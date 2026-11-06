@@ -1,3 +1,7 @@
+---
+title: "15. Verification: the model, the harness, scenarios and gates"
+description: "BATON_SPEC — 15. Verification: the model, the harness, scenarios and gates."
+---
 ## 15. Verification: the model, the harness, scenarios and gates *(partly built — B-50)*
 
 - **R-BTN-29 (the harness).** `test/integration/` runs the real Worker and Durable Object locally

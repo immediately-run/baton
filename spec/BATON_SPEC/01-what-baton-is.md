@@ -1,3 +1,7 @@
+---
+title: "1. What Baton is"
+description: "Baton hands out tickets to runners under fenced leases and shows the work's live state."
+---
 ## 1. What Baton is *(proposal)*
 
 Baton hands out **tickets** to **runners** under fenced leases and shows the work's live state.

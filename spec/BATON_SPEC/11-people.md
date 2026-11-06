@@ -1,3 +1,7 @@
+---
+title: "11. People: administrators, owners and their surfaces"
+description: "Two kinds of people hold authority in a tenant: its administrators and each repository's owners."
+---
 ## 11. People: administrators, owners and their surfaces *(partly built)*
 
 Two kinds of people hold authority in a tenant: its **administrators** and each repository's
@@ -433,11 +437,11 @@ is summarized in the principal table (§12.1).
     2. The page sends `POST /v1/login {role}`. Baton writes a `login_codes` row of that role, sets
        the pending cookie `__Host-baton_pending` (value `bps_<id>_<secret>`, two minutes, R-BTN-16), and
        answers `{code}`: eight Crockford base32 characters, which the page shows.
-    3. The key holder types the code into the CLI, which sends `POST /v1/admin/login-links
-       {code}` with the administrator key, or `POST /v1/owner/login-links {code}` with the owner
+    3. The key holder types the code into the CLI, which sends `POST
+       /v1/admin/login-links {code}` with the administrator key, or `POST /v1/owner/login-links {code}` with the owner
        key. Baton answers the unexpired, unbound row with that code and the route's role as
        `{role, client_addr, age_s}` and binds nothing. The CLI prints it ("owner session for
-       <address>, <n> s old") and asks `bind? [y/N]`, defaulting to no and taking no `--yes`,
+       `<address>`, `<n>` s old") and asks `bind? [y/N]`, defaulting to no and taking no `--yes`,
        since the address is the one thing the key holder must read. On yes it sends the same
        route `{code, confirm: true}`, and Baton binds the key to that row; on no it sends
        nothing, and the row expires unbound. An `sk-` key needs a touch for each request. At
@@ -466,8 +470,8 @@ is summarized in the principal table (§12.1).
     sessions revoke` (`POST /v1/owner/sessions/revoke`, `owner.sessions.revoke`, destructive)
     ends every session the owner's key minted; `baton admin sessions revoke --all` (`POST
     /v1/admin/sessions/revoke`, `admin.sessions.revoke`, destructive) ends every session.
-  - **Confirmed actions.** A session's request that changes authority answers `202
-    {confirm_code}` instead of acting: eight Crockford base32 characters, living two minutes and
+  - **Confirmed actions.** A session's request that changes authority answers
+    `202 {confirm_code}` instead of acting: eight Crockford base32 characters, living two minutes and
     used once, bound to the session, the action and its parameters (`action_confirmations`).
     Only the key that minted the session confirms it, through its role's route: `baton admin
     confirm <code>` (`POST /v1/admin/confirm`) for an administrator's session, `baton owner

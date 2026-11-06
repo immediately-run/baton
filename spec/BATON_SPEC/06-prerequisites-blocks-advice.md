@@ -1,3 +1,7 @@
+---
+title: "6. Prerequisites, blocks and advice"
+description: "A leg starts when its prerequisites hold."
+---
 ## 6. Prerequisites, blocks and advice *(partly built — B-7, B-10, B-21, B-41, R3-1259, R3-1269)*
 
 A leg starts when its prerequisites hold. Baton stores each unmet one as a block, answers "why

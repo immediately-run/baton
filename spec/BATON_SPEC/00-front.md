@@ -1,5 +1,6 @@
 ---
-title: "Baton — ticket leases, runners and the live factory view on a Cloudflare Durable Object"
+title: "immediately.run Baton — the factory's live state, off git"
+description: "BATON_SPEC's front: its title, status, companions and contents."
 status: proposal
 updated: 2026-11-02
 ---

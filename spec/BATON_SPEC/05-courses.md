@@ -1,3 +1,7 @@
+---
+title: "5. Courses"
+description: "A course is the process a ticket follows: a graph of stations, where a ticket rests, and legs, the work that takes it from one station to the next."
+---
 ## 5. Courses *(partly built — B-28, B-29, B-40)*
 
 A course is the process a ticket follows: a graph of **stations**, where a ticket rests, and
@@ -31,8 +35,8 @@ mean (R-BTN-50).
     `..` segment, its last segment the course id. `github` (→
     `https://github.com/<namespace>/<repository>.git`, names compared without case) is the only
     provider. The short `id` is the name tickets, rows, rule 9 and branch patterns use. A course
-    with no `source` is the repository's own. The CLI configuration's `sources:
-    {"github/<ns>/<repo>": "<url>"}` (`--config` of `baton runner start`, `baton repo sync`,
+    with no `source` is the repository's own. The CLI configuration's
+    `sources: {"github/<ns>/<repo>": "<url>"}` (`--config` of `baton runner start`, `baton repo sync`,
     `baton course test`) may map a source repository to a mirror, trusted exactly as its
     upstream; every reader of a deployment maps it the same way.
   - **Fetching, the same for every reader:** one cache clone per source repository;

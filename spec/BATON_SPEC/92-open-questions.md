@@ -1,3 +1,7 @@
+---
+title: "Open questions"
+description: "BATON_SPEC — Open questions."
+---
 ## Open questions
 
 - **§12.8's remaining items (the fifth adversarial review, 2026-10-29).** The amendment merged as a

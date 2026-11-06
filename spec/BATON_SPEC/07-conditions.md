@@ -1,3 +1,7 @@
+---
+title: "7. Conditions"
+description: "A leg that cannot go on alone (it needs a person, it hit an error or it has something to report) raises a condition."
+---
 ## 7. Conditions *(proposal)*
 
 A leg that cannot go on alone (it needs a person, it hit an error or it has something to report)
@@ -41,8 +45,8 @@ Limits that hold throughout:
     and Baton refuses a leg's raise of them (`invalid-params`). A leg may also narrow what it may
     raise: `"conditions": []` allows none and `"conditions": ["warning"]` allows only warnings.
   - **Declaring.** A course declares its own types in the course file (R-BTN-69):
-    `"conditions": {<type>: {"disposition": "interrupt" | "suspend" | "notify", "restarts":
-    {<id>: <description>}, "default": <id>, "wait_s": <n>, "retryable": <bool>, "description":
+    `"conditions": {<type>: {"disposition": "interrupt" | "suspend" | "notify",
+    "restarts": {<id>: <description>}, "default": <id>, "wait_s": <n>, "retryable": <bool>, "description":
     …}}`. Only `disposition` is required. A restart id matches §12.3's decision-id pattern. A
     declared subtype of a standard type inherits that type's disposition unless it states its
     own.
@@ -116,8 +120,8 @@ Limits that hold throughout:
 ### 7.2 Handlers
 
 - **R-BTN-161 (bindings choose a handler course; the handler is a ticket file).**
-  - **Binding.** A binding maps a type prefix to a course id, for example `"conditions":
-    {"hitl": "ask", "warning": "announce"}`; for an `error` type the value may be `{"course":
+  - **Binding.** A binding maps a type prefix to a course id, for example
+    `"conditions": {"hitl": "ask", "warning": "announce"}`; for an `error` type the value may be `{"course":
     <id>, "replaces": "retry"}` (R-BTN-122). It is written in one of two scopes:
     - the repository's scope, in `.baton/baton.json`;
     - a ticket's scope, in its file (`conditions:`, posted by the ticket source as

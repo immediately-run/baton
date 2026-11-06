@@ -1,3 +1,7 @@
+---
+title: "13. Data model"
+description: "One SQLite database per tenant, in the tenant's Durable Object (or the local host's file)."
+---
 ## 13. Data model *(proposal)*
 
 One SQLite database per tenant, in the tenant's Durable Object (or the local host's file). The

@@ -1,3 +1,7 @@
+---
+title: "Decisions"
+description: "One line per decision in force; the reasoning and the rejected alternatives in full are in BATON_SPEC_HISTORY.md (Decisions in full)."
+---
 ## Decisions
 
 One line per decision in force; the reasoning and the rejected alternatives in full are in

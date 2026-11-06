@@ -1,5 +1,6 @@
 ---
 title: "Baton — OAuth 2.1 for MCP clients: an owner-approved MCP key, obtained by the standard MCP authorization flow"
+description: "Baton as the authorization server for its own MCP endpoint: an owner-approved MCP key, obtained by the standard MCP authorization flow."
 status: proposal
 updated: 2026-10-20
 ---
@@ -215,7 +216,7 @@ standard OAuth consent on Baton's dashboard (Decisions).
     step 2 answers `{error, redirect}`, which the page follows.
   - **What the page shows** (all through `textContent`, §6): the client as §3 names it, its
     self-declared name, the full redirect URI, and for a loopback redirect "the code goes to
-    whichever program on this computer listens on port <n>"; a repository picker (preselected
+    whichever program on this computer listens on port `<n>`"; a repository picker (preselected
     when the session owns one, omitting any whose `approvers.members` is human-only, below); the
     actions, with `read` ticked and each requested write unticked, the destructive ones
     (`leg.stop`, `ticket.cancel`, `BATON_SPEC` §12.2) under their own line "destructive", each
@@ -234,10 +235,10 @@ standard OAuth consent on Baton's dashboard (Decisions).
     - records the approval on the request row and issues the authorization code (§8); it mints
       no grant: the grant is created at the code's first redemption (§7), so an approval that is
       never redeemed leaves nothing behind;
-    - answers `{redirect, repository, actions}`; the page shows "approved for <repository>:
-      <actions>" and navigates to `redirect`.
-    - An approval naming a destructive action (`leg.stop`, `ticket.cancel`) is R-BTN-155's confirmed action: it answers `202
-      {confirm_code}`, the page shows the code, the owner confirms it with `baton owner confirm`
+    - answers `{redirect, repository, actions}`; the page shows "approved for `<repository>`:
+      `<actions>`" and navigates to `redirect`.
+    - An approval naming a destructive action (`leg.stop`, `ticket.cancel`) is R-BTN-155's confirmed action: it answers
+      `202 {confirm_code}`, the page shows the code, the owner confirms it with `baton owner confirm`
       and the key that minted the session (`POST /v1/owner/confirm`), and the page polls `POST /v1/ui/oauth/status {request}` every 2 seconds for the redirect.
       An approval naming no destructive action needs no confirmation code (Decisions).
   - **Deny.** `POST /v1/ui/oauth/approve {request, deny: true}` (`owner.mcp-key.deny`) ends the
@@ -396,7 +397,7 @@ standard OAuth consent on Baton's dashboard (Decisions).
   - **Per IP** (the per-IP rule, keyed `<host>|<ip>`, an IPv6 address by its `/64`): register
     20 an hour; token 120 a minute; revoke 60 a minute; the static page as any static asset.
     Past one, `429` with `Retry-After` and body `{error: "temporarily_unavailable",
-    error_description: "rate limited"}`; the page shows "too many requests, try again in <n>
+    error_description: "rate limited"}`; the page shows "too many requests, try again in `<n>`
     s". Hosted Claude calls from one shared egress range (`160.79.104.0/21`), so the token limit
     is sized for a team's clients behind one address.
   - **Session routes** count as the session's authenticated calls (600 a minute). At most five
@@ -587,28 +588,28 @@ test file each (`S-BTN-137.<part>.test.ts`).
 ## Sources
 
 - MCP specification, revision 2026-07-28, Authorization:
-  <https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization>, and its pages
+  [https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization), and its pages
   Authorization Server Discovery, Client Registration and Security Considerations (same path).
-- OAuth 2.1, draft-ietf-oauth-v2-1-13: <https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-13>.
-- RFC 7636 (PKCE): <https://www.rfc-editor.org/rfc/rfc7636>.
-- RFC 8414 (Authorization Server Metadata): <https://www.rfc-editor.org/rfc/rfc8414>.
-- RFC 9728 (Protected Resource Metadata): <https://www.rfc-editor.org/rfc/rfc9728>.
-- RFC 7591 (Dynamic Client Registration): <https://www.rfc-editor.org/rfc/rfc7591>.
-- RFC 8707 (Resource Indicators): <https://www.rfc-editor.org/rfc/rfc8707>.
-- RFC 9207 (Issuer Identification): <https://www.rfc-editor.org/rfc/rfc9207>.
-- RFC 7009 (Token Revocation): <https://www.rfc-editor.org/rfc/rfc7009>.
+- OAuth 2.1, draft-ietf-oauth-v2-1-13: [https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-13](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-13).
+- RFC 7636 (PKCE): [https://www.rfc-editor.org/rfc/rfc7636](https://www.rfc-editor.org/rfc/rfc7636).
+- RFC 8414 (Authorization Server Metadata): [https://www.rfc-editor.org/rfc/rfc8414](https://www.rfc-editor.org/rfc/rfc8414).
+- RFC 9728 (Protected Resource Metadata): [https://www.rfc-editor.org/rfc/rfc9728](https://www.rfc-editor.org/rfc/rfc9728).
+- RFC 7591 (Dynamic Client Registration): [https://www.rfc-editor.org/rfc/rfc7591](https://www.rfc-editor.org/rfc/rfc7591).
+- RFC 8707 (Resource Indicators): [https://www.rfc-editor.org/rfc/rfc8707](https://www.rfc-editor.org/rfc/rfc8707).
+- RFC 9207 (Issuer Identification): [https://www.rfc-editor.org/rfc/rfc9207](https://www.rfc-editor.org/rfc/rfc9207).
+- RFC 7009 (Token Revocation): [https://www.rfc-editor.org/rfc/rfc7009](https://www.rfc-editor.org/rfc/rfc7009).
 - RFC 6749 §5.2 (error responses), RFC 6750 §3 (`WWW-Authenticate`), RFC 8252 §7.3 (loopback
   redirects), RFC 9700 (OAuth security BCP), RFC 6890 and RFC 8190 (special-purpose addresses).
 - OAuth Client ID Metadata Document, draft-ietf-oauth-client-id-metadata-document-02 (6 July
-  2026): <https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-02>.
+  2026): [https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-02](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-02).
   The MCP revision cites -00; nothing this spec relies on differs.
-- Anthropic, "Authentication for connectors": <https://claude.com/docs/connectors/building/authentication>
+- Anthropic, "Authentication for connectors": [https://claude.com/docs/connectors/building/authentication](https://claude.com/docs/connectors/building/authentication)
   (callback `https://claude.ai/api/mcp/auth_callback`, CIMD only with `none` advertised,
   port-agnostic loopback, refresh rotation and `invalid_grant`, 10 s and 30 s timeouts, egress
   `160.79.104.0/21`).
-- Anthropic, "Lazy authentication for MCP servers": <https://claude.com/docs/connectors/building/lazy-authentication>
+- Anthropic, "Lazy authentication for MCP servers": [https://claude.com/docs/connectors/building/lazy-authentication](https://claude.com/docs/connectors/building/lazy-authentication)
   (the `401` shape and its `scope`, `insufficient_scope` step-up, discovery caching).
-- Claude Code's Client ID Metadata Document: <https://claude.ai/oauth/claude-code-client-metadata>
+- Claude Code's Client ID Metadata Document: [https://claude.ai/oauth/claude-code-client-metadata](https://claude.ai/oauth/claude-code-client-metadata)
   (fetched 2026-10-20: `http://localhost/callback` and `http://127.0.0.1/callback`, no
   `Cache-Control`).
 - Anthropic support, "Building custom connectors via remote MCP servers" (the possible move of the

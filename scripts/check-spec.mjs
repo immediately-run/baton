@@ -26,6 +26,7 @@ import { join, relative, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { patchNotes } from './spec-tools.mjs';
 import { joinParts, layoutProblems, specParts } from './spec-files.mjs';
+import { stripFrontmatter } from './lib/stripFrontmatter.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -184,7 +185,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const tickets = new Set(['tickets', 'tickets/archive'].flatMap((d) => readdirSync(join(REPO, d)))
     .filter((n) => n.endsWith('.mdx')).map((n) => n.slice(0, -4)));
   const historyPath = join(REPO, 'spec', 'BATON_SPEC_HISTORY.md');
-  const history = existsSync(historyPath) ? readFileSync(historyPath, 'utf8') : '';
+  // The history is a page of the spec bundle (B-180): its body, past the frontmatter.
+  const history = existsSync(historyPath) ? stripFrontmatter(readFileSync(historyPath, 'utf8')) : '';
   const integration = join(REPO, 'test', 'integration');
   const testNames = existsSync(integration) ? readdirSync(integration) : [];
   const problems = check(spec, code, tickets, history, testNames, PATCH_NOTES_ALLOWED);

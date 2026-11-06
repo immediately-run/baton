@@ -2,17 +2,18 @@
 // well formed and in order, a joined line maps back to its file, the index is generated from the
 // parts, check:spec's layout check (`layoutProblems`) fails a stray file, a misordered part or a
 // stale index, the move proof compares bytes, and spec-tools reads a directory as its parts joined,
-// spec:impact placing each unit at its file and line.
+// spec:impact placing each unit at its file and line. B-180: each part is a Grove page whose
+// frontmatter spec:index writes; every reader takes the body, and line numbers stay the file's.
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 // @ts-expect-error a plain .mjs script, no types
-import { SPEC_DIR, SPEC_INDEX, indexText, joinParts, layoutProblems, locate, moveProof, partProblems, specParts } from '../../scripts/spec-files.mjs';
+import { SPEC_DIR, SPEC_INDEX, indexText, joinParts, layoutProblems, locate, moveProof, part, partFrontmatter, partProblems, specParts } from '../../scripts/spec-files.mjs';
 // @ts-expect-error a plain .mjs script, no types
 import { impact, readSpecAt } from '../../scripts/spec-tools.mjs';
 
-type Part = { name: string; path: string; text: string };
+type Part = { name: string; path: string; text: string; frontmatter?: string; offset?: number };
 const ROOT = resolve(import.meta.dirname, '..', '..');
 
 function fixture(parts: Record<string, string>): string {
@@ -25,6 +26,14 @@ function fixture(parts: Record<string, string>): string {
 const FRONT = '# Spec\n\n## Contents\n\n| § | Title |\n';
 const ONE = '## 1. One *(proposal)*\n\n### 1.1 Sub\n\n- **R-BTN-1 (one home per fact).** Each fact.\n- **R-BTN-2 / R-BTN-3 (two at once).** Both.\n';
 const TWO = '## 2. Two\n\n| S-BTN-7 a scenario | steps | expected |\n| G-BTN-9 | a gate |\n';
+
+/** Each part's text as spec:index leaves it: its generated frontmatter, then its body. */
+function paged(parts: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(parts).map(([name, text]) => {
+    const p: Part = part(name, `${SPEC_DIR}/${name}`, text);
+    return [name, partFrontmatter(p) + p.text];
+  }));
+}
 
 describe('spec-files (B-179)', () => {
   it('the parts, joined in name order, are the spec', () => {
@@ -78,16 +87,16 @@ describe('spec-files (B-179)', () => {
   });
 
   it("check:spec's layout check: a stray file, a missing or stale index; a fresh one passes", () => {
-    const root = fixture({ '00-front.md': FRONT, '01-one.md': ONE, '02-two.md': TWO, '03-Three.md': '## 3. Three\n', 'notes.txt': '' });
+    const root = fixture({ ...paged({ '00-front.md': FRONT, '01-one.md': ONE, '02-two.md': TWO }), '03-Three.md': '## 3. Three\n', 'notes.txt': '' });
     expect(layoutProblems(root)).toEqual([
       `${SPEC_DIR}/03-Three.md: not a part — a part is named NN-slug.md, and nothing else lives in ${SPEC_DIR}/ (B-179)`,
       `${SPEC_DIR}/notes.txt: not a part — a part is named NN-slug.md, and nothing else lives in ${SPEC_DIR}/ (B-179)`,
       `${SPEC_INDEX} is missing — \`npm run spec:index\` writes it from ${SPEC_DIR}/ (B-179)`,
     ]);
-    const fresh = fixture({ '00-front.md': FRONT, '01-one.md': ONE, '02-two.md': TWO });
+    const fresh = fixture(paged({ '00-front.md': FRONT, '01-one.md': ONE, '02-two.md': TWO }));
     writeFileSync(join(fresh, SPEC_INDEX), indexText(specParts(fresh)));
     expect(layoutProblems(fresh)).toEqual([]);
-    writeFileSync(join(fresh, SPEC_DIR, '02-two.md'), TWO + '| G-BTN-10 | another gate |\n');
+    writeFileSync(join(fresh, SPEC_DIR, '02-two.md'), paged({ '02-two.md': TWO + '| G-BTN-10 | another gate |\n' })['02-two.md']);
     expect(layoutProblems(fresh)).toEqual([`${SPEC_INDEX} is stale — \`npm run spec:index\` writes it from ${SPEC_DIR}/ (B-179)`]);
   });
 
@@ -146,5 +155,34 @@ describe('spec-files (B-179)', () => {
       `${SPEC_DIR}/91-load.md: appendix 91 opens with \`## Decisions\``,
       `${SPEC_DIR}/93-more.md: no appendix is numbered 93; they are 90 Load-bearing assumptions, 91 Decisions, 92 Open questions`,
     ]);
+  });
+  it('B-180: a part is a page — its frontmatter is stripped from the text every reader takes, and lines stay the file\'s', () => {
+    const files = paged({ '00-front.md': `---\ntitle: "Old"\nstatus: proposal\n---\n${FRONT}`, '01-one.md': `${ONE.split('\n\n')[0]}\n\nOne fact. Then another.\n\n${ONE.split('\n\n').slice(1).join('\n\n')}` });
+    expect(files['00-front.md']).toBe(`---\ntitle: "Spec"\ndescription: "BATON_SPEC's front: its title, status, companions and contents."\nstatus: proposal\n---\n${FRONT}`);
+    expect(files['01-one.md'].startsWith('---\ntitle: "1. One"\ndescription: "One fact."\n---\n## 1. One *(proposal)*\n')).toBe(true);
+    const root = fixture(files);
+    const parts: Part[] = specParts(root);
+    expect(joinParts(parts)).toBe(FRONT + files['01-one.md'].split('---\n')[2]);
+    expect(parts.map((p) => p.offset)).toEqual([5, 4]);
+    expect(locate(parts, 1)).toBe(`${SPEC_DIR}/00-front.md:6`);
+    expect(locate(parts, FRONT.split('\n').length)).toBe(`${SPEC_DIR}/01-one.md:5`);
+    expect(readSpecAt(root, SPEC_DIR).text).toBe(joinParts(parts));
+    expect(partProblems(parts)).toEqual([]);
+  });
+
+  it('B-180: a part with no frontmatter, or one spec:index would not write, is reported', () => {
+    const root = fixture({ ...paged({ '00-front.md': FRONT }), '01-one.md': ONE, '02-two.md': `---\ntitle: "2. Deux"\ndescription: "x"\n---\n${TWO}` });
+    writeFileSync(join(root, SPEC_INDEX), indexText(specParts(root)));
+    expect(layoutProblems(root)).toEqual([
+      `${SPEC_DIR}/01-one.md: its frontmatter is missing — \`npm run spec:index\` writes its title and description (B-180)`,
+      `${SPEC_DIR}/02-two.md: its frontmatter is stale — \`npm run spec:index\` writes its title and description (B-180)`,
+    ]);
+  });
+
+  it("B-180: the move proof compares bodies, each side's frontmatter stripped", () => {
+    const parts: Part[] = specParts(fixture(paged({ '00-front.md': `---\ntitle: "T"\n---\n${FRONT}`, '01-one.md': ONE, '02-two.md': TWO })));
+    expect(moveProof(`---\ntitle: "T"\n---\n${FRONT}${ONE}${TWO}`, parts).ok).toBe(true);
+    expect(moveProof(`${FRONT}${ONE}${TWO}`, parts).ok).toBe(true);
+    expect(moveProof(`---\ntitle: "T"\n---\n${FRONT}${ONE}`, parts).ok).toBe(false);
   });
 });

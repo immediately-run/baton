@@ -19,7 +19,7 @@ repository's policy, the grants and the owners' bars. Git holds the work itself:
 its body and its evidence. Baton does not do, verify or confine the work. Its permissions cover
 its own state, its gates protect the lock, and it advises on everything else. A repository can opt
 into one exception through its policy: Baton's trusted runners decide what lands, and the forge
-lets only them and a human land it (BATON_SPEC §12.8).
+lets only them and a human land it ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 
 ## The problem
 
@@ -71,7 +71,7 @@ and with what is at stake:
 Baton scales from one person running a few agents on their own machine to a software factory with
 a threat model of its own. Both ends run the same core. What differs is the repository's
 **policy**: one versioned document, held in Baton and never read from git, that decides who lands
-on which refs, who approves what, and whose attestations count (BATON_SPEC R-BTN-188).
+on which refs, who approves what, and whose attestations count (BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 
 - **The simple end.** The `cooperative` preset and the standard courses: leases, courses and the
   live view, for workers that cooperate. At this end, owner bars and positions are a

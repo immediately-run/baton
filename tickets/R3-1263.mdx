@@ -21,10 +21,10 @@ depends_on:
 ---
 
 **Brief:** the Baton project; filed by R3-1253 (docs#217).
-**Spec:** `spec/BATON_SPEC.md` §3.3 R-BTN-94 (wants, runners, dispatch adapters, the unblocked trigger, forge credentials, raises) and R-BTN-73; §6.2 R-BTN-77; §4.8 R-BTN-88 (export, the seal); §3.2 (the sync principal); §12.7 (the GitHub App as dispatch adapter); §2.1 (`ForgeSecrets`); §14 (`GET /v1/sync/wanted`, `POST /v1/sync/want`); §15 S-BTN-56 (the want and dispatch cases), G-BTN-83
+**Spec:** [BATON_SPEC §3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) (wants, runners, dispatch adapters, the unblocked trigger, forge credentials, raises) and [R-BTN-73](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3); [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) [R-BTN-77](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2); [§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) [R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) (export, the seal); [§3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) (the sync principal); [§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7) (the GitHub App as dispatch adapter); [§2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) (`ForgeSecrets`); [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET /v1/sync/wanted`, `POST /v1/sync/want`); [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-56](../spec/BATON_SPEC/15-verification.md#scenarios) (the want and dispatch cases), [G-BTN-83](../spec/BATON_SPEC/15-verification.md#gates)
 **Depends on:** R3-1262
 
-### Amended 2026-10-16 (docs#220; now BATON_SPEC §3.3 R-BTN-105, §8.2 R-BTN-102)
+### Amended 2026-10-16 (docs#220; now [BATON_SPEC §3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) [R-BTN-105](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), [§8.2](../spec/BATON_SPEC/08-runners.md#sec-8-2) [R-BTN-102](../spec/BATON_SPEC/08-runners.md#sec-8-2))
 
 - `GET /v1/sync/wanted` also returns `head_sha`: the newest commit any post named, held posts included, so a runner comparing it with `git ls-remote` is not re-triggered forever by a held head.
 - `POST /v1/owner/{repository}/sync-want` (an owner key) records a want, for a person pushing from a machine with no runner; `baton owner sync-want` is R3-1272's.
@@ -76,12 +76,12 @@ ticket's station stale, and the clearing rule rides R-BTN-62's numbers.
 
 ## Status
 
-_2026-10-16 — amended for the 2026-10-16 amendment (now BATON_SPEC §3.3 R-BTN-105): `head_sha` on `wanted`, the owner's `sync-want` route._
+_2026-10-16 — amended for the 2026-10-16 amendment (now [BATON_SPEC §3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) [R-BTN-105](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3)): `head_sha` on `wanted`, the owner's `sync-want` route._
 
 
 _(filed 2026-10-16)_
 
-_(2026-11-01: the dispatch credentials move out of Baton (BATON_SPEC R-BTN-94, R-BTN-171, B-152): the dispatch adapters become dispatch targets a dispatch courier delivers as `dispatch` outbox entries, woken by the doorbell; Baton queues them in the transaction that records the want. B-152 builds the move.)_
+_(2026-11-01: the dispatch credentials move out of Baton (BATON_SPEC [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), [R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8), B-152): the dispatch adapters become dispatch targets a dispatch courier delivers as `dispatch` outbox entries, woken by the doorbell; Baton queues them in the transaction that records the want. B-152 builds the move.)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): `GET /v1/sync/wanted`'s `head_sha` is the newest commit any post named; there are no held posts (R-BTN-11, R-BTN-94).)_
 

@@ -24,11 +24,11 @@ depends_on:
 **Brief:** the owner, 2026-10-20: close the open question "OAuth for MCP clients (R-BTN-130)" so
 Claude's clients (claude.ai custom connectors, the desktop app, Claude Code) connect to Baton's
 MCP endpoint through the standard MCP authorization flow instead of a pasted `bmcp_` key.
-**Spec:** `spec/BATON_MCP_OAUTH_SPEC.md` (all of it); `spec/BATON_SPEC.md` R-BTN-130 / R-BTN-154
-and R-BTN-129 (§11.3), R-BTN-155 (owner sessions and confirmed actions) and R-BTN-159 (§11),
-R-BTN-16 (cookies, same-origin writes, the Access bypass list) and §12.1's bearer rule (§12),
-R-BTN-135 and R-BTN-137 (§2.2), §2.3's admission and failure buckets, R-BTN-149's write budgets,
-R-BTN-158 (bearers over `http`), §2.1's alarm, §13.2 `mcp_keys`, §13.8 `events.kind`, §14.
+**Spec:** `spec/BATON_MCP_OAUTH_SPEC.md` (all of it); BATON_SPEC [R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3) / [R-BTN-154](../spec/BATON_SPEC/11-people.md#sec-11-3)
+and [R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3) ([§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3)), [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4) (owner sessions and confirmed actions) and [R-BTN-159](../spec/BATON_SPEC/11-people.md#sec-11-1) ([§11](../spec/BATON_SPEC/11-people.md#sec-11)),
+[R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4) (cookies, same-origin writes, the Access bypass list) and [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1)'s bearer rule ([§12](../spec/BATON_SPEC/12-security.md#sec-12)),
+[R-BTN-135](../spec/BATON_SPEC/02-deployments.md#sec-2-2) and [R-BTN-137](../spec/BATON_SPEC/02-deployments.md#sec-2-2) ([§2.2](../spec/BATON_SPEC/02-deployments.md#sec-2-2)), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3)'s admission and failure buckets, [R-BTN-149](../spec/BATON_SPEC/02-deployments.md#sec-2-3)'s write budgets,
+[R-BTN-158](../spec/BATON_SPEC/12-security.md#sec-12-5) (bearers over `http`), [§2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1)'s alarm, [§13.2](../spec/BATON_SPEC/13-data-model.md#sec-13-2) `mcp_keys`, [§13.8](../spec/BATON_SPEC/13-data-model.md#sec-13-8) `events.kind`, [§14](../spec/BATON_SPEC/14-api.md#sec-14).
 **Depends on:** B-25 (the registry, `authorize`, `POST /v1/mcp` and `mcp_keys`, which this ticket
 extends), B-45 (served only at the origin, per-tenant objects and refusal handling, which the
 issuer, resource and tenant binding rest on) and B-76 (owners' dashboard sessions, the `owner-session`
@@ -53,14 +53,14 @@ device-code phishing kit, so consent is now the standard OAuth shape: spec Decis
 
 ### What to build
 
-1. **Fold the spec in.** Add the companion's rows to `spec/BATON_SPEC.md`: §13.2's `mcp_keys`
+1. **Fold the spec in.** Add the companion's rows to BATON_SPEC: [§13.2](../spec/BATON_SPEC/13-data-model.md#sec-13-2)'s `mcp_keys`
    change (an immutable `id` as key), `oauth_clients`, `oauth_requests` and `oauth_tokens`,
-   §13.1's `oauth_redirect_uris`; §2.1's alarm instants and §13.8's `oauth` event kind; §14's
-   routes; §15's S-BTN-137 and G-BTN-157; R-BTN-172 itself, in §11.3 beside R-BTN-130;
-   R-BTN-130's new challenge; the four OAuth actions under R-BTN-129's `owner-session` principal
+   [§13.1](../spec/BATON_SPEC/13-data-model.md#sec-13-1)'s `oauth_redirect_uris`; [§2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1)'s alarm instants and [§13.8](../spec/BATON_SPEC/13-data-model.md#sec-13-8)'s `oauth` event kind; [§14](../spec/BATON_SPEC/14-api.md#sec-14)'s
+   routes; [§15](../spec/BATON_SPEC/15-verification.md#sec-15)'s S-BTN-137 and G-BTN-157; R-BTN-172 itself, in [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) beside [R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3);
+   [R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3)'s new challenge; the four OAuth actions under [R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3)'s `owner-session` principal
    (which B-76 builds);
-   R-BTN-158's and §12.1's new bearer prefixes (`bmo_`, `bmr_`, `bor_`); §12.1's Public row
-   (`/oauth/authorize`, the OAuth machine routes). §2.3's admission and R-BTN-16's Access
+   [R-BTN-158](../spec/BATON_SPEC/12-security.md#sec-12-5)'s and [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1)'s new bearer prefixes (`bmo_`, `bmr_`, `bor_`); [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1)'s Public row
+   (`/oauth/authorize`, the OAuth machine routes). [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3)'s admission and [R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4)'s Access
    bypass already name the OAuth routes. Defining R-BTN-172 in `spec/BATON_SPEC.md` is what lets
    code cite it: `check-spec` reads only that file.
 2. **Discovery** (R-BTN-172 §2), in `src/core/oauth/metadata.ts`: both documents built from

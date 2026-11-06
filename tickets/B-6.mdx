@@ -21,7 +21,7 @@ depends_on:
 ---
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §10 (R-BTN-115), §12.7 (Baton's own GitHub App, which never posts
+**Spec:** [BATON_SPEC §10](../spec/BATON_SPEC/10-checks.md#sec-10) ([R-BTN-115](../spec/BATON_SPEC/10-checks.md#sec-10)), [§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7) (Baton's own GitHub App, which never posts
 the check).
 
 ### Why
@@ -55,6 +55,6 @@ R-BTN-115 is specified; this ticket does its operator part.
 
 _(2026-10-31: registering a courier is an `approvers.members` action (R-BTN-188's first row; B-145 item 12 builds the hook), and its trust level and trust domain are set by an approver on `approvers.trust` (R-BTN-180, B-147); whether it may claim is the policy's `outbox` (R-BTN-171, B-64).)_
 
-_(2026-11-01: the dispatch credentials move out of Baton (BATON_SPEC R-BTN-94, R-BTN-171, B-152): Baton no longer holds `BATON_GITHUB_APP_KEY`; the dispatch App's key is the dispatch courier's. Reusing that App means reusing the courier's key, on the courier's host.)_
+_(2026-11-01: the dispatch credentials move out of Baton (BATON_SPEC [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), [R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8), B-152): Baton no longer holds `BATON_GITHUB_APP_KEY`; the dispatch App's key is the dispatch courier's. Reusing that App means reusing the courier's key, on the courier's host.)_
 
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) reverses the note of 2026-11-01 on the dispatch App: Baton holds `BATON_GITHUB_APP_KEY` again and dispatches itself (B-160, B-152 superseded). The check App's key goes to the host of the runner that delivers `forge-check`, never to Baton (R-BTN-115, §12.7); step 3 reads so.)_
