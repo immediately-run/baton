@@ -60,7 +60,19 @@ const STARTS_FROM = new Set(['request']);
 const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
 const ENTRY_KEYS = new Set(['output', 'schema']);
 const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
-  'no_chain_from', 'isolation', 'requires']);
+  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires']);
+/** R-BTN-116: the one kind a leg may be today — `person`, a leg a person answers by a
+ *  `std:decision@1`. A `call` leg (R-BTN-165) is not built, so a file carrying one is refused
+ *  rather than kept unread. */
+const LEG_KINDS = new Set(['person']);
+/** R-BTN-116: who answers a person's leg — a label, the same shape a decision's `asks` takes
+ *  (§7.1). Kept beside the course file's own patterns: `course.ts` is pure and imports no core. */
+const ASKS_LABEL = /^[a-z][a-z0-9-]{0,31}$/;
+/** R-BTN-116: what a person leg's `expires` holds — how long unanswered (60 s–30 d) and the
+ *  outcome it reaches when it expires. */
+const EXPIRES_KEYS = new Set(['after_s', 'reached']);
+/** 30 days in seconds: `expires.after_s`'s upper bound. */
+const EXPIRES_AFTER_MAX = 30 * 86_400;
 /** R-BTN-120: what a leg's `requires` holds — its capabilities, which rule 4 reads as its own
  *  input beside the ticket's clause (`gates.ts`; `claims.ts` passes the leg's list through).
  *  The spec's `tickets`, `resources` and the other prerequisite kinds are not implemented, so a
@@ -229,6 +241,28 @@ export function validateCourse(json: unknown): CourseViolation[] {
         if ('capabilities' in r) capabilityList(r.capabilities, `${at}.requires.capabilities`, 'a leg');
       }
     }
+    // R-BTN-116: a person's leg — `kind: "person"` with `asks` (who answers) and, at most, an
+    // `expires`. `asks` and `expires` sit only on a person's leg; a person's leg names who
+    // answers. A `call` leg is not built, so any other kind is refused.
+    const person = l.kind === 'person';
+    if ('kind' in l && !LEG_KINDS.has(l.kind as string)) add('shape', `${at}.kind`, `kind, when given, is "person" (R-BTN-116); a call leg is not built (R-BTN-165)`);
+    if ('asks' in l && (typeof l.asks !== 'string' || !ASKS_LABEL.test(l.asks))) add('shape', `${at}.asks`, `asks is a label of who answers (${ASKS_LABEL.source}, R-BTN-116)`);
+    if (person && !('asks' in l)) add('shape', `${at}.asks`, 'a person leg says who answers: asks is required on kind: person (R-BTN-116)');
+    if ('asks' in l && !person) add('shape', `${at}.asks`, 'asks sits only on a kind: person leg (R-BTN-116)');
+    if ('expires' in l) {
+      const e = l.expires;
+      const at2 = `${at}.expires`;
+      if (!isObject(e)) add('shape', at2, 'expires is {after_s, reached} (R-BTN-116)');
+      else {
+        for (const k of Object.keys(e)) if (!EXPIRES_KEYS.has(k)) add('unknown-key', `${at2}.${k}`, `unknown key "${k}"`);
+        if (!(isInt(e.after_s) && e.after_s >= 60 && e.after_s <= EXPIRES_AFTER_MAX)) add('bound', `${at2}.after_s`, `after_s is an integer from 60 to ${EXPIRES_AFTER_MAX} seconds (60 s–30 d, R-BTN-116)`);
+        if (typeof e.reached !== 'string' || !to.includes(e.reached)) add('shape', `${at2}.reached`, 'reached names one of the leg\'s own outcomes (R-BTN-116)');
+      }
+      if (!person) add('shape', at2, 'expires sits only on a kind: person leg (R-BTN-116)');
+    }
+    // R-BTN-167: a person leg has no deadline — its clock is its `expires`, and no claim ever
+    // runs it to time out.
+    if (person && 'max_duration' in l) add('bound', `${at}.max_duration`, 'a person leg carries no deadline: its clock is its expires (R-BTN-167, R-BTN-116)');
     if ('label' in l && !isFreeText(l.label)) add('bound', `${at}.label`, 'a label is §10.4 free text: 1–500 characters, no control characters, none of < > { }');
     if ('outputs' in l) {
       if (!isObject(l.outputs)) add('shape', `${at}.outputs`, 'outputs is an object of output names');

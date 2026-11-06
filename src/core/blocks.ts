@@ -67,6 +67,11 @@ export const STALLED_AFTER_MS = 72 * 3_600_000;
  *  `not-before-invalid` arrive with B-39 and R3-1259), and `time` (R-BTN-89) is a wait by design. */
 export const BATON_WAITS = ['policy', 'course-changed', 'input-missing', 'input-version', 'not-before-invalid', 'time'] as const;
 
+/** Rule 3's one definition of a held ticket, as SQL (R-BTN-39): a claim active, completed but
+ *  unconfirmed, or reaped with its fence still pending. `Blocks.isHeld` reads it over one
+ *  ticket; queries that must exclude held tickets inline it. */
+export const HELD_CLAIMS_SQL = `(status = 'active' OR (status = 'completed' AND confirmed_at IS NULL) OR (status = 'reaped' AND fence_pending = 1))`;
+
 /** A live worker as the counts see it: the repositories its key works on, the capabilities it may
  *  use in each (null: all it declares), what it declares and the account instances it uses. */
 interface FleetWorker {
@@ -317,8 +322,7 @@ export class Blocks {
 
   /** Whether a claim holds the ticket — rule 3's check, the one definition (R-BTN-75). */
   isHeld(id: string): boolean {
-    return this.rows(`SELECT 1 FROM claims WHERE ticket_id = ? AND (status = 'active' OR (status = 'completed' AND confirmed_at IS NULL)
-                      OR (status = 'reaped' AND fence_pending = 1)) LIMIT 1`, id).length > 0;
+    return this.rows(`SELECT 1 FROM claims WHERE ticket_id = ? AND (${HELD_CLAIMS_SQL}) LIMIT 1`, id).length > 0;
   }
 
   /** R-BTN-75: blocked when not held, with a queued leg, and with a whole-ticket row or a row on
@@ -496,6 +500,14 @@ export class Blocks {
     const owner = home.github.slice(0, home.github.indexOf('/'));
     const repos = JSON.parse(this.rows<{ repos: string }>('SELECT repos FROM tickets WHERE id = ?', id)[0]?.repos ?? '[]') as string[];
     return [home.web_base, ...repos.map((r) => (r.includes('/') ? r : `${owner}/${r}`)).filter((r) => isForgePath(home.forge as Forge, r)).map((r) => host + r)];
+  }
+
+  /** Those bases by ticket id, for a reader that judges a link the same way `posted` judges a
+   *  decision's `url` (R-BTN-92) — a person leg's question among them (R-BTN-116). */
+  linkBases(id: string): string[] {
+    const home = this.rows<{ forge: string; web_base: string | null; github: string }>(
+      'SELECT forge, web_base, github FROM repositories WHERE id = ?', repositoryOf(id))[0];
+    return home ? this.ticketRepos(id, home) : [];
   }
 
   // ── unblocking wakes work (R-BTN-77) ──────────────────────────────────────────────────────

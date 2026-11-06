@@ -57,6 +57,20 @@ export interface PostedTicket {
   rank?: number | null;
   /** Shown, never read (§2b). */
   display?: { status?: string; group?: string; project?: string };
+  /** R-BTN-116: the queued person leg's question (§4.4) — stored only while the ticket's queued
+   *  leg is a person's; any other is dropped and logged `question-dropped`. */
+  question?: PostedQuestion | null;
+}
+
+/** R-BTN-116: the question a ticket source posts for its queued person leg — an id for the
+ *  question, where git holds its text, its severity (R-BTN-125) and its options, each naming the
+ *  outcome in the leg's `to` it chooses. With no options posted, the leg's own outcomes are its
+ *  options, each under its own name (§6.4). */
+export interface PostedQuestion {
+  id: string;
+  url?: string | null;
+  severity?: string | null;
+  options?: { id: string; reached: string }[] | null;
 }
 
 /** Where the sync places a ticket (R-BTN-70, §7.1 `stations`). */
@@ -107,6 +121,20 @@ export interface BoardPayload {
   ontology?: { builtin?: string | null; program: unknown } | { error: string };
   /** §6.8: the transcript repositories from `baton.json`; absent, the defaults stand. */
   transcript_repos?: string[];
+  /** §4.4 (R-BTN-191): the sync's attestations, this run's observation. Only `std:decision@1` —
+   *  a person leg's answer read from the ticket's `answer:` — is acted on (R-BTN-116); an
+   *  arrival Baton does not apply is recorded `arrival-unapplied` (R-BTN-39). */
+  attestations?: PostedAttestation[];
+}
+
+/** R-BTN-191's envelope as the sync posts it (§4.4): a typed fact about one ticket, its `value`
+ *  judged by its `type`'s schema when the type is read. */
+export interface PostedAttestation {
+  type: string;
+  /** A local ticket id, as the post's tickets name them. */
+  ticket: string;
+  ref?: string | null;
+  value: unknown;
 }
 
 export interface ProvidersData {
@@ -186,6 +214,24 @@ export function checkPayload(body: unknown): BoardPayload {
       throw new BatonError('invalid-params', 'ontology must be {builtin?, program} or {error}');
     }
   }
+  // R-BTN-191's envelope (§4.4): a typed fact about one ticket of the post. The shape here; each
+  // type's own validation — and whether Baton applies the fact — is where the type is read
+  // (R-BTN-116 reads `std:decision@1`; the other types arrive with B-146 and B-120).
+  if (p.attestations !== undefined) {
+    if (!Array.isArray(p.attestations) || p.attestations.length > 100) throw new BatonError('invalid-params', `attestations must be a list of at most 100`);
+    for (const [i, a] of p.attestations.entries()) {
+      const at = `attestations[${i}]`;
+      if (!isObj(a) || typeof (a as PostedAttestation).type !== 'string' || !/^[a-z][a-z0-9.-]*(:[a-z][a-z0-9.-]*)?@\d+$/.test((a as PostedAttestation).type)) {
+        throw new BatonError('invalid-params', `${at}.type must be a schema id <id>@<version>`);
+      }
+      if (typeof (a as PostedAttestation).ticket !== 'string' || !LOCAL_ID.test((a as PostedAttestation).ticket)) throw new BatonError('invalid-params', `${at}.ticket must be a local ticket id`);
+      const ref = (a as PostedAttestation).ref;
+      if (ref !== undefined && ref !== null && (typeof ref !== 'string' || ref.length > 200)) {
+        throw new BatonError('invalid-params', `${at}.ref must be a short string or null`);
+      }
+      if (!isObj((a as PostedAttestation).value)) throw new BatonError('invalid-params', `${at}.value must be an object`);
+    }
+  }
   return p.registry === undefined ? p : { ...p, registry: checkRegistry(p.registry) };
 }
 
@@ -236,6 +282,9 @@ const isTicketPath = (v: unknown) =>
   typeof v === 'string' && v.length <= 256 && v.split('/').every((seg) => /^[A-Za-z0-9._-]+$/.test(seg) && seg !== '.' && seg !== '..');
 /** A `waiting_on` label: free, short, compared as a string (R-BTN-69). */
 const WAITING_ON = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+/** R-BTN-116: a question option's id — a station id's shape, so a decision packet's letters (`a`,
+ * `b`) and the leg's own outcome names (`approve`) both fit, each naming the outcome it chooses. */
+const OPTION_ID = LEG_ID;
 const isObjArr = (v: unknown, max: number) => Array.isArray(v) && v.length <= max;
 
 function checkNormative(p: BoardPayload) {
@@ -266,6 +315,34 @@ function checkNormative(p: BoardPayload) {
     if (!isObjArr(t.repos, 64)) fail(`${t.id}.repos`, 'must be a list of at most 64');
     list(t.repos, REPO, `${t.id}: repos`);
     if (t.rank != null && !(Number.isSafeInteger(t.rank) && t.rank >= 0)) fail(`${t.id}.rank`, 'must be a non-negative integer');
+    // R-BTN-116 (§4.4): the queued person leg's question. Its shape here; whether the ticket's
+    // queued leg is a person's — and each option's `reached` one of the leg's own outcomes — is
+    // judged where the course in force is known, when the question is stored.
+    if (t.question !== undefined && t.question !== null) {
+      const q = t.question;
+      const at = `${t.id}.question`;
+      if (!isObj(q)) fail(at, 'must be {id, url?, severity?, options?}');
+      else {
+        for (const k of Object.keys(q)) if (!['id', 'url', 'severity', 'options'].includes(k)) fail(`${at}.${k}`, 'is not a question field');
+        if (typeof q.id !== 'string' || !DECISION_ID.test(q.id)) fail(`${at}.id`, `must match ${DECISION_ID}`);
+        if (q.id.startsWith('baton.')) fail(`${at}.id`, 'a question id never begins "baton." — that is Baton\'s own (R-BTN-78)');
+        if (q.url != null && (typeof q.url !== 'string' || q.url.length > 1000)) fail(`${at}.url`, 'must be a URL string of at most 1000 characters');
+        if (q.severity != null && !['critical', 'high', 'normal'].includes(q.severity as string)) fail(`${at}.severity`, 'must be critical, high or normal (R-BTN-125)');
+        if (q.options !== undefined && q.options !== null) {
+          if (!isObjArr(q.options, DECISIONS_MAX)) fail(`${at}.options`, `must be a list of at most ${DECISIONS_MAX} options`);
+          else {
+            const ids = new Set<string>();
+            for (const [j, o] of (q.options as { id?: unknown; reached?: unknown }[]).entries()) {
+              if (!isObj(o) || typeof (o as { id?: unknown }).id !== 'string' || !OPTION_ID.test((o as { id: string }).id)) fail(`${at}.options[${j}].id`, `must match ${OPTION_ID}`);
+              if (typeof (o as { reached?: unknown }).reached !== 'string' || !LEG_ID.test((o as { reached: string }).reached)) fail(`${at}.options[${j}].reached`, 'must be a station id');
+              const oid = (o as { id: string }).id;
+              if (ids.has(oid)) fail(`${at}.options[${j}].id`, `${oid} appears twice`);
+              ids.add(oid);
+            }
+          }
+        }
+      }
+    }
     if (t.display !== undefined) {
       if (!isObj(t.display)) fail(`${t.id}.display`, 'must be an object');
       for (const [k, v] of Object.entries(t.display)) {

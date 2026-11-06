@@ -150,5 +150,25 @@
   "S-BTN-66.entry › S-BTN-66 entry requirements > the envelope's shape is checked before anything else: one of uri and value, a bounded value, a digest off git": {
     "at": 1,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-67.person-legs › a person leg with expires: unanswered it arrives at reached with question-expired; answered after the instant, arrival-unapplied": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-67.person-legs › a queued person leg waits unheld: its question is stored and listed, a stray one dropped, and a runner is refused (rule person)": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-67.person-legs › an answer naming an option the question lacks: invalid-params from the CLI, dropped answer-invalid from the sync": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-67.person-legs › the owner answers in git: the sync attests the answer, the leg arrives from its std:decision@1 as a fact-arrival": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-67.person-legs › the owner answers with baton decision answer: the same arrival through the attestations route": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   }
 }

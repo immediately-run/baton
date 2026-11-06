@@ -338,3 +338,59 @@ describe('validateCourse (R-BTN-69)', () => {
     }
   });
 });
+
+// B-7 (R-BTN-116): a person's leg — `kind: "person"` with `asks`, and at most an `expires` naming
+// one of its own outcomes. `asks` is required on a person's leg and refused on any other; a
+// `call` leg (R-BTN-165) is not built, so the kind is refused rather than kept unread; and a
+// person's leg carries no deadline (R-BTN-167) — its clock is its `expires`.
+describe('person legs (R-BTN-116)', () => {
+  const personCourse = (): Course => {
+    const c = copy();
+    c.stations.parked = { label: 'Parked' };
+    c.legs.merge = { ...c.legs.merge, from: ['reviewed', 'adjudicated', 'parked'] };
+    c.legs.decide = { from: ['reviewed'], to: ['adjudicated', 'parked'], kind: 'person', asks: 'owner' };
+    return c;
+  };
+
+  it('passes a person leg with asks, and one with expires naming an outcome', () => {
+    expect(validateCourse(personCourse())).toEqual([]);
+    const withExpiry = personCourse();
+    withExpiry.legs.decide = { ...withExpiry.legs.decide, expires: { after_s: 3600, reached: 'parked' } };
+    expect(validateCourse(withExpiry)).toEqual([]);
+  });
+
+  it('asks is required on a person leg, and refused on any other', () => {
+    const noAsks = personCourse();
+    delete (noAsks.legs.decide as Record<string, unknown>).asks;
+    expect(rules(noAsks)).toEqual(['shape legs.decide.asks']);
+    const agentLeg = personCourse();
+    agentLeg.legs.fix = { ...agentLeg.legs.fix, asks: 'runner' };
+    expect(rules(agentLeg)).toEqual(['shape legs.fix.asks']);
+  });
+
+  it('kind is "person" — a call leg is refused, not kept unread (R-BTN-165)', () => {
+    const call = personCourse();
+    call.legs.decide = { from: ['reviewed'], to: ['adjudicated', 'parked'], kind: 'call' };
+    expect(rules(call)).toEqual(['shape legs.decide.kind']);
+  });
+
+  it('expires sits only on a person leg, within 60 s–30 d, naming one of its outcomes', () => {
+    const agent = personCourse();
+    agent.legs.fix = { ...agent.legs.fix, expires: { after_s: 3600, reached: 'fixed' } };
+    expect(rules(agent)).toEqual(['shape legs.fix.expires']);
+    for (const after_s of [59, 0, -60, 30 * 86_400 + 1]) {
+      const bound = personCourse();
+      bound.legs.decide = { ...bound.legs.decide, expires: { after_s, reached: 'parked' } };
+      expect(rules(bound)).toEqual([`bound legs.decide.expires.after_s`]);
+    }
+    const outcome = personCourse();
+    outcome.legs.decide = { ...outcome.legs.decide, expires: { after_s: 3600, reached: 'filed' } };
+    expect(rules(outcome)).toEqual(['shape legs.decide.expires.reached']);
+  });
+
+  it('a person leg carries no deadline: its clock is its expires (R-BTN-167)', () => {
+    const deadline = personCourse();
+    deadline.legs.decide = { ...deadline.legs.decide, max_duration: 3600 };
+    expect(rules(deadline)).toEqual(['bound legs.decide.max_duration']);
+  });
+});

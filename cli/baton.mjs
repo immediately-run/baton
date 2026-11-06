@@ -57,6 +57,10 @@
 //   baton decision list -i KEY [--watch | --all]
 //                — the CLI courier (R-BTN-80): claims the key's notices, prints them as text and
 //                marks them sent; --watch asks once a minute; --all lists every open decision it delivers
+//   baton decision answer -i KEY <repository>:<id> <option> [--ref REF]
+//                — a person's answer to the ticket's queued person leg, a std:decision@1 (R-BTN-116);
+//                signed with an owner key of the repository or a human-only key; --ref names the
+//                answer for idempotence when it rode a commit (R-BTN-39)
 //
 //   baton repo sync [--root DIR] [--url URL] [--latest BRANCH] [--facts FILE] [--sync-key FILE] [--busy-retry S]
 //   baton repo init [--course C] [--agent opencode|claude-code] [--agent-command CMD] [--override LEG]…
@@ -570,6 +574,35 @@ async function decisionList(argv) {
   return 0;
 }
 
+/**
+ * `baton decision answer TICKET OPTION` (R-BTN-127, R-BTN-116): a person's answer to the ticket's
+ * queued person leg, a `std:decision@1` through `POST /v1/repositories/{repository}/attestations`,
+ * signed with an owner key of the repository or a human-only key. Pure planning beside `plan`, so
+ * the tests check the request without a Baton.
+ */
+export function answerPlan(ticket, option, ref) {
+  const i = String(ticket).indexOf(':');
+  if (i < 1) throw new Error('the ticket is <repository>:<id>');
+  return {
+    method: 'POST',
+    path: `/v1/repositories/${encodeURIComponent(String(ticket).slice(0, i))}/attestations`,
+    body: { type: 'std:decision@1', subject: { ticket: String(ticket).slice(i + 1) }, value: { option, ...(ref ? { ref } : {}) } },
+  };
+}
+
+/** The command: one request, the answer's arrival printed as one line (R-BTN-39) — deferred
+ *  when a claim holds the ticket, which the alarm applies when the hold ends. */
+async function decisionAnswer(argv) {
+  const { flags, positional } = parseArgs(argv, [], ['identity', 'url', 'ref'], 2);
+  const p = answerPlan(need(positional[0], 'the ticket, <repository>:<id>'), need(positional[1], 'the option the person chose'), flags.ref);
+  const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+  const keyFile = need(flags.identity, '-i KEY (an owner key of the repository, or a human-only key)');
+  const { status, json } = await send(url, p, keyFile);
+  if (!(status >= 200 && status < 300)) throw new Error(`${json?.code ?? status}: ${json?.message ?? 'refused'}`);
+  process.stdout.write(`${json.ticket ?? positional[0]}: ${p.body.value.option} → ${json.reached}${json.deferred ? ' (a claim holds the ticket; applied when it ends)' : ''}\n`);
+  return 0;
+}
+
 // ── `baton owner policy …` (§12.8 R-BTN-188/R-BTN-189, B-145) ────────────────────────────
 
 /** The policy's knobs, dotted, in the spec table's order — the CLI's own copy of
@@ -699,7 +732,9 @@ export async function main(argv) {
     return 0;
   }
   if (argv[0] === 'decision') {
-    if (argv[1] !== 'list') throw new Error('baton decision list -i KEY [--watch | --all]');
+    // R-BTN-116, R-BTN-127: a person's answer to a queued person leg, or the courier's list.
+    if (argv[1] === 'answer') return decisionAnswer(argv.slice(2));
+    if (argv[1] !== 'list') throw new Error('baton decision list -i KEY [--watch | --all] | baton decision answer -i KEY <repository>:<id> <option>');
     return decisionList(argv.slice(2));
   }
   if (argv[0] === 'owner') {

@@ -4,7 +4,7 @@
 // file. A posted file that fails `validateCourse` keeps the previous one in force and is listed
 // under Needs you; with no previous one there is nothing to keep, so the post is refused.
 import { validateCourse, type CourseViolation } from './course';
-import { graphOf, legNeedsOf, resolveLeg } from './graph';
+import { graphOf, legNeedsOf, personLegsOf, resolveLeg } from './graph';
 import { BatonError } from './http';
 import { FREE_TEXT_MAX } from './text';
 import type { Policies } from './policy';
@@ -267,10 +267,11 @@ export class Courses {
         ? this.c.store.exec<{ route_choices_json: string }>('SELECT route_choices_json FROM courses WHERE repository_id = ? AND id = ?', repo, e.id).toArray()[0]?.route_choices_json ?? '{}'
         : JSON.stringify(acceptedRoutes.get(e.id) ?? {});
       this.c.store.exec(
-        `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, step_kinds, min_worker_version, report_horizon_h, branch_pattern, previous_branch_pattern, route_choices_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, person_legs_json, step_kinds, min_worker_version, report_horizon_h, branch_pattern, previous_branch_pattern, route_choices_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (repository_id, id) DO UPDATE SET version = excluded.version, skill = excluded.skill, course_json = excluded.course_json,
            leg_capabilities_json = excluded.leg_capabilities_json,
+           person_legs_json = excluded.person_legs_json,
            step_kinds = excluded.step_kinds, min_worker_version = excluded.min_worker_version, report_horizon_h = excluded.report_horizon_h,
            branch_pattern = excluded.branch_pattern, previous_branch_pattern = excluded.previous_branch_pattern,
            route_choices_json = excluded.route_choices_json`,
@@ -280,12 +281,13 @@ export class Courses {
         // role from that read, R-BTN-157). Review round 6, finding 2: the expanded form is never
         // the stored file. What rule 4 needs instead is derived beside it, from the one expansion
         // `graphOf` reads (`legNeedsOf`), for the candidate query's SQL — a view, kept in step with
-        // the file by being written in the same statement.
+        // the file by being written in the same statement. So is R-BTN-116's view (`personLegsOf`):
+        // the person legs the candidate query's SQL leaves out, as rule `person` refuses them.
         // B-104 (round 1, A7): `acceptedRoutes === undefined` names a refused ontology unit —
         // every entry keeps its previous attachments, so the value written is the one already
         // stored (a no-op); an accepted unit's map names this post's attachments whole, and an
         // entry absent from it carries none.
-        repo, e.id, e.version, e.skill, JSON.stringify(e.course), JSON.stringify(legNeedsOf(e.course)), JSON.stringify(e.step_kinds), e.min_worker_version, e.report_horizon_h,
+        repo, e.id, e.version, e.skill, JSON.stringify(e.course), JSON.stringify(legNeedsOf(e.course)), JSON.stringify(personLegsOf(e.course)), JSON.stringify(e.step_kinds), e.min_worker_version, e.report_horizon_h,
         e.branch_pattern, e.previous_branch_pattern, routesJson);
       this.c.store.exec('DELETE FROM course_refusals WHERE repository_id = ? AND course_id = ?', repo, e.id);
       // Immutable: a schema already held has the same digest (schemaViolations), so it is kept.
