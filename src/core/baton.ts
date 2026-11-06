@@ -9,6 +9,7 @@ import { MIGRATIONS } from '../migrations';
 import { BatonError, errorResponse, json } from './http';
 import { checkPayload, DEFAULT_COURSE, inPeak, nextPeakChange, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation } from './board';
 import { Stations, type Seen } from './stations';
+import { Questions } from './questions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
 import { priceFor } from '../shared/sessionUsage.mjs';
 import { familyOf } from '../shared/baton.mjs';
@@ -19,7 +20,7 @@ import { Claims } from './claims';
 import { Ontologies } from './ontologies';
 import { Cutover } from './cutover';
 import { Mirror } from './mirror';
-import { CAPABILITY_NAME, checkConfirmations, checkRepositoryId, GIT_BRANCH, GIT_REPO } from './validate';
+import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkRepositoryId, GIT_BRANCH, GIT_REPO } from './validate';
 import { Courses } from './courses';
 import { Observations } from './observations';
 import { Webhooks, type Delivery } from './webhook';
@@ -65,6 +66,8 @@ export class BatonCore {
   readonly notices: Notices;
   readonly queues: Queues;
   readonly history: History;
+  /** §6.4 (R-BTN-116): the person legs' questions, their answers and their expiry. */
+  readonly questions: Questions;
   /** §12.8 (B-145): the repository policies, their floors, their guarantees. */
   readonly policies: Policies;
   readonly store: Store;
@@ -115,6 +118,13 @@ export class BatonCore {
       dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices,
       policies: this.policies, humanBreakGlass: () => this.humanBreakGlass() });
     this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo), history: this.history });
+    // R-BTN-116: a person leg's question and answer. Its arrival moves the ticket as a claim's
+    // does — the queues' membership follows (R-BTN-79), the blocks are re-evaluated (R-BTN-75),
+    // a sync is asked (R-BTN-73) — and what it may not apply it records, never refusing (R-BTN-39).
+    this.questions = new Questions({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course), history: this.history,
+      queued: (ticket) => this.queues.touch(ticket), reevaluate: (ticket) => this.blocks.write([ticket]), isHeld: (ticket) => this.blocks.isHeld(ticket),
+      linkBases: (ticket) => this.blocks.linkBases(ticket), answersFrom: (repo) => this.policies.current(repo)?.policy.inputs.answers ?? 'git',
+      dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
     this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course), ontologies: this.ontologies,
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
@@ -317,6 +327,12 @@ export class BatonCore {
           return next;
         });
         this.blocks.expireMessages();
+        // R-BTN-39, R-BTN-116: answers that waited out a hold are applied first — before the
+        // expiries, so a person's word wins over a clock that passed while the ticket was held
+        // — then a person leg's expiry, due and still unanswered and unheld, arrives at its
+        // `expires.reached`: Baton's own settlement, applied at the instant.
+        this.questions.applyPending();
+        this.questions.expireDue(this.now());
         this.takeUnblocked();
         // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.
         this.notices.alarm();
@@ -348,6 +364,8 @@ export class BatonCore {
     const ontologyDue = this.ontologies.alarmTurn();
     if (ontologyDue != null || before > 0) this.store.transaction(() => this.blocks.recount());
     if (ontologyDue != null) await this.armBy(ontologyDue);
+    // R-BTN-116: the earliest person expiry still pending, so the alarm wakes at the instant.
+    await this.armBy(this.questions.nextDue());
   }
 
   /** R-BTN-77: each repository's unblocked dispatch due now, queued to send after the commit. */
@@ -464,6 +482,41 @@ export class BatonCore {
         if (req.method === 'GET' && url.pathname === '/v1/ui/session') return json({ ok: true });
       }
       if (req.method === 'GET' && url.pathname === '/v1/ui/state') return json(this.uiState());
+      // R-BTN-181's envelope (§14), B-7's slice: `POST /v1/repositories/{repository}/attestations`
+      // with a `std:decision@1` — a person's answer to the ticket's queued person leg
+      // (R-BTN-116), what `baton decision answer` writes (R-BTN-127). An owner key of the
+      // repository or a human-only key (R-BTN-185) writes it; an administrator's key is never an
+      // owner's (R-BTN-57) and writes nothing here.
+      const attestation = /^\/v1\/repositories\/([^/]+)\/attestations$/.exec(url.pathname);
+      if (req.method === 'POST' && attestation) {
+        let repoId: string;
+        try {
+          repoId = decodeURIComponent(attestation[1]);
+        } catch {
+          throw new BatonError('invalid-params', 'a malformed path segment');
+        }
+        const repo = checkRepositoryId(repoId);
+        if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
+        if (!req.headers.has('X-Baton-Signed') && !req.headers.has('X-Baton-Api-Key')) {
+          throw new BatonError('unauthenticated', 'sign with an owner key of the repository or a human-only key, or send its API key');
+        }
+        const admins = await this.admin.adminFingerprints();
+        // R-BTN-185: an owner key of the repository, or a human-only one — a registered human
+        // key's own public line serves the signature lookup, not the host's break-glass lines
+        // alone (a key registered through POST /v1/human-keys owns nothing, but answers).
+        const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.admin.humanKeyLine(fp));
+        const fp = signed.cred;
+        const human = await this.admin.isHumanKey(fp);
+        if (admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is never an owner key (R-BTN-57); a person’s answer is an owner’s or a human-only key’s');
+        if (!human && !this.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key neither owns ${repo} nor is a human-only key (R-BTN-116, R-BTN-185)`);
+        // §12.8, R-BTN-191: where the policy's `inputs.answers` is `attestation` (`protected`),
+        // a person's answer counts from a human key alone — an owner key's does not.
+        if (!human && (this.policies.current(repo)?.policy.inputs.answers ?? 'git') === 'attestation') {
+          throw new BatonError('forbidden', `${repo}'s policy counts a person's answer from a human key alone (inputs.answers: attestation)`);
+        }
+        const b = checkAttestation(await readJson(signed.req), repo);
+        return json(this.store.transaction(() => this.questions.answer(repo, b.ticket, b.value, human ? `human:${fp}` : `owner:${fp}`)));
+      }
       const read = await this.blocksRoute(req, url);
       if (read) return read;
       if (url.pathname.startsWith('/v1/courier/')) return await this.courierRoute(req, url);
@@ -1254,6 +1307,12 @@ export class BatonCore {
       for (const { row } of rows) if (!stations.has(row.id)) this.stations.clear(qualify(r, row.id));
       this.stations.reopened(r, rows.map(({ row }) => row.id));
       const seen = this.stations.apply(r, p.sha, n, stations, p.closed ?? [], at);
+      // R-BTN-116: the questions the post carries for its queued person legs (§4.4), then the
+      // sync's attestations (R-BTN-191) — a person leg's answer, read from the ticket's
+      // `answer:` — applied as the leg's arrival (R-BTN-39), which may move the ticket before
+      // the blocks are re-evaluated below.
+      this.questions.posted(r, p.tickets ?? [], new Set(stations.keys()));
+      this.questions.attestations(r, p.attestations ?? []);
       // B-129 (R-BTN-85, both values): a post whose ticket frontmatter says `available` while
       // the ticket is past its course's start — the snapshot implying a position Baton has
       // moved past, the false `available`/`prs: []` of the 2026-10-27 release — is a
@@ -1323,6 +1382,10 @@ export class BatonCore {
     // archive may be in the rewritten history alone, and its done end must not wait the hold's
     // 24 hours (R-BTN-62; round 2, 2-A-0). A plain refresh of the head cannot close what it has.
     const seen = this.stations.apply(r, p.sha, n, stations, (p.closed ?? []).filter((c) => held || !live.has(c.id)), at);
+    // R-BTN-116: a refresh carries the tickets' questions and the run's attestations like a new
+    // head (§4.4) — each is idempotent, so a re-post of the same question or answer moves nothing.
+    this.questions.posted(r, (p.tickets ?? []).filter((t) => live.has(t.id)), new Set(stations.keys()));
+    this.questions.attestations(r, p.attestations ?? []);
     // A refresh's stations carry `needs` and `decisions` too (R-BTN-76, R-BTN-78).
     this.applyBlocks(r, stations, [], legsBefore);
     return seen;

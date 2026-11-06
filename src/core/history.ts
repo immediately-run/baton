@@ -9,9 +9,12 @@ import { repositoryOf } from './validate';
 import type { Store } from './ports';
 
 /** R-BTN-81: the kinds of row, as §4 lists them. `inputs`, `outputs`, `position-confirmed`,
- *  `position-replaced` and `re-routed` are written by B-38 and B-39; `spawned` by R3-1258. */
+ *  `position-replaced` and `re-routed` are written by B-38 and B-39; `spawned` by R3-1258;
+ *  `fact-arrival`, `arrival-unapplied` and the person leg's question rows by B-7 (R-BTN-39,
+ *  R-BTN-116). */
 export const HISTORY_KINDS = ['leg-started', 'leg-finished', 'leg-abandoned', 'position-confirmed', 'position-replaced', 'git-moved', 'regressed',
-  're-routed', 'blocked', 'unblocked', 'decision-opened', 'decision-answered', 'inputs', 'outputs', 'discrepancy', 'spawned'] as const;
+  're-routed', 'blocked', 'unblocked', 'decision-opened', 'decision-answered', 'inputs', 'outputs', 'discrepancy', 'spawned',
+  'fact-arrival', 'arrival-unapplied', 'question-posted', 'question-answered', 'question-expired'] as const;
 export type HistoryKind = (typeof HISTORY_KINDS)[number];
 
 /** R-BTN-85: the cases a discrepancy names, exactly. `position-replaced` and `route-overridden`

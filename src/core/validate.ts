@@ -731,6 +731,43 @@ export function checkOverride(body: unknown): { expedite?: boolean; hold?: boole
   return { expedite: b.expedite as boolean | undefined, hold: b.hold as boolean | undefined };
 }
 
+/** What `POST /v1/repositories/{repository}/attestations` reads of R-BTN-181's envelope (§14):
+ *  `{type, subject: {ticket}, value}`. B-7's slice takes `std:decision@1` alone — a person leg's
+ *  answer (R-BTN-116), the type `baton decision answer` writes (R-BTN-127); the attestation store
+ *  itself arrives with B-146, which widens this. */
+export interface AnswerAttestation {
+  type: string;
+  /** A qualified ticket id, or a local one of `repository`. */
+  ticket: string;
+  value: { id?: string; leg?: string; option: string; reached?: string; ref?: string; answered_by?: string; commit?: string };
+}
+
+export function checkAttestation(body: unknown, repository: string): AnswerAttestation {
+  if (!isObj(body)) bad('body', 'must be a JSON object');
+  const b = body as Record<string, unknown>;
+  for (const k of Object.keys(b)) if (!['type', 'subject', 'value'].includes(k)) bad(`body.${k}`, 'unknown field');
+  if (b.type !== DECISION_TYPE_NAME) bad('type', `must be ${DECISION_TYPE_NAME} — the one attestation Baton reads here (R-BTN-116); the rest arrive with B-146`);
+  if (!isObj(b.subject)) bad('subject', 'must be {ticket}');
+  else for (const k of Object.keys(b.subject)) if (k !== 'ticket') bad(`subject.${k}`, 'unknown field');
+  const raw = (b.subject as Record<string, unknown>).ticket;
+  if (typeof raw !== 'string' || !raw.length) bad('subject.ticket', 'must name the ticket');
+  const ticket = (raw as string).includes(':') ? raw as string : `${repository}:${raw as string}`;
+  if (!TICKET_ID.test(ticket) || repositoryOf(ticket) !== repository) bad('subject.ticket', `must be a ticket of ${repository}`);
+  if (!isObj(b.value)) bad('value', `must be a ${DECISION_TYPE_NAME} value`);
+  const v = b.value as Record<string, unknown>;
+  for (const k of Object.keys(v)) if (!['id', 'leg', 'option', 'reached', 'ref', 'answered_by', 'commit'].includes(k)) bad(`value.${k}`, 'unknown field');
+  if (typeof v.option !== 'string' || !v.option.length) bad('value.option', 'must name the option the person chose');
+  const str = (k: string) => {
+    if (v[k] !== undefined && (typeof v[k] !== 'string' || !(v[k] as string).length)) bad(`value.${k}`, 'must be a non-empty string');
+  };
+  str('id'); str('leg'); str('reached'); str('ref'); str('answered_by'); str('commit');
+  return { type: b.type as string, ticket, value: v as AnswerAttestation['value'] };
+}
+
+/** The one attestation type either side of the API reads (R-BTN-116; R-BTN-191's list arrives
+ *  with B-146): a person's answer to a person leg, `{id, leg, option, reached, ref?, …}`. */
+export const DECISION_TYPE_NAME = 'std:decision@1';
+
 // ── blocks, external resources and readings (§2g R-BTN-75–78, §2l R-BTN-101; R3-1251) ─────
 
 /** R-BTN-76: an external resource's name — opaque to core (`llm:<model>`, `github-api`). */

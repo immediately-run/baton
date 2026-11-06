@@ -28,6 +28,13 @@ export interface Leg {
    *  their capabilities and a vocabulary role by its four, so no role name is left (§12.5) —
    *  except `human-operator`, which is no role and stands literal (R-BTN-121). */
   requires: string[];
+  /** R-BTN-116: a person's leg — no runner may take it (rule `person`); it arrives when a person
+   *  answers it with a `std:decision@1`. */
+  person: boolean;
+  /** R-BTN-116: who answers a person's leg; null on any other. */
+  asks: string | null;
+  /** R-BTN-116: a person leg's expiry — unanswered this long, it reaches `reached`; null with none. */
+  expires: { afterS: number; reached: string } | null;
 }
 
 export interface Graph {
@@ -84,14 +91,16 @@ export function graphOf(json: unknown): Graph {
     start: string; start_leg: string; end: string[]; short_waits?: string[];
     capability_roles?: Record<string, string[]>;
     stations: Record<string, { renamed_from?: string | string[]; entry?: { output: string; schema: string }[] }>;
-    legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session'; requires?: { capabilities?: string[] } }>;
+    legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session'; requires?: { capabilities?: string[] };
+      kind?: 'person'; asks?: string; expires?: { after_s: number; reached: string } }>;
   };
   const legs = new Map<string, Leg>();
   const legRenames = new Map<string, string>();
   const stationRenames = new Map<string, string>();
   for (const [id, l] of Object.entries(f.legs)) {
     legs.set(id, { from: [...new Set(l.from)], to: [...new Set(names(l.to))], maxRuns: l.max_runs ?? null, maxQueue: l.max_queue ?? null,
-      noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null, requires: legCapabilities(l.requires, f.capability_roles) });
+      noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null, requires: legCapabilities(l.requires, f.capability_roles),
+      person: l.kind === 'person', asks: l.kind === 'person' ? l.asks ?? null : null, expires: l.kind === 'person' && l.expires ? { afterS: l.expires.after_s, reached: l.expires.reached } : null });
     for (const old of names(l.renamed_from)) legRenames.set(old, id);
   }
   const entry = new Map<string, { output: string; schema: string }[]>();
@@ -136,6 +145,21 @@ export function legNeedsOf(json: unknown): Record<string, string[]> {
     out[id] = legCapabilities(typeof l === 'object' && l !== null ? (l as { requires?: unknown }).requires : undefined, f.capability_roles);
   }
   return out;
+}
+
+/**
+ * R-BTN-116: the legs of a course file that are a person's, by leg id — the view the registry
+ * derives beside the course file (`courses.ts` writes it to `person_legs_json`) so the candidate
+ * query's SQL, which cannot read a graph, offers none of them, as rule `person` refuses them at
+ * a claim and an advance. Like `legNeedsOf`, a view, never the file.
+ */
+export function personLegsOf(json: unknown): string[] {
+  if (typeof json !== 'object' || json === null || Array.isArray(json)) return [];
+  const legs = (json as { legs?: unknown }).legs;
+  if (typeof legs !== 'object' || legs === null || Array.isArray(legs)) return [];
+  return Object.entries(legs as Record<string, unknown>)
+    .filter(([, l]) => typeof l === 'object' && l !== null && !Array.isArray(l) && (l as { kind?: unknown }).kind === 'person')
+    .map(([id]) => id);
 }
 
 /**
