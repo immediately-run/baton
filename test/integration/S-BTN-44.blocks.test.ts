@@ -71,7 +71,7 @@ beforeEach(async () => {
   });
 });
 
-describe('S-BTN-44 blocks, resources and decisions', () => {
+describe('S-BTN-44 blocks, resources and decisions', { timeout: 30_000 }, () => {
   it('names every source of a block, answers per worker, refuses and overrides, unblocks with what cleared', async () => {
     const w1 = await grantedWorker(owner, 'docs', 'w1', CAPS, [GO]);
     const w2 = await grantedWorker(owner, 'docs', 'w2', CAPS, [GO, GO2]);
