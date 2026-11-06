@@ -279,3 +279,14 @@ These are its lessons, newest understanding first.
   tailing it read a crash into a healthy claim that fetched, loaded and ran its review leg
   seconds later. **The probes are `rev-parse --verify --quiet` now** — the miss still misses,
   silently. *Status: fixed.*
+
+## 2026-11-06 — the model report becomes advisory
+
+- **A verification gate priced in hours is a gate nobody can pass.** R-BTN-68 put
+  `npm run model:pr`'s report in every model-touching PR's body: on this fleet a report costs
+  20–30 minutes of model plus up to three hours of scenario traces, and run-20261105 showed
+  VM0's replay hangs outright on the person-legs traces — three PRs sat a day with green tests
+  and a report no machine could produce, merged only by the owner's bypass. **The report is
+  advisory now** (the owner, 2026-11-06): `model-report` validates what is pasted — green with
+  none, red only for a pasted report that shows a failed check — and R-BTN-68 says so. *Status:
+  the gate is gone; the weekly `model:full` and the hunger for a tractable replay remain.*

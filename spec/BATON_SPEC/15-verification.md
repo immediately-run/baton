@@ -53,8 +53,12 @@ description: "BATON_SPEC — 15. Verification: the model, the harness, scenarios
     (`npm run model:links`). A PR that changes what the checks read — the model, the core and
     what it imports, replay and its helpers, the scenarios and their hosts, the trace check, the
     Quint version — carries `npm run model:pr`'s report for its head (typecheck and regression
-    runs, 200 model-drawn traces driving the core, every scenario trace checked); the CI job
-    `model-report` fails until a passing report naming the head is in the PR body.
+    runs, 200 model-drawn traces driving the core, every scenario trace checked) when a machine
+    to run it is available. **The report is advisory, never a merge requirement** (the owner,
+    2026-11-06: a report costs hours on the fleet's machines and VM0's scenario replay hangs on
+    the person-legs traces): the CI job `model-report` validates what is pasted — green for a
+    passing report naming the head, green with none pasted, red only for a pasted report that
+    shows a failed check.
   - `npm run model:full` (simulation, witnesses, 1,000 traces, the proof, the scenario traces)
     runs weekly on `main`'s head as the Baton series "Weekly model check" (B-50, R-BTN-89) on
     any runner granted on baton; each run appends its report to its ticket file, and a failure

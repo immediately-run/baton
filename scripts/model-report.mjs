@@ -103,8 +103,18 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     process.exit(0);
   }
   const problem = reportProblem(PR_BODY, HEAD_SHA);
-  console.log(problem
-    ? `✗ ${problem}. This PR changes what the model checks read: run \`npm run model:pr\` on its head and paste the report into the PR body (R-BTN-68).`
-    : `✓ the PR body carries a passing model report for ${HEAD_SHA.slice(0, 7)}`);
-  process.exit(problem ? 1 : 0);
+  if (!problem) {
+    console.log(`✓ the PR body carries a passing model report for ${HEAD_SHA.slice(0, 7)}`);
+    process.exit(0);
+  }
+  // The owner, 2026-11-06: the report is advisory, never a merge requirement — a report costs
+  // hours on the fleet's machines, and VM0's scenario replay hangs on the person-legs traces
+  // (run-20261105: three PRs blocked a day on it). What is pasted is still validated: a report
+  // that shows a failed check fails this job, evidence against the merge.
+  if (/\*\*FAIL\*\*/.test(PR_BODY ?? '')) {
+    console.log(`✗ the pasted model report shows a failed check (${problem}). The report is advisory, but a failing one is evidence against the merge.`);
+    process.exit(1);
+  }
+  console.log(`✓ no blocking model report (advisory since 2026-11-06): ${problem}. Paste 'npm run model:pr' output when a machine allows it.`);
+  process.exit(0);
 }
