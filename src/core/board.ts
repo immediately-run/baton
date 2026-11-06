@@ -45,7 +45,16 @@ export const DEFAULT_COURSE = 'roadmap-pr';
 export interface PostedTicket {
   id: string;
   course_id: string;
-  path: string;
+  /** The ticket's file, when it has one: a `custom` source with `versions: "current"` may post a
+   *  ticket with no path at all (§4.4, B-183) — its `key` then names it. */
+  path?: string;
+  /** B-183 (R-BTN-74): the ticket source's opaque version for this ticket — the markdown
+   *  source's is the ticket file's blob id at the posted commit. Absent (`''` stored): no
+   *  version held, compared with nothing. Baton compares versions for equality only (values 4). */
+  version?: string;
+  /** B-183 (R-BTN-147): the source's stable name for the ticket, by which a dropped and
+   *  re-added ticket is detected as `renumbered`. Absent: the ticket's `path`. */
+  key?: string;
   title: string;
   tier?: string | null;
   requires: string[];
@@ -107,6 +116,11 @@ export interface BoardPayload {
   /** The number `POST /v1/sync/observation` handed out before the sync read anything (R-BTN-62). */
   observation: number;
   force?: boolean;
+  /** B-183 (R-BTN-74, §4.4): the ticket source's declaration — `kind` (`markdown`, the CLI's
+   *  default, or `custom`, the repository's own `.baton/tickets.mjs`), how it reads a ticket
+   *  (`versions`: `pinned` at a version, `current` as it is now) and the CLI that posted. Absent:
+   *  an older CLI's post, read as none of it. */
+  source?: { kind: 'markdown' | 'custom'; versions?: 'pinned' | 'current'; cli?: string } | null;
   /** The interim post (docs until R3-1233): factory-state's items and the `rankReady` order. */
   state?: { items: StateItem[] };
   /** The ready items in `rankReady` order (lib/factoryState.mjs), computed by the sync. */
@@ -152,6 +166,11 @@ export interface ProvidersData {
 export interface TicketRow {
   id: string;
   path: string;
+  /** B-183: the ticket's opaque version ('' when the source posts none) and stable key (its
+   *  `path` when the source posts none) — inputs of `row_hash`, so a changed version rewrites
+   *  the row (§4.3, R-BTN-11). */
+  version: string;
+  key: string | null;
   title: string;
   project: string | null;
   status: string;
@@ -181,6 +200,9 @@ export interface TicketRow {
 const SHA = /^[0-9a-f]{40}$/;
 const ID = LOCAL_ID; // a local id (R-BTN-47)
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// B-183 (§12.3): a ticket's opaque version, the source's own string — a git blob id, a store's
+// stamp, a digest — compared for equality only, never ordered or read as a time (values 4).
+const VERSION = /^[A-Za-z0-9._:+/=-]{1,128}$/;
 // A title comes from git, not from a worker, and the dashboard renders it with textContent
 // (§10.4), so it is only bounded and free of control characters.
 const TEXT = /^[^\u0000-\u001f\u007f]{1,500}$/;
@@ -200,6 +222,17 @@ export function checkPayload(body: unknown): BoardPayload {
   if (typeof p.sha !== 'string' || !SHA.test(p.sha)) throw new BatonError('invalid-params', 'sha must be a 40-hex commit');
   if (p.parent_sha !== null && (typeof p.parent_sha !== 'string' || !SHA.test(p.parent_sha))) throw new BatonError('invalid-params', 'parent_sha must be a 40-hex commit or null');
   if (!Number.isSafeInteger(p.observation) || p.observation < 1) throw new BatonError('invalid-params', 'observation must be the number POST /v1/sync/observation handed out (R-BTN-62)');
+  // B-183 (§4.4): the ticket source's declaration. Its shape here; the `tickets-approved` floor
+  // reads it where the repository's policy is known, when the post is judged.
+  if (p.source !== undefined && p.source !== null) {
+    const s = p.source;
+    if (!isObj(s) || (s.kind !== 'markdown' && s.kind !== 'custom')) throw new BatonError('invalid-params', "source must be {kind: 'markdown' | 'custom', versions?, cli?}");
+    if (s.versions !== undefined && s.versions !== null && s.versions !== 'pinned' && s.versions !== 'current') {
+      throw new BatonError('invalid-params', "source.versions must be 'pinned' or 'current' (R-BTN-74)");
+    }
+    if (s.cli !== undefined && s.cli !== null && (typeof s.cli !== 'string' || s.cli.length > 200)) throw new BatonError('invalid-params', 'source.cli must be a short string naming the posting CLI');
+    for (const k of Object.keys(s)) if (!['kind', 'versions', 'cli'].includes(k)) throw new BatonError('invalid-params', `source.${k} is not a source field`);
+  }
   if (p.tickets !== undefined) {
     if (p.state !== undefined || p.ready !== undefined) throw new BatonError('invalid-params', 'a post is either the normative tickets or the interim state.items, not both');
     checkNormative(p);
@@ -304,7 +337,23 @@ function checkNormative(p: BoardPayload) {
     if (seen.has(t.id)) fail(`${at}.id`, `${t.id} appears twice`);
     seen.add(t.id);
     if (typeof t.course_id !== 'string' || !COURSE_ID.test(t.course_id)) fail(`${t.id}.course_id`, 'must be a course id');
-    if (!isTicketPath(t.path)) fail(`${t.id}.path`, 'must be a relative path, no segment empty, . or ..');
+    // B-183 (§4.4): `path` is the ticket's file — required of every source but a `custom` one
+    // that reads only as it is now (`versions: "current"`), whose ticket may live in no tree at
+    // all. A ticket with neither path nor `key` names nothing stable, so it is refused.
+    const pathOptional = p.source?.kind === 'custom' && p.source?.versions === 'current';
+    if (t.path !== undefined && t.path !== null) {
+      if (!isTicketPath(t.path)) fail(`${t.id}.path`, 'must be a relative path, no segment empty, . or ..');
+    } else if (!pathOptional || t.key == null) {
+      fail(`${t.id}.path`, pathOptional ? 'a ticket with no path must carry key' : 'must be a relative path, no segment empty, . or ..');
+    }
+    // B-183 (§12.3): the version is the source's opaque string, the key its stable name; both
+    // untrusted text, validated on write, compared for equality only.
+    if (t.version !== undefined && t.version !== null && (typeof t.version !== 'string' || !VERSION.test(t.version))) {
+      fail(`${t.id}.version`, `must be 1–128 characters of ${VERSION.source} (R-BTN-74)`);
+    }
+    if (t.key !== undefined && t.key !== null && (typeof t.key !== 'string' || t.key.length < 1 || t.key.length > 256 || !/^[A-Za-z0-9][A-Za-z0-9._:+/=-]*$/.test(t.key))) {
+      fail(`${t.id}.key`, 'must be a short stable name of the source\'s own');
+    }
     if (typeof t.title !== 'string' || !TEXT.test(t.title)) fail(`${t.id}.title`, 'must be short plain text');
     if (t.tier != null && !NAME.test(t.tier)) fail(`${t.id}.tier`, 'must be a tier name');
     if (!Array.isArray(t.requires)) fail(`${t.id}.requires`, 'must be a list (`none` and no clause are [])');
@@ -621,9 +670,13 @@ export function rowFor(it: StateItem, rankOf: Map<string, number>): TicketRow {
   const tags = it.tags ?? [];
   const names = it.requires ?? null;
   const clause = names == null ? 'absent' : names.every((n) => n === 'none') ? 'none' : 'listed';
+  const path = `content/roadmap/${it.id}.mdx`;
   return {
     id: it.id,
-    path: `content/roadmap/${it.id}.mdx`,
+    path,
+    // The interim post carries no versions (B-183): no version held, the path the key.
+    version: '',
+    key: path,
     title: it.title,
     project: it.project ?? null,
     status: it.status,
@@ -654,7 +707,11 @@ export function rowForTicket(t: PostedTicket): TicketRow {
   const names = [...new Set(t.requires)];
   return {
     id: t.id,
-    path: t.path,
+    path: t.path ?? '',
+    // B-183: the source's opaque version and stable key; `version` is an input of `row_hash`, so
+    // a ticket whose version changed rewrites its row on a refresh too (§4.3, R-BTN-11).
+    version: t.version ?? '',
+    key: t.key ?? t.path ?? null,
     title: t.title,
     project: t.display?.project ?? null,
     status: '',

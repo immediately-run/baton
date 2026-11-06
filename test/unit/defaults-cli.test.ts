@@ -23,6 +23,7 @@ import { CREATE_PR_COURSE, stationsPr, stationsReviewPr, type PrFact } from '../
 import { prClose, verdictLine, type Exec } from '../../src/defaults/pr-close';
 import { splitWords } from '../../src/defaults/agent-words';
 import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
+import { stampMarkdownVersions } from '../../src/defaults/ticket-versions';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const CLI = join(ROOT, 'cli', 'baton.mjs');
@@ -1101,8 +1102,12 @@ describe('baton repo init, through the built CLI', () => {
     const files = ['README.md', 'a.md', 'archive/b.md'].map((f) => ({ path: f, text: readFileSync(join(root, 'tickets', f), 'utf8') }));
     const ejected = await load(join(root, '.baton', 'tickets.mjs'));
     const out = await ejected.default.tickets(ctx);
-    expect(out).toEqual(ticketsMarkdown(files, ctx.settings));
+    // The ejected source answers what the default answers, versions included (B-183: each
+    // ticket's version is its file's blob id at the commit — '' here, nothing committed yet).
+    expect(out).toEqual(stampMarkdownVersions(root, ticketsMarkdown(files, ctx.settings), ctx.settings.items));
     expect(out.closed).toEqual([{ id: 'B-1', as: 'done' }]);
+    expect(ejected.default.versions).toBe('pinned');
+    expect(await ejected.default.read('A-1', { version: 'f'.repeat(40), checkout: root })).toEqual({ version: 'f'.repeat(40), ticket: null });
     // A second eject would overwrite edits: refused without --force.
     expect(() => baton(root, 'repo', 'init', '--eject', 'tickets')).toThrow();
     baton(root, 'repo', 'init', '--eject', 'tickets', '--force');

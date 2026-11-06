@@ -85,8 +85,9 @@ function ticketsMarkdown(files, settings = {}) {
       repos: resolved,
       rank: order != null ? Math.max(0, Math.round(order)) : null,
       // Opaque to Baton, read by the course's own code (§2b): the PR list the PR courses read,
-      // and the owner's `answer:` the decision course waits on (R-BTN-131).
-      course: { ...strList(fm.prs).length ? { prs: strList(fm.prs) } : {}, ...str(fm.answer) != null ? { answer: str(fm.answer) } : {} },
+      // the ticket's project (B-112: `baton tickets new --project` writes it, and the generated
+      // page groups by it), and the owner's `answer:` the decision course waits on (R-BTN-131).
+      course: { ...strList(fm.prs).length ? { prs: strList(fm.prs) } : {}, ...str(fm.project) != null ? { project: str(fm.project) } : {}, ...str(fm.answer) != null ? { answer: str(fm.answer) } : {} },
       ...parent != null ? { parent } : {},
       ...fm.not_before != null ? { not_before: fm.not_before } : {},
       ...str(fm.status) != null ? { display: { status: str(fm.status) } } : {}
@@ -97,7 +98,47 @@ function ticketsMarkdown(files, settings = {}) {
   return { tickets, closed };
 }
 
-// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-EOjAr3/entry.ts
+// src/defaults/ticket-versions.ts
+import { execFileSync } from "node:child_process";
+
+// src/defaults/ticket-state.ts
+var GIT_NONINTERACTIVE_ENV = {
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o ConnectTimeout=20"
+};
+
+// src/defaults/ticket-versions.ts
+var git = (root, args, timeoutMs = 3e4) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 16 << 20, env: { ...process.env, ...GIT_NONINTERACTIVE_ENV }, stdio: ["ignore", "pipe", "pipe"] });
+function blobIds(root, dir, rev = "HEAD", run = git) {
+  let out;
+  try {
+    out = run(root, ["ls-tree", "-r", rev, "--", dir]);
+  } catch {
+    return /* @__PURE__ */ new Map();
+  }
+  const ids = /* @__PURE__ */ new Map();
+  for (const line of out.split("\n")) {
+    const m = /^\d+ blob ([0-9a-f]{40})\t(.+)$/.exec(line);
+    if (m) ids.set(m[2], m[1]);
+  }
+  return ids;
+}
+function stampMarkdownVersions(root, result, itemsDir, rev = "HEAD", run = git) {
+  const dir = (itemsDir ?? "tickets").replace(/\/$/, "");
+  const blobs = blobIds(root, dir, rev, run);
+  for (const t of result.tickets) t.version = blobs.get(t.path) ?? "";
+  return result;
+}
+function readTicketBlob(checkout, version, run = git) {
+  if (typeof version !== "string" || !/^[0-9a-f]{40}$/.test(version)) return null;
+  try {
+    return run(checkout, ["cat-file", "blob", version]);
+  } catch {
+    return null;
+  }
+}
+
+// ../../../../../tmp/opencode/baton-b183-tickets-entry/entry.mjs
 var entry_default = {
   // The same signature the sync calls a repository's own source with: edit freely.
   // This repository's tickets wiki holds more than tickets: `projects/` (Grove project
@@ -111,11 +152,21 @@ var entry_default = {
   // CI token cannot read the private docs repository (R-BTN-74 fails the whole board
   // for exactly that). A ticket that genuinely needs a docs PR names it again the day
   // the sync's token can read it; the sync will say so loudly.
+  //
+  // B-183 (R-BTN-74): pinned — a ticket is read at its version — and each ticket's
+  // version is its file's blob id at the commit the sync posts, so an unrelated commit
+  // changes no ticket's version and stales no claim.
+  versions: "pinned",
   async tickets(ctx) {
     const files = readItems(ctx.root, ctx.settings.items).filter((f) => /^(\w[\w-]*\.mdx|archive\/\w[\w-]*\.mdx)$/.test(f.path));
-    const result = ticketsMarkdown(files, ctx.settings);
+    const result = stampMarkdownVersions(ctx.root, ticketsMarkdown(files, ctx.settings), ctx.settings.items);
     for (const t of result.tickets) t.repos = (t.repos ?? []).filter((r) => !/^immediately-run\/docs$/i.test(r));
     return result;
+  },
+  // The ticket's blob at its version (§4.5): what the runner reads, exactly as it reads
+  // the file at the claim's snapshot today. `checkout` is the runner's home checkout.
+  async read(id, { version, checkout } = {}) {
+    return { version, ticket: readTicketBlob(checkout ?? process.cwd(), version) };
   }
 };
 export {

@@ -77,7 +77,7 @@ export async function refresh(extra: Record<string, unknown> = {}) {
 /** `POST /v1/sync/observation` as a repository's sync (R-BTN-62): its JSON and status. */
 export async function observe(token?: string) {
   const res = await call('/v1/sync/observation', { method: 'POST', headers: { Authorization: `Bearer ${token ?? (await syncToken())}`, 'Content-Type': 'application/json' }, body: '{}' });
-  return { status: res.status, json: (await res.json()) as { sha: string | null; observation: number; bars: unknown[]; code?: string } };
+  return { status: res.status, json: (await res.json()) as { sha: string | null; observation: number; bars: unknown[]; versions?: Record<string, string>; code?: string } };
 }
 
 export async function ownerCall(path: string, init: RequestInit = {}) {

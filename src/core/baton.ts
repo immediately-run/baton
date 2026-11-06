@@ -7,7 +7,7 @@
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
 import { MIGRATIONS } from '../migrations';
 import { BatonError, errorResponse, json } from './http';
-import { checkPayload, DEFAULT_COURSE, inPeak, nextPeakChange, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation } from './board';
+import { checkPayload, DEFAULT_COURSE, inPeak, nextPeakChange, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
@@ -424,7 +424,10 @@ export class BatonCore {
           // answers to the sync's decisions, and the legs claims finished with an evidence
           // pointer (the claim's nonce beside it) — so a marker in git counts only as the
           // evidence Baton recorded, and an answer only as the owner gave it here.
-          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), ...this.claims.syncRecord(repo) });
+          // B-183 (§4.3): and each live ticket's last accepted `version`, handed back so the
+          // source's own code — never Baton — judges whether its store read is older than what
+          // the board holds, and refuses to post a ticket it judges behind (R-BTN-150).
+          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), ...this.claims.syncRecord(repo), versions: this.ticketVersions(repo) });
         }
         if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
           const { repo, req: signed } = await this.verifySync(req, 'sync');
@@ -1179,6 +1182,11 @@ export class BatonCore {
     // than the last accepted one, or a void or used number, is refused whole here.
     const n = p.observation;
     this.observations.use(r, n);
+    // B-183 (§4.4, R-BTN-184): the `tickets-approved` guarantee is defined over a ticket file's
+    // approval — a source that reads only as it is now has no file to approve, so its post to a
+    // repository whose policy's floors include the guarantee is refused, naming it. What approval
+    // means for a tracker source is a later ticket's.
+    this.refuseCurrentUnderApprovalFloor(repo, p);
     const head = this.headOf(r);
     const at = this.now();
     const normative = p.tickets !== undefined;
@@ -1194,7 +1202,7 @@ export class BatonCore {
       // staleness do not stall for the hold's 24 hours. Its interim confirmations likewise.
       this.store.transaction(() => {
         this.observations.accept(r, n);
-        const seen = normative ? this.refreshStations(r, p, n, at, true) : new Map<string, Seen>();
+        const seen = normative ? this.refreshStations(r, p, n, at, null, true) : new Map<string, Seen>();
         this.claims.confirm(confirmations, n);
         this.claims.judge(r, n, seen);
         this.store.exec('UPDATE held_snapshots SET observation = ? WHERE repository_id = ? AND sha = ?', n, r, p.sha);
@@ -1216,30 +1224,37 @@ export class BatonCore {
       throw new BatonError('snapshot-rejected', `a rewritten history is held for the owner until ${new Date(deadline).toISOString()}; claims continue on the current head`);
     }
     if (p.sha === head) {
-      // §7.1 step 4: a refresh — the board's tickets unchanged, its stations, paths, next legs and
-      // closures replaced. Its registry is not applied: the sync builds that body at the commit it
-      // fetched, which may be an ancestor of the head, and an older registry would roll a course
-      // back. A refresh is a reading like any other: it confirms ends and judges claims made
-      // before its number (R-BTN-62, R-BTN-35), not only the post that moved the head.
+      // §4.3 step 4 (R-BTN-11): a refresh — the head's own reading again under a newer number,
+      // its stations, paths, next legs and closures replaced; its registry is not applied: the
+      // sync builds that body at the commit it fetched, which may be an ancestor of the head, and
+      // an older registry would roll a course back. A refresh is a reading like any other: it
+      // confirms ends and judges claims made before its number (R-BTN-62, R-BTN-35), not only the
+      // post that moved the head.
+      // B-183: a source may change a ticket with no commit, so a refresh may now add, close or
+      // change any ticket whose `version` differs from the row Baton holds — materialization
+      // upserts by `row_hash`, `version` among its inputs. The markdown source's versions are
+      // blob ids, so no version changes without a new commit and its refreshes still write no
+      // ticket row.
+      const refreshed = normative ? await this.rowsFor(repo, p) : null;
       return this.store.transaction(() => {
         this.observations.accept(r, n);
-        const seen = normative ? this.refreshStations(r, p, n, at) : new Map<string, Seen>();
+        this.rememberSource(r, p);
+        const wrote = refreshed ? this.materialize(r, refreshed, p.sha, at) : null;
+        const seen = normative ? this.refreshStations(r, p, n, at, wrote) : new Map<string, Seen>();
         const confirmed = this.claims.confirm(confirmations, n);
         const judged = this.claims.judge(r, n, seen);
-        return { ok: true, unchanged: true, confirmed: confirmed + judged.confirmed, stale_released: judged.stale_released };
+        return {
+          ok: true, unchanged: true,
+          ...(wrote ? { tickets_upserted: wrote.upserted.length, tickets_deleted: wrote.deleted, ...(wrote.renumbered.length ? { renumbered: wrote.renumbered } : {}) } : {}),
+          confirmed: confirmed + judged.confirmed, stale_released: judged.stale_released,
+        };
       });
     }
     if (!accepted && p.parent_sha !== head) throw new BatonError('head-moved', `the head is ${head ?? 'unset'}; re-read it and retry`);
 
     // Hash every row before the transaction: the digest is async, the transaction is not.
-    const rankOf = new Map((p.ready ?? []).map((id, i) => [id, i]));
-    const posted = normative ? p.tickets!.map(rowForTicket) : p.state!.items.map((it) => rowFor(it, rankOf));
-    const rows = await Promise.all(posted.map(async (base) => {
-      // R-BTN-66: tiers arrive by name and are matched as positions in this repository's ladder.
-      const row = { ...base, tier_position: tierPosition(repo.tiers, base.tier ?? null) };
-      return { row, hash: await rowHash(row) };
-    }));
-    const changed: { upserted: number; deleted: number; confirmed?: number; stale_released?: number; courses_refused?: string[]; fleet_ignored?: boolean; dropped?: string[] } = { upserted: 0, deleted: 0 };
+    const rows = await this.rowsFor(repo, p);
+    const changed: { upserted: number; deleted: number; renumbered?: { from: string; to: string; key: string }[]; confirmed?: number; stale_released?: number; courses_refused?: string[]; fleet_ignored?: boolean; dropped?: string[] } = { upserted: 0, deleted: 0 };
     this.store.transaction(() => {
       // The row hashes were awaited after the number was used, so another run may have posted
       // meanwhile: this reading must still be the newest, over the head it was judged against.
@@ -1261,43 +1276,13 @@ export class BatonCore {
       const refused = this.applyRegistry(r, p, rows.map(({ row }) => row.course_id), at, acceptedRoutes);
       if (refused.length) changed.courses_refused = refused;
       const legsBefore = this.queuedLegs(r);
-      const upserted: string[] = [];
-      // The repository's own tickets only, keyed by their local ids (R-BTN-47).
-      const have = new Map(this.sql<{ local_id: string; row_hash: string }>('SELECT local_id, row_hash FROM tickets WHERE repository_id = ?', r).map((x) => [x.local_id, x.row_hash]));
-      for (const { row, hash } of rows) {
-        const before = have.get(row.id);
-        have.delete(row.id);
-        if (before === hash) continue;
-        const id = qualify(r, row.id);
-        this.store.exec(
-          `INSERT INTO tickets (id, repository_id, local_id, path, title, project, status, node, queue, tags, tier, requires_clause, operator_only,
-             depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, tier_position, expedite, display)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (id) DO UPDATE SET path = excluded.path, title = excluded.title, project = excluded.project,
-             status = excluded.status, node = excluded.node, queue = excluded.queue, tags = excluded.tags,
-             tier = excluded.tier, requires_clause = excluded.requires_clause, operator_only = excluded.operator_only,
-             depends_on = excluded.depends_on, blocked_by = excluded.blocked_by, repos = excluded.repos,
-             ord = excluded.ord, rank = excluded.rank, snapshot_sha = excluded.snapshot_sha, row_hash = excluded.row_hash,
-             since = excluded.since, holder = excluded.holder, course_id = excluded.course_id, tier_position = excluded.tier_position,
-             expedite = excluded.expedite, display = excluded.display`,
-          id, r, row.id, row.path, row.title, row.project, row.status, row.node, row.queue, row.tags, row.tier,
-          row.requires_clause, row.operator_only, row.depends_on, row.blocked_by, row.repos, row.ord, row.rank, p.sha, hash, row.since, row.holder, row.course_id,
-          row.tier_position, row.expedite, row.display);
-        this.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
-        for (const name of row.requires) this.store.exec('INSERT INTO ticket_requires (ticket_id, name) VALUES (?, ?)', id, name);
-        changed.upserted++;
-        upserted.push(id);
-      }
-      // Tickets no longer live leave the cache (R-BTN-35); their claims and events stay.
-      for (const gone of have.keys()) {
-        const id = qualify(r, gone);
-        this.stations.clear(id);
-        this.blocks.forget(id);
-        this.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
-        this.store.exec('DELETE FROM tickets WHERE id = ?', id);
-        this.queues.touch(id);
-        changed.deleted++;
-      }
+      // The repository's own tickets, keyed by their local ids (R-BTN-47) — upserts by
+      // `row_hash`, drops by what the post no longer names, renumberings by `key` (B-183).
+      const wrote = this.materialize(r, rows, p.sha, at);
+      changed.upserted = wrote.upserted.length;
+      changed.deleted = wrote.deleted;
+      if (wrote.renumbered.length) changed.renumbered = wrote.renumbered;
+      const upserted = wrote.upserted;
       // Where each ticket is (R-BTN-70): the normative post's stations, or the interim post's
       // placement at each course's start; and the closures it reports (R-BTN-10).
       const stations = normative
@@ -1326,6 +1311,7 @@ export class BatonCore {
       if (this.reference(r, p)) changed.fleet_ignored = true;
       this.store.exec('INSERT INTO board_snapshots (repository_id, sha, parent_sha, received_at, ticket_count) VALUES (?, ?, ?, ?, ?) ON CONFLICT (repository_id, sha) DO NOTHING', r, p.sha, p.parent_sha, at, ticketCount);
       this.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, ?) ON CONFLICT (repository_id) DO UPDATE SET sha = excluded.sha', r, p.sha);
+      this.rememberSource(r, p);
       // A hold is against one head (R3-1223): when the head moves — an accepted rewrite or a
       // plain fast-forward — every row held against the head it leaves is retired, answered or
       // not. Left in place, an accepted row would accept a NEW rewrite silently whenever the
@@ -1370,8 +1356,118 @@ export class BatonCore {
     }
   }
 
-  /** A refresh's stations (§7.1, R-BTN-62): the head's tickets unchanged, where each is replaced. */
-  private refreshStations(r: string, p: BoardPayload, n: number, at: number, held = false): Map<string, Seen> {
+  /** A post's tickets as hashed rows (§4, R-BTN-33): hashed before any transaction, the digest
+   *  being async. `version` and `key` are inputs of the hash, so a ticket whose version changed
+   *  rewrites its row (B-183). The interim post's items (docs until R3-1233) become rows the
+   *  same way; only a refresh skips materialization for them (§4.3: the interim post carries no
+   *  versions, and its refreshes change no ticket). */
+  private async rowsFor(repo: Repository, p: BoardPayload): Promise<{ row: TicketRow; hash: string }[]> {
+    const rankOf = new Map((p.ready ?? []).map((id, i) => [id, i]));
+    const posted = p.tickets !== undefined
+      ? p.tickets.map(rowForTicket)
+      : p.state!.items.map((it) => rowFor(it, rankOf));
+    return await Promise.all(posted.map(async (base) => {
+      // R-BTN-66: tiers arrive by name and are matched as positions in this repository's ladder.
+      const row = { ...base, tier_position: tierPosition(repo.tiers, base.tier ?? null) };
+      return { row, hash: await rowHash(row) };
+    }));
+  }
+
+  /** Write a post's ticket rows (§4.3, R-BTN-11, R-BTN-35): the repository's own tickets, keyed
+   *  by their local ids (R-BTN-47) — rows whose `row_hash` changed are upserted, tickets the post
+   *  no longer names leave the cache (their claims and events stay), and — B-183 (R-BTN-147) — a
+   *  dropped ticket re-added under a new id at the same `key` is `renumbered`: the new id takes
+   *  the old one's hold and backoff, and an event says the move. Returns what it wrote. */
+  private materialize(r: string, rows: { row: TicketRow; hash: string }[], sha: string, at: number): { upserted: string[]; deleted: number; renumbered: { from: string; to: string; key: string }[] } {
+    const upserted: string[] = [];
+    const renumbered: { from: string; to: string; key: string }[] = [];
+    const have = new Map(this.sql<{ local_id: string; row_hash: string; key: string | null; path: string }>(
+      'SELECT local_id, row_hash, key, path FROM tickets WHERE repository_id = ?', r).map((x) => [x.local_id, x]));
+    // A new ticket's key → its id, for the renumbering read of the dropped rows.
+    const byKey = new Map(rows.map(({ row }) => [row.key ?? row.path ?? row.id, row.id]));
+    for (const { row, hash } of rows) {
+      const before = have.get(row.id);
+      have.delete(row.id);
+      if (before?.row_hash === hash) continue;
+      const id = qualify(r, row.id);
+      this.store.exec(
+        `INSERT INTO tickets (id, repository_id, local_id, path, title, project, status, node, queue, tags, tier, requires_clause, operator_only,
+           depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, tier_position, expedite, display, version, key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET path = excluded.path, title = excluded.title, project = excluded.project,
+           status = excluded.status, node = excluded.node, queue = excluded.queue, tags = excluded.tags,
+           tier = excluded.tier, requires_clause = excluded.requires_clause, operator_only = excluded.operator_only,
+           depends_on = excluded.depends_on, blocked_by = excluded.blocked_by, repos = excluded.repos,
+           ord = excluded.ord, rank = excluded.rank, snapshot_sha = excluded.snapshot_sha, row_hash = excluded.row_hash,
+           since = excluded.since, holder = excluded.holder, course_id = excluded.course_id, tier_position = excluded.tier_position,
+           expedite = excluded.expedite, display = excluded.display, version = excluded.version, key = excluded.key`,
+        id, r, row.id, row.path, row.title, row.project, row.status, row.node, row.queue, row.tags, row.tier,
+        row.requires_clause, row.operator_only, row.depends_on, row.blocked_by, row.repos, row.ord, row.rank, sha, hash, row.since, row.holder, row.course_id,
+        row.tier_position, row.expedite, row.display, row.version, row.key);
+      this.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
+      for (const name of row.requires) this.store.exec('INSERT INTO ticket_requires (ticket_id, name) VALUES (?, ?)', id, name);
+      upserted.push(id);
+    }
+    let deleted = 0;
+    // Tickets no longer live leave the cache (R-BTN-35); their claims and events stay.
+    for (const [gone, had] of have) {
+      const id = qualify(r, gone);
+      this.stations.clear(id);
+      this.blocks.forget(id);
+      this.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
+      this.store.exec('DELETE FROM tickets WHERE id = ?', id);
+      this.queues.touch(id);
+      deleted++;
+      // B-183 (R-BTN-147): the post drops one id and adds another at the same `key` — the source
+      // renumbered its ticket. The new id takes the old one's hold and backoff (`ticket_overrides`),
+      // and the move is logged as an event `renumbered`.
+      const key = had.key ?? had.path;
+      const to = key != null ? byKey.get(key) : undefined;
+      if (key != null && to != null && to !== gone) {
+        this.store.exec(
+          `INSERT INTO ticket_overrides (ticket_id, expedite, hold, hold_reason, retry_after, set_by, set_at, runs_json)
+           SELECT ?, expedite, hold, hold_reason, retry_after, set_by, set_at, runs_json FROM ticket_overrides WHERE ticket_id = ?
+           ON CONFLICT (ticket_id) DO UPDATE SET hold = excluded.hold, hold_reason = excluded.hold_reason,
+             retry_after = excluded.retry_after, runs_json = excluded.runs_json`,
+          qualify(r, to), id);
+        this.store.exec('DELETE FROM ticket_overrides WHERE ticket_id = ?', id);
+        this.event(r, 'renumbered', { from: gone, to, key }, at);
+        renumbered.push({ from: gone, to, key });
+      }
+    }
+    return { upserted, deleted, renumbered };
+  }
+
+  /** B-183 (§4.4, R-BTN-184): a `custom` source that reads only as it is now has no ticket file
+   *  to approve, so its post to a repository whose policy's floors include the `tickets-approved`
+   *  guarantee is refused, naming the guarantee. */
+  private refuseCurrentUnderApprovalFloor(repo: Repository, p: BoardPayload): void {
+    if (p.source?.kind !== 'custom' || p.source.versions !== 'current') return;
+    const floored = (this.policies?.floors(repo.id) ?? []).filter((f) => f.guarantees.includes('tickets-approved'));
+    if (!floored.length) return;
+    throw new BatonError('invalid-params',
+      `this repository's policy floors include the tickets-approved guarantee, which is defined over a ticket file's approval (R-BTN-184) — a custom ticket source with versions: "current" cannot post it (B-183)`);
+  }
+
+  /** B-183: the last accepted post's ticket-source declaration, kept on the head for the claim
+   *  answer (§4.5: the runner re-verifies by the source's own way of reading). A post that
+   *  declares none keeps what stood — an older CLI's post undeclares nothing. */
+  private rememberSource(r: string, p: BoardPayload): void {
+    if (!p.source) return;
+    this.store.exec('UPDATE board_head SET source_kind = ?, source_versions = ? WHERE repository_id = ?', p.source.kind, p.source.versions ?? null, r);
+  }
+
+  /** B-183 (§4.3): each live ticket's last accepted version, keyed by local id, for the
+   *  observation's answer — Baton's own record, returned to the posting credential only, as
+   *  `positions` is. A ticket posted with no version holds `''`. */
+  ticketVersions(r: string): Record<string, string> {
+    return Object.fromEntries(this.sql<{ local_id: string; version: string }>('SELECT local_id, version FROM tickets WHERE repository_id = ?', r).map((t) => [t.local_id, t.version]));
+  }
+
+  /** A refresh's stations (§4.3, R-BTN-62): the head's tickets as the refresh materialized them,
+   *  where each is replaced. `wrote` is the refresh's own materialization (B-183) — null on a
+   *  held history's refresh, which changes no ticket. */
+  private refreshStations(r: string, p: BoardPayload, n: number, at: number, wrote: { upserted: string[]; deleted: number } | null, held = false): Map<string, Seen> {
     const live = new Set(this.sql<{ local_id: string }>('SELECT local_id FROM tickets WHERE repository_id = ?', r).map((t) => t.local_id));
     const stations = new Map(Object.entries(p.stations ?? {}).filter(([id]) => live.has(id)).map(([id, st]) => [id, stationOf(st)] as [string, PostedStation]));
     // As on a new head: a live ticket the refresh does not place is placed nowhere, never offered
@@ -1380,14 +1476,17 @@ export class BatonCore {
     for (const id of live) if (!stations.has(id)) this.stations.clear(qualify(r, id));
     // A held history's closures stand even for tickets the current head still has: the holder's
     // archive may be in the rewritten history alone, and its done end must not wait the hold's
-    // 24 hours (R-BTN-62; round 2, 2-A-0). A plain refresh of the head cannot close what it has.
+    // 24 hours (R-BTN-62; round 2, 2-A-0). A plain refresh's own closures are applied as they
+    // arrive (B-183): validation already refuses a post closing a ticket it also posts, and its
+    // materialization dropped what it no longer names.
     const seen = this.stations.apply(r, p.sha, n, stations, (p.closed ?? []).filter((c) => held || !live.has(c.id)), at);
     // R-BTN-116: a refresh carries the tickets' questions and the run's attestations like a new
     // head (§4.4) — each is idempotent, so a re-post of the same question or answer moves nothing.
     this.questions.posted(r, (p.tickets ?? []).filter((t) => live.has(t.id)), new Set(stations.keys()));
     this.questions.attestations(r, p.attestations ?? []);
-    // A refresh's stations carry `needs` and `decisions` too (R-BTN-76, R-BTN-78).
-    this.applyBlocks(r, stations, [], legsBefore);
+    // A refresh's stations carry `needs` and `decisions` too (R-BTN-76, R-BTN-78); a refresh that
+    // materialized (B-183) recounts for what its rows moved, as a new head does.
+    this.applyBlocks(r, stations, wrote?.upserted ?? [], legsBefore, !!wrote && wrote.deleted > 0);
     return seen;
   }
 
