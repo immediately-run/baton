@@ -14,7 +14,8 @@ thread.
 > completion: a harness that is a client of a background service must keep its session in
 > process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
 > work ends leaves truncated output and an orphaned session posting to a claim that no longer
-> exists (B-84).
+> exists (B-84). Never end with work in flight: the process is the session, and nothing resumes
+> it — wait, in the foreground, on every job you started before printing your final line.
 
 ## For each finding, most severe first
 

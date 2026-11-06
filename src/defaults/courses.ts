@@ -3,7 +3,7 @@
 // its course file, the facts its station function reads, how each leg's stub turns the agent's
 // answer into a position, and the Markdown instructions shipped for each leg. One table, so a
 // course is added in one place. Course code in the CLI, never core (§2b).
-import { CREATE_PR_COURSE, CREATE_SPEC_COURSE, REVIEW_PR_COURSE, stationsPr, stationsReviewPr, stationsSpec, type PrFact, type PrGraph, type StationsResult } from './course-pr';
+import { CREATE_PR_COURSE, CREATE_SPEC_COURSE, REVIEW_PR_COURSE, stationsPr, stationsReviewPr, stationsSpec, type BatonRecord, type PrFact, type PrGraph, type StationsResult } from './course-pr';
 import { stationsTickets, type CourseGraph } from './ticket-state';
 import type { SourceTicket } from './tickets-markdown';
 
@@ -19,6 +19,9 @@ export interface StationCtx {
   repository: string | null;
   /** The course file as the checkout has it: the bounds the function reads. */
   graph: Record<string, unknown>;
+  /** B-110: Baton's own record, read with the sync's observation — the owner's answers to posted
+   *  decisions and the legs claims finished with an evidence pointer. */
+  baton?: BatonRecord;
 }
 
 /** What a leg's agent must print as its last line, when the leg's result depends on it: the
@@ -33,7 +36,16 @@ export interface Ask {
  * expression over `answer` (the agent's last line, checked against `ask.values`). A position
  * whose next leg waits on someone outside the claim (the owner, the PR's author) carries
  * `suspend: true`: the runner closes the leg and ends the claim there, rather than starting a
- * next leg on a board that cannot yet show the wait (§6.13). */
+ * next leg on a board that cannot yet show the wait (§6.13).
+ *
+ * B-110's `tests: true` is a stub of another kind: it runs no agent at all. The stub runs the
+ * course's deterministic test script itself (`npm run <test_script>`, the course file's field,
+ * default `test`) in the checkout, bounded and non-interactive (B-94's bounds, a bound of its
+ * own), green advancing to `review` and red to the back leg — the gate's outcome never depends
+ * on a model (R-BTN-131, the owner, 2026-10-24). Its position is not a static expression over
+ * an answer: it is read from `ctx.claim.station` (the station the gate ran from) and the
+ * script's exit, on the PR branch's fetched head in a scratch worktree; the run makes the gate's
+ * marker on the tested head and its close pushes it (`testsClose`). */
 export interface LegStub {
   ask?: Ask;
   position: string;
@@ -41,6 +53,9 @@ export interface LegStub {
    * PR on a branch the course's patterns map to the ticket, its head what the checkout pushed.
    * The agent's exit 0 is not the leg's outcome. */
   verify?: 'pr';
+  /** B-110: the deterministic test gate — no agent runs; the stub itself executes the course's
+   *  `test_script` on the PR's head and the close pushes the branch's `Baton-Tests` marker. */
+  tests?: true;
 }
 
 export interface BuiltIn {
@@ -196,20 +211,34 @@ const VERDICT: Ask = { name: 'verdict', values: ['approve', 'changes'] };
 
 const CREATE_PR: BuiltIn = {
   id: 'create-pr',
-  summary: 'implement a ticket in a PR, review it in up to three blind rounds, fix, adjudicate what stays open, merge',
+  summary: 'implement a ticket in a PR, gate every review round behind its tests, review it in up to three blind rounds, fix, hand the third round\'s blockers to the owner, merge',
   course: CREATE_PR_COURSE,
   reads: 'prs',
-  stations: (ctx) => stationsPr({ tickets: ctx.tickets, facts: ctx.facts, closed: ctx.closed, done: ctx.done, branchPatterns: ctx.branchPatterns, repository: ctx.repository, graph: ctx.graph as PrGraph }),
+  stations: (ctx) => stationsPr({ tickets: ctx.tickets, facts: ctx.facts, closed: ctx.closed, done: ctx.done, branchPatterns: ctx.branchPatterns, repository: ctx.repository, graph: ctx.graph as PrGraph, ...(ctx.baton ? { baton: ctx.baton } : {}) }),
   legs: {
     // B-81: the stub verifies its PR on the forge (open, on a branch the patterns map to this
     // ticket, its head pushed) before returning pr-open — never the agent's exit code alone.
-    implement: { position: "{ reached: 'pr-open', next: 'review' }", verify: 'pr' },
-    // The verdict decides what the review queues: merge for approve, fix for changes (once the
-    // fixes run out the sync queues adjudicate instead, and a refused fix suspends the claim).
-    review: { ask: VERDICT, position: "{ reached: 'reviewed', next: answer === 'approve' ? 'merge' : 'fix', verdict: answer }" },
-    fix: { position: "{ reached: 'fixed', next: 'review' }" },
-    // `merge`: no open blocking finding reproduced; `owner`: one did, and the owner decides —
-    // the claim suspends until they do.
+    // B-110: what follows implement is the gate, not the round — the claim's walk runs
+    // run-tests before any review, green advancing and red routing back to a fix.
+    implement: { position: "{ reached: 'pr-open', next: 'run-tests' }", verify: 'pr' },
+    // B-110: the deterministic gate — no agent. The stub runs `npm run <test_script>` itself on
+    // the PR branch's fetched head, bounded, and returns the station it ran from (the claim's,
+    // pr-open or fixed): green advances to review, red routes to fix — never back to implement —
+    // wherever the push came from, naming the failing script's last lines in the marker it
+    // makes on the tested head and the close pushes.
+    'run-tests': { position: "station", tests: true },
+    // The verdict decides what the review queues: merge for approve, fix for changes — until the
+    // rounds run out (B-110: the run that reaches the file's `max_runs`, or one the owner granted
+    // past it): then changes queue `adjudicate`, waiting on the owner, so the claim suspends
+    // there rather than spend a fix the owner has not asked for (round 1, finding 6).
+    review: { ask: VERDICT, position: `{ ...(answer !== 'approve' && (ctx.run ?? 1) >= ${CREATE_PR_COURSE.legs.review.max_runs} ? { suspend: true } : {}), reached: 'reviewed', next: answer === 'approve' ? 'merge' : (ctx.run ?? 1) >= ${CREATE_PR_COURSE.legs.review.max_runs} ? 'adjudicate' : 'fix', verdict: answer }` },
+    // B-110: a fix's push re-opens the gate, so what follows fix is run-tests again — the next
+    // round waits on a green head, never on the fix's own word for it.
+    fix: { position: "{ reached: 'fixed', next: 'run-tests' }" },
+    // B-110: the third round's blockers are the owner's — the leg waits on them (the sync posts
+    // the `review-rounds-<n>` decision carrying their question) until they answer through Baton
+    // (`baton owner resolve … merge|owner|round`). No agent reproduces anything, so no runner is
+    // offered the leg: the position below is what a holder would report if one ever ran it by hand.
     adjudicate: { ask: { name: 'adjudication', values: ['merge', 'owner'] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
     merge: { position: "{ reached: 'merged', next: null }" },
   },

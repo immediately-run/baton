@@ -3,7 +3,7 @@ title: "B-7 — Baton person legs: legs a person runs, answered in git"
 id: B-7
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-05
 repos:
   - baton
 tags:
@@ -14,7 +14,8 @@ description: "`kind: person` legs with `asks`: never offered to or claimable by 
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/181
 depends_on:
   - B-3
 ---
@@ -80,3 +81,14 @@ stores the leg's `asks`; no notices, and an invalid answer raises `baton.output-
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): a person leg is the one way a course waits on a person (R-BTN-116): the ticket source posts the leg's **question** (`{id, url, severity, options}`) with the ticket, stored in `ticket_questions`; the answer is a `std:decision@1` whose `option` is one of the question's options, from the person (`baton attest`, the dashboard; a delegated key as part 3 decides, B-156) or the sync (`answer:`) where the policy admits it; an invalid answer is `invalid-params` or `answer-invalid`, not `baton.output-invalid`; a leg may carry `expires: {after_s, reached}`, which Baton applies as its own arrival (`question-expired`). Posted decisions (R-BTN-78) are retired, so the source translates a `## Decision needed` packet into the queued person leg's question.)_
 
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton attest` is `baton decision answer` (a `std:decision@1` for the ticket's queued person leg) or `baton attestation add` (R-BTN-127).)_
+
+_(2026-11-05: implemented, PR #181 — the course file takes `kind: person` with `asks` and `expires`
+(no deadline on a person leg), rule `person` refuses a claim and an advance and the candidate query never
+offers one; the question posted with the ticket is stored in `ticket_questions` (a stray one
+`question-dropped`); the answer — a `std:decision@1` the sync attests where `inputs.answers` admits git, or
+an owner's `baton decision answer` through `POST /v1/repositories/{repository}/attestations` — is applied as
+the leg's arrival (R-BTN-39), `next_source: baton`, a snapshot that has not caught up not undoing it; the
+alarm applies `expires` (`question-expired`), a late answer `arrival-unapplied`. S-BTN-67 and G-BTN-90's
+person clause green on both hosts, the traces replayed to their pinned stop. The Needs-you listing is
+B-56's, the attestation store B-146's, the dashboard control and `ticket_timers` as above; deleting
+`ticket_decisions` stays B-74's map.)_

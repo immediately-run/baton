@@ -95,7 +95,7 @@ describe('decide: the edge rule', () => {
   });
 
   it('an old leg or station name resolves through renamed_from (R-BTN-64)', () => {
-    const { fix, ...others } = roadmapPr.legs as Record<string, { from: string[]; to: string; max_runs?: number }>;
+    const { fix, ...others } = roadmapPr.legs as Record<string, { from: string[]; to: string | string[]; max_runs?: number }>;
     const renamed = graphOf({ ...roadmapPr, legs: { ...others, address: { ...fix, renamed_from: 'fix' } } });
     expect(decide({ reached: 'reviewed', next: 'fix' }, renamed, 'review', 'pr-open')).toEqual({
       kind: 'advance', reached: 'reviewed', leg: 'address', bars: [],
@@ -155,7 +155,7 @@ describe('runNumber: git’s runs plus this claim’s, under current names', () 
   });
 
   it('an old name in the path counts as the renamed leg (R-BTN-64)', () => {
-    const { fix, ...others } = roadmapPr.legs as Record<string, { from: string[]; to: string; max_runs?: number }>;
+    const { fix, ...others } = roadmapPr.legs as Record<string, { from: string[]; to: string | string[]; max_runs?: number }>;
     const renamed = graphOf({ ...roadmapPr, legs: { ...others, address: { ...fix, renamed_from: 'fix' } } });
     expect(runNumber(renamed, [{ leg: 'fix', reached: 'fixed' }], 'address', [])).toBe(2);
   });

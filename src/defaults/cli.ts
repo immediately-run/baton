@@ -19,11 +19,12 @@ import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
-import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type PrFact, type StationsResult } from './course-pr';
+import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type PrFact, type StationsResult } from './course-pr';
+import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
-import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch } from './ticket-state';
+import { closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, RUN_TESTS_TIMEOUT_MS } from './ticket-state';
 
 /** The retired markers file's path (B-100): the sync no longer reads it — `baton repo
  *  migrate-markers` does, once, and deletes it. */
@@ -271,7 +272,7 @@ interface Board {
 
 /** Read the board from the checkout as it stands: the tickets and stations from the
  * repository's own code or the CLI's defaults, the registry from `baton.json`'s courses. */
-async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void): Promise<Board> {
+async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void, record?: BatonRecord): Promise<Board> {
   const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
   const ctx = { root, settings };
 
@@ -339,6 +340,21 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     }
   }
   const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()]) : [];
+  // B-110: the plain-git half of the fact reading. A fact whose adapter read no commits (a facts
+  // file, a forge with no adapter) gets its open branch's commits from the checkout's own git —
+  // no forge, no `gh` — so the run-tests gate's markers are read the same way (`commitsOf`). Only
+  // the home repository's branches are this checkout's to read; a branch git cannot fetch keeps
+  // its fact as it is (its gate stays open).
+  const boundedGit = (a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...GIT_NONINTERACTIVE_ENV, LC_ALL: 'C' } });
+  for (const f of facts) {
+    if (f.commits || f.state !== 'open' || (f.repository != null && repository != null && !sameRepoName(f.repository, repository)) || !owns(f)) continue;
+    try {
+      boundedGit(['fetch', '-q', '--no-tags', 'origin', `refs/heads/${f.head}`]);
+      f.commits = commitsOf(boundedGit, ['FETCH_HEAD', '--not', 'HEAD']);
+    } catch (e) {
+      log(`baton: ${f.head}'s commits could not be read from git (${e instanceof Error ? e.message.split('\n')[0] : String(e)}) — its gate reads as open`);
+    }
+  }
 
   // B-100: the ticket is the record. One traversal of the repository's history groups every
   // `baton:close <id> <leg>` commit by ticket; each live ticket's closes — oldest first — are
@@ -367,7 +383,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     if (!existsSync(courseFile)) throw new Error(`.baton/courses/${c.id}/course.json is missing — run \`baton repo init --course ${c.id}\``);
     const course = JSON.parse(readFileSync(courseFile, 'utf8')) as { legs?: Record<string, unknown> };
     const branchPatterns = [c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])];
-    const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, branchPatterns, graph: course };
+    const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, branchPatterns, graph: course, ...(record ? { baton: record } : {}) };
     const syncMjs = syncMjsOf(c.id);
     if (c.source) checkSource(c, readFileSync(courseFile, 'utf8'), existsSync(syncMjs));
     const standard = builtIn(c.id);
@@ -548,6 +564,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   const auth = args.auth ?? (args.syncKey ? syncKeyAuth(args.syncKey) : bearerAuth(args.token ?? process.env.BATON_SYNC_TOKEN ?? (await actionsToken(url))));
   const api = new BatonApi({ url, transport: args.transport ?? ((req) => fetch(req)), auth }, log);
   let board: Board | null = null;
+  let record: BatonRecord | undefined;
   // B-89: `busy` is another run's reading, not this run's post, and R-BTN-62 lets no number this
   // run takes be used while that one is out. So the wait comes before the first `observe`, and
   // the retry is a whole second sync from a fresh number.
@@ -574,8 +591,15 @@ export async function syncMain(args: SyncArgs): Promise<number> {
     }
   };
   const syncOnceRun = () => syncOnce(git(root, 'rev-parse', 'HEAD'), {
+    // B-110: the observation also carries Baton's own record a station function judges git
+    // against — the owner's answers to posted decisions and the legs claims finished with an
+    // evidence pointer — read after the number like everything else this run posts.
     observe: async () => {
-      const o = await asResult(() => api.observation());
+      const o = await asResult(async () => {
+        const got = await api.observation();
+        record = { answers: Array.isArray(got.answers) ? got.answers : [], legs: Array.isArray(got.legs) ? got.legs : [] };
+        return got;
+      });
       if (o.ok !== false && Number.isSafeInteger(o.observation)) held = o.observation;
       return o;
     },
@@ -586,7 +610,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         git(root, 'checkout', '-q', '--detach', 'FETCH_HEAD');
       }
       // baton.json too is read at the commit posted.
-      board = await readBoard(root, JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson, args, log);
+      board = await readBoard(root, JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson, args, log, record);
       return git(root, 'rev-parse', 'HEAD');
     },
     readHead: () => asResult(() => api.head()),
@@ -702,7 +726,7 @@ const GRAPHQL_BATCH = 25;
  * covered the REST read. */
 const PR_DETAIL = `fragment D on PullRequest {
   head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
-  commits(first: 100) { pageInfo { hasNextPage } nodes { commit { committedDate } } }
+  commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message tree { oid } parents(first: 1) { nodes { oid tree { oid } } } } } }
   reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body } }
   comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation createdAt body } }
 }`;
@@ -827,7 +851,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     }
     return listed.map((pr) => {
       const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
-      return { number: pr.number, head: pr.head.ref, state, ...(detail.get(pr.number) ?? { pushedAt: 0, checks: [], reviews: [] }), repository: repo };
+      return { number: pr.number, head: pr.head.ref, state, ...(detail.get(pr.number) ?? { pushedAt: 0, checks: [], reviews: [] }), repository: repo, ...(typeof pr.html_url === 'string' ? { url: pr.html_url } : {}) };
     });
   }
 
@@ -843,9 +867,24 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
       // A run not yet completed has no conclusion: null, as the REST list gives it.
       : (suites?.nodes ?? []).flatMap((cs: any) => cs?.checkRuns?.nodes ?? []).map((c: any) => (c.status === 'COMPLETED' && c.conclusion ? String(c.conclusion).toLowerCase() : null));
     // A push is read from its commits' own dates, never `updated_at`, which a comment moves.
-    const pushes = node.commits.pageInfo.hasNextPage
-      ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/commits`)).map((c) => Date.parse(c.commit.committer.date))
-      : node.commits.nodes.map((c: any) => Date.parse(c.commit.committedDate));
+    // B-110: the commits themselves too — sha, first parent, whether the tree changed, message —
+    // for the run-tests gate's markers, which the station function counts only as the evidence
+    // Baton recorded (a counted marker is no push; anything else is, whatever its message).
+    type CommitNode = { oid: string; at: string; message: string; tree: string | null; parent: string | null; parentTree: string | null };
+    const commitNodes: CommitNode[] = node.commits.pageInfo.hasNextPage
+      ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/commits`)).map((c: any) => ({
+        oid: c.sha, at: c.commit.committer.date, message: c.commit.message, tree: c.commit.tree?.sha ?? null, parent: c.parents?.[0]?.sha ?? null, parentTree: null,
+      }))
+      : node.commits.nodes.map((c: any) => ({
+        oid: c.commit.oid, at: c.commit.committedDate, message: c.commit.message, tree: c.commit.tree?.oid ?? null,
+        parent: c.commit.parents?.nodes?.[0]?.oid ?? null, parentTree: c.commit.parents?.nodes?.[0]?.tree?.oid ?? null,
+      }));
+    const treeOf = new Map(commitNodes.map((c) => [c.oid, c.tree]));
+    const commits: BranchCommit[] = commitNodes.map((c) => {
+      const parentTree = c.parentTree ?? (c.parent ? treeOf.get(c.parent) ?? null : null);
+      return { sha: c.oid, at: Date.parse(c.at), parent: c.parent, empty: c.tree != null && parentTree != null && c.tree === parentTree, message: c.message ?? '' };
+    });
+    const pushes = commits.map((c) => c.at);
     // A verdict counts only from someone who can push to the repository (R-BTN-139) — never a
     // drive-by comment on a public PR.
     const reviews = (await trustedOnly(repo, node.reviews.pageInfo.hasNextPage
@@ -856,7 +895,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
       ? (await all<any>(`/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, association: c.author_association, at: c.created_at, body: c.body }))
       : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body }))))
       .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
-    return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments] };
+    return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments], commits };
   }
 
   /** A repository's PRs. A named repository whose list GitHub refuses (403) or does not find
@@ -1181,13 +1220,159 @@ export async function handoff() { return null; }
 /** pr-close.ts's PR URL, as a regular-expression literal for the stubs (B-29). */
 const PR_URL = `/${PR_URL_RE.source}/`;
 
+/** The `run-tests` gate's stub source (B-110) — a stub of another kind: no agent runs, ever.
+ * The stub itself executes the course's deterministic test script — `npm run <test_script>`,
+ * the course file's field read at the claim's snapshot (default `test`) — on the PR's head, not
+ * on whatever the runner's home checkout holds (round 1, finding 1): it finds the ticket's one PR
+ * branch in the home repository by the course's branch patterns (`git ls-remote`, plain git, no
+ * forge), fetches it, and runs the script in a scratch worktree at that head (the home
+ * checkout's `node_modules` linked in when it has one), bounded by RUN_TESTS_TIMEOUT_MS and
+ * non-interactive exactly as B-94 bounds git. The run is the leg's own process, so the runner
+ * beats while it waits. The script's exit is the gate's whole verdict: green advances to
+ * `review`, red routes to `fix` — never back to `implement` — from the station the claim sits at
+ * (`ctx.claim.station`: making the tests green is fixing, wherever the push came from); a
+ * timeout or output overflow is red too, named; npm that cannot start, or a kill the bound did
+ * not send, fails the leg — no verdict, no marker (finding 14). The marker is made here with
+ * `git commit-tree` — an empty-tree commit on the tested head, naming it (`Baton-Tested`) — and
+ * the close (`testsClose`) pushes it to that branch. A repository replaces the run as any leg's
+ * (`legs/run-tests.run.mjs`, R-BTN-131), keeping the close. */
+export function testsStubSource(b: BuiltIn, course: string, leg: string): string {
+  return `import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { testsClose } from ${JSON.stringify(source('pr-close.ts'))};
+import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
+import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};
+// B-94: the git this stub makes — the snapshot reads, the override load, the branch's fetch, the
+// scratch worktree and the marker commit — is bounded and non-interactive, the same bound and
+// environment the close uses. It runs in the leg's own process (legProcess.mjs), where it
+// blocks no beat; only the close's one push runs in the runner's.
+const GIT_BOUND_MS = ${CLOSE_TIMEOUT_MS}, GIT_ENV = ${JSON.stringify(GIT_NONINTERACTIVE_ENV)};
+const gitRun = (args, opts = {}) => execFileSync('git', args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+// B-110: the gate's own bound — the one \`npm run <test_script>\`, no agent, in the leg's own
+// process (the runner beats while it waits). A course whose suite needs longer raises it in this
+// copy of the file.
+const RUN_TESTS_TIMEOUT_MS = ${RUN_TESTS_TIMEOUT_MS};
+const OUTPUT_MAX = ${AGENT_OUTPUT_MAX};
+// The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\` (B-110): it runs
+// NO agent — the gate's outcome never depends on a model. The stub executes the course's
+// deterministic test script itself, on the PR branch's fetched head in a scratch worktree; the
+// script's exit is the verdict. Green advances to \`review\`; red routes to \`fix\` from either
+// edge of the gate's loop, wherever the push came from, and the failing script's last lines ride
+// the marker. The repository may replace this run, never its close: \`${leg}.run.mjs\` beside
+// this file (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131).
+export async function run(ctx) {
+  const sha = ctx.snapshot?.sha;
+  if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
+  const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
+  if (gitRun(['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() === '') return standard(ctx);
+  const dir = mkdtempSync(join(tmpdir(), 'baton-override-'));
+  try {
+    const file = join(dir, ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)});
+    writeFileSync(file, gitRun(['-C', ctx.checkout, 'show', sha + ':' + rel], { maxBuffer: OUTPUT_MAX }));
+    const mod = await import(pathToFileURL(file).href);
+    if (typeof mod.run !== 'function') throw new Error(rel + ' exports no run(ctx, standard)');
+    return await mod.run(ctx, standard);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+/** The script's verdict in \`cwd\`: green, red with its named cause and last lines, or a throw
+ *  when npm could not give one (finding 14: not every failure is the script's red). */
+function verdictOf(cwd, script) {
+  try {
+    // One run, bounded, stdin never an open pipe (B-84's rule holds for any child), npm
+    // inheriting git's non-interactive environment (B-94): a credential prompt or a host-key
+    // question fails the run rather than waiting on a terminal the runner does not have.
+    execFileSync('npm', ['run', script], {
+      cwd, encoding: 'utf8', timeout: RUN_TESTS_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: OUTPUT_MAX,
+      stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...GIT_ENV },
+    });
+    return { tests: 'green' };
+  } catch (e) {
+    // The last lines of both streams, one paragraph (blank lines dropped), so the marker's
+    // trailer block stays the message's last.
+    const tail = [String(e?.stdout ?? ''), String(e?.stderr ?? '')].join('\\n').split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n');
+    const named = (why) => ({ tests: 'red', tail: 'npm run ' + script + ' ' + why + (tail ? '; its last lines:\\n' + tail : '; it printed nothing') });
+    if (e?.code === 'ETIMEDOUT') return named('timed out after ' + Math.round(RUN_TESTS_TIMEOUT_MS / 1000) + ' s');
+    if (e?.code === 'ENOBUFS') return named('printed more than ' + OUTPUT_MAX + ' bytes');
+    if (typeof e?.status === 'number') return named('exited ' + e.status);
+    if (e?.signal) throw new Error('npm run ' + script + ' was killed by ' + e.signal + ', which the gate did not send — no verdict, no marker');
+    throw new Error('npm run ' + script + ' could not run (' + (e?.code ?? e?.message ?? String(e)) + ') — no verdict, no marker');
+  }
+}
+/** The course's own run of this leg: what \`run\` does with no override, and what an override may call. */
+async function standard(ctx) {
+  const station = ctx.claim?.station;
+  if (station !== 'pr-open' && station !== 'fixed') {
+    throw new Error('the run-tests gate runs at pr-open or fixed, not ' + JSON.stringify(station ?? null));
+  }
+  const sha = ctx.snapshot?.sha;
+  if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read the course file at');
+  const show = (rel) => gitRun(['-C', ctx.checkout, 'show', sha + ':' + rel], { maxBuffer: 1024 * 1024 });
+  // The course file at the snapshot names the script; absent or malformed, the default. The
+  // settings never name it: the course owns the gate, not the repository's agent settings.
+  let script = 'test';
+  try {
+    const file = JSON.parse(show(${JSON.stringify(`.baton/courses/${course}/course.json`)}));
+    if (file && typeof file.test_script === 'string' && /^[\\w:.+-]{1,64}$/.test(file.test_script)) script = file.test_script;
+  } catch { /* no course file at the snapshot, or one that is not JSON: the default script */ }
+  // The ticket's PR branch in the home repository, by the course's branch patterns as the
+  // snapshot's settings carry them: exactly one, or no verdict (the sync asks the owner about a
+  // ticket whose PRs the gate cannot reach, rather than offering this leg — finding 2).
+  let settings = {};
+  try { settings = JSON.parse(show('.baton/baton.json')); } catch { /* none: the default pattern */ }
+  const entry = (Array.isArray(settings.courses) ? settings.courses : []).find((c) => c && c.id === ${JSON.stringify(b.id)}) ?? {};
+  const id = bareTicketId(ctx.ticket);
+  const wanted = matchPatterns([entry.branch_pattern ?? DEFAULT_BRANCH_PATTERN, entry.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '')).map((p) => p.replace(/\\{ticket\\}/g, id));
+  const branches = gitRun(['-C', ctx.checkout, 'ls-remote', '--heads', 'origin']).split('\\n').map((l) => l.split('\\t')[1] ?? '').filter((r) => r.startsWith('refs/heads/')).map((r) => r.slice('refs/heads/'.length)).filter((br) => wanted.some((p) => branchMatches(p, br)));
+  if (branches.length !== 1) {
+    throw new Error(branches.length
+      ? 'the run-tests gate tests one PR branch; ' + id + ' has ' + branches.join(', ') + ' in the home repository'
+      : 'no branch matching ' + wanted.join(' or ') + ' in the home repository for ' + id + ' — the gate tests the PR branch it can reach');
+  }
+  const branch = branches[0];
+  gitRun(['-C', ctx.checkout, 'fetch', '-q', '--no-tags', 'origin', 'refs/heads/' + branch]);
+  const tested = gitRun(['-C', ctx.checkout, 'rev-parse', 'FETCH_HEAD']).trim();
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': npm run ' + script + ' on ' + branch + ' at ' + tested.slice(0, 10) + ' (' + station + ')\\n');
+  // A scratch worktree at the tested head: the home checkout's branch and working tree are never
+  // touched, and the script runs on exactly what the PR holds.
+  const dir = mkdtempSync(join(tmpdir(), 'baton-run-tests-'));
+  const tree = join(dir, 'tree');
+  let verdict;
+  try {
+    gitRun(['-C', ctx.checkout, 'worktree', 'add', '-q', '--detach', tree, tested]);
+    const modules = join(ctx.checkout, 'node_modules');
+    if (existsSync(modules) && !existsSync(join(tree, 'node_modules'))) symlinkSync(modules, join(tree, 'node_modules'), 'dir');
+    verdict = verdictOf(tree, script);
+  } finally {
+    try { unlinkSync(join(tree, 'node_modules')); } catch { /* no link made */ }
+    try { gitRun(['-C', ctx.checkout, 'worktree', 'remove', '--force', tree]); } catch { /* never added */ }
+    try { gitRun(['-C', ctx.checkout, 'worktree', 'prune']); } catch { /* nothing to prune */ }
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // The marker: an empty-tree commit on the tested head, its trailers the gate's record —
+  // counted by the sync only as the evidence Baton records for this claim's advance.
+  const trailers = ['Baton-Tests: ' + verdict.tests, 'Baton-Tested: ' + tested, ...(ctx.claim?.nonce ? ['Baton-Claim: ' + ctx.claim.nonce] : [])].join('\\n');
+  const paragraphs = ['baton: tests ' + verdict.tests + ' for ' + id, ...(verdict.tests === 'red' ? [verdict.tail] : []), trailers];
+  const marker = gitRun(['-C', ctx.checkout, 'commit-tree', tested + '^{tree}', '-p', tested, ...paragraphs.flatMap((m) => ['-m', m])]).trim();
+  return { reached: station, next: verdict.tests === 'green' ? 'review' : 'fix', tests: verdict.tests, script, branch, tested, marker, ...(verdict.tests === 'red' ? { tail: verdict.tail } : {}) };
+}
+const closeCtx2 = (ctx) => ({ ...ctx, ...(ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === 'string' && process.env.BATON_DEFAULT_BRANCH !== '' ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {}) });
+export const close = (ctx, result) => testsClose(closeCtx2(ctx), result);
+export async function handoff() { return null; }
+`;
+}
+
 /** A repository's replacement for one leg's `run` (R-BTN-131): `legs/<leg>.run.mjs`. */
 const OVERRIDE_SUFFIX = '.run.mjs';
 
 /** The file `init --override <leg>` seeds: a `run` that calls the course's own, which the
  * repository then edits. It owns the file; init never rewrites it. */
 function overrideSource(b: BuiltIn, leg: string): string {
-  const { ask, position } = b.legs[leg];
+  const { ask, position, tests } = b.legs[leg];
   return `// The \`${leg}\` leg of the \`${b.id}\` course as this repository implements it (BATON_SPEC R-BTN-131).
 // \`baton repo init --override ${leg}\` wrote it; it is yours, and init never rewrites it. The standard
 // leg script beside it (${leg}.mjs) loads this file from the claim's snapshot and calls its \`run\` in
@@ -1195,9 +1380,11 @@ function overrideSource(b: BuiltIn, leg: string): string {
 // standard one.
 //
 // run(ctx, standard): \`ctx\` is the leg's context (ticket, checkout, snapshot, leg, claim, …);
-// \`standard\` is the course's own run — the repository's agent_command with the leg's instructions.
+// \`standard\` is the course's own run — ${tests
+    ? 'for this leg (B-110), the deterministic test script itself on the PR branch\u2019s head: no agent runs, the script\u2019s exit is the verdict, and the close pushes the branch\u2019s Baton-Tests marker'
+    : 'the repository\u2019s agent_command with the leg\u2019s instructions'}.
 // Return a position that is an edge of the course, the shape \`standard\` returns:
-//   ${position}${ask ? `
+//   ${tests ? "{ reached: <'pr-open' | 'fixed', the claim's station>, next: 'review' | 'fix', tests: 'green' | 'red', branch, tested, marker } — the close pushes \`marker\`, an empty-tree commit on \`tested\` (call \`standard\` for it)" : position}${ask ? `
 // where \`answer\` is the ${ask.name}: ${ask.values.join(' or ')}.` : ''}
 // This file is loaded alone, from the snapshot: import only node: built-ins.
 export async function run(ctx, standard) {
@@ -1217,9 +1404,10 @@ const wrapperExample = (): string =>
 const instructionsOf = (course: string, leg: string): string =>
   readFileSync(fromSource() ? join(packageRoot(), 'src', 'defaults', 'courses', course, `${leg}.md`) : prebuilt('courses', course, `${leg}.md`), 'utf8');
 
-/** A leg stub, bundled with its `close`: from source in a checkout, else build:cli's copy. */
+/** A leg stub, bundled with its `close`: from source in a checkout, else build:cli's copy. The
+ * run-tests gate (B-110) generates its own kind — no agent, the script itself. */
 async function writeStub(b: BuiltIn, leg: string, abs: string): Promise<void> {
-  if (fromSource()) await bundleSource(stubSource(b, b.id, leg), abs);
+  if (fromSource()) await bundleSource(b.legs[leg]?.tests ? testsStubSource(b, b.id, leg) : stubSource(b, b.id, leg), abs);
   else copyFileSync(prebuilt('stubs', b.id, `${leg}.mjs`), abs);
 }
 
@@ -1239,7 +1427,7 @@ export async function prebuildDefaults(dist: string, build: { repository: string
   for (const b of BUILT_INS) {
     mkdirSync(join(out, 'stubs', b.id), { recursive: true });
     for (const leg of Object.keys(b.course.legs)) {
-      await bundleSource(stubSource(b, b.id, leg), join(out, 'stubs', b.id, `${leg}.mjs`));
+      await bundleSource(b.legs[leg]?.tests ? testsStubSource(b, b.id, leg) : stubSource(b, b.id, leg), join(out, 'stubs', b.id, `${leg}.mjs`));
       files++;
       const md = join(packageRoot(), 'src', 'defaults', 'courses', b.id, `${leg}.md`);
       if (existsSync(md)) {

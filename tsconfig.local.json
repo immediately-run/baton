@@ -51,6 +51,7 @@
     "test/unit/bounded-git.test.ts",
     "test/unit/tickets-check.test.ts",
     "test/unit/spec-files.test.ts",
+    "test/unit/pr-markers.test.ts",
     "test/unit/tickets.test.ts",
     "test/integration/S-BTN-189.ticket-commands.test.ts",
     "test/unit/request.test.ts",
@@ -59,6 +60,7 @@
     "test/integration/S-BTN-175.request.test.ts",
     "test/integration/S-BTN-172.ticket-check.test.ts",
     "test/unit/check-wiki-vocabulary.test.ts",
+    "test/unit/safe-render.test.ts",
     "test/integration/S-BTN-104.standard-courses.test.ts",
     "test/integration/S-BTN-105.course-sources.test.ts",
     "test/integration/S-BTN-106.cross-repo-prs.test.ts",
@@ -67,6 +69,8 @@
     "test/integration/S-BTN-156.sync-key.test.ts",
     "test/integration/S-BTN-157.busy-sync.test.ts",
     "test/integration/S-BTN-159.quiet-start.test.ts",
-    "test/unit/seed-owners-fresh.test.ts"
+    "test/integration/S-BTN-201.short-wait-alive.test.ts",
+    "test/unit/seed-owners-fresh.test.ts",
+    "test/unit/cloud-runner.test.ts"
   ]
 }

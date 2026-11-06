@@ -3,8 +3,10 @@ name: model-report
 # R-BTN-68 (amended 2026-10-17): the model is checked on the author's machine, not here. A PR
 # that changes what the model checks read (the model, the core and its imports, the replay, the
 # trace check, the Quint version; scripts/model-report.mjs lists them) carries
-# `npm run model:pr`'s report (or a weekly `npm run model:full`'s) for its head in its body; this job only reads the body and fails
-# until that report is there, names the head and passes. Editing the body re-runs it, so pasting
+# `npm run model:pr`'s report (or a weekly `npm run model:full`'s) for its head in its body when a machine to run it is available; this
+# job reads the body and validates what is pasted — advisory since the owner's ruling of
+# 2026-11-06 (a report costs hours on the fleet's machines; VM0's replay hangs): green with
+# none pasted, red only for a pasted report that shows a failed check. Editing the body re-runs it, so pasting
 # the report after a push turns it green without another push. No dependencies, no model run.
 on:
   pull_request:

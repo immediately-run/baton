@@ -22,15 +22,24 @@ export type Harness = 'opencode' | 'claude-code';
  * result-dependent leg — which the agent reads with its own tools; the ticket id, the leg and
  * the checkout arrive as the command's trailing arguments. B-108's lesson (2026-10-22): the
  * exit is named in the briefing itself — an agent that finished and sat cost its claim five
- * hours, so the last sentence tells it to end its process the moment the leg is done. */
+ * hours, so the closing sentences tell it to end its process the moment the leg is done.
+ * B-181's lesson (2026-11-04), the mirror: an agent that backgrounded its second reviewer and
+ * the vitest suite, stopped on "I'll resume when they land", and exited — losing B-180's review
+ * round whole, because nothing resumes a leg process — so the closing sentences now state the
+ * one-shot contract first: never exit with work pending, and never write that you are waiting. */
 export const AGENT_PROMPT =
-  'You are a Baton leg agent. The file named by the BATON_INSTRUCTIONS environment variable holds your instructions for this leg: read them and follow them exactly. The environment names your course (BATON_COURSE), your leg (BATON_LEG), the ticket\'s file (BATON_TICKET_FILE) and the answer rule for your last line (BATON_ANSWER, when one is set); the arguments after this message are the ticket id, your leg and the repository checkout. Work in the current repository checkout. When BATON_ANSWER is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it. Your process\'s exit is the leg\'s completion: when the leg is done — the work pushed, the checks green, the final line printed — exit immediately, never waiting for further input.';
+  'You are a Baton leg agent. The file named by the BATON_INSTRUCTIONS environment variable holds your instructions for this leg: read them and follow them exactly. The environment names your course (BATON_COURSE), your leg (BATON_LEG), the ticket\'s file (BATON_TICKET_FILE) and the answer rule for your last line (BATON_ANSWER, when one is set); the arguments after this message are the ticket id, your leg and the repository checkout. Work in the current repository checkout. When BATON_ANSWER is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it. Your process\'s exit is the leg\'s completion, and nothing resumes it: no scheduler, no wake-up, stdin is closed for good. Never exit with work pending — every test run, subagent and verification you start must be waited on to completion, in the foreground, before your final line (a "background job" is an orphan the moment you exit; never write that you are waiting or will resume). When the leg is done — the work pushed, the checks green, the final line printed — exit immediately.';
+
+/** The briefing as one word of a command line: it rides inside double quotes, and the split
+ * reads a double quote inside them only when a backslash escapes it (B-84), so every `"` the
+ * briefing carries is escaped here — the agent still receives the literal character. */
+const quotedBriefing = `"${AGENT_PROMPT.replaceAll('"', '\\"')}"`;
 
 /** Each harness's `agent_command` (B-83): what `baton repo init --agent <harness>` writes and
  * `baton run --harness <harness>` runs when `.baton/baton.json` names none. `--auto` and
  * `--permission-mode bypassPermissions` are the unattended modes — a leg's agent edits the
  * working tree, runs the checks and pushes, with nobody watching to answer a prompt. */
 export const HARNESS_AGENTS: Record<Harness, string> = {
-  opencode: `opencode run --auto --model zai-coding-plan/glm-5.3 "${AGENT_PROMPT}"`,
-  'claude-code': `claude -p --permission-mode bypassPermissions --model sonnet "${AGENT_PROMPT}"`,
+  opencode: `opencode run --auto --model zai-coding-plan/glm-5.3 ${quotedBriefing}`,
+  'claude-code': `claude -p --permission-mode bypassPermissions --model sonnet ${quotedBriefing}`,
 };

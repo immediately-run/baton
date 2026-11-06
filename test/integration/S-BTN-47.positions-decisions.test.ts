@@ -11,7 +11,7 @@
 // listed by `blocked?on=decision:baton:*`; a posted `baton:x` is dropped; and `baton owner resolve
 // … retry` clears one and unblocks the ticket.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, adminSession, course, cutover, keyCall, placed, rows, sessionCall, setAdminKeys, setClock, tick } from '../helpers';
+import { Git, adminSession, course, cutover, keyCall, observe, placed, rows, sessionCall, setAdminKeys, setClock, tick } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { grantedWorker, signed } from '../lib/fleet';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
@@ -146,4 +146,85 @@ describe('S-BTN-47 positions, course changes and the dead-ticket queue', () => {
     expect(await decisions('S')).toEqual([]);
     expect(await rows(`SELECT state FROM notices WHERE ticket_id = 'docs:S'`)).toEqual([{ state: 'closed' }]);
   });
+
+  // B-110 round 1 (findings 3, 5, 6, 16): a decision the sync posts is answered through Baton's
+  // owner route — the way Baton's own decisions are — never by a line in git; the answer is one
+  // of the decision's options and carries that option's grant in its own transaction (the
+  // owner, 2026-11-03, "The answer carries the grant"), each leg its own key. S-BTN-17's run
+  // limit, with the grants: an advance refused without a grant, accepted with one, refused again
+  // once the grant is spent.
+  it('a posted decision is answered with baton owner resolve, its option\'s grant lifting max_runs by exactly what it says, leg by leg', async () => {
+    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue']);
+    const c = await w.call('/v1/runner/claim', { request_id: 'req-claim-a', ticket_id: 'docs:A' });
+    expect(c.status).toBe(200);
+    const adv = (body: Record<string, unknown>) => w.call(`/v1/runner/claims/${c.json.claim_id}/advance`, body);
+    // review, fix, review, fix, review: three reviews, two fixes — both legs at their max_runs.
+    expect((await adv({ leg: 'review' })).status).toBe(200);
+    for (let i = 0; i < 2; i++) {
+      expect((await adv({ reached: 'reviewed', leg: 'fix' })).status).toBe(200);
+      expect((await adv({ reached: 'fixed', leg: 'review' })).status).toBe(200);
+    }
+    expect((await adv({ reached: 'reviewed', leg: 'fix' })).json).toMatchObject({ code: 'not-eligible', rule_code: 'max-runs' });
+
+    // The sync posts two decisions on A, each with its options and what each option grants.
+    const path: [string, string][] = [['implement', 'pr-open'], ['review', 'reviewed'], ['fix', 'fixed'], ['review', 'reviewed'], ['fix', 'fixed'], ['review', 'reviewed']];
+    const rounds = { id: 'review-rounds-3', leg: 'adjudicate', asks: 'owner', url: 'https://github.com/immediately-run/docs/pull/7', question: '3 failed reviews — manual review or start a 4th round?',
+      options: [{ id: 'merge' }, { id: 'owner' }, { id: 'round', grants: { leg: 'review', runs: 1 } }] };
+    const fixes = (id: string) => ({ id, asks: 'owner', options: [{ id: 'yes', grants: { leg: 'fix', runs: 1 } }, { id: 'no' }] });
+    git.place('A', placed('reviewed', path, [['adjudicate', 'waiting', 'owner']], { decisions: [rounds, fixes('more-fix-1')] }));
+    expect((await git.post()).status).toBe(200);
+    expect(await rows(`SELECT decision_id, question, options_json FROM ticket_decisions WHERE ticket_id = 'docs:A' ORDER BY decision_id`)).toEqual([
+      { decision_id: 'more-fix-1', question: null, options_json: JSON.stringify(fixes('more-fix-1').options) },
+      { decision_id: 'review-rounds-3', question: rounds.question, options_json: JSON.stringify(rounds.options) },
+    ]);
+    // The courier's view carries the question and the options it may answer.
+    const view = (await signed(cli, '/v1/courier/decisions', { method: 'GET' })).json;
+    expect(view.decisions.find((d: { decision: { id: string } }) => d.decision.id === 'review-rounds-3').decision).toEqual({
+      id: 'review-rounds-3', asks: 'owner', url: rounds.url, question: rounds.question, options: ['merge', 'owner', 'round'],
+    });
+
+    const resolve = (decision: string, answer: string, as: TestKey = owner) => keyCall(as, '/v1/owner/docs/tickets/A/resolve', { decision, answer });
+    // An answer the decision does not offer, and a decision not open, are refused; a key that
+    // owns nothing here is refused before anything is read.
+    expect((await resolve('more-fix-1', 'maybe')).json).toMatchObject({ code: 'invalid-params' });
+    expect((await resolve('no-such-decision', 'yes')).json).toMatchObject({ code: 'not-found' });
+    expect((await resolve('more-fix-1', 'yes', cli)).status).toBe(401); // a courier key is no owner's
+    expect(await rows(`SELECT runs_json FROM ticket_overrides WHERE ticket_id = 'docs:A'`)).toEqual([]);
+
+    // The owner's answer: one more fix, granted by the answer itself — no separate grant step.
+    await setClock(T0 + MIN);
+    expect(await resolve('more-fix-1', 'yes')).toMatchObject({ status: 200, json: { ok: true } });
+    expect(await rows(`SELECT decision_id, answer, answered_by, answered_at FROM decision_answers WHERE ticket_id = 'docs:A'`)).toEqual([
+      { decision_id: 'more-fix-1', answer: 'yes', answered_by: owner.fingerprint, answered_at: T0 + MIN },
+    ]);
+    expect((await decisions('A')).map((d) => d.decision_id)).toEqual(['review-rounds-3']);
+    expect((await resolve('more-fix-1', 'yes')).json.code).toBe('not-found'); // answered once
+    expect((await adv({ reached: 'reviewed', leg: 'fix' })).status).toBe(200); // the third fix, granted
+    // The fourth review is past review's max_runs with no grant of its own: refused.
+    expect((await adv({ reached: 'fixed', leg: 'review' })).json).toMatchObject({ code: 'not-eligible', rule_code: 'max-runs' });
+    // The owner's `round`: exactly one more review, beside the fix grant — neither resets the other.
+    expect((await resolve('review-rounds-3', 'round')).status).toBe(200);
+    expect(await rows(`SELECT runs_json FROM ticket_overrides WHERE ticket_id = 'docs:A'`)).toEqual([{ runs_json: JSON.stringify({ fix: 1, review: 1 }) }]);
+    expect((await adv({ reached: 'fixed', leg: 'review' })).status).toBe(200); // the fourth review
+    // A re-post of an answered decision opens nothing again.
+    git.place('A', placed('reviewed', path, [['adjudicate', 'waiting', 'owner']], { decisions: [rounds, fixes('more-fix-1'), fixes('more-fix-2')] }));
+    expect((await git.post()).status).toBe(200);
+    expect((await decisions('A')).map((d) => d.decision_id)).toEqual(['more-fix-2']);
+    expect((await resolve('more-fix-2', 'yes')).status).toBe(200);
+    expect(await rows(`SELECT runs_json FROM ticket_overrides WHERE ticket_id = 'docs:A'`)).toEqual([{ runs_json: JSON.stringify({ fix: 2, review: 1 }) }]);
+    expect((await adv({ reached: 'reviewed', leg: 'fix' })).status).toBe(200); // the fourth fix
+    // The fifth review: the round the owner granted is spent, so it is refused.
+    expect((await adv({ reached: 'fixed', leg: 'review' })).json).toMatchObject({ code: 'not-eligible', rule_code: 'max-runs' });
+
+    // The sync reads Baton's record with its observation number: the owner's answers, and the
+    // legs claims finished with their evidence and nonce (what a run-tests marker is counted by).
+    const o = await observe();
+    expect(o.status).toBe(200);
+    expect((o.json as unknown as { answers: unknown[] }).answers).toEqual(expect.arrayContaining([
+      { ticket: 'A', decision: 'review-rounds-3', answer: 'round', answered_at: T0 + MIN },
+      { ticket: 'A', decision: 'more-fix-1', answer: 'yes', answered_at: T0 + MIN },
+    ]));
+    expect((o.json as unknown as { legs: unknown[] }).legs).toEqual([]); // no leg here passed an evidence pointer
+  });
 });
+

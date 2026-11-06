@@ -214,9 +214,17 @@ elapsed_s() {
 }
 watch_leg() {
   [ -d "$HOME/.local/share/opencode/worktree" ] || return 0
-  local legpid agentpid elapsed
-  legpid="$(pgrep -P "$RUNNER" 2>/dev/null | head -1)"
-  [ -n "$legpid" ] || { warned_leg=""; return 0; }
+  local legpid agentpid elapsed p
+  # The leg wrapper the runner spawned — matched by command, the newest legProcess.mjs among
+  # the runner's children (pgrep promises no order, so the max is taken explicitly). The
+  # runner's other children live as long as it does: on 2026-11-04 the cli's esbuild service,
+  # born with the runner, is what a bare `pgrep | head -1` picked — the watch then read the
+  # runner's own age as the agent's and pointed the operator at a daemon no one can check.
+  legpid=0
+  for p in $(pgrep -P "$RUNNER" -f 'legProcess\.mjs' 2>/dev/null); do
+    [ "$p" -gt "$legpid" ] && legpid="$p"
+  done
+  [ "$legpid" -gt 0 ] || { warned_leg=""; return 0; }
   agentpid="$(pgrep -P "$legpid" 2>/dev/null | head -1)"
   [ -n "$agentpid" ] && legpid="$agentpid"
   elapsed="$(elapsed_s "$legpid")" || return 0

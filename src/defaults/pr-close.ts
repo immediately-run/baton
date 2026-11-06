@@ -20,6 +20,11 @@
 //   (a merge is read from the forge's own PR state). A pushed `baton:` commit on a PR branch, or
 //   an unpushed one carried by the next push, would move the head past the one the leg verified —
 //   a change no course asked for.
+// - `create-pr`'s `run-tests` (B-110) is the exception the gate needs: its close pushes an
+//   EMPTY marker commit the run made on the PR head it tested (`testsClose`) — the gate's record,
+//   `Baton-Tests`/`Baton-Tested`/`Baton-Claim` trailers and a red marker's failure tail — which
+//   the sync counts only as the evidence Baton recorded for the claim. No comment anywhere: the
+//   marker is git's, so a plain-git repository reads the same gate with no forge at all.
 // `baton repo init` bundles this into each leg stub, so a stub imports nothing at run time.
 import { closeTicket, exec } from './ticket-state';
 
@@ -102,4 +107,32 @@ export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: 
   // and its PR, which may never land on the default branch (an owner who stops before the PR is
   // open still leaves the record); the marker courses' legs, whose work IS the ticket, keep it.
   return closeTicket({ ...ctx, heading: false }, result, run);
+}
+
+/** B-110: the `run-tests` gate's close — the push of the marker commit the run made, the gate's
+ *  record in git and never on the forge. The run (in the leg's own process) tested the PR
+ *  branch's fetched head in a scratch worktree and made the marker with `git commit-tree`: an
+ *  empty-tree commit on that head — `Baton-Tests: green|red`, `Baton-Tested: <the head>`,
+ *  `Baton-Claim: <nonce>`, a red marker's own paragraph naming the failing script's last lines —
+ *  so the home checkout's branch and working tree are never touched. The close pushes it to the
+ *  branch it tested, never forced: a branch that moved since the fetch refuses the push, and the
+ *  leg fails rather than mark a head it did not test. Its sha is the evidence the advance
+ *  carries, which Baton records against the claim — the one thing a station function counts a
+ *  marker by (the owner, 2026-11-03, "Through Baton, not git"). One bounded git call, so the
+ *  close's three attempts stay under the lease's margin (`CLOSE_TIMEOUT_MS`'s arithmetic). */
+export function testsClose(
+  ctx: CloseCtx,
+  result: { reached?: string; next?: string | null; tests?: unknown; branch?: unknown; tested?: unknown; marker?: unknown },
+  run: Exec = exec,
+): string {
+  if (result?.tests !== 'green' && result?.tests !== 'red') {
+    throw new Error(`the run-tests gate returned neither green nor red, got ${JSON.stringify(result?.tests)}`);
+  }
+  if (typeof result?.reached !== 'string' || result.reached === '') throw new Error('the run-tests gate returned no station reached');
+  const sha = /^[0-9a-f]{40}$/;
+  if (typeof result.branch !== 'string' || result.branch === '' || result.branch.startsWith('-')) throw new Error('the run-tests gate returned no PR branch it tested');
+  if (typeof result.tested !== 'string' || !sha.test(result.tested)) throw new Error('the run-tests gate returned no tested head');
+  if (typeof result.marker !== 'string' || !sha.test(result.marker)) throw new Error('the run-tests gate returned no marker commit');
+  run('git', ['push', 'origin', `${result.marker}:refs/heads/${result.branch}`], ctx.checkout);
+  return result.marker;
 }

@@ -360,6 +360,84 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   S-BTN-21 was rewritten and G-BTN-162 added. The 2026-10-14/16 rejection of reservations now
   names future capacity: a seat a running leg holds is a fact the runner states, not a forecast.
 
+- **2026-10-31 — §3.4, §5.2, §5.8, §6.1, §6.8: the run-tests gate and the owner round (owner
+  direction; B-110).** The owner, 2026-10-24: "I would like both the implement and fix legs to be
+  followed by a run – test leg, which execute an NPM script to run deterministic tests and
+  linting" and "I would like the course to explicitly specify that the third round of reviews
+  should trigger a human in the loop request if they continue to find blockers." `create-pr`
+  gained `run-tests` — a self-loop at `pr-open` and `fixed`, `max_runs` 30 (and `fix` 30 beside
+  it, the review rounds staying at 3) — whose stub runs **no agent**: it executes `npm run
+  <test_script>` (the course file's new field, default `test`) itself, bounded
+  (`RUN_TESTS_TIMEOUT_MS`) and non-interactive as B-94 bounds git; green advances to `review`,
+  red routes to `fix` — never back to `implement` — so no review round starts on red checks. The
+  gate's state is the marker its close commits on the branch (`Baton-Tests: green|red`, a red
+  marker naming the failing script's last lines; a marker commit changes no tree, so it is never
+  a push and a content commit re-opens the gate), read by the fact adapter from the commits it
+  already reads — git, so a plain-git repository (R3-1265) runs the gate identically with `gh`
+  nowhere in sight. The loop's runs are counted from Baton's traversal record alone (§4's rule
+  of the same day: "Baton's traversal record counts"), never from a forge. And the third round's
+  blockers became the owner's: `adjudicate` queues `waiting` on the owner — no agent reproduces
+  anything, the third pair of eyes is the person's — with the decision the sync posts carrying
+  *"3 failed reviews — manual review or start a 4th round?"* to Needs you, until the owner
+  answers `Baton-Adjudicated: merge|owner|round` as a trailer on a commit pushed to the branch
+  (`merge` → merge ready; `owner` → parked; `round` → exactly one more review round, its run
+  budget granted by §6.8's owner-granted runs, added for the purpose: `{runs: {leg, add}}` on
+  the override surface, read at the advance that starts the leg). The forge-comment spelling of
+  the adjudication (`<!-- baton:adjudicated merge|owner -->`) became one reader beside the
+  trailer, not the record. R-BTN-120's `why` table gained nothing: the gate's waits are
+  readiness, not blocks. S-BTN-43 gained the gate and the owner round; the model's course is
+  docs' own `roadmap-pr`, untouched by this change.
+
+- **2026-11-03 — review round one of PR #161 (B-110): §3.4, §5.8, §6.8, §11, §15** (two fresh
+  reviewers, nineteen merged findings). Blocking, found by both: the gate ran and pushed in the
+  runner's home checkout, not on the PR's head; a marker or an adjudication answer counted from
+  any commit's trailers, so a fix agent could skip the gate or answer the owner's question; no
+  surface sent the round's run grant; the decision carried no question. The owner ruled on
+  three, 2026-11-03:
+  - "Revert, re-pin after merge": the sync workflow's CLI pin and `.baton/baton.json`'s source,
+    with the committed stubs regenerated at the moved pin, went back to main's values.
+  - "Through Baton, not git": the owner's answer goes through Baton's authenticated owner
+    surface, and a `Baton-Tests` marker counts only as an empty-tree commit carrying the nonce
+    Baton issued to that run-tests claim, verified against Baton's record; commit trailers are a
+    record only, never the authority.
+  - "The answer carries the grant": an authenticated `round` answer itself grants exactly one
+    more `review` run, with no separate grant step.
+
+  Fixed, amending the rules in place:
+  - **The gate runs on the PR's head.** The stub finds the ticket's one home PR branch by the
+    branch patterns, fetches it, runs the script in a scratch worktree and makes the marker with
+    `git commit-tree` on the tested head (`Baton-Tested`); the close only pushes it, never
+    forced. Failures are told apart (a timeout or overflow red and named; npm that cannot start,
+    or a kill the bound did not send, no verdict), the red body names the script, and the lease
+    arithmetic is the close's one push (the run is the leg's own process).
+  - **A marker is a record.** It counts only as an empty-tree commit on the head it names whose
+    sha is the evidence Baton recorded for that claim's run-tests leg, read by the sync with its
+    observation (`legs`); the gate's state is read by commit order, and a content commit carrying
+    the trailers is a push. The `Baton-Adjudicated` trailer and, for `create-pr`, the
+    adjudication comment line answer nothing.
+  - **The owner answers through Baton.** The sync posts `review-rounds-<n>` with the question,
+    the PR and the options; the owner's key answers on the ticket's owner route, which records
+    the answer, applies the option's grant (each leg its own key) and hands the answer back in
+    the observation (`answers`). The override route lost `runs`. The review stub suspends at
+    `adjudicate` on a last round asking for changes rather than spend a fix.
+  - **A gate that cannot reach the change asks the owner** (`run-tests-unreachable`, `skip`)
+    rather than loop, for a ticket whose PRs are in other repositories or several at home.
+  - The plain-git reading (`commitsOf`) now reads a fact with no commits from the checkout's own
+    git. `fix`'s instructions gained the red-gate entry; `adjudicate`'s give the owner's command.
+    R-BTN-131's PR-courses bullet and `docs/standard-courses.mdx` no longer give `create-pr` a
+    comment-line adjudication, the table's `review` leaves `reviewed` too, and the retired marker
+    courses' bullet the main merge kept is gone.
+
+  Argued, not changed: the gate's routing reads git's markers, verified against Baton's record,
+  not the traversal record's own placement, which waits on B-120 (the PR's Deviations). Open for
+  the owner: R-BTN-116's person leg is the specification's one way to ask a person, and person
+  legs are not built (B-161), so the owner's question rides the built posted-decision route.
+  The owner then ruled on the three questions the fixes left open: a posted decision's question is
+  one line of at most 200 characters ("Allow one short line", the one prose R-BTN-33 admits); the
+  owner's answer waits for person legs ("Wait for B-161", so B-110 holds until B-161 lands, and the
+  owner-resolve answer is interim on its branch only); and the owner may waive an unreachable gate
+  ("Keep skip").
+
 - **2026-10-29 — the standard courses serve the simpler end (owner direction).** The owner:
   "baton is a general tool designed to scale from single-user naive setups where security is an
   afterthought and automation and lock management is the primary concern to something like our

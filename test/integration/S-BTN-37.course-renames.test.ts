@@ -26,7 +26,9 @@ const { fix, ...others } = roadmapPr.legs;
 const RENAMED = {
   ...roadmapPr,
   stations: { ...roadmapPr.stations, triaged: { label: 'Triaged' } },
-  legs: { ...others, address: { ...fix, renamed_from: 'fix' }, triage: { from: ['triaged'], to: 'pr-open' }, park: { from: ['pr-open'], to: 'triaged', max_runs: 1 } },
+  // The renamed file carries its own bound for address — two, so the run the holder still
+  // names `fix` can be seen counting toward it (B-110 raised the shipped fix's bound to 30).
+  legs: { ...others, address: { ...fix, max_runs: 2, renamed_from: 'fix' }, triage: { from: ['triaged'], to: 'pr-open' }, park: { from: ['pr-open'], to: 'triaged', max_runs: 1 } },
 };
 let git: Git;
 

@@ -238,3 +238,55 @@ These are its lessons, newest understanding first.
   fence that outlives a quiet hour; both are the owner's to decide. *Status: the merge stands
   (delivered, `c43f550`); the model evidence for the landed head is on the PR; B-142 filed
   (item 7); the re-claim race is unfiled and the owner's.*
+
+## 2026-11-04 — run-20261104-144136-3664308: a healthy review read as B-86, and legs that ended leaving their strays
+
+- **A stall watch that names the wrong process turns a healthy claim into an incident report.**
+  The operator's watch in `scripts/start-runner.sh` took the runner's oldest child as "the leg's
+  agent" — the cli's `esbuild --service`, born with the runner at 14:41 — and read its age (137
+  minutes) as the agent's while B-54's review leg waited out its background model replays; the
+  warning's pid pointed at a daemon no one can check, and the claim it said could not advance
+  advanced eleven minutes later. The watch now matches the leg wrapper by command
+  (`legProcess.mjs`) and reports the agent beneath it, so its pid, its age and its quiet are the
+  leg's own. *Status: fixed.*
+- **A leg that ends normally leaves its process group's leftovers running.** The runner killed
+  a leg's whole group only on a lost lease (R-BTN-24); a wrapper that exited on its own stranded
+  whatever the agent had spawned — this session's finished legs left eight `flock` holders from
+  the machine-lock test (`sleep infinity`, parented by init) and orphaned quint replays each
+  burning a CPU past their legs, with the VM's load at 8.4 and nothing running. **A leg's end is
+  its whole group's end, whatever ended the leg**: the runner now kills the group at the
+  wrapper's exit too (R-BTN-72 amended, S-BTN-200). *Status: fixed in the runner; B-108's idle
+  bounds remain the detection half.*
+
+## 2026-11-05 — the runner that vanished mid-claim: exit 0, no line, lock left
+
+- **A short wait is not an idle wait, and the runner's life hangs on ref'd timers.** At 02:40:51
+  the runner of run-20261104-144136 finished B-7's fix, gated the review on CI, and entered the
+  short wait — whose fallback timer was unref'd, as the beat's interval is — so node's event
+  loop emptied and the process exited 0 on the spot: no drain, no hand-off, none of B-94's
+  death lines, and the home lock left behind for the next start to refuse. `start-runner`'s
+  "(0)" sign-off dressed the silent death as the graceful path; the claim was fenced by the
+  reaper at lease end and the ticket waited unheld. **The wait's fallback timer is ref'd now,
+  as idleWait's sleeps always were** (S-BTN-201) — a wait ends by its own clock, never by an
+  empty loop. *Status: fixed; B-7 re-claimable at fixed with its PR.*
+
+## 2026-11-05 — an expected miss that printed 'fatal'
+
+- **A designed miss must fail quietly.** run-20261105-142428 claimed B-181, whose snapshot sat
+  on an origin/main the checkout had not fetched; `ensureSha`'s first probe failed on cue, but
+  `git()` leaves the child's stderr on the parent's, so git's raw
+  `fatal: Not a valid object name …^{commit}` landed in the runner's log — where an operator
+  tailing it read a crash into a healthy claim that fetched, loaded and ran its review leg
+  seconds later. **The probes are `rev-parse --verify --quiet` now** — the miss still misses,
+  silently. *Status: fixed.*
+
+## 2026-11-06 — the model report becomes advisory
+
+- **A verification gate priced in hours is a gate nobody can pass.** R-BTN-68 put
+  `npm run model:pr`'s report in every model-touching PR's body: on this fleet a report costs
+  20–30 minutes of model plus up to three hours of scenario traces, and run-20261105 showed
+  VM0's replay hangs outright on the person-legs traces — three PRs sat a day with green tests
+  and a report no machine could produce, merged only by the owner's bypass. **The report is
+  advisory now** (the owner, 2026-11-06): `model-report` validates what is pasted — green with
+  none, red only for a pasted report that shows a failed check — and R-BTN-68 says so. *Status:
+  the gate is gone; the weekly `model:full` and the hunger for a tractable replay remain.*

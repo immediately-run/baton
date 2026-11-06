@@ -7,7 +7,7 @@ import * as http from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { confirmCapacity, createApiKey, duration, main, parseArgs, plan, policyDiff, send } from '../../cli/baton.mjs';
+import { answerPlan, confirmCapacity, createApiKey, duration, main, parseArgs, plan, policyDiff, send } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
 import { ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
@@ -116,7 +116,7 @@ describe('plan: one request per command', () => {
     expect(plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries', 'retry'], key))
       .toEqual({ method: 'POST', path: '/v1/owner/docs/tickets/docs%3AR3-1/resolve', body: { decision: 'baton:retries', answer: 'retry' } });
     expect(plan('owner', ['resolve', 'docs', 'docs:R3-1', 'baton:stalled', 'park'], key).path).toBe('/v1/owner/docs/tickets/docs%3AR3-1/resolve');
-    expect(() => plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries'], key)).toThrow('the answer (retry or park) is required');
+    expect(() => plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries'], key)).toThrow("the answer (retry or park, or one of the posted decision's options) is required");
     expect(() => plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries', 'retry', 'extra'], key)).toThrow('no further argument');
     expect(plan('ticket', ['history', 'docs:R3-1'], key)).toEqual({ method: 'GET', path: '/v1/repositories/docs/tickets/R3-1/history' });
     expect(plan('ticket', ['history', 'docs:R3-1', '--before', '40', '--limit', '20'], key).path).toBe('/v1/repositories/docs/tickets/R3-1/history?before=40&limit=20');
@@ -506,5 +506,22 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
     expect(requests[6].body).toEqual({ name: 'fieldhouse', remove: true, confirm: true });
     // diff printed the one knob; show printed the read it verified the fields of.
     expect(outs.join('')).toContain('human_key');
+  });
+});
+
+// B-7 (R-BTN-116, R-BTN-127): `baton decision answer` — a person's answer to the ticket's queued
+// person leg, one `std:decision@1` through the attestations route, signed with an owner key of
+// the repository or a human-only key. The planning is pure (the request above), `--ref` optional.
+describe('baton decision answer (R-BTN-116, R-BTN-127)', () => {
+  it('plans one POST per ticket and option, with the ref when given', () => {
+    expect(answerPlan('docs:B-7', 'ship')).toEqual({
+      method: 'POST', path: '/v1/repositories/docs/attestations',
+      body: { type: 'std:decision@1', subject: { ticket: 'B-7' }, value: { option: 'ship' } },
+    });
+    expect(answerPlan('docs:B-7', 'hold', 'f'.padEnd(40, '1')).body.value).toEqual({ option: 'hold', ref: 'f'.padEnd(40, '1') });
+  });
+
+  it('refuses a ticket that is not <repository>:<id>', () => {
+    expect(() => answerPlan('B-7', 'ship')).toThrow('the ticket is <repository>:<id>');
   });
 });

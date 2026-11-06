@@ -282,12 +282,14 @@ describe('validateCourse (R-BTN-69)', () => {
     const full = copy();
     for (let i = 0; i < 94; i++) full.stations[`s${i}`] = {};
     const all = Object.keys(full.stations);
-    for (let i = 0; i < 195; i++) full.legs[`l${i}`] = { from: all, to: all, max_runs: 1 };
+    // The file's own legs plus these stay at COURSE_LEGS_MAX exactly (B-110 added run-tests to
+    // the fixture, so the loose legs are one fewer).
+    for (let i = 0; i < 200 - Object.keys(full.legs).length; i++) full.legs[`l${i}`] = { from: all, to: all, max_runs: 1 };
     t = Date.now();
     validateCourse(full);
     expect(Date.now() - t).toBeLessThan(2000);
     // The same file with no max_runs runs the cycle pass at the caps (review gate 2-A-0): one
-    // component holding all 195 loose legs, kept as station pairs, not per leg.
+    // component holding all the loose legs, kept as station pairs, not per leg.
     for (const l of Object.values(full.legs) as Record<string, unknown>[]) delete l.max_runs;
     full.legs.review.max_runs = 3;
     full.legs.fix.max_runs = 2;
@@ -336,5 +338,61 @@ describe('validateCourse (R-BTN-69)', () => {
       expect(() => validateCourse(bad)).not.toThrow();
       expect(validateCourse(bad).length).toBeGreaterThan(0);
     }
+  });
+});
+
+// B-7 (R-BTN-116): a person's leg — `kind: "person"` with `asks`, and at most an `expires` naming
+// one of its own outcomes. `asks` is required on a person's leg and refused on any other; a
+// `call` leg (R-BTN-165) is not built, so the kind is refused rather than kept unread; and a
+// person's leg carries no deadline (R-BTN-167) — its clock is its `expires`.
+describe('person legs (R-BTN-116)', () => {
+  const personCourse = (): Course => {
+    const c = copy();
+    c.stations.parked = { label: 'Parked' };
+    c.legs.merge = { ...c.legs.merge, from: ['reviewed', 'adjudicated', 'parked'] };
+    c.legs.decide = { from: ['reviewed'], to: ['adjudicated', 'parked'], kind: 'person', asks: 'owner' };
+    return c;
+  };
+
+  it('passes a person leg with asks, and one with expires naming an outcome', () => {
+    expect(validateCourse(personCourse())).toEqual([]);
+    const withExpiry = personCourse();
+    withExpiry.legs.decide = { ...withExpiry.legs.decide, expires: { after_s: 3600, reached: 'parked' } };
+    expect(validateCourse(withExpiry)).toEqual([]);
+  });
+
+  it('asks is required on a person leg, and refused on any other', () => {
+    const noAsks = personCourse();
+    delete (noAsks.legs.decide as Record<string, unknown>).asks;
+    expect(rules(noAsks)).toEqual(['shape legs.decide.asks']);
+    const agentLeg = personCourse();
+    agentLeg.legs.fix = { ...agentLeg.legs.fix, asks: 'runner' };
+    expect(rules(agentLeg)).toEqual(['shape legs.fix.asks']);
+  });
+
+  it('kind is "person" — a call leg is refused, not kept unread (R-BTN-165)', () => {
+    const call = personCourse();
+    call.legs.decide = { from: ['reviewed'], to: ['adjudicated', 'parked'], kind: 'call' };
+    expect(rules(call)).toEqual(['shape legs.decide.kind']);
+  });
+
+  it('expires sits only on a person leg, within 60 s–30 d, naming one of its outcomes', () => {
+    const agent = personCourse();
+    agent.legs.fix = { ...agent.legs.fix, expires: { after_s: 3600, reached: 'fixed' } };
+    expect(rules(agent)).toEqual(['shape legs.fix.expires']);
+    for (const after_s of [59, 0, -60, 30 * 86_400 + 1]) {
+      const bound = personCourse();
+      bound.legs.decide = { ...bound.legs.decide, expires: { after_s, reached: 'parked' } };
+      expect(rules(bound)).toEqual([`bound legs.decide.expires.after_s`]);
+    }
+    const outcome = personCourse();
+    outcome.legs.decide = { ...outcome.legs.decide, expires: { after_s: 3600, reached: 'filed' } };
+    expect(rules(outcome)).toEqual(['shape legs.decide.expires.reached']);
+  });
+
+  it('a person leg carries no deadline: its clock is its expires (R-BTN-167)', () => {
+    const deadline = personCourse();
+    deadline.legs.decide = { ...deadline.legs.decide, max_duration: 3600 };
+    expect(rules(deadline)).toEqual(['bound legs.decide.max_duration']);
   });
 });

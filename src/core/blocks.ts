@@ -11,7 +11,8 @@ import { BatonError } from './http';
 import { logEvent } from './db';
 import { grantedKeySql, isGrantedKey, qualify, repositoryOf, RESOURCE_NAME, TICKET_ID } from './validate';
 import { DISPATCH_WINDOW_MS } from './webhook';
-import { isForgePath, underWebBase, type Forge } from './links';
+import { isForgePath, type Forge } from './links';
+import { underWebBase } from '../shared/links.mjs';
 import type { PostedStation } from './board';
 import type { Store } from './ports';
 import type { History } from './history';
@@ -65,6 +66,11 @@ export const STALLED_AFTER_MS = 72 * 3_600_000;
  *  already (`policy` R-BTN-67, `course-changed` R-BTN-83; `input-missing`, `input-version` and
  *  `not-before-invalid` arrive with B-39 and R3-1259), and `time` (R-BTN-89) is a wait by design. */
 export const BATON_WAITS = ['policy', 'course-changed', 'input-missing', 'input-version', 'not-before-invalid', 'time'] as const;
+
+/** Rule 3's one definition of a held ticket, as SQL (R-BTN-39): a claim active, completed but
+ *  unconfirmed, or reaped with its fence still pending. `Blocks.isHeld` reads it over one
+ *  ticket; queries that must exclude held tickets inline it. */
+export const HELD_CLAIMS_SQL = `(status = 'active' OR (status = 'completed' AND confirmed_at IS NULL) OR (status = 'reaped' AND fence_pending = 1))`;
 
 /** A live worker as the counts see it: the repositories its key works on, the capabilities it may
  *  use in each (null: all it declares), what it declares and the account instances it uses. */
@@ -316,8 +322,7 @@ export class Blocks {
 
   /** Whether a claim holds the ticket — rule 3's check, the one definition (R-BTN-75). */
   isHeld(id: string): boolean {
-    return this.rows(`SELECT 1 FROM claims WHERE ticket_id = ? AND (status = 'active' OR (status = 'completed' AND confirmed_at IS NULL)
-                      OR (status = 'reaped' AND fence_pending = 1)) LIMIT 1`, id).length > 0;
+    return this.rows(`SELECT 1 FROM claims WHERE ticket_id = ? AND (${HELD_CLAIMS_SQL}) LIMIT 1`, id).length > 0;
   }
 
   /** R-BTN-75: blocked when not held, with a queued leg, and with a whole-ticket row or a row on
@@ -390,6 +395,27 @@ export class Blocks {
     return true;
   }
 
+  /** B-110: a sync-posted decision on the ticket, open, with the options the owner may answer —
+   *  null when none is open by that id. */
+  postedDecision(ticket: string, id: string): { options: { id: string; grants?: { leg: string; runs: number } }[] } | null {
+    const row = this.rows<{ options_json: string | null }>(`SELECT options_json FROM ticket_decisions WHERE ticket_id = ? AND decision_id = ? AND source = 'sync'`, ticket, id)[0];
+    if (!row) return null;
+    try {
+      return { options: row.options_json ? (JSON.parse(row.options_json) as { id: string; grants?: { leg: string; runs: number } }[]) : [] };
+    } catch {
+      return { options: [] };
+    }
+  }
+
+  /** B-110: the owner answered a sync-posted decision — recorded once, the decision and its
+   *  notices closed in the caller's transaction; the sync reads the answer in its observation. */
+  answerPosted(ticket: string, id: string, answer: string, owner: string, at: number): void {
+    this.exec('INSERT INTO decision_answers (ticket_id, decision_id, answer, answered_by, answered_at) VALUES (?, ?, ?, ?, ?)', ticket, id, answer, owner, at);
+    this.exec(`DELETE FROM ticket_decisions WHERE ticket_id = ? AND decision_id = ? AND source = 'sync'`, ticket, id);
+    this.c.decisions?.closed(ticket, [id]);
+    this.write([ticket], ['decision']);
+  }
+
   /**
    * The alarm (R-BTN-78): `baton:stalled` on a ticket no hold keeps whose queued leg has been
    * posted `waiting` for 72 hours without a break. Only the waits a sync posts count: the ones
@@ -448,17 +474,24 @@ export class Blocks {
       }
       const needs = (st?.next ?? []).flatMap((n) => (n.needs ?? []).filter((r) => RESOURCE_NAME.test(r)).map((r) => `${n.leg}\u0000${r}`)).sort();
       const repos = home ? this.ticketRepos(id, home) : [];
+      // B-110: a decision the owner has answered (`decision_answers`) is never posted open again —
+      // a sync that read its observation before the answer would otherwise reopen it.
+      const answered = new Set(this.rows<{ decision_id: string }>('SELECT decision_id FROM decision_answers WHERE ticket_id = ?', id).map((r) => r.decision_id));
       const decisions = (st?.decisions ?? []).filter((d) => {
+        if (answered.has(d.id)) return false;
         if (!d.id.startsWith('baton:')) return true;
         dropped.push(`${id}:decision:${d.id}`);
         return false;
-      }).map((d) => ({ id: d.id, leg: d.leg && legs.has(d.leg) ? d.leg : '', asks: d.asks, url: d.url && repos.some((base) => underWebBase(d.url!, base)) ? d.url : null }))
+      }).map((d) => ({
+        id: d.id, leg: d.leg && legs.has(d.leg) ? d.leg : '', asks: d.asks, url: d.url && repos.some((base) => underWebBase(d.url!, base)) ? d.url : null,
+        question: d.question ?? null, options: d.options?.length ? JSON.stringify(d.options.map((o) => ({ id: o.id, ...(o.grants ? { grants: { leg: o.grants.leg, runs: o.grants.runs } } : {}) }))) : null,
+      }))
         .sort((a, b) => (a.id < b.id ? -1 : 1));
       const haveNeeds = this.rows<{ leg: string; resource: string }>('SELECT leg, resource FROM leg_needs WHERE ticket_id = ? ORDER BY leg, resource', id).map((n) => `${n.leg}\u0000${n.resource}`).sort();
-      const haveDecisions = this.rows<{ decision_id: string; leg: string; asks: string; url: string | null }>(
-        `SELECT decision_id, leg, asks, url FROM ticket_decisions WHERE ticket_id = ? AND source = 'sync' ORDER BY decision_id`, id);
+      const haveDecisions = this.rows<{ decision_id: string; leg: string; asks: string; url: string | null; question: string | null; options_json: string | null }>(
+        `SELECT decision_id, leg, asks, url, question, options_json FROM ticket_decisions WHERE ticket_id = ? AND source = 'sync' ORDER BY decision_id`, id);
       const needsChanged = haveNeeds.join('\n') !== needs.join('\n');
-      const decisionsChanged = JSON.stringify(haveDecisions.map((d) => ({ id: d.decision_id, leg: d.leg, asks: d.asks, url: d.url }))) !== JSON.stringify(decisions);
+      const decisionsChanged = JSON.stringify(haveDecisions.map((d) => ({ id: d.decision_id, leg: d.leg, asks: d.asks, url: d.url, question: d.question, options: d.options_json }))) !== JSON.stringify(decisions);
       if (needsChanged) {
         this.exec('DELETE FROM leg_needs WHERE ticket_id = ?', id);
         for (const n of needs) {
@@ -470,8 +503,8 @@ export class Blocks {
         // A snapshot rewrites only the sync's own rows; Baton's are answered in Baton (R-BTN-78).
         this.exec(`DELETE FROM ticket_decisions WHERE ticket_id = ? AND source = 'sync'`, id);
         for (const d of decisions) {
-          this.exec(`INSERT INTO ticket_decisions (ticket_id, decision_id, leg, asks, url, source) VALUES (?, ?, ?, ?, ?, 'sync')
-                     ON CONFLICT (ticket_id, decision_id) DO NOTHING`, id, d.id, d.leg, d.asks, d.url);
+          this.exec(`INSERT INTO ticket_decisions (ticket_id, decision_id, leg, asks, url, source, question, options_json) VALUES (?, ?, ?, ?, ?, 'sync', ?, ?)
+                     ON CONFLICT (ticket_id, decision_id) DO NOTHING`, id, d.id, d.leg, d.asks, d.url, d.question, d.options);
         }
         // A decision the snapshot no longer posts is answered — git shows it — and one it posts
         // for the first time is new: their notices close or are queued here (R-BTN-80). One whose
@@ -495,6 +528,14 @@ export class Blocks {
     const owner = home.github.slice(0, home.github.indexOf('/'));
     const repos = JSON.parse(this.rows<{ repos: string }>('SELECT repos FROM tickets WHERE id = ?', id)[0]?.repos ?? '[]') as string[];
     return [home.web_base, ...repos.map((r) => (r.includes('/') ? r : `${owner}/${r}`)).filter((r) => isForgePath(home.forge as Forge, r)).map((r) => host + r)];
+  }
+
+  /** Those bases by ticket id, for a reader that judges a link the same way `posted` judges a
+   *  decision's `url` (R-BTN-92) — a person leg's question among them (R-BTN-116). */
+  linkBases(id: string): string[] {
+    const home = this.rows<{ forge: string; web_base: string | null; github: string }>(
+      'SELECT forge, web_base, github FROM repositories WHERE id = ?', repositoryOf(id))[0];
+    return home ? this.ticketRepos(id, home) : [];
   }
 
   // ── unblocking wakes work (R-BTN-77) ──────────────────────────────────────────────────────

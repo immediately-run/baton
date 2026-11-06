@@ -179,4 +179,12 @@ describe('G-BTN-31 through the server', () => {
     const { secret } = await register('vm-a');
     expect((await workerCall('/v1/runner/next', { secret })).status).toBe(200);
   });
+
+  it('no override grants runs: the answer carries the grant (B-110 round 1, finding 6)', async () => {
+    // The owner, 2026-11-03, "The answer carries the grant": a run beyond a leg's max_runs is
+    // granted only by the owner's authenticated answer to a posted decision (S-BTN-47), never by
+    // a separate override, so the override route takes no `runs`.
+    expect((await owner('/v1/ui/overrides/docs:R3-9002', { runs: { leg: 'review', add: 1 } })).status).toBe(400);
+    expect(await rows(`SELECT runs_json FROM ticket_overrides WHERE ticket_id = 'docs:R3-9002'`)).toEqual([]);
+  });
 });

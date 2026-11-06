@@ -126,8 +126,9 @@ async function route(req: Request, env: Config, to: Forward): Promise<Response> 
   // The repository reads (§11): a course's record, its blocks and a ticket's history — any key
   // granted on it; the blocks and the history also an owner's or an administrator's, whose keys
   // sign, as every key does. B-90: the board of one repository, read the same three ways — and
-  // §12.8 (B-145): its signed policy read, for the same principals (R-BTN-189).
-  if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|board|policy|tickets\/[^/]+\/(blocks|history))$/.test(pathname)) {
+  // §12.8 (B-145): its signed policy read, for the same principals (R-BTN-189). R-BTN-181 (B-7's
+  // slice): the attestation write signs the same way — the core checks the writer it names.
+  if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|board|policy|attestations|tickets\/[^/]+\/(blocks|history))$/.test(pathname)) {
     if (isSigned(req)) return forwardSigned(req, env, to);
     // R-BTN-159: a worker's (or, on the reads, an owner's or administrator's) API key.
     const apiKey = apiKeyOf(req);

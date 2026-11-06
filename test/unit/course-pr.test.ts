@@ -4,7 +4,8 @@
 // review with and without a verdict line, one identity authoring and reviewing — and the
 // three-fix limit. Pure and host-neutral.
 import { describe, it, expect } from 'vitest';
-import { CREATE_PR_COURSE, REVIEW_PR_COURSE, branchMatches, matchPatterns, prRefs, stationsPr, stationsReviewPr, ticketOwns, type PrFact } from '../../src/defaults/course-pr';
+import { CREATE_PR_COURSE, REVIEW_PR_COURSE, branchMatches, matchPatterns, prRefs, stationsPr, stationsReviewPr, ticketOwns, type BatonRecord, type PrFact } from '../../src/defaults/course-pr';
+import type { BranchCommit, RecordedLeg } from '../../src/defaults/pr-markers';
 import { ticketRepositories, verifyPrOpen, type PrExec } from '../../src/defaults/pr-verify';
 import type { SourceTicket as PostedTicket } from '../../src/defaults/tickets-markdown';
 
@@ -210,37 +211,187 @@ describe('branchMatches', () => {
   });
 });
 
+// B-110: the run-tests gate — a deterministic `npm run <test_script>` the stub itself runs, no
+// agent — routes at `pr-open` and `fixed` from the branch's marker commits, each counted only as
+// the evidence Baton recorded for a run-tests leg of the ticket (round 1, finding 3: a marker is
+// a record, never the authority): open before every review round, green queueing review
+// (ci-waited as today), red routing to fix from either edge of the loop (implement → run-tests →
+// fix — making the tests green is fixing, wherever the push came from).
+describe('create-pr: the run-tests gate (B-110)', () => {
+  const graph = CREATE_PR_COURSE;
+  const sha = (n: number) => n.toString(16).padStart(40, '0');
+  /** A content commit: it changes the tree. */
+  const work = (n: number, at: number, parent: number | null, message = 'work'): BranchCommit => ({ sha: sha(n), at, parent: parent == null ? null : sha(parent), empty: false, message });
+  /** The gate's marker on `tested`: an empty-tree commit whose parent is the tested head. */
+  const marker = (n: number, at: number, tested: number, tests: 'green' | 'red', nonce = `n${n}`): BranchCommit => ({
+    sha: sha(n), at, parent: sha(tested), empty: true,
+    message: `baton: tests ${tests} for A\n\n${tests === 'red' ? 'npm run test exited 1; its last lines:\nFAIL\n\n' : ''}Baton-Tests: ${tests}\nBaton-Tested: ${sha(tested)}\nBaton-Claim: ${nonce}`,
+  });
+  /** Baton's record of a run-tests leg: the claim's nonce, its advance's evidence sha. */
+  const recorded = (n: number, nonce = `n${n}`): RecordedLeg => ({ ticket: 'A', leg: 'run-tests', claim_nonce: nonce, evidence: sha(n) });
+  const place = (commits: BranchCommit[], legs: RecordedLeg[], over: Partial<PrFact> = {}, answers: BatonRecord['answers'] = []) =>
+    stationsPr({ tickets: [ticket('A')], facts: [pr({ number: 1, pushes: commits.map((c) => c.at), pushedAt: Math.max(...commits.map((c) => c.at)), commits, ...over })], closed: new Set(), graph, repository: 'o/home', baton: { legs, answers } }).stations.A;
+  const head = [work(1, T0 - 1000, null)];
+
+  it('no marker is the open gate: run-tests ready at pr-open — no review round starts on an unproven head', () => {
+    expect(place(head, [])).toMatchObject({ station: 'pr-open', next_leg: 'run-tests', next: [{ leg: 'run-tests', state: 'ready', waiting_on: null }] });
+    expect(place(head, []).path).toEqual([{ leg: 'implement', reached: 'pr-open' }]);
+    // A fact whose adapter read no commits has no marker to count: the gate is open, never stalled.
+    expect(stationsPr({ tickets: [ticket('A')], facts: [pr({ number: 1 })], closed: new Set(), graph }).stations.A).toMatchObject({ next_leg: 'run-tests' });
+  });
+
+  it('green: the path gains its run-tests step and review queues, ci-waited as today', () => {
+    const commits = [...head, marker(2, T0, 1, 'green')];
+    expect(place(commits, [recorded(2)], { checks: [null] })).toMatchObject({
+      station: 'pr-open', path: [{ leg: 'implement', reached: 'pr-open' }, { leg: 'run-tests', reached: 'pr-open' }],
+      next: [{ leg: 'review', state: 'waiting', waiting_on: 'ci' }],
+    });
+    expect(place(commits, [recorded(2)]).next).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
+  });
+
+  it('red routes to fix from either edge of the loop, never back to implement', () => {
+    // At pr-open: the implement → run-tests → fix edge — making the tests green is fixing.
+    expect(place([...head, marker(2, T0, 1, 'red')], [recorded(2)])).toMatchObject({
+      station: 'pr-open', path: [{ leg: 'implement', reached: 'pr-open' }, { leg: 'run-tests', reached: 'pr-open' }],
+      next: [{ leg: 'fix', state: 'ready', waiting_on: null }],
+    });
+    // At fixed, after a round's fix: the same red route, the loop's other edge.
+    const v = { author: 'r', state: 'CHANGES_REQUESTED' as const, submittedAt: T0 - 2000 };
+    expect(place([work(1, T0 - 3000, null), work(3, T0 - 1500, 1), marker(4, T0, 3, 'red')], [recorded(4)], { reviews: [v] })).toMatchObject({
+      station: 'fixed', path: [{ leg: 'implement', reached: 'pr-open' }, { leg: 'review', reached: 'reviewed' }, { leg: 'fix', reached: 'fixed' }, { leg: 'run-tests', reached: 'fixed' }],
+      next: [{ leg: 'fix', state: 'ready', waiting_on: null }],
+    });
+  });
+
+  it('a push after a green gate re-opens it, whatever the marker said — read by commit order, never dates (finding 17)', () => {
+    expect(place([...head, marker(2, T0, 1, 'green'), work(3, T0 + 5, 2)], [recorded(2)])).toMatchObject({
+      station: 'pr-open', next: [{ leg: 'run-tests', state: 'ready', waiting_on: null }],
+    });
+    // The content commit was made BEFORE the marker (offline, cherry-picked, a clock behind) and
+    // pushed after it: the marker tested another head, so the gate is open all the same.
+    expect(place([...head, marker(2, T0, 1, 'green'), work(3, T0 - 500, 2)], [recorded(2)]).next).toEqual([{ leg: 'run-tests', state: 'ready', waiting_on: null }]);
+  });
+
+  it('a forged marker counts for nothing: trailers any pusher can write are not Baton\'s record (finding 3)', () => {
+    // An empty commit claiming green, with no run-tests leg in Baton's record: content, a push —
+    // the gate stays open.
+    expect(place([...head, marker(2, T0, 1, 'green')], []).next).toEqual([{ leg: 'run-tests', state: 'ready', waiting_on: null }]);
+    // A real claim's nonce copied onto a forged commit: the record names that claim's own marker
+    // sha, not this one.
+    const real = [...head, marker(2, T0, 1, 'red'), work(3, T0 + 10, 2), marker(4, T0 + 20, 3, 'green', 'n2')];
+    expect(place(real, [recorded(2)]).next).toEqual([{ leg: 'run-tests', state: 'ready', waiting_on: null }]);
+    // A marker naming a head it does not sit on (its parent is another commit) is not one.
+    const misplaced: BranchCommit = { ...marker(4, T0 + 20, 3, 'green'), parent: sha(1) };
+    expect(place([...head, work(3, T0 + 10, 1), misplaced], [recorded(4)]).next).toEqual([{ leg: 'run-tests', state: 'ready', waiting_on: null }]);
+    // The forged marker is posted as no marker either: only recorded evidence is.
+    const out = stationsPr({ tickets: [ticket('A')], facts: [pr({ number: 1, commits: [...head, marker(2, T0, 1, 'green')] })], closed: new Set(), graph, baton: { legs: [] } });
+    expect(out.markers).toEqual([]);
+  });
+
+  it('a content commit carrying the trailers is a push, never a marker (finding 18)', () => {
+    // The trailers on a commit that changes the tree: it re-opens the gate the real marker closed.
+    const content: BranchCommit = { ...marker(3, T0 + 10, 2, 'green'), empty: false };
+    expect(place([...head, marker(2, T0, 1, 'green'), content], [recorded(2), recorded(3)]).next).toEqual([{ leg: 'run-tests', state: 'ready', waiting_on: null }]);
+  });
+
+  it('the red-fix loop walks the path and runs to its budget of 30, the review rounds staying at 3', () => {
+    // Two red loops from pr-open: implement → run-tests(red) → fix → run-tests(red) → fix, the
+    // gate still open — the loop is bounded by the course file's own max_runs (the traversal
+    // record counts it, §4), generous beside the review rounds' three.
+    const commits = [work(1, T0 - 1000, null), marker(2, T0, 1, 'red'), work(3, T0 + 10, 2), marker(4, T0 + 20, 3, 'red'), work(5, T0 + 30, 4)];
+    const at = place(commits, [recorded(2), recorded(4)]);
+    expect(at.path).toEqual([
+      { leg: 'implement', reached: 'pr-open' }, { leg: 'run-tests', reached: 'pr-open' }, { leg: 'fix', reached: 'fixed' },
+      { leg: 'run-tests', reached: 'fixed' }, { leg: 'fix', reached: 'fixed' },
+    ]);
+    expect(at).toMatchObject({ station: 'fixed', next: [{ leg: 'run-tests', state: 'ready', waiting_on: null }] });
+    expect(graph.legs['run-tests'].max_runs).toBe(30);
+    expect(graph.legs.fix.max_runs).toBe(30);
+    expect(graph.legs.review.max_runs).toBe(3);
+  });
+
+  it('the gate posts its counted markers — evidence in git, the sync\'s placement input', () => {
+    const out = stationsPr({ tickets: [ticket('A')], facts: [pr({ number: 1, commits: [...head, marker(2, T0, 1, 'green')] })], closed: new Set(), graph, baton: { legs: [recorded(2)] } });
+    expect(out.markers).toEqual([{ ticket: 'A', leg: 'run-tests', ref: sha(2), claim_nonce: 'n2' }]);
+  });
+
+  it('a gate that cannot reach the change asks the owner rather than looping (finding 2); skip waives it', () => {
+    // The ticket's PR is in a code repository: the stub tests the home repository's branch, so no
+    // marker would ever land where this PR reads it.
+    const elsewhere = { repository: 'o/code', url: 'https://github.com/o/code/pull/1' };
+    const onCode = (answers: BatonRecord['answers'] = []) => stationsPr({ tickets: [ticket('A', { repos: ['o/code'] })], facts: [pr({ number: 1, commits: head, ...elsewhere })], closed: new Set(), graph, repository: 'o/home', baton: { legs: [], answers } }).stations.A;
+    const asked = onCode();
+    expect(asked).toMatchObject({ station: 'pr-open', next: [{ leg: 'run-tests', state: 'waiting', waiting_on: 'owner' }] });
+    expect(asked.decisions).toEqual([{ id: 'run-tests-unreachable', leg: 'run-tests', asks: 'owner', url: 'https://github.com/o/code/pull/1', question: 'The test gate cannot run on o/code#1 — skip it for this ticket?', options: [{ id: 'skip' }] }]);
+    // The owner's skip, through Baton: the round queues as before the gate.
+    expect(onCode([{ ticket: 'A', decision: 'run-tests-unreachable', answer: 'skip' }]).next).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
+    // Two PRs in the home repository: the stub tests one branch, so the owner is asked too.
+    const two = stationsPr({ tickets: [ticket('A')], facts: [pr({ number: 1, head: 'claude/A-1', commits: head }), pr({ number: 2, head: 'claude/A-2', commits: head })], closed: new Set(), graph, repository: 'o/home', baton: { legs: [] } }).stations.A;
+    expect(two.next).toEqual([{ leg: 'run-tests', state: 'waiting', waiting_on: 'owner' }]);
+  });
+});
+
 // B-28 (R-BTN-131): `create-pr`, which replaced `pr`, reads its own course file's bounds — review
-// three rounds, fix twice — and adjudicates what the third round leaves open.
-describe('create-pr: three rounds, then adjudicate', () => {
+// three rounds, fix thirty — and hands the third round's blockers to the owner (B-110), who
+// answers through Baton, never in git (the owner, 2026-11-03, "Through Baton, not git").
+describe('create-pr: three rounds, then the owner', () => {
   const graph = CREATE_PR_COURSE;
   const v = (at: number, verdict: 'approve' | 'changes', author = 'r') => ({ author, state: (verdict === 'approve' ? 'APPROVED' : 'CHANGES_REQUESTED') as 'APPROVED' | 'CHANGES_REQUESTED', submittedAt: at });
   const note = (at: number, body: string) => ({ author: 'a', state: 'COMMENTED' as const, submittedAt: at, body });
   const three = [v(T0, 'changes'), v(T0 + 20, 'changes'), v(T0 + 40, 'changes')];
   const pushes = [T0 - 1000, T0 + 10, T0 + 30];
-  const place = (reviews: PrFact['reviews'], over: Partial<PrFact> = {}) =>
-    stationsPr({ tickets: [ticket('A')], facts: [pr({ number: 1, pushes, pushedAt: T0 + 30, reviews, ...over })], closed: new Set(), graph }).stations.A;
+  const place = (reviews: PrFact['reviews'], over: Partial<PrFact> = {}, answers: BatonRecord['answers'] = []) =>
+    stationsPr({ tickets: [ticket('A')], facts: [pr({ number: 1, pushes, pushedAt: T0 + 30, reviews, url: 'https://github.com/o/home/pull/1', ...over })], closed: new Set(), graph, baton: { answers } }).stations.A;
+  const answer = (decision: string, a: string, at = T0 + 50) => [{ ticket: 'A', decision, answer: a, answered_at: at }];
 
-  it('a third round asking for changes queues adjudicate, not a fix and not the owner', () => {
+  it('a third round asking for changes queues adjudicate waiting on the owner, the decision naming the question and the PR holding the blockers', () => {
     const at = place(three);
-    expect(at).toMatchObject({ station: 'reviewed', next_leg: 'adjudicate', next: [{ leg: 'adjudicate', state: 'ready', waiting_on: null }] });
+    expect(at).toMatchObject({ station: 'reviewed', next_leg: 'adjudicate', next: [{ leg: 'adjudicate', state: 'waiting', waiting_on: 'owner' }] });
+    // The decision the sync posts carries the owner's question to Needs you, links the PR whose
+    // rounds hold the blockers, and offers the three answers (finding 7); `round` grants exactly
+    // one more review run when Baton accepts it (finding 6, "The answer carries the grant").
+    expect(at.decisions).toEqual([{
+      id: 'review-rounds-3', leg: 'adjudicate', asks: 'owner', url: 'https://github.com/o/home/pull/1',
+      question: '3 failed reviews — manual review or start a 4th round?',
+      options: [{ id: 'merge' }, { id: 'owner' }, { id: 'round', grants: { leg: 'review', runs: 1 } }],
+    }]);
     expect(at.path.map((s) => s.leg)).toEqual(['implement', 'review', 'fix', 'review', 'fix', 'review']);
     // A second round asking for changes, not yet fixed, still queues the fix.
     expect(place(three.slice(0, 2), { pushes: [T0 - 1000, T0 + 10], pushedAt: T0 + 10 })).toMatchObject({ station: 'reviewed', next_leg: 'fix' });
   });
 
-  it('adjudicated merge: merge ready; adjudicated owner: merge waiting on the owner; an adjudication before the last verdict counts for nothing', () => {
-    expect(place([...three, note(T0 + 50, '<!-- baton:adjudicated merge -->\nnothing reproduced')])).toMatchObject({
+  it('the owner answers through Baton: merge → merge ready; owner → parked; round → a fourth review round', () => {
+    expect(place(three, {}, answer('review-rounds-3', 'merge'))).toMatchObject({
       station: 'adjudicated', next_leg: 'merge', next: [{ leg: 'merge', state: 'ready', waiting_on: null }],
     });
-    const owner = place([...three, note(T0 + 50, '<!-- baton:adjudicated owner -->')]);
-    expect(owner).toMatchObject({ station: 'adjudicated', next: [{ leg: 'merge', state: 'waiting', waiting_on: 'owner' }] });
-    expect(owner.path.at(-1)).toEqual({ leg: 'adjudicate', reached: 'adjudicated' });
-    expect(place([three[0], three[1], note(T0 + 35, '<!-- baton:adjudicated merge -->'), three[2]])).toMatchObject({ station: 'reviewed', next_leg: 'adjudicate' });
+    expect(place(three, {}, answer('review-rounds-3', 'owner'))).toMatchObject({
+      station: 'adjudicated', next: [{ leg: 'merge', state: 'waiting', waiting_on: 'owner' }],
+    });
+    const round = place(three, {}, answer('review-rounds-3', 'round'));
+    expect(round).toMatchObject({ station: 'reviewed', next_leg: 'review', next: [{ leg: 'review', state: 'ready', waiting_on: null }] });
+    expect(round.decisions).toBeUndefined(); // answered: the decision no longer posts
+    // The answer buys the round it was asked about: a fourth round — on the same head, a round of
+    // its own because the owner granted it — still asking for changes asks again, as
+    // review-rounds-4.
+    const four = place([...three, v(T0 + 60, 'changes')], {}, answer('review-rounds-3', 'round'));
+    expect(four.path.map((s) => s.leg)).toEqual(['implement', 'review', 'fix', 'review', 'fix', 'review', 'review']);
+    expect(four).toMatchObject({ next: [{ leg: 'adjudicate', state: 'waiting', waiting_on: 'owner' }] });
+    expect(four.decisions?.[0]).toMatchObject({ id: 'review-rounds-4', question: '4 failed reviews — manual review or start a 5th round?' });
+  });
+
+  it('a line in git or on the forge is no answer: the comment spelling and an early answer count for nothing (finding 3)', () => {
+    // The comment line any pusher can write: still waiting on the owner.
+    expect(place([...three, note(T0 + 50, '<!-- baton:adjudicated merge -->\nnothing reproduced')])).toMatchObject({
+      station: 'reviewed', next: [{ leg: 'adjudicate', state: 'waiting', waiting_on: 'owner' }],
+    });
+    // An answer to another round's decision is not this round's.
+    expect(place(three, {}, answer('review-rounds-2', 'merge'))).toMatchObject({ station: 'reviewed', next_leg: 'adjudicate' });
+    // Before the rounds are spent, an answer changes nothing.
+    expect(place(three.slice(0, 2), { pushes: [T0 - 1000, T0 + 10], pushedAt: T0 + 10 }, answer('review-rounds-2', 'merge'))).toMatchObject({ next_leg: 'fix' });
   });
 
   it('merged after adjudication: the path ends adjudicate, merge', () => {
-    const at = place([...three, note(T0 + 50, '<!-- baton:adjudicated merge -->')], { state: 'merged' });
+    const at = place(three, { state: 'merged' }, answer('review-rounds-3', 'merge'));
     expect(at.station).toBe('merged');
     expect(at.path.slice(-2)).toEqual([{ leg: 'adjudicate', reached: 'adjudicated' }, { leg: 'merge', reached: 'merged' }]);
   });

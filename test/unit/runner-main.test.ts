@@ -10,7 +10,8 @@ import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { asksHelp, declareCourses, fetchMain, parseRunArgs, runMain, servedCourses } from '../../src/runner/main';
 import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
-import { HARNESS_AGENTS } from '../../src/runner/harness';
+import { HARNESS_AGENTS, AGENT_PROMPT } from '../../src/runner/harness';
+import { splitWords } from '../../src/defaults/agent-words';
 import { envAuth } from '../../src/runner/api';
 import { courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
 import { declarationFrom } from '../../src/runner/runner';
@@ -140,6 +141,22 @@ describe('the agent_command a runner runs (B-83)', () => {
     // B-103: the banner's course field names every served course (`create-pr@1, create-spec@2`),
     // in the singular only when `--course` (or a one-course home) left one.
     expect(src).toContain("course${courses.length === 1 ? '' : 's'} ${courses.map((c) => `${c.course}@${c.version}`).join(', ')}");
+  });
+
+  it('the briefing carries the one-shot contract: nothing resumes the agent, so it never exits with work pending (B-181)', () => {
+    // B-180's review round (2026-11-04) was lost whole to an agent that started its second
+    // reviewer and the vitest suite as background jobs, printed "I'll resume when they land",
+    // and exited — the stub reads exit as completion, and a promise is not a verdict. B-108's
+    // lesson, mirrored: the briefing is the one thing guaranteed in every agent_command, so the
+    // contract is stated there and the next drift fails this test, not a round. The phrase is
+    // the sentence the ticket prescribes, capital N and all.
+    expect(AGENT_PROMPT).toContain('nothing resumes it');
+    expect(AGENT_PROMPT).toContain('Never exit with work pending');
+    expect(AGENT_PROMPT).not.toContain('never waiting for further input');
+    // The briefing rides inside the command's double quotes and now carries double quotes of
+    // its own: escaped in HARNESS_AGENTS, the no-shell split (B-84) still spawns it whole.
+    expect(splitWords(HARNESS_AGENTS.opencode).at(-1)).toBe(AGENT_PROMPT);
+    expect(splitWords(HARNESS_AGENTS['claude-code']).at(-1)).toBe(AGENT_PROMPT);
   });
 
   it('settings naming no agent_command drive from --harness, the command logged; a named one is left to the settings', async () => {
@@ -892,6 +909,54 @@ describe('draining (SIGTERM\'s graceful path, 2026-10-24)', () => {
     await r.work();
     expect(claims).toBe(0);
     r.stop();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// S-BTN-200 (R-BTN-72): a leg's end is its whole process group's end, whatever ended the leg.
+// The lost lease's group kill (R-BTN-24) is half the rule; 2026-11-04's session showed the other
+// half missing — a wrapper that exited on its own left its group's leftovers running (eight flock
+// holders and orphaned model replays, each burning past its leg), so the runner now kills the
+// group at the wrapper's exit too.
+describe('S-BTN-200 a leg that ends reaps its process group (R-BTN-72)', () => {
+  it('a leg that finishes normally kills the processes its agent left behind', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-reap-'));
+    mkdirSync(join(dir, 'scratch'), { recursive: true });
+    const lines: string[] = [];
+    const api = {
+      setSecret: () => {},
+      heartbeat: async () => ({ worker_id: 1, incarnation: 1, messages: [] }),
+      recommendations: async () => ({ recommendations: [] }),
+      claim: async () => { throw new BatonRefusal('no-eligible-ticket', undefined, 'none', 400); },
+    } as unknown as BatonApi;
+    const r = new Runner({ api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'reap',
+      courses: [], stateFile: join(dir, 's.json'), beatEvery: 60_000, log: (l) => lines.push(l) });
+    // The state sidecar the loop would own, as the fixtures above hand it over.
+    const state: Record<string, unknown> = { worker_id: 1, claim: null };
+    (r as unknown as { state: unknown }).state = { get: () => state, set: () => {}, spool: join(dir, 'spool.jsonl') };
+    (r as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
+    // A leg that finishes cleanly while leaving a process behind on purpose — a held lock, a
+    // background check: a child of the wrapper, in its process group, that never exits alone.
+    const stray = join(dir, 'stray.pid');
+    const script = join(dir, 'leg.mjs');
+    writeFileSync(script, `import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+export async function run(ctx) {
+  const child = spawn('sleep', ['30'], { stdio: 'ignore' });
+  writeFileSync(${JSON.stringify(stray)}, String(child.pid));
+  return { echoed: ctx.leg };
+}
+`);
+    const leg = (r as unknown as { runLeg(course: { scripts: Map<string, string> }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result: unknown }> });
+    const out = await leg.runLeg({ scripts: new Map([['implement', script]]) }, 'implement', { leg: 'implement' }, join(dir, 'scratch'));
+    expect(out).toEqual({ kind: 'ok', result: { echoed: 'implement' } });
+    const pid = Number(readFileSync(stray, 'utf8'));
+    let alive = 'alive';
+    for (let i = 0; i < 100 && alive === 'alive'; i++) {
+      try { process.kill(pid, 0); } catch { alive = 'gone'; }
+      if (alive === 'alive') await new Promise((res) => setTimeout(res, 20));
+    }
+    expect(alive).toBe('gone'); // the wrapper exited on its own; the group died with the leg
     rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -698,13 +698,24 @@ export function checkResolve(body: unknown): { action: 'confirm' | 'release' } {
 
 /** `POST /v1/owner/{repository}/tickets/{ticket}/resolve` (R-BTN-78, §11): `{decision, answer}`.
  *  `baton:contract` is raised from B-39 on, and the `route` answer arrives with the owner's
- *  re-route (B-38); until then each is refused by name rather than accepted and ignored. */
-export function checkDecisionAnswer(body: unknown): { decision: 'baton:retries' | 'baton:stalled'; answer: 'retry' | 'park' } {
+ *  re-route (B-38); until then each is refused by name rather than accepted and ignored. Any
+ *  other decision id is one a sync posted on the ticket (B-110): its answer is one of the
+ *  options the decision carries, checked against the stored decision by the route. */
+export function checkDecisionAnswer(body: unknown):
+  | { decision: 'baton:retries' | 'baton:stalled'; answer: 'retry' | 'park' }
+  | { decision: string; answer: string; posted: true } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
   for (const k of Object.keys(b)) if (!['decision', 'answer', 'leg'].includes(k)) bad(`body.${k}`, 'unknown field');
   if (b.decision === 'baton:contract') bad('decision', 'baton:contract is raised with leg contracts (B-39), not yet');
-  if (b.decision !== 'baton:retries' && b.decision !== 'baton:stalled') bad('decision', "must be 'baton:retries' or 'baton:stalled'");
+  if (typeof b.decision === 'string' && !b.decision.startsWith('baton:') && DECISION_ID.test(b.decision)) {
+    // B-110: a decision the ticket's sync posted — the owner's answer to the course's own
+    // question (create-pr's third failed review round), one of the decision's options.
+    if (typeof b.answer !== 'string' || !DECISION_OPTION.test(b.answer)) bad('answer', `must be one of the decision's options (${DECISION_OPTION})`);
+    if (b.leg !== undefined) bad('leg', 'only with the route answer');
+    return { decision: b.decision, answer: b.answer as string, posted: true };
+  }
+  if (b.decision !== 'baton:retries' && b.decision !== 'baton:stalled') bad('decision', "must be 'baton:retries', 'baton:stalled' or a decision the ticket's sync posted");
   if (b.answer === 'route') bad('answer', "route needs the owner's re-route (B-38), not yet: answer retry or park");
   if (b.answer !== 'retry' && b.answer !== 'park') bad('answer', "must be 'retry' or 'park'");
   if (b.leg !== undefined) bad('leg', 'only with the route answer');
@@ -719,6 +730,43 @@ export function checkOverride(body: unknown): { expedite?: boolean; hold?: boole
   if (b.expedite === undefined && b.hold === undefined) bad('body', 'names expedite or hold');
   return { expedite: b.expedite as boolean | undefined, hold: b.hold as boolean | undefined };
 }
+
+/** What `POST /v1/repositories/{repository}/attestations` reads of R-BTN-181's envelope (§14):
+ *  `{type, subject: {ticket}, value}`. B-7's slice takes `std:decision@1` alone — a person leg's
+ *  answer (R-BTN-116), the type `baton decision answer` writes (R-BTN-127); the attestation store
+ *  itself arrives with B-146, which widens this. */
+export interface AnswerAttestation {
+  type: string;
+  /** A qualified ticket id, or a local one of `repository`. */
+  ticket: string;
+  value: { id?: string; leg?: string; option: string; reached?: string; ref?: string; answered_by?: string; commit?: string };
+}
+
+export function checkAttestation(body: unknown, repository: string): AnswerAttestation {
+  if (!isObj(body)) bad('body', 'must be a JSON object');
+  const b = body as Record<string, unknown>;
+  for (const k of Object.keys(b)) if (!['type', 'subject', 'value'].includes(k)) bad(`body.${k}`, 'unknown field');
+  if (b.type !== DECISION_TYPE_NAME) bad('type', `must be ${DECISION_TYPE_NAME} — the one attestation Baton reads here (R-BTN-116); the rest arrive with B-146`);
+  if (!isObj(b.subject)) bad('subject', 'must be {ticket}');
+  else for (const k of Object.keys(b.subject)) if (k !== 'ticket') bad(`subject.${k}`, 'unknown field');
+  const raw = (b.subject as Record<string, unknown>).ticket;
+  if (typeof raw !== 'string' || !raw.length) bad('subject.ticket', 'must name the ticket');
+  const ticket = (raw as string).includes(':') ? raw as string : `${repository}:${raw as string}`;
+  if (!TICKET_ID.test(ticket) || repositoryOf(ticket) !== repository) bad('subject.ticket', `must be a ticket of ${repository}`);
+  if (!isObj(b.value)) bad('value', `must be a ${DECISION_TYPE_NAME} value`);
+  const v = b.value as Record<string, unknown>;
+  for (const k of Object.keys(v)) if (!['id', 'leg', 'option', 'reached', 'ref', 'answered_by', 'commit'].includes(k)) bad(`value.${k}`, 'unknown field');
+  if (typeof v.option !== 'string' || !v.option.length) bad('value.option', 'must name the option the person chose');
+  const str = (k: string) => {
+    if (v[k] !== undefined && (typeof v[k] !== 'string' || !(v[k] as string).length)) bad(`value.${k}`, 'must be a non-empty string');
+  };
+  str('id'); str('leg'); str('reached'); str('ref'); str('answered_by'); str('commit');
+  return { type: b.type as string, ticket, value: v as AnswerAttestation['value'] };
+}
+
+/** The one attestation type either side of the API reads (R-BTN-116; R-BTN-191's list arrives
+ *  with B-146): a person's answer to a person leg, `{id, leg, option, reached, ref?, …}`. */
+export const DECISION_TYPE_NAME = 'std:decision@1';
 
 // ── blocks, external resources and readings (§2g R-BTN-75–78, §2l R-BTN-101; R3-1251) ─────
 
@@ -739,6 +787,13 @@ export const USES_MAX = 64;
 export const READINGS_MAX = 50;
 export const NEEDS_MAX = 32;
 export const DECISIONS_MAX = 32;
+/** B-110: a posted decision's option id — what the owner answers (`merge`, `round`, …). */
+export const DECISION_OPTION = /^[a-z][a-z0-9-]{0,31}$/;
+/** B-110: a posted decision's options, at most this many, each granting at most this many runs. */
+export const DECISION_OPTIONS_MAX = 8;
+export const DECISION_GRANT_MAX = 10;
+/** B-110: a posted decision's question — one line of display text, rendered as text (§10.4). */
+export const DECISION_QUESTION = /^[^\u0000-\u001f\u007f]{1,200}$/;
 /** R-BTN-76, R-BTN-101: how long a reading may stay in force, in seconds, by who posts it. */
 export const VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600, admin_s: 7 * 24 * 3600 } as const;
 
