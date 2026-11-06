@@ -3,7 +3,7 @@ title: "B-17 — [OP] Baton dashboard design: iterate with Claude Design from th
 id: B-17
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-04
 repos:
   - baton
 tags:
@@ -15,7 +15,8 @@ description: "The owner takes docs/context/design-brief.mdx through Claude Desig
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/177
 depends_on: []
 ---
 
@@ -48,3 +49,14 @@ The brief exists, but no ticket takes it through a design to a dashboard that im
 - [ ] its implementation tickets filed
 
 ## Status
+
+_(2026-11-04: the implement leg cannot build this one — step 1 is the operator's. Run 1 released
+`cannot-finish:transient`; run 2 (claim `b9c6e0`) looked: no agreed design is linked from
+`docs/context/design-brief.mdx`, and the Do-not bars implementing or filing the design's tickets
+before the owner has agreed one, so the leg opened a note-only PR (in `prs:` below) and stopped.
+The `OP` tag sits without the `human-operator` `requires` it means (HOW-TICKETS-WORK), so Baton
+offered the ticket to a runner that cannot hold that capability — B-41's move of these forms
+should take it. Next: the owner iterates the brief with Claude Design and exports or links the
+agreed design here; a pickup then files the implementation tickets citing §11.4 and the design,
+each keeping §12.3 (`textContent`, no remote resource), and updates the brief with what the
+design settled.)_
