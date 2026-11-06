@@ -284,13 +284,20 @@ export class Notices {
    *  each already checked under §10.4 when the snapshot was accepted. Its answer unblocks its
    *  ticket. */
   private decisionView(ticket: string, decision: string) {
-    const d = this.rows<{ asks: string; url: string | null; title: string; repository_id: string; local_id: string }>(
-      `SELECT d.asks, d.url, t.title, t.repository_id, t.local_id FROM ticket_decisions d JOIN tickets t ON t.id = d.ticket_id
+    const d = this.rows<{ asks: string; url: string | null; question: string | null; options_json: string | null; title: string; repository_id: string; local_id: string }>(
+      `SELECT d.asks, d.url, d.question, d.options_json, t.title, t.repository_id, t.local_id FROM ticket_decisions d JOIN tickets t ON t.id = d.ticket_id
        WHERE d.ticket_id = ? AND d.decision_id = ?`, ticket, decision)[0];
     if (!d) return null;
+    // B-110: a posted decision's question and the options its answer may name (`baton owner
+    // resolve`), shown as text.
+    let options: string[] = [];
+    try {
+      options = d.options_json ? (JSON.parse(d.options_json) as { id: string }[]).map((o) => o.id) : [];
+    } catch { /* stored by Blocks.posted from a checked post: never malformed */ }
     return {
       repository: d.repository_id, ticket: qualify(d.repository_id, d.local_id), title: d.title,
-      decision: { id: decision, asks: d.asks, ...(d.url ? { url: d.url } : {}) }, unblocks: [qualify(d.repository_id, d.local_id)],
+      decision: { id: decision, asks: d.asks, ...(d.url ? { url: d.url } : {}), ...(d.question ? { question: d.question } : {}), ...(options.length ? { options } : {}) },
+      unblocks: [qualify(d.repository_id, d.local_id)],
     };
   }
 

@@ -48,6 +48,7 @@
 //   baton owner -i KEY courier add REPO --key PUB --asks owner[,…]      (R-BTN-80: a personal courier)
 //   baton owner -i KEY courier revoke REPO FINGERPRINT
 //   baton owner -i KEY resolve REPO TICKET baton:retries|baton:stalled retry|park   (R-BTN-78)
+//   baton owner -i KEY resolve REPO TICKET DECISION OPTION   — a sync-posted decision's answer (B-110: review-rounds-3 round)
 //   baton admin -i KEY repos                                         (B-90: the registry — one signed request, one JSON answer)
 //   baton owner -i KEY grants REPO                    (B-90: the repository's owners, grants and settings, and the bars in force)
 //   baton board -i KEY REPO                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
@@ -405,7 +406,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       const [repo, ticket, decision, answer] = positional;
       const local = need(ticket, 'the ticket');
       return { method: 'POST', path: `/v1/owner/${encodeURIComponent(need(repo, 'the repository id'))}/tickets/${encodeURIComponent(local.includes(':') ? local : `${repo}:${local}`)}/resolve`,
-        body: { decision: need(decision, 'the decision (baton:retries or baton:stalled)'), answer: need(answer, 'the answer (retry or park)') } };
+        body: { decision: need(decision, "the decision (baton:retries, baton:stalled or one the ticket's sync posted)"), answer: need(answer, "the answer (retry or park, or one of the posted decision's options)") } };
     }
     throw new Error('baton owner grants|grant|revoke|owners|bar|settings|courier|resolve');
   }

@@ -236,7 +236,10 @@ describe('R-BTN-78: Baton’s own decisions', () => {
     expect((await keyCall(owner, '/v1/owner/docs/tickets/A/resolve', { decision: 'baton:retries', answer: 'retry' })).json.code).toBe('not-found');
     expect((await keyCall(owner, '/v1/owner/docs/tickets/ops%3AA/resolve', { decision: 'baton:retries', answer: 'retry' })).json.code).toBe('invalid-params');
     expect(checkDecisionAnswer({ decision: 'baton:stalled', answer: 'park' })).toEqual({ decision: 'baton:stalled', answer: 'park' });
-    for (const bad of [null, {}, { decision: 'baton:contract', answer: 'retry' }, { decision: 'R3-1', answer: 'retry' }, { decision: 'baton:retries', answer: 'route', leg: 'fix' },
+    // B-110: any other decision id is a question the ticket's sync posted, answered with one of
+    // its options (checked against the stored question by the route); its answer is an option id.
+    expect(checkDecisionAnswer({ decision: 'R3-1', answer: 'retry' })).toEqual({ decision: 'R3-1', answer: 'retry', posted: true });
+    for (const bad of [null, {}, { decision: 'baton:contract', answer: 'retry' }, { decision: 'R3-1', answer: 'Not An Option' }, { decision: 'R3-1', answer: 'yes', leg: 'fix' }, { decision: 'baton:retries', answer: 'route', leg: 'fix' },
       { decision: 'baton:retries', answer: 'later' }, { decision: 'baton:retries', answer: 'retry', leg: 'fix' }, { decision: 'baton:retries', answer: 'retry', extra: 1 }]) {
       expect(() => checkDecisionAnswer(bad)).toThrow();
     }

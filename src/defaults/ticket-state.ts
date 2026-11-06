@@ -68,6 +68,15 @@ export type Exec = (
  * against 11 at today's 15-minute lease), pinned by test. */
 export const CLOSE_TIMEOUT_MS = 120_000;
 
+/** B-110: the bound on the `run-tests` gate's one `npm run <test_script>` — the deterministic
+ * script itself, never an agent. The run, like every leg's, is the leg's own process
+ * (`legProcess.mjs`), so the runner keeps beating while it waits: unlike the close's git, it is
+ * not under the lease's margin (round 1, finding 15 — the stub's own git reads run there too).
+ * What blocks the runner's loop is the gate's close alone, one bounded push per attempt, which
+ * CLOSE_TIMEOUT_MS's arithmetic (3 × CLOSE_TIMEOUT_MS under the margin) already covers, pinned by
+ * test. A course whose suite needs longer raises this in its own copy of the leg script. */
+export const RUN_TESTS_TIMEOUT_MS = 240_000;
+
 /** B-94: git's environment for every call the close and the runner's own git make —
  * non-interactive by construction, so a credential prompt or an ssh host-key question can never
  * wait on a terminal the runner does not have: no terminal prompt from git itself, and ssh in

@@ -420,7 +420,11 @@ export class BatonCore {
         if (req.method === 'POST' && url.pathname === '/v1/sync/observation') {
           const repo = (await this.verifySync(req, 'sync')).repo.id;
           // R-BTN-67: with the owner bars in force or scheduled for the repository, each with its course.
-          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b) });
+          // B-110: and Baton's own record a station function judges git against — the owner's
+          // answers to the sync's decisions, and the legs claims finished with an evidence
+          // pointer (the claim's nonce beside it) — so a marker in git counts only as the
+          // evidence Baton recorded, and an answer only as the owner gave it here.
+          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), ...this.claims.syncRecord(repo) });
         }
         if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
           const { repo, req: signed } = await this.verifySync(req, 'sync');

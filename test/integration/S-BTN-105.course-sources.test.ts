@@ -17,7 +17,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
-import { ORIGIN, rows, setClock, syncToken } from '../helpers';
+import { ORIGIN, register, rows, setClock, syncToken } from '../helpers';
 
 const T0 = Date.parse('2026-10-18T12:00:00Z');
 const ROOT = resolve(import.meta.dirname, '../..');
@@ -63,6 +63,22 @@ describe('S-BTN-105 a course from its source, one leg overridden', () => {
     expect(settings.courses[0].source).toMatch(new RegExp(`^github/[^/]+/[^/]+/${SHA}/create-pr$`));
     await sync();
     const at = async () => (await rows<{ station: string; next_leg: string | null }>('SELECT station, next_leg FROM ticket_stations WHERE ticket_id = ?', 'docs:T-1'))[0];
+    // The gate comes before every review round (B-110): with no marker on the head it is the
+    // gate that is ready, not the round.
+    expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'run-tests' });
+    // The gate stands green on the head — a Baton-Tests marker commit, the evidence a claim's
+    // run-tests leg recorded (B-110 round 1, finding 3) — and the round queues.
+    const work = 'c'.repeat(40);
+    const commits = [
+      { sha: work, at: T0, parent: null, empty: false, message: 'the work' },
+      { sha: 'a'.repeat(40), at: T0 + 30_000, parent: work, empty: true, message: `baton: tests green for T-1\n\nBaton-Tests: green\nBaton-Tested: ${work}\nBaton-Claim: n0` },
+    ];
+    const { id: worker } = await register('vm-a');
+    await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason) VALUES ('docs:T-1', ?, 'gate:n0', 'n0', '', 0, 'released', 1, 'released:requested')`, worker);
+    const [{ id: claim }] = await rows<{ id: number }>(`SELECT id FROM claims WHERE request_id = 'gate:n0'`);
+    await rows(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, to_station, started_at, started_observation, finished_at, evidence) VALUES (?, 1, 'run-tests', 'pr-open', 'pr-open', 0, 0, 1, ?)`, claim, 'a'.repeat(40));
+    writeFileSync(facts, JSON.stringify([{ number: 7, head: 'claude/T-1-x', state: 'open', pushedAt: T0 + 30_000, pushes: [T0, T0 + 30_000], checks: ['success'], reviews: [], commits }]));
+    await sync();
     expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'review' });
 
     // The repository's review: its own check, then the course's run with an agent that asks for changes.
@@ -94,7 +110,7 @@ export async function run(ctx, standard) {
       const body = readFileSync(join(bin, 'body'), 'utf8');
       expect(body.split('\n')[0]).toBe('<!-- baton:verdict changes -->');
       // The forge now carries that comment: the next sync reads it as the review's verdict.
-      writeFileSync(facts, JSON.stringify([{ number: 7, head: 'claude/T-1-x', state: 'open', pushedAt: T0, pushes: [T0], checks: ['success'], reviews: [{ author: 'baton', state: 'COMMENTED', submittedAt: T0 + 60_000, body }] }]));
+      writeFileSync(facts, JSON.stringify([{ number: 7, head: 'claude/T-1-x', state: 'open', pushedAt: T0, pushes: [T0], checks: ['success'], reviews: [{ author: 'baton', state: 'COMMENTED', submittedAt: T0 + 60_000, body }], commits }]));
     } finally {
       process.env.PATH = path;
       rmSync(bin, { recursive: true, force: true });

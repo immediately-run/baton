@@ -479,7 +479,7 @@ describe('baton repo init, through the built CLI', () => {
     expect(settings.agent_command).not.toMatch(/[<>|]/);
     expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'review', 'fix', 'adjudicate', 'merge'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -592,7 +592,7 @@ describe('baton repo init, through the built CLI', () => {
   it('each leg stub imports only Node built-ins, so a scratch copy runs as the runner loads it', async () => {
     // A stub and its instructions per leg (R-BTN-131); the runner and the kit read only the .mjs.
     const files = readdirSync(join(root, '.baton', 'courses', 'create-pr', 'legs')).sort();
-    const legNames = ['adjudicate', 'fix', 'implement', 'merge', 'review'];
+    const legNames = ['adjudicate', 'fix', 'implement', 'merge', 'review', 'run-tests'];
     expect(files).toEqual(legNames.flatMap((l) => [`${l}.md`, `${l}.mjs`]));
     const legs = files.filter((f) => f.endsWith('.mjs'));
     for (const leg of legs) {
@@ -631,7 +631,7 @@ describe('baton repo init, through the built CLI', () => {
       const ctx = { ticket: { id: 'A-1' }, checkout: root, snapshot };
       // An open PR on a branch the pattern maps to A-1: the stub returns its position.
       writeFileSync(answer, JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
-      expect(await stub.run(ctx)).toEqual({ reached: 'pr-open', next: 'review' });
+      expect(await stub.run(ctx)).toEqual({ reached: 'pr-open', next: 'run-tests' });
       // No such PR: the leg fails naming the pattern it looked for, not trusting exit 0 (B-81).
       writeFileSync(answer, '[]');
       await expect(stub.run(ctx)).rejects.toThrow('no open PR on a branch matching claude/A-1-* for ticket A-1 exists in the checkout’s repository');
@@ -646,6 +646,90 @@ describe('baton repo init, through the built CLI', () => {
       commitAll(root);
     }
   });
+
+  it('the run-tests stub runs the script itself on the PR branch\'s head — no agent anywhere — green advancing to review, red to fix naming the script and its last lines (B-110; round 1, findings 1, 14, 19)', async () => {
+    const g = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const origin = mkdtempSync(join(tmpdir(), 'baton-gate-origin-'));
+    const bin = mkdtempSync(join(tmpdir(), 'baton-gate-bin-'));
+    const courseFile = join(root, '.baton', 'courses', 'create-pr', 'course.json');
+    const courseBefore = readFileSync(courseFile, 'utf8');
+    const path = process.env.PATH;
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' });
+    g('remote', 'add', 'origin', origin);
+    const main = g('rev-parse', 'HEAD');
+    try {
+      g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      // The PR branch: a fixture gate that fails loudly while its marker file is absent.
+      g('checkout', '-q', '-b', 'claude/A-1-gate');
+      writeFileSync(join(root, 'gate.mjs'), 'import { existsSync } from "node:fs";\nimport { fileURLToPath } from "node:url";\nif (!existsSync(fileURLToPath(new URL("./gate.txt", import.meta.url)))) { console.error("the gate refuses"); process.exit(1); }\nconsole.log("the gate is green");\n');
+      writeFileSync(join(root, 'package.json'), `${JSON.stringify({ name: 'scaffold-gate', scripts: { test: 'node gate.mjs', verify: 'node gate.mjs' } }, null, 2)}\n`);
+      const tested = commitAll(root);
+      g('push', '-q', 'origin', 'HEAD:refs/heads/claude/A-1-gate');
+      // The home checkout sits on main, which has no gate at all: the stub must test the PR's head.
+      g('checkout', '-q', 'main');
+      const stub = await load(join(root, '.baton', 'courses', 'create-pr', 'legs', 'run-tests.mjs'));
+      const ctx = (station: string, sha = main) => ({ ticket: { id: 'A-1' }, checkout: root, snapshot: { sha }, claim: { station, nonce: 'n1' } });
+      // Red at pr-open — the implement → run-tests → fix edge: the station it ran from, fix
+      // queued, the script and its last lines named for the marker. No agent runs: the scaffold's
+      // agent_command is the real opencode command, and nothing of it executed.
+      const red = await stub.run(ctx('pr-open'));
+      expect(red).toMatchObject({ reached: 'pr-open', next: 'fix', tests: 'red', script: 'test', branch: 'claude/A-1-gate', tested });
+      expect(red.tail).toContain('npm run test exited 1; its last lines:');
+      expect(red.tail).toContain('the gate refuses');
+      // The marker: an empty-tree commit on the tested head, its trailers the gate's record and
+      // its red body naming the script (finding 19) — made without touching the home checkout.
+      expect(g('rev-parse', 'HEAD')).toBe(main);
+      expect(g('rev-parse', `${red.marker}^`)).toBe(tested);
+      expect(g('rev-parse', `${red.marker}^{tree}`)).toBe(g('rev-parse', `${tested}^{tree}`));
+      const message = g('show', '-s', '--format=%B', red.marker);
+      expect(message).toContain('npm run test exited 1');
+      expect(message).not.toContain('<the course');
+      expect(message.trim().split('\n').slice(-3)).toEqual(['Baton-Tests: red', `Baton-Tested: ${tested}`, 'Baton-Claim: n1']);
+      // The close pushes it to the branch it tested; its sha is the leg's evidence.
+      expect(stub.close(ctx('pr-open'), red)).toBe(red.marker);
+      expect(execFileSync('git', ['-C', origin, 'rev-parse', 'refs/heads/claude/A-1-gate'], { encoding: 'utf8' }).trim()).toBe(red.marker);
+      // The fix lands on the branch (after the marker): green at fixed, review queued.
+      g('fetch', '-q', 'origin');
+      g('checkout', '-q', '-B', 'claude/A-1-gate', 'origin/claude/A-1-gate');
+      writeFileSync(join(root, 'gate.txt'), 'ok\n');
+      const fixed = commitAll(root);
+      g('push', '-q', 'origin', 'HEAD:refs/heads/claude/A-1-gate');
+      g('checkout', '-q', 'main');
+      expect(await stub.run(ctx('fixed'))).toMatchObject({ reached: 'fixed', next: 'review', tests: 'green', tested: fixed });
+      // The course file at the snapshot names another script — `test_script`, default `test`.
+      writeFileSync(courseFile, `${JSON.stringify({ ...JSON.parse(courseBefore), test_script: 'verify' }, null, 2)}\n`);
+      const other = commitAll(root);
+      expect(await stub.run(ctx('fixed', other))).toMatchObject({ tests: 'green', script: 'verify' });
+      // Failures told apart (finding 14), through a stand-in npm on PATH: an exit is red, named;
+      // a kill the gate did not send, or npm that cannot start, is no verdict at all.
+      execFileSync('ln', ['-s', execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim(), join(bin, 'git')]);
+      process.env.PATH = bin;
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test could not run (ENOENT) — no verdict, no marker');
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho "two failed"\nexit 2\n');
+      chmodSync(join(bin, 'npm'), 0o755);
+      const exited = await stub.run(ctx('fixed'));
+      expect(exited).toMatchObject({ tests: 'red', next: 'fix' });
+      expect(exited.tail).toBe('npm run test exited 2; its last lines:\ntwo failed');
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\nkill -TERM $$\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test was killed by SIGTERM, which the gate did not send');
+      process.env.PATH = path;
+      // The gate runs only at its two stations, and only on a branch it can reach.
+      await expect(stub.run(ctx('reviewed'))).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not "reviewed"');
+      await expect(stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot: { sha: main } })).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not null');
+      await expect(stub.run({ ...ctx('pr-open'), ticket: { id: 'A-2' } })).rejects.toThrow('no branch matching claude/A-2-* in the home repository');
+      // No worktree is left behind.
+      expect(g('worktree', 'list').split('\n')).toHaveLength(1);
+    } finally {
+      process.env.PATH = path;
+      g('checkout', '-q', 'main');
+      g('reset', '-q', '--hard', main);
+      g('branch', '-q', '-D', 'claude/A-1-gate');
+      g('remote', 'remove', 'origin');
+      rmSync(origin, { recursive: true, force: true });
+      rmSync(bin, { recursive: true, force: true });
+      writeFileSync(courseFile, courseBefore);
+    }
+  }, 120_000);
 
   it('the stubs run the agent_command baton.json names at the claim’s snapshot, arguments and all; the review returns its verdict', async () => {
     const agent = join(root, 'agent.sh');
@@ -663,13 +747,21 @@ describe('baton repo init, through the built CLI', () => {
       process.env.VERDICT = 'changes';
       expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
       expect(readFileSync(join(root, 'agent.args'), 'utf8').trim()).toBe(`--flag A-1 review ${root}`);
+      // B-110 round 1, finding 6: the last round (the file's max_runs, 3) — or a fourth the owner
+      // granted — asking for changes queues the owner's adjudicate and suspends there, never a
+      // fix the owner did not ask for; earlier rounds still queue the fix.
+      expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, run: 2 })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
+      expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, run: 3 })).toEqual({ suspend: true, reached: 'reviewed', next: 'adjudicate', verdict: 'changes' });
+      expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, run: 4 })).toEqual({ suspend: true, reached: 'reviewed', next: 'adjudicate', verdict: 'changes' });
+      expect(decide({ suspend: true, reached: 'reviewed', next: 'adjudicate', verdict: 'changes' }, graphOf(CREATE_PR_COURSE), 'review', 'fixed')).toMatchObject({ kind: 'suspend', reached: 'reviewed', next: 'adjudicate' });
       process.env.VERDICT = 'approve';
       expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
+      expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, run: 3 })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
       process.env.VERDICT = 'maybe';
       await expect((await load(file)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).rejects.toThrow('no verdict');
       await expect((await load(file)).run({ ticket: { id: 'A-1' }, checkout: root })).rejects.toThrow('no snapshot');
-      // The fix stub queues review, the only leg leaving `fixed`.
-      expect(await (await load(join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs'))).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'review' });
+      // The fix stub queues the gate, whose green marker stands before every review round (B-110).
+      expect(await (await load(join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs'))).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'run-tests' });
     } finally {
       delete process.env.VERDICT;
       writeFileSync(settingsFile, before);
@@ -693,7 +785,7 @@ describe('baton repo init, through the built CLI', () => {
       const snapshot = { sha: commitAll(root) };
       process.env.BATON_AGENT_COMMAND = agent;
       try {
-        expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'review' });
+        expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'run-tests' });
         expect(readFileSync(args, 'utf8').trim()).toBe(`A-1 fix ${root}`);
       } finally {
         delete process.env.BATON_AGENT_COMMAND;
@@ -705,7 +797,7 @@ describe('baton repo init, through the built CLI', () => {
       const named = { sha: commitAll(root) };
       process.env.BATON_AGENT_COMMAND = '/nonexistent-baton-agent';
       try {
-        expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: named })).toEqual({ reached: 'fixed', next: 'review' });
+        expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: named })).toEqual({ reached: 'fixed', next: 'run-tests' });
         expect(readFileSync(args, 'utf8').trim()).toBe(`A-1 fix ${root}`);
       } finally {
         delete process.env.BATON_AGENT_COMMAND;
@@ -779,7 +871,7 @@ describe('baton repo init, through the built CLI', () => {
     try {
       writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: `${agent} --flag 'quoted arg'` }));
       const snapshot = { sha: commitAll(root) };
-      expect(await guard((await load(implement)).run({ ticket: { id: 'B-1' }, checkout: root, snapshot }))).toEqual({ reached: 'pr-open', next: 'review' });
+      expect(await guard((await load(implement)).run({ ticket: { id: 'B-1' }, checkout: root, snapshot }))).toEqual({ reached: 'pr-open', next: 'run-tests' });
       const facts = readFileSync(join(root, 'stdin.facts'), 'utf8');
       expect(facts).toContain('argc=5');
       expect(facts).toContain(`arg1=--flag\narg2=quoted arg\narg3=B-1\narg4=implement\narg5=${root}\n`);
@@ -897,7 +989,7 @@ describe('baton repo init, through the built CLI', () => {
       const snapshot = { sha: commitAll(root) };
       process.env.BATON_VERBOSE = '1';
       try {
-        expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'review' });
+        expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'run-tests' });
         expect(wrote.join('')).toContain('agent_command: ' + agent);
         expect(wrote.join('')).toContain('line one\n');
         expect(wrote.join('')).toContain('to stderr\n');
@@ -906,7 +998,7 @@ describe('baton repo init, through the built CLI', () => {
       }
       // Without the flag the streams are silent; the answer protocol is untouched either way.
       wrote.length = 0;
-      expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'review' });
+      expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'run-tests' });
       expect(wrote.join('')).not.toContain('line one');
       // A failing agent's last stderr line names why it died.
       writeFileSync(agent, '#!/bin/sh\necho "boom: no quota left" >&2\nexit 3\n');
@@ -1197,13 +1289,15 @@ describe('prClose', () => {
   it('adjudicate and conclude write the lines the station functions read; a missing adjudication throws', async () => {
     const changes = await posted('review', { verdict: 'changes' }, 10);
     const pr = (reviews: PrFact['reviews']): PrFact => ({ number: 7, head: 'claude/A-1-x', state: 'open', pushedAt: 1, pushes: [1, 20, 40], checks: ['success'], reviews });
-    // create-pr: three rounds of changes and two fixes spend the fixes; the adjudication places.
+    // create-pr: three rounds of changes spend the rounds. The adjudication line the close still
+    // writes is no answer there (B-110 round 1, finding 3): a line on the forge is anyone's to
+    // write, so the third round's blockers wait on the owner's answer through Baton.
     const rounds = [changes, await posted('review', { verdict: 'changes' }, 30), await posted('review', { verdict: 'changes' }, 50)];
-    for (const [answer, merge] of [['merge', 'ready'], ['owner', 'waiting']] as const) {
+    for (const answer of ['merge', 'owner'] as const) {
       const adjudicated = await posted('adjudicate', { adjudication: answer }, 60);
       expect(adjudicated.body.split('\n')[0]).toBe(`<!-- baton:adjudicated ${answer} -->`);
       const placed = stationsPr({ tickets: [ticketsMarkdown([{ path: 'tickets/a1.md', text: '---\nid: A-1\ntitle: A\n---\n' }]).tickets[0]], facts: [pr([...rounds, adjudicated])], closed: new Set(), graph: CREATE_PR_COURSE }).stations['A-1'];
-      expect(placed).toMatchObject({ station: 'adjudicated', next: [{ leg: 'merge', state: merge }] });
+      expect(placed).toMatchObject({ station: 'reviewed', next: [{ leg: 'adjudicate', state: 'waiting', waiting_on: 'owner' }] });
     }
     await expect(prClose({ checkout: '/co', ticket: { id: 'A-1' }, leg: 'adjudicate' }, { adjudication: 'maybe' }, () => '')).rejects.toThrow('neither merge nor owner');
     // review-pr: the conclusion line after a changes verdict ends the ticket at `concluded`.
@@ -1233,7 +1327,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     vi.unstubAllGlobals();
     calls.length = 0;
   });
-  const pr = (number: number, head: string, state: string, merged = false) => ({ number, head: { ref: head, sha: `s${number}` }, state, merged_at: merged ? '2026-10-01T00:00:00Z' : null });
+  const pr = (number: number, head: string, state: string, merged = false) => ({ number, head: { ref: head, sha: `s${number}` }, state, merged_at: merged ? '2026-10-01T00:00:00Z' : null, html_url: `https://github.com/o/r/pull/${number}` });
   const who = (author_association: string, body: string, at: string, login = 'x') => ({ user: { login }, author_association, body, created_at: at, submitted_at: at, state: 'COMMENTED' });
   /** R-BTN-139: what the forge says `login` may do in `repo` — the read that decides a verdict's author. */
   const may = (repo: string, login: string, permission: string) => ({ [`/repos/${repo}/collaborators/${login}/permission`]: { permission } });
@@ -1376,7 +1470,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
       '/repos/o/r/collaborators/x/permission', '/repos/o/r/collaborators/y/permission', 'graphql o/r 26,27,28,29,30']);
     expect(facts).toHaveLength(31);
     expect(facts[0]).toEqual({
-      number: 1, head: 'claude/A-1-x', state: 'open', repository: 'o/r',
+      number: 1, head: 'claude/A-1-x', state: 'open', repository: 'o/r', url: 'https://github.com/o/r/pull/1', commits: expect.any(Array),
       checks: ['success', 'timed_out', null], pushes: [Date.parse('2026-10-02T00:00:00Z')], pushedAt: Date.parse('2026-10-02T00:00:00Z'),
       reviews: [
         { author: 'x', state: 'APPROVED', submittedAt: Date.parse('2026-10-03T00:00:00Z'), body: '<!-- baton:verdict approve -->' },
@@ -1385,7 +1479,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     });
     // An owned PR with no checks, commits or reviews; an unowned PR from the list alone.
     expect(facts[1]).toMatchObject({ checks: [], pushes: [], pushedAt: 0, reviews: [] });
-    expect(facts[30]).toEqual({ number: 99, head: 'feature/other', state: 'open', pushedAt: 0, checks: [], reviews: [], repository: 'o/r' });
+    expect(facts[30]).toEqual({ number: 99, head: 'feature/other', state: 'open', pushedAt: 0, checks: [], reviews: [], repository: 'o/r', url: 'https://github.com/o/r/pull/99' });
   });
 
   it('reads over REST, in full, a connection that overflows its first page, and the checks of a head the batch read at another commit (B-35)', async () => {
@@ -1467,6 +1561,49 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     ]);
   });
 
+  it('reads the branch\'s commits from the same lists — trees, parents, messages — for the gate the station function counts against Baton\'s record (B-110)', async () => {
+    // The gate's markers live as empty-tree commits on the PR's branch; the adapter reads each
+    // commit's tree, first parent and message from the commits list it already reads, so the
+    // gate arrives with the PR facts. Which marker counts is the station function's: only the
+    // evidence Baton recorded for a run-tests leg of the ticket (round 1, finding 3).
+    const at = (s: string) => `2026-10-0${s}T00:00:00Z`;
+    const sha = (c: string) => c.repeat(40);
+    const commit = (c: string, parent: string | null, tree: string, message: string, day: string) => ({ sha: sha(c), parents: parent ? [{ sha: sha(parent) }] : [], commit: { message, tree: { sha: sha(tree) }, committer: { date: at(day) } } });
+    serve({
+      '/repos/o/r/pulls?state=all': [pr(1, 'claude/A-1-x', 'open')],
+      '/repos/o/r/pulls/1/commits': [
+        commit('a', null, '1', 'the work', '1'),
+        commit('b', 'a', '1', `baton: tests red for A-1\n\nnpm run test exited 1\n\nBaton-Tests: red\nBaton-Tested: ${sha('a')}\nBaton-Claim: n1`, '2'),
+        commit('c', 'b', '2', 'the fix', '3'),
+        commit('d', 'c', '2', `baton: tests green for A-1\n\nBaton-Tests: green\nBaton-Tested: ${sha('c')}\nBaton-Claim: n2`, '4'),
+        // A content commit carrying the trailers: a push, whatever it says (finding 18).
+        commit('e', 'd', '3', `sneaky\n\nBaton-Tests: green\nBaton-Tested: ${sha('d')}\nBaton-Claim: n2`, '5'),
+      ],
+      '/repos/o/r/pulls/1/reviews': [],
+      '/repos/o/r/issues/1/comments': [],
+      ...may('o/r', 'x', 'write'),
+    });
+    const [fact] = await githubFacts(dir, () => {}, () => true);
+    expect(fact.commits?.map((c) => [c.sha, c.parent, c.empty])).toEqual([
+      [sha('a'), null, false], [sha('b'), sha('a'), true], [sha('c'), sha('b'), false], [sha('d'), sha('c'), true], [sha('e'), sha('d'), false],
+    ]);
+    expect(fact.url).toBe('https://github.com/o/r/pull/1');
+    // The station function reads them back against Baton's record: the sneaky commit re-opened
+    // the gate the green marker closed.
+    const ticket = ticketsMarkdown([{ path: 'tickets/a1.md', text: '---\nid: A-1\ntitle: A\n---\n' }]).tickets[0];
+    const legs = [{ ticket: 'A-1', leg: 'run-tests', claim_nonce: 'n1', evidence: sha('b') }, { ticket: 'A-1', leg: 'run-tests', claim_nonce: 'n2', evidence: sha('d') }];
+    const placed = stationsPr({ tickets: [ticket], facts: [fact], closed: new Set(), graph: CREATE_PR_COURSE, baton: { legs } }).stations['A-1'];
+    expect(placed).toMatchObject({ station: 'fixed', next_leg: 'run-tests' });
+    // Without it, the green head reads green.
+    const clean = { ...fact, commits: fact.commits!.slice(0, 4) };
+    expect(stationsPr({ tickets: [ticket], facts: [clean], closed: new Set(), graph: CREATE_PR_COURSE, baton: { legs } }).stations['A-1']).toMatchObject({
+      station: 'fixed', next_leg: 'review', path: [
+        { leg: 'implement', reached: 'pr-open' }, { leg: 'run-tests', reached: 'pr-open' },
+        { leg: 'fix', reached: 'fixed' }, { leg: 'run-tests', reached: 'fixed' },
+      ],
+    });
+  });
+
   it('maps an answer in GitHub\'s GraphQL shape: runs across suites, a run not completed null, enums lowercased, a ghost author and untrusted authors dropped (B-35, B-119)', async () => {
     // Written to GitHub's public GraphQL schema, not built from the REST fixtures: the runs sit in
     // several check suites, one of them empty, and a deleted user is a null author.
@@ -1491,7 +1628,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     const [fact] = await githubFacts(dir, () => {}, () => true);
     // A deleted user's verdict cannot be asked of the forge, so it does not count (R-BTN-139).
     expect(fact).toEqual({
-      number: 4, head: 'claude/A-4-x', state: 'open', repository: 'o/r',
+      number: 4, head: 'claude/A-4-x', state: 'open', repository: 'o/r', url: 'https://github.com/o/r/pull/4', commits: expect.any(Array),
       checks: ['success', null, 'action_required'],
       pushes: [Date.parse('2026-10-07T10:00:00Z'), Date.parse('2026-10-07T09:00:00Z')], pushedAt: Date.parse('2026-10-07T10:00:00Z'),
       reviews: [
@@ -1719,8 +1856,10 @@ describe('course sources and leg overrides (B-33)', () => {
   it('--override seeds legs/<leg>.run.mjs calling the course’s own run; a leg the course lacks is refused before anything is written', () => {
     const seeded = readFileSync(join(legs(), 'review.run.mjs'), 'utf8');
     expect(seeded).toContain('export async function run(ctx, standard) {\n  return standard(ctx);\n}');
-    expect(seeded).toContain("{ reached: 'reviewed', next: answer === 'approve' ? 'merge' : 'fix', verdict: answer }");
-    expect(() => baton(root, 'repo', 'init', '--pin', PIN, '--override', 'deploy')).toThrow(/--override deploy: create-pr has no such leg — its legs are implement, review, fix, adjudicate, merge/);
+    // B-110 round 1: a changes verdict on the last round (the file's `max_runs`, or one the owner
+    // granted past it) queues the owner's adjudicate and suspends, never a fix.
+    expect(seeded).toContain("{ ...(answer !== 'approve' && (ctx.run ?? 1) >= 3 ? { suspend: true } : {}), reached: 'reviewed', next: answer === 'approve' ? 'merge' : (ctx.run ?? 1) >= 3 ? 'adjudicate' : 'fix', verdict: answer }");
+    expect(() => baton(root, 'repo', 'init', '--pin', PIN, '--override', 'deploy')).toThrow(/--override deploy: create-pr has no such leg — its legs are implement, run-tests, review, fix, adjudicate, merge/);
     expect(existsSync(join(legs(), 'deploy.run.mjs'))).toBe(false);
   });
 

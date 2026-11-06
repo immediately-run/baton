@@ -7,10 +7,13 @@
 // Node only: it spawns processes and drives the production seams with a real hanging git.
 import { afterAll, afterEach, describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { exec, closeTicket, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from '../../src/defaults/ticket-state';
+import { exec, closeTicket, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, RUN_TESTS_TIMEOUT_MS } from '../../src/defaults/ticket-state';
+import { testsClose } from '../../src/defaults/pr-close';
+import { testsStubSource } from '../../src/defaults/cli';
+import { builtIn } from '../../src/defaults/courses';
 import { git, GIT_TIMEOUT_MS } from '../../src/runner/home';
 import { BEAT_MS, Runner } from '../../src/runner/runner';
 import type { BatonApi } from '../../src/runner/api';
@@ -59,6 +62,29 @@ describe('the defaults’ close is bounded and non-interactive (B-94)', () => {
     // runner's loop is blocked for 3 × CLOSE_TIMEOUT_MS with no beat possible; the lease goes
     // at lease_timeout − 4 min (§9.2), 900 s at today's floor.
     expect(3 * CLOSE_TIMEOUT_MS).toBeLessThan(900_000 - 240_000);
+  });
+
+  it('the run-tests gate’s close is one bounded push, under the close’s own arithmetic; its script run is the leg’s own process (B-110 round 1, finding 15)', () => {
+    // The gate's script and the stub's own git reads run in the leg's process (legProcess.mjs),
+    // where the runner keeps beating; what blocks the runner's loop is the close alone — one
+    // git call per attempt, so its three attempts are 3 × CLOSE_TIMEOUT_MS, pinned above.
+    const calls: string[][] = [];
+    const sha = 'a'.repeat(40);
+    testsClose({ checkout: '/co', ticket: { id: 'A-1' }, leg: 'run-tests' }, { reached: 'pr-open', next: 'review', tests: 'green', branch: 'claude/A-1-x', tested: sha, marker: 'b'.repeat(40) }, (_cmd, args) => {
+      calls.push(args);
+      return '';
+    });
+    expect(calls).toEqual([['push', 'origin', `${'b'.repeat(40)}:refs/heads/claude/A-1-x`]]);
+    expect(3 * calls.length * CLOSE_TIMEOUT_MS).toBeLessThan(900_000 - 240_000);
+    // The generated stub carries the gate's bound by name, and bounds its own git and npm the
+    // way B-94 bounds every child: SIGKILL at the bound, stdin never an open pipe, no prompt.
+    expect(RUN_TESTS_TIMEOUT_MS).toBeGreaterThan(0);
+    const stub = testsStubSource(builtIn('create-pr')!, 'create-pr', 'run-tests');
+    expect(stub).toContain(`const RUN_TESTS_TIMEOUT_MS = ${RUN_TESTS_TIMEOUT_MS};`);
+    expect(stub).toContain(`const GIT_BOUND_MS = ${CLOSE_TIMEOUT_MS}`);
+    expect(stub).toContain("stdio: ['ignore', 'pipe', 'pipe']"); // stdin never an open pipe (B-84)
+    expect(stub).toContain("killSignal: 'SIGKILL'");
+    expect(stub).toContain('GIT_TERMINAL_PROMPT');
   });
 
   it('the environment is merged in at the real seams, not only named (round 2: a probe sees it)', () => {
