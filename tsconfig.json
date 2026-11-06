@@ -55,7 +55,6 @@
     "test/unit/standard-courses.test.ts",
     "test/unit/ticket-state.test.ts",
     "test/unit/bounded-git.test.ts",
-    "test/unit/pr-markers.test.ts",
     "test/unit/tickets-check.test.ts",
     "test/unit/spec-files.test.ts",
     "test/unit/tickets-commands.test.ts",
@@ -75,6 +74,7 @@
     "test/integration/S-BTN-156.sync-key.test.ts",
     "test/integration/S-BTN-157.busy-sync.test.ts",
     "test/integration/S-BTN-159.quiet-start.test.ts",
+    "test/integration/S-BTN-201.short-wait-alive.test.ts",
     "test/unit/seed-owners-fresh.test.ts",
     "test/unit/cloud-runner.test.ts"
   ]
