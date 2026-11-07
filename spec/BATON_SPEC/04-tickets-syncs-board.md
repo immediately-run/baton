@@ -421,10 +421,18 @@ live solely in Baton, and both are exportable (R-BTN-88).
                display: { status?, group?, project? },           -- shown; core reads project and status only (R-BTN-33)
                handoff_url?,                                     -- R-BTN-24
                question?: { id, url?, severity?, options?: [{ id, reached }] },  -- the queued person leg's, R-BTN-116
+               brief?: { signed, signer?, commit },              -- B-127: whose words the brief is
                bars: { <leg>: [<tag>] },                         -- R-BTN-60
                course: <opaque> }],
   closed:   [{ id, as: 'done' | 'withdrawn' }],                  -- tickets that left the board
   attestations: [{ type, ticket, ref?, value }],                 -- the sync's attestations, this run's observation (R-BTN-191)
+  control?: { keys: [<fingerprint>],                             -- B-127: what the sync verified with
+              groups: { agent_command, overrides, rank }:        --   each {read, key, unsigned}: the
+                                                                 --   commit a runner loads from (null: no
+                                                                 --   signed version; key null: the
+                                                                 --   pre-adoption baseline), its signing
+                                                                 --   key, the unsigned changes left behind
+              unsigned: [{ path, commits, fields? }] },          --   the notice's list (fields: EXPEDITE)
   course_data: { <course>: <opaque> } }
 ```
 
@@ -435,6 +443,17 @@ live solely in Baton, and both are exportable (R-BTN-88).
   posted; Baton derives them from the run's attestations (R-BTN-10).
 - `requires` arrives expanded to capabilities (`none` or no clause is `[]`). `repos` are forge
   paths on the home's forge host (R-BTN-92), resolved by the sync from short names.
+- **B-127's marks and record.** Each ticket's `brief` — `{signed, signer?, commit}`, marked
+  whether or not the repository requires signed control — is stored with the ticket and served
+  with the claim answer, so a privileged session's first sight of a brief is whose words it is;
+  an unsigned one is a claim, not the owner (the standing harness rule). The post's `control`
+  record stands for the repository, and a post that moves the head onto unsigned control inputs
+  while the repository requires them signed raises one `unsigned-control` event under Needs you,
+  naming the paths and the commits; the claim answers carry the record with the repository's own
+  setting and owner keys, and every runner verifies the named commits' signatures before loading
+  them (R-BTN-133). The sync computes both where the git objects are, with the owner keys served
+  by the observation (never read from the repository it is judging); B-137 moves the
+  verification server-side over the raw commits.
 - Every ticket with a ready leg is ranked, a suspended one included.
 - A `question` is stored only for a ticket whose queued leg is a person leg (R-BTN-116); any
   other is dropped and logged `question-dropped`.

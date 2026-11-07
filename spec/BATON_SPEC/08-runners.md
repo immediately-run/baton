@@ -371,6 +371,17 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     `--against <sha>`.
 - **R-BTN-133 (a leg runs in a read-only checkout of its commit).** R-BTN-143 runs first; an
   off-branch sha is never checked out or installed.
+  - **Owner-signed control** (B-127, R-BTN-66 as amended): where the repository requires signed
+    control, the claim answer's `control` names, per group, the commit a runner loads
+    `agent_command` (with `agent_wrapper`, both in `.baton/baton.json`), the overrides
+    (`legs/<leg>.run.mjs`) and `rank.mjs` (R-BTN-98) from. The runner verifies each named
+    commit's `git`-namespace SSHSIG (R-BTN-13) against the owner keys the answer carries —
+    Baton's own, never the post's choice — before loading anything, and refuses the claim
+    (`released:cannot-finish:spec`, fail closed) when a named commit does not verify or a group
+    has no signed version; a post that lied about a signature changes what a runner refuses,
+    not what it runs. A group naming no signing key is the pre-adoption baseline and gates
+    nothing. An unsigned change to a group keeps the last owner-signed version in force: the
+    legs read that group at the named commit, never the snapshot's newer bytes.
   - **Leg trees** are sparse, detached, non-cone git worktrees: the home repository at
     `snapshot_sha` with only `/.baton/` (`ctx.snapshot.tree`), and, for a sourced course, the
     source repository at its commit with only the course directory (R-BTN-134). The course

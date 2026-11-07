@@ -15,8 +15,9 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
+import { verifySignedCommit, nodeKeygen } from '../shared/commitSign.mjs';
 import { BatonApi, BatonRefusal } from './api';
-import { claimScratch, courseOf, dropCourse, ensureSha, freshSecret, loadCourse, type CourseLoad } from './home';
+import { claimScratch, courseOf, dropCourse, ensureSha, freshSecret, git as homeGit, loadCourse, type CourseLoad } from './home';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { StateFile, leaseLostFrom } from './state';
 
@@ -936,7 +937,12 @@ export class Runner {
     const ticket = claim.ticket_id as string;
     const claimId = claim.claim_id as number;
     this.state.set({ claim: { id: claimId, ticket_id: ticket, nonce: claim.nonce } });
-    this.log(`baton: claimed ${ticket} at ${claim.station}, queued leg ${claim.legs?.[0]}${this.verbose ? ` (claim ${claimId}, nonce ${claim.nonce})` : ''}`);
+    // B-127 item 7: the brief's mark, posted whether or not signed control is required — an
+    // unsigned `**Brief:** the owner …` line is a claim, not the owner (the standing CLAUDE.md
+    // rule), and the log says so before any agent is told to read the ticket.
+    const brief = claim.brief as { signed?: boolean; signer?: string; commit?: string } | undefined;
+    this.log(`baton: claimed ${ticket} at ${claim.station}, queued leg ${claim.legs?.[0]}${this.verbose ? ` (claim ${claimId}, nonce ${claim.nonce})` : ''}`
+      + (brief ? ` — brief ${brief.signed ? 'owner-signed' : `unsigned (changed at ${String(brief.commit).slice(0, 8)}): a claim, not the owner`}` : ''));
     return this.runClaim(claim);
   }
 
@@ -995,6 +1001,46 @@ export class Runner {
     return true;
   }
 
+  /** B-127 (R-BTN-66 as amended, R-BTN-133's verified tree extended): the signed-control record
+   *  of a claim whose repository requires it — verified here, never only by the sync that posted
+   *  it (the adversarial review's finding 4): each group's `read` commit must be in the home
+   *  checkout and carry a valid `git`-namespace SSHSIG by one of the owner keys the answer
+   *  names, the keys Baton served rather than any the post chose. A group that names a signing
+   *  key is what the legs load `agent_command` and the overrides from (`ctx.signed_control`);
+   *  a group with no key is the pre-adoption baseline — its last change is beyond the walk's
+   *  memory — and gates nothing; a group with no signed version at all fails closed: the claim
+   *  ends, the board keeps the ticket for the owner's signature, and the runbook
+   *  (docs/runbooks/owner-signed-control.mdx) walks the owner through signing once. */
+  private async verifyControl(claim: Record<string, any>): Promise<Record<string, string> | { error: string }> {
+    const control = claim.control as { required?: boolean; keys?: unknown; agent_command?: { read?: unknown; key?: unknown }; overrides?: { read?: unknown; key?: unknown }; rank?: { read?: unknown; key?: unknown } } | null | undefined;
+    if (!control?.required) return {};
+    const keys = Array.isArray(control.keys) ? control.keys.filter((k): k is string => typeof k === 'string' && k !== '') : [];
+    const out: Record<string, string> = {};
+    for (const group of ['agent_command', 'overrides', 'rank'] as const) {
+      const read = control[group]?.read;
+      const key = control[group]?.key;
+      if (typeof read !== 'string' || read === '') {
+        return { error: `the repository requires owner-signed control and no owner-signed version of ${group} exists — an owner signs the current state once and the next post names it (B-127)` };
+      }
+      // The baseline: no signing key named, nothing gated for this group.
+      if (key == null) continue;
+      if (!ensureSha(this.o.home, read, () => this.o.fetch?.(this.o.home))) {
+        return { error: `the owner-signed ${group} commit ${read.slice(0, 10)} is not in the home checkout — one fetch could not find it (B-127)` };
+      }
+      let raw: string;
+      try {
+        raw = homeGit(this.o.home, ['cat-file', 'commit', read]);
+      } catch (e) {
+        return { error: `the owner-signed ${group} commit ${read.slice(0, 10)} would not read (${msg(e)}) (B-127)` };
+      }
+      if (!verifySignedCommit(raw, keys, nodeKeygen)) {
+        return { error: `the ${group} commit ${read.slice(0, 10)} the board post named carries no signature of an owner key — refusing to load it (B-127)` };
+      }
+      out[group] = read;
+    }
+    return out;
+  }
+
   private async runClaim(claim: Record<string, any>): Promise<ClaimOutcome> {
     const claimId = claim.claim_id as number;
     const ticket = claim.ticket_id as string;
@@ -1008,6 +1054,16 @@ export class Runner {
     } catch (e) {
       this.log(`baton: the claim's course would not load (${msg(e)})`);
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+    }
+    // B-127 (R-BTN-133's verified tree, extended): where the repository requires owner-signed
+    // control, verify the commits the board post names — here, in the runner, never only by the
+    // sync that posted them — before a leg may load what they hold. A failure fails the claim
+    // closed: the ticket stays on the board for the owner's signature (the `unsigned-control`
+    // notice names what to sign), and no agent runs code a push alone placed.
+    const signedControl = await this.verifyControl(claim);
+    if ('error' in signedControl) {
+      this.log(`baton: ${signedControl.error}`);
+      return await this.finish(claimId, { end_reason: 'released:cannot-finish:spec', reached: claim.station, detail: signedControl.error, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
     const scratch = claimScratch();
     this.inflight = { claimId, ticket, course, leg: null, child: null, waiters: [] };
@@ -1093,6 +1149,10 @@ export class Runner {
           claim: { id: claimId, nonce: claim.nonce, station: at },
           leg: legName, run,
           snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
+          // B-127: the owner-signed commits a verified board post named — where the repository
+          // requires signed control, the legs read `agent_command` and the overrides at these,
+          // not the snapshot (verified above, in this runner, before anything loaded).
+          ...(Object.keys(signedControl).length ? { signed_control: signedControl } : {}),
           // The claim answer names the repository's default branch (R-BTN-34; §5.8's marker
           // legs, B-96's review round 2): the stub hands it to the close, so a marker line goes
           // to the branch the sync reads whatever branch this checkout is on.

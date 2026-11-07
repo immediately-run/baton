@@ -98,6 +98,8 @@ interface ItemFacts {
   rank: number | null;
   /** Where the head snapshot places it, or null when it places it nowhere. */
   station: { station: string; path: Step[]; next_leg: string | null; to_end: number; handoff_url: string | null } | null;
+  /** B-127 item 7: the brief's mark, when the sync posted one. */
+  brief?: { signed: boolean; signer?: string; commit: string };
 }
 
 /** A row of the candidate query (§7.2). */
@@ -380,8 +382,8 @@ export class Claims {
 
   /** A ticket's filter fields and where the head snapshot places it (R-BTN-33, R-BTN-70). */
   private item(id: string): ItemFacts | null {
-    const r = this.rows<{ id: string; repository_id: string; course_id: string; path: string; tier: string | null; requires_clause: string; operator_only: number; rank: number | null; expedite: number }>(
-      'SELECT id, repository_id, course_id, path, tier, requires_clause, operator_only, rank, expedite FROM tickets WHERE id = ?', id)[0];
+    const r = this.rows<{ id: string; repository_id: string; course_id: string; path: string; tier: string | null; requires_clause: string; operator_only: number; rank: number | null; expedite: number; brief: string | null }>(
+      'SELECT id, repository_id, course_id, path, tier, requires_clause, operator_only, rank, expedite, brief FROM tickets WHERE id = ?', id)[0];
     if (!r) return null;
     const requires = r.requires_clause === 'listed'
       ? this.rows<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ? ORDER BY name', id).map((x) => x.name)
@@ -392,6 +394,8 @@ export class Claims {
       id: r.id, repository: r.repository_id, course: r.course_id, path: r.path, tier: r.tier, requires, operator_only: !!r.operator_only, rank: r.rank,
       expedite: !!r.expedite || !!this.override(id)?.expedite,
       station: s ? { station: s.station, path: JSON.parse(s.path) as Step[], next_leg: s.next_leg, to_end: s.to_end, handoff_url: s.handoff_url } : null,
+      // B-127 item 7: the brief's mark, served with the ticket wherever its facts are read.
+      ...(r.brief ? { brief: JSON.parse(r.brief) as { signed: boolean; signer?: string; commit: string } } : {}),
     };
   }
 
@@ -885,7 +889,9 @@ export class Claims {
    *  home declares and needs this to load the claim's one), its queued leg, the latest snapshot's
    *  next legs, its hand-off document, its path and the snapshot the claim was decided on — never
    *  its content — and the earlier attempts, newest first, each with its resume record and the legs
-   *  it ran (§6.11, R-BTN-24). */
+   *  it ran (§6.11, R-BTN-24). B-127 adds two readings beside them: the ticket's brief mark, and —
+   *  while the repository requires signed control — the record of what counts, with the owner
+   *  keys a runner verifies the named commits against itself. */
   private claimResponse(id: number) {
     const c = this.rows<{ id: number; ticket_id: string; nonce: string; snapshot_sha: string; station: string; offered_leg: string | null; advice_json: string | null; course_id: string | null }>(
       'SELECT id, ticket_id, nonce, snapshot_sha, station, offered_leg, advice_json, course_id FROM claims WHERE id = ?', id)[0];
@@ -907,10 +913,18 @@ export class Claims {
     const repo = repositoryOf(c.ticket_id);
     const policy = this.c.policies?.hashesFor(repo) ?? null;
     const legState = this.c.policies?.current(repo) && this.c.forgeOf ? legStateOf(this.c.policies.current(repo)!.policy, this.c.forgeOf(repo)) : null;
+    // B-127: the brief's mark (item 7 — marked whether or not signed control is required), and,
+    // while the repository requires it, the signed-control record the runners load from and
+    // verify. `control.required` is Baton's own setting — never the post's word — and its keys
+    // are the repository's owner signing keys, so a runner that trusts the record still checks
+    // the signatures against keys the post did not choose.
+    const briefRow = this.rows<{ brief: string | null }>('SELECT brief FROM tickets WHERE id = ?', c.ticket_id)[0];
+    const brief = briefRow?.brief ? JSON.parse(briefRow.brief) as { signed: boolean; signer?: string; commit: string } : null;
     return {
       claim_id: c.id, ticket_id: c.ticket_id, course_id: c.course_id, course_version: courseVersion,
       ...(policy ? { policy_hash: policy.policy_hash, guarantees_hash: policy.guarantees_hash, floors_hash: policy.floors_hash } : {}),
       ...(legState ? { leg_state: legState } : {}),
+      ...(brief ? { brief } : {}),
       station: c.station, legs: c.offered_leg ? [c.offered_leg] : [], next: this.nextLegs(c.ticket_id, c.station),
       ...(handoff ? { handoff_url: handoff } : {}), path, nonce: c.nonce, snapshot_sha: c.snapshot_sha,
       ...(defaultBranch ? { default_branch: defaultBranch } : {}),

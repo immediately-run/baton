@@ -26,7 +26,7 @@ await build({
   logLevel: 'warning',
 });
 
-export const { initMain, parseSyncArgs, syncMain, prebuildDefaults, remoteSlug } = await import(pathToFileURL(OUT).href);
+export const { initMain, parseSyncArgs, syncMain, prebuildDefaults, remoteSlug, verifyConfigMain } = await import(pathToFileURL(OUT).href);
 
 /** One command module bundled the same way. Each bundle is this run's own — another process
  *  builds its own — and it is deleted once loaded, before the child's imports run. */

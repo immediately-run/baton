@@ -521,7 +521,10 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
 - **R-BTN-12 (expedite and hold).** A ticket is expedited when its snapshot carries `EXPEDITE`
   or its override says so; the override stays until an owner clears it, whatever later snapshots
-  show, and the mirror writes the tag (§16).
+  show, and the mirror writes the tag (§16). Under `require_signed_control` (B-127, R-BTN-66)
+  the tag is a control input: it counts only when the commit that last changed it is
+  owner-signed, and the sync posts the tag's last signed state — an `EXPEDITE` a push alone
+  added does not expedite, and the notice names it.
   - A **hold** means "do not hand this ticket out" (rule 3), with `hold_reason` `owner`,
     `mcp:<name>`, `parked` (R-BTN-163), `attempts-exhausted`, `non-retryable:<class>`,
     `blocked-exhausted` (R-BTN-122, R-BTN-126), or `outbox-refused` (R-BTN-171). A cancellation

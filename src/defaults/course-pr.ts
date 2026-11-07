@@ -356,6 +356,12 @@ export interface BatonRecord {
    *  the third round refused, its verdict a round apart from the one before it. */
   answers?: { ticket: string; decision: string; answer: string; answered_at?: number }[];
   legs?: RecordedLeg[];
+  /** B-127: the repository's owner signing keys, as the observation serves them — what the
+   *  sync verifies signed control with (null: the repository has none, so nothing is marked). */
+  signing_keys?: { public_key: string; fingerprint: string }[] | null;
+  /** B-127: whether the repository requires signed control — the sync drops an EXPEDITE whose
+   *  last change is unsigned only while this is on (the marks and the record post either way). */
+  require_signed_control?: boolean;
 }
 
 /** The gate's reading of one ticket's PRs (B-110): the run-tests gate's state, the counted

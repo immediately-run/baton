@@ -33,6 +33,9 @@ import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from '
 import { mergeOntology } from './ontologyMerge';
 import { readItems } from './read-items';
 import { parseFrontmatter, ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
+import { marksOf, signedControlOf, unsignedAgentConfig } from './signed-control';
+import { nodeKeygen } from '../shared/commitSign.mjs';
+import type { PostedControl } from '../core/board';
 import { readTicketSettings } from './tickets-config';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 
@@ -409,8 +412,34 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     });
   }
   const status = new Map(result.tickets.map((t) => [t.id, t.display?.status ?? 'live']));
+  // B-127 (R-BTN-66 as amended): what counts when a repository's control inputs must be
+  // owner-signed. The owner keys come from Baton's observation — never the repository being
+  // judged — and the walks read the checkout's git where the objects are. The marks post
+  // whether or not the setting is on (item 7); an EXPEDITE whose last change is unsigned is
+  // dropped only while it is (item 1), and named in the record either way; the record's groups
+  // name the commits a runner loads `agent_command`, overrides and `rank.mjs` from, each runner
+  // verifying them again before loading. A failure to read git is a failed sync, never a
+  // half-marked board.
+  let controlField: { control?: PostedControl } = {};
+  const signingKeys = record?.signing_keys ?? [];
+  if (signingKeys.length) {
+    const gitOf = (...a: string[]): string => git(root, ...a);
+    const head = gitOf('rev-parse', 'HEAD');
+    const found = signedControlOf(head, signingKeys, gitOf, nodeKeygen);
+    const marks = marksOf(head, signingKeys, result.tickets.map((t) => t.path), gitOf, nodeKeygen);
+    for (const t of result.tickets) {
+      const mark = marks.briefs.get(t.path);
+      if (mark) t.brief = mark.signed && mark.signer != null ? { signed: true, signer: mark.signer, commit: mark.commit } : { signed: false, commit: mark.commit };
+      const unsignedExpedite = marks.expedite.get(t.path);
+      if (unsignedExpedite != null && t.expedite) {
+        found?.unsigned.push({ path: t.path, commits: [unsignedExpedite], fields: ['EXPEDITE'] });
+        if (record?.require_signed_control) t.expedite = false;
+      }
+    }
+    if (found) controlField = { control: { keys: signingKeys.map((k) => k.fingerprint), groups: found.groups, unsigned: found.unsigned } };
+  }
   return {
-    payload: { registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...ontologyField },
+    payload: { registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...ontologyField, ...controlField },
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };
 }
@@ -555,6 +584,45 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
  * S-BTN-13 drive): the observation number first, then — with `--latest` — the current default
  * branch fetched and checked out, then the board read from the checkout, the head read and the
  * ancestry decided; a lost race takes a new number and reads again, once. */
+/** `baton owner -i KEY verify-config REPO [--checkout DIR]` (B-127 item 1): the verifier for
+ *  the agent-configuration half — the paths Baton cannot gate, because a harness loads them
+ *  wherever they sit and a check kept in the repository is rewritten by the push it guards. The
+ *  owner installs it outside the repository (a user-level SessionStart hook, or the environment's
+ *  setup script; the runbook shows both), so it reads the repository's owner signing keys from
+ *  Baton with the key `-i` names and refuses — exit 1, naming every path and commit — when the
+ *  checkout's agent configuration was last changed in a commit no owner key signed. A privileged
+ *  session that refuses to open is this command's exit code in the owner's settings; Baton's own
+ *  part is the notice, which names the same paths for every reader of the board. */
+export async function verifyConfigMain(argv: string[], io: { keys: { public_key: string; fingerprint: string }[]; log?: (l: string) => void }): Promise<number> {
+  const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
+  const positional: string[] = [];
+  let checkout = '.';
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--checkout') {
+      const v = argv[++i];
+      if (v === undefined) throw new Error('--checkout needs a value');
+      checkout = v;
+    } else if (a.startsWith('--')) throw new Error(`${a}: not a flag of this command`);
+    else positional.push(a);
+  }
+  if (!positional.length) throw new Error('baton owner -i KEY verify-config REPOSITORY [--checkout DIR]');
+  if (!io.keys.length) {
+    log(`baton: ${positional[0]} has no owner signing keys registered as human-only (BATON_HUMAN_KEYS or /v1/human-keys, then \`baton owner owners\`) — nothing can be owner-signed, and the check cannot pass (B-127)`);
+    return 1;
+  }
+  const gitOf = (...a: string[]): string => git(checkout, ...a);
+  const head = gitOf('rev-parse', 'HEAD');
+  const unsigned = unsignedAgentConfig(head, io.keys, gitOf, nodeKeygen);
+  if (!unsigned.length) {
+    log(`baton: ${checkout}'s agent configuration at ${head.slice(0, 10)} was last changed in owner-signed commits (B-127)`);
+    return 0;
+  }
+  for (const u of unsigned) log(`baton: ${u.path} was last changed by unsigned commit ${u.commit.slice(0, 10)} (B-127)`);
+  log(`baton: ${unsigned.length} agent-configuration ${unsigned.length === 1 ? 'path' : 'paths'} of ${checkout} last changed in commits no owner key signed — refusing to open a privileged session on it`);
+  return 1;
+}
+
 export async function syncMain(args: SyncArgs): Promise<number> {
   const log = args.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   const root = args.root;
@@ -575,7 +643,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
     // evidence pointer — read after the number like everything else this run posts.
     observe: () => asResult(async () => {
       const o = await api.observation();
-      record = { answers: Array.isArray(o.answers) ? o.answers : [], legs: Array.isArray(o.legs) ? o.legs : [] };
+      record = { answers: Array.isArray(o.answers) ? o.answers : [], legs: Array.isArray(o.legs) ? o.legs : [], signing_keys: Array.isArray(o.signing_keys) ? o.signing_keys : [], require_signed_control: o.require_signed_control === true };
       return o;
     }),
     // Everything posted under a number is read after it (§7.1 steps 1–2): the commit and the board.
@@ -1025,17 +1093,22 @@ import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-ver
 // open PR on a branch this course's branch patterns map to the ticket, its head pushed; where
 // it cannot verify, the leg fails naming what it looked for.` : ''}
 // The repository may replace this leg's run, never its close: \`${leg}.run.mjs\` beside this file
-// (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131).
+// (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131) — or, where the
+// repository requires owner-signed control (B-127), at the signed commit the claim's
+// \`ctx.signed_control.overrides\` names: an unsigned change to an override keeps the last
+// owner-signed version in force, and the runner verified that commit's signature before naming
+// it. Both read the checkout's object store, so any commit the claim can name, the stub can read.
 export async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
+  const readSha = typeof ctx.signed_control?.overrides === 'string' && ctx.signed_control.overrides !== '' ? ctx.signed_control.overrides : sha;
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
   // As with the instructions below: only an empty listing means there is no override.
-  if (gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() === '') return standard(ctx);
+  if (gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', readSha, '--', rel]).trim() === '') return standard(ctx);
   const dir = mkdtempSync(join(tmpdir(), 'baton-override-'));
   try {
     const file = join(dir, ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)});
-    writeFileSync(file, gitRun('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }));
+    writeFileSync(file, gitRun('git', ['-C', ctx.checkout, 'show', readSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }));
     const mod = await import(pathToFileURL(file).href);
     if (typeof mod.run !== 'function') throw new Error(rel + ' exports no run(ctx, standard)');
     return await mod.run(ctx, standard);
@@ -1047,7 +1120,12 @@ export async function run(ctx) {
 async function standard(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
-  const show = (rel) => gitRun('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} });
+  // B-127: where the repository requires owner-signed control, \`agent_command\` and
+  // \`agent_wrapper\` are read at the signed commit \`ctx.signed_control.agent_command\` names —
+  // the last owner-signed version of \`.baton/baton.json\`, whose signature the runner verified —
+  // so an unsigned change to the settings never picks the agent every leg runs.
+  const settingsSha = typeof ctx.signed_control?.agent_command === 'string' && ctx.signed_control.agent_command !== '' ? ctx.signed_control.agent_command : sha;
+  const show = (rel) => gitRun('git', ['-C', ctx.checkout, 'show', settingsSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} });
   const settings = JSON.parse(show('.baton/baton.json'));
   // B-83: the snapshot's settings stay authoritative; BATON_AGENT_COMMAND — the harness command
   // \`baton run --harness\` chose — fills their absence, never overrides their choice.
