@@ -683,10 +683,11 @@ export function pageFinding(root: string, settings: TicketSettings): { path: str
  *  PR's own description says "status-only" — CHECKS that claim against the computation, and a
  *  mismatch is a finding: the label is the check's, never the description's (B-133).
  *  `--forge FILE` — built by CI from the forge API — adds the forge's reading of each commit
- *  (the accounts behind author and committer, signature verification) beside git's, which is
- *  labelled as git's: anyone sets an author or committer (B-126). One `path: message` line
- *  each, then the count; exit 1 with a finding, 0 without; `--quiet` keeps stdout for the
- *  exit code alone. */
+ *  (the accounts the commit's author and committer emails map to — email-derived, steered by
+ *  the commit's writer exactly as git's own names are, and labelled as such — and the signature
+ *  verification) beside git's, which is labelled as git's: anyone sets an author or committer
+ *  (B-126). One `path: message` line each, then the count; exit 1 with a finding, 0 without;
+ *  `--quiet` keeps stdout for the exit code alone. */
 export async function ticketsCheckMain(argv: string[], io: TicketsIo = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   let root = io.root ?? process.env.BATON_HOME ?? process.cwd();
@@ -758,15 +759,32 @@ function ticketPrFindings(root: string, settings: TicketSettings, base: string |
   };
   const baseFiles: Record<string, string | undefined> = {};
   const headFiles: Record<string, string | undefined> = {};
-  // The forge's reading of the PR's commits (B-126), when CI built it; a malformed file is a
-  // thrown error, never a silent fallthrough that would show git's reading as the only one.
-  const forge = forgePath == null ? null : JSON.parse(readFileSync(forgePath, 'utf8')) as { pr_author?: string; commits?: Record<string, import('../shared/ticketPr.mjs').TicketForge> };
+  // The forge's reading of the PR's commits (B-126), when CI built it. A malformed file is a
+  // loud one-line refusal naming --forge, never a silent fallthrough that would show git's
+  // reading as the only one over a file the caller did pass (round two's finding — docs'
+  // readForge shape).
+  type ForgeFile = { pr_author: string; commits: Record<string, import('../shared/ticketPr.mjs').TicketForge> };
+  let forge: ForgeFile | null = null;
+  if (forgePath != null) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(forgePath, 'utf8'));
+    } catch (e) {
+      throw new Error(`--forge ${forgePath} does not parse (${(e as Error).message})`);
+    }
+    if (typeof parsed !== 'object' || parsed === null || typeof (parsed as { pr_author?: unknown }).pr_author !== 'string' || typeof (parsed as { commits?: unknown }).commits !== 'object') {
+      throw new Error(`--forge ${forgePath} is not {"pr_author": "…", "commits": {"<sha>": {author, committer, verified}}}`);
+    }
+    forge = parsed as ForgeFile;
+  }
   const provenance: Record<string, import('../shared/ticketPr.mjs').TicketProvenance[]> = {};
   for (const p of paths) {
     baseFiles[p] = read(mergeBase, p);
     headFiles[p] = existsSync(join(root, p)) ? readFileSync(join(root, p), 'utf8') : undefined;
     // B-126's direction: git's reading — authors AND committers, since anyone sets an author —
-    // labelled as git's, with the forge's reading of each commit beside it when CI passed one.
+    // labelled as git's, with the forge's reading of each commit beside it when CI passed one:
+    // the account the commit's author and committer EMAILS map to (email-derived, printed as
+    // such) and its signature verification.
     provenance[p] = run('log', `${mergeBase}..HEAD`, '--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%aI', '--', p)
       .split('\n').filter(Boolean).map((row) => {
         const [sha, author, committer, date] = row.split('\x1f');
@@ -777,8 +795,12 @@ function ticketPrFindings(root: string, settings: TicketSettings, base: string |
   lines.push(`ticket-pr (B-133): ${view.changed.length} ticket file(s) changed against ${base} (${mergeBase.slice(0, 10)})`);
   if (!view.changed.length) lines.push('  no ticket changes — the status-only label does not apply');
   else {
-    lines.push(forge?.pr_author
-      ? `  provenance: git's reading beside the forge's — the PR is opened by ${forge.pr_author} (B-126)`
+    // "Beside the forge's" is keyed on the forge's reading EXISTING — at least one commit: a
+    // passed file naming no commit (a failed API call) degrades to git's reading alone; the
+    // forge's name is never printed over nothing (round two's finding).
+    const forgeRead = forge != null && Object.keys(forge.commits).length > 0 ? forge : null;
+    lines.push(forgeRead
+      ? `  provenance: git's reading beside the forge's — the PR is opened by ${forgeRead.pr_author} (B-126)`
       : "  provenance: git's reading — anyone sets an author or committer; the forge's reading is not read here (B-126)");
     for (const c of view.changed) for (const l of formatTicket(c)) lines.push(l);
     lines.push(`status-only: ${view.statusOnly ? 'yes — only status fields changed; no body, brief or control field' : `no — ${view.reasons.join('; ')}`}`);

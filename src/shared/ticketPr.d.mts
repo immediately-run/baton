@@ -16,8 +16,9 @@ export interface TicketFieldChange {
   to: string | null;
   control: boolean;
 }
-/** The forge's reading of one commit (B-126): the account behind the git author and committer
- *  (null when none is associated) and the commit's signature verification. */
+/** The forge's reading of one commit (B-126): the account the commit's author and committer
+ *  emails map to (null when none is associated — email-derived, steered by the commit's writer
+ *  exactly as git's own names are) and the commit's signature verification. */
 export interface TicketForge {
   author: string | null;
   committer: string | null;

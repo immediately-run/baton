@@ -136,6 +136,28 @@ describe('B-133: the ticket-PR view', () => {
     expect(printed).toMatch(/ticket-pr: the PR is described status-only, but the computed view says otherwise/);
   });
 
+  it('a ticket named *.MDX is visible: an added EXPEDITE ticket breaks a status-only claim (round two)', async () => {
+    // The round-two review's exact repro: the extension test was case-sensitive where both
+    // ticket sources read /\.mdx?$/i, so this PR printed "1 ticket file(s) changed",
+    // "status-only: yes" and UPHELD its claim — the computed view vouching for a change it
+    // could not see.
+    const dir = repo(
+      { 'tickets/B-1.mdx': ticket() },
+      {
+        'tickets/B-1.mdx': ticket({ status: 'in-review', updated: '2026-11-07' }),
+        'tickets/B-9.MDX': ticket({ id: 'B-9', EXPEDITE: 'true' }, '**Brief:** a quietly filed ticket.\n\n### What to build\n\n- the thing\n'),
+      },
+    );
+    const r = await run(dir, ['--claimed-status-only']);
+    expect(r.code).toBe(1);
+    const printed = r.lines.join('\n');
+    expect(printed).toMatch(/2 ticket file\(s\) changed/);
+    expect(printed).toMatch(/tickets\/B-9\.MDX \(B-9\): added/);
+    expect(printed).toMatch(/control field EXPEDITE changed/);
+    expect(printed).toMatch(/status-only: no — /);
+    expect(printed).toMatch(/ticket-pr: the PR is described status-only, but the computed view says otherwise/);
+  });
+
   it("the forge's reading rides each commit beside git's, which is labelled as git's (B-126)", async () => {
     const dir = repo({}, { 'tickets/B-2.mdx': ticket({ id: 'B-2' }) });
     const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -145,10 +167,38 @@ describe('B-133: the ticket-PR view', () => {
     expect(r.code).toBe(0);
     const printed = r.lines.join('\n');
     expect(printed).toMatch(/provenance: git's reading beside the forge's — the PR is opened by immediately-run-worker/);
-    expect(printed).toMatch(/ · forge: author no forge account, committer immediately-run-worker, signature verified/);
+    // The forge's accounts are email-derived — the commit's writer chooses the email that picks
+    // the account (round two's finding) — so the row labels them as what they are.
+    expect(printed).toMatch(/ · forge: author no forge account, committer immediately-run-worker — the accounts those commit emails map to; signature verified/);
     // Without the forge, git's agent-settable reading is named as such — never as verified.
     const plain = await run(dir);
     expect(plain.lines.join('\n')).toMatch(/provenance: git's reading — anyone sets an author or committer; the forge's reading is not read here \(B-126\)/);
+  });
+
+  it("a forge file naming no commit degrades to git's reading alone, never 'beside the forge's'", async () => {
+    // The shape a FAILED forge API call used to leave behind ({"pr_author": …, "commits": {}}):
+    // the header is keyed on the reading existing, not on the file being passed (round two).
+    const dir = repo({}, { 'tickets/B-2.mdx': ticket({ id: 'B-2' }) });
+    const forge = join(dir, 'forge.json');
+    writeFileSync(forge, JSON.stringify({ pr_author: 'immediately-run-worker', commits: {} }));
+    const r = await run(dir, ['--forge', forge]);
+    expect(r.code).toBe(0);
+    const printed = r.lines.join('\n');
+    expect(printed).toMatch(/provenance: git's reading — anyone sets an author or committer; the forge's reading is not read here \(B-126\)/);
+    expect(printed).not.toMatch(/beside the forge's/);
+  });
+
+  it('a wrong-shape --forge file is a loud one-line refusal naming --forge, not a silent fallthrough', async () => {
+    // `[]` used to parse, read as no forge, and pass — over the file the caller did pass. The
+    // refusal takes docs runner's shape check (round two's finding).
+    const dir = repo({}, { 'tickets/B-2.mdx': ticket({ id: 'B-2' }) });
+    const forge = join(dir, 'forge.json');
+    writeFileSync(forge, '[]');
+    await expect(ticketsCheckMain(['--repo', dir, '--pr', 'main', '--forge', forge], { log: () => {} }))
+      .rejects.toThrow(/--forge .* is not \{"pr_author": "…", "commits": \{"<sha>": \{author, committer, verified\}\}\}/);
+    writeFileSync(forge, 'not json');
+    await expect(ticketsCheckMain(['--repo', dir, '--pr', 'main', '--forge', forge], { log: () => {} }))
+      .rejects.toThrow(/--forge .* does not parse/);
   });
 
   it('an unresolvable --pr base is a one-line finding, not a raw stack', async () => {

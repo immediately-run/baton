@@ -16,9 +16,11 @@
 //
 // Provenance (B-126's direction): the caller passes each path's commits since the base; authors
 // and committers are git's reading — anyone sets an author, so the view names both, and each
-// entry may carry the FORGE's reading of the same commit (the account behind the author and
-// committer, its signature verification), the fact B-126 adds. A runner without forge access
-// shows git's reading alone and must say so beside it, never present it as verified.
+// entry may carry the FORGE's reading of the same commit (the account the commit's author and
+// committer EMAILS map to — an association the commit's writer steers by choosing the email, so
+// it is printed as email-derived, never as an identity stronger than git's own names — and its
+// signature verification), the fact B-126 adds. A runner without forge access shows git's
+// reading alone and must say so beside it, never present it as verified.
 /** The fields a status-only change may touch: the ticket's own progress, nothing that steers
  *  work (the control fields are the opposite set, B-126 item 1). `updated` is the filing's
  *  bookkeeping date, `prs` the record of its delivering pull requests. */
@@ -121,14 +123,17 @@ export function diffPairs(aText, bText, max = 8) {
   return { pairs, shown, lines };
 }
 
-/** The ticket-ish paths under an items directory (live or archive/): `.mdx` and `.md`, as both
- *  ticket sources read them (BATON_SPEC §4). */
+/** The ticket-ish paths under an items directory (live or archive/): `.mdx` and `.md` in ANY
+ *  letter case, as both ticket sources read them (`/\.mdx?$/i`, BATON_SPEC §4) — a ticket named
+ *  `B-9.MDX` is a ticket to the board, and must be one to this view: a case-sensitive test here
+ *  made the view compute `status-only: yes` over a change it could not see (round two's
+ *  blocking finding). */
 export function ticketPathsUnder(items, paths) {
   const dir = items.replace(/\/$/, "");
   return paths.filter((p) => {
     if (!p.startsWith(`${dir}/`)) return false;
     const rest = p.slice(dir.length + 1);
-    if (!/\.(mdx|md)$/.test(rest)) return false;
+    if (!/\.(mdx|md)$/i.test(rest)) return false;
     return rest.split("/").every((seg) => seg !== "." && seg !== "..");
   });
 }
@@ -137,7 +142,7 @@ export function ticketPathsUnder(items, paths) {
  *  the file-naming convention every items directory keeps (a file named for its id). */
 export function ticketId(path, text) {
   const fmId = /^id:\s*(\S+)/m.exec(splitFrontmatter(text).fm)?.[1];
-  return fmId ?? path.split("/").pop().replace(/\.(mdx|md)$/, "");
+  return fmId ?? path.split("/").pop().replace(/\.(mdx|md)$/i, "");
 }
 
 /**
@@ -204,11 +209,13 @@ function fieldChanges(before, after) {
 
 const shorten = (v) => (v == null ? "nothing" : v.length > 40 ? `${v.slice(0, 39)}…` : v.replace(/\n/g, " "));
 
-/** The forge's reading of one commit (B-126), when the caller could reach it: the account
- *  behind the git author and committer (null when none is associated) and the commit's
- *  signature verification. */
+/** The forge's reading of one commit (B-126), when the caller could reach it: the account the
+ *  commit's author and committer EMAILS map to (null when none is associated) and the commit's
+ *  signature verification. The association is email-derived — the commit's writer chooses the
+ *  email, exactly as they choose git's own author and committer — so the logins are labelled as
+ *  what they are, never as an identity stronger than git's reading beside them. */
 const forgeLine = (f) =>
-  ` · forge: author ${f.author ?? "no forge account"}, committer ${f.committer ?? "no forge account"}, signature ${f.verified ? "verified" : "unverified"}`;
+  ` · forge: author ${f.author ?? "no forge account"}, committer ${f.committer ?? "no forge account"} — the accounts those commit emails map to; signature ${f.verified ? "verified" : "unverified"}`;
 
 /** One row as the lines a check prints; the caller prefixes and orders them. */
 export function formatTicket(c) {
