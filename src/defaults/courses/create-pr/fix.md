@@ -52,6 +52,10 @@ before the next round reviews it.
 ## Before you push
 
 - Run the repository's own checks, the same ones CI runs.
+- Install the way the implement leg's dependency hygiene says (B-132): `npm ci` from the
+  lockfile, lifecycle scripts off (`ignore-scripts=true`) but for `.baton/baton.json`'s
+  `allow_install_scripts` — never an `npm install` that rewrites the lockfile to make a failure
+  go away.
 - Re-read your diff as a hostile reviewer would: what would make the next round reject it?
 - Make one push per repository carrying every fix there, not one push per finding: each
   repository's PR branch, of the same name, in its own checkout.

@@ -36,6 +36,10 @@ verdict line on the PR from it. If the PR is in another repository (named in the
   unless the reply is wrong; then say why, once.
 - For each candidate, find a `file:line` and a one-sentence mechanism, and run the test or probe
   that shows it. Drop what you cannot show.
+- **Name every dependency the diff adds or upgrades** (B-132) — manifest and lockfile both:
+  name, version, publisher (its maintainers or owning scope, read from the registry) and that
+  version's age. A dependency the review does not name is itself a finding: unreviewed supply
+  chain.
 
 Severity: **blocking**, **should-fix**, **nit**, as the `create-pr` review defines them.
 

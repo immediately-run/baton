@@ -78,6 +78,14 @@ Fix whatever the answers expose before you push.
 - Implement what the ticket says, with its tests. A behaviour change without a test that would
   fail without it is not finished.
 - Run the repository's checks yourself. Push only once they pass.
+- **Install dependencies with hygiene** (B-132): from the lockfile only — `npm ci`, never an
+  `npm install` that rewrites it — unless the ticket itself asks for a dependency change; and
+  with lifecycle scripts off (`ignore-scripts=true`, which the runner's image sets; pass
+  `--ignore-scripts` where nothing does). A package whose install script the repository needs
+  is listed in `.baton/baton.json` (`allow_install_scripts: [<package>]`, a control input under
+  B-127): run exactly those packages' scripts — `npm rebuild <package>
+  --ignore-scripts=false` — never scripts for all. Where the repository sets a registry age
+  floor (npm's `before` setting, or a proxy at the fence), install inside it, never around it.
 - Commit with explicit paths (`git commit -- <paths>`), never `git add -A`: the checkout may hold
   other work.
 
