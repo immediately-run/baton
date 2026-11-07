@@ -50,7 +50,10 @@ jobs:
           if [ -f .git/shallow ]; then git fetch --no-tags --unshallow origin; fi
           git fetch --no-tags origin +main:refs/remotes/origin/main
           CLAIM=()
-          if printf '%s' "$PR_BODY" | grep -qi 'status-only'; then CLAIM=(--claimed-status-only); fi
+          # A PR CLAIMS status-only with a line of its own ("status-only: yes", "- status-only — …"),
+          # never by merely mentioning the words in prose — this PR's own body would otherwise
+          # claim it while describing the check.
+          if printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*(-[[:space:]]*)?status-only([[:space:]]*[:—-])'; then CLAIM=(--claimed-status-only); fi
           node cli/baton.mjs tickets check --repo . --pr origin/main "${CLAIM[@]}"
       - run: npm run check:spec   # spec/BATON_SPEC.md defines every R-BTN-n the code cites
       - run: npm run check:package   # the npm tarball installs and its `baton` starts
