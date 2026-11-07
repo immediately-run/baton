@@ -19,13 +19,14 @@ beforeEach(async () => {
 describe('POST /v1/sync/observation (R-BTN-62)', () => {
   it('hands out the next number with the head; sync-busy while one is outstanding; void after ten minutes', async () => {
     // B-110: with Baton's own record for the station functions — the owner's answers, the legs' evidence.
-    expect(await observe()).toEqual({ status: 200, json: { sha: null, observation: 1, bars: [], answers: [], legs: [] } });
+    // B-183: and each live ticket's last accepted version (§4.3) — {} with no board yet.
+    expect(await observe()).toEqual({ status: 200, json: { sha: null, observation: 1, bars: [], answers: [], legs: [], versions: {} } });
     const busy = await observe();
     expect([busy.status, busy.json.code]).toEqual([409, 'sync-busy']);
     await setClock(T0 + 10 * MIN - 1);
     expect((await observe()).json.code).toBe('sync-busy');
     await setClock(T0 + 10 * MIN);
-    expect((await observe()).json).toEqual({ sha: null, observation: 2, bars: [], answers: [], legs: [] });
+    expect((await observe()).json).toEqual({ sha: null, observation: 2, bars: [], answers: [], legs: [], versions: {} });
     expect(await rows(`SELECT last_handed_out, handed_out_at, observation FROM board_head WHERE repository_id = 'docs'`)).toEqual([
       { last_handed_out: 2, handed_out_at: T0 + 10 * MIN, observation: 0 }]);
   });

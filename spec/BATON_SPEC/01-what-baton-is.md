@@ -84,7 +84,7 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   and owner state (R-BTN-66). When Baton and git disagree about those, Baton wins: an arrival it
   does not apply is recorded `arrival-unapplied` on the ticket (R-BTN-39), and git's other facts
   are adopted and logged (R-BTN-85). About anything else, git is authoritative: every other ticket fact
-  Baton holds (its existence, filter fields, closure) is a cache of the head snapshot, which
+  Baton holds (its existence, filter fields, version, closure) is a cache of the head snapshot, which
   Baton never edits. A runner acts on the ticket as `origin/<default branch>` has it, or as its branch does for a
   course that keeps its record there (R-BTN-5, R-BTN-34); the next accepted snapshot overwrites the cached rows; **Resync** forces one.
   - **Staleness.** A snapshot observed after a claim's latest claim or `advance` (R-BTN-62)

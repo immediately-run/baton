@@ -395,7 +395,10 @@ describe('the courses a runner serves (R-BTN-131, B-103)', () => {
   const probe = async (dir: string, argv: string[] = [], signal: NodeJS.Signals = 'SIGTERM') => {
     const seen = { heartbeats: [] as Record<string, unknown>[] };
     const lines: string[] = [];
-    const saved = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE'].map((n) => [n, process.env[n]] as const);
+    // The Baton-leg env a dispatched runner runs the suite under leaks its own identity in:
+    // BATON_REPOSITORY would rename the heartbeat's home repository away from 'docs' (the tests
+    // are green in CI and under a person, and only a Baton leg exports it — B-183's leg met it).
+    const saved = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE', 'BATON_REPOSITORY'].map((n) => [n, process.env[n]] as const);
     for (const [n] of saved) delete process.env[n];
     process.env.BATON_TOKEN = 'tok-vm-a'; // a credential, so the run gets as far as its beats
     try {

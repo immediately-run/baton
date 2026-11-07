@@ -894,7 +894,14 @@ export class Claims {
     const courseVersion = c.course_id
       ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(c.ticket_id), c.course_id)[0]?.version ?? null
       : null;
-    const path = this.rows<{ path: string }>('SELECT path FROM tickets WHERE id = ?', c.ticket_id)[0]?.path ?? null;
+    const ticketRow = this.rows<{ path: string; version: string; key: string | null }>('SELECT path, version, key FROM tickets WHERE id = ?', c.ticket_id)[0] ?? null;
+    const path = ticketRow?.path ?? null;
+    // B-183 (§4.5): the ticket's opaque `version` as the board holds it, and how its source
+    // reads — pinned (at a version) or current (as it is now) — so the runner re-verifies the
+    // claim by the source's own way of reading before any leg runs (R-BTN-5, R-BTN-34). A board
+    // that declared no source, or a ticket with no version, is re-verified as before.
+    const source = this.rows<{ source_kind: string | null; source_versions: string | null }>(
+      'SELECT source_kind, source_versions FROM board_head WHERE repository_id = ?', repositoryOf(c.ticket_id))[0];
     // R-BTN-34's default branch (§11's claim answer lists it): the branch a marker leg's line is
     // committed on, whatever branch the runner's checkout was left on (B-96's review round 3).
     const defaultBranch = this.rows<{ default_branch: string }>('SELECT default_branch FROM repositories WHERE id = ?', repositoryOf(c.ticket_id))[0]?.default_branch ?? null;
@@ -913,6 +920,9 @@ export class Claims {
       ...(legState ? { leg_state: legState } : {}),
       station: c.station, legs: c.offered_leg ? [c.offered_leg] : [], next: this.nextLegs(c.ticket_id, c.station),
       ...(handoff ? { handoff_url: handoff } : {}), path, nonce: c.nonce, snapshot_sha: c.snapshot_sha,
+      // B-183 (§4.5): the ticket's version and the source's reading of it — `version` is `''`
+      // when the source posts none, and `ticket_source` is null when the board declared none.
+      version: ticketRow?.version ?? '', ...(source?.source_kind ? { ticket_source: { kind: source.source_kind, versions: source.source_versions } } : {}),
       ...(defaultBranch ? { default_branch: defaultBranch } : {}),
       previous_attempts: previous.map((p) => ({
         claim_id: p.id, status: p.status, end_reason: p.end_reason, detail: p.end_detail, ended_at: p.ended_at,

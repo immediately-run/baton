@@ -77,7 +77,7 @@ export async function refresh(extra: Record<string, unknown> = {}) {
 /** `POST /v1/sync/observation` as a repository's sync (R-BTN-62): its JSON and status. */
 export async function observe(token?: string) {
   const res = await call('/v1/sync/observation', { method: 'POST', headers: { Authorization: `Bearer ${token ?? (await syncToken())}`, 'Content-Type': 'application/json' }, body: '{}' });
-  return { status: res.status, json: (await res.json()) as { sha: string | null; observation: number; bars: unknown[]; code?: string } };
+  return { status: res.status, json: (await res.json()) as { sha: string | null; observation: number; bars: unknown[]; versions?: Record<string, string>; code?: string } };
 }
 
 export async function ownerCall(path: string, init: RequestInit = {}) {
@@ -316,9 +316,10 @@ export class Git {
     }
     return { status: res.status, ...json };
   }
-  /** A refresh of the head: its tickets unchanged, its stations and closures replaced. */
+  /** A refresh of the head: its tickets unchanged, its stations and closures replaced. The body
+   *  is read at the head, as a sync whose checkout stands there posts it (B-183: `read_sha`). */
   async refresh(extra: Record<string, unknown> = {}) {
-    const res = await syncCall('/v1/sync/board', this.body(this.head!, this.head, extra), this.token);
+    const res = await syncCall('/v1/sync/board', { ...this.body(this.head!, this.head), read_sha: this.head!, ...extra }, this.token);
     const json = (await res.json()) as Record<string, any>;
     if (res.status === 200) this.closed = [];
     return { status: res.status, ...json };

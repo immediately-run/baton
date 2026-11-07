@@ -122,6 +122,10 @@ Every value below is validated on write; a value over its cap is refused `invali
   `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`, the prefix `baton.` reserved to core; an `asks` label
   matches `^[a-z][a-z0-9-]{0,31}$`; a condition type follows R-BTN-160. This is the ticket-id rule
   the other sections cite.
+- **Ticket versions and keys** (B-183): a ticket's `version` — the ticket source's opaque
+  string — matches `^[A-Za-z0-9._:+/=-]{1,128}$`; its `key`, the source's stable name, matches
+  `^[A-Za-z0-9][A-Za-z0-9._:+/=-]{0,255}$`. Both are untrusted text validated on write; Baton
+  compares each for equality only (values 4), never orders two and never reads one as a time.
 - **Links.** Every link Baton accepts or draws passes R-BTN-92's link rule for one of the
   ticket's repositories with reach (R-BTN-140), or names a host an administrator allowed:
   `link_hosts` for a view's `link` (R-BTN-112), `session_hosts` for a session link
