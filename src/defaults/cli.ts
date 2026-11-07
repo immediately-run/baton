@@ -311,7 +311,11 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     const declared = mod.default.versions;
     if (declared !== undefined && declared !== null) {
       if (declared !== 'pinned' && declared !== 'current') throw new Error(`.baton/tickets.mjs exports versions ${JSON.stringify(declared)} — "pinned" or "current" (R-BTN-74)`);
-      if (declared === 'pinned' && typeof mod.default.read !== 'function') throw new Error('.baton/tickets.mjs declares versions: "pinned" but exports no read(id, {version}) — a pinned source is read at its version (R-BTN-74)');
+      // A declaration exports `read` (round 1): a pinned source is read at its version, and a
+      // current one read now — the read-now comparison is a current source's whole staleness
+      // protection (§4.2), so a declaration without `read` is refused at load, not run with no
+      // re-verification at all.
+      if (typeof mod.default.read !== 'function') throw new Error(`.baton/tickets.mjs declares versions: ${JSON.stringify(declared)} but exports no read(id, {version}) — a declared source is read through its read (R-BTN-74)`);
       sourceVersions = declared;
     } else {
       sourceVersions = null;

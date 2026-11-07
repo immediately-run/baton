@@ -1232,14 +1232,38 @@ export class BatonCore {
       // post that moved the head.
       // B-183: a source may change a ticket with no commit, so a refresh may now add, close or
       // change any ticket whose `version` differs from the row Baton holds — materialization
-      // upserts by `row_hash`, `version` among its inputs. The markdown source's versions are
-      // blob ids, so no version changes without a new commit and its refreshes still write no
-      // ticket row.
-      const refreshed = normative ? await this.rowsFor(repo, p) : null;
+      // upserts by `row_hash`, `version` among its inputs. But only a body read at the head it
+      // refreshes (`read_sha`, §4.4): a confirm-only re-post from a checkout behind the head
+      // (§7.1) is labelled with the head's sha while its tickets were read at the ancestor, and
+      // writing them would roll the cache back — so a refresh naming another commit's read, or
+      // none (an older CLI's), changes no ticket row, exactly as before B-183. The markdown
+      // source's versions are blob ids, so no version changes without a new commit and its
+      // refreshes still write no ticket row.
+      const readAtHead = normative && p.read_sha === p.sha;
+      const refreshed = readAtHead ? await this.rowsFor(repo, p) : null;
       return this.store.transaction(() => {
+        // The row hashes were awaited after the number was used, so another run may have posted
+        // meanwhile (round 1, finding 2): this reading must still be the newest, over the head it
+        // was judged against — the same two re-checks the new-head path performs after its
+        // identical await. `accept` would no-op on a newer accepted number, but `rememberSource`
+        // would regress the stored declaration and `materialize` would overwrite the newer post's
+        // rows with this older reading's and drop every ticket it added.
+        if (!this.observations.newest(r, n)) throw new BatonError('stale-observation', `a newer reading than ${n} was accepted while this post was judged; take a new number and retry (R-BTN-62)`);
+        if (this.headOf(r) !== head) throw new BatonError('head-moved', `the head moved to ${this.headOf(r) ?? 'unset'} while this post was judged; re-read it and retry`);
         this.observations.accept(r, n);
-        this.rememberSource(r, p);
-        const wrote = refreshed ? this.materialize(r, refreshed, p.sha, at) : null;
+        if (readAtHead) this.rememberSource(r, p);
+        let wrote: { upserted: string[]; deleted: number; renumbered: { from: string; to: string; key: string }[] } | null = null;
+        if (refreshed) {
+          // Every ticket a refresh writes must name a course in force (R-BTN-48, R-BTN-69, round
+          // 1 finding 3) — the same per-ticket check the new-head path runs, without applying the
+          // registry the body carries (an older one would roll a course back, above).
+          this.requireCoursesInForce(r, refreshed.map(({ row }) => row.course_id));
+          wrote = this.materialize(r, refreshed, p.sha, at);
+          // A live ticket is not closed (stations.ts, R-BTN-12): a refresh that re-adds a
+          // withdrawn ticket clears its closure row, as a new head does (round 1, finding 4) —
+          // withdraw-and-reopen with no commit is the tracker flow this ticket builds for.
+          this.stations.reopened(r, refreshed.map(({ row }) => row.id));
+        }
         const seen = normative ? this.refreshStations(r, p, n, at, wrote) : new Map<string, Seen>();
         const confirmed = this.claims.confirm(confirmations, n);
         const judged = this.claims.judge(r, n, seen);
@@ -1376,15 +1400,19 @@ export class BatonCore {
   /** Write a post's ticket rows (§4.3, R-BTN-11, R-BTN-35): the repository's own tickets, keyed
    *  by their local ids (R-BTN-47) — rows whose `row_hash` changed are upserted, tickets the post
    *  no longer names leave the cache (their claims and events stay), and — B-183 (R-BTN-147) — a
-   *  dropped ticket re-added under a new id at the same `key` is `renumbered`: the new id takes
+   *  dropped ticket replaced by a **new** id at the same `key` is `renumbered`: the new id takes
    *  the old one's hold and backoff, and an event says the move. Returns what it wrote. */
   private materialize(r: string, rows: { row: TicketRow; hash: string }[], sha: string, at: number): { upserted: string[]; deleted: number; renumbered: { from: string; to: string; key: string }[] } {
     const upserted: string[] = [];
     const renumbered: { from: string; to: string; key: string }[] = [];
     const have = new Map(this.sql<{ local_id: string; row_hash: string; key: string | null; path: string }>(
       'SELECT local_id, row_hash, key, path FROM tickets WHERE repository_id = ?', r).map((x) => [x.local_id, x]));
-    // A new ticket's key → its id, for the renumbering read of the dropped rows.
-    const byKey = new Map(rows.map(({ row }) => [row.key ?? row.path ?? row.id, row.id]));
+    // A new ticket's key → its id, for the renumbering read of the dropped rows. Only ids the
+    // board did not already hold (review round 1): the post ADDS a ticket at the key of one it
+    // drops (R-BTN-147) — an existing ticket that moves onto a dropped key keeps its own hold
+    // and backoff, it is not "renumbered onto".
+    const held = new Set(have.keys());
+    const byKey = new Map(rows.filter(({ row }) => !held.has(row.id)).map(({ row }) => [row.key ?? row.path ?? row.id, row.id]));
     for (const { row, hash } of rows) {
       const before = have.get(row.id);
       have.delete(row.id);
@@ -1520,15 +1548,23 @@ export class BatonCore {
     return dropped;
   }
 
+  /** Every course a post's tickets name must be in force (R-BTN-48, R-BTN-69) — checked wherever
+   *  rows are materialized: on a new head (inside `applyRegistry`, after the registry applies)
+   *  and on a refresh that writes rows (round 1, finding 3), so no course-less ticket can sit in
+   *  the cache that no course resolves. */
+  private requireCoursesInForce(r: string, ticketCourses: string[]): void {
+    for (const c of new Set(ticketCourses)) {
+      if (!this.courses.get(r, c)) throw new BatonError('invalid-params', `a ticket's course ${c} is not in ${r}'s registry`);
+    }
+  }
+
   /** The registry of a post (R-BTN-48, R-BTN-69), inside its transaction: applied whole, then
    *  every course the post's tickets name must be in force — a refused file with none to keep,
    *  or a course the registry dropped while a ticket still names it, refuses the post. */
   private applyRegistry(r: string, p: BoardPayload, ticketCourses: string[], at: number, acceptedRoutes?: Map<string, Record<string, string[]>>): string[] {
     const refused = p.registry ? this.courses.apply(r, p.registry, p.sha, at, acceptedRoutes) : [];
     this.stations.reset();
-    for (const c of new Set(ticketCourses)) {
-      if (!this.courses.get(r, c)) throw new BatonError('invalid-params', `a ticket's course ${c} is not in ${r}'s registry`);
-    }
+    this.requireCoursesInForce(r, ticketCourses);
     // R-BTN-64: a course file accepted with renames carries its active claims over.
     for (const e of p.registry ?? []) {
       if (refused.includes(e.id)) continue;

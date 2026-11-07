@@ -8,9 +8,16 @@
 // `renumbered`, its hold and backoff moving to the new id; a post from a `custom` source with
 // `versions: "current"` to a repository whose policy's floors include `tickets-approved` is
 // refused, naming the guarantee; the claim answer names the ticket's version and the source's
-// way of reading. The sync's and the runner's halves are S-BTN-203's (Node only: real git).
+// way of reading. Review round 1: a refresh materializes only a body read at the head it
+// refreshes (`read_sha`; a confirm-only re-post from a checkout behind the head, or an older
+// CLI's post naming none, changes no ticket row) and a refresh overtaken while its rows were
+// hashed is refused as a new head is; a refresh that writes rows checks the courses it names
+// and clears the closure of a ticket it re-adds; an existing ticket that moves onto a dropped
+// key keeps its own hold; two tickets of one post never share a key. The sync's and the
+// runner's halves are S-BTN-203's (Node only: real git).
 import { describe, it, expect, beforeEach } from 'vitest';
-import { claimItem, claimRow, cutover, Git, observe, placed, register, rows, setClock, syncCall } from '../helpers';
+import { claimItem, claimRow, cutover, Git, observe, placed, register, rows, setClock, syncCall, withCore } from '../helpers';
+import { checkPayload } from '../../src/core/board';
 
 const T0 = Date.parse('2026-11-06T12:00:00Z');
 /** The source declaration the CLI's sync posts for a tracker-backed source. */
@@ -172,5 +179,150 @@ describe('S-BTN-202 opaque ticket versions', () => {
     expect(c.json.ticket_source).toBeUndefined();
     // The observation still hands back the (empty) version it holds.
     expect((await observe()).json.versions).toEqual({ 'T-1': '' });
+  });
+
+  it('a refresh whose body was read at another commit changes no ticket: no rollback, no deletion (round 1)', async () => {
+    const git = new Git();
+    git.add('T-1', tracked('T-1', 'rev-1:aaaaaaaa'), FILED);
+    git.add('T-2', tracked('T-2', 'rev-1:dead0000'), FILED);
+    await git.post(CURRENT);
+    // A confirm-only re-post of the head from a checkout behind it (§7.1): labelled with the
+    // head's sha, its body the ancestor's older reading — T-1 before the edit, T-2 not yet
+    // added. Writing it would roll the cache back; a refresh materializes only a body read at
+    // the head it refreshes (`read_sha`, §4.3).
+    const ancestor = 'e'.repeat(40);
+    const behind = await git.refresh({
+      ...CURRENT, read_sha: ancestor,
+      tickets: [tracked('T-1', 'rev-0:00000000', { title: 'T-1 — the old reading' })],
+      closed: [], stations: { 'T-1': FILED },
+    }) as Record<string, any>;
+    expect(behind).toMatchObject({ status: 200, ok: true, unchanged: true });
+    expect(behind.tickets_upserted).toBeUndefined();
+    expect(behind.tickets_deleted).toBeUndefined();
+    expect(await rows('SELECT local_id AS id, version FROM tickets WHERE repository_id = ? ORDER BY id', 'docs')).toEqual([
+      { id: 'T-1', version: 'rev-1:aaaaaaaa' },
+      { id: 'T-2', version: 'rev-1:dead0000' },
+    ]);
+    // An older CLI's refresh, naming no read_sha at all, changes no ticket either: absent means
+    // not read at the head, never a materialization on the word of a body Baton cannot place.
+    const older = await git.refresh({
+      ...CURRENT, read_sha: undefined,
+      tickets: [tracked('T-1', 'rev-0:00000000', { title: 'T-1 — the old reading' })],
+      closed: [], stations: { 'T-1': FILED },
+    }) as Record<string, any>;
+    expect(older).toMatchObject({ status: 200, ok: true, unchanged: true });
+    expect(await rows('SELECT local_id AS id, version FROM tickets WHERE repository_id = ? ORDER BY id', 'docs')).toEqual([
+      { id: 'T-1', version: 'rev-1:aaaaaaaa' },
+      { id: 'T-2', version: 'rev-1:dead0000' },
+    ]);
+  });
+
+  it('a refresh another run overtook while its rows were hashed is refused; the newer reading stands (round 1)', async () => {
+    const git = new Git();
+    git.add('T-1', tracked('T-1', 'rev-1:aaaaaaaa'), FILED);
+    await git.post(CURRENT);
+    // The refresh carries the moved ticket (rev-2) and is held at its row hashing — its number
+    // already used (R-BTN-62) — while a second run takes the next number and posts a NEW head
+    // (rev-3) that completes first. The refresh's transaction must refuse as the new-head path's
+    // does after the same await: never overwrite the newer post's row with the older reading,
+    // never drop what the newer post added.
+    git.tickets.set('T-1', tracked('T-1', 'rev-2:bbbbbbbb'));
+    const out = await withCore(async (c) => {
+      const core = c as unknown as {
+        registry: { get(id: string): unknown };
+        rowsFor: (repo: unknown, p: { sha: string }) => Promise<unknown>;
+        board: (repo: unknown, p: unknown) => Promise<unknown>;
+        observations: { observe: (r: string) => { observation: number } };
+      };
+      const repo = core.registry.get('docs');
+      const head = git.head!;
+      const orig = core.rowsFor.bind(c);
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      // Hold only the refresh's hashing (its payload's sha is the head); the second run's flows on.
+      core.rowsFor = async (r2, p) => {
+        const hashed = await orig(r2, p);
+        if (p.sha === head) await gate;
+        return hashed;
+      };
+      const first = core.observations.observe('docs').observation;
+      const p1 = core.board(repo, checkPayload({ ...git.body(head, head), ...CURRENT, read_sha: head, observation: first }))
+        .then(() => ({ ok: true }), (e: { code: string }) => ({ code: e.code }));
+      const second = core.observations.observe('docs').observation;
+      const newer = new Git();
+      newer.add('T-1', tracked('T-1', 'rev-3:dddddddd'), FILED);
+      const p2 = await core.board(repo, checkPayload({ ...newer.body('f'.repeat(40), head), ...CURRENT, observation: second }))
+        .then(() => ({ ok: true }), (e: { code: string }) => ({ code: e.code }));
+      release();
+      return [await p1, p2];
+    });
+    expect(out[1]).toEqual({ ok: true });
+    expect(out[0]).toMatchObject({ code: expect.stringMatching(/^(head-moved|stale-observation)$/) });
+    // The newer reading stands: the refresh never rolled the row back to rev-2.
+    expect(await rows('SELECT version FROM tickets WHERE id = ?', 'docs:T-1')).toEqual([{ version: 'rev-3:dddddddd' }]);
+  });
+
+  it('a refresh that adds a ticket whose course is not in force is refused, its row unwritten (round 1)', async () => {
+    const git = new Git();
+    git.add('T-1', tracked('T-1', 'rev-1:aaaaaaaa'), FILED);
+    await git.post(CURRENT);
+    git.add('T-9', tracked('T-9', 'rev-1:cccccccc', { course_id: 'no-such-course' }), FILED);
+    const refused = await git.refresh(CURRENT) as Record<string, any>;
+    expect([refused.status, refused.code]).toEqual([400, 'invalid-params']);
+    expect(refused.message).toContain('no-such-course');
+    // Nothing landed: the refresh was refused whole, as the same content as a new head is.
+    expect(await rows('SELECT local_id FROM tickets')).toEqual([{ local_id: 'T-1' }]);
+  });
+
+  it('a ticket withdrawn in one refresh and re-added in the next is live again, its closure cleared (round 1)', async () => {
+    const git = new Git();
+    git.add('T-1', tracked('T-1', 'rev-1:aaaaaaaa'), FILED);
+    await git.post(CURRENT);
+    // A tracker withdrawal with no commit: the refresh drops the row and records the closure.
+    git.close('T-1', 'withdrawn');
+    expect(await git.refresh(CURRENT)).toMatchObject({ ok: true, tickets_deleted: 1 });
+    expect(await rows('SELECT ticket_id, closed_as FROM closed_tickets')).toEqual([{ ticket_id: 'docs:T-1', closed_as: 'withdrawn' }]);
+    // Re-added with no commit: the ticket is live again and — a live ticket is not closed
+    // (R-BTN-12) — its closure row is gone, as a new head's `reopened` clears it.
+    git.add('T-1', tracked('T-1', 'rev-2:bbbbbbbb'), FILED);
+    expect(await git.refresh(CURRENT)).toMatchObject({ ok: true, tickets_upserted: 1 });
+    expect(await rows('SELECT local_id, version FROM tickets')).toEqual([{ local_id: 'T-1', version: 'rev-2:bbbbbbbb' }]);
+    expect(await rows('SELECT ticket_id FROM closed_tickets')).toEqual([]);
+  });
+
+  it('an existing ticket that moves onto a dropped ticket’s key keeps its own hold — it is not “renumbered onto” (round 1)', async () => {
+    const git = new Git();
+    git.add('T-1', tracked('T-1', 'rev-1:aaaaaaaa'), FILED);
+    git.add('T-2', tracked('T-2', 'rev-1:dddddddd'), FILED);
+    await git.post(CURRENT);
+    await rows(`INSERT INTO ticket_overrides (ticket_id, hold, hold_reason, retry_after, set_by, set_at) VALUES ('docs:T-1', 1, 'one', ?, 'owner:x', ?)`, T0 + 3_600_000, T0);
+    await rows(`INSERT INTO ticket_overrides (ticket_id, hold, hold_reason, retry_after, set_by, set_at) VALUES ('docs:T-2', 1, 'two', ?, 'owner:y', ?)`, T0 + 7_200_000, T0);
+    // The post drops T-1 while the SURVIVING T-2 takes its key: the move the spec names is a
+    // post that ADDS a ticket at the key of one it drops (R-BTN-147) — T-2 was already on the
+    // board, so nothing moves: no event, and each keeps its own hold.
+    git.close('T-1', 'withdrawn');
+    git.tickets.set('T-2', tracked('T-2', 'rev-2:dddddddd', { key: 'linear:issue-T-1' }));
+    const res = await git.post(CURRENT) as Record<string, any>;
+    expect(res.renumbered).toBeUndefined();
+    expect(await rows('SELECT ticket_id, hold_reason FROM ticket_overrides ORDER BY ticket_id')).toEqual([
+      { ticket_id: 'docs:T-1', hold_reason: 'one' },
+      { ticket_id: 'docs:T-2', hold_reason: 'two' },
+    ]);
+    expect(await rows(`SELECT 1 FROM events WHERE kind = 'renumbered'`)).toEqual([]);
+  });
+
+  it('two live tickets of one post never share a stable key, whichever way it is named (round 1)', async () => {
+    const git = new Git();
+    git.add('T-1', tracked('T-1', 'rev-1:aaaaaaaa'), FILED);
+    git.add('T-2', tracked('T-2', 'rev-1:dddddddd', { key: 'linear:issue-T-1' }), FILED);
+    const byKey = await git.post(CURRENT) as Record<string, any>;
+    expect([byKey.status, byKey.code]).toEqual([400, 'invalid-params']);
+    expect(byKey.message).toContain('linear:issue-T-1');
+    // The same collision through two paths that stand for keys (the effective key is `key ?? path`).
+    git.tickets.set('T-1', tracked('T-1', 'rev-1:aaaaaaaa', { key: undefined, path: 'tickets/t-1.mdx' }));
+    git.tickets.set('T-2', tracked('T-2', 'rev-1:dddddddd', { key: undefined, path: 'tickets/t-1.mdx' }));
+    const byPath = await git.post(CURRENT) as Record<string, any>;
+    expect([byPath.status, byPath.code]).toEqual([400, 'invalid-params']);
+    expect(await rows('SELECT 1 FROM tickets')).toEqual([]);
   });
 });

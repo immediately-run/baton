@@ -36,12 +36,19 @@ export function blobIds(root: string, dir: string, rev = 'HEAD', run = git): Map
 
 /** Stamp a markdown source's result with its tickets' versions (R-BTN-74: the source decides
  *  what a ticket's version is; the markdown default decides the file's blob id at `rev`): each
- *  live ticket whose file the commit holds gains `version` and `key` (its path, the default).
- *  Returns the same result, stamped. */
+ *  live ticket whose file the commit holds gains `version`. `key` is not stamped — its default
+ *  is the ticket's `path` (§4.4), which the row already carries. A ticket whose file is not at
+ *  the commit gains no `version` field at all (round 1: a present-but-empty `version` fails
+ *  §12.3's grammar and the whole post with it — an uncommitted new ticket file, a repository
+ *  with no commits), so it is posted with no version, never a failed sync. Returns the same
+ *  result, stamped. */
 export function stampMarkdownVersions(root: string, result: TicketsResult, itemsDir?: string, rev = 'HEAD', run = git): TicketsResult {
   const dir = (itemsDir ?? 'tickets').replace(/\/$/, '');
   const blobs = blobIds(root, dir, rev, run);
-  for (const t of result.tickets) t.version = t.path != null ? blobs.get(t.path) ?? '' : '';
+  for (const t of result.tickets) {
+    const blob = t.path != null ? blobs.get(t.path) : undefined;
+    if (blob != null) t.version = blob;
+  }
   return result;
 }
 

@@ -126,7 +126,10 @@ function blobIds(root, dir, rev = "HEAD", run = git) {
 function stampMarkdownVersions(root, result, itemsDir, rev = "HEAD", run = git) {
   const dir = (itemsDir ?? "tickets").replace(/\/$/, "");
   const blobs = blobIds(root, dir, rev, run);
-  for (const t of result.tickets) t.version = blobs.get(t.path) ?? "";
+  for (const t of result.tickets) {
+    const blob = t.path != null ? blobs.get(t.path) : void 0;
+    if (blob != null) t.version = blob;
+  }
   return result;
 }
 function readTicketBlob(checkout, version, run = git) {
@@ -138,7 +141,7 @@ function readTicketBlob(checkout, version, run = git) {
   }
 }
 
-// ../../../../../tmp/opencode/baton-b183-tickets-entry/entry.mjs
+// ../../../../../tmp/opencode/baton-b183-fix-entry/entry.mjs
 var entry_default = {
   // The same signature the sync calls a repository's own source with: edit freely.
   // This repository's tickets wiki holds more than tickets: `projects/` (Grove project
@@ -155,7 +158,9 @@ var entry_default = {
   //
   // B-183 (R-BTN-74): pinned — a ticket is read at its version — and each ticket's
   // version is its file's blob id at the commit the sync posts, so an unrelated commit
-  // changes no ticket's version and stales no claim.
+  // changes no ticket's version and stales no claim. A ticket whose file is not at the
+  // commit is posted with no version at all (never a present-but-empty string, which
+  // §12.3's grammar refuses).
   versions: "pinned",
   async tickets(ctx) {
     const files = readItems(ctx.root, ctx.settings.items).filter((f) => /^(\w[\w-]*\.mdx|archive\/\w[\w-]*\.mdx)$/.test(f.path));

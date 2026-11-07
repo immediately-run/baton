@@ -116,6 +116,12 @@ export interface BoardPayload {
   /** The number `POST /v1/sync/observation` handed out before the sync read anything (R-BTN-62). */
   observation: number;
   force?: boolean;
+  /** B-183 (§4.3): the commit the post's tickets were read at, when that is not `sha` itself —
+   *  a confirm-only re-post of the head from a checkout behind it (§7.1) carries the head's
+   *  `sha` with a body read at the checkout. A refresh materializes tickets only when this is
+   *  the head (`read_sha === sha`); absent, a refresh changes no ticket row (an older CLI's
+   *  post). The new-head path never reads it: its body is read at its `sha` by construction. */
+  read_sha?: string;
   /** B-183 (R-BTN-74, §4.4): the ticket source's declaration — `kind` (`markdown`, the CLI's
    *  default, or `custom`, the repository's own `.baton/tickets.mjs`), how it reads a ticket
    *  (`versions`: `pinned` at a version, `current` as it is now) and the CLI that posted. Absent:
@@ -221,6 +227,7 @@ export function checkPayload(body: unknown): BoardPayload {
   if (!p || typeof p !== 'object') throw new BatonError('invalid-params', 'a JSON object is required');
   if (typeof p.sha !== 'string' || !SHA.test(p.sha)) throw new BatonError('invalid-params', 'sha must be a 40-hex commit');
   if (p.parent_sha !== null && (typeof p.parent_sha !== 'string' || !SHA.test(p.parent_sha))) throw new BatonError('invalid-params', 'parent_sha must be a 40-hex commit or null');
+  if (p.read_sha !== undefined && p.read_sha !== null && (typeof p.read_sha !== 'string' || !SHA.test(p.read_sha))) throw new BatonError('invalid-params', 'read_sha must be a 40-hex commit or null (the commit the tickets were read at, B-183)');
   if (!Number.isSafeInteger(p.observation) || p.observation < 1) throw new BatonError('invalid-params', 'observation must be the number POST /v1/sync/observation handed out (R-BTN-62)');
   // B-183 (§4.4): the ticket source's declaration. Its shape here; the `tickets-approved` floor
   // reads it where the repository's policy is known, when the post is judged.
@@ -331,6 +338,7 @@ function checkNormative(p: BoardPayload) {
   };
   if (!isObjArr(p.tickets, TICKETS_MAX)) fail('tickets', `must be a list of at most ${TICKETS_MAX}`);
   const seen = new Set<string>();
+  const seenKeys = new Set<string>();
   for (const [i, t] of p.tickets!.entries()) {
     const at = `tickets[${i}]`;
     if (!isObj(t) || typeof t.id !== 'string' || !ID.test(t.id)) fail(`${at}.id`, 'must be a local id');
@@ -353,6 +361,15 @@ function checkNormative(p: BoardPayload) {
     }
     if (t.key !== undefined && t.key !== null && (typeof t.key !== 'string' || t.key.length < 1 || t.key.length > 256 || !/^[A-Za-z0-9][A-Za-z0-9._:+/=-]*$/.test(t.key))) {
       fail(`${t.id}.key`, 'must be a short stable name of the source\'s own');
+    }
+    // B-183 (R-BTN-147, round 1): two live tickets of one post never share a stable key (`key`,
+    // or the `path` that stands for it) — materialization's renumbering read would keep whichever
+    // row built last, and a later drop at that key would move hold and backoff to an arbitrary
+    // survivor of the collision.
+    const stableKey = t.key ?? t.path;
+    if (stableKey != null) {
+      if (seenKeys.has(stableKey)) fail(`${t.id}.key`, `${stableKey} is already the key of another ticket in this post`);
+      seenKeys.add(stableKey);
     }
     if (typeof t.title !== 'string' || !TEXT.test(t.title)) fail(`${t.id}.title`, 'must be short plain text');
     if (t.tier != null && !NAME.test(t.tier)) fail(`${t.id}.tier`, 'must be a tier name');

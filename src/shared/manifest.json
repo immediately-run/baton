@@ -5,7 +5,7 @@
     "baton.mjs": "0fea689a6d3f4451c14792816ae817abff4fd2b8f0b2d2dae071c9451d68114e",
     "vocabulary.mjs": "5f1bd410a26b4450927e8da8d5452951b736e1f34496a24e986983a0f0e9ae1f",
     "sessionUsage.mjs": "8e89c71f5a4d1fa45d1b28f24c7d29668644edeb75494075784ed64c105f727a",
-    "batonSync.mjs": "520158cfbe8f1e706454a63d226ae405290e5e788f3cffd2a776b617e3d53c07"
+    "batonSync.mjs": "782ff02cc42496faa8de9af234a760eed322eafc0e7a37bf9754c395e8eac3df"
   },
   "fixtures": {
     "test/fixtures/courses/roadmap-pr/course.json": "f1de3e3cee8f210a7b687c00d24d62404e6fbd5a96408278574930cb2813decf"

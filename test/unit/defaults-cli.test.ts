@@ -24,6 +24,7 @@ import { prClose, verdictLine, type Exec } from '../../src/defaults/pr-close';
 import { splitWords } from '../../src/defaults/agent-words';
 import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
 import { stampMarkdownVersions } from '../../src/defaults/ticket-versions';
+import { syncOnce } from '../../src/shared/batonSync.mjs';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const CLI = join(ROOT, 'cli', 'baton.mjs');
@@ -407,6 +408,81 @@ describe('syncMain’s busy retry (B-89, R-BTN-62)', () => {
     expect(once).toBe(1);
     expect(waits).toEqual([]);
     expect(none.seen).toEqual(['POST /v1/sync/observation']);
+  });
+
+  it('a ticket source that declares versions without read is refused at load, pinned or current (B-183, review round 1)', async () => {
+    // A `current` declaration is the one whose claims would silently skip re-verification
+    // without a `read` — the read-now comparison is that source's whole staleness protection
+    // (§4.2) — so the load refuses it exactly as it refuses a pinned one.
+    dir = await scaffold();
+    writeFileSync(join(dir, '.baton', 'tickets.mjs'), `export default { versions: 'current', async tickets() { return { tickets: [], closed: [] }; } }`);
+    await expect(syncMain({ root: dir, url: 'https://baton.test', token: 't', transport: scripted({}).transport, sleep: async () => {}, log: () => {} }))
+      .rejects.toThrow(/declares versions: "current" but exports no read/);
+    const pinnedDir = await scaffold();
+    try {
+      writeFileSync(join(pinnedDir, '.baton', 'tickets.mjs'), `export default { versions: 'pinned', async tickets() { return { tickets: [], closed: [] }; } }`);
+      await expect(syncMain({ root: pinnedDir, url: 'https://baton.test', token: 't', transport: scripted({}).transport, sleep: async () => {}, log: () => {} }))
+        .rejects.toThrow(/declares versions: "pinned" but exports no read/);
+    } finally {
+      rmSync(pinnedDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('syncOnce’s confirm-only re-post (B-183, review round 1)', () => {
+  /** `syncOnce` with every effect injected (the module is pure): a head, a payload and an
+   * ancestry the test scripts, recording the one board post. */
+  const run = async (over: { head: string; next: string; ancestor?: boolean; unconfirmed?: unknown[] }) => {
+    const posts: Record<string, unknown>[] = [];
+    const out = await syncOnce(over.next, {
+      observe: async () => ({ sha: over.head, observation: 7 }),
+      fetchNext: async () => over.next,
+      readHead: async () => ({ sha: over.head, unconfirmed: over.unconfirmed ?? [] }),
+      post: async (body: Record<string, unknown>) => {
+        posts.push(body);
+        return { ok: true };
+      },
+      // `next` is the head, an ancestor of it (the checkout behind), or ahead of it, as scripted.
+      isAncestor: async (a: string, b: string) => (over.ancestor ? a !== over.head || b === over.head : a === over.head),
+      buildPayload: async () => ({ source: { kind: 'custom', versions: 'current', cli: 't' }, tickets: [{ id: 'T-1', version: 'v1' }], closed: [] }),
+      statusOf: () => 'done',
+      sleep: async () => {},
+    });
+    return { out, posts };
+  };
+
+  it('a checkout behind the head re-posts the head labelled with the commit its body was read at', async () => {
+    const head = 'a'.repeat(40);
+    const behind = 'b'.repeat(40);
+    const { out, posts } = await run({
+      head, next: behind, ancestor: true,
+      // Without a confirmation the behind run posts nothing (§7.1); with one it re-posts the head.
+      unconfirmed: [{ claim_id: 1, ticket_id: 'docs:T-1', end_reason: 'done', ended_at_sha: behind }],
+    });
+    expect(out.outcome).toBe('confirmed');
+    expect(posts).toHaveLength(1);
+    // The body is labelled with the head (R3-1212) but names `read_sha` — the checkout it was
+    // read at — so Baton materializes no ticket of it (§4.3): writing the ancestor's reading
+    // would roll the cache back.
+    expect(posts[0]).toMatchObject({ sha: head, parent_sha: head, read_sha: behind, observation: 7 });
+  });
+
+  it('a run at the head names the head as its read, so its refresh carries its tickets', async () => {
+    const head = 'a'.repeat(40);
+    const { out, posts } = await run({ head, next: head });
+    expect(out.outcome).toBe('confirmed');
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ sha: head, parent_sha: head, read_sha: head });
+  });
+
+  it('an advancing run posts no read_sha: its body is read at its sha by construction', async () => {
+    const head = 'a'.repeat(40);
+    const next = 'c'.repeat(40);
+    const { out, posts } = await run({ head, next });
+    expect(out.outcome).toBe('advanced');
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ sha: next, parent_sha: head });
+    expect('read_sha' in posts[0]).toBe(false);
   });
 });
 
@@ -1103,9 +1179,13 @@ describe('baton repo init, through the built CLI', () => {
     const ejected = await load(join(root, '.baton', 'tickets.mjs'));
     const out = await ejected.default.tickets(ctx);
     // The ejected source answers what the default answers, versions included (B-183: each
-    // ticket's version is its file's blob id at the commit — '' here, nothing committed yet).
+    // ticket's version is its file's blob id at the commit).
     expect(out).toEqual(stampMarkdownVersions(root, ticketsMarkdown(files, ctx.settings), ctx.settings.items));
     expect(out.closed).toEqual([{ id: 'B-1', as: 'done' }]);
+    // Nothing is committed yet: a ticket whose file the commit does not hold carries NO version
+    // field — a present-but-empty one fails §12.3's grammar and the whole post with it (review
+    // round 1); it is posted with no version and the row stores ''.
+    expect(out.tickets.every((t: { version?: string }) => t.version === undefined)).toBe(true);
     expect(ejected.default.versions).toBe('pinned');
     expect(await ejected.default.read('A-1', { version: 'f'.repeat(40), checkout: root })).toEqual({ version: 'f'.repeat(40), ticket: null });
     // A second eject would overwrite edits: refused without --force.

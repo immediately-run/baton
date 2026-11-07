@@ -316,9 +316,10 @@ export class Git {
     }
     return { status: res.status, ...json };
   }
-  /** A refresh of the head: its tickets unchanged, its stations and closures replaced. */
+  /** A refresh of the head: its tickets unchanged, its stations and closures replaced. The body
+   *  is read at the head, as a sync whose checkout stands there posts it (B-183: `read_sha`). */
   async refresh(extra: Record<string, unknown> = {}) {
-    const res = await syncCall('/v1/sync/board', this.body(this.head!, this.head, extra), this.token);
+    const res = await syncCall('/v1/sync/board', { ...this.body(this.head!, this.head), read_sha: this.head!, ...extra }, this.token);
     const json = (await res.json()) as Record<string, any>;
     if (res.status === 200) this.closed = [];
     return { status: res.status, ...json };

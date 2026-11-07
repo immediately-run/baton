@@ -971,7 +971,10 @@ export class Runner {
    *  the log, and the claim releases `stale-board` before any leg runs. The version is the
    *  source's opaque string (the markdown source's is the ticket file's blob id); the source at
    *  the claim's snapshot decides how it is read — `pinned` at the version, `current` as the
-   *  store holds the ticket now — and Baton, never the runner, orders nothing. */
+   *  store holds the ticket now — and Baton, never the runner, orders nothing. A source that
+   *  declares `versions` but exports no `read` cannot read at all — the CLI refuses one at load
+   *  (§4.2), so this is a source the snapshot broke — and the claim releases rather than run
+   *  with no re-verification (round 1). */
   private async verifyTicketVersion(claim: Record<string, any>, scratch: string): Promise<string | null> {
     const version = typeof claim.version === 'string' ? claim.version : '';
     const how = (claim.ticket_source ?? null) as { versions?: string | null } | null;
@@ -983,7 +986,10 @@ export class Runner {
       return `the ticket source at the snapshot would not load (${msg(e)})`;
     }
     if (src == null) src = MARKDOWN_SOURCE as unknown as Record<string, unknown>;
-    if (typeof src.versions !== 'string' || !['pinned', 'current'].includes(src.versions) || typeof src.read !== 'function') return null;
+    // A source that declares neither `versions` nor `read` is read as declaring nothing (§4.2):
+    // an existing custom source keeps working until it opts in.
+    if (typeof src.versions !== 'string' || !['pinned', 'current'].includes(src.versions)) return null;
+    if (typeof src.read !== 'function') return `the ticket source declares versions: ${JSON.stringify(src.versions)} but exports no read — the ticket cannot be re-verified at it (R-BTN-74)`;
     const read = src.read as (id: string, o: { version?: string; checkout?: string }) => Promise<{ version?: unknown; ticket?: unknown } | null>;
     const id = bareTicketId({ id: claim.ticket_id as string });
     try {
