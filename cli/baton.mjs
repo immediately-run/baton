@@ -760,6 +760,14 @@ export async function main(argv) {
     // policy show REPO` is the documented form (round 1, finding 10). The flags stay in what
     // policyMain receives; only the `policy` word is taken out.
     const rest = argv.slice(1);
+    // B-127 round 1: a `-m`/`--repo` value that is itself the `-i`/`--url` flag shape is refused
+    // by name, BEFORE the token filter below eats it and the command misparses
+    // (`owner sign -m --url -- p` used to lose the value token and end in a confusing refusal).
+    for (let i = 0; i < rest.length; i++) {
+      if ((rest[i] === '-m' || rest[i] === '--message' || rest[i] === '--repo') && (rest[i + 1] === '-i' || rest[i + 1] === '--url')) {
+        throw new Error(`${rest[i]} needs a plain value — ${rest[i + 1]} is a flag of its own (quote a value that starts with a dash)`);
+      }
+    }
     const clean = rest.filter((_, i, a) => !(a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
     const flagsOf = () => parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'), [], ['identity', 'url'], 0).flags;
     // B-127 item 6: `baton owner -i KEY sign` — a commit signed the way `require_signed_control`
@@ -774,14 +782,19 @@ export async function main(argv) {
       let message = 'owner-signed control change';
       const paths = [];
       let repo = '.';
+      // A flag-shaped token is never a value: `-m --url -- p` would otherwise lose `--url`'s
+      // place to the `-i`/`--url` filter above and misparse into a confusing refusal (round 1).
+      const flagShaped = (v) => v === '-i' || v === '--url' || v === '-m' || v === '--message' || v === '--repo' || v === '--';
       for (let i = 0; i < args.length; i++) {
         if (args[i] === '-m' || args[i] === '--message') {
           const v = args[++i];
           if (v === undefined) throw new Error(`${args[i - 1]} needs a value`);
+          if (flagShaped(v)) throw new Error(`${args[i - 1]} needs a plain value (quote a message that starts with a dash)`);
           message = v;
         } else if (args[i] === '--repo') {
           const v = args[++i];
           if (v === undefined) throw new Error('--repo needs a value');
+          if (flagShaped(v)) throw new Error(`--repo needs a plain value, not ${v}`);
           repo = v;
         } else if (args[i] === '--') { paths.push(...args.slice(i + 1)); break; }
         else throw new Error(`${args[i]}: not a flag of \`baton owner sign\` (-m TEXT, --repo DIR, -- <paths>)`);
@@ -800,7 +813,10 @@ export async function main(argv) {
       const keyFile = need(flags.identity, '-i KEY (an owner key of the repository)');
       const args = clean.slice(1);
       const checkoutAt = args.indexOf('--checkout');
-      const positional = args.filter((_, i) => i !== checkoutAt && i !== checkoutAt + 1);
+      // `--checkout DIR` takes DIR with it (round 1: the old filter also dropped index 0 when
+      // there was no --checkout, eating the REPOSITORY positional of the documented
+      // no---checkout form, which then always hit the usage error).
+      const positional = args.filter((_, i) => i !== checkoutAt && (checkoutAt < 0 || i !== checkoutAt + 1));
       if (positional.length !== 1) throw new Error('baton owner -i KEY verify-config REPOSITORY [--checkout DIR]');
       const read = await send(url, { method: 'GET', path: `/v1/owner/${encodeURIComponent(positional[0])}/signing-keys` }, keyFile);
       if (!(read.status >= 200 && read.status < 300)) {

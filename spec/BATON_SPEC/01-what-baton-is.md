@@ -280,9 +280,11 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   its first parent on a control path is that merge's change, never a rollback to an older
   signed version. An unsigned change keeps the last owner-signed version in force and raises an
   `unsigned-control` notice under Needs you naming the paths and commits; with no signed
-  version, nothing counts and the runners stand down (fail closed) until an owner signs the
-  current state once. Runners load `agent_command`, overrides and `rank.mjs` only from the
-  commits the board post names (§7.1, R-BTN-133), verifying each signature themselves. A
+  version, nothing counts and no claim is handed out (fail closed) until an owner signs the
+  current state once. Runners load `agent_command`, overrides, `rank.mjs` and the courses' leg
+  scripts only from the commits the board post names (§7.1, R-BTN-133), verifying each
+  signature themselves; a group is read atomically, so a signed change to one input never
+  carries a sibling input's unsigned bytes into force. A
   ticket's `tier` is not one (the owner, 2026-10-27: a tier routes by quality, not privilege).
   Whether or not the setting is on, the sync marks each ticket's brief `signed` or `unsigned`
   with its provenance (§7.1), and the standing harness rule (each repository's `CLAUDE.md`)

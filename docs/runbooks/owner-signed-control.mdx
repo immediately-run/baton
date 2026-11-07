@@ -58,8 +58,12 @@ only the marks post (briefs are marked `signed`/`unsigned` either way).
 **Sign the current state once when opting in.** A control input counts only from a commit that
 *changed it* and is signed, so turn the setting on only after signing one real change per
 control file — a comment bump is enough; an empty `--allow-empty` signature signs nothing the
-walk can see. Until then each group fails closed: runners refuse claims
-(`released:cannot-finish:spec`) and the `unsigned-control` notice under Needs you names what to
+walk can see. The runner-loaded groups are read atomically per file: the ceremony's one commit
+must touch every file of a group (`.baton/baton.json`; each course's every `legs/*.mjs` — the
+overrides of their own group; `rank.mjs` when a loader exists), or a later signed change to one
+file would otherwise be held back by an unsigned sibling. Until then no claim on the
+repository's tickets is handed out — not a `cannot-finish:spec` the ticket would pay an attempt
+and a non-retryable hold for — and the `unsigned-control` notice under Needs you names what to
 sign. After the one-time signing, an unsigned change keeps the last signed version in force —
 the runners keep loading it, the notice names the paths and commits, and the owner signs or
 reverts at leisure.
@@ -73,7 +77,8 @@ signature on the commit that changed the path.
 ## The notice and the marks
 
 An unsigned change to a control input raises one `unsigned-control` notice under Needs you,
-naming the paths and the commits — the push alone is never silent. A ticket's `**Brief:** the
+naming the paths and the commits — the push alone is never silent, and a standing unsigned
+change is named once, not on every later head move. A ticket's `**Brief:** the
 owner …` line is marked `signed` or `unsigned` with its provenance whether or not the setting is
 on: the mark is served with the ticket, printed at the claim, and the standing `CLAUDE.md` rule
 reads an unsigned owner quote as a claim, not the owner.
@@ -119,8 +124,8 @@ your harness enforces it is its own setting.)
 | Part | Refuses |
 |---|---|
 | the sync | nothing — it computes what counts and posts it, marking briefs and the record |
-| Baton | silently missing it: a post that moves the head onto unsigned control inputs raises the notice (while the setting is on) |
-| each runner | loading what a post named without verifying: a forged or non-owner signature on a named commit ends the claim `cannot-finish:spec` |
+| Baton | handing out any claim while a group has no owner-signed version (no attempt charged); silently missing an unsigned change: a post that moves the head onto one raises the notice (while the setting is on), once per change the last notice did not name |
+| each runner | loading what a post named without verifying: a forged or non-owner signature, a commit that is no ancestor of the claim's snapshot, or a keyless read that is not the snapshot itself, each ends the claim `cannot-finish:spec` |
 | the runner (fail closed) | a group with no signed version: no claim runs until an owner signs the state once |
 | `verify-config` | a privileged session on a checkout whose agent configuration was last changed unsigned |
 | the merge runner | nothing new — control paths land by the policy's `paths.control` as ever (R-BTN-184) |
@@ -132,8 +137,23 @@ your harness enforces it is its own setting.)
   path is that merge's change, so a crafted rollback to an older signed version never counts;
   burying a change past the bound takes that many accepted head moves, each flagged while in
   memory. B-137's server-side read of the push deliveries is the memory-free answer.
+- A group is read **atomically per file**: the record's read commit is the newest owner-signed
+  change that leaves every other file of the group at its own last owner-signed change — a
+  signed change to `b.run.mjs` never carries an unsigned `a.run.mjs`'s bytes into force through
+  its tree. When a sibling's unsigned change stands, the group holds at the earlier signed
+  state and the notice names both, until an owner signs the whole group once.
+- The verification budget is spent on certainty, never on accusation: past its 256 checks a
+  brief or an `EXPEDITE` is left **unmarked** rather than read `unsigned` — the owner's signed
+  words are not called a claim by exhaustion — while the runner-loaded groups fail closed.
 - `EXPEDITE` gating and the notice are the sync's computation until B-137 moves them
   server-side; the runner-loaded groups are verified by every runner, so a lying post changes
   what a runner refuses, not what it runs.
+- The course group covers each course's `legs/*.mjs` — the code a runner executes. The graph
+  loads with the scripts, one coherent tree at the group's commit; the group's *walk* covers
+  the scripts only, because a sourced course's `course.json` is pinned byte-equal by the sync
+  itself (B-33 refuses the post when it differs) and could never be signed after its scaffold —
+  byte-identical for a sourced course, an owned course's graph change taking effect with the
+  next signed change to its leg scripts, and a leg a pushed graph adds that the signed `legs/`
+  does not carry refuses the claim as a missing script. No pushed code runs either way.
 - `sync.mjs` and `.baton/tickets.mjs` still run at the head the sync reads (their unsigned
   changes raise the notice); gating their execution joins B-139's sourced-course work.

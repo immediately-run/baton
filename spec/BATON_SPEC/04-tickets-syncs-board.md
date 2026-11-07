@@ -427,11 +427,16 @@ live solely in Baton, and both are exportable (R-BTN-88).
   closed:   [{ id, as: 'done' | 'withdrawn' }],                  -- tickets that left the board
   attestations: [{ type, ticket, ref?, value }],                 -- the sync's attestations, this run's observation (R-BTN-191)
   control?: { keys: [<fingerprint>],                             -- B-127: what the sync verified with
-              groups: { agent_command, overrides, rank }:        --   each {read, key, unsigned}: the
+              groups: { agent_command, overrides, rank,          --   each {read, key, unsigned}: the
                                                                  --   commit a runner loads from (null: no
                                                                  --   signed version; key null: the
-                                                                 --   pre-adoption baseline), its signing
-                                                                 --   key, the unsigned changes left behind
+                                                                 --   pre-adoption baseline, honest only as
+                                                                 --   the post's own head), its signing
+                                                                 --   key, the unsigned changes left behind;
+                                                                 --   course (a course's legs/*.mjs) may be
+                                                                 --   absent from a sync before the group —
+                                                                 --   while the setting is on, a claim fails
+                                                                 --   closed on a missing group
               unsigned: [{ path, commits, fields? }] },          --   the notice's list (fields: EXPEDITE)
   course_data: { <course>: <opaque> } }
 ```
@@ -448,12 +453,18 @@ live solely in Baton, and both are exportable (R-BTN-88).
   with the claim answer, so a privileged session's first sight of a brief is whose words it is;
   an unsigned one is a claim, not the owner (the standing harness rule). The post's `control`
   record stands for the repository, and a post that moves the head onto unsigned control inputs
-  while the repository requires them signed raises one `unsigned-control` event under Needs you,
-  naming the paths and the commits; the claim answers carry the record with the repository's own
-  setting and owner keys, and every runner verifies the named commits' signatures before loading
-  them (R-BTN-133). The sync computes both where the git objects are, with the owner keys served
-  by the observation (never read from the repository it is judging); B-137 moves the
-  verification server-side over the raw commits.
+  while the repository requires them signed raises one `unsigned-control` event under Needs you
+  for the changes the last raised event did not already name — the paths and the commits — so
+  one standing unsigned change does not re-notice on every later head move; the claim answers
+  carry the record with the repository's own setting and owner keys, and every runner verifies
+  the named commits' signatures before loading them (R-BTN-133). A group is read atomically:
+  the record's `read` is the newest owner-signed commit that changed any of the group's paths
+  while leaving every other path of the group at its own last owner-signed change — a signed
+  change to one file never carries a sibling's earlier unsigned bytes into force. While a group
+  names no signed version, no claim on the repository's tickets is handed out (fail closed,
+  no attempt charged: the notice names what an owner signs once). The sync computes both where
+  the git objects are, with the owner keys served by the observation (never read from the
+  repository it is judging); B-137 moves the verification server-side over the raw commits.
 - Every ticket with a ready leg is ranked, a suspended one included.
 - A `question` is stored only for a ticket whose queued leg is a person leg (R-BTN-116); any
   other is dropped and logged `question-dropped`.

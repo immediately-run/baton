@@ -11,7 +11,7 @@
 // and each runner's own verification of the named commits) is test/unit/signed-control.test.ts
 // and S-BTN-203.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, course, keyCall, observe, payload, rows, setAdminKeys, setClock, syncCall, ticket, placed, withCore } from '../helpers';
+import { Git, adminSession, course, keyCall, observe, payload, rows, sessionCall, setAdminKeys, setClock, syncCall, ticket, placed, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-06T12:00:00Z');
@@ -25,13 +25,14 @@ let owner: TestKey;
 /** The owner key's public line as Baton stores it (type and base64, no comment). */
 let ownerLine: string;
 
-/** The `control` record as the sync posts it (B-127): three groups, each with its read commit. */
+/** The `control` record as the sync posts it (B-127): four groups, each with its read commit. */
 const control = (over: Record<string, unknown> = {}) => ({
   keys: [FP],
   groups: {
     agent_command: { read: SHA, key: FP, unsigned: [OTHER_SHA] },
     overrides: { read: SHA, key: FP, unsigned: [] },
     rank: { read: null, key: null, unsigned: [] },
+    course: { read: SHA, key: FP, unsigned: [] },
   },
   unsigned: [{ path: '.baton/baton.json', commits: [OTHER_SHA] }],
   ...over,
@@ -83,17 +84,33 @@ describe(`S-BTN-202 owner-signed briefs and the signed-control record`, () => {
     expect(await rows('SELECT sha, control_json FROM signed_control WHERE repository_id = ?', 'docs')).toEqual([
       { sha: git.head, control_json: JSON.stringify(control()) },
     ]);
-    // A group's key must be one the record names; a read commit is a commit.
+    // A refused post does not consume its observation number (R-BTN-62), so each post here
+    // takes a fresh one: the clock ticks past the 10-minute TTL between posts, and every 400
+    // below is the control shape's own refusal, not a stale number's.
+    let at = T0;
+    const tick = () => setClock(at += 11 * 60_000);
     for (const bad of [
       { ...control(), keys: [FP, FP] },
       control({ keys: ['not-a-fingerprint'] }),
       control({ groups: { ...control().groups, agent_command: { read: 'nope', key: FP, unsigned: [] } } }),
       control({ groups: { ...control().groups, agent_command: { read: SHA, key: FP2, unsigned: [] } } }),
       control({ unsigned: [{ path: '.baton/baton.json', commits: [] }] }),
+      // Round 1 (the course group): an unknown group name is refused.
+      control({ groups: { ...control().groups, sync: { read: SHA, key: FP, unsigned: [] } } }),
+      control({ groups: { ...control().groups, agent_command: { read: SHA, key: FP, unsigned: [], nope: 1 } } }),
     ]) {
+      await tick();
       const res = await syncCall('/v1/sync/board', payload('d'.repeat(40), git.head, { items: [], ready: [] }, { control: bad }));
       expect(res.status, JSON.stringify(bad)).toBe(400);
-      await observe(); // the refused post used its number (R-BTN-62)
+      expect(((await res.json()) as { message: string }).message, JSON.stringify(bad)).toContain('control');
+    }
+    for (const good of [
+      // The pre-course-group shape (a sync from before the group) still stands.
+      control({ groups: { agent_command: control().groups.agent_command, overrides: control().groups.overrides, rank: control().groups.rank } }),
+    ]) {
+      await tick();
+      const res = await syncCall('/v1/sync/board', payload('e'.repeat(40), git.head, { items: [], ready: [] }, { control: good }));
+      expect(res.status, JSON.stringify(good)).toBe(200);
     }
   });
 
@@ -112,13 +129,28 @@ describe(`S-BTN-202 owner-signed briefs and the signed-control record`, () => {
     expect(events.length).toBe(1);
     const detail = JSON.parse(events[0].detail_json) as { changes: { path: string; commits: string[] }[] };
     expect(detail.changes).toEqual([{ path: '.baton/baton.json', commits: [OTHER_SHA] }]);
-    // §14 Needs you lists it.
-    await withCore(async () => {});
-    const needs = (await rows('SELECT 1 FROM events WHERE kind = \'unsigned-control\'')).length;
-    expect(needs).toBe(1);
+    // §14 Needs you lists it — the state answer's own surface (round 1: the notice used to be
+    // raised into a view nothing rendered; asserting the events table proved nothing).
+    // §14 Needs you lists it — the state answer's own surface, read as the dashboard does
+    // (round 1: the notice used to be raised into a view nothing rendered; asserting the
+    // events table proved nothing about the view).
+    const session = await adminSession(admin);
+    const uiRes = await sessionCall(session, '/v1/ui/state');
+    expect(uiRes.status).toBe(200);
+    const state = (await uiRes.json()) as { needs_you: { unsigned_control: { repository_id: string; changes: { path: string; commits: string[] }[] }[] } };
+    expect(state.needs_you.unsigned_control.map((u) => [u.repository_id, u.changes])).toEqual([['docs', [{ path: '.baton/baton.json', commits: [OTHER_SHA] }]]]);
+    // Round 1 (re-firing): a later head move that changes nothing about the standing unsigned
+    // change raises nothing new; the same path under a NEW unsigned commit does.
+    expect((await git.post({ control: control() })).status).toBe(200);
+    expect(await rows(`SELECT COUNT(*) AS n FROM events WHERE kind = 'unsigned-control'`)).toEqual([{ n: 1 }]);
+    const NEW_SHA = 'c'.repeat(40);
+    expect((await git.post({ control: control({ unsigned: [{ path: '.baton/baton.json', commits: [NEW_SHA] }] }) })).status).toBe(200);
+    const events2 = await rows<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'unsigned-control'`);
+    expect(events2.length).toBe(2);
+    expect((JSON.parse(events2[1].detail_json) as { changes: { commits: string[] }[] }).changes).toEqual([{ path: '.baton/baton.json', commits: [NEW_SHA] }]);
     // A post with no unsigned change raises nothing.
     expect((await git.post({ control: control({ unsigned: [] }) })).status).toBe(200);
-    expect(await rows(`SELECT COUNT(*) AS n FROM events WHERE kind = 'unsigned-control'`)).toEqual([{ n: 1 }]);
+    expect(await rows(`SELECT COUNT(*) AS n FROM events WHERE kind = 'unsigned-control'`)).toEqual([{ n: 2 }]);
   });
 
   it('the observation serves the owner signing keys and the setting; the read answers an owner too', async () => {

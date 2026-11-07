@@ -1368,9 +1368,13 @@ export class BatonCore {
    *  about owner-signed control inputs at this commit — stands for the repository, and a post
    *  that moved the head (`from` is the head it left) onto unsigned control inputs raises one
    *  `unsigned-control` event under Needs you while the repository requires them signed, naming
-   *  the paths and the commits. The record is the sync's computation: the paths and signatures
-   *  are B-137's to move server-side over the raw commits; the groups a runner loads from are
-   *  verified by each runner before it loads them, never only by the sync that posts them. */
+   *  the paths and the commits. Round 1 (re-firing): only entries the last raised event did not
+   *  already name raise it — a newly listed path, or the same path under a new unsigned commit —
+   *  so one standing unsigned change does not re-notice on every later head move, and opting the
+   *  setting on still notices what stands. The record is the sync's computation: the paths and
+   *  signatures are B-137's to move server-side over the raw commits; the groups a runner loads
+   *  from are verified by each runner before it loads them, never only by the sync that posts
+   *  them. */
   private applyControl(r: string, p: BoardPayload, at: number, from: string | null): void {
     if (p.control !== undefined) {
       this.store.exec(`INSERT INTO signed_control (repository_id, sha, control_json, updated_at) VALUES (?, ?, ?, ?)
@@ -1381,8 +1385,24 @@ export class BatonCore {
     if (!p.control.unsigned.length) return;
     const required = !!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', r)[0]?.flag;
     if (!required) return;
-    const changes = p.control.unsigned.slice(0, 50);
-    logEvent(this.store, at, 'unsigned-control', 'sync', { sha: p.sha, parent_sha: from, keys: p.control.keys, changes, ...(p.control.unsigned.length > changes.length ? { omitted: p.control.unsigned.length - changes.length } : {}) }, null, null, r);
+    // Round 1 (re-firing): only entries the owner has not already been told raise it. The last
+    // raised event is the notice's own record — a newly listed path, or the same path under a
+    // new unsigned commit, is news; a standing unsigned change the owner already saw is not.
+    // The previous control record is NOT the witness: while the setting was off nothing was
+    // raised, and opting in must still notice what stands.
+    const seen = new Set<string>();
+    const last = this.sql<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'unsigned-control' AND repository_id = ? ORDER BY seq DESC LIMIT 1`, r)[0];
+    if (last) {
+      try {
+        for (const u of (JSON.parse(last.detail_json) as { changes: { path: string; commits: string[] }[] }).changes) seen.add(`${u.path}\u0000${u.commits.join(',')}`);
+      } catch {
+        // Unreadable: nothing is known to have been noticed — the event fires.
+      }
+    }
+    const fresh = p.control.unsigned.filter((u) => !seen.has(`${u.path}\u0000${u.commits.join(',')}`));
+    const changes = fresh.slice(0, 50);
+    if (!changes.length) return;
+    logEvent(this.store, at, 'unsigned-control', 'sync', { sha: p.sha, parent_sha: from, keys: p.control.keys, changes, ...(fresh.length > changes.length ? { omitted: fresh.length - changes.length } : {}) }, null, null, r);
   }
 
   /** §14 Needs you, B-127: the unsigned control changes of the last 7 days, newest first, of
@@ -1412,7 +1432,7 @@ export class BatonCore {
   private async claimControl(ticket: string): Promise<{ control?: unknown }> {
     if (!ticket.includes(':')) return {};
     const repo = repositoryOf(ticket);
-    if (!!!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag) return {};
+    if (!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag) return {};
     const keys = (await this.admin.signingKeys(repo)).map((k) => k.public_key);
     const row = this.sql<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', repo)[0];
     let groups: Record<string, { read: string | null; key: string | null; unsigned: string[] }> = {};

@@ -98,8 +98,6 @@ interface ItemFacts {
   rank: number | null;
   /** Where the head snapshot places it, or null when it places it nowhere. */
   station: { station: string; path: Step[]; next_leg: string | null; to_end: number; handoff_url: string | null } | null;
-  /** B-127 item 7: the brief's mark, when the sync posted one. */
-  brief?: { signed: boolean; signer?: string; commit: string };
 }
 
 /** A row of the candidate query (§7.2). */
@@ -382,8 +380,8 @@ export class Claims {
 
   /** A ticket's filter fields and where the head snapshot places it (R-BTN-33, R-BTN-70). */
   private item(id: string): ItemFacts | null {
-    const r = this.rows<{ id: string; repository_id: string; course_id: string; path: string; tier: string | null; requires_clause: string; operator_only: number; rank: number | null; expedite: number; brief: string | null }>(
-      'SELECT id, repository_id, course_id, path, tier, requires_clause, operator_only, rank, expedite, brief FROM tickets WHERE id = ?', id)[0];
+    const r = this.rows<{ id: string; repository_id: string; course_id: string; path: string; tier: string | null; requires_clause: string; operator_only: number; rank: number | null; expedite: number }>(
+      'SELECT id, repository_id, course_id, path, tier, requires_clause, operator_only, rank, expedite FROM tickets WHERE id = ?', id)[0];
     if (!r) return null;
     const requires = r.requires_clause === 'listed'
       ? this.rows<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ? ORDER BY name', id).map((x) => x.name)
@@ -394,8 +392,6 @@ export class Claims {
       id: r.id, repository: r.repository_id, course: r.course_id, path: r.path, tier: r.tier, requires, operator_only: !!r.operator_only, rank: r.rank,
       expedite: !!r.expedite || !!this.override(id)?.expedite,
       station: s ? { station: s.station, path: JSON.parse(s.path) as Step[], next_leg: s.next_leg, to_end: s.to_end, handoff_url: s.handoff_url } : null,
-      // B-127 item 7: the brief's mark, served with the ticket wherever its facts are read.
-      ...(r.brief ? { brief: JSON.parse(r.brief) as { signed: boolean; signer?: string; commit: string } } : {}),
     };
   }
 
@@ -665,6 +661,9 @@ export class Claims {
    */
   private recommend(w: WorkerFacts, limit: number): Recommendation[] {
     const groups = new Map<string, { rows: (Candidate & { item: ItemFacts })[]; done: boolean }>();
+    // B-127 (fail closed, unpenalised): no ticket of a repository whose required control has no
+    // signed version is recommended — see unsignedControlBlocked.
+    const unsignedBlocked = this.unsignedControlBlocked();
     for (let page = 0; page < 4; page++) {
       const wanted = page === 0 ? null : [...groups].filter(([, g]) => !g.done && g.rows.length < limit).map(([k]) => k);
       if (wanted && !wanted.length) break;
@@ -673,6 +672,7 @@ export class Claims {
       for (const c of read) {
         const key = `${c.repository_id}\u0000${c.course_id}`;
         if (wanted && !wanted.includes(key)) continue;
+        if (unsignedBlocked.has(c.repository_id)) continue;
         counts.set(key, (counts.get(key) ?? 0) + 1);
         const g = groups.get(key) ?? { rows: [], done: false };
         groups.set(key, g);
@@ -712,6 +712,34 @@ export class Claims {
     }));
   }
 
+  /** B-127 (fail closed, unpenalised — review round 1): the repositories that require signed
+   *  control while the standing record names no owner-signed version for one of the groups (or
+   *  carries none, or names a group this Baton does not know). No claim on their tickets is
+   *  handed out until an owner signs the current state once: the pre-ceremony window is the
+   *  owner's to close, not a `cannot-finish:spec` the ticket pays an attempt and a non-retryable
+   *  hold for. The `unsigned-control` notice under Needs you names what to sign; the runner-side
+   *  verification remains as the last line (a record that lies about a signature still ends its
+   *  claim closed). */
+  private unsignedControlBlocked(): Set<string> {
+    const out = new Set<string>();
+    for (const r of this.rows<{ id: string; control_json: string | null }>(
+      `SELECT r.id AS id, sc.control_json AS control_json FROM repositories r
+       LEFT JOIN signed_control sc ON sc.repository_id = r.id
+       WHERE r.require_signed_control = 1 AND r.retired_at IS NULL`)) {
+      let groups: Record<string, { read?: unknown }> | null = null;
+      try {
+        groups = r.control_json ? (JSON.parse(r.control_json) as { groups: Record<string, { read?: unknown }> }).groups : null;
+      } catch {
+        groups = null;
+      }
+      if (!groups || ['agent_command', 'overrides', 'rank', 'course'].some((g) => {
+        const read = groups![g]?.read;
+        return typeof read !== 'string' || read === '';
+      })) out.add(r.id);
+    }
+    return out;
+  }
+
   /** R-BTN-79: whether `item` is a new ticket — at its course's start with an empty path — of a
    *  course whose intake is closed, and not expedited (R-BTN-12: the owner's say still counts). */
   private intakeClosed(item: ItemFacts): boolean {
@@ -747,6 +775,12 @@ export class Claims {
       // §12.8 (B-145, R-BTN-189): a ticket that reaches a repository whose floored guarantee is
       // broken is not claimable — rule `floor`, `floor-broken`.
       this.refuseStopped(wanted, w);
+      // B-127 (fail closed, unpenalised): the pre-ceremony window — the repository requires
+      // signed control and a group has no owner-signed version — hands out no claim; the notice
+      // under Needs you names what an owner signs once.
+      if (this.unsignedControlBlocked().has(repositoryOf(wanted))) {
+        throw new BatonError('not-eligible', `${wanted}: ${repositoryOf(wanted)} requires owner-signed control and a control input has no owner-signed version yet — an owner signs the current state once (B-127)`, { rule: 'unsigned-control' });
+      }
       const item = this.item(wanted);
       if (!item || !item.station?.next_leg) throw new BatonError('not-eligible', `${wanted} has no leg to claim`, { rule: 1, rule_code: GATE_CODES[1] });
       const v = this.gate(w, item, item.station.next_leg, 'claim');

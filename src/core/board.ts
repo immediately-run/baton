@@ -158,7 +158,13 @@ export interface PostedGroup {
 export interface PostedControl {
   /** The owner keys' fingerprints the sync verified with — what named `key` below means. */
   keys: string[];
-  groups: { agent_command: PostedGroup; overrides: PostedGroup; rank: PostedGroup };
+  /** The runner-loaded groups (B-127 item 4): `agent_command` (`.baton/baton.json`), the
+   *  overrides (`legs/<leg>.run.mjs`), `rank.mjs`, and the courses' leg scripts
+   *  (`legs/*.mjs` — the code a runner executes; the graph stays with the snapshot, B-33
+   *  pinning a sourced course's file). A sync from before the course group posts three; while
+   *  the repository requires signed control, the claim is refused until a post names all four
+   *  (fail closed on a missing group). */
+  groups: { agent_command: PostedGroup; overrides: PostedGroup; rank: PostedGroup; course?: PostedGroup };
   /** Every control input whose last change (first parents) is unsigned: one entry per path,
    *  with its commits; a ticket file's entry names the watched fields (`EXPEDITE`) in `fields`. */
   unsigned: { path: string; commits: string[]; fields?: string[] }[];
@@ -288,11 +294,13 @@ export function checkPayload(body: unknown): BoardPayload {
     for (const [k, v] of Object.entries(c)) if (!['keys', 'groups', 'unsigned'].includes(k)) badControl(k, 'is not a control field');
     if (!Array.isArray(c.keys) || !c.keys.every((x) => typeof x === 'string' && FINGERPRINT.test(x))) badControl('keys', 'must be the signing keys’ fingerprints');
     if (new Set(c.keys).size !== c.keys.length) badControl('keys', 'names a key twice');
-    if (!isObj(c.groups) || Object.keys(c.groups).length !== 3 || !(['agent_command', 'overrides', 'rank'] as const).every((g) => isObj(c.groups![g]))) {
+    if (!isObj(c.groups) || !(['agent_command', 'overrides', 'rank'] as const).every((g) => isObj(c.groups![g]))) {
       badControl('groups', 'must hold agent_command, overrides and rank');
     }
-    for (const g of ['agent_command', 'overrides', 'rank'] as const) {
+    for (const k of Object.keys(c.groups)) if (!(['agent_command', 'overrides', 'rank', 'course'] as readonly string[]).includes(k)) badControl(`groups.${k}`, 'is not a group');
+    for (const g of ['agent_command', 'overrides', 'rank', 'course'] as const) {
       const grp = c.groups[g];
+      if (grp === undefined) continue; // course: a sync from before the group; while the setting is on, a claim fails closed on it
       const at = `groups.${g}`;
       for (const [k, v] of Object.entries(grp)) if (!['read', 'key', 'unsigned'].includes(k)) badControl(`${at}.${k}`, 'is not a group field');
       if (grp.read !== null && (typeof grp.read !== 'string' || !SHA.test(grp.read))) badControl(`${at}.read`, 'must be a 40-hex commit or null (no signed version)');

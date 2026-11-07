@@ -53,13 +53,18 @@ export function commitSignature(raw) {
 /**
  * What an SSH-signed commit signed: the raw object with the `gpgsig` header and its
  * continuation lines removed — git's own rule (its `remove_signature`), the rest byte for byte.
- * A commit with no `gpgsig` header returns unchanged (it carries no SSHSIG).
+ * Only the headers are touched: they end at the blank line before the message, so a message
+ * body line that begins `gpgsig ` is the owner's words, not a header to strip (round 1: such a
+ * commit used to fail verification and read unsigned). A commit with no `gpgsig` header returns
+ * unchanged (it carries no SSHSIG).
  */
 export function signedPayload(raw) {
   const lines = raw.split('\n');
+  const end = lines.indexOf(''); // the headers end at the blank line before the message
+  const headerEnd = end < 0 ? lines.length : end;
   const out = [];
   let skipping = false;
-  for (const line of lines) {
+  for (const line of lines.slice(0, headerEnd)) {
     if (line.startsWith('gpgsig ')) { skipping = true; continue; }
     if (skipping) {
       if (line.startsWith(' ')) continue;
@@ -67,7 +72,7 @@ export function signedPayload(raw) {
     }
     out.push(line);
   }
-  return out.join('\n');
+  return [...out, ...lines.slice(headerEnd)].join('\n');
 }
 
 /** The fingerprint ssh-keygen names in its `Good … signature` line, else null. */

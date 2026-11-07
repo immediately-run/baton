@@ -22,13 +22,25 @@ export interface SigningKey {
 
 /** The runner-loaded control inputs (B-127 item 4), each a group read from one commit:
  *  `agent_command` and `agent_wrapper` live in `.baton/baton.json`; an override is a course's
- *  `legs/<leg>.run.mjs`; a course's `rank.mjs` (R-BTN-98). */
+ *  `legs/<leg>.run.mjs`; a course's `rank.mjs` (R-BTN-98); and a course's leg scripts
+ *  `legs/*.mjs` (B-127 item 1; review round 1: the scripts are the code that *enforces* the
+ *  gate, so they load at the group's signed commit, never an unsigned snapshot). The overrides
+ *  are their own group and excluded here, so an unsigned override change does not freeze the
+ *  course's scripts with it. The walk covers the scripts only — the runner loads a course's
+ *  graph with them, one coherent tree — because a sourced course's `course.json` is pinned
+ *  byte-equal by the sync itself (B-33 refuses the post when it differs) and so can never be
+ *  signed after its scaffold; a leg a pushed graph adds that the signed `legs/` does not carry
+ *  refuses the claim as a missing script, so no pushed code runs either way. */
 export const CONTROL_GROUPS = {
   agent_command: [':(glob).baton/baton.json'],
   overrides: [':(glob).baton/courses/**/*.run.mjs'],
   rank: [':(glob).baton/courses/**/rank.mjs'],
+  course: [':(glob).baton/courses/**/legs/**/*.mjs', ':(exclude):(glob).baton/courses/**/*.run.mjs'],
 } as const;
 export type ControlGroup = keyof typeof CONTROL_GROUPS;
+/** Every group's name, the post's protocol constant (board.ts validates the same list core-side;
+ *  the runner verifies each group it names). */
+export const CONTROL_GROUP_NAMES = Object.keys(CONTROL_GROUPS) as ControlGroup[];
 
 /** The control inputs (B-127 item 1), as path patterns: Baton's own configuration, goal files
  *  and everything a privileged interactive session loads or executes (security model reach 1;
@@ -71,13 +83,9 @@ export interface SignedControl {
 }
 
 /** A ticket brief's mark (B-127 item 7): whose words the brief is. `signed` only when the
- *  commit that last changed the brief paragraph carries an owner key's signature; `commit` that
- *  commit, `signer` the key when signed. */
-export interface BriefMark {
-  signed: boolean;
-  signer: string | null;
-  commit: string;
-}
+ *  commit that last changed the brief paragraph carries an owner key's signature — and then
+ *  `signer` names the key; `commit` that commit either way. */
+export type BriefMark = { signed: true; signer: string; commit: string } | { signed: false; commit: string };
 
 /** One git command in the repository, as the caller's own helper runs it (cli.ts's `git`). */
 export type Git = (...args: string[]) => string;
@@ -92,8 +100,14 @@ export type Keygen = (input: KeygenInput) => { status: number | null; stdout?: s
 export const WALK_BOUND = 2000;
 /** How many commits that changed one path the per-path walks list. */
 export const CHANGERS_BOUND = 200;
-/** The most signatures one sync verifies: past it everything reads unsigned (fail closed). */
+/** The most signatures one sync verifies: past it a group fails closed and a mark is left
+ *  unmade (see Walk.signed) — never a false `unsigned`. */
 export const VERIFIES_MAX = 256;
+/** The post's own bounds (checkPayload's, src/core/board.ts): the sync clamps to them, so a
+ *  busy repository's record is never refused for the notice's size (review round 1: the 41st
+ *  unsigned change used to brick the whole board post). */
+export const GROUP_UNSIGNED_MAX = 40;
+export const CONTROL_UNSIGNED_MAX = 200;
 
 /** `keys`' public lines, the one list every verify passes. */
 const publicKeyLines = (keys: SigningKey[]): string[] => keys.map((k) => k.public_key);
@@ -147,7 +161,7 @@ export function isSignedControlPath(path: string): boolean {
 
 /** The deps every walk shares: memoized signature checks under their bound. */
 class Walk {
-  private readonly verified = new Map<string, { key: string } | {} | null>();
+  private readonly verified = new Map<string, { key: string } | null | undefined>();
   private spent = 0;
   constructor(
     private readonly git: Git,
@@ -164,12 +178,34 @@ class Walk {
     const out = this.git('log', '--first-parent', '--diff-filter=A', '--format=%H', '-n1', head, '--', pathspec).trim();
     return out || null;
   }
-  /** Whether `sha` is signed by an owner key, and which (memoized; past VERIFIES_MAX never). */
-  signed(sha: string): { key: string } | {} | null {
-    if (this.verified.has(sha)) return this.verified.get(sha) ?? null;
+  /** The commits that changed `group`'s paths against their first parent, newest first, each
+   *  with the paths it changed. `--diff-merges=first-parent` makes a merge show the paths its
+   *  tree differs on from its first parent — finding 13's reading of "the commit that last
+   *  changed it", which the default (no diff for merges) would leave invisible to the
+   *  per-path tracking the laundering rule needs. */
+  groupLog(group: ControlGroup, head: string): { sha: string; paths: Set<string> }[] {
+    const text = this.git('log', '--first-parent', '--no-renames', '--diff-merges=first-parent', '--name-status', '--format=%H', `-n${CHANGERS_BOUND}`, head, '--', ...CONTROL_GROUPS[group]);
+    const out: { sha: string; paths: Set<string> }[] = [];
+    let at: { sha: string; paths: Set<string> } | null = null;
+    for (const line of text.split('\n')) {
+      if (/^[0-9a-f]{40}$/.test(line)) { at = { sha: line, paths: new Set() }; out.push(at); continue; }
+      if (at && /^[A-Z]\t/.test(line)) at.paths.add(line.slice(2).split('\t').at(-1)!);
+    }
+    return out;
+  }
+  /** Whether `sha` is signed by an owner key, and which (memoized). `{key}` only: a signature
+   *  ssh-keygen accepts but names no fingerprint for does not count — the record could not name
+   *  the key, and its shape has nowhere for an unnamed one (round 1: such a commit used to
+   *  reach the record as `{read, key: null}`, silently ungating the group). Past VERIFIES_MAX
+   *  the answer is `undefined` — not verified either way — and the callers split on what that
+   *  means: the ones that can leave a mark or a gate unmade (a brief mark, the EXPEDITE gate)
+   *  leave it rather than claim the owner's signed words are not theirs; the ones that must
+   *  decide (the groups) fail closed. */
+  signed(sha: string): { key: string } | null | undefined {
+    if (this.verified.has(sha)) return this.verified.get(sha);
     if (this.spent++ >= VERIFIES_MAX) {
-      this.verified.set(sha, null);
-      return null;
+      this.verified.set(sha, undefined);
+      return undefined;
     }
     let raw: string;
     try {
@@ -178,13 +214,14 @@ class Walk {
       this.verified.set(sha, null);
       return null;
     }
-    // A git commit object ends in a newline and the signature covers it; the sync's own `git`
-    // helper trims its answer, so the byte is put back rather than verified against a shortened
-    // payload. A commit that genuinely lacked it fails closed, like any unsigned one.
+    // A git commit object ends in a newline and the signature covers it; a caller whose own
+    // `git` helper trims its answer has that byte restored rather than verified against a
+    // shortened payload. A commit that genuinely lacked it fails closed, like any unsigned one.
     if (!raw.endsWith('\n')) raw += '\n';
     const out = verifySignedCommit(raw, this.keys, this.keygen);
-    this.verified.set(sha, out);
-    return out;
+    const named = out != null && 'key' in out ? out : null;
+    this.verified.set(sha, named);
+    return named;
   }
   /** A file's bytes at `sha`, or null when the commit has no such file. */
   at(sha: string, path: string): string | null {
@@ -196,30 +233,51 @@ class Walk {
   }
 }
 
-/** One group's in-force state: the newest changer whose signature counts, the read commit at
- *  its tree (every later change is unsigned and left behind), or — with no changer within the
- *  walk's memory — the head as the pre-adoption baseline, unverified. */
+/** One group's in-force state: `read` the commit to load from (null: no signed version — nothing
+ *  counts), `key` the fingerprint that signed `read` (null when `read` is only the pre-adoption
+ *  baseline beyond the walk's memory, or nothing counts), `unsigned` the commits that changed
+ *  the group without counting.
+ *
+ * `read` is the newest owner-signed changer whose tree leaves every path of the group it did
+ * not itself change at that path's last counting change — review round 1's laundering fix: the
+ * newest signed changer of *any* path used to be `read`, and its tree carries earlier unsigned
+ * changes to the group's *other* paths (unsigned `a.run.mjs`, owner-signed `b.run.mjs` → the
+ * b commit's tree holds the pushed a, and the runner loaded it). A signed changer whose tree
+ * would launder a sibling does not become `read`: the group stays at the earlier signed state
+ * and every changer above it — the unsigned change and the signed one that would carry it —
+ * lands in `unsigned`, fail closed, until an owner signs the whole state once. */
 function groupInForce(walk: Walk, group: ControlGroup, head: string): GroupInForce {
-  // Newest first: `git log`'s own order, kept through the dedupe (a group's pathspecs list the
-  // same commit twice at most once here, but the order is what the walk below depends on).
-  const changers: string[] = [];
-  for (const p of CONTROL_GROUPS[group]) for (const sha of walk.changers(p, head)) if (!changers.includes(sha)) changers.push(sha);
-  if (!changers.length) return { read: head, key: null, unsigned: [] };
-  const unsigned: string[] = [];
-  for (const sha of changers) {
+  const log = walk.groupLog(group, head);
+  if (!log.length) return { read: head, key: null, unsigned: [] };
+  // Oldest → newest: `settled` holds, per path the walk has seen change, whether its most
+  // recent change so far counts (an owner-signed commit changed it last). A signed changer
+  // qualifies as `read` only when every path it does not itself change is settled — its own
+  // paths are settled by it, signed as it is.
+  const settled = new Map<string, boolean>();
+  let read: string | null = null;
+  let key: string | null = null;
+  for (const { sha, paths } of [...log].reverse()) {
     const v = walk.signed(sha);
-    if (v) return { read: sha, key: 'key' in v ? v.key : null, unsigned };
-    unsigned.push(sha);
+    if (v) {
+      if ([...settled].every(([p, ok]) => ok || paths.has(p))) { read = sha; key = v.key; }
+      for (const p of paths) settled.set(p, true);
+    } else {
+      for (const p of paths) settled.set(p, false);
+    }
   }
-  return { read: null, key: null, unsigned };
+  if (read == null) return { read: null, key: null, unsigned: log.map((c) => c.sha).slice(0, GROUP_UNSIGNED_MAX) };
+  const at = log.findIndex((c) => c.sha === read);
+  return { read, key, unsigned: log.slice(0, at).map((c) => c.sha).slice(0, GROUP_UNSIGNED_MAX) };
 }
 
 /** Every path the head's first-parent history changed, with the newest commit that changed it:
  *  one bounded `git log --name-status`, its first sight of a path being that path's last
- *  change. Paths beyond the bound keep no entry (their change predates the walk's memory). */
+ *  change. `--diff-merges=first-parent` attributes a merge's control-path changes to the merge
+ *  (finding 13's reading), which the default — no diff rows for merges — would leave unnamed by
+ *  the notice. Paths beyond the bound keep no entry (their change predates the walk's memory). */
 function lastChanges(git: Git, head: string): Map<string, string> {
   const out = new Map<string, string>();
-  const text = git('log', '--first-parent', '--no-renames', '--name-status', '--format=%H', `-n${WALK_BOUND}`, head);
+  const text = git('log', '--first-parent', '--no-renames', '--diff-merges=first-parent', '--name-status', '--format=%H', `-n${WALK_BOUND}`, head);
   let sha = '';
   for (const line of text.split('\n')) {
     if (/^[0-9a-f]{40}$/.test(line)) { sha = line; continue; }
@@ -230,6 +288,14 @@ function lastChanges(git: Git, head: string): Map<string, string> {
   return out;
 }
 
+/** The notice's list at the post's own bound (checkPayload's CONTROL_UNSIGNED_MAX), sorted by
+ *  path: a repository with more unsigned control paths than the post admits lists the first
+ *  ones deterministically, and the event's `omitted` count names the rest — never a refused
+ *  post. */
+export function clampUnsignedList(list: SignedControl['unsigned']): SignedControl['unsigned'] {
+  return [...list].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)).slice(0, CONTROL_UNSIGNED_MAX);
+}
+
 /**
  * The signed-control state of `head` (B-127): the three runner-loaded groups, and the control
  * inputs whose last change is unsigned — the notice's list. With no owner signing keys (the
@@ -238,11 +304,8 @@ function lastChanges(git: Git, head: string): Map<string, string> {
 export function signedControlOf(head: string, keys: SigningKey[], git: Git, keygen: Keygen): SignedControl | null {
   if (!keys.length) return null;
   const walk = new Walk(git, publicKeyLines(keys), keygen);
-  const groups = {
-    agent_command: groupInForce(walk, 'agent_command', head),
-    overrides: groupInForce(walk, 'overrides', head),
-    rank: groupInForce(walk, 'rank', head),
-  };
+  const groups = {} as Record<ControlGroup, GroupInForce>;
+  for (const g of CONTROL_GROUP_NAMES) groups[g] = groupInForce(walk, g, head);
   const byCommit = new Map<string, string[]>();
   for (const [path, sha] of lastChanges(git, head)) {
     if (!isSignedControlPath(path)) continue;
@@ -251,9 +314,8 @@ export function signedControlOf(head: string, keys: SigningKey[], git: Git, keyg
     list.push(path);
     byCommit.set(sha, list);
   }
-  const unsigned = [...byCommit.entries()]
-    .flatMap(([sha, paths]) => paths.map((path) => ({ path, commits: [sha] })))
-    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const unsigned = clampUnsignedList([...byCommit.entries()]
+    .flatMap(([sha, paths]) => paths.map((path) => ({ path, commits: [sha] }))));
   return { groups, unsigned };
 }
 
@@ -296,31 +358,37 @@ function expediteAt(walk: Walk, sha: string, path: string): boolean {
   return fm != null && strList(fm.tags).includes('EXPEDITE');
 }
 
-/** The newest commit of `changers` (newest first) that changed the value — against the next
- *  changer's, or against the absent value when the oldest changer listed is the file's creation
- *  (the value appeared with it). Null when no change is within the walk's memory: the value
- *  predates it and counts as today's, so an unsigned change that touched the file around an
- *  unchanged value — a Status line appended below a signed brief — claims nothing. */
-function lastChangeOf<T>(changers: string[], valueOf: (sha: string) => T, absent: T, created: string | null): string | null {
+/** The commits that changed the value — newest first, each against the next older changer's,
+ *  or against the absent value when the oldest changer listed is the file's creation (the
+ *  value appeared with it). Only changes within the walk's memory: a value whose every change
+ *  predates it counts as today's, so nothing is listed for it — an unsigned change that
+ *  touched the file around an unchanged value (a Status line appended below a signed brief)
+ *  claims nothing. */
+function valueChangers<T>(changers: string[], valueOf: (sha: string) => T, absent: T, created: string | null): string[] {
+  const out: string[] = [];
   for (let i = 0; i < changers.length; i++) {
     const was = i + 1 < changers.length
       ? valueOf(changers[i + 1])
       : created === changers[changers.length - 1] ? absent : undefined;
     if (was === undefined) break;
-    if (valueOf(changers[i]) !== was) return changers[i];
+    if (valueOf(changers[i]) !== was) out.push(changers[i]);
   }
-  return null;
+  return out;
 }
 
 /**
  * The brief marks of `paths` (B-127 item 7 — marked whether or not the setting is on) and the
  * paths whose EXPEDITE does not count (item 1: a control input; only under
- * `require_signed_control` does the sync drop it), mapped to the unsigned commit that last
- * changed the tag — the notice names it. Both read the same per-file walk: the newest commit
- * that changed the words — the brief paragraph, the tag — against their state at the previous
- * changer, first parents only, so a Status line appended below changes neither. A value whose
- * last change is beyond the walk's memory is left unmarked and counts as today's (the
- * pre-adoption baseline); a ticket file the head does not carry is left out.
+ * `require_signed_control` does the sync hold it to the last signed state), mapped to the
+ * unsigned commit that last changed the tag — the notice names it — with that state (the tag's
+ * value at its newest owner-signed change, `false` with none: a push alone neither adds nor
+ * removes an EXPEDITE, review round 1's both-directions fix). Both read the same per-file walk:
+ * the commits that changed the words — the brief paragraph, the tag — against their state at
+ * the previous changer, first parents only, so a Status line appended below changes neither. A
+ * value whose last change is beyond the walk's memory is left unmarked and counts as today's
+ * (the pre-adoption baseline); so is one the verification budget did not reach (a false
+ * `unsigned` would claim the owner's signed words are not theirs); a ticket file the head does
+ * not carry is left out.
  */
 export function marksOf(
   head: string,
@@ -328,24 +396,43 @@ export function marksOf(
   paths: string[],
   git: Git,
   keygen: Keygen,
-): { briefs: Map<string, BriefMark>; expedite: Map<string, string> } {
+): { briefs: Map<string, BriefMark>; expedite: Map<string, { commit: string; inForce: boolean }> } {
   const briefs = new Map<string, BriefMark>();
-  const expedite = new Map<string, string>();
+  const expedite = new Map<string, { commit: string; inForce: boolean }>();
   if (!keys.length) return { briefs, expedite };
   const walk = new Walk(git, publicKeyLines(keys), keygen);
   for (const path of paths) {
     const changers = walk.changers(path, head);
     if (!changers.length) continue;
     const created = walk.created(path, head);
-    const briefCommit = lastChangeOf(changers, (sha) => briefOf(walk.at(sha, path) ?? ''), null, created);
-    if (briefCommit != null) {
-      const v = walk.signed(briefCommit);
-      briefs.set(path, v
-        ? { signed: true, signer: 'key' in v ? v.key : null, commit: briefCommit }
-        : { signed: false, signer: null, commit: briefCommit });
+    const briefChanges = valueChangers(changers, (sha) => briefOf(walk.at(sha, path) ?? ''), null, created);
+    if (briefChanges.length) {
+      const v = walk.signed(briefChanges[0]);
+      if (v) briefs.set(path, { signed: true, signer: v.key, commit: briefChanges[0] });
+      else if (v === null) briefs.set(path, { signed: false, commit: briefChanges[0] });
+      // v === undefined: the budget is spent — unmarked, never a false `unsigned`.
     }
-    const expediteCommit = lastChangeOf(changers, (sha) => expediteAt(walk, sha, path), false, created);
-    if (expediteCommit != null && !walk.signed(expediteCommit)) expedite.set(path, expediteCommit);
+    const expediteChanges = valueChangers(changers, (sha) => expediteAt(walk, sha, path), false, created);
+    if (expediteChanges.length) {
+      const v = walk.signed(expediteChanges[0]);
+      if (v === null) {
+        // The tag's last change is unsigned: the LAST SIGNED STATE stays in force (item 3, both
+        // directions) — the value at the tag's newest owner-signed change, `false` with none
+        // (fail closed, like a group: a push alone neither adds nor removes an EXPEDITE). The
+        // budget running out mid-search is the one unknown: the gate is left off rather than
+        // drop a possibly signed tag or hold it to a state not read.
+        let inForce = false;
+        let unknown = false;
+        for (const sha of expediteChanges.slice(1)) {
+          const s = walk.signed(sha);
+          if (s) { inForce = expediteAt(walk, sha, path); break; }
+          if (s === undefined) { unknown = true; break; }
+        }
+        if (!unknown) expedite.set(path, { commit: expediteChanges[0], inForce });
+      }
+      // v truthy: the tag's last change is itself signed — it counts as today's, no gate.
+      // v === undefined: unmarked, as with the brief.
+    }
   }
   return { briefs, expedite };
 }

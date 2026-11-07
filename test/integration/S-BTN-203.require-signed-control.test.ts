@@ -10,7 +10,7 @@
 // server half of every clause runs on both hosts in S-BTN-202.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
@@ -111,10 +111,27 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** The course group's ceremony files: every leg script of the scaffolded course (the group is
+ *  atomic per file — an unsigned change to one leg must not ride in through a signed change to
+ *  another — so the owner signs a change touching each; the graph file stays out of the group,
+ *  a sourced course's being pinned byte-equal by the sync, B-33). */
+function bumpLegs(): void {
+  const legs = join(dir, '.baton', 'courses', 'create-pr', 'legs');
+  for (const f of readdirSync(legs)) {
+    if (!f.endsWith('.mjs') || f.endsWith('.run.mjs')) continue;
+    const file = join(legs, f);
+    writeFileSync(file, `${readFileSync(file, 'utf8')}\n`);
+    execFileSync('git', ['-C', dir, 'add', `.baton/courses/create-pr/legs/${f}`], { stdio: 'ignore' });
+  }
+}
+
 /** The scaffolded home: one ticket with an unsigned-filed brief, a stub-written agent that
- *  records its own argv, and the owner-signed baseline of the settings. Returns the signed
- *  baseline's sha. */
-async function scaffold(): Promise<{ baseline: string; filed: string }> {
+ *  records its own argv, an evil agent, and — with `ceremony` — the owner-signed baseline of
+ *  every control group: the settings (the commit that names the agent, so the walk sees a real
+ *  change) and a bump of the course's leg scripts (the course group round 1 added). Returns
+ *  the signed baseline's sha. Without the ceremony, every group's changes stay unsigned: the
+ *  pre-adoption window the claim-refusal test needs. */
+async function scaffold(ceremony = true): Promise<{ baseline: string; filed: string }> {
   // No --agent-command at the scaffold: the owner-signed baseline must CHANGE the settings to
   // count (the walk reads the commit that last changed a group; an empty signature signs
   // nothing), so it is the commit that names the agent.
@@ -125,10 +142,12 @@ async function scaffold(): Promise<{ baseline: string; filed: string }> {
   writeFileSync(join(dir, '.baton', 'facts.json'), '[]');
   execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' }); // the scaffold's own files
   const filed = commit(null, 'scaffold, unsigned');
+  if (!ceremony) return { baseline: '', filed };
   const settings = JSON.parse(readFileSync(join(dir, '.baton', 'baton.json'), 'utf8')) as Record<string, unknown>;
   settings.agent_command = 'node ./agent.mjs';
   write('.baton/baton.json', `${JSON.stringify(settings, null, 2)}\n`);
-  const baseline = commit('owner', 'the owner-signed baseline of the settings');
+  bumpLegs();
+  const baseline = commit('owner', 'the owner-signed baseline of the control inputs');
   return { baseline, filed };
 }
 
@@ -147,8 +166,9 @@ describe('S-BTN-203 require_signed_control', () => {
     expect((await sync()).code).toBe(0);
     // The record names the signed baseline for the group, the unsigned change in its list.
     const record = (await rows<{ sha: string; control_json: string }>('SELECT sha, control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0];
-    const control = JSON.parse(record.control_json) as { groups: { agent_command: { read: string; key: string } }; unsigned: { path: string; commits: string[] }[] };
+    const control = JSON.parse(record.control_json) as { groups: { agent_command: { read: string; key: string }; course: { read: string; key: string } }; unsigned: { path: string; commits: string[] }[] };
     expect(control.groups.agent_command).toMatchObject({ read: baseline, key: ownerFp });
+    expect(control.groups.course).toMatchObject({ read: baseline, key: ownerFp });
     expect(control.unsigned).toContainEqual({ path: '.baton/baton.json', commits: [pushed] });
     expect(await rows(`SELECT COUNT(*) AS n FROM events WHERE kind = 'unsigned-control'`)).toEqual([{ n: 1 }]);
     // The claim answer carries the record (Baton's own setting and keys with it), and the leg
@@ -251,5 +271,163 @@ describe('S-BTN-203 require_signed_control', () => {
     expect(await rows('SELECT brief FROM tickets WHERE id = ?', 'docs:B-9001')).toEqual([
       { brief: JSON.stringify({ signed: false, commit: filed }) },
     ]);
+  }, 120_000);
+
+  it('an unsigned REMOVAL of an owner-signed EXPEDITE keeps it in force (round 1, both directions)', async () => {
+    const { baseline } = await scaffold();
+    // The tag added by the owner: the ceremony's state, then a signed change that adds the tag.
+    write('tickets/B-9001.mdx', '---\nid: B-9001\ntitle: Signed control\ntags: [EXPEDITE]\n---\n\n**Brief:** the owner, 2026-11-06: hold the line.\n\nWork.\n');
+    commit('owner', 'the owner adds EXPEDITE');
+    await tick();
+    expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
+    expect((await sync()).code).toBe(0);
+    expect(await rows('SELECT expedite FROM tickets WHERE id = ?', 'docs:B-9001')).toEqual([{ expedite: 1 }]);
+    // The worker removes the tag unsigned: the last signed state — present — stays in force.
+    write('tickets/B-9001.mdx', '---\nid: B-9001\ntitle: Signed control\n---\n\n**Brief:** the owner, 2026-11-06: hold the line.\n\nWork.\n');
+    const removed = commit(null, 'the worker removes EXPEDITE');
+    await tick();
+    expect((await sync()).code).toBe(0);
+    expect(await rows('SELECT expedite FROM tickets WHERE id = ?', 'docs:B-9001')).toEqual([{ expedite: 1 }]);
+    const record = JSON.parse((await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0].control_json);
+    expect(record.unsigned).toContainEqual({ path: 'tickets/B-9001.mdx', commits: [removed], fields: ['EXPEDITE'] });
+    // With the setting off, the same removal counts as today's.
+    expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: false }, 'PUT')).status).toBe(200);
+    write('tickets/B-9001.mdx', '---\nid: B-9001\ntitle: Signed control\n---\n\n**Brief:** the owner, 2026-11-06: hold the line.\n\nWork, and a later change.\n');
+    commit(null, 'a later change');
+    await tick();
+    expect((await sync()).code).toBe(0);
+    expect(await rows('SELECT expedite FROM tickets WHERE id = ?', 'docs:B-9001')).toEqual([{ expedite: 0 }]);
+  }, 120_000);
+
+  it('an unsigned change to a course\'s leg scripts never runs: the runner loads the signed course (round 1, blocking)', async () => {
+    await scaffold();
+    await tick();
+    expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
+    expect((await sync()).code).toBe(0);
+    // The push rewrites the implement leg itself — the code that enforces the gate — to run
+    // anything.
+    const legFile = join(dir, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
+    writeFileSync(legFile, "import { appendFileSync } from 'node:fs';\nappendFileSync('ran-leg.txt', 'THE PUSHED LEG RAN\\n');\nexport async function run(ctx) { return { reached: 'pr-open', next: 'run-tests' }; }\n");
+    execFileSync('git', ['-C', dir, 'add', '.baton/courses/create-pr/legs/implement.mjs'], { stdio: 'ignore' });
+    const pushed = commit(null, 'the pushed leg script');
+    await tick();
+    expect((await sync()).code).toBe(0);
+    const control = JSON.parse((await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0].control_json);
+    expect(control.groups.course.unsigned).toContain(pushed);
+    // The runner claims and runs the SIGNED leg (the scaffold's stub, which runs the signed
+    // agent): the pushed leg script never executes, whatever it would have run.
+    const log: string[] = [];
+    const runner = makeRunner(log);
+    try {
+      const out = await runner.runOnce();
+      expect(out).not.toBeNull();
+      expect(readFileSync(join(dir, 'ran-agent.txt'), 'utf8')).not.toContain('PUSHED');
+      expect(existsSync(join(dir, 'ran-leg.txt'))).toBe(false);
+      const claim = (await rows<{ snapshot_sha: string }>('SELECT snapshot_sha FROM claims ORDER BY id DESC LIMIT 1'))[0];
+      expect(claim.snapshot_sha).toBe(pushed);
+    } finally {
+      runner.stop();
+    }
+  }, 120_000);
+
+  it('a record that names a keyless commit other than the snapshot is refused by the runner (round 1, blocking)', async () => {
+    const { baseline, filed } = await scaffold();
+    await tick();
+    expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
+    expect((await sync()).code).toBe(0);
+    // A lying record of the {read, key: null} shape: only the snapshot itself may stand as the
+    // unsigned baseline; any other keyless read ungates the group on the post's word alone.
+    write('tickets/B-9001.mdx', '---\nid: B-9001\ntitle: Signed control\n---\n\n**Brief:** the owner, 2026-11-06: hold the line.\n\nWork, changed.\n');
+    const pushed = commit(null, 'an unsigned change the record will lie about');
+    await tick();
+    expect((await sync()).code).toBe(0); // the snapshot moves past the baseline: the lie becomes tellable
+    const record = (await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0];
+    const lying = JSON.parse(record.control_json);
+    lying.groups.agent_command = { read: baseline, key: null };
+    await rows('UPDATE signed_control SET control_json = ? WHERE repository_id = ?', JSON.stringify(lying), 'docs');
+    const log: string[] = [];
+    const runner = makeRunner(log);
+    try {
+      const out = await runner.runOnce();
+      expect(out).not.toBeNull();
+      expect(log.join('\n')).toContain('no signing key');
+      const end = (await rows<{ status: string; end_reason: string }>('SELECT status, end_reason FROM claims ORDER BY id DESC LIMIT 1'))[0];
+      expect([end.status, end.end_reason]).toEqual(['released', 'released:cannot-finish:spec']);
+      expect(await rows(`SELECT COUNT(*) AS n FROM claim_legs`)).toEqual([{ n: 0 }]);
+    } finally {
+      runner.stop();
+    }
+  }, 120_000);
+
+  it('a named commit off the branch — or older than the snapshot\'s line — never loads (round 1)', async () => {
+    await scaffold();
+    await tick();
+    expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
+    expect((await sync()).code).toBe(0);
+    // An owner-signed commit on a side branch: a good signature, but not where the snapshot
+    // came from — the rollback the first-parent rule exists to prevent, off-branch.
+    execFileSync('git', ['-C', dir, 'checkout', '-q', '-b', 'side', 'HEAD~1'], { stdio: 'ignore' });
+    const sideSettings = JSON.parse(readFileSync(join(dir, '.baton', 'baton.json'), 'utf8')) as Record<string, unknown>;
+    sideSettings.side_branch_note = 'a real change, signed';
+    write('.baton/baton.json', `${JSON.stringify(sideSettings, null, 2)}\n`);
+    const side = commit('owner', 'a signed change off the branch');
+    execFileSync('git', ['-C', dir, 'checkout', '-q', 'main'], { stdio: 'ignore' });
+    write('tickets/B-9001.mdx', '---\nid: B-9001\ntitle: Signed control\n---\n\n**Brief:** the owner, 2026-11-06: hold the line.\n\nWork, changed.\n');
+    commit(null, 'a later head move');
+    await tick();
+    expect((await sync()).code).toBe(0);
+    const record = (await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0];
+    const lying = JSON.parse(record.control_json);
+    lying.groups.agent_command = { read: side, key: ownerFp };
+    await rows('UPDATE signed_control SET control_json = ? WHERE repository_id = ?', JSON.stringify(lying), 'docs');
+    const log: string[] = [];
+    const runner = makeRunner(log);
+    try {
+      const out = await runner.runOnce();
+      expect(out).not.toBeNull();
+      expect(log.join('\n')).toContain('not an ancestor');
+      expect(await rows(`SELECT COUNT(*) AS n FROM claim_legs`)).toEqual([{ n: 0 }]);
+    } finally {
+      runner.stop();
+    }
+  }, 120_000);
+
+  it('the pre-ceremony window hands out no claim — no ticket pays an attempt (round 1)', async () => {
+    const { filed } = await scaffold(false);
+    await tick();
+    expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
+    expect((await sync()).code).toBe(0);
+    // The notice names what to sign once the head moves onto it (§7.1: a first post raises
+    // nothing), and no claim is made: not a `cannot-finish:spec` the ticket would pay an
+    // attempt and a non-retryable hold for.
+    write('tickets/B-9001.mdx', '---\nid: B-9001\ntitle: Signed control\n---\n\n**Brief:** the owner, 2026-11-06: hold the line.\n\nWork, and a head move.\n');
+    commit(null, 'a head move');
+    await tick();
+    expect((await sync()).code).toBe(0);
+    expect(await rows(`SELECT COUNT(*) AS n FROM events WHERE kind = 'unsigned-control'`)).toEqual([{ n: 1 }]);
+    const log: string[] = [];
+    const runner = makeRunner(log);
+    try {
+      expect(await runner.runOnce()).toBeNull();
+      expect(await rows(`SELECT COUNT(*) AS n FROM claims`)).toEqual([{ n: 0 }]);
+    } finally {
+      runner.stop();
+    }
+    // The ceremony: the owner signs the current state once, and claims flow again.
+    const settings = JSON.parse(readFileSync(join(dir, '.baton', 'baton.json'), 'utf8')) as Record<string, unknown>;
+    settings.agent_command = 'node ./agent.mjs';
+    write('.baton/baton.json', `${JSON.stringify(settings, null, 2)}\n`);
+    bumpLegs();
+    commit('owner', 'the ceremony: the owner signs the state once');
+    await tick();
+    expect((await sync()).code).toBe(0);
+    const log2: string[] = [];
+    const runner2 = makeRunner(log2);
+    try {
+      expect(await runner2.runOnce()).not.toBeNull();
+      expect(readFileSync(join(dir, 'ran-agent.txt'), 'utf8')).not.toContain('PUSHED');
+    } finally {
+      runner2.stop();
+    }
   }, 120_000);
 });

@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { allowedSigners, commitSignature, signedPayload, verifySignedCommit, nodeKeygen } from '../../src/shared/commitSign.mjs';
-import { briefOf, isAgentConfigPath, isSignedControlPath, marksOf, signedControlOf, unsignedAgentConfig, type SigningKey } from '../../src/defaults/signed-control';
+import { briefOf, isAgentConfigPath, isSignedControlPath, marksOf, signedControlOf, unsignedAgentConfig, VERIFIES_MAX, type SigningKey } from '../../src/defaults/signed-control';
 
 /** One real key pair on disk, as an owner's hardware key stands in test: `-S` signs with the file. */
 function keypair(dir: string, name: string): { pub: string; file: string; key: SigningKey } {
@@ -108,6 +108,19 @@ describe('commitSign (B-127): an owner-signed git commit, verified', () => {
     expect(verifySignedCommit(signedRaw, [], nodeKeygen)).toBeNull();
     rmSync(r.dir, { recursive: true, force: true });
   });
+
+  it('a commit whose message body holds a line beginning "gpgsig " verifies (round 1)', () => {
+    const r = repo();
+    r.write('.baton/baton.json', '{}\n');
+    const sha = r.commit({ sign: 'owner', message: 'the change\n\nthe body names a header shape\ngpgsig not a header, the owner\'s words\n' });
+    const raw = execFileSync('git', ['-C', r.dir, 'cat-file', 'commit', sha], { encoding: 'utf8' });
+    // The signature's header and the message body's line both begin `gpgsig `: only the header
+    // is the signature; the body's line is payload the owner signed.
+    expect(raw.split('\n').filter((l) => l.startsWith('gpgsig ')).length).toBeGreaterThan(1);
+    expect(signedPayload(raw)).toContain('gpgsig not a header');
+    expect(verifySignedCommit(raw, [owner.pub], nodeKeygen)).toMatchObject({ key: owner.key.fingerprint });
+    rmSync(r.dir, { recursive: true, force: true });
+  });
 });
 
 describe('signedControlOf (B-127): what counts, first parents only', () => {
@@ -175,6 +188,79 @@ describe('signedControlOf (B-127): what counts, first parents only', () => {
     expect(sc.groups.agent_command.unsigned).toEqual([head]);
     rmSync(r.dir, { recursive: true, force: true });
   });
+
+  it('a group\'s read commit launders no sibling file\'s unsigned bytes (round 1, blocking)', () => {
+    const r = repo();
+    // The owner-signed baseline creates both overrides of the group.
+    r.write('.baton/courses/create-pr/legs/a.run.mjs', 'export async function run() {}\n');
+    r.write('.baton/courses/create-pr/legs/b.run.mjs', 'export async function run() {}\n');
+    const baseline = r.commit({ sign: 'owner' });
+    // The unsigned push changes a.run.mjs to arbitrary bytes; the owner then signs a change to
+    // b.run.mjs only — whose tree carries a's pushed bytes.
+    r.write('.baton/courses/create-pr/legs/a.run.mjs', 'export async function run() { /* pushed */ }\n');
+    r.commit({});
+    r.write('.baton/courses/create-pr/legs/b.run.mjs', 'export async function run() { /* owner */ }\n');
+    const signedB = r.commit({ sign: 'owner' });
+    const head = r.head();
+    // The attack's shape: loading the group at signedB runs a's pushed bytes.
+    expect(execFileSync('git', ['-C', r.dir, 'show', `${signedB}:.baton/courses/create-pr/legs/a.run.mjs`], { encoding: 'utf8' })).toContain('pushed');
+    const sc = signedControlOf(head, [owner.key], gitOf(r), nodeKeygen)!;
+    // The gate holds the whole group at the baseline: signedB would launder a's unsigned bytes,
+    // so it does not count; both newer changers are named. The owner signs the state once (a
+    // signed change that settles a.run.mjs) and the group moves again.
+    expect(sc.groups.overrides).toMatchObject({ read: baseline, key: owner.key.fingerprint });
+    expect(sc.groups.overrides.unsigned).toEqual([signedB, expect.any(String)]);
+    r.write('.baton/courses/create-pr/legs/a.run.mjs', 'export async function run() { /* owner */ }\n');
+    const settled = r.commit({ sign: 'owner' });
+    const sc2 = signedControlOf(r.head(), [owner.key], gitOf(r), nodeKeygen)!;
+    expect(sc2.groups.overrides).toMatchObject({ read: settled, key: owner.key.fingerprint });
+    expect(sc2.groups.overrides.unsigned).toEqual([]);
+    rmSync(r.dir, { recursive: true, force: true });
+  });
+
+  it('a course\'s leg scripts are their own group: an unsigned legs change keeps the signed ones in force', () => {
+    const r = repo();
+    r.write('.baton/courses/create-pr/course.json', '{"legs":{"implement":{}}}\n');
+    r.write('.baton/courses/create-pr/legs/implement.mjs', 'export async function run() {}\n');
+    r.write('.baton/courses/create-pr/legs/implement.run.mjs', 'export async function run() {}\n');
+    const baseline = r.commit({ sign: 'owner' });
+    // A push rewrites the leg script unsigned (the graph file beside it is named by the notice —
+    // `.baton/**` — but is not the group's: a sourced course's graph is pinned by the sync).
+    r.write('.baton/courses/create-pr/legs/implement.mjs', 'export async function run() { /* pushed */ }\n');
+    r.write('.baton/courses/create-pr/course.json', '{"legs":{"implement":{},"evil":{}}}\n');
+    const pushed = r.commit({});
+    const sc = signedControlOf(r.head(), [owner.key], gitOf(r), nodeKeygen)!;
+    expect(sc.groups.course).toMatchObject({ read: baseline, key: owner.key.fingerprint });
+    expect(sc.groups.course.unsigned).toEqual([pushed]);
+    // The override is its own group (the course group excludes it): the push to it names the
+    // overrides group, not the course's.
+    expect(sc.groups.overrides).toMatchObject({ read: baseline, key: owner.key.fingerprint });
+    // The pushed graph file is the notice's to name, not the group's to gate.
+    expect(sc.unsigned).toContainEqual({ path: '.baton/courses/create-pr/course.json', commits: [pushed] });
+    rmSync(r.dir, { recursive: true, force: true });
+  });
+
+  it('the walk clamps to the post\'s own bounds: 40 commits a group, 200 paths a record (round 1, blocking)', () => {
+    const r = repo();
+    r.write('.baton/baton.json', '{"agent_command":"signed"}\n');
+    r.commit({ sign: 'owner' });
+    // 41 unsigned changes to the group's path: the newest 40 are named, the record still posts.
+    for (let i = 0; i < 41; i++) {
+      r.write('.baton/baton.json', `{"agent_command":"push ${i}"}\n`);
+      r.commit({});
+    }
+    const sc = signedControlOf(r.head(), [owner.key], gitOf(r), nodeKeygen)!;
+    expect(sc.groups.agent_command.unsigned).toHaveLength(40);
+    expect(sc.groups.agent_command.unsigned[0]).toBe(r.head());
+    // 201 agent-configuration paths changed unsigned in one commit: 200 entries, sorted.
+    for (let i = 0; i < 201; i++) r.write(`.claude/skills/s${String(i).padStart(3, '0')}/SKILL.md`, `# ${i}\n`);
+    r.commit({});
+    const sc2 = signedControlOf(r.head(), [owner.key], gitOf(r), nodeKeygen)!;
+    expect(sc2.unsigned).toHaveLength(200);
+    expect(sc2.unsigned[0].path).toBe('.baton/baton.json'); // sorted by path, .baton before .claude
+    expect(sc2.unsigned.at(-1)!.path).toMatch(/^\.claude\/skills\/s\d+/);
+    rmSync(r.dir, { recursive: true, force: true });
+  }, 120_000);
 
   it('the notice\'s paths are the control inputs: .baton, goals, agent configuration; a ticket file only for its EXPEDITE', () => {
     expect(isSignedControlPath('.baton/baton.json')).toBe(true);
@@ -245,11 +331,12 @@ describe('marksOf (B-127 item 7): brief marks and the EXPEDITE gate', () => {
     const filed = r.commit({});
     let marks = marksOf(filed, [owner.key], [TICKET], gitOf(r), nodeKeygen);
     expect(marks.expedite.has(TICKET)).toBe(false);
-    // The tag added by an unsigned push.
+    // The tag added by an unsigned push: its last signed state is `false` (none exists — fail
+    // closed, like a group), so a push alone does not expedite.
     r.write(TICKET, body('a brief', ['EXPEDITE']));
     const pushed = r.commit({});
     marks = marksOf(pushed, [owner.key], [TICKET], gitOf(r), nodeKeygen);
-    expect(marks.expedite.get(TICKET)).toBe(pushed);
+    expect(marks.expedite.get(TICKET)).toEqual({ commit: pushed, inForce: false });
     // The owner taking it over: the tag's last change must itself be signed — removing and
     // re-adding it in owner-signed commits — not merely a signed commit that left it standing.
     r.write(TICKET, body('a brief'));
@@ -261,8 +348,50 @@ describe('marksOf (B-127 item 7): brief marks and the EXPEDITE gate', () => {
     rmSync(r.dir, { recursive: true, force: true });
   });
 
+  it('an unsigned REMOVAL of an owner-signed EXPEDITE keeps the tag in force (round 1: both directions)', () => {
+    const r = repo();
+    r.write(TICKET, body('a brief', ['EXPEDITE']));
+    const filed = r.commit({ sign: 'owner' });
+    expect(marksOf(filed, [owner.key], [TICKET], gitOf(r), nodeKeygen).expedite.has(TICKET)).toBe(false);
+    // The worker removes the tag unsigned: the last signed state — present — stays in force.
+    r.write(TICKET, body('a brief'));
+    const removed = r.commit({});
+    const marks = marksOf(removed, [owner.key], [TICKET], gitOf(r), nodeKeygen);
+    expect(marks.expedite.get(TICKET)).toEqual({ commit: removed, inForce: true });
+    // The owner removing it for real: signed, it counts.
+    r.write(TICKET, body('a brief', ['EXPEDITE']));
+    r.commit({ sign: 'owner' });
+    r.write(TICKET, body('a brief'));
+    const gone = r.commit({ sign: 'owner' });
+    expect(marksOf(gone, [owner.key], [TICKET], gitOf(r), nodeKeygen).expedite.has(TICKET)).toBe(false);
+    rmSync(r.dir, { recursive: true, force: true });
+  });
+
   it('briefOf reads the Brief paragraph and nothing after it', () => {
     expect(briefOf('**Brief:** the owner: x\nmore of it\n\nbody')).toBe('**Brief:** the owner: x\nmore of it');
     expect(briefOf('no brief here')).toBeNull();
   });
+
+  it('past the verification budget a brief is left unmarked, never falsely unsigned (round 1)', () => {
+    const r = repo();
+    const paths: string[] = [];
+    // The commits are signed with the owner's key, but the walk verifies against another key's
+    // public line and a stub keygen that accepts any signature: what is tested is the budget,
+    // not ssh-keygen. Every brief's last change is its own signed commit, so the shared budget
+    // runs out four paths before the end: the first ones are marked, the tail is left unmarked —
+    // the old behaviour read them `unsigned`, a false statement about the owner's words.
+    for (let i = 0; i < VERIFIES_MAX + 4; i++) {
+      const p = `tickets/B-${1000 + i}.mdx`;
+      r.write(p, `---\nid: B-${1000 + i}\ntitle: T\n---\n\n**Brief:** the owner: ${i}.\n`);
+      r.commit({ sign: 'owner' });
+      paths.push(p);
+    }
+    const stub = () => ({ status: 0, stdout: `Good "baton-owner" signature with ED25519 key SHA256:${'k'.repeat(43)}` });
+    const marks = marksOf(r.head(), [other.key], paths, gitOf(r), stub);
+    expect(marks.briefs.size).toBe(VERIFIES_MAX);
+    expect(marks.briefs.get(paths[0])).toMatchObject({ signed: true });
+    expect(marks.briefs.has(paths[VERIFIES_MAX - 1])).toBe(true);
+    expect(marks.briefs.has(paths[VERIFIES_MAX])).toBe(false);
+    rmSync(r.dir, { recursive: true, force: true });
+  }, 180_000);
 });

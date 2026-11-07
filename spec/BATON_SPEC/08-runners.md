@@ -374,14 +374,26 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
   - **Owner-signed control** (B-127, R-BTN-66 as amended): where the repository requires signed
     control, the claim answer's `control` names, per group, the commit a runner loads
     `agent_command` (with `agent_wrapper`, both in `.baton/baton.json`), the overrides
-    (`legs/<leg>.run.mjs`) and `rank.mjs` (R-BTN-98) from. The runner verifies each named
-    commit's `git`-namespace SSHSIG (R-BTN-13) against the owner keys the answer carries —
-    Baton's own, never the post's choice — before loading anything, and refuses the claim
-    (`released:cannot-finish:spec`, fail closed) when a named commit does not verify or a group
-    has no signed version; a post that lied about a signature changes what a runner refuses,
-    not what it runs. A group naming no signing key is the pre-adoption baseline and gates
-    nothing. An unsigned change to a group keeps the last owner-signed version in force: the
-    legs read that group at the named commit, never the snapshot's newer bytes.
+    (`legs/<leg>.run.mjs`), `rank.mjs` (R-BTN-98) and the course's leg scripts
+    (`legs/*.mjs`, overrides excluded) from. The runner verifies each named commit's
+    `git`-namespace SSHSIG (R-BTN-13) against the owner keys the answer carries — Baton's own,
+    never the post's choice — and that the commit is an ancestor of the claim's snapshot, before
+    loading anything, and refuses the claim (`released:cannot-finish:spec`, fail closed) when a
+    named commit does not verify, is no ancestor of the snapshot, or names no signing key
+    without being the snapshot itself (the pre-adoption baseline, the one keyless shape that is
+    honest, the record and the head moving together post by post); a post that lied about a
+    signature changes what a runner refuses, not what it runs. While a group names no signed
+    version, no claim is handed out at all. An unsigned change to a group keeps the last
+    owner-signed version in force: the legs read that group at the named commit, never the
+    snapshot's newer bytes — and the course group's commit is where the runner loads the
+    course's graph and its leg scripts as one coherent tree, so the code that enforces the gate
+    is never a push's own bytes. A group's read is atomic (§7.1): a signed change to one of its
+    paths carries no sibling's unsigned bytes. The course group's walk covers the leg scripts
+    only: a sourced course's `course.json` is pinned byte-equal by the sync (B-33) and could
+    never be signed after its scaffold, so the graph travels with the scripts — byte-identical
+    for a sourced course, an owned course's graph change taking effect with the next signed
+    change to its leg scripts — and a leg a pushed graph adds that the signed `legs/` does not
+    carry refuses the claim as a missing script.
   - **Leg trees** are sparse, detached, non-cone git worktrees: the home repository at
     `snapshot_sha` with only `/.baton/` (`ctx.snapshot.tree`), and, for a sourced course, the
     source repository at its commit with only the course directory (R-BTN-134). The course

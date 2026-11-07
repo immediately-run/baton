@@ -1004,26 +1004,37 @@ export class Runner {
   /** B-127 (R-BTN-66 as amended, R-BTN-133's verified tree extended): the signed-control record
    *  of a claim whose repository requires it — verified here, never only by the sync that posted
    *  it (the adversarial review's finding 4): each group's `read` commit must be in the home
-   *  checkout and carry a valid `git`-namespace SSHSIG by one of the owner keys the answer
-   *  names, the keys Baton served rather than any the post chose. A group that names a signing
-   *  key is what the legs load `agent_command` and the overrides from (`ctx.signed_control`);
-   *  a group with no key is the pre-adoption baseline — its last change is beyond the walk's
-   *  memory — and gates nothing; a group with no signed version at all fails closed: the claim
-   *  ends, the board keeps the ticket for the owner's signature, and the runbook
-   *  (docs/runbooks/owner-signed-control.mdx) walks the owner through signing once. */
+   *  checkout, carry a valid `git`-namespace SSHSIG by one of the owner keys the answer names
+   *  (the keys Baton served, never any the post chose), and be an ancestor of the claim's
+   *  snapshot (round 1: an old or off-branch signed commit — the rollback the first-parent rule
+   *  exists to prevent — never loads). A group naming a signing key is what the legs load
+   *  `agent_command`, the overrides and `rank.mjs` from, and what the course group's commit —
+   *  the course's graph and its leg scripts, one coherent tree — loads at; a group naming no key is the
+   *  pre-adoption baseline, honest only as the claim's own snapshot (the record and the head
+   *  move together, post by post), and gates nothing; a group with no signed version at all
+   *  fails closed: Baton hands out no claim in that state (round 1, unpenalised), and this
+   *  check remains the last line; the runbook (docs/runbooks/owner-signed-control.mdx) walks
+   *  the owner through signing once. */
   private async verifyControl(claim: Record<string, any>): Promise<Record<string, string> | { error: string }> {
-    const control = claim.control as { required?: boolean; keys?: unknown; agent_command?: { read?: unknown; key?: unknown }; overrides?: { read?: unknown; key?: unknown }; rank?: { read?: unknown; key?: unknown } } | null | undefined;
+    const control = claim.control as { required?: boolean; keys?: unknown } & Partial<Record<'agent_command' | 'overrides' | 'rank' | 'course', { read?: unknown; key?: unknown }>> | null | undefined;
     if (!control?.required) return {};
     const keys = Array.isArray(control.keys) ? control.keys.filter((k): k is string => typeof k === 'string' && k !== '') : [];
     const out: Record<string, string> = {};
-    for (const group of ['agent_command', 'overrides', 'rank'] as const) {
+    for (const group of ['agent_command', 'overrides', 'rank', 'course'] as const) {
       const read = control[group]?.read;
       const key = control[group]?.key;
       if (typeof read !== 'string' || read === '') {
         return { error: `the repository requires owner-signed control and no owner-signed version of ${group} exists — an owner signs the current state once and the next post names it (B-127)` };
       }
-      // The baseline: no signing key named, nothing gated for this group.
-      if (key == null) continue;
+      // The baseline: no signing key named, nothing gated for this group — and honest only as
+      // the claim's own snapshot (round 1: a record naming any other commit with no key is a
+      // lie or an edge, and never ungates the group on its word alone).
+      if (key == null) {
+        if (read !== claim.snapshot_sha) {
+          return { error: `the ${group} group names commit ${read.slice(0, 10)} with no signing key — only the snapshot itself (${String(claim.snapshot_sha).slice(0, 10)}) may stand as the unsigned baseline (B-127)` };
+        }
+        continue;
+      }
       if (!ensureSha(this.o.home, read, () => this.o.fetch?.(this.o.home))) {
         return { error: `the owner-signed ${group} commit ${read.slice(0, 10)} is not in the home checkout — one fetch could not find it (B-127)` };
       }
@@ -1036,6 +1047,11 @@ export class Runner {
       if (!verifySignedCommit(raw, keys, nodeKeygen)) {
         return { error: `the ${group} commit ${read.slice(0, 10)} the board post named carries no signature of an owner key — refusing to load it (B-127)` };
       }
+      try {
+        homeGit(this.o.home, ['merge-base', '--is-ancestor', read, String(claim.snapshot_sha)]);
+      } catch {
+        return { error: `the owner-signed ${group} commit ${read.slice(0, 10)} is not an ancestor of the claim's snapshot — refusing to load it (B-127)` };
+      }
       out[group] = read;
     }
     return out;
@@ -1045,25 +1061,36 @@ export class Runner {
     const claimId = claim.claim_id as number;
     const ticket = claim.ticket_id as string;
     let course: CourseLoad | null = null;
+    let signedControl: Record<string, string> = {};
     try {
       // R-BTN-34: the snapshot must be in the home checkout — one fetch, else stale-board.
       if (!ensureSha(this.o.home, claim.snapshot_sha, () => this.o.fetch?.(this.o.home))) {
         return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
       }
-      course = loadCourse(this.o.home, claim.snapshot_sha, this.claimCourse(claim));
+      // B-127 (R-BTN-133's verified tree, extended): where the repository requires owner-signed
+      // control, verify the commits the board post names — here, in the runner, never only by
+      // the sync that posted them — BEFORE the course loads (round 1: the leg scripts are the
+      // code that enforces the gate, so they may not load from an unsigned snapshot). A failure
+      // fails the claim closed: the ticket stays on the board for the owner's signature (the
+      // `unsigned-control` notice names what to sign), and no agent runs code a push alone
+      // placed. Baton hands out no claim while a group has no signed version, so this path is
+      // a lying or stale record's.
+      signedControl = await this.verifyControl(claim);
+      if ('error' in signedControl) {
+        this.log(`baton: ${signedControl.error}`);
+        return await this.finish(claimId, { end_reason: 'released:cannot-finish:spec', reached: claim.station, detail: signedControl.error, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+      }
+      // B-127 (round 1, the course group): the course's graph and its leg scripts load — one
+      // coherent tree — at the commit the record named and this runner verified; with the gate
+      // off, the pre-adoption baseline, or a group that gates nothing, that is the claim's
+      // snapshot itself. A course the signed commit does not carry refuses here (stale-board,
+      // unpenalised): an unsigned course change keeps the last signed course in force, and a
+      // course no owner signed does not run.
+      const courseSha = typeof signedControl.course === 'string' && signedControl.course !== '' ? signedControl.course : claim.snapshot_sha as string;
+      course = loadCourse(this.o.home, courseSha, this.claimCourse(claim));
     } catch (e) {
       this.log(`baton: the claim's course would not load (${msg(e)})`);
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
-    }
-    // B-127 (R-BTN-133's verified tree, extended): where the repository requires owner-signed
-    // control, verify the commits the board post names — here, in the runner, never only by the
-    // sync that posted them — before a leg may load what they hold. A failure fails the claim
-    // closed: the ticket stays on the board for the owner's signature (the `unsigned-control`
-    // notice names what to sign), and no agent runs code a push alone placed.
-    const signedControl = await this.verifyControl(claim);
-    if ('error' in signedControl) {
-      this.log(`baton: ${signedControl.error}`);
-      return await this.finish(claimId, { end_reason: 'released:cannot-finish:spec', reached: claim.station, detail: signedControl.error, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
     const scratch = claimScratch();
     this.inflight = { claimId, ticket, course, leg: null, child: null, waiters: [] };
@@ -1150,8 +1177,10 @@ export class Runner {
           leg: legName, run,
           snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
           // B-127: the owner-signed commits a verified board post named — where the repository
-          // requires signed control, the legs read `agent_command` and the overrides at these,
-          // not the snapshot (verified above, in this runner, before anything loaded).
+          // requires signed control, the legs read `agent_command` and the overrides at these
+          // (and the course itself — the graph, these scripts — loaded at the `course` one),
+          // never the snapshot's newer bytes (verified above, in this runner, before anything
+          // loaded).
           ...(Object.keys(signedControl).length ? { signed_control: signedControl } : {}),
           // The claim answer names the repository's default branch (R-BTN-34; §5.8's marker
           // legs, B-96's review round 2): the stub hands it to the close, so a marker line goes

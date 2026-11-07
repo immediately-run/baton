@@ -33,7 +33,7 @@ import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from '
 import { mergeOntology } from './ontologyMerge';
 import { readItems } from './read-items';
 import { parseFrontmatter, ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
-import { marksOf, signedControlOf, unsignedAgentConfig } from './signed-control';
+import { clampUnsignedList, marksOf, signedControlOf, unsignedAgentConfig } from './signed-control';
 import { nodeKeygen } from '../shared/commitSign.mjs';
 import type { PostedControl } from '../core/board';
 import { readTicketSettings } from './tickets-config';
@@ -44,6 +44,13 @@ import { PAGE_NAME, ticketsPage } from './tickets-page';
 // is 'Kein Git-Repository', and the quiet case would throw instead. The C catalog is git's own
 // stable one, whatever the operator's locale.
 const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
+/** The control walks' git (B-127): untrimmed — a commit object's bytes are what its SSHSIG
+ *  signed, and `git` above trims, which would verify against a shortened payload (round 1:
+ *  a `--cleanup=verbatim` message ending in a blank line failed to verify) — and bounded at
+ *  16 MiB, because the walks' one `git log --name-status -n2000` runs through it (round 1:
+ *  Node's 1 MiB default overflowed on busy repositories and failed every sync). Callers that
+ *  need a single value trim it themselves. */
+const gitRaw = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', maxBuffer: 16 << 20, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } });
 /** Why `git` failed, as `execFileSync` reports it: the exit status, and the stderr it captured
  * (`string` under `encoding: 'utf8'`; `Uint8Array`, which `Buffer` is, if an encoding is ever
  * dropped — named that rather than `Buffer` so this file types under both tsconfigs the repo ships,
@@ -423,20 +430,23 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   let controlField: { control?: PostedControl } = {};
   const signingKeys = record?.signing_keys ?? [];
   if (signingKeys.length) {
-    const gitOf = (...a: string[]): string => git(root, ...a);
-    const head = gitOf('rev-parse', 'HEAD');
+    const gitOf = (...a: string[]): string => gitRaw(root, ...a);
+    const head = gitOf('rev-parse', 'HEAD').trim();
     const found = signedControlOf(head, signingKeys, gitOf, nodeKeygen);
     const marks = marksOf(head, signingKeys, result.tickets.map((t) => t.path), gitOf, nodeKeygen);
     for (const t of result.tickets) {
       const mark = marks.briefs.get(t.path);
-      if (mark) t.brief = mark.signed && mark.signer != null ? { signed: true, signer: mark.signer, commit: mark.commit } : { signed: false, commit: mark.commit };
-      const unsignedExpedite = marks.expedite.get(t.path);
-      if (unsignedExpedite != null && t.expedite) {
-        found?.unsigned.push({ path: t.path, commits: [unsignedExpedite], fields: ['EXPEDITE'] });
-        if (record?.require_signed_control) t.expedite = false;
+      if (mark) t.brief = mark;
+      // The EXPEDITE gate, both directions (round 1): the tag's last change unsigned means a
+      // push alone moved it — added or removed — and the last signed state stays in force
+      // while the setting is on: the notice names the commit either way.
+      const gate = marks.expedite.get(t.path);
+      if (gate) {
+        found?.unsigned.push({ path: t.path, commits: [gate.commit], fields: ['EXPEDITE'] });
+        if (record?.require_signed_control) t.expedite = gate.inForce;
       }
     }
-    if (found) controlField = { control: { keys: signingKeys.map((k) => k.fingerprint), groups: found.groups, unsigned: found.unsigned } };
+    if (found) controlField = { control: { keys: signingKeys.map((k) => k.fingerprint), groups: found.groups, unsigned: clampUnsignedList(found.unsigned) } };
   }
   return {
     payload: { registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...ontologyField, ...controlField },
@@ -611,8 +621,8 @@ export async function verifyConfigMain(argv: string[], io: { keys: { public_key:
     log(`baton: ${positional[0]} has no owner signing keys registered as human-only (BATON_HUMAN_KEYS or /v1/human-keys, then \`baton owner owners\`) — nothing can be owner-signed, and the check cannot pass (B-127)`);
     return 1;
   }
-  const gitOf = (...a: string[]): string => git(checkout, ...a);
-  const head = gitOf('rev-parse', 'HEAD');
+  const gitOf = (...a: string[]): string => gitRaw(checkout, ...a);
+  const head = gitOf('rev-parse', 'HEAD').trim();
   const unsigned = unsignedAgentConfig(head, io.keys, gitOf, nodeKeygen);
   if (!unsigned.length) {
     log(`baton: ${checkout}'s agent configuration at ${head.slice(0, 10)} was last changed in owner-signed commits (B-127)`);
