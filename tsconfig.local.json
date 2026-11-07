@@ -50,6 +50,7 @@
     "test/unit/ticket-state.test.ts",
     "test/unit/bounded-git.test.ts",
     "test/unit/tickets-check.test.ts",
+    "test/unit/ticket-pr.test.ts",
     "test/unit/spec-files.test.ts",
     "test/unit/pr-markers.test.ts",
     "test/unit/tickets.test.ts",

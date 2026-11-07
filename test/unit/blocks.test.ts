@@ -8,7 +8,7 @@ import { Git, armedAt, cutover, keyCall, placed, register, beat, claimItem, endC
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { grantedWorker, signed, SCHEMA } from '../lib/fleet';
 import type { Workflow } from '../../src/core/ports';
-import { BLOCK_SQL, STALLED_AFTER_MS } from '../../src/core/blocks';
+import { BLOCK_SQL, decisionOptionActions, STALLED_AFTER_MS } from '../../src/core/blocks';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const MIN = 60_000;
@@ -621,5 +621,60 @@ describe('R-BTN-75: asking', () => {
     // The backoff passes: no longer listed.
     await setClock(T0 + MIN);
     expect((await other()).map((o) => o.kind)).not.toContain('backoff');
+  });
+});
+
+describe('B-133: a decision shows its options’ computed actions', () => {
+  it('Baton’s own decisions spell what retry and park each do; a posted one spells its options, grants included', () => {
+    // The actions are what `resolveDecision` does — computed, so the dashboard, `baton decision
+    // list` and this test cannot disagree with the answer’s effect.
+    expect(decisionOptionActions('baton:retries', null)).toEqual([
+      { id: 'retry', action: 'lifts the hold and clears its backoff — the failed-attempt count starts again and the ticket becomes claimable' },
+      { id: 'park', action: 'keeps the hold — the ticket stays parked until an owner lifts the hold' },
+    ]);
+    expect(decisionOptionActions('baton:stalled', null)).toEqual([
+      { id: 'retry', action: 'closes this decision and restarts the queued leg’s 72-hour stall clock from now' },
+      { id: 'park', action: 'holds the ticket (parked) until an owner lifts the hold' },
+    ]);
+    expect(decisionOptionActions('review-rounds-3', [
+      { id: 'merge' },
+      { id: 'owner' },
+      { id: 'round', grants: { leg: 'review', runs: 1 } },
+    ])).toEqual([
+      { id: 'merge', action: 'records this answer, closes the decision and its notices, and unblocks the ticket' },
+      { id: 'owner', action: 'records this answer, closes the decision and its notices, and unblocks the ticket' },
+      { id: 'round', action: 'records this answer, closes the decision and its notices, and unblocks the ticket, granting the leg ‘review’ 1 more run beyond the course’s max_runs' },
+    ]);
+  });
+
+  it('the dashboard’s blocked view carries a decision block’s question and computed options beside the agent’s words', async () => {
+    git.add('G', {}, placed('reviewed', [['implement', 'pr-open'], ['review', 'reviewed']], [['merge', 'waiting']], {
+      decisions: [{
+        id: 'review-rounds-3', leg: 'merge', asks: 'owner',
+        question: 'Merge after three failed rounds?',
+        options: [{ id: 'round', grants: { leg: 'review', runs: 1 } }],
+      }],
+    }));
+    await git.post();
+    const view = await withCore((core) => core.blocks.view());
+    const g = view.find((t) => t.ticket_id === 'docs:G')!;
+    expect(g.blocks).toEqual([expect.objectContaining({
+      kind: 'decision', ref: 'review-rounds-3', leg: 'merge', asks: 'owner',
+      question: 'Merge after three failed rounds?',
+      options: [{ id: 'round', action: 'records this answer, closes the decision and its notices, and unblocks the ticket, granting the leg ‘review’ 1 more run beyond the course’s max_runs' }],
+    })]);
+    // A decision block with no stored options (Baton’s own carry none) still shows the actions
+    // its fixed answers take: `raise` is what the alarm calls.
+    await withCore((core) => {
+      core.store.transaction(() => core.blocks.raise('docs:G', 'baton:stalled'));
+    });
+    const after = (await withCore((core) => core.blocks.view())).find((t) => t.ticket_id === 'docs:G')!;
+    expect(after.blocks.find((b) => b.kind === 'decision' && b.ref === 'baton:stalled')).toEqual(expect.objectContaining({
+      asks: 'owner',
+      options: [
+        { id: 'retry', action: 'closes this decision and restarts the queued leg’s 72-hour stall clock from now' },
+        { id: 'park', action: 'holds the ticket (parked) until an owner lifts the hold' },
+      ],
+    }));
   });
 });

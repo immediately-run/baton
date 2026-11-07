@@ -9,6 +9,7 @@
 import { BatonError } from './http';
 import { randomHex } from './db';
 import { checkMark, qualify } from './validate';
+import { decisionOptionActions } from './blocks';
 import type { Store } from './ports';
 import { OVER_SQL, type QueueOver } from './queues';
 
@@ -39,7 +40,8 @@ export type Courier =
   | { kind: 'personal'; fingerprint: string }
   | { kind: 'worker'; fingerprint: string; repository: string; asks: string[] };
 
-/** A notice as a courier receives it (R-BTN-80): a decision, or a leg over its bound (R-BTN-79). */
+/** A notice as a courier receives it (R-BTN-80): a decision, or a leg over its bound (R-BTN-79).
+ *  A decision's options each carry their computed action (B-133). */
 export type NoticeView =
   | {
     notice_id: string;
@@ -47,7 +49,7 @@ export type NoticeView =
     repository: string;
     ticket: string;
     title: string;
-    decision: { id: string; asks: string; url?: string };
+    decision: { id: string; asks: string; url?: string; question?: string; options?: { id: string; action: string }[] };
     unblocks: string[];
     created_at: number;
   }
@@ -282,21 +284,22 @@ export class Notices {
 
   /** A decision as a courier sees it: the ticket's title and the decision's id, `asks` and link —
    *  each already checked under §10.4 when the snapshot was accepted. Its answer unblocks its
-   *  ticket. */
+   *  ticket. B-133: each option carries its COMPUTED action (what the answer does —
+   *  `decisionOptionActions`), beside the packet's own question. */
   private decisionView(ticket: string, decision: string) {
     const d = this.rows<{ asks: string; url: string | null; question: string | null; options_json: string | null; title: string; repository_id: string; local_id: string }>(
       `SELECT d.asks, d.url, d.question, d.options_json, t.title, t.repository_id, t.local_id FROM ticket_decisions d JOIN tickets t ON t.id = d.ticket_id
        WHERE d.ticket_id = ? AND d.decision_id = ?`, ticket, decision)[0];
     if (!d) return null;
-    // B-110: a posted decision's question and the options its answer may name (`baton owner
-    // resolve`), shown as text.
-    let options: string[] = [];
+    let options: { id: string; grants?: { leg: string; runs: number } }[] | null = null;
     try {
-      options = d.options_json ? (JSON.parse(d.options_json) as { id: string }[]).map((o) => o.id) : [];
+      options = d.options_json ? (JSON.parse(d.options_json) as { id: string; grants?: { leg: string; runs: number } }[]) : null;
     } catch { /* stored by Blocks.posted from a checked post: never malformed */ }
+    // B-110: the options the owner may answer, each with its computed action (B-133).
+    const computed = decisionOptionActions(decision, options);
     return {
       repository: d.repository_id, ticket: qualify(d.repository_id, d.local_id), title: d.title,
-      decision: { id: decision, asks: d.asks, ...(d.url ? { url: d.url } : {}), ...(d.question ? { question: d.question } : {}), ...(options.length ? { options } : {}) },
+      decision: { id: decision, asks: d.asks, ...(d.url ? { url: d.url } : {}), ...(d.question ? { question: d.question } : {}), ...(computed.length ? { options: computed } : {}) },
       unblocks: [qualify(d.repository_id, d.local_id)],
     };
   }

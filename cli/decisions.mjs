@@ -15,14 +15,20 @@ export const WATCH_EVERY_MS = 60_000;
  */
 export const plain = (v) => String(v).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '\uFFFD');
 
-/** One decision as lines of text: `<ticket> — <title>`, its question, and its link. */
+/** One decision as lines of text: `<ticket> — <title>`, its question, and its link. B-133: each
+ *  option prints its COMPUTED action — what the answer does — beside the packet's question, so
+ *  the owner reads what runs, never only the agent's summary of it. */
 export function formatDecision(d) {
   const lines = [`${plain(d.ticket)} — ${plain(d.title)}`, `  decision ${plain(d.decision.id)} (asks ${plain(d.decision.asks)})`];
   if (d.decision.question) lines.push(`  ${plain(d.decision.question)}`);
   if (d.decision.url) lines.push(`  ${plain(d.decision.url)}`);
-  // B-110: a decision a ticket's sync posted names its options — the owner answers one with
-  // `baton owner -i KEY resolve <repository> <ticket> <decision> <option>`.
-  if (Array.isArray(d.decision.options) && d.decision.options.length) lines.push(`  answer: baton owner resolve ${plain(d.repository)} ${plain(d.ticket)} ${plain(d.decision.id)} ${d.decision.options.map(plain).join('|')}`);
+  // B-110: a decision a ticket's sync posted names its options; B-133: each with its action.
+  if (Array.isArray(d.decision.options) && d.decision.options.length) {
+    for (const o of d.decision.options) {
+      lines.push(`  (${plain(o.id)}) ${o.action ? plain(o.action) : ''}`.trimEnd());
+    }
+    lines.push(`  answer: baton owner resolve ${plain(d.repository)} ${plain(d.ticket)} ${plain(d.decision.id)} ${d.decision.options.map((o) => plain(o.id)).join('|')}`);
+  }
   if (d.notice_state !== undefined) lines.push(`  notice: ${d.notice_state == null ? 'none' : plain(d.notice_state)}`);
   return lines.join('\n');
 }

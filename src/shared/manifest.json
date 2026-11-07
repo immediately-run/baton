@@ -1,11 +1,12 @@
 {
   "$comment": "Written by scripts/vendor.mjs (R-BTN-37): the docs commit these copies were taken from and their SHA-256. Never edit the copies here; change them in docs and re-vendor.",
-  "docs_commit": "9f288592d87a3b49b02c275b0e09b2ab543e5c13",
+  "docs_commit": "e9bb275722c3fa463a812860618dd9816433a367",
   "files": {
     "baton.mjs": "0fea689a6d3f4451c14792816ae817abff4fd2b8f0b2d2dae071c9451d68114e",
     "vocabulary.mjs": "5f1bd410a26b4450927e8da8d5452951b736e1f34496a24e986983a0f0e9ae1f",
     "sessionUsage.mjs": "8e89c71f5a4d1fa45d1b28f24c7d29668644edeb75494075784ed64c105f727a",
-    "batonSync.mjs": "520158cfbe8f1e706454a63d226ae405290e5e788f3cffd2a776b617e3d53c07"
+    "batonSync.mjs": "520158cfbe8f1e706454a63d226ae405290e5e788f3cffd2a776b617e3d53c07",
+    "ticketPr.mjs": "5ca644d267c591008d1b494d016c5a868e72e224a2147c255014a195876025d0"
   },
   "fixtures": {
     "test/fixtures/courses/roadmap-pr/course.json": "f1de3e3cee8f210a7b687c00d24d62404e6fbd5a96408278574930cb2813decf"
