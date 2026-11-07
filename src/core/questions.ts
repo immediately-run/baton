@@ -74,11 +74,12 @@ export interface QuestionOption {
 
 /** B-133: the computed action of choosing the option that reaches `station`, from the course
  *  graph — where the ticket lands and what leaves there, each leg named as a person's or a
- *  runner's. The packet's words describe the choice; this is what Baton will do with it. */
+ *  runner's; a station that is one of the course's ends names the end (an end station carries
+ *  no legs and a toEnd of 0, so "no legs queued" is exactly the end case). The packet's words
+ *  describe the choice; this is what Baton will do with it. */
 function optionAction(g: Graph, station: string): string {
   const next = [...g.legs.entries()].filter(([, l]) => l.from.includes(station)).map(([name, l]) => `${name} (${l.person ? 'a person leg' : 'a runner leg'})`);
-  const toEnd = g.toEnd.get(station) ?? 0;
-  return `moves the ticket to ‘${station}’${next.length ? `, which queues ${next.join(', ')}` : toEnd ? ' — the course’s end' : ''}`;
+  return `moves the ticket to ‘${station}’${next.length ? `, which queues ${next.join(', ')}` : g.ends.has(station) ? ' — the course’s end' : ''}`;
 }
 
 /** A `std:decision@1` value as the library's schema shapes it (§5.5). */

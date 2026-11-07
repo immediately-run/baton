@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read # the B-133 ticket-PR view reads the PR's commits (the forge's reading, B-126)
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -41,20 +42,36 @@ jobs:
       # and brief diffs, provenance, the status-only label), printed where the owner approves.
       # A PR whose own description claims "status-only" that its diff contradicts fails here;
       # the label is this check's, never the description's. The checkout is depth-1 of the PR's
-      # merge commit: the view needs the merge-base, so main comes with its history.
+      # merge commit: the view needs the merge-base, so main comes with its history. CI also
+      # passes the forge's reading of the PR's commits (B-126) — the account behind each
+      # commit's author and committer, and its signature verification — beside git's own
+      # reading, which anyone can set.
       - name: Ticket PR view (B-133)
         if: github.event_name == 'pull_request'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -f .git/shallow ]; then git fetch --no-tags --unshallow origin; fi
           git fetch --no-tags origin +main:refs/remotes/origin/main
+          FORGE=$(mktemp)
+          printf '{"pr_author":"%s","commits":' "$PR_AUTHOR" > "$FORGE"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" \
+            --jq '.[] | {(.sha): {author: (.author.login // null), committer: (.committer.login // null), verified: (.commit.verification.verified // false)}}' \
+            | jq -s 'add // {}' >> "$FORGE" || true
+          printf '}' >> "$FORGE"
           CLAIM=()
-          # A PR CLAIMS status-only with a line of its own ("status-only: yes", "- status-only — …"),
-          # never by merely mentioning the words in prose — this PR's own body would otherwise
-          # claim it while describing the check.
-          if printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*(-[[:space:]]*)?status-only([[:space:]]*[:—-])'; then CLAIM=(--claimed-status-only); fi
-          node cli/baton.mjs tickets check --repo . --pr origin/main "${CLAIM[@]}"
+          # A PR CLAIMS status-only with a line of its own ("status-only: yes", "- status-only — …",
+          # "- **status-only** — …"), never by merely mentioning the words in prose; a line that
+          # says "status-only: no" or "not status-only —" asserts the opposite and claims nothing.
+          if printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*(-[[:space:]]*)?(\*\*)?status-only(\*\*)?[[:space:]]*[:—-]'; then
+            if ! printf '%s' "$PR_BODY" | grep -qiE '^[[:space:]]*(-[[:space:]]*)?(\*\*)?status-only(\*\*)?[[:space:]]*[:—-][[:space:]]*(no|not\b)'; then
+              CLAIM=(--claimed-status-only)
+            fi
+          fi
+          node cli/baton.mjs tickets check --repo . --pr origin/main --forge "$FORGE" "${CLAIM[@]}"
       - run: npm run check:spec   # spec/BATON_SPEC.md defines every R-BTN-n the code cites
       - run: npm run check:package   # the npm tarball installs and its `baton` starts
 

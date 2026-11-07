@@ -15,8 +15,10 @@
 //                                  is this computation's, never the PR description's claim.
 //
 // Provenance (B-126's direction): the caller passes each path's commits since the base; authors
-// and committers are git's reading — anyone sets an author, so the view names both and the
-// forge's pusher is the fact B-126 adds.
+// and committers are git's reading — anyone sets an author, so the view names both, and each
+// entry may carry the FORGE's reading of the same commit (the account behind the author and
+// committer, its signature verification), the fact B-126 adds. A runner without forge access
+// shows git's reading alone and must say so beside it, never present it as verified.
 /** The fields a status-only change may touch: the ticket's own progress, nothing that steers
  *  work (the control fields are the opposite set, B-126 item 1). `updated` is the filing's
  *  bookkeeping date, `prs` the record of its delivering pull requests. */
@@ -33,10 +35,13 @@ export function splitFrontmatter(text) {
 }
 
 /** The frontmatter's top-level fields as raw text: each key to its value lines (a block list's
- *  `- item` lines belong to the key above them). Line-wise, not YAML: the question is what a
- *  change altered, and a value that reflows is a change. A line that is not `key: value` and
- *  not a list item under one is ignored (a comment, a nested mapping Baton's tickets never
- *  carry). */
+ *  `- item` lines belong to the key above them, at ANY indent — YAML's canonical zero-indent
+ *  sequence included — and a block scalar's indented continuation lines belong to their key).
+ *  Line-wise, not YAML: the question is what a change altered, and a value that reflows is a
+ *  change. Any other non-blank, non-comment line under a key is carried as part of its value
+ *  rather than dropped: a shape dropped on both sides reads as UNCHANGED and hides the change
+ *  (the computed view fails toward showing one); a line before any key is prose the tickets
+ *  never carry. */
 export function frontmatterFields(text) {
   const { fm } = splitFrontmatter(text);
   const out = {};
@@ -46,12 +51,12 @@ export function frontmatterFields(text) {
     if (kv) {
       key = kv[1];
       out[key] = kv[2].trim();
-    } else if (key != null && /^\s+-\s+/.test(line)) {
-      out[key] = out[key] ? `${out[key]}\n${line.replace(/^\s+-\s+/, "- ")}` : line.replace(/^\s+-\s+/, "- ");
     } else if (line.trim() === "" || /^\s*#/.test(line)) {
       continue;
-    } else {
-      key = null; // prose or a nested shape: no field of ours
+    } else if (key != null) {
+      const item = /^(\s*)-\s+(.*)$/.exec(line);
+      const part = item ? `- ${item[2]}` : line.trim();
+      out[key] = out[key] ? `${out[key]}\n${part}` : part;
     }
   }
   return out;
@@ -75,7 +80,8 @@ export function briefOf(body) {
 }
 
 /** A bounded unified diff of two texts: the first `max` changed line PAIRS, each as
- *  `− old` / `+ new`, and the total pair count (so a reader knows when the diff was cut). */
+ *  `− old` / `+ new`, the number of pairs SHOWN (capped at `max`) and the total pair count —
+ *  `pairs > shown` is exactly when the diff was cut. */
 export function diffPairs(aText, bText, max = 8) {
   const a = aText.split(/\r?\n/);
   const b = bText.split(/\r?\n/);
@@ -106,12 +112,13 @@ export function diffPairs(aText, bText, max = 8) {
   while (i < midA.length) minus.push(midA[i++]);
   while (j < midB.length) plus.push(midB[j++]);
   const pairs = Math.max(minus.length, plus.length);
+  const shown = Math.min(pairs, max);
   const lines = [];
-  for (let k = 0; k < pairs && k < max; k++) {
+  for (let k = 0; k < shown; k++) {
     if (k < minus.length) lines.push(`− ${minus[k]}`);
     if (k < plus.length) lines.push(`+ ${plus[k]}`);
   }
-  return { pairs, lines };
+  return { pairs, shown, lines };
 }
 
 /** The ticket-ish paths under an items directory (live or archive/): `.mdx` and `.md`, as both
@@ -137,7 +144,8 @@ export function ticketId(path, text) {
  * The computed view. `items` is the items directory ("tickets", "content/roadmap"); `base` and
  * `head` map repo-relative paths to file text (a path absent from a map was not there);
  * `provenance` maps a path to the commits that changed it since the base, each
- * `{sha, author, committer, date}` — git's reading, named as such where it is shown.
+ * `{sha, author, committer, date, forge?}` — git's reading, named as such where it is shown,
+ * with the forge's reading of the same commit (B-126) beside it when the caller could reach it.
  *
  * Returns `{ changed: [...], statusOnly, reasons }` — `changed` one row per ticket file that
  * differs (added, removed or modified), each `{path, id, kind, fields, body, brief, statusOnly,
@@ -196,6 +204,12 @@ function fieldChanges(before, after) {
 
 const shorten = (v) => (v == null ? "nothing" : v.length > 40 ? `${v.slice(0, 39)}…` : v.replace(/\n/g, " "));
 
+/** The forge's reading of one commit (B-126), when the caller could reach it: the account
+ *  behind the git author and committer (null when none is associated) and the commit's
+ *  signature verification. */
+const forgeLine = (f) =>
+  ` · forge: author ${f.author ?? "no forge account"}, committer ${f.committer ?? "no forge account"}, signature ${f.verified ? "verified" : "unverified"}`;
+
 /** One row as the lines a check prints; the caller prefixes and orders them. */
 export function formatTicket(c) {
   const lines = [`${c.path} (${c.id}): ${c.kind}`];
@@ -204,10 +218,10 @@ export function formatTicket(c) {
   }
   if (c.brief.changed) lines.push("  **Brief:** changed");
   if (c.body.changed) {
-    lines.push(`  body changed (${c.body.pairs} line pair${c.body.pairs === 1 ? "" : "s"}${c.body.pairs > c.body.lines.length ? ", diff cut" : ""}):`);
+    lines.push(`  body changed (${c.body.pairs} line pair${c.body.pairs === 1 ? "" : "s"}${c.body.pairs > (c.body.shown ?? c.body.lines.length) ? ", diff cut" : ""}):`);
     for (const l of c.body.lines) lines.push(`    ${l}`);
   }
-  for (const p of c.provenance) lines.push(`  ${p.sha.slice(0, 10)} ${p.author} (committed by ${p.committer}) ${p.date}`);
+  for (const p of c.provenance) lines.push(`  ${p.sha.slice(0, 10)} ${p.author} (committed by ${p.committer}) ${p.date}${p.forge ? forgeLine(p.forge) : ""}`);
   if (!c.provenance.length) lines.push("  no commit carries this change (working tree)");
   lines.push(`  status-only: ${c.statusOnly ? "yes" : `no — ${c.reasons.join("; ")}`}`);
   return lines;

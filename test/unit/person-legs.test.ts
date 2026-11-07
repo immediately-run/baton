@@ -283,6 +283,20 @@ describe('R-BTN-116: a second person leg (one answer queues another ask)', () =>
     expect(await station('Q')).toEqual([expect.objectContaining({ station: 'merged' })]);
   });
 
+  it('B-133: an option that ends the course names the end as its computed action', async () => {
+    // `merged` is the course's one end: no legs leave it (and its toEnd is 0), so the action
+    // must SAY the choice ends the course — the old `toEnd ?` branch could never fire and the
+    // most consequential option printed only the station name.
+    expect((await git.post({ attestations: [DECISION('a')] })).status).toBe(200);
+    git.tickets.get('Q')!.question = CONFIRM;
+    git.place('Q', placed('adjudicated', [...REVIEWED, ['decide', 'adjudicated']], [['confirm', 'ready']]));
+    expect((await git.post()).status).toBe(200);
+    const q = (await withCore((core) => core.questions.needsYou())).find((x) => x.ticket_id === 'docs:Q')!;
+    expect(q.options).toEqual([
+      expect.objectContaining({ id: 'yes', reached: 'merged', action: 'moves the ticket to ‘merged’ — the course’s end' }),
+    ]);
+  });
+
   it('a Baton move that queues a person leg with expires arms its clock itself (§6.4)', async () => {
     expect((await git.post({ attestations: [DECISION('a')] })).status).toBe(200);
     expect(await station('Q')).toEqual([expect.objectContaining({ station: 'adjudicated', next_leg: 'confirm', person_expires_at: T0 + 60_000 })]);

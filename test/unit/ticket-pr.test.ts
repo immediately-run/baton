@@ -115,4 +115,47 @@ describe('B-133: the ticket-PR view', () => {
     expect(printed).toMatch(/status-only: no — file added/);
     expect(printed).toMatch(/\*\*Brief:\*\* changed/); // the whole agent-written ticket is in view
   });
+
+  it('a path git would emit quoted is visible: a body rewrite under a non-ASCII name breaks a status-only claim', async () => {
+    // core.quotepath's default quoting made this path invisible to the prefix test, so the
+    // view computed `status-only: yes` over a rewritten body and the claim PASSED — the
+    // ticket's own test case, arrived at by encoding (the round-one review's blocking finding).
+    const dir = repo(
+      { 'tickets/Bö-1.mdx': ticket({ id: 'Bö-1' }), 'tickets/B-2.mdx': ticket({ id: 'B-2' }) },
+      {
+        'tickets/Bö-1.mdx': ticket({ id: 'Bö-1' }, '**Brief:** quietly rewritten.\n\n### What to build\n\n- the thing\n'),
+        'tickets/B-2.mdx': ticket({ id: 'B-2', status: 'in-review', updated: '2026-11-07' }),
+      },
+    );
+    const r = await run(dir, ['--claimed-status-only']);
+    expect(r.code).toBe(1);
+    const printed = r.lines.join('\n');
+    expect(printed).toMatch(/tickets\/Bö-1\.mdx \(Bö-1\): changed/);
+    expect(printed).toMatch(/body changed/);
+    expect(printed).toMatch(/status-only: no — /);
+    expect(printed).toMatch(/ticket-pr: the PR is described status-only, but the computed view says otherwise/);
+  });
+
+  it("the forge's reading rides each commit beside git's, which is labelled as git's (B-126)", async () => {
+    const dir = repo({}, { 'tickets/B-2.mdx': ticket({ id: 'B-2' }) });
+    const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const forge = join(dir, 'forge.json');
+    writeFileSync(forge, JSON.stringify({ pr_author: 'immediately-run-worker', commits: { [sha]: { author: null, committer: 'immediately-run-worker', verified: true } } }));
+    const r = await run(dir, ['--forge', forge]);
+    expect(r.code).toBe(0);
+    const printed = r.lines.join('\n');
+    expect(printed).toMatch(/provenance: git's reading beside the forge's — the PR is opened by immediately-run-worker/);
+    expect(printed).toMatch(/ · forge: author no forge account, committer immediately-run-worker, signature verified/);
+    // Without the forge, git's agent-settable reading is named as such — never as verified.
+    const plain = await run(dir);
+    expect(plain.lines.join('\n')).toMatch(/provenance: git's reading — anyone sets an author or committer; the forge's reading is not read here \(B-126\)/);
+  });
+
+  it('an unresolvable --pr base is a one-line finding, not a raw stack', async () => {
+    const dir = repo({}, { 'tickets/B-2.mdx': ticket({ id: 'B-2' }) });
+    const lines: string[] = [];
+    const code = await ticketsCheckMain(['--repo', dir, '--pr', 'no-such-ref'], { log: (l) => lines.push(l) });
+    expect(code).toBe(1);
+    expect(lines.some((l) => l.includes("ticket-pr: cannot resolve a merge-base with no-such-ref — is it fetched? (git fetch origin)") && l.includes('Not a valid object'))).toBe(true);
+  });
 });
