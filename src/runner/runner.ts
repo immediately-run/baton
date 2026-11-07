@@ -15,8 +15,10 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
+import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
-import { claimScratch, courseOf, dropCourse, ensureSha, freshSecret, loadCourse, type CourseLoad } from './home';
+import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
+import { claimScratch, courseOf, dropCourse, ensureSha, freshSecret, git, loadCourse, type CourseLoad } from './home';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { StateFile, leaseLostFrom } from './state';
 
@@ -111,6 +113,10 @@ export interface RunnerOptions {
    *  taken before a claim for, or the advance into, a leg requiring it and held until the claim
    *  ends or a leg not requiring it starts. Absent, no lock governs anything. */
   locks?: Record<string, string>;
+  /** B-134: one read of the home checkout's remote refs — the runner's evidence for its leg-end
+   *  scope audit. The default reads it with the runner's bounded git; a test replaces it. A read
+   *  that fails skips the audit (logged), never the leg. */
+  auditRefs?: (home: string) => RefState | null;
 }
 
 interface LegChild {
@@ -309,6 +315,9 @@ export class Runner {
   /** R-BTN-177 (B-105): the taken the leg that just exited wrote, reported on the advance or end
    *  that finishes it and cleared when it is. */
   private pendingTaken: Taken[] | null = null;
+  /** B-134: the actions the finished leg's audit found outside the claim's ticket scope —
+   *  reported on the advance or end that finishes it, like the taken, and cleared when it is. */
+  private pendingScope: ScopeAction[] | null = null;
   /** B-106 (R-BTN-178): this machine's locks, null when none were configured. */
   private readonly locks: MachineLocks | null;
 
@@ -995,6 +1004,36 @@ export class Runner {
     return true;
   }
 
+  /** B-134: one read of the home checkout's remote refs for the leg-end scope audit — the
+   *  injected reader's, or the runner's bounded git of the home checkout. A read that fails is
+   *  logged and returns null: an unreadable audit is no audit, and never fails a leg. */
+  private readRefs(): RefState | null {
+    const read = this.o.auditRefs ?? ((home: string) => readRefState((args) => git(home, args)));
+    try {
+      return read(this.o.home);
+    } catch (e) {
+      this.log(`baton: the scope audit could not read the checkout's refs (${msg(e)}) — the audit is skipped for this leg`);
+      return null;
+    }
+  }
+
+  /** B-134: the leg-end scope audit. The refs the leg's window moved, mapped to the repositories
+   *  their remotes point at, are the runner's own evidence (the agent supplies none of it); the
+   *  pushes outside the claim answer's `scope` are parked for the advance or end that finishes
+   *  the leg, and the window moves to what was just read. An unreadable baseline or reading
+   *  skips the audit; a claim whose answer carried no scope audits nothing (a Baton before
+   *  B-134). */
+  private auditLeg(leg: string, ticket: string, scope: string[] | null, refs: RefState | null): RefState | null {
+    const after = this.readRefs();
+    if (refs == null || after == null) return after;
+    const outside = outsideScope(pushesBetween(refs, after), scope);
+    if (outside.length) {
+      this.pendingScope = [...(this.pendingScope ?? []), ...outside].slice(-16);
+      this.log(`baton: ${ticket}'s ${leg} pushed outside its ticket's scope: ${outside.map((a) => `${a.target}${a.ref ? ` (${a.ref})` : ''}`).join(', ')} — reported with the leg's finish (B-134)`);
+    }
+    return after;
+  }
+
   private async runClaim(claim: Record<string, any>): Promise<ClaimOutcome> {
     const claimId = claim.claim_id as number;
     const ticket = claim.ticket_id as string;
@@ -1027,6 +1066,12 @@ export class Runner {
     const own: string[] = [];
     let ranScript: string | null = null;
     let ranCtx: Record<string, unknown> | null = null;
+    // B-134: the claim answer's scope — the ticket's home and its `repos:` — against which each
+    // leg's pushes are audited at its end. A claim whose answer carried none audits nothing.
+    const scope = Array.isArray(claim.scope) && claim.scope.every((s: unknown) => typeof s === 'string')
+      ? claim.scope as string[] : null;
+    // B-134: the refs the audit's window starts from, read before the first leg runs.
+    let refs = this.readRefs();
     // The first leg is the claim response's queued leg (R-BTN-83); the first advance starts it.
     let legName = (claim.legs?.[0] ?? null) as string | null;
     let at = claim.station as string;
@@ -1107,6 +1152,10 @@ export class Runner {
           ranScript = script;
           ranCtx = ctx;
         }
+        // B-134: the leg's end — audit its window's pushes whatever the outcome was (a crashed
+        // or aborted leg can have pushed; a `missing` one never ran, and a lost lease ends here
+        // with the audit still read).
+        if (outcome.kind !== 'missing') refs = this.auditLeg(legName, ticket, scope, refs);
         if (outcome.kind === 'lease-lost') {
           // The group is dead; no close, no hand-off (R-BTN-24's resume record covers the leg).
           return await this.finish(claimId, { end_reason: 'released:lease-lost', reached: at, next: legName }, null);
@@ -1181,8 +1230,9 @@ export class Runner {
         if (!(await this.ensureLegLocks(verdict.leg, course))) {
           return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg }, await this.callHandoff(script, ctx) ?? handoffUrl);
         }
-        const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}), ...(this.pendingTaken ? { taken: this.pendingTaken } : {}) }, verdict.reached);
+        const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}), ...(this.pendingTaken ? { taken: this.pendingTaken } : {}), ...(this.pendingScope ? { scope_exceeded: this.pendingScope } : {}) }, verdict.reached);
         this.pendingTaken = null;
+        this.pendingScope = null;
         // 2026-10-24: the advance trail — every finished leg names where it landed and what it
         // queued, so a suspension or an odd end position reads as a trail, not a riddle.
         this.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : (answer.next?.[0]?.leg ?? verdict.leg)} (run ${run} of ${course.graph.legs.get(legName)?.maxRuns ?? 1})`);
@@ -1391,6 +1441,10 @@ export class Runner {
     // delivered it first (the go-on advance clears `pendingTaken` once it has).
     if (this.pendingTaken != null && body.taken === undefined) body = { ...body, taken: this.pendingTaken };
     this.pendingTaken = null;
+    // B-134: the end carries the leg's scope audit the same way — the advance that finished the
+    // leg clears it once it has delivered it.
+    if (this.pendingScope != null && body.scope_exceeded === undefined) body = { ...body, scope_exceeded: this.pendingScope };
+    this.pendingScope = null;
     try {
       await this.o.api.end(claimId, body);
     } catch (e) {

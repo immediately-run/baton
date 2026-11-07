@@ -46,9 +46,11 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
     // §12.8 (B-145, R-BTN-189): the policy facts of the claim's repository, and its `leg_state`
     // (R-BTN-188) — a forge repository with the knob unset hands state over in the forge's
     // conversation.
+    // B-134: the ticket's scope — its home (the fixture's `repos: ['immediately-run/docs']` is
+    // the home itself, so one path).
     expect(c.json).toEqual({ claim_id: expect.any(Number), ticket_id: 'docs:R3-9001', course_id: 'roadmap-pr', course_version: 3, default_branch: 'main',
       policy_hash: expect.stringMatching(/^[0-9a-f]{64}$/), guarantees_hash: expect.stringMatching(/^[0-9a-f]{64}$/), floors_hash: expect.stringMatching(/^[0-9a-f]{64}$/), leg_state: 'forge',
-      station: 'filed', legs: ['implement'], next: [{ leg: 'implement', state: 'ready' }],
+      station: 'filed', legs: ['implement'], next: [{ leg: 'implement', state: 'ready' }], scope: ['immediately-run/docs'],
       path: 'content/roadmap/R3-9001.mdx', nonce: expect.stringMatching(/^[0-9a-f]{6}$/), snapshot_sha: sha.A, previous_attempts: [], advice: null });
     expect((await beat('vm-a', secret)).json.claim).toMatchObject({ id: c.json.claim_id, ticket_id: 'docs:R3-9001', nonce: c.json.nonce, station: 'filed',
       git: { station: 'filed', path: [], path_len: 0, regressed: false, next: [{ leg: 'implement', state: 'ready' }] } });

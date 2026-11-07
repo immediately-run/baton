@@ -78,6 +78,16 @@ const only = (b: Record<string, unknown>, keys: string[], at: string) => {
 /** A key's stored line: its type and base64 only — a comment is for people, never stored. */
 const lineOf = (key: SshKey, text: string) => `${key.type} ${text.trim().split(/\s+/)[1]}`;
 
+/** A setting's value as the settings event carries it: the JSON settings parse back to their
+ *  value; `scope_policy`'s bare word (B-134) is its own value, not JSON. */
+function settingValue(v: string): unknown {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return v;
+  }
+}
+
 /** R-BTN-67: an owner bar's reason becomes `released:<reason>`; never one of §6.5's closed
  *  reasons, so an owner bar's release is never counted as a failed attempt (§6.10). */
 export function isOwnerBarReason(r: unknown): r is string {
@@ -872,14 +882,15 @@ export class Admin {
 
   /** `PUT /v1/owner/{repository}/settings`: `required_bars`, `retry`, `transcript_repos`,
    *  `unblocked_trigger`, `remind_after` (seconds, R-BTN-80), `required_independence`
-   *  (R-BTN-106) — each given replaces that setting whole. R-BTN-188's knob table: every
-   *  LOOSENING of an R-BTN-66 setting needs an approver on `approvers.policy` (R-BTN-186 names
-   *  `retry`, `transcript_repos` and `required_independence` flatly, and the removing or
-   *  narrowing of a bar; tightening — adding a bar — stays open to any owner). */
+   *  (R-BTN-106), `scope_policy` and `worker_pushers` (B-134) — each given replaces that
+   *  setting whole. R-BTN-188's knob table: every LOOSENING of an R-BTN-66 setting needs an
+   *  approver on `approvers.policy` (R-BTN-186 names `retry`, `transcript_repos` and
+   *  `required_independence` flatly, and the removing or narrowing of a bar; tightening —
+   *  adding a bar — stays open to any owner). */
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'required_independence'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'required_independence', 'scope_policy', 'worker_pushers'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     const sets: [string, string | null][] = [];
     if (b.required_bars !== undefined) sets.push(['required_bars', JSON.stringify(this.checkRequiredBars(repository, b.required_bars))]);
@@ -896,6 +907,21 @@ export class Admin {
       sets.push(['remind_after_s', JSON.stringify(r)]);
     }
     if (b.required_independence !== undefined) sets.push(['required_independence', JSON.stringify(checkIndependence(b.required_independence))]);
+    // B-134: what a scope-exceeded finding does (`report`, Needs you alone — the default — or
+    // `hold`, the ticket parked until an owner lifts it), and the forge logins the fleet's VM
+    // runners push as, whose pushes are cross-checked against open claims. Null or an empty
+    // list names none: the cross-check is off until the owners name one. `scope_policy` is a
+    // bare word (its column's CHECK admits two), not JSON like the list settings.
+    if (b.scope_policy !== undefined) {
+      if (b.scope_policy !== 'report' && b.scope_policy !== 'hold') bad('scope_policy', "must be 'report' or 'hold'");
+      sets.push(['scope_policy', b.scope_policy as string]);
+    }
+    if (b.worker_pushers !== undefined) {
+      const w = b.worker_pushers === null ? [] : Array.isArray(b.worker_pushers) && b.worker_pushers.length <= 50
+        && b.worker_pushers.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 100 && /^[A-Za-z0-9-]+$/.test(x))
+          ? [...new Set(b.worker_pushers as string[])] : bad('worker_pushers', 'must be null or a list of at most 50 forge logins');
+      sets.push(['worker_pushers', JSON.stringify(w)]);
+    }
     // R-BTN-188/R-BTN-186: the loosening needs an approver on `approvers.policy` as it stands.
     if (this.loosensSettings(repository, sets)) {
       const policies = this.c.policies;
@@ -909,7 +935,7 @@ export class Admin {
     }
     return this.c.store.transaction(() => {
       for (const [k, v] of sets) this.exec(`UPDATE repositories SET ${k} = ? WHERE id = ?`, v, repository);
-      this.event(actor, { act: 'settings', repository, ...Object.fromEntries(sets.map(([k, v]) => [k === 'remind_after_s' ? 'remind_after' : k, v == null ? null : JSON.parse(v)])) }, repository);
+      this.event(actor, { act: 'settings', repository, ...Object.fromEntries(sets.map(([k, v]) => [k === 'remind_after_s' ? 'remind_after' : k, v == null ? null : settingValue(v)])) }, repository);
       // Required bars are applied as a snapshot's legs are stored: the next sync re-stores them
       // now rather than at the schedule (round 1, 1-A-8).
       if (b.required_bars !== undefined) this.c.dispatchSync(repository);
@@ -920,7 +946,9 @@ export class Admin {
   /** Whether the settings this change writes loosen what stands: R-BTN-186 names `retry`,
    *  `transcript_repos` and `required_independence` flatly — any change to one is governed —
    *  while a bar's removal or narrowing loosens and its addition tightens. `remind_after` and
-   *  `unblocked_trigger` tune operation, not trust, and are never governed. */
+   *  `unblocked_trigger` tune operation, not trust, and are never governed. B-134's two scope
+   *  settings are governed one way each: a hold that stops holding, and a cross-check that
+   *  names fewer pushers, loosen. */
   private loosensSettings(repository: string, sets: [string, string | null][]): boolean {
     const flat = ['retry', 'transcript_repos', 'required_independence'];
     for (const [k, v] of sets) {
@@ -929,6 +957,16 @@ export class Admin {
         const before = k === 'transcript_repos' ? JSON.parse(this.rows<{ v: string | null }>('SELECT transcript_repos AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? 'null') : old;
         if (JSON.stringify(before ?? null) !== (v ?? 'null')) return true;
       }
+    }
+    // B-134: both scope settings only loosen one way — a hold that stops holding, and a
+    // cross-check that names fewer pushers. Naming more, or holding, tightens.
+    const policy = sets.find(([k]) => k === 'scope_policy');
+    if (policy && policy[1] === 'report' && this.rows<{ v: string }>('SELECT scope_policy AS v FROM repositories WHERE id = ?', repository)[0]?.v === 'hold') return true;
+    const pushers = sets.find(([k]) => k === 'worker_pushers');
+    if (pushers) {
+      const was = JSON.parse(this.rows<{ v: string | null }>('SELECT worker_pushers AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? '[]') as string[];
+      const next = JSON.parse(pushers[1]!) as string[];
+      if (was.some((p) => !next.includes(p))) return true;
     }
     const bars = sets.find(([k]) => k === 'required_bars');
     if (!bars) return false;
@@ -1019,7 +1057,7 @@ export class Admin {
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
-      settings: this.rows('SELECT id AS repository_id, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, required_independence FROM repositories WHERE retired_at IS NULL ORDER BY id'),
+      settings: this.rows('SELECT id AS repository_id, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, required_independence, scope_policy, worker_pushers FROM repositories WHERE retired_at IS NULL ORDER BY id'),
       // R-BTN-80: the personal channels, by repository.
       couriers: this.c.notices?.couriers() ?? [],
     };

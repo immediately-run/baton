@@ -102,6 +102,7 @@ is stale. Never edit it by hand.
 | | 12.6 Capability roles and links | R-BTN-157 |
 | | 12.7 Baton's GitHub App | — |
 | | 12.8 The repository policy and its guarantees *(proposal — B-127, B-131, B-133, B-136, B-137, B-139, B-140, B-145, B-146, B-147)* | R-BTN-188, R-BTN-189, R-BTN-180, R-BTN-181, R-BTN-191, R-BTN-192, R-BTN-182, R-BTN-183, R-BTN-184, R-BTN-185, R-BTN-186, R-BTN-187 |
+| | 12.9 A leg's scope *(B-134)* | — |
 | [`13-data-model.md`](BATON_SPEC/13-data-model.md) | **13. Data model** | — |
 | | 13.1 Repositories, courses and tenant settings | — |
 | | 13.2 Credentials and sign-in | — |
@@ -459,6 +460,7 @@ is stale. Never edit it by hand.
 | S-BTN-199 | the git-lock pickup asks Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-200 | a leg's end reaps its group | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-201 | the runner outlives its short waits | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-202 | a leg's scope | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

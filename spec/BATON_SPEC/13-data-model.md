@@ -59,6 +59,8 @@ reach it, each new one the next free number at merge as R-BTN-31 numbers a scena
 | `unblocked_trigger` JSON (the `dispatch` shape) | NULL | R-BTN-77, R-BTN-94 |
 | `pushers` JSON (forge user ids) | `[]` | R-BTN-139 |
 | `code_repos` JSON `[{path, repo_id, former_paths}]` — owners write `path` only; Baton resolves `repo_id` and keeps `former_paths` | `[]` | R-BTN-140 |
+| `scope_policy` (`report`\|`hold`) — what a scope-exceeded finding does: Needs you alone, or a hold on its ticket | `report` | §12.9 |
+| `worker_pushers` JSON (forge logins) — the fleet's VM runners' pushes, cross-checked against open claims | `[]` | §12.9 |
 | `api_keys` | 1 | R-BTN-117 |
 | `checks` JSON `{<course>: {name, conclusions}}` | `{}` | R-BTN-114 |
 | `leg_log_root` — `s3://…`, `gs://…`, or on the local host `file:///…` | NULL (off) | R-BTN-128 |
@@ -117,6 +119,7 @@ and never accepted holds no role (§12.1).
 | `leg_queue_members` | `ticket_id` | `repository_id`, `course_id`, `leg` | The one queue each unheld ticket, and each `cancelling` ticket, is counted in (R-BTN-79) |
 | `unblocked_dispatch` | `repository_id` | `last_sent_at`, `pending_json` (≤ 100 entries and a `truncated` count), `due_at` | The unblocked trigger's 30-second coalescing window, dispatched by Baton (R-BTN-94) |
 | `pending_owner_state` | `(repository_id, ticket_id, kind, key)` | `kind` (`override`\|`condition`\|`timer`\|`outbox`\|`station`\|`history`\|`run`), `key` (`''`, the condition id, the timer's `(leg, kind)` or the outbox id), `row_json` | Imported ticket-scoped rows awaiting their ticket's first snapshot (R-BTN-88) |
+| `scope_findings` | `id`; one open row per `(repository_id, COALESCE(ticket_id,''), kind, target)` | `ticket_id` (the claim's ticket; NULL for `unclaimed-write`), `claim_id`, `kind` (`scope-exceeded`\|`unclaimed-write`), `target` (the repository or host the action touched), `detail_json` (identifiers only), `raised_at`, `updated_at`, `resolved_at`, `resolved_by` | A leg's actions outside its ticket's scope, as its runner reported them, and a worker push no open claim covers, as the forge delivered it; open until an owner resolves it (§12.9) |
 
 ### 13.5 Claims and leg runs
 
@@ -147,7 +150,7 @@ Under §12.8 (proposal), `repository_policies` `(repository_id, version)` holds 
 | `ticket_blocks` | `(ticket_id, kind, ref, leg)`; `leg` `''` for the whole ticket | `repository_id`, `kind` (`ticket`\|`capability`\|`resource`\|`retry`\|`condition`\|`call`\|`attestation`), `ref`, `since`, `until`, `provisional` (the commit a runner-written row waits for), `found` (`before-start`\|`during-run`), `binds` (`gate`\|`advice`; set for `resource` and `attestation` rows from their requirement, R-BTN-181) | Each unmet prerequisite, maintained, never recomputed on read (R-BTN-75, R-BTN-120, R-BTN-126) |
 | `leg_needs` | `(ticket_id, leg, resource)` | `repository_id`, `source` (`posted`\|`end`), `added_at`, `found_at` | Resources a next leg needs; an `end` need is never removed by a post (R-BTN-76, R-BTN-126) |
 | `leg_attempts` | `(ticket_id, leg)` | `repository_id`, `attempts`, `retry_after`, `last_error_type` | Retry state per ticket and leg; reset when the leg reaches an outcome or a hold is lifted (R-BTN-122) |
-| `ticket_overrides` | `ticket_id` | `expedite`, `hold`, `hold_reason` (`owner`\|`attempts-exhausted`\|`non-retryable:<class>`\|`blocked-exhausted`\|`parked`\|`outbox-refused`\|`mcp:<name>`), `cancelling_at` (set by a cancellation, cleared at the close, never in `kept_json`, R-BTN-168), `route_leg`, `route_station`, `override_kind` (`owner`\|`baton`), `set_by`, `set_at` | Expedite, hold and cancellation (§6); the queued leg Baton or the owner chose, held until the station changes — an owner's route, retry's `exhausted` leg, a person leg's expiry, the `cancel` leg (R-BTN-12, R-BTN-83, R-BTN-116, R-BTN-122, R-BTN-168) |
+| `ticket_overrides` | `ticket_id` | `expedite`, `hold`, `hold_reason` (`owner`\|`attempts-exhausted`\|`non-retryable:<class>`\|`blocked-exhausted`\|`parked`\|`outbox-refused`\|`scope-exceeded`\|`mcp:<name>`), `cancelling_at` (set by a cancellation, cleared at the close, never in `kept_json`, R-BTN-168), `route_leg`, `route_station`, `override_kind` (`owner`\|`baton`), `set_by`, `set_at` | Expedite, hold and cancellation (§6); the queued leg Baton or the owner chose, held until the station changes — an owner's route, retry's `exhausted` leg, a person leg's expiry, the `cancel` leg (R-BTN-12, R-BTN-83, R-BTN-116, R-BTN-122, R-BTN-168) |
 | `owner_bars` | `id` | `repository_id`, `course` (an id or `*`), `tag`, `legs` JSON, `applies` (`claim`\|`claim+advance`), `starts_at`, `ends_at`, `release_holders`, `reason` (`^[a-z][a-z0-9-]{0,39}$`), `set_by`, `lifted_at` | R-BTN-67 |
 | `conditions` | `id` | `repository_id`, `ticket_id` (NULL for a repository's), `ref` (what a core condition is about: a runner, an instance, `<course>:<leg>`, a question id), `claim_id`, `leg`, `run`, `type`, `disposition` (`interrupt`\|`suspend`\|`notify`), `handler` (the handler ticket), `restarts` JSON, `default`, `severity` (`critical`\|`high`\|`normal`), `url`, `detail` JSON (a core condition's identifiers and numbers), `raised_at`, `closed_at`, `outcome`, `restart`, `reason`, `answered_by` (the answer's, or an owner's credential), `consumed_at` (an end of the raiser's claim consumed the restart, R-BTN-162) | Raised conditions, filter fields only; indexed open by repository, and by `handler`; an open core condition is unique on `(repository_id, type, ticket_id, ref)` (R-BTN-160, R-BTN-162, R-BTN-163) |
 | `ticket_timers` | `(ticket_id, leg, kind)`; `kind` `stalled`\|`expires` | `repository_id`, `from_at`, `due_at`, `fired_at` | The instants Baton holds per leg; each fires once per `from_at`; renamed with their leg (R-BTN-64, R-BTN-116, R-BTN-167) |
@@ -180,6 +183,7 @@ Under §12.8 (proposal), `repository_policies` `(repository_id, version)` holds 
 `question-posted`, `question-answered`, `question-expired`, `question-dropped`, `answer-invalid`, `call-settled`,
 `superseded`, `course-closed`, `course-opened`, `capacity`,
 `parent-invalid`, `not-before-invalid`, `output-unclaimed`, `reading-refused`, `invalid-pointer`,
+`scope-exceeded`, `unclaimed-write`,
 `admin` (its act in `detail.action`), `frozen`, `unfrozen`, `sealed`, `imported`; *adoption:* `adopted`, `cutover`, `shadow-conflict`,
 `foreign-claim`.
 

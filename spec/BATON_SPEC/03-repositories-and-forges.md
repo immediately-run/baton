@@ -297,7 +297,10 @@ repository reachable over SSH is enough (R-BTN-105).
     `baton.mirror-late` (a mirror more than 30 minutes behind).
   - **The GitHub App** (§12.7) is GitHub's dispatch target and Baton's webhook source.
 - **R-BTN-73 / R-BTN-95 (forge notifications are only triggers).** A notification records a
-  want; it never computes or carries state.
+  want; it never computes or carries state. The one thing besides the want a delivery produces
+  is the scope cross-check (B-134, §12.9): a push by a worker pusher of the owners'
+  `worker_pushers` setting to a repository no active claim's scope covers records an
+  `unclaimed-write` finding from the delivery's own fields — no repository content is read.
   - **Routes.** `POST /v1/github/webhook` takes the App's deliveries for every repository it is
     installed on (`X-Hub-Signature-256` under `BATON_GITHUB_WEBHOOK_SECRET`).
     `POST /v1/forges/{repository}/notify` takes a GitLab notification (`X-Gitlab-Token`

@@ -428,6 +428,18 @@ function renderNeeds() {
   }
   // R3-1239: the BATON_KEYS seed; the keys in force stay until a list seeds.
   if (n.keys?.refused) list.append(el('li', { text: `BATON_KEYS was refused (${n.keys.refused}); the keys in force stay` }));
+  // B-134: a leg reported outside its ticket's scope, and a worker push no open claim covers —
+  // each open until an owner resolves it.
+  for (const s of n.scope ?? []) {
+    const what = s.kind === 'unclaimed-write'
+      ? `a push by a named worker pusher to ${s.target}, which no open claim covers`
+      : `a leg of ${s.ticket_id} pushed to ${s.target}${s.detail?.ref ? ` (${s.detail.ref})` : ''}, outside its ticket's scope`;
+    const li = el('li', { text: `${s.repository_id}: ${s.kind} — ${what}, since ${fmtTime(s.raised_at)}` });
+    li.append(document.createTextNode(' '), button('Resolve', () => {
+      if (confirm(`Resolve ${s.repository_id}'s ${s.kind} on ${s.target}: it was looked into?`)) act(`/v1/ui/scope/${s.id}/resolve`, {});
+    }));
+    list.append(li);
+  }
   // R-BTN-75, R-BTN-76: a day blocked on a capability no live worker has; an instance a posted leg
   // needs that no instrument has reported on for a day.
   for (const b of n.blocked_capability ?? []) list.append(el('li', { text: `${b.ticket_id}: blocked since ${fmtTime(b.since)} on ${b.capability}, which no live worker declares` }));
