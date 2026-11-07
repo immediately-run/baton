@@ -59,9 +59,10 @@ only the marks post (briefs are marked `signed`/`unsigned` either way).
 *changed it* and is signed, so turn the setting on only after signing one real change per
 control file — a comment bump is enough; an empty `--allow-empty` signature signs nothing the
 walk can see. The runner-loaded groups are read atomically per file: the ceremony's one commit
-must touch every file of a group (`.baton/baton.json`; each course's every `legs/*.mjs` — the
-overrides of their own group; `rank.mjs` when a loader exists), or a later signed change to one
-file would otherwise be held back by an unsigned sibling. Until then no claim on the
+must touch every file of a group (`.baton/baton.json`; each course's every `legs/*.mjs` and
+`legs/*.md` — the leg instructions are group paths beside the scripts they order; the
+overrides of their own group; `rank.mjs` when a loader exists), or a later signed change to
+one file would otherwise be held back by an unsigned sibling. Until then no claim on the
 repository's tickets is handed out — not a `cannot-finish:spec` the ticket would pay an attempt
 and a non-retryable hold for — and the `unsigned-control` notice under Needs you names what to
 sign. After the one-time signing, an unsigned change keeps the last signed version in force —
@@ -124,16 +125,18 @@ your harness enforces it is its own setting.)
 | Part | Refuses |
 |---|---|
 | the sync | nothing — it computes what counts and posts it, marking briefs and the record |
-| Baton | handing out any claim while a group has no owner-signed version (no attempt charged); silently missing an unsigned change: a post that moves the head onto one raises the notice (while the setting is on), once per change the last notice did not name |
-| each runner | loading what a post named without verifying: a forged or non-owner signature, a commit that is no ancestor of the claim's snapshot, or a keyless read that is not the snapshot itself, each ends the claim `cannot-finish:spec` |
+| Baton | handing out any claim while a group has no owner-signed version (no attempt charged); silently missing an unsigned change: a post that moves the head onto one raises the notice (while the setting is on), once per change no notice in the window already named; a claim answer serves the record read in the claim's own transaction, stored with the claim — a lost-response replay re-serves the same pairing, never a newer post's record |
+| each runner | loading what a post named without verifying: a forged or non-owner signature, a commit that is no ancestor of the claim's snapshot, a `read` the walk at the snapshot does not name (an old on-branch signed commit — the rollback — never loads on a record's word), or a keyless read that is not the snapshot itself, each ends the claim `cannot-finish:spec` |
 | the runner (fail closed) | a group with no signed version: no claim runs until an owner signs the state once |
 | `verify-config` | a privileged session on a checkout whose agent configuration was last changed unsigned |
 | the merge runner | nothing new — control paths land by the policy's `paths.control` as ever (R-BTN-184) |
 
 ## Bounds, honestly
 
-- The walks read the default branch's **first parents**, bounded (2000 commits, 200 changers,
-  256 verifications a sync): a merge whose result differs from its first parent on a control
+- The walks read the default branch's **first parents**, bounded: 2000 commits for a path's
+  last change, and — per group — the newest 64 changers, four groups at 64 fitting the
+  256-check verification budget exactly, so a group's own newest signed change is never the
+  one the budget skipped. A merge whose result differs from its first parent on a control
   path is that merge's change, so a crafted rollback to an older signed version never counts;
   burying a change past the bound takes that many accepted head moves, each flagged while in
   memory. B-137's server-side read of the push deliveries is the memory-free answer.
@@ -142,15 +145,25 @@ your harness enforces it is its own setting.)
   signed change to `b.run.mjs` never carries an unsigned `a.run.mjs`'s bytes into force through
   its tree. When a sibling's unsigned change stands, the group holds at the earlier signed
   state and the notice names both, until an owner signs the whole group once.
-- The verification budget is spent on certainty, never on accusation: past its 256 checks a
-  brief or an `EXPEDITE` is left **unmarked** rather than read `unsigned` — the owner's signed
-  words are not called a claim by exhaustion — while the runner-loaded groups fail closed.
+- The verification budget is spent on certainty, never on accusation: the groups' walks are
+  bounded to fit their budget whole (above), and past the notice's own 256-check budget a
+  path is left **unnamed** — as a brief or an `EXPEDITE` past one is left **unmarked** —
+  because "not verified either way" is not `unsigned`, and the owner's signed words are not
+  called a claim by exhaustion. The notice's list itself is bounded (200 entries): what the
+  bound drops is never named and never counted, by path order — an honest bound, disclosed
+  here.
+- The notice fires once per **change** — a newly listed path, or the same path under a new
+  unsigned commit — that no notice in the 7-day window already named: two notices that named
+  different sets do not re-notify each other's names on every later head move, and entries one
+  event's 50-line display slice left out are not news again on the next.
 - `EXPEDITE` gating and the notice are the sync's computation until B-137 moves them
-  server-side; the runner-loaded groups are verified by every runner, so a lying post changes
-  what a runner refuses, not what it runs.
-- The course group covers each course's `legs/*.mjs` — the code a runner executes. The graph
-  loads with the scripts, one coherent tree at the group's commit; the group's *walk* covers
-  the scripts only, because a sourced course's `course.json` is pinned byte-equal by the sync
+  server-side; the runner-loaded groups are verified by every runner — each named commit's
+  signature, its ancestry, and the walk at the claim's own snapshot recomputed with the keys
+  the answer served — so a lying post changes what a runner refuses, not what it runs.
+- The course group covers each course's `legs/*.mjs` and the leg instructions `legs/*.md`
+  beside them — the code a runner executes and the words that order its agent, one coherent
+  tree at the group's commit. The graph loads with the scripts; the group's *walk* covers the
+  scripts and instructions only, because a sourced course's `course.json` is pinned byte-equal by the sync
   itself (B-33 refuses the post when it differs) and could never be signed after its scaffold —
   byte-identical for a sourced course, an owned course's graph change taking effect with the
   next signed change to its leg scripts, and a leg a pushed graph adds that the signed `legs/`

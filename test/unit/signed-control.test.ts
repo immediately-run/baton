@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { allowedSigners, commitSignature, signedPayload, verifySignedCommit, nodeKeygen } from '../../src/shared/commitSign.mjs';
-import { briefOf, isAgentConfigPath, isSignedControlPath, marksOf, signedControlOf, unsignedAgentConfig, VERIFIES_MAX, type SigningKey } from '../../src/defaults/signed-control';
+import { briefOf, isAgentConfigPath, isSignedControlPath, marksOf, signedControlOf, unsignedAgentConfig, GROUP_WALK_BOUND, VERIFIES_MAX, type SigningKey } from '../../src/defaults/signed-control';
 
 /** One real key pair on disk, as an owner's hardware key stands in test: `-S` signs with the file. */
 function keypair(dir: string, name: string): { pub: string; file: string; key: SigningKey } {
@@ -261,6 +261,119 @@ describe('signedControlOf (B-127): what counts, first parents only', () => {
     expect(sc2.unsigned.at(-1)!.path).toMatch(/^\.claude\/skills\/s\d+/);
     rmSync(r.dir, { recursive: true, force: true });
   }, 120_000);
+
+  it('the leg instructions are the course group\'s: an unsigned .md keeps the signed words, a signed .md change moves the group (round 2, blocking)', () => {
+    const r = repo();
+    r.write('.baton/courses/create-pr/course.json', '{"legs":{"implement":{}}}\n');
+    r.write('.baton/courses/create-pr/legs/implement.mjs', 'export async function run() {}\n');
+    r.write('.baton/courses/create-pr/legs/implement.md', '# implement — the signed words\n');
+    const baseline = r.commit({ sign: 'owner' });
+    // A push rewrites the instructions unsigned: the notice names them, and the course group —
+    // the scripts AND their instructions, one coherent tree — holds at the signed baseline,
+    // so the pushed words never order an agent and cannot ride in with the next signed
+    // settings change (the group they never belonged to).
+    r.write('.baton/courses/create-pr/legs/implement.md', '# implement — THE PUSHED WORDS\n');
+    const pushed = r.commit({});
+    const sc = signedControlOf(r.head(), [owner.key], gitOf(r), nodeKeygen)!;
+    expect(sc.groups.course).toMatchObject({ read: baseline, key: owner.key.fingerprint });
+    expect(sc.groups.course.unsigned).toEqual([pushed]);
+    expect(sc.unsigned).toContainEqual({ path: '.baton/courses/create-pr/legs/implement.md', commits: [pushed] });
+    // The owner signs the instructions alone: the group moves — a signed .md change takes
+    // effect on its own, without a settings or scripts change to carry it.
+    r.write('.baton/courses/create-pr/legs/implement.md', '# implement — the owner re-signed the words\n');
+    const signed = r.commit({ sign: 'owner' });
+    const sc2 = signedControlOf(r.head(), [owner.key], gitOf(r), nodeKeygen)!;
+    expect(sc2.groups.course).toMatchObject({ read: signed, key: owner.key.fingerprint });
+    expect(sc2.groups.course.unsigned).toEqual([]);
+    rmSync(r.dir, { recursive: true, force: true });
+  });
+
+  it('an override pushed on its own moves the overrides group only, never the course\'s (round 2: the exclude pathspec)', () => {
+    const r = repo();
+    r.write('.baton/courses/create-pr/course.json', '{"legs":{"implement":{}}}\n');
+    r.write('.baton/courses/create-pr/legs/implement.mjs', 'export async function run() {}\n');
+    r.write('.baton/courses/create-pr/legs/implement.md', '# implement\n');
+    const baseline = r.commit({ sign: 'owner' });
+    r.write('.baton/courses/create-pr/legs/implement.run.mjs', 'export async function run(ctx, standard) { return standard(ctx); }\n');
+    const pushed = r.commit({});
+    const sc = signedControlOf(r.head(), [owner.key], gitOf(r), nodeKeygen)!;
+    // Git parses ONE magic prefix: the old `:(exclude):(glob)…` form read the second prefix
+    // literally and matched no path, so this push was a course-group changer too — an unsigned
+    // override push froze the course's scripts and instructions with it, and a signed one moved
+    // the course group. The `:(exclude,glob)…` form excludes it, as the walk's comment claims.
+    expect(sc.groups.overrides).toMatchObject({ read: null, key: null });
+    expect(sc.groups.overrides.unsigned).toEqual([pushed]);
+    expect(sc.groups.course).toMatchObject({ read: baseline, key: owner.key.fingerprint });
+    expect(sc.groups.course.unsigned).toEqual([]);
+    rmSync(r.dir, { recursive: true, force: true });
+  });
+
+  it('past the per-group walk bound a group still counts its own newest signed change (round 2: the budget lands on what the window reads)', () => {
+    const r = repo();
+    r.write('.baton/baton.json', '{"agent_command":"signed"}\n');
+    r.commit({ sign: 'owner' });
+    // More than GROUP_WALK_BOUND unsigned changes bury the old signed state past the group's
+    // window; the owner then signs the current state. The walk's window reads the newest
+    // GROUP_WALK_BOUND changers — the ceremony among them — and the group counts it: the
+    // owner's own newest signed change is never the one a budget skipped.
+    for (let i = 0; i < GROUP_WALK_BOUND + 10; i++) {
+      r.write('.baton/baton.json', `{"agent_command":"push ${i}"}\n`);
+      r.commit({});
+    }
+    r.write('.baton/baton.json', '{"agent_command":"the owner signs the state"}\n');
+    const ceremony = r.commit({ sign: 'owner' });
+    const sc = signedControlOf(r.head(), [owner.key], gitOf(r), nodeKeygen)!;
+    expect(sc.groups.agent_command).toMatchObject({ read: ceremony, key: owner.key.fingerprint });
+    rmSync(r.dir, { recursive: true, force: true });
+  }, 120_000);
+
+  it('a busy repository\'s newest signed course change still counts: the groups\' walks fit their budget whole (round 2)', () => {
+    const r = repo();
+    // The owner-signed baseline of both groups…
+    r.write('.baton/baton.json', '{"agent_command":"signed"}\n');
+    r.write('.baton/courses/create-pr/course.json', '{"legs":{"implement":{}}}\n');
+    r.write('.baton/courses/create-pr/legs/implement.mjs', 'export async function run() {}\n');
+    r.write('.baton/courses/create-pr/legs/implement.md', '# implement\n');
+    const baseline = r.commit({ sign: 'owner' });
+    // …then a flood of unsigned settings changes (one group's worth and more)…
+    for (let i = 0; i < 200; i++) {
+      r.write('.baton/baton.json', `{"agent_command":"push ${i}"}\n`);
+      r.commit({});
+    }
+    // …unsigned leg-script changes, and the owner signing the leg script last: with one shared
+    // 256-check budget spent oldest-first across the groups, the ceremony was the check the
+    // budget skipped — read fell to the older signed state, and a busy repository's own newest
+    // signed change never counted. The per-group window (the newest 64 changers, four groups
+    // fitting the budget exactly) always reads it.
+    for (let i = 0; i < 57; i++) {
+      r.write('.baton/courses/create-pr/legs/implement.mjs', `export async function run() { /* push ${i} */ }\n`);
+      r.commit({});
+    }
+    r.write('.baton/courses/create-pr/legs/implement.mjs', 'export async function run() { /* the owner signed this */ }\n');
+    const ceremony = r.commit({ sign: 'owner' });
+    const sc = signedControlOf(r.head(), [owner.key], gitOf(r), nodeKeygen)!;
+    expect(sc.groups.agent_command.read).toBeNull(); // the settings' signed state is buried past the window
+    expect(sc.groups.course).toMatchObject({ read: ceremony, key: owner.key.fingerprint });
+    rmSync(r.dir, { recursive: true, force: true });
+  }, 300_000);
+
+  it('past the notice walk\'s own budget a path is left unnamed, never read unsigned (round 2)', () => {
+    const r = repo();
+    // 260 agent-configuration paths, each changed by its own unsigned commit, the oldest named
+    // c000: the notice walk verifies each path's last changer newest-first, and past its
+    // 256-check budget the four oldest (c000–c003) read `undefined` — not verified either way.
+    // The old walk, sharing the budget with the groups, read that as `unsigned` and named them;
+    // the notice accuses only what it checked, so they keep no entry.
+    for (let i = 0; i < VERIFIES_MAX + 4; i++) {
+      r.write(`.claude/c/${String(i).padStart(3, '0')}/SKILL.md`, `# ${i}\n`);
+      r.commit({});
+    }
+    const sc = signedControlOf(r.head(), [owner.key], gitOf(r), nodeKeygen)!;
+    expect(sc.unsigned).toHaveLength(200); // the post's own clamp, sorted by path
+    expect(sc.unsigned[0]!.path).toBe('.claude/c/004/SKILL.md');
+    expect(sc.unsigned.at(-1)!.path).toBe('.claude/c/203/SKILL.md');
+    rmSync(r.dir, { recursive: true, force: true });
+  }, 180_000);
 
   it('the notice\'s paths are the control inputs: .baton, goals, agent configuration; a ticket file only for its EXPEDITE', () => {
     expect(isSignedControlPath('.baton/baton.json')).toBe(true);

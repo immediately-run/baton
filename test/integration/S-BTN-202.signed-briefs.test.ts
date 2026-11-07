@@ -11,7 +11,7 @@
 // and each runner's own verification of the named commits) is test/unit/signed-control.test.ts
 // and S-BTN-203.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, adminSession, course, keyCall, observe, payload, rows, sessionCall, setAdminKeys, setClock, syncCall, ticket, placed, withCore } from '../helpers';
+import { Git, adminSession, course, cutover, keyCall, observe, payload, register, rows, sessionCall, setAdminKeys, setClock, syncCall, ticket, placed, workerCall, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-06T12:00:00Z');
@@ -151,6 +151,67 @@ describe(`S-BTN-202 owner-signed briefs and the signed-control record`, () => {
     // A post with no unsigned change raises nothing.
     expect((await git.post({ control: control({ unsigned: [] }) })).status).toBe(200);
     expect(await rows(`SELECT COUNT(*) AS n FROM events WHERE kind = 'unsigned-control'`)).toEqual([{ n: 2 }]);
+  });
+
+  it('two notices that named different sets do not re-notify each other\'s names on every later head move (round 2)', async () => {
+    const git = new Git();
+    git.add('T-1');
+    // A head exists with the setting still off (a first post raises nothing, §7.1).
+    expect((await git.post({ control: control() })).status).toBe(200);
+    expect((await keyCall(owner, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
+    // Event one names A only (B is not present yet); event two, with both standing, names B.
+    expect((await git.post({ control: control({ unsigned: [{ path: '.claude/a', commits: [SHA] }] }) })).status).toBe(200);
+    expect((await git.post({ control: control({ unsigned: [{ path: '.claude/a', commits: [SHA] }, { path: '.claude/b', commits: [OTHER_SHA] }] }) })).status).toBe(200);
+    // Both changes stand and nothing is new: the head can move as often as it likes, no third
+    // event fires. The last-event-only witness saw only B in the last event and alternated A,
+    // B, A, B on every later head move — the dedupe reads every notice the window holds.
+    for (let i = 0; i < 3; i++) {
+      expect((await git.post({ control: control({ unsigned: [{ path: '.claude/a', commits: [SHA] }, { path: '.claude/b', commits: [OTHER_SHA] }] }) })).status).toBe(200);
+    }
+    const events = await rows<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'unsigned-control' ORDER BY seq`);
+    expect(events.length).toBe(2);
+    expect((JSON.parse(events[0].detail_json) as { changes: { path: string }[] }).changes.map((c) => c.path)).toEqual(['.claude/a']);
+    expect((JSON.parse(events[1].detail_json) as { changes: { path: string }[] }).changes.map((c) => c.path)).toEqual(['.claude/b']);
+    // The same path under a NEW unsigned commit is still news.
+    expect((await git.post({ control: control({ unsigned: [{ path: '.claude/a', commits: [OTHER_SHA] }, { path: '.claude/b', commits: [OTHER_SHA] }] }) })).status).toBe(200);
+    const events2 = await rows<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'unsigned-control' ORDER BY seq`);
+    expect(events2.length).toBe(3);
+    expect((JSON.parse(events2[2].detail_json) as { changes: { path: string; commits: string[] }[] }).changes).toEqual([{ path: '.claude/a', commits: [OTHER_SHA] }]);
+  });
+
+  it('a claim answer pairs its snapshot with its own record: a lost-response replay re-serves it after the board moved (round 2)', async () => {
+    const git = new Git();
+    git.add('T-1');
+    // Every group names a signed version, as a post-ceremony repository's does (the fixture's
+    // rank group names none, and a pre-ceremony repository hands out no claim at all).
+    const gated = () => control({ groups: { ...control().groups, rank: { read: SHA, key: FP, unsigned: [] } } });
+    expect((await git.post({ control: gated() })).status).toBe(200);
+    expect((await keyCall(owner, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
+    await cutover();
+    const worker = await register('vm-a');
+    const rid = `s202-pair-${Math.random().toString(16).slice(2)}`;
+    const claim = () => workerCall('/v1/runner/claim', { cred: 'vm-a', secret: worker.secret, body: { request_id: rid, ticket_id: 'docs:T-1' } });
+    const first = await claim();
+    expect(first.status).toBe(200);
+    const firstJson = (await first.json()) as { claim_id: number; snapshot_sha: string; control: { required: boolean; agent_command: { read: string } } };
+    expect(firstJson.control).toMatchObject({ required: true, agent_command: { read: SHA } });
+    expect(firstJson.snapshot_sha).toBe(git.head);
+    // The board moves — a new head whose record names its own state — and the response is lost.
+    const MOVED = 'd'.repeat(40);
+    expect((await git.post({ control: control({ groups: { ...gated().groups, agent_command: { read: MOVED, key: FP, unsigned: [] } } }) })).status).toBe(200);
+    // The retry of the same request_id is the SAME claim (G-BTN-2), serving the record IT was
+    // made with: the moved board's record would fail the runner's own checks (a signed read
+    // the claim's snapshot does not descend from) and burn an honest claim as
+    // cannot-finish:spec — a counted, non-retryable attempt — where nothing went wrong.
+    const replay = await claim();
+    expect(replay.status).toBe(200);
+    const again = (await replay.json()) as typeof firstJson;
+    expect(again.claim_id).toBe(firstJson.claim_id);
+    expect(again.snapshot_sha).toBe(firstJson.snapshot_sha);
+    expect(again.control).toMatchObject({ required: true, agent_command: { read: SHA } });
+    expect(again.control.agent_command.read).not.toBe(MOVED);
+    // The claim is none the worse for the retry: still active, no failed attempt recorded.
+    expect(await rows('SELECT status, failed_attempt FROM claims WHERE id = ?', firstJson.claim_id)).toEqual([{ status: 'active', failed_attempt: 0 }]);
   });
 
   it('the observation serves the owner signing keys and the setting; the read answers an owner too', async () => {

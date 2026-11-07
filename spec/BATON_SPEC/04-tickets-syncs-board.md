@@ -433,10 +433,11 @@ live solely in Baton, and both are exportable (R-BTN-88).
                                                                  --   pre-adoption baseline, honest only as
                                                                  --   the post's own head), its signing
                                                                  --   key, the unsigned changes left behind;
-                                                                 --   course (a course's legs/*.mjs) may be
-                                                                 --   absent from a sync before the group —
-                                                                 --   while the setting is on, a claim fails
-                                                                 --   closed on a missing group
+                                                                 --   course (a course's legs/*.mjs and
+                                                                 --   legs/*.md) may be absent from a sync
+                                                                 --   before the group — while the setting
+                                                                 --   is on, a claim fails closed on a
+                                                                 --   missing group
               unsigned: [{ path, commits, fields? }] },          --   the notice's list (fields: EXPEDITE)
   course_data: { <course>: <opaque> } }
 ```
@@ -454,10 +455,13 @@ live solely in Baton, and both are exportable (R-BTN-88).
   an unsigned one is a claim, not the owner (the standing harness rule). The post's `control`
   record stands for the repository, and a post that moves the head onto unsigned control inputs
   while the repository requires them signed raises one `unsigned-control` event under Needs you
-  for the changes the last raised event did not already name — the paths and the commits — so
-  one standing unsigned change does not re-notice on every later head move; the claim answers
-  carry the record with the repository's own setting and owner keys, and every runner verifies
-  the named commits' signatures before loading them (R-BTN-133). A group is read atomically:
+  for the changes no raised event in the 7-day window already named — the paths and the commits
+  — so one standing unsigned change does not re-notice on every later head move, and two
+  notices that named different sets do not re-notify each other's names; the claim answers
+  carry the record read in the claim's own transaction and stored with the claim (round 2's
+  pairing: a lost-response replay re-serves the same pairing, never a newer post's record),
+  with the repository's own setting and owner keys, and every runner verifies the named
+  commits' signatures — and the walk's own answer — before loading them (R-BTN-133). A group is read atomically:
   the record's `read` is the newest owner-signed commit that changed any of the group's paths
   while leaving every other path of the group at its own last owner-signed change — a signed
   change to one file never carries a sibling's earlier unsigned bytes into force. While a group

@@ -111,14 +111,15 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-/** The course group's ceremony files: every leg script of the scaffolded course (the group is
- *  atomic per file — an unsigned change to one leg must not ride in through a signed change to
- *  another — so the owner signs a change touching each; the graph file stays out of the group,
- *  a sourced course's being pinned byte-equal by the sync, B-33). */
+/** The course group's ceremony files: every leg script AND instruction file of the scaffolded
+ *  course (the group is atomic per file — an unsigned change to one leg must not ride in
+ *  through a signed change to another, and round 2 made the `.md` files group paths beside the
+ *  scripts, so the owner signs a change touching each; the graph file stays out of the group, a
+ *  sourced course's being pinned byte-equal by the sync, B-33). */
 function bumpLegs(): void {
   const legs = join(dir, '.baton', 'courses', 'create-pr', 'legs');
   for (const f of readdirSync(legs)) {
-    if (!f.endsWith('.mjs') || f.endsWith('.run.mjs')) continue;
+    if ((!f.endsWith('.mjs') && !f.endsWith('.md')) || f.endsWith('.run.mjs')) continue;
     const file = join(legs, f);
     writeFileSync(file, `${readFileSync(file, 'utf8')}\n`);
     execFileSync('git', ['-C', dir, 'add', `.baton/courses/create-pr/legs/${f}`], { stdio: 'ignore' });
@@ -386,6 +387,95 @@ describe('S-BTN-203 require_signed_control', () => {
       const out = await runner.runOnce();
       expect(out).not.toBeNull();
       expect(log.join('\n')).toContain('not an ancestor');
+      expect(await rows(`SELECT COUNT(*) AS n FROM claim_legs`)).toEqual([{ n: 0 }]);
+    } finally {
+      runner.stop();
+    }
+  }, 120_000);
+
+  it('the leg instructions are the course group\'s: an unsigned .md keeps the signed words in force; a signed .md change takes effect (round 2, blocking)', async () => {
+    const { baseline } = await scaffold();
+    // The agent copies the file BATON_INSTRUCTIONS names into its output, so the test sees
+    // exactly which instructions the stub served — the strongest behaviour-shaping input a
+    // course has, and round 2's blocking finding: the .md files belonged to no group, loaded
+    // from the agent_command group's signed tree, where a signed .md change never took effect
+    // and an unsigned one rode into force with the next signed settings change.
+    write('agent.mjs', "import { appendFileSync, readFileSync } from 'node:fs';\nappendFileSync('ran-agent.txt', 'INSTRUCTIONS:' + (process.env.BATON_INSTRUCTIONS ? readFileSync(process.env.BATON_INSTRUCTIONS, 'utf8') : '<none>') + '\\n');\n");
+    commit(null, 'the agent records the instructions it was served');
+    await tick();
+    expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
+    expect((await sync()).code).toBe(0);
+    // The push rewrites the implement instructions unsigned: the notice names them, the course
+    // group holds at the signed baseline, and the leg runs with the SIGNED words.
+    const mdRel = '.baton/courses/create-pr/legs/implement.md';
+    write(mdRel, `${readFileSync(join(dir, mdRel), 'utf8')}\nPUSHED-INSTRUCTIONS-MARKER\n`);
+    const pushed = commit(null, 'the pushed instructions');
+    await tick();
+    expect((await sync()).code).toBe(0);
+    const control = JSON.parse((await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0].control_json);
+    expect(control.groups.course.read).toBe(baseline);
+    expect(control.groups.course.unsigned).toEqual([pushed]);
+    expect(control.unsigned).toContainEqual({ path: '.baton/courses/create-pr/legs/implement.md', commits: [pushed] });
+    const log: string[] = [];
+    const runner = makeRunner(log);
+    try {
+      const out = await runner.runOnce();
+      expect(out).toMatchObject({ ticket: 'docs:B-9001', end_reason: 'released:cannot-finish:transient' });
+      const served = readFileSync(join(dir, 'ran-agent.txt'), 'utf8');
+      expect(served).toContain('INSTRUCTIONS:');
+      expect(served).not.toContain('PUSHED-INSTRUCTIONS-MARKER');
+    } finally {
+      runner.stop();
+    }
+    // The owner signs the pushed instructions: the group moves to that commit and the SAME leg
+    // serves the owner-signed words — a signed .md change takes effect on its own, with no
+    // settings or scripts change to carry it.
+    await setClock(clock += 2 * 60_000_000); // past the failed attempt's one-hour backoff
+    write(mdRel, `${readFileSync(join(dir, mdRel), 'utf8')}\n`);
+    const signed = commit('owner', 'the owner signs the pushed instructions');
+    await tick();
+    expect((await sync()).code).toBe(0);
+    const control2 = JSON.parse((await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0].control_json);
+    expect(control2.groups.course).toMatchObject({ read: signed, key: ownerFp });
+    const log2: string[] = [];
+    const runner2 = makeRunner(log2);
+    try {
+      expect(await runner2.runOnce()).not.toBeNull();
+      const served2 = readFileSync(join(dir, 'ran-agent.txt'), 'utf8');
+      expect(served2.slice(served2.lastIndexOf('INSTRUCTIONS:'))).toContain('PUSHED-INSTRUCTIONS-MARKER');
+    } finally {
+      runner2.stop();
+    }
+  }, 240_000);
+
+  it('a record naming an OLD on-branch owner-signed commit never loads: the runner recomputes the walk (round 2)', async () => {
+    const { baseline } = await scaffold();
+    await tick();
+    expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
+    expect((await sync()).code).toBe(0);
+    // The owner signs a NEWER settings change: the version in force, the commit the walk names.
+    const settings = JSON.parse(readFileSync(join(dir, '.baton', 'baton.json'), 'utf8')) as Record<string, unknown>;
+    settings.control_note = 'v2';
+    write('.baton/baton.json', `${JSON.stringify(settings, null, 2)}\n`);
+    const signed2 = commit('owner', 'the owner signs a newer settings change');
+    await tick();
+    expect((await sync()).code).toBe(0);
+    const control = JSON.parse((await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0].control_json);
+    expect(control.groups.agent_command).toMatchObject({ read: signed2, key: ownerFp });
+    // The lying record rolls the group back to the baseline — on the snapshot's own line,
+    // owner-signed, an ancestor: the signature and ancestry checks alone load it (the round-2
+    // finding), and the baseline's settings would run in place of the owner's newest words.
+    // The runner recomputes the walk at the claim's snapshot and refuses what disagrees.
+    control.groups.agent_command.read = baseline;
+    await rows('UPDATE signed_control SET control_json = ? WHERE repository_id = ?', JSON.stringify(control), 'docs');
+    const log: string[] = [];
+    const runner = makeRunner(log);
+    try {
+      const out = await runner.runOnce();
+      expect(out).not.toBeNull();
+      expect(log.join('\n')).toContain('does not match its own history');
+      const end = (await rows<{ status: string; end_reason: string }>('SELECT status, end_reason FROM claims ORDER BY id DESC LIMIT 1'))[0];
+      expect([end.status, end.end_reason]).toEqual(['released', 'released:cannot-finish:spec']);
       expect(await rows(`SELECT COUNT(*) AS n FROM claim_legs`)).toEqual([{ n: 0 }]);
     } finally {
       runner.stop();

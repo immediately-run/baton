@@ -1107,7 +1107,9 @@ import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-ver
 // repository requires owner-signed control (B-127), at the signed commit the claim's
 // \`ctx.signed_control.overrides\` names: an unsigned change to an override keeps the last
 // owner-signed version in force, and the runner verified that commit's signature before naming
-// it. Both read the checkout's object store, so any commit the claim can name, the stub can read.
+// it. The instructions (the leg's .md) read at the \`course\` group's signed commit the same
+// way, beside the scripts. All read the checkout's object store, so any commit the claim can
+// name, the stub can read.
 export async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
@@ -1156,13 +1158,19 @@ async function standard(ctx) {
   const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '');
   const ticketText = (() => { try { return ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), 'utf8') : null; } catch { return null; } })();
   const legRun = (cmd, args, cwd) => { try { return gitRun(cmd, args, { cwd, maxBuffer: ${AGENT_OUTPUT_MAX} }).trim(); } catch (e) { const why = e && typeof e.stderr === 'string' && e.stderr.trim() !== '' ? e.stderr.trim().split('\\n')[0] : e && e.message ? e.message : String(e); throw new Error(\`\${cmd} \${args.join(' ')} failed: \${why}\`); } };` : ''}
-  // The instructions, when the repository still has them; it owns them and may delete them. Only
-  // a path the snapshot lacks means deleted: \`ls-tree\` lists nothing for it and succeeds (git
-  // translates its messages, and \`cat-file -e\` exits 128 for every failure alike), so any
-  // failure of the probe itself stops the leg.
+  // The instructions, when the signed tree still has them; the repository owns them and may
+  // delete them. B-127 (round 2, blocking): the .md files are the course group's paths, beside
+  // the scripts they order — read at the signed commit \`ctx.signed_control.course\` names, so
+  // a signed instructions change takes effect on its own, an unsigned one keeps the last signed
+  // version in force (a deleted .md still serves the signed instructions; an added one serves
+  // none), and no unsigned .md rides into force with the next signed settings change. Only a
+  // path the read commit lacks means deleted: \`ls-tree\` lists nothing for it and succeeds
+  // (git translates its messages, and \`cat-file -e\` exits 128 for every failure alike), so
+  // any failure of the probe itself stops the leg.
+  const courseSha = typeof ctx.signed_control?.course === 'string' && ctx.signed_control.course !== '' ? ctx.signed_control.course : sha;
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
-  const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() !== '';
-  const text = present ? show(rel) : null;
+  const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', courseSha, '--', rel]).trim() !== '';
+  const text = present ? gitRun('git', ['-C', ctx.checkout, 'show', courseSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }) : null;
   const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
   const instructions = dir == null ? '' : join(dir, ${JSON.stringify(`${leg}.md`)});
   if (dir != null) writeFileSync(instructions, text);

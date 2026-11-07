@@ -33,6 +33,7 @@ import personLegs from './0031_person_legs.sql';
 import answerDeferred from './0032_answer_deferred.sql';
 import ownerRuns from './0033_owner_runs.sql';
 import signedControl from './0034_signed_control.sql';
+import claimControl from './0035_claim_control.sql';
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },
@@ -71,4 +72,6 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   // 0034 is B-127's (owner-signed control inputs); a parallel leg's 0034 (B-126's control watch)
   // renumbers at whichever merge lands second.
   { id: 34, sql: signedControl },
+  // 0035 is B-127's review round 2 (the claim's own control record).
+  { id: 35, sql: claimControl },
 ];

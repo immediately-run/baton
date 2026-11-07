@@ -23,19 +23,27 @@ export interface SigningKey {
 /** The runner-loaded control inputs (B-127 item 4), each a group read from one commit:
  *  `agent_command` and `agent_wrapper` live in `.baton/baton.json`; an override is a course's
  *  `legs/<leg>.run.mjs`; a course's `rank.mjs` (R-BTN-98); and a course's leg scripts
- *  `legs/*.mjs` (B-127 item 1; review round 1: the scripts are the code that *enforces* the
- *  gate, so they load at the group's signed commit, never an unsigned snapshot). The overrides
- *  are their own group and excluded here, so an unsigned override change does not freeze the
- *  course's scripts with it. The walk covers the scripts only — the runner loads a course's
- *  graph with them, one coherent tree — because a sourced course's `course.json` is pinned
- *  byte-equal by the sync itself (B-33 refuses the post when it differs) and so can never be
- *  signed after its scaffold; a leg a pushed graph adds that the signed `legs/` does not carry
- *  refuses the claim as a missing script, so no pushed code runs either way. */
+ *  `legs/*.mjs` with their instruction files `legs/*.md` beside them (B-127 item 1; review
+ *  round 1: the scripts are the code that *enforces* the gate, so they load at the group's
+ *  signed commit, never an unsigned snapshot; round 2, blocking: the instructions are the
+ *  strongest behaviour-shaping input of all — a course's orders to every agent — and a group
+ *  of none left them loading from the `agent_command` group's tree, where a signed `.md`
+ *  change never took effect and an unsigned one rode in with the next signed `.baton/baton.json`
+ *  change; they belong to the course, and load with its scripts). The overrides are their own
+ *  group and excluded here, so an unsigned override change does not freeze the course's scripts
+ *  with it. Beside the scripts the walk covers the instructions only — the runner loads a
+ *  course's graph with them, one coherent tree — because a sourced course's `course.json` is
+ *  pinned byte-equal by the sync itself (B-33 refuses the post when it differs) and so can
+ *  never be signed after its scaffold; a leg a pushed graph adds that the signed `legs/` does
+ *  not carry refuses the claim as a missing script, so no pushed code runs either way. */
 export const CONTROL_GROUPS = {
   agent_command: [':(glob).baton/baton.json'],
   overrides: [':(glob).baton/courses/**/*.run.mjs'],
   rank: [':(glob).baton/courses/**/rank.mjs'],
-  course: [':(glob).baton/courses/**/legs/**/*.mjs', ':(exclude):(glob).baton/courses/**/*.run.mjs'],
+  // Round 2: git parses ONE magic prefix, so the exclude spells its glob inside the prefix —
+  // `:(exclude):(glob)…` read the second prefix literally and matched no path, leaving
+  // `.run.mjs` overrides course-group paths too (round 2, verified on git 2.47.3).
+  course: [':(glob).baton/courses/**/legs/**/*.mjs', ':(glob).baton/courses/**/legs/**/*.md', ':(exclude,glob).baton/courses/**/*.run.mjs'],
 } as const;
 export type ControlGroup = keyof typeof CONTROL_GROUPS;
 /** Every group's name, the post's protocol constant (board.ts validates the same list core-side;
@@ -100,9 +108,17 @@ export type Keygen = (input: KeygenInput) => { status: number | null; stdout?: s
 export const WALK_BOUND = 2000;
 /** How many commits that changed one path the per-path walks list. */
 export const CHANGERS_BOUND = 200;
-/** The most signatures one sync verifies: past it a group fails closed and a mark is left
+/** The most signatures one walk verifies: past it a group fails closed and a mark is left
  *  unmade (see Walk.signed) — never a false `unsigned`. */
 export const VERIFIES_MAX = 256;
+/** How many changers ONE group's walk reads: the newest this many per group. Four groups at
+ *  this bound fit the verification budget exactly, so a group's own newest signed change is
+ *  never the one the budget skipped (round 2: the walks used to read 200 changers oldest-first
+ *  against one shared budget, and on a busy repository the blind spot landed on the newest
+ *  changers — the owner's own ceremony commit read `undefined`, "not verified either way", and
+ *  the group failed closed on the one commit that mattered). Changers older than this bound are
+ *  the pre-adoption baseline, like paths beyond WALK_BOUND. */
+export const GROUP_WALK_BOUND = Math.floor(VERIFIES_MAX / CONTROL_GROUP_NAMES.length);
 /** The post's own bounds (checkPayload's, src/core/board.ts): the sync clamps to them, so a
  *  busy repository's record is never refused for the notice's size (review round 1: the 41st
  *  unsigned change used to brick the whole board post). */
@@ -179,12 +195,13 @@ class Walk {
     return out || null;
   }
   /** The commits that changed `group`'s paths against their first parent, newest first, each
-   *  with the paths it changed. `--diff-merges=first-parent` makes a merge show the paths its
-   *  tree differs on from its first parent — finding 13's reading of "the commit that last
-   *  changed it", which the default (no diff for merges) would leave invisible to the
-   *  per-path tracking the laundering rule needs. */
+   *  with the paths it changed, the newest GROUP_WALK_BOUND of them (the budget-fitting bound).
+   *  `--diff-merges=first-parent` makes a merge show the paths its tree differs on from its
+   *  first parent — finding 13's reading of "the commit that last changed it", which the
+   *  default (no diff for merges) would leave invisible to the per-path tracking the
+   *  laundering rule needs. */
   groupLog(group: ControlGroup, head: string): { sha: string; paths: Set<string> }[] {
-    const text = this.git('log', '--first-parent', '--no-renames', '--diff-merges=first-parent', '--name-status', '--format=%H', `-n${CHANGERS_BOUND}`, head, '--', ...CONTROL_GROUPS[group]);
+    const text = this.git('log', '--first-parent', '--no-renames', '--diff-merges=first-parent', '--name-status', '--format=%H', `-n${GROUP_WALK_BOUND}`, head, '--', ...CONTROL_GROUPS[group]);
     const out: { sha: string; paths: Set<string> }[] = [];
     let at: { sha: string; paths: Set<string> } | null = null;
     for (const line of text.split('\n')) {
@@ -198,9 +215,11 @@ class Walk {
    *  the key, and its shape has nowhere for an unnamed one (round 1: such a commit used to
    *  reach the record as `{read, key: null}`, silently ungating the group). Past VERIFIES_MAX
    *  the answer is `undefined` — not verified either way — and the callers split on what that
-   *  means: the ones that can leave a mark or a gate unmade (a brief mark, the EXPEDITE gate)
-   *  leave it rather than claim the owner's signed words are not theirs; the ones that must
-   *  decide (the groups) fail closed. */
+   *  means: the ones that can leave a mark, a gate or a notice unmade (a brief mark, the
+   *  EXPEDITE gate, the notice's paths) leave it rather than claim the owner's signed words are
+   *  not theirs; the groups' walks are bounded (GROUP_WALK_BOUND × 4 = VERIFIES_MAX) so the
+   *  budget's edge never lands inside them and every changer their window reads is verified
+   *  either way. */
   signed(sha: string): { key: string } | null | undefined {
     if (this.verified.has(sha)) return this.verified.get(sha);
     if (this.spent++ >= VERIFIES_MAX) {
@@ -245,7 +264,11 @@ class Walk {
  * b commit's tree holds the pushed a, and the runner loaded it). A signed changer whose tree
  * would launder a sibling does not become `read`: the group stays at the earlier signed state
  * and every changer above it — the unsigned change and the signed one that would carry it —
- * lands in `unsigned`, fail closed, until an owner signs the whole state once. */
+ * lands in `unsigned`, fail closed, until an owner signs the whole state once. The walk reads
+ * the newest GROUP_WALK_BOUND changers and settles them oldest → newest, so the qualification
+ * of the newest changer is decided on the whole window it read (its tree's paths below it
+ * included); the window fits the verification budget four times over, one per group, so the
+ * settling never runs on an unverified commit. */
 function groupInForce(walk: Walk, group: ControlGroup, head: string): GroupInForce {
   const log = walk.groupLog(group, head);
   if (!log.length) return { read: head, key: null, unsigned: [] };
@@ -290,26 +313,50 @@ function lastChanges(git: Git, head: string): Map<string, string> {
 
 /** The notice's list at the post's own bound (checkPayload's CONTROL_UNSIGNED_MAX), sorted by
  *  path: a repository with more unsigned control paths than the post admits lists the first
- *  ones deterministically, and the event's `omitted` count names the rest — never a refused
- *  post. */
+ *  ones deterministically — never a refused post. What the clamp drops keeps no entry and no
+ *  count of its own (round 2: the doc used to claim the event's `omitted` named the rest; the
+ *  event's count names the fresh entries beyond its own 50-line display slice, and nothing
+ *  names the clamp's — an honest bound, not a disclosed one). */
 export function clampUnsignedList(list: SignedControl['unsigned']): SignedControl['unsigned'] {
   return [...list].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)).slice(0, CONTROL_UNSIGNED_MAX);
 }
 
 /**
- * The signed-control state of `head` (B-127): the three runner-loaded groups, and the control
- * inputs whose last change is unsigned — the notice's list. With no owner signing keys (the
- * usual repository today), null: nothing is marked and nothing gated.
+ * The four runner-loaded groups' state at `head` (B-127): the half of `signedControlOf` a post
+ * carries and every runner RECOMPUTES (round 2: the signature and ancestry checks pass for an
+ * old owner-signed commit on the snapshot's own line too — the rollback the first-parent rule
+ * exists to prevent — when a lying record names one; recomputing the same walk, with the same
+ * code and keys, over the claim's own snapshot refuses a `read` that disagrees). Same Walk,
+ * same order, as the sync's, so an honest record and the runner's recomputation agree commit
+ * for commit. Null with no owner signing keys: nothing is gated.
  */
-export function signedControlOf(head: string, keys: SigningKey[], git: Git, keygen: Keygen): SignedControl | null {
+export function controlGroupsOf(head: string, keys: SigningKey[], git: Git, keygen: Keygen): Record<ControlGroup, GroupInForce> | null {
   if (!keys.length) return null;
   const walk = new Walk(git, publicKeyLines(keys), keygen);
   const groups = {} as Record<ControlGroup, GroupInForce>;
   for (const g of CONTROL_GROUP_NAMES) groups[g] = groupInForce(walk, g, head);
+  return groups;
+}
+
+/**
+ * The signed-control state of `head` (B-127): the runner-loaded groups, and the control
+ * inputs whose last change is unsigned — the notice's list. With no owner signing keys (the
+ * usual repository today), null: nothing is marked and nothing gated. The groups and the
+ * notice walk separately (round 2): the groups' four bounded walks share one budget they
+ * cannot exhaust, and the notice's walk has a budget of its own — shared, the groups spent it
+ * all and every notice path read `undefined`, named unsigned by a falsy read of "not verified
+ * either way".
+ */
+export function signedControlOf(head: string, keys: SigningKey[], git: Git, keygen: Keygen): SignedControl | null {
+  if (!keys.length) return null;
+  const groups = controlGroupsOf(head, keys, git, keygen)!;
+  const notice = new Walk(git, publicKeyLines(keys), keygen);
   const byCommit = new Map<string, string[]>();
   for (const [path, sha] of lastChanges(git, head)) {
     if (!isSignedControlPath(path)) continue;
-    if (walk.signed(sha)) continue;
+    // `undefined` — past the notice walk's budget, not verified either way — leaves the path
+    // unnamed: the notice accuses only what it checked (round 2; the marks already read so).
+    if (notice.signed(sha) !== null) continue;
     const list = byCommit.get(sha) ?? [];
     list.push(path);
     byCommit.set(sha, list);
@@ -333,7 +380,8 @@ export function unsignedAgentConfig(head: string, keys: SigningKey[], git: Git, 
   const out: { path: string; commit: string }[] = [];
   for (const [path, sha] of lastChanges(git, head)) {
     if (!isAgentConfigPath(path)) continue;
-    if (walk.signed(sha)) continue;
+    // As the notice: `undefined` (not verified either way, past the budget) names nothing.
+    if (walk.signed(sha) !== null) continue;
     out.push({ path, commit: sha });
   }
   return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));

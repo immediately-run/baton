@@ -752,10 +752,28 @@ export class BatonCore {
         // must not roll the evaluation back with it.
         const wanted = typeof (body as { ticket_id?: unknown }).ticket_id === 'string' ? (body as { ticket_id: string }).ticket_id : null;
         const prepared = this.claims.prepareSetsFor(workerId, wanted != null && wanted.includes(':') ? wanted : null);
-        const answer = tx(() => this.claims.claim(workerId, body, prepared));
-        // B-127: the signed-control record rides the answer, read outside the claim's
-        // transaction — its keys come from the human-only register, an async port away.
-        return json({ ...answer, ...await this.claimControl(String(answer.ticket_id ?? '')) });
+        // B-127 (round 2, the pairing): the claim and the standing signed-control record are
+        // read in ONE transaction, and the record it paired with is stored on the claim — the
+        // answer serves the claim's own record, and a lost-response replay of the same
+        // request_id serves the same pairing again, whatever the board has moved to since.
+        // The old code read the record after the claim's transaction (an async hop away, for
+        // the owner keys), so a post accepted in between paired the claim's snapshot with the
+        // newer post's record, and the runner's own checks (a keyless read must be the
+        // snapshot itself; a signed read must be its ancestor) burned the honest claim as
+        // `cannot-finish:spec`, a counted, non-retryable attempt, where the stale board's
+        // release is unpenalised.
+        const answer = tx(() => {
+          const a = this.claims.claim(workerId, body, prepared);
+          const ticket = String(a.ticket_id ?? '');
+          if (ticket.includes(':') && Number(this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repositoryOf(ticket))[0]?.flag ?? 0)) {
+            const standing = this.sql<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', repositoryOf(ticket))[0];
+            // Set once: a replay keeps the pairing the claim was made with, never the moved
+            // board's (an empty string is the required-but-no-record shape, never NULL).
+            this.store.exec('UPDATE claims SET control_json = ? WHERE id = ? AND control_json IS NULL', standing?.control_json ?? '', Number(a.claim_id));
+          }
+          return a;
+        });
+        return json({ ...answer, ...await this.claimControl(String(answer.ticket_id ?? ''), Number(answer.claim_id ?? 0)) });
       }
       if (m === 'GET' && p === '/v1/runner/next') return json(this.claims.next(workerId));
       if (m === 'GET' && p === '/v1/runner/recommendations') {
@@ -1368,12 +1386,17 @@ export class BatonCore {
    *  about owner-signed control inputs at this commit — stands for the repository, and a post
    *  that moved the head (`from` is the head it left) onto unsigned control inputs raises one
    *  `unsigned-control` event under Needs you while the repository requires them signed, naming
-   *  the paths and the commits. Round 1 (re-firing): only entries the last raised event did not
-   *  already name raise it — a newly listed path, or the same path under a new unsigned commit —
-   *  so one standing unsigned change does not re-notice on every later head move, and opting the
-   *  setting on still notices what stands. The record is the sync's computation: the paths and
-   *  signatures are B-137's to move server-side over the raw commits; the groups a runner loads
-   *  from are verified by each runner before it loads them, never only by the sync that posts
+   *  the paths and the commits. Round 1 (re-firing): only entries the owner has not already
+   *  been told raise it — a newly listed path, or the same path under a new unsigned commit —
+   *  so one standing unsigned change does not re-notice on every later head move, and opting
+   *  the setting on still notices what stands. Round 2: the witness is every notice the
+   *  window holds, not the last one — the last event names only what was fresh at its own
+   *  head, and once two notices have named different sets (event k naming A, event k+1 naming
+   *  B) a last-only dedupe alternated A, B, A, B on every later head move, forever; the union
+   *  also carries entries a single event's 50-line display slice left out, so they do not
+   *  rotate back in as news. The record is the sync's computation: the paths and signatures
+   *  are B-137's to move server-side over the raw commits; the groups a runner loads from are
+   *  verified by each runner before it loads them, never only by the sync that posts
    *  them. */
   private applyControl(r: string, p: BoardPayload, at: number, from: string | null): void {
     if (p.control !== undefined) {
@@ -1385,18 +1408,16 @@ export class BatonCore {
     if (!p.control.unsigned.length) return;
     const required = !!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', r)[0]?.flag;
     if (!required) return;
-    // Round 1 (re-firing): only entries the owner has not already been told raise it. The last
-    // raised event is the notice's own record — a newly listed path, or the same path under a
-    // new unsigned commit, is news; a standing unsigned change the owner already saw is not.
-    // The previous control record is NOT the witness: while the setting was off nothing was
-    // raised, and opting in must still notice what stands.
+    // Round 2: every prior notice in the view's window (7 days, the same 100 the Needs-you
+    // view reads) is the witness — see the comment above. The previous control record is NOT
+    // the witness: while the setting was off nothing was raised, and opting in must still
+    // notice what stands; an unreadable event says nothing — the event fires.
     const seen = new Set<string>();
-    const last = this.sql<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'unsigned-control' AND repository_id = ? ORDER BY seq DESC LIMIT 1`, r)[0];
-    if (last) {
+    for (const prior of this.sql<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'unsigned-control' AND repository_id = ? AND at > ? ORDER BY seq DESC LIMIT 100`, r, at - 7 * 86_400_000)) {
       try {
-        for (const u of (JSON.parse(last.detail_json) as { changes: { path: string; commits: string[] }[] }).changes) seen.add(`${u.path}\u0000${u.commits.join(',')}`);
+        for (const u of (JSON.parse(prior.detail_json) as { changes?: { path: string; commits: string[] }[] }).changes ?? []) seen.add(`${u.path}\u0000${u.commits.join(',')}`);
       } catch {
-        // Unreadable: nothing is known to have been noticed — the event fires.
+        // Unreadable: nothing from this event is known to have been noticed.
       }
     }
     const fresh = p.control.unsigned.filter((u) => !seen.has(`${u.path}\u0000${u.commits.join(',')}`));
@@ -1423,21 +1444,23 @@ export class BatonCore {
 
   /** B-127: the signed-control record a claim answer carries while its repository requires
    *  signed control — the setting and the owner keys from Baton itself, the groups from the
-   *  standing record the last accepted post left. `required` and `keys` are never the post's
-   *  word; the groups' commits are the post's, and each runner verifies them against `keys`
-   *  before loading, so a post that lied about a signature changes what a runner refuses, not
-   *  what it runs. With the setting off, `{}`: nothing is gated, and the ticket's brief mark
-   *  rides its row as ever. A group missing (`read` null or absent) is the fail-closed case —
-   *  no signed version — and the runner treats it so. */
-  private async claimControl(ticket: string): Promise<{ control?: unknown }> {
+   *  record stored on the claim by its own transaction (round 2's pairing: the answer and a
+   *  lost-response replay serve the claim's own record, never a newer post's). `required` and
+   *  `keys` are never the post's word; the groups' commits are the post's, and each runner
+   *  verifies them against `keys` before loading, so a post that lied about a signature
+   *  changes what a runner refuses, not what it runs. With the setting off, `{}`: nothing is
+   *  gated, and the ticket's brief mark rides its row as ever. A group missing (`read` null or
+   *  absent) is the fail-closed case — no signed version — and the runner treats it so. */
+  private async claimControl(ticket: string, claimId: number): Promise<{ control?: unknown }> {
     if (!ticket.includes(':')) return {};
     const repo = repositoryOf(ticket);
     if (!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag) return {};
     const keys = (await this.admin.signingKeys(repo)).map((k) => k.public_key);
-    const row = this.sql<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', repo)[0];
+    // The claim's own record, stored at the claim (0035): immutable from the answer's side.
+    const stored = this.sql<{ control_json: string | null }>('SELECT control_json FROM claims WHERE id = ?', claimId)[0]?.control_json ?? null;
     let groups: Record<string, { read: string | null; key: string | null; unsigned: string[] }> = {};
     try {
-      groups = row ? (JSON.parse(row.control_json) as { groups: Record<string, { read: string | null; key: string | null; unsigned: string[] }> }).groups : {};
+      groups = stored ? (JSON.parse(stored) as { groups: Record<string, { read: string | null; key: string | null; unsigned: string[] }> }).groups : {};
     } catch {
       groups = {};
     }

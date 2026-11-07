@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { verifySignedCommit, nodeKeygen } from '../shared/commitSign.mjs';
+import { controlGroupsOf } from '../defaults/signed-control';
 import { BatonApi, BatonRefusal } from './api';
 import { claimScratch, courseOf, dropCourse, ensureSha, freshSecret, git as homeGit, loadCourse, type CourseLoad } from './home';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
@@ -1005,20 +1006,28 @@ export class Runner {
    *  of a claim whose repository requires it — verified here, never only by the sync that posted
    *  it (the adversarial review's finding 4): each group's `read` commit must be in the home
    *  checkout, carry a valid `git`-namespace SSHSIG by one of the owner keys the answer names
-   *  (the keys Baton served, never any the post chose), and be an ancestor of the claim's
-   *  snapshot (round 1: an old or off-branch signed commit — the rollback the first-parent rule
-   *  exists to prevent — never loads). A group naming a signing key is what the legs load
-   *  `agent_command`, the overrides and `rank.mjs` from, and what the course group's commit —
-   *  the course's graph and its leg scripts, one coherent tree — loads at; a group naming no key is the
-   *  pre-adoption baseline, honest only as the claim's own snapshot (the record and the head
-   *  move together, post by post), and gates nothing; a group with no signed version at all
-   *  fails closed: Baton hands out no claim in that state (round 1, unpenalised), and this
-   *  check remains the last line; the runbook (docs/runbooks/owner-signed-control.mdx) walks
-   *  the owner through signing once. */
+   *  (the keys Baton served, never any the post chose), be an ancestor of the claim's
+   *  snapshot, and be the commit the walk itself names — round 2: `--is-ancestor` refuses an
+   *  off-branch commit, but an OLD owner-signed commit on the snapshot's own line (the rollback
+   *  the first-parent rule exists to prevent) still verifies and descends, so the runner
+   *  recomputes the group walk at the claim's snapshot, with `controlGroupsOf` — the same walk,
+   *  code and key order the sync ran — and refuses a `read` that disagrees; an old or off-branch
+   *  signed commit never loads, whatever a record says. A group naming a signing key is what
+   *  the legs load `agent_command`, the overrides and `rank.mjs` from, and what the course
+   *  group's commit — the course's graph, its leg scripts and their instruction `.md` files,
+   *  one coherent tree — loads at; a group naming no key is the pre-adoption baseline, honest
+   *  only as the claim's own snapshot (the record and the head move together, post by post —
+   *  round 2's pairing reads them in one transaction), and gates nothing; a group with no
+   *  signed version at all fails closed: Baton hands out no claim in that state (round 1,
+   *  unpenalised), and this check remains the last line; the runbook
+   *  (docs/runbooks/owner-signed-control.mdx) walks the owner through signing once. */
   private async verifyControl(claim: Record<string, any>): Promise<Record<string, string> | { error: string }> {
     const control = claim.control as { required?: boolean; keys?: unknown } & Partial<Record<'agent_command' | 'overrides' | 'rank' | 'course', { read?: unknown; key?: unknown }>> | null | undefined;
     if (!control?.required) return {};
     const keys = Array.isArray(control.keys) ? control.keys.filter((k): k is string => typeof k === 'string' && k !== '') : [];
+    // Round 2 (the on-branch rollback): recomputed once, compared per group — the walk is the
+    // runner's own word over its home checkout's history, never the record's.
+    const recomputed = keys.length ? controlGroupsOf(String(claim.snapshot_sha), keys.map((k) => ({ public_key: k, fingerprint: '' })), (...args) => homeGit(this.o.home, args), nodeKeygen) : null;
     const out: Record<string, string> = {};
     for (const group of ['agent_command', 'overrides', 'rank', 'course'] as const) {
       const read = control[group]?.read;
@@ -1051,6 +1060,13 @@ export class Runner {
         homeGit(this.o.home, ['merge-base', '--is-ancestor', read, String(claim.snapshot_sha)]);
       } catch {
         return { error: `the owner-signed ${group} commit ${read.slice(0, 10)} is not an ancestor of the claim's snapshot — refusing to load it (B-127)` };
+      }
+      // Round 2 (the on-branch rollback): the record's word on WHICH ancestor counts is never
+      // trusted alone — the walk at the snapshot, verified signature by verified signature,
+      // names the one commit that may load, and a record naming any other refuses the claim.
+      const walkRead = recomputed?.[group]?.read ?? null;
+      if (walkRead !== read) {
+        return { error: `the ${group} record names commit ${read.slice(0, 10)}, and the walk at the claim's snapshot names ${walkRead == null ? 'no signed version' : walkRead.slice(0, 10)} — the record does not match its own history, refusing to load it (B-127)` };
       }
       out[group] = read;
     }
