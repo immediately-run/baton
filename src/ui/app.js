@@ -411,6 +411,12 @@ function renderNeeds() {
     const first = c.violations[0];
     list.append(el('li', { text: `${c.repository_id}:${c.course_id} version ${c.version} refused at ${c.snapshot_sha.slice(0, 8)} (${c.violations.length} problem${c.violations.length === 1 ? '' : 's'}${first ? `, first: ${first.path || 'the file'} — ${first.message}` : ''}); the previous file stays in force` }));
   }
+  // B-127: an unsigned change to a control input of a repository that requires them signed —
+  // the last owner-signed version stays in force until an owner signs the state once.
+  for (const u of n.unsigned_control ?? []) {
+    const changes = (u.changes ?? []).map((c) => `${c.path} @ ${(c.commits ?? [])[0] ? c.commits[0].slice(0, 8) : '?'}`).join(', ');
+    list.append(el('li', { text: `${u.repository_id}: control inputs changed with no owner signature at ${short(u.sha)} — the last signed version stays in force (${changes || 'no paths listed'}${u.omitted ? `, +${u.omitted} more` : ''})` }));
+  }
   // R3-1239: the BATON_KEYS seed; the keys in force stay until a list seeds.
   if (n.keys?.refused) list.append(el('li', { text: `BATON_KEYS was refused (${n.keys.refused}); the keys in force stay` }));
   // R-BTN-75, R-BTN-76: a day blocked on a capability no live worker has; an instance a posted leg

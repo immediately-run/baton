@@ -33,6 +33,9 @@ import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from '
 import { mergeOntology } from './ontologyMerge';
 import { readItems } from './read-items';
 import { parseFrontmatter, ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
+import { clampUnsignedList, marksOf, signedControlOf, unsignedAgentConfig } from './signed-control';
+import { nodeKeygen } from '../shared/commitSign.mjs';
+import type { PostedControl } from '../core/board';
 import { readTicketSettings } from './tickets-config';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 
@@ -41,6 +44,13 @@ import { PAGE_NAME, ticketsPage } from './tickets-page';
 // is 'Kein Git-Repository', and the quiet case would throw instead. The C catalog is git's own
 // stable one, whatever the operator's locale.
 const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
+/** The control walks' git (B-127): untrimmed — a commit object's bytes are what its SSHSIG
+ *  signed, and `git` above trims, which would verify against a shortened payload (round 1:
+ *  a `--cleanup=verbatim` message ending in a blank line failed to verify) — and bounded at
+ *  16 MiB, because the walks' one `git log --name-status -n2000` runs through it (round 1:
+ *  Node's 1 MiB default overflowed on busy repositories and failed every sync). Callers that
+ *  need a single value trim it themselves. */
+const gitRaw = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', maxBuffer: 16 << 20, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } });
 /** Why `git` failed, as `execFileSync` reports it: the exit status, and the stderr it captured
  * (`string` under `encoding: 'utf8'`; `Uint8Array`, which `Buffer` is, if an encoding is ever
  * dropped — named that rather than `Buffer` so this file types under both tsconfigs the repo ships,
@@ -409,8 +419,37 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     });
   }
   const status = new Map(result.tickets.map((t) => [t.id, t.display?.status ?? 'live']));
+  // B-127 (R-BTN-66 as amended): what counts when a repository's control inputs must be
+  // owner-signed. The owner keys come from Baton's observation — never the repository being
+  // judged — and the walks read the checkout's git where the objects are. The marks post
+  // whether or not the setting is on (item 7); an EXPEDITE whose last change is unsigned is
+  // dropped only while it is (item 1), and named in the record either way; the record's groups
+  // name the commits a runner loads `agent_command`, overrides and `rank.mjs` from, each runner
+  // verifying them again before loading. A failure to read git is a failed sync, never a
+  // half-marked board.
+  let controlField: { control?: PostedControl } = {};
+  const signingKeys = record?.signing_keys ?? [];
+  if (signingKeys.length) {
+    const gitOf = (...a: string[]): string => gitRaw(root, ...a);
+    const head = gitOf('rev-parse', 'HEAD').trim();
+    const found = signedControlOf(head, signingKeys, gitOf, nodeKeygen);
+    const marks = marksOf(head, signingKeys, result.tickets.map((t) => t.path), gitOf, nodeKeygen);
+    for (const t of result.tickets) {
+      const mark = marks.briefs.get(t.path);
+      if (mark) t.brief = mark;
+      // The EXPEDITE gate, both directions (round 1): the tag's last change unsigned means a
+      // push alone moved it — added or removed — and the last signed state stays in force
+      // while the setting is on: the notice names the commit either way.
+      const gate = marks.expedite.get(t.path);
+      if (gate) {
+        found?.unsigned.push({ path: t.path, commits: [gate.commit], fields: ['EXPEDITE'] });
+        if (record?.require_signed_control) t.expedite = gate.inForce;
+      }
+    }
+    if (found) controlField = { control: { keys: signingKeys.map((k) => k.fingerprint), groups: found.groups, unsigned: clampUnsignedList(found.unsigned) } };
+  }
   return {
-    payload: { registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...ontologyField },
+    payload: { registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...ontologyField, ...controlField },
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };
 }
@@ -555,6 +594,45 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
  * S-BTN-13 drive): the observation number first, then — with `--latest` — the current default
  * branch fetched and checked out, then the board read from the checkout, the head read and the
  * ancestry decided; a lost race takes a new number and reads again, once. */
+/** `baton owner -i KEY verify-config REPO [--checkout DIR]` (B-127 item 1): the verifier for
+ *  the agent-configuration half — the paths Baton cannot gate, because a harness loads them
+ *  wherever they sit and a check kept in the repository is rewritten by the push it guards. The
+ *  owner installs it outside the repository (a user-level SessionStart hook, or the environment's
+ *  setup script; the runbook shows both), so it reads the repository's owner signing keys from
+ *  Baton with the key `-i` names and refuses — exit 1, naming every path and commit — when the
+ *  checkout's agent configuration was last changed in a commit no owner key signed. A privileged
+ *  session that refuses to open is this command's exit code in the owner's settings; Baton's own
+ *  part is the notice, which names the same paths for every reader of the board. */
+export async function verifyConfigMain(argv: string[], io: { keys: { public_key: string; fingerprint: string }[]; log?: (l: string) => void }): Promise<number> {
+  const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
+  const positional: string[] = [];
+  let checkout = '.';
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--checkout') {
+      const v = argv[++i];
+      if (v === undefined) throw new Error('--checkout needs a value');
+      checkout = v;
+    } else if (a.startsWith('--')) throw new Error(`${a}: not a flag of this command`);
+    else positional.push(a);
+  }
+  if (!positional.length) throw new Error('baton owner -i KEY verify-config REPOSITORY [--checkout DIR]');
+  if (!io.keys.length) {
+    log(`baton: ${positional[0]} has no owner signing keys registered as human-only (BATON_HUMAN_KEYS or /v1/human-keys, then \`baton owner owners\`) — nothing can be owner-signed, and the check cannot pass (B-127)`);
+    return 1;
+  }
+  const gitOf = (...a: string[]): string => gitRaw(checkout, ...a);
+  const head = gitOf('rev-parse', 'HEAD').trim();
+  const unsigned = unsignedAgentConfig(head, io.keys, gitOf, nodeKeygen);
+  if (!unsigned.length) {
+    log(`baton: ${checkout}'s agent configuration at ${head.slice(0, 10)} was last changed in owner-signed commits (B-127)`);
+    return 0;
+  }
+  for (const u of unsigned) log(`baton: ${u.path} was last changed by unsigned commit ${u.commit.slice(0, 10)} (B-127)`);
+  log(`baton: ${unsigned.length} agent-configuration ${unsigned.length === 1 ? 'path' : 'paths'} of ${checkout} last changed in commits no owner key signed — refusing to open a privileged session on it`);
+  return 1;
+}
+
 export async function syncMain(args: SyncArgs): Promise<number> {
   const log = args.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   const root = args.root;
@@ -575,7 +653,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
     // evidence pointer — read after the number like everything else this run posts.
     observe: () => asResult(async () => {
       const o = await api.observation();
-      record = { answers: Array.isArray(o.answers) ? o.answers : [], legs: Array.isArray(o.legs) ? o.legs : [] };
+      record = { answers: Array.isArray(o.answers) ? o.answers : [], legs: Array.isArray(o.legs) ? o.legs : [], signing_keys: Array.isArray(o.signing_keys) ? o.signing_keys : [], require_signed_control: o.require_signed_control === true };
       return o;
     }),
     // Everything posted under a number is read after it (§7.1 steps 1–2): the commit and the board.
@@ -1025,17 +1103,24 @@ import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-ver
 // open PR on a branch this course's branch patterns map to the ticket, its head pushed; where
 // it cannot verify, the leg fails naming what it looked for.` : ''}
 // The repository may replace this leg's run, never its close: \`${leg}.run.mjs\` beside this file
-// (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131).
+// (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131) — or, where the
+// repository requires owner-signed control (B-127), at the signed commit the claim's
+// \`ctx.signed_control.overrides\` names: an unsigned change to an override keeps the last
+// owner-signed version in force, and the runner verified that commit's signature before naming
+// it. The instructions (the leg's .md) read at the \`course\` group's signed commit the same
+// way, beside the scripts. All read the checkout's object store, so any commit the claim can
+// name, the stub can read.
 export async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
+  const readSha = typeof ctx.signed_control?.overrides === 'string' && ctx.signed_control.overrides !== '' ? ctx.signed_control.overrides : sha;
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
   // As with the instructions below: only an empty listing means there is no override.
-  if (gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() === '') return standard(ctx);
+  if (gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', readSha, '--', rel]).trim() === '') return standard(ctx);
   const dir = mkdtempSync(join(tmpdir(), 'baton-override-'));
   try {
     const file = join(dir, ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)});
-    writeFileSync(file, gitRun('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }));
+    writeFileSync(file, gitRun('git', ['-C', ctx.checkout, 'show', readSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }));
     const mod = await import(pathToFileURL(file).href);
     if (typeof mod.run !== 'function') throw new Error(rel + ' exports no run(ctx, standard)');
     return await mod.run(ctx, standard);
@@ -1047,7 +1132,12 @@ export async function run(ctx) {
 async function standard(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
-  const show = (rel) => gitRun('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} });
+  // B-127: where the repository requires owner-signed control, \`agent_command\` and
+  // \`agent_wrapper\` are read at the signed commit \`ctx.signed_control.agent_command\` names —
+  // the last owner-signed version of \`.baton/baton.json\`, whose signature the runner verified —
+  // so an unsigned change to the settings never picks the agent every leg runs.
+  const settingsSha = typeof ctx.signed_control?.agent_command === 'string' && ctx.signed_control.agent_command !== '' ? ctx.signed_control.agent_command : sha;
+  const show = (rel) => gitRun('git', ['-C', ctx.checkout, 'show', settingsSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} });
   const settings = JSON.parse(show('.baton/baton.json'));
   // B-83: the snapshot's settings stay authoritative; BATON_AGENT_COMMAND — the harness command
   // \`baton run --harness\` chose — fills their absence, never overrides their choice.
@@ -1068,13 +1158,19 @@ async function standard(ctx) {
   const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '');
   const ticketText = (() => { try { return ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), 'utf8') : null; } catch { return null; } })();
   const legRun = (cmd, args, cwd) => { try { return gitRun(cmd, args, { cwd, maxBuffer: ${AGENT_OUTPUT_MAX} }).trim(); } catch (e) { const why = e && typeof e.stderr === 'string' && e.stderr.trim() !== '' ? e.stderr.trim().split('\\n')[0] : e && e.message ? e.message : String(e); throw new Error(\`\${cmd} \${args.join(' ')} failed: \${why}\`); } };` : ''}
-  // The instructions, when the repository still has them; it owns them and may delete them. Only
-  // a path the snapshot lacks means deleted: \`ls-tree\` lists nothing for it and succeeds (git
-  // translates its messages, and \`cat-file -e\` exits 128 for every failure alike), so any
-  // failure of the probe itself stops the leg.
+  // The instructions, when the signed tree still has them; the repository owns them and may
+  // delete them. B-127 (round 2, blocking): the .md files are the course group's paths, beside
+  // the scripts they order — read at the signed commit \`ctx.signed_control.course\` names, so
+  // a signed instructions change takes effect on its own, an unsigned one keeps the last signed
+  // version in force (a deleted .md still serves the signed instructions; an added one serves
+  // none), and no unsigned .md rides into force with the next signed settings change. Only a
+  // path the read commit lacks means deleted: \`ls-tree\` lists nothing for it and succeeds
+  // (git translates its messages, and \`cat-file -e\` exits 128 for every failure alike), so
+  // any failure of the probe itself stops the leg.
+  const courseSha = typeof ctx.signed_control?.course === 'string' && ctx.signed_control.course !== '' ? ctx.signed_control.course : sha;
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
-  const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() !== '';
-  const text = present ? show(rel) : null;
+  const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', courseSha, '--', rel]).trim() !== '';
+  const text = present ? gitRun('git', ['-C', ctx.checkout, 'show', courseSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }) : null;
   const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
   const instructions = dir == null ? '' : join(dir, ${JSON.stringify(`${leg}.md`)});
   if (dir != null) writeFileSync(instructions, text);

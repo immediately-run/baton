@@ -355,6 +355,13 @@ last signed version and raises a notice under Needs you.
   unreviewed (R-BTN-66 says they may today), so an agent's course change becomes a proposal
   an owner signs.
 
+**Built** (B-127, 2026-11-06): `require_signed_control` per repository (default off), the
+SSHSIG-`git` verification in the sync and in every runner (never only the sync), the
+first-parent walks with the merge-rollback fix, the `unsigned-control` notice, brief marks, the
+`baton owner sign` / `verify-config` tooling and the runbook
+(`docs/runbooks/owner-signed-control.mdx`). Server-side verification over the raw commits and
+the memory-free walk remain B-137's.
+
 ### D. Control as Baton state
 
 Goals, expedite and exclusivity become owner actions (`baton owner goal set`). Git may carry a

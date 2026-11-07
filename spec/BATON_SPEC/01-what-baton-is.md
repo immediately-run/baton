@@ -249,6 +249,8 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
     R-BTN-128), `artifact_buckets` (R-BTN-82), `api_keys` (default `true`, R-BTN-117),
     `checks` and `check_runners` (R-BTN-114), `pushers` (R-BTN-139), `code_repos`
     (with the named repository's consent, R-BTN-140) and each grant's `sync` flag (R-BTN-146);
+    `require_signed_control` (default off, B-127 — turning it on tightens, turning it off is a
+    loosening R-BTN-186 governs);
     each grant's role and domain (R-BTN-180), set by the policy's `approvers.roles` alone; and
     the repository policy (R-BTN-188), which holds every rule about
     authority and trust;
@@ -265,6 +267,30 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   (R-BTN-161), `branch_pattern`, `min_runner_version`, station functions,
   ranking code. They are protected paths (R-BTN-184), landed only as the policy's
   `paths.control` says.
+
+  **Owner-signed control inputs** (B-127, the owner 2026-10-27; security model mitigation C).
+  A repository may require, by the owners' setting `require_signed_control` (default off), that
+  its **control inputs** — `.baton/**`, goal files, the `EXPEDITE` tag and agent configuration
+  (`.claude/**`, every `CLAUDE.md` and `AGENTS.md`, MCP and plugin manifests) — count only at a
+  commit carrying a valid SSHSIG in the namespace `git` (R-BTN-13's format) by an owner key of
+  the repository that no agent session holds: the human-only register's (R-BTN-185), which is
+  what an owner-signed commit accepts and nothing else — an API-key owner cannot sign, and a
+  key an agent session holds would let an injected session sign. "The commit that last changed
+  it" is read along the default branch's first parents, so a merge whose result differs from
+  its first parent on a control path is that merge's change, never a rollback to an older
+  signed version. An unsigned change keeps the last owner-signed version in force and raises an
+  `unsigned-control` notice under Needs you naming the paths and commits; with no signed
+  version, nothing counts and no claim is handed out (fail closed) until an owner signs the
+  current state once. Runners load `agent_command`, overrides, `rank.mjs` and the courses' leg
+  scripts only from the commits the board post names (§7.1, R-BTN-133), verifying each
+  signature themselves; a group is read atomically, so a signed change to one input never
+  carries a sibling input's unsigned bytes into force. A
+  ticket's `tier` is not one (the owner, 2026-10-27: a tier routes by quality, not privilege).
+  Whether or not the setting is on, the sync marks each ticket's brief `signed` or `unsigned`
+  with its provenance (§7.1), and the standing harness rule (each repository's `CLAUDE.md`)
+  reads an unsigned owner quote as a claim, not the owner. The sync computes the marks and the
+  record where the git objects are; B-137 moves the verification over the raw commits
+  server-side — until then the runners' own verification is what a lying post cannot pass.
 
   **What Baton's state protects.** Under `cooperative`, whoever can push can also re-file a held
   ticket under a new id (R-BTN-12), change a ticket's `course:`, rename a leg a bar names

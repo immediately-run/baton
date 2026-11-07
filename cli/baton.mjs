@@ -31,6 +31,15 @@
 //   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T]
 //   baton owner -i KEY revoke REPO FINGERPRINT
 //   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
+//   baton owner -i KEY sign [--message TEXT] [--repo DIR] -- <paths>…   (B-127: a commit signed
+//                the way require_signed_control counts — git's gpg.format ssh, the SSHSIG
+//                namespace `git`, the key -i names; plain `git commit -S` with git configured
+//                for the key is exactly as good)
+//   baton owner -i KEY verify-config REPOSITORY [--checkout DIR]   (B-127: the agent-configuration
+//                verifier — refuses (exit 1, naming paths and commits) when the checkout's agent
+//                configuration (.claude/**, every CLAUDE.md and AGENTS.md, .mcp.json, plugin
+//                manifests) was last changed in a commit no owner key signed; the owner installs
+//                it outside the repository, in user-level settings or the environment's setup)
 //   baton owner -i KEY policy show REPO                     — the signed read (R-BTN-189), as JSON
 //   baton owner -i KEY policy diff REPO FILE                — the knobs FILE's document would change
 //   baton owner -i KEY policy log REPO [--after N]          — the append-only change log
@@ -45,6 +54,9 @@
 //                [--retry 1h,4h --max-failed 3 | --retry default] [--transcript-repos a,b]
 //                [--unblocked-workflow .github/workflows/F.yml | --unblocked-workflow none] [--remind-after 24h]
 //                [--independence 'review=implement,fix;adjudicate=implement' | --independence none]
+//                [--require-signed-control | --no-require-signed-control]   (B-127: control inputs
+//                count only at commits an owner's human-only key signed; on tightens, off needs
+//                an approvers.policy approver)
 //   baton owner -i KEY courier add REPO --key PUB --asks owner[,…]      (R-BTN-80: a personal courier)
 //   baton owner -i KEY courier revoke REPO FINGERPRINT
 //   baton owner -i KEY resolve REPO TICKET baton:retries|baton:stalled retry|park   (R-BTN-78)
@@ -121,7 +133,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { requestCredential, signHeaders } from './sign.mjs';
+import { requestCredential, signHeaders, signingKey } from './sign.mjs';
 
 export const DEFAULT_URL = 'https://baton.immediately.run';
 const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -361,7 +373,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       } };
     }
     if (cmd === 'settings') {
-      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'independence'], 1);
+      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars', 'require-signed-control', 'no-require-signed-control'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'independence'], 1);
       const body = {};
       if (flags['no-required-bars']) {
         if (groups.length) throw new Error('--no-required-bars clears them: name no --required-bar beside it');
@@ -389,6 +401,11 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
           return [leg.trim(), list(from)];
         }));
       }
+      // B-127 (R-BTN-66 as amended): control inputs count only at owner-signed commits. On
+      // tightens — any owner may; off is a loosening an `approvers.policy` approver signs for.
+      if (flags['require-signed-control'] && flags['no-require-signed-control']) throw new Error('--require-signed-control and --no-require-signed-control name one state, not both');
+      if (flags['require-signed-control']) body.require_signed_control = true;
+      if (flags['no-require-signed-control']) body.require_signed_control = false;
       if (!Object.keys(body).length) throw new Error('baton owner settings REPO names at least one setting');
       return { method: 'PUT', path: `/v1/owner/${need(positional[0], 'the repository id')}/settings`, body };
     }
@@ -743,6 +760,72 @@ export async function main(argv) {
     // policy show REPO` is the documented form (round 1, finding 10). The flags stay in what
     // policyMain receives; only the `policy` word is taken out.
     const rest = argv.slice(1);
+    // B-127 round 1: a `-m`/`--repo` value that is itself the `-i`/`--url` flag shape is refused
+    // by name, BEFORE the token filter below eats it and the command misparses
+    // (`owner sign -m --url -- p` used to lose the value token and end in a confusing refusal).
+    for (let i = 0; i < rest.length; i++) {
+      if ((rest[i] === '-m' || rest[i] === '--message' || rest[i] === '--repo') && (rest[i + 1] === '-i' || rest[i + 1] === '--url')) {
+        throw new Error(`${rest[i]} needs a plain value — ${rest[i + 1]} is a flag of its own (quote a value that starts with a dash)`);
+      }
+    }
+    const clean = rest.filter((_, i, a) => !(a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
+    const flagsOf = () => parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'), [], ['identity', 'url'], 0).flags;
+    // B-127 item 6: `baton owner -i KEY sign` — a commit signed the way `require_signed_control`
+    // counts (git's `gpg.format ssh`, the SSHSIG namespace `git`), made with the key `-i` names.
+    // Plain `git commit -S` with the same configuration is exactly as good (the runbook says so);
+    // this wraps it so the ceremony is one command. It is a local git command, never a request.
+    if (clean[0] === 'sign') {
+      const flags = flagsOf();
+      const keyFile = need(flags.identity, '-i KEY (the owner key that signs the commit)');
+      signingKey(keyFile); // refuses a file ssh-keygen cannot sign with, before git is run
+      const args = clean.slice(1);
+      let message = 'owner-signed control change';
+      const paths = [];
+      let repo = '.';
+      // A flag-shaped token is never a value: `-m --url -- p` would otherwise lose `--url`'s
+      // place to the `-i`/`--url` filter above and misparse into a confusing refusal (round 1).
+      const flagShaped = (v) => v === '-i' || v === '--url' || v === '-m' || v === '--message' || v === '--repo' || v === '--';
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === '-m' || args[i] === '--message') {
+          const v = args[++i];
+          if (v === undefined) throw new Error(`${args[i - 1]} needs a value`);
+          if (flagShaped(v)) throw new Error(`${args[i - 1]} needs a plain value (quote a message that starts with a dash)`);
+          message = v;
+        } else if (args[i] === '--repo') {
+          const v = args[++i];
+          if (v === undefined) throw new Error('--repo needs a value');
+          if (flagShaped(v)) throw new Error(`--repo needs a plain value, not ${v}`);
+          repo = v;
+        } else if (args[i] === '--') { paths.push(...args.slice(i + 1)); break; }
+        else throw new Error(`${args[i]}: not a flag of \`baton owner sign\` (-m TEXT, --repo DIR, -- <paths>)`);
+      }
+      if (!paths.length) throw new Error('baton owner sign names no path: commit paths explicitly (`-- .baton/baton.json`), the way a leg does — never the whole tree');
+      const out = execFileSync('git', ['-C', repo, '-c', 'gpg.format=ssh', `-c`, `user.signingkey=${realpathSync(keyFile)}`, 'commit', '-S', '--no-verify', '-m', message, '--', ...paths], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      process.stdout.write(out);
+      process.stderr.write(`baton: signed with ${keyFile} — a commit \`require_signed_control\` counts (B-127)\n`);
+      return 0;
+    }
+    // B-127 item 1's verifier: the agent-configuration check a privileged session's opener runs.
+    // The keys come from Baton with the owner's key; the walk runs in the checkout.
+    if (clean[0] === 'verify-config') {
+      const flags = flagsOf();
+      const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+      const keyFile = need(flags.identity, '-i KEY (an owner key of the repository)');
+      const args = clean.slice(1);
+      const checkoutAt = args.indexOf('--checkout');
+      // `--checkout DIR` takes DIR with it (round 1: the old filter also dropped index 0 when
+      // there was no --checkout, eating the REPOSITORY positional of the documented
+      // no---checkout form, which then always hit the usage error).
+      const positional = args.filter((_, i) => i !== checkoutAt && (checkoutAt < 0 || i !== checkoutAt + 1));
+      if (positional.length !== 1) throw new Error('baton owner -i KEY verify-config REPOSITORY [--checkout DIR]');
+      const read = await send(url, { method: 'GET', path: `/v1/owner/${encodeURIComponent(positional[0])}/signing-keys` }, keyFile);
+      if (!(read.status >= 200 && read.status < 300)) {
+        process.stdout.write(`${JSON.stringify(read.json)}\n`);
+        return 1;
+      }
+      const { verifyConfigMain } = await import('../scripts/baton-cli.mjs');
+      return await verifyConfigMain(args, { keys: read.json?.keys ?? [] });
+    }
     let cut = -1;
     for (let i = 0; i < rest.length; i++) {
       if (rest[i] === '-i' || rest[i] === '--url') { i += 1; continue; }

@@ -459,6 +459,8 @@ is stale. Never edit it by hand.
 | S-BTN-199 | the git-lock pickup asks Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-200 | a leg's end reaps its group | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-201 | the runner outlives its short waits | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-202 | owner-signed briefs and the control record (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-203 | require_signed_control (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

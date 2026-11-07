@@ -11,7 +11,12 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const OUT = join(ROOT, '.local', 'baton-cli.mjs');
+// This run's own bundle, as `bundleCommand`'s below: parallel processes (vitest workers'
+// `baton()` children among them) each rebuild, and one shared path let one process's write
+// land inside another's import — the child then read a half-written bundle and
+// `initMain` "was not a function" (seen on CI, 2026-11-07). Deleted once loaded, like the
+// command bundles.
+const OUT = join(ROOT, '.local', `baton-cli-${process.pid}.mjs`);
 mkdirSync(join(ROOT, '.local'), { recursive: true });
 
 await build({
@@ -26,7 +31,9 @@ await build({
   logLevel: 'warning',
 });
 
-export const { initMain, parseSyncArgs, syncMain, prebuildDefaults, remoteSlug } = await import(pathToFileURL(OUT).href);
+const cli = await import(pathToFileURL(OUT).href);
+rmSync(OUT, { force: true });
+export const { initMain, parseSyncArgs, syncMain, prebuildDefaults, remoteSlug, verifyConfigMain } = cli;
 
 /** One command module bundled the same way. Each bundle is this run's own — another process
  *  builds its own — and it is deleted once loaded, before the child's imports run. */
