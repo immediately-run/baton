@@ -412,6 +412,26 @@ describe('baton decision list: the CLI courier (R-BTN-80)', () => {
     expect(out).toEqual(['docs:E — Open\n  decision E-1 (asks owner)\n  notice: none']);
   });
 
+  it('B-133: a posted decision’s options print their computed actions beside the packet’s question', () => {
+    // What the answer DOES — computed by Baton — is printed for each option, so the owner reads
+    // the action and the exact answer command, never only the agent’s summary.
+    expect(formatDecision({
+      ticket: 'docs:E', title: 'Three failed rounds', repository: 'docs',
+      decision: { id: 'review-rounds-3', asks: 'owner', question: 'Merge after three failed rounds?', options: [
+        { id: 'merge', action: 'records this answer, closes the decision and its notices, and unblocks the ticket' },
+        { id: 'round', action: 'records this answer, closes the decision and its notices, and unblocks the ticket, granting the leg ‘review’ 1 more run beyond the course’s max_runs' },
+      ] },
+      unblocks: ['docs:E'],
+    })).toBe([
+      'docs:E — Three failed rounds',
+      '  decision review-rounds-3 (asks owner)',
+      '  Merge after three failed rounds?',
+      '  (merge) records this answer, closes the decision and its notices, and unblocks the ticket',
+      '  (round) records this answer, closes the decision and its notices, and unblocks the ticket, granting the leg ‘review’ 1 more run beyond the course’s max_runs',
+      '  answer: baton owner resolve docs docs:E review-rounds-3 merge|round',
+    ].join('\n'));
+  });
+
   it('--watch asks once a minute until stopped', async () => {
     const stop = new AbortController();
     const waits: number[] = [];

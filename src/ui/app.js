@@ -102,7 +102,13 @@ function renderBlocked() {
   const box = document.getElementById('blocked');
   box.replaceChildren();
   for (const t of state.blocked ?? []) {
-    const why = t.blocks.map((b) => `${b.kind} ${b.ref}${b.leg ? ` (${b.leg})` : ''}${b.until ? ` until ${fmtTime(b.until)}` : ''}`).join('; ');
+    // B-133: a decision block carries its computed options — what answering each does — beside
+    // the packet's own question; every other block prints as before.
+    const why = t.blocks.map((b) => {
+      if (b.kind !== 'decision') return `${b.kind} ${b.ref}${b.leg ? ` (${b.leg})` : ''}${b.until ? ` until ${fmtTime(b.until)}` : ''}`;
+      const options = (b.options ?? []).map((o) => `${o.id}: ${o.action}`).join('; ');
+      return `decision ${b.ref}${b.asks ? ` (asks ${b.asks})` : ''}${b.question ? ` — “${b.question}” (the ticket’s words)` : ''}${options ? ` — ${options}` : ''}`;
+    }).join('; ');
     box.append(el('li', { text: `${t.ticket_id}: blocked since ${fmtTime(t.since)} — ${why}` }));
   }
   if (!box.children.length) box.append(el('li', { text: 'No ticket is blocked.', cls: 'muted' }));
@@ -356,6 +362,15 @@ function renderNeeds() {
   const n = state.needs_you;
   const list = document.getElementById('needs');
   list.replaceChildren();
+  // B-133 (R-BTN-116): a person leg's question, each option with its computed action — where
+  // the ticket lands and what queues there — beside the packet's words. Nothing is pre-selected;
+  // the owner answers with `baton decision answer` naming the option.
+  for (const q of n.questions ?? []) {
+    const options = (q.options ?? []).map((o) => `${o.id} → ${o.action}`).join(' · ');
+    const li = el('li', { text: `${q.ticket_id} — ${q.title}: ${q.question_id ?? q.leg} asks ${q.asks}${q.severity ? ` (${q.severity})` : ''} — ${options}${q.expires_at ? ` · expires ${fmtTime(q.expires_at)}` : ''}` });
+    if (q.url) li.append(document.createTextNode(' '), httpsLink('the ticket', q.url));
+    list.append(li);
+  }
   for (const c of n.unconfirmed) {
     // §6.7: never confirmed automatically; the owner confirms it or releases it.
     const li = el('li', { text: `${c.ticket_id}: completed ${fmtTime(c.ended_at)} (${c.end_reason}) at ${short(c.ended_at_sha)}, not confirmed by git after 6 h` });

@@ -1662,7 +1662,9 @@ export class BatonCore {
       // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
       limits: this.admin.view(now),
       // R-BTN-69: a refused course file, the previous one staying in force.
-      needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), ontologies_refused: this.ontologies.refusals(), keys: this.keysNotice() },
+      needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), ontologies_refused: this.ontologies.refusals(), keys: this.keysNotice(),
+        // B-133: the person legs' questions with each option's computed action (R-BTN-116).
+        questions: this.questions.needsYou() },
       // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.
       blocked: this.blocks.view(),
       // R-BTN-85: the disagreements with git of the last 7 days, by kind.

@@ -44,8 +44,14 @@ A `## prepare` section in the ticket file, opening with the packet:
 ```
 
 - The question is one sentence and names the thing decided.
-- Two to four options, lettered in order, each a complete action someone can carry out.
-- The recommendation is yours, from what you read and reproduced.
+- Two to four options, lettered in order, each a complete action someone can carry out — and,
+  where the action is a command or an API call (B-133: the owner approves beside what each
+  option DOES, never only your description of it), spelled as the exact thing that runs, in the
+  option's own words: `(a) revoke the grant — baton admin -i KEY revoke <fingerprint>`.
+- The recommendation is yours, from what you read and reproduced, and it is marked as yours:
+  name the preparing session under the packet so the provenance shows. An option whose action
+  touches credentials, grants, CI, deploys or another repository may be recommended but is
+  never pre-selected — spell its action and let the owner choose it by hand.
 - Evidence is links, not prose.
 - Nothing is applied without the owner's letter: Baton waits on the answer, however long it
   takes. Say in the recommendation what waiting costs, when it costs something.

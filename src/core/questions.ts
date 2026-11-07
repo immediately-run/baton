@@ -72,6 +72,15 @@ export interface QuestionOption {
   reached: string;
 }
 
+/** B-133: the computed action of choosing the option that reaches `station`, from the course
+ *  graph — where the ticket lands and what leaves there, each leg named as a person's or a
+ *  runner's. The packet's words describe the choice; this is what Baton will do with it. */
+function optionAction(g: Graph, station: string): string {
+  const next = [...g.legs.entries()].filter(([, l]) => l.from.includes(station)).map(([name, l]) => `${name} (${l.person ? 'a person leg' : 'a runner leg'})`);
+  const toEnd = g.toEnd.get(station) ?? 0;
+  return `moves the ticket to ‘${station}’${next.length ? `, which queues ${next.join(', ')}` : toEnd ? ' — the course’s end' : ''}`;
+}
+
 /** A `std:decision@1` value as the library's schema shapes it (§5.5). */
 export interface DecisionValue {
   id: string;
@@ -479,11 +488,13 @@ export class Questions {
 
   /** §14 Needs you (R-BTN-116): every ticket waiting on a person's leg — from the moment it is
    *  queued, posted question or not — with who answers, its question, its options and its expiry.
-   *  The row's question is the leg's own: one a previous leg's answer closed names nothing here. */
+   *  The row's question is the leg's own: one a previous leg's answer closed names nothing here.
+   *  B-133: each option carries its COMPUTED action — the station it reaches and the legs that
+   *  leave it, person or runner, from the course graph — beside the packet's words. */
   needsYou() {
-    const waiting = this.rows<{ ticket_id: string; leg: string; person_expires_at: number | null; course_id: string; repository_id: string;
+    const waiting = this.rows<{ ticket_id: string; leg: string; person_expires_at: number | null; course_id: string; repository_id: string; title: string;
       question_id: string | null; url: string | null; severity: string | null; options_json: string | null }>(
-      `SELECT s.ticket_id, s.next_leg AS leg, s.person_expires_at, t.course_id, t.repository_id,
+      `SELECT s.ticket_id, s.next_leg AS leg, s.person_expires_at, t.course_id, t.repository_id, t.title,
               CASE WHEN q.leg = s.next_leg THEN q.question_id END AS question_id,
               CASE WHEN q.leg = s.next_leg THEN q.url END AS url,
               CASE WHEN q.leg = s.next_leg THEN q.severity END AS severity,
@@ -491,14 +502,17 @@ export class Questions {
        FROM ticket_stations s JOIN tickets t ON t.id = s.ticket_id LEFT JOIN ticket_questions q ON q.ticket_id = s.ticket_id
        WHERE s.next_leg IS NOT NULL AND (q.ticket_id IS NULL OR q.answered_at IS NULL OR q.leg != s.next_leg)
        ORDER BY t.repository_id, s.ticket_id`);
-    const out: { ticket_id: string; leg: string; asks: string | null; question_id: string | null; url: string | null; severity: string | null; options: QuestionOption[]; expires_at?: number }[] = [];
+    const out: { ticket_id: string; leg: string; asks: string | null; title: string; question_id: string | null; url: string | null; severity: string | null; options: (QuestionOption & { action: string })[]; expires_at?: number }[] = [];
     for (const w of waiting) {
-      const def = this.c.graph(w.repository_id, w.course_id)?.legs.get(w.leg);
+      const g = this.c.graph(w.repository_id, w.course_id);
+      const def = g?.legs.get(w.leg);
       if (!def?.person) continue;
       const posted = w.options_json != null ? (JSON.parse(w.options_json) as QuestionOption[]).filter((o) => def.to.includes(o.reached)) : [];
+      const options = (posted.length ? posted : def.to.map((reached) => ({ id: reached, reached })))
+        .map((o) => ({ ...o, action: optionAction(g!, o.reached) }));
       out.push({
-        ticket_id: w.ticket_id, leg: w.leg, asks: def.asks, question_id: w.question_id, url: w.url, severity: w.severity,
-        options: posted.length ? posted : def.to.map((reached) => ({ id: reached, reached })),
+        ticket_id: w.ticket_id, leg: w.leg, asks: def.asks, title: w.title, question_id: w.question_id, url: w.url, severity: w.severity,
+        options,
         ...(w.person_expires_at != null ? { expires_at: w.person_expires_at } : {}),
       });
     }
