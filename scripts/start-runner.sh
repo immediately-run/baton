@@ -12,6 +12,7 @@
 #                                 repository's route choices advise on — B-105 — which the
 #                                 grant must also name, or the choices see nothing to advise)
 #                                [--url <https://…>] [--check] [--log <file>]
+#                                [--cli <dist/baton.mjs>] [--cli-version <version>]
 #
 #   --home        the checkout the runner works in (default: this repository). One runner per
 #                 checkout — a second runner needs its own clone (the script refuses a held one).
@@ -21,11 +22,23 @@
 #   --capabilities  narrows what the runner declares; without it the runner declares what the
 #                 grant allows on the repositories it serves (B-86). It never enables: a name the
 #                 grant does not allow is refused at the heartbeat.
+#   --cli         the released CLI the runner runs: the dist/baton.mjs of an installed
+#                 @immediately-run/baton (B-138). Never a checkout's cli/ — the script refuses
+#                 a CLI inside a git working tree, whose code a push (a branch a leg checks
+#                 out) changes. Default (BATON_CLI): a pinned release the script installs
+#                 itself, outside every checkout.
+#   --cli-version  the release the default install pins (BATON_CLI_VERSION). Default: the
+#                 version this checkout's package.json names — the release this tree is or
+#                 becomes; npm only ever has approval-gated releases, so a push can re-pin
+#                 among those or stop the runner loudly (an unpublished name cannot install),
+#                 never install unreviewed code.
 #
 # Environment: BATON_KEY_FILE (or BATON_KEY / BATON_TOKEN) must name the worker key the owner
 # granted — the hostname must match the grant, and the grant is what the runner declares unless
 # --capabilities narrows it (runbook step 5). BATON_HOSTNAME
-# overrides the reported hostname; BATON_URL, BATON_REPOSITORY have defaults.
+# overrides the reported hostname; BATON_URL, BATON_REPOSITORY have defaults. BATON_CLI,
+# BATON_CLI_VERSION name --cli/--cli-version; BATON_CLI_HOME moves the default install
+# (default: ~/.local/share/immediately-run/baton/cli — a directory no leg writes).
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -44,6 +57,8 @@ CAPABILITIES="create-pr,llm-call,agent-venue,key:opencode-go,key:deepinfra,key:c
 URL="${BATON_URL:-}"         # empty: the CLI's default (production)
 CHECK_ONLY=0
 LOG=""
+CLI_NAMED="${BATON_CLI:-}"   # B-138: an installed released CLI, named outright
+CLI_VERSION="${BATON_CLI_VERSION:-}"
 
 die() { echo "start-runner: $*" >&2; exit 2; }
 note() { echo "start-runner: $*"; }
@@ -60,6 +75,8 @@ while [ $# -gt 0 ]; do
     --drain) DRAIN=1; shift ;;
     --verbose) VERBOSE=1; shift ;;
     --log) LOG="${2:?--log needs a path}"; shift 2 ;;
+    --cli) CLI_NAMED="${2:?--cli needs a path}"; shift 2 ;;
+    --cli-version) CLI_VERSION="${2:?--cli-version needs a version}"; shift 2 ;;
     *) die "unknown flag: $1 (see the header of this script)" ;;
   esac
 done
@@ -88,23 +105,74 @@ if [ -n "${BATON_KEY_FILE:-}" ]; then
 elif [ -n "${BATON_KEY:-}" ]; then CRED="BATON_KEY"
 elif [ -n "${BATON_TOKEN:-}" ]; then CRED="BATON_TOKEN"
 else
-  die "no credential: set BATON_KEY_FILE (~/.ssh/baton_worker; runbook step 5: ssh-keygen, then the owner runs 'node cli/baton.mjs owner grant baton --key worker.pub --hostname <hostname> --capabilities create-pr,llm-call,agent-venue --max-tier judgement')"
+  die "no credential: set BATON_KEY_FILE (~/.ssh/baton_worker; runbook step 5: ssh-keygen, then the owner runs 'npx --yes @immediately-run/baton@<version> owner grant baton --key worker.pub --hostname <hostname> --capabilities create-pr,llm-call,agent-venue --max-tier judgement')"
 fi
+
+# ---- the CLI the runner runs (B-138): a pinned release, never a working tree -------------
+# The finding (2026-10-27, 5): this script used to run node "$ROOT/cli/baton.mjs" — the checkout
+# the legs themselves work in, so a branch a leg checks out changed the runner's own code at the
+# next restart. The CLI now comes from outside every checkout: --cli names an installed release
+# outright, else the script installs the pinned @immediately-run/baton into a directory no leg
+# writes ($BATON_CLI_HOME, default under ~). The release needs no checkout and no esbuild: its
+# dist/ is prebuilt (scripts/build-cli.mjs).
+if [ -n "$CLI_NAMED" ]; then
+  CLI="$CLI_NAMED"
+  CLI_WHERE="named by --cli (BATON_CLI)"
+else
+  [ -n "$CLI_VERSION" ] || CLI_VERSION="$(node -e 'process.stdout.write(require(process.argv[1]).version ?? "")' "$ROOT/package.json" 2>/dev/null)" \
+    || die "cannot read a version from $ROOT/package.json — pass --cli-version <version> (or --cli <dist/baton.mjs of an installed release)"
+  [ -n "$CLI_VERSION" ] || die "$ROOT/package.json names no version — pass --cli-version <version> (or --cli <dist/baton.mjs of an installed release)"
+  case "$CLI_VERSION" in
+    *[!0-9A-Za-z.+_-]*) die "--cli-version must be a plain version (got: $CLI_VERSION) — a range would not be a pin" ;;
+  esac
+  case "$CLI_VERSION" in
+    [0-9]*.[0-9]*.[0-9]*) : ;;
+    *) die "--cli-version must look like 0.1.2, not $CLI_VERSION — a pin names one release" ;;
+  esac
+  CLI_HOME="${BATON_CLI_HOME:-$HOME/.local/share/immediately-run/baton/cli}"
+  DEST="$CLI_HOME/@immediately-run__baton@$CLI_VERSION"
+  CLI="$DEST/node_modules/@immediately-run/baton/dist/baton.mjs"
+  CLI_WHERE="the pinned release @immediately-run/baton@$CLI_VERSION, installed in $CLI_HOME (outside every checkout)"
+  if [ ! -f "$CLI" ]; then
+    note "installing the pinned CLI @immediately-run/baton@$CLI_VERSION into $DEST"
+    command -v npm >/dev/null 2>&1 || die "npm is not on PATH — the pinned CLI is installed with npm (B-138)"
+    mkdir -p "$DEST"
+    npm install --no-fund --no-audit --prefix "$DEST" "@immediately-run/baton@$CLI_VERSION" \
+      || die "npm could not install @immediately-run/baton@$CLI_VERSION into $DEST — is that version released? (npm view @immediately-run/baton versions; --cli-version pins another)"
+  fi
+fi
+[ -f "$CLI" ] || die "the CLI to run ($CLI) does not exist — --cli names an installed release's dist/baton.mjs"
+
+# A checkout's cli/ (or a dist/ built inside one) is code a push changes: refuse it, whichever
+# way it was named — the runner's own code is what a leg would run next.
+CLI_DIR="$(cd "$(dirname "$CLI")" && pwd -P)" || die "the CLI to run ($CLI) has no readable directory"
+WORKTREE="$CLI_DIR"
+while :; do
+  if [ -e "$WORKTREE/.git" ]; then
+    die "the CLI to run ($CLI) is inside the git working tree at $WORKTREE — a pushed branch would change the runner's own code (B-138). start-runner installs a pinned release outside every checkout; pass --cli <an installed release's dist/baton.mjs> instead"
+  fi
+  PARENT="$(dirname "$WORKTREE")"
+  [ "$PARENT" = "$WORKTREE" ] && break
+  WORKTREE="$PARENT"
+done
+# The probe: `baton key create` loads the whole module (sign.mjs, jose) and exits 0 needing no
+# Baton and no credential — a command that works the same on every release (`run --help`, by
+# contrast, is newer than the releases this script may pin).
+PROBE_KEY="${TMPDIR:-/tmp}/baton-start-runner-probe.$$"
+if ! node "$CLI" key create "$PROBE_KEY" >/dev/null 2>&1; then
+  rm -f "$PROBE_KEY" "$PROBE_KEY.pub"
+  die "node cannot run $CLI (its 'key create' probe failed) — the runner needs node >= 22.13 (package.json engines) and a complete install"
+fi
+rm -f "$PROBE_KEY" "$PROBE_KEY.pub"
 
 [ -d "$HOME_DIR/.git" ] || [ -f "$HOME_DIR/.git" ] || die "$HOME_DIR is not a git checkout"
 GIT_DIR="$(git -C "$HOME_DIR" rev-parse --absolute-git-dir)"
 
-# The runner bundle is built from the checkout's current source on every start
-# (scripts/baton-run.mjs), which needs esbuild — a devDependency. Importing it runs that
-# build: the same thing `baton run` does first, so the preflight proves the run path.
-[ -x "$ROOT/node_modules/.bin/esbuild" ] || die "esbuild is missing — run: npm ci (in $ROOT)"
-node -e 'await import(process.argv[1])' "$ROOT/scripts/baton-run.mjs" >/dev/null 2>&1 || die "the runner bundle fails to build — run: npm ci (in $ROOT), and check: node scripts/baton-run.mjs"
-
 # The settings the runner will read (B-83: the no-op echo is refused by baton run itself).
 SETTINGS="$HOME_DIR/.baton/baton.json"
-[ -f "$SETTINGS" ] || die "$HOME_DIR has no .baton/baton.json — run: node cli/baton.mjs repo init"
+[ -f "$SETTINGS" ] || die "$HOME_DIR has no .baton/baton.json — run: npx --yes @immediately-run/baton@<version> repo init"
 AGENT_COMMAND="$(node -e 'const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(typeof s.agent_command === "string" && s.agent_command !== "" ? s.agent_command : "echo")' "$SETTINGS")"
-[ "$AGENT_COMMAND" != "echo" ] || die ".baton/baton.json names agent_command \"echo\" — the no-op stub: run: node cli/baton.mjs repo init --agent opencode"
+[ "$AGENT_COMMAND" != "echo" ] || die ".baton/baton.json names agent_command \"echo\" — the no-op stub: run: npx --yes @immediately-run/baton@<version> repo init --agent opencode"
 AGENT_BIN="$(printf '%s' "$AGENT_COMMAND" | awk '{print $1}')"
 command -v "$AGENT_BIN" >/dev/null 2>&1 || note "WARNING: '$AGENT_BIN' (the agent_command) is not on PATH — every leg would fail until it is (and authenticated)"
 
@@ -149,6 +217,7 @@ note "credential:   $CRED"
 note "url:          ${URL:-default (https://baton.immediately.run)}"
 note "repository:   $REPOSITORY (course: what .baton/baton.json declares)"
 note "home:         $HOME_DIR"
+note "cli:          $CLI  ($CLI_WHERE — B-138: never a checkout's cli)"
 note "hostname:     $HOSTNAME_REPORTED  (must match the grant; BATON_HOSTNAME overrides)"
 note "capabilities: $CAPABILITIES  (must be granted to the key, or every leg refuses rule 4; --capabilities overrides)"
 note "harness:      $HARNESS (fills in only when the settings name no agent_command)"
@@ -158,7 +227,7 @@ note "log:          $LOG"
 note "stop:         Ctrl-C (a graceful release with a hand-off)${FOR:+, or after $FOR}"
 
 if [ "$CHECK_ONLY" = 1 ]; then
-  note "--check: preflight passed; would run: node cli/baton.mjs ${RUN_ARGS[*]}"
+  note "--check: preflight passed; would run: node $CLI ${RUN_ARGS[*]}"
   exit 0
 fi
 
@@ -174,7 +243,7 @@ env -u BATON_COURSE -u BATON_LEG -u BATON_INSTRUCTIONS -u BATON_TICKET_FILE \
     -u BATON_ADVICE -u BATON_STATE \
     ${URL:+BATON_URL="$URL"} BATON_REPOSITORY="$REPOSITORY" \
     BATON_HOSTNAME="$HOSTNAME_REPORTED" BATON_SESSION="$SESSION" \
-    node "$ROOT/cli/baton.mjs" "${RUN_ARGS[@]}" >"$LOG" 2>&1 &
+    node "$CLI" "${RUN_ARGS[@]}" >"$LOG" 2>&1 &
 RUNNER=$!
 
 # ---- the stalled-leg watch (the B-86 lesson, 2026-10-22) --------------------------------
