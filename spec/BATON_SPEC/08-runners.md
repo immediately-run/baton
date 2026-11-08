@@ -312,8 +312,8 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     it, `not-eligible`, rule `chain`, by a **credential** that has run any named leg on this ticket
     (`claim_legs` → claim → runner → credential; a row with a null claim, an adopted run, is
     skipped; containers sharing one key count as one) — in the same claim, or in another claim in
-    an unlabelled run. A labelled run in another claim (a credential `domains.per_run` lists,
-    R-BTN-180) does not refuse: a listed credential may review across claims what it wrote under
+    an unlabelled run. A labelled run in another claim does not refuse while the credential is
+    listed in this repository's `domains.per_run` and the new run is labelled too (R-BTN-180): a listed credential may review across claims what it wrote under
     another label, and never chains a writing leg into a review within one claim. The runner
     suspends instead.
 - **R-BTN-107 (isolation: process, attached, session).** The runner declares `isolation` on its
@@ -470,7 +470,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     | `BATON_SOCKET` | the local channel (R-BTN-106) |
     | `BATON_LEG` | `<claim id>.<leg>.<run>` (R-BTN-145) |
     | `BATON_RUN_ID` | the run's `run_id` (R-BTN-63) |
-    | `BATON_SESSION_ID` | `<run_id>.r<n>`: the run's session, `n` counting R-BTN-123's refreshes from 0 |
+    | `BATON_SESSION_ID` | `<run_id>.r<n>`: the run's session, `n` counting R-BTN-123's refreshes from 0 (`process` mode) |
     | `BATON_ACTIVITY` | set by a launcher for a child session it starts under an activity (§9.9) |
     | `BATON_RESUME` | path of a JSON file holding earlier claimants' text — resume records, end details, hand-off documents, claim `rationale` — which reaches a leg only as data, never inside its instructions |
     | `<NAME>` for `credential:<NAME>` | present only when the leg's `requires`, after role expansion (R-BTN-121), names it; every other declared `credential:` variable is removed |

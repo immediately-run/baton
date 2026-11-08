@@ -2562,15 +2562,21 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   or dropping the domain rule, the owner answered "yes" to the first; and asked that Baton "be
   completely agnostic regarding how runner sandbox legs, if at all". So a policy may list grants whose domain is per run
   (`domains.per_run`, R-BTN-180): their runs carry single-use labels Baton compares and never
-  interprets; `std:wrote@1`, `std:ran@1` and `std:review@1` carry the per-run domain (R-BTN-181)
-  and independent review compares them (R-BTN-183); `no_chain_from` (R-BTN-106) refuses a listed
+  interprets; `std:wrote@1`, `std:ran@1` and `std:review@1` carry the grant's domain and the run's
+  label as separate fields (R-BTN-181), a labelled run's attestations superseding only their own
+  label's, and independent review compares them (R-BTN-183) — a label counting only under a
+  repository that listed the credential, and two runs by one runner key always one domain; `no_chain_from` (R-BTN-106) refuses a listed
   credential only within one claim or against its unlabelled runs. A run carries its grant's domain and its label as separate fields,
   and a labelled run and any unlabelled run on the same domain count as one, whichever key made
   either, so listing or un-listing never makes a grant independent of
   itself; only an `approvers.policy` change lists a credential, never a trusted-runner, checker or
-  domainless one, and its dry run names what the change disables (R-BTN-188). Review round 1 (two
-  fresh reviewers) found the cross-version self-review, the inert `no_chain_from` and the leg-log
-  directory in the claim reply; all fixed before merge. `independent-review` never holds while the list is non-empty; the new, weaker
+  domainless one, and its dry run names what the change disables (R-BTN-188). Review: round 1 (two fresh
+  reviewers) found the cross-version self-review, the inert `no_chain_from` and the leg-log
+  directory in the claim reply; round 2 (one) the same-host second key and B-187's drift; round 3
+  (one) that a listed key's second review would supersede its first, that a multi-repository
+  ticket's labels counted under a policy that never listed the key, `no_chain_from` admitting an
+  un-listed key on its old label, and re-domaining as a way to self-independence. All fixed before
+  merge. `independent-review` never holds while the list is non-empty; the new, weaker
   `independent-runs` does, and does not hold against a compromised per-run runner or a leg that
   can act as it (R-BTN-189, §12.8's outside list). S-BTN-204 and S-BTN-205's rows follow.
 

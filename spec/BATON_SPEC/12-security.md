@@ -313,9 +313,9 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     requirements the new `attestations` entries admit no writer for, tickets on a course whose
     `merge` leg a new `merge.trusted` leaves without a trusted runner, and, for a change to
     `domains.per_run`, the credentials listed or un-listed, the course legs whose `no_chain_from`
-    then admits a listed credential's labelled run from another claim (R-BTN-106), and `independent-review` broken;
-    `baton owner policy show` lists the per-run credentials beside the guarantees (`baton owner policy apply
-    <preset> --dry-run`). Each change is logged `admin` with the versions and the
+    then admits a listed credential's labelled run from another claim (R-BTN-106), and
+    `independent-review` broken (`baton owner policy apply <preset> --dry-run`); `baton owner
+    policy show` lists the per-run credentials beside the guarantees. Each change is logged `admin` with the versions and the
     knobs it changed. Every change is checked against the floors (R-BTN-189) and the current
     courses (R-BTN-181) in its transaction.
   - **Who may change it.** Every change to the policy, in any direction, needs an approver on the
@@ -339,7 +339,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     | `paths.tickets` — a ticket or goal change the merge runner merges needs a `std:approval@1`; a human's own merge of a ticket's PR (`merged-by-hand`, R-BTN-131), or of a request PR (R-BTN-131), is their approval of the ticket files it carries | `any` | `approval` | | trusted runners | R-BTN-183, R-BTN-184 |
     | `merge.trusted` — merge legs are trusted legs, and no course commits to the default branch | `false` | `true` | | Baton, the forge | R-BTN-182 |
     | `merge.reviews` — `{count}`: the `std:review@1` a merge needs at its head, from `count` distinct domains, each other than every writer domain | `{count: 0}` | `{count: 2}` | | trusted runners | R-BTN-183 |
-    | `domains.per_run` — the credentials, by key fingerprint, whose runs each carry a domain (R-BTN-180) | `[]` (no value when applied) | no value | | Baton | R-BTN-180, R-BTN-183 |
+    | `domains.per_run` — the credentials, by key fingerprint, whose runs each carry a run label (R-BTN-180) | `[]` (no value when applied) | no value | | Baton | R-BTN-180, R-BTN-183 |
     | `merge.checks` — `optional`, or `required`: the protected default branch's check runs pass at the head, or a `std:checks@1` the owner named a writer for | `optional` | `required` | | trusted runners, the forge | R-BTN-183 |
     | `tickets.created` — how a ticket a runner's action creates (a handler ticket, a call leg's child, a supersession's replacement) and a withdrawal reach git | `filed` | `proposed` | | Baton, trusted runners | R-BTN-161, R-BTN-165, R-BTN-171, R-BTN-180 |
     | `outbox.git`, `outbox.forge-check` — `{deliverers}`: which grant roles may deliver the kind, from `runner`, `trusted-runner` | `{deliverers: [runner]}`, each | `{deliverers: [trusted-runner]}`, each | | Baton | R-BTN-171 |
@@ -473,9 +473,11 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
   - **Per-run domains.** The policy's `domains.per_run` (an `approvers.policy` change, checked
     against the floors like any other) lists credentials — by key fingerprint — whose runs each
     carry a label of their own:
-    - **Who may be listed.** Only a credential whose grant on the repository is a `runner` with a non-null domain set by an admitted approver; a policy change listing any
-      other — a `trusted-runner` or checker grant, a grant with no domain, an unknown or revoked
-      key — is refused `invalid-params`, and so is a role change that would make a listed
+    - **Who may be listed.** Only a credential whose grant on the repository is a `runner` with a
+      non-null domain set by an admitted approver; a policy change listing any other — a
+      `trusted-runner` or checker grant, a grant with no domain, an unknown, revoked or suspended
+      key — is refused `invalid-params`; revoking or suspending a listed key un-lists it in the same
+      transaction; and so is a role change that would make a listed
       credential's grant `trusted-runner`, a checker or domainless. Clearing a domain (*Making
       `approvers.roles` human-only*, above) un-lists the credential in the same transaction.
     - **The label.** A listed credential's runner reports a `run_label` (1–128 characters of
@@ -486,12 +488,18 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
       atomically (`run_labels`, §13). A refresh (R-BTN-123) keeps its run's label; an `advance` that starts no run and carries one is
       refused `label-unexpected`. A run's label is fixed when it starts: listing or un-listing later
       changes no run already recorded. An adopted run carries no label.
-    - **How runs compare.** A run is attributed its grant's domain and its label, if any, each
-      recorded as its own field. Two runs count as **different domains** when their domains differ,
-      or when their domains are equal and both carry labels that differ. A labelled run and any
-      unlabelled run on the same domain — whichever credential made either — count as the same: so
-      no grant becomes independent of itself by being listed or un-listed, and no other key
-      labelled with the same host becomes independent of a listed one (R-BTN-183).
+    - **How runs compare.** A run is attributed the domain its grant had when the run started
+      (`claim_legs.domain`) and its label, if any, each recorded as its own field; its attestations
+      carry both (R-BTN-181). A label counts only in a comparison made under the policy of a
+      repository whose `domains.per_run` listed the run's credential when the run started; under
+      any other repository's policy — another `repos:` entry of a multi-repository ticket among
+      them — the run counts as unlabelled. Two runs count as **different domains** when their
+      domains differ and their runner keys differ, or when both carry counting labels that differ.
+      Every other pair counts as the same: a labelled run and any unlabelled run on one domain,
+      whichever credential made either; and two runs by one runner key, whatever domain its grant
+      had at each. So no grant becomes independent of itself by being listed, un-listed or
+      re-domained, and no other key with the same domain becomes independent of a listed one
+      (R-BTN-183).
     - Baton knows nothing of what a label names.
   - **Refs.** A runner or mirror updates only the ref classes `refs.*` admits it to, and a runner
     admitted to no ref outside `branch_pattern` updates only refs matching it. `refs/baton/*` is
@@ -533,7 +541,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     It runs as a process in a domain of its own, never as a workflow and never beside a merge
     runner, holds the credential `--check` needs and no merge credential, and claims no leg. What
     Baton can check, it does: a marked grant is offered no leg and admitted to no `outbox` class,
-    and Baton refuses to mark a grant whose domain is null or whose label another grant of the repository carries,
+    and Baton refuses to mark a grant whose domain is null or whose domain another grant of the repository carries,
     that has claimed a trusted leg, or that delivers a class (`invalid-params`); the rest is the
     deployment's (§12.8). It runs `--check` at least hourly and reports `{matched, reading_hash}`
     with its heartbeat's `protection`, which Baton keeps as the repository's last report
@@ -623,8 +631,9 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     `human` ones.
   - **Supersession.** A new attestation supersedes an earlier one only when type, subject, writer
     and **attested key** are the same; the attested key is the writer's key, except for a `baton`
-    attestation, whose attested key is the runner key it is about. So two runners' reviews at one
-    head coexist, a later `std:ran@1` by one domain never erases another's, and each instrument
+    attestation, whose attested key is the runner key it is about — with the run's label, for a
+    labelled run (R-BTN-180). So two runners' reviews at one head coexist, and so do one listed
+    key's reviews under two labels, a later `std:ran@1` by one domain never erases another's, and each instrument
     keeps its own latest reading (R-BTN-76). The one exception is the sync's: its attestations
     supersede by type and subject whichever sync credential posted them (R-BTN-191).
   - **Bound by subject, not consumed.** An attestation gates every action on exactly its subject:

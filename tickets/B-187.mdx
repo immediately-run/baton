@@ -38,7 +38,7 @@ a container, nothing) is the deployment's, and Baton never learns it.
 
 ### What to build
 
-1. **A grant may be `domain: per-run` — a policy change.** Marking a grant `per-run` changes what
+1. **A credential may be listed in `domains.per_run` — a policy change.** Marking a grant `per-run` changes what
    `independent-review` means for its work, so it is a change to the repository policy, governed
    by `approvers.policy` (R-BTN-186), not a role setting: the policy gains `domains.per_run:
    [fingerprints]`. `independent-review`'s *holds when* gains "and `domains.per_run` is empty", so a
@@ -67,8 +67,9 @@ a container, nothing) is the deployment's, and Baton never learns it.
    compares those, unchanged otherwise: each review from a domain other than every writer domain
    of `H`, no two from one domain.
 5. **`no_chain_from` for a listed credential** refuses within one claim and against the
-   credential's unlabelled runs, as today; across claims it refuses only an unlabelled run. A
-   labelled run and its grant's unlabelled domain count as one domain (R-BTN-180). For every other
+   credential's unlabelled runs, as today; across claims it admits a labelled run only while the
+   credential is listed and the new run is labelled. A labelled run and any unlabelled run on one
+   domain count as one, and so do two runs by one runner key (R-BTN-180). For every other
    credential it compares credentials, as today.
 6. **Shown on the record.** The ticket's history (R-BTN-81) and the dashboard show a run's per-run
    domain, so an owner sees that a review ran under a label no writer used.
