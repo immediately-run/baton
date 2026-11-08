@@ -1,0 +1,99 @@
+---
+title: "B-188 — A runner holds several claims: up to k tickets at once, each leg in its own executor session, each claim fenced alone"
+id: B-188
+project: baton
+status: available
+updated: 2026-11-08
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1187
+tier: judgement
+description: "R-BTN-72's runner claims one ticket and runs its legs one at a time, and the architecture page defers a runner multiplexing legs until a sandbox fleet's evidence is in. With legs in executor sandboxes (B-184) the runner mostly waits on I/O, so let it hold up to k claims at once — never two legs of one ticket, which one live claim per ticket already ensures — declaring k on its heartbeat, fencing each claim alone, and reattaching to its running legs after a restart within the lease. A runner without --concurrency behaves as today. Requires: B-184, B-185."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-184
+  - B-185
+---
+
+**Brief:** the owner, 2026-11-08, proposed "N runners querying the baton server for executable
+legs, each runner executing several tickets' legs in parallel (but each ticket is at exactly one
+station or undergoing the execution of a single leg, so there is no parallelization within a
+ticket)" (FIELDHOUSE_SPEC §5, R-FH-79).
+
+This is a proposal: the spec half lands first, as its own spec PR, with the owner's approval.
+
+**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3),
+[R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1)
+([R-BTN-3](../spec/BATON_SPEC/08-runners.md#sec-8-1), [R-BTN-9](../spec/BATON_SPEC/08-runners.md#sec-8-1), the heartbeat),
+[§9.2](../spec/BATON_SPEC/09-claims.md#sec-9-2) (the lease and the fence), [§9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5)
+(reaping), [§5.9](../spec/BATON_SPEC/05-courses.md#sec-5-9) ([R-BTN-174](../spec/BATON_SPEC/05-courses.md#sec-5-9));
+`docs/context/architecture.mdx` (*Parallelism is horizontal*).
+**Depends on:** B-184 (legs in executor sessions, not the runner's process), B-185 (run ids key
+each running leg).
+**Used by:** fieldhouse §5 (R-FH-79), FLDH-53.
+
+### What to build
+
+1. **`baton runner start --concurrency <k>`** (default 1, which is today's runner exactly). The
+   runner keeps up to `k` claims, each on a different ticket, asking for recommendations while it
+   holds fewer than `k`. The heartbeat declares `concurrency: k` and lists the claims it holds.
+2. **Per-claim independence.** Each claim keeps its own fence, lease accounting, stop handling
+   (R-BTN-119) and end; one claim's release, failure or supersession touches no other. Course
+   code for each claim runs in that claim's executor session (B-184 item 4), never shared.
+3. **Capacity bounds `k`.** A runner never starts a leg past the seats its capabilities and
+   readings allow (R-BTN-178): `k` is a ceiling, the capacity readings for its model credential
+   the real bound.
+4. **Reattach after a restart.** The runner persists, per held claim, the claim id, run id and
+   executor handle in its state file. Restarted within the lease, it re-keys (R-BTN-14),
+   reconnects to each still-running executor session and carries on; a session it cannot reach is
+   salvaged (B-186) if possible and the claim ends `released:cannot-finish:transient`.
+5. **Dashboard and history** show a runner's held claims, and Running groups legs by runner.
+6. **Amend `docs/context/architecture.mdx`**: *Parallelism is horizontal* says a runner may hold
+   several claims, each leg in its own executor session; the multiplexing it deferred is this,
+   decided now that legs run outside the runner. The page was last changed through an
+   owner-approved PR, so this edit needs the owner's approval in the spec PR (B-184 item 9 edits
+   the same paragraph; land them together).
+
+### What not to do
+
+- **No two legs of one ticket at once:** one live claim per ticket is unchanged.
+- **No shared working tree between claims:** with `builtin` and `k > 1` each claim gets its own
+  worktree, or the runner refuses `--concurrency` above 1 with `builtin` and says why.
+- **No change at `k = 1`.**
+
+### Trust
+
+- **`concurrency` and the held-claims list on the heartbeat** — the runner's word, bounded by
+  Baton's own record of which claims the runner holds; Baton never trusts the list over that.
+- **The state file's handles** — the runner's own file on its host, never read from a checkout.
+
+### Invariants
+
+- **One live claim per ticket** and **one writer per ticket file** (architecture.mdx) hold.
+- **The fence:** a lost heartbeat still reaps every claim the runner holds (§9.5); reattachment
+  only shortens the gap when the runner returns within the lease.
+- **One clock** (R-BTN-32) in the runner's lease accounting for every claim.
+
+### Tests
+
+- `k = 3`: three tickets' legs run at once; stopping one leaves the other two running.
+- A runner killed and restarted within the lease reattaches to its running sessions; past the
+  lease its claims are reaped as today.
+- `--concurrency 2` with `builtin` and one home checkout is refused, or gets separate worktrees.
+- `k = 1` passes the full existing suite unchanged.
+- Each behaviour change names its `S-BTN-n` scenario (R-BTN-31).
+
+### Exit criteria
+
+- [ ] the spec PR (R-BTN-72's loop, the heartbeat's fields, architecture.mdx) is merged with the
+  owner's approval
+- [ ] built as above; the tests pass; `npm test` and `npm run typecheck` are green
+
+## Status
+
+_filed 2026-11-08._
