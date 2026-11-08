@@ -63,8 +63,8 @@ B-186 (below).
      25 s), every process the leg started gone (R-BTN-145's guarantee, the executor's to keep);
    - `end(handle) → {status, result}` — the `baton-leg-result` block or the agent's last line, which
      the runner checks as R-BTN-106 says;
-   - `exec(handle, argv, {cwd, timeout_s}) → {status, stdout, stderr}` — runs a command where the
-     leg runs (item 4);
+   - `exec(handle, argv, {cwd, timeout_s, stdin}) → {status, stdout, stderr}` — runs a command
+     where the leg runs (item 4);
    - `salvage(handle) → {sha, ref} | null` — B-186's capture (null until B-186 lands), run before the executor tears the
      leg's environment down, on every end where that environment still exists; an executor whose
      environment outlives the leg (`builtin`) may leave it to the runner.
@@ -74,8 +74,7 @@ B-186 (below).
    The runner keeps everything Baton knows about — heartbeat, claim, lease, fencing, its key,
    result checking, leg logs (R-BTN-128, written from what the executor streams) and masking
    (R-BTN-144, applied by the runner to the executor's streams).
-2. **The per-leg channel.** Mid-leg calls (`baton leg …` from inside a leg: progress, notes,
-   hand-off, R-BTN-123's refresh request) go to a channel the runner serves for that leg alone and
+2. **The per-leg channel.** Mid-leg calls (R-BTN-106's `baton leg …` verbs from inside a leg) go to a channel the runner serves for that leg alone and
    proxies to Baton with its own credential, so no executor needs to hand a leg a Baton credential.
    Whether a leg can nonetheless reach the runner's credential is the executor's matter: under
    `builtin` a leg runs as the runner's user and can read its state file and use its ssh-agent, as
@@ -102,7 +101,8 @@ B-186 (below).
    repository names, it does so by `exec` in an executor session of the call's kind, never in its
    own process: `leg` (a leg script's `run`, today already a child process; its `close` and
    `handoff`, today run in the runner; a course's `legs/<leg>.run.<ext>` overrides), `rank`
-   (`rank.mjs`, R-BTN-98, before a claim), `source` (the ticket source's exports, R-BTN-74, where the
+   (`rank.mjs`, R-BTN-98, before a claim — by a runner, and likewise by a launcher or sidecar
+   wherever R-BTN-98 has one run it), `source` (the ticket source's exports, R-BTN-74, where the
    runner calls them), `sync` (a course's `sync.mjs`, where a runner runs the sync) and `install`
    (the install roots' dependency installs, R-BTN-133). The kind is a word in `brief`; Baton says
    nothing about how a session of any kind is run. Decided here, not left to the implementer:
@@ -113,12 +113,17 @@ B-186 (below).
      from the default branch's head the runner verified (R-BTN-143), as `rank.mjs` itself is.
    - **Calls that take `ctx`.** `close`, `handoff`, `rank.mjs` and the ticket source's exports are
      JavaScript calls: the runner runs them by `exec` of the existing wrapper (`legProcess.mjs`),
-     passing `ctx` as a JSON file and reading the result from a JSON file the wrapper writes,
-     bounded as today (2 minutes for `close` and `handoff`). A push `close` makes uses the
-     credential the executor gives the leg session, never the runner's. For `builtin` every kind is a child process, as
-   close to today as makes no difference; a deployment's executor decides what each kind gets.
+     which gains an argument naming the export to call (today it calls only `run`), passing `ctx`
+     as JSON on stdin and reading the result as JSON from the last line of stdout — so it needs
+     nothing beyond `exec`'s argv, stdin and stdout, on any executor — bounded as today (2 minutes
+     for `close` and `handoff`). A push `close` makes uses the credential the executor gives the
+     leg session, never the runner's.
+
+   For `builtin` every kind is a child process, as close to today as makes no difference; a deployment's executor decides what each kind gets.
 5. **Executor data, opaque to Baton.** A course may give each leg an `executor` object in its
-   course file, and a home may narrow it in `.baton/baton.json` (`legs.<course>.<leg>.executor`).
+   course file, and a home may set one in `.baton/baton.json` (`legs.<course>.<leg>.executor`); both
+   are passed to the executor as they are (`course`, `home`), and how they combine is the
+   executor's.
    Baton defines no key in it and knows nothing of images, networks, tokens or isolation: it checks
    only that the value is a JSON object within a size bound, passes it to the executor's `start`,
    and stores none of it (R-BTN-33). An executor documents and validates its own keys — a
@@ -126,10 +131,14 @@ B-186 (below).
    (`executor_schema`), which the sync applies as it applies other schemas (§5.5), without
    reading it. A leg that needs something only some executors offer requires one of their
    `provides` names (item 7), so matching keeps it from the rest. An executor that still cannot
-   honour what it is given ends the leg `released:blocked` with kind `capability` and `ref` one
-   of its own `provides` names (R-BTN-126, §6.3): not a failed attempt, and only this runner stops
-   being offered the leg until it declares the name again (R-BTN-121); the ticket stays claimable
-   by every other runner. `builtin` ignores the data.
+   honour what it is given ends the leg one of two ways. If the leg requires one of the
+   executor's `provides` names and that is what failed, `released:blocked` with kind `capability`
+   and that name as `ref` (R-BTN-126, §6.3): not a failed attempt; Baton removes the name from this
+   runner's declared set, so no leg requiring it is offered here, and the runner declares it again
+   only when its executor reports the name honourable again (R-BTN-121's re-declaration, driven by
+   the executor's own check, never at once). Otherwise it is an ordinary failed attempt
+   (`released:cannot-finish:transient`), as any leg that could not start. `builtin` ignores the
+   data.
 6. **One way to start a leg.** `agent_command` becomes a per-leg course field (the home's
    `.baton/baton.json` value stays accepted as the default for every leg, through a dual-read
    window), passed to every executor in `brief`; `agent_wrapper` and `BATON_AGENT_WRAPPER` stay what they are — words composed in front of
@@ -169,13 +178,21 @@ B-186 (below).
      built-in capability retired, a check leg requires a capability name its course declares and a
      deployment's executor `provides` (the standard course's default: `checks:withheld-credentials`),
      and the withheld-credential rule stays Baton's, stated of the session, not of its isolation.
+     A capability name that stands for executor behaviour is declared only from `executor.provides`
+     — never from B-86's grant-default declaration or `runner.json` `capabilities` — so a
+     `builtin` runner cannot claim it by configuration.
    - **R-BTN-182 runs a trusted leg's `run.mjs` override in `bubblewrap`** and refuses it where
      none exists — isolation logic in Baton, guarding Baton's own trusted runner. **Decision for the
-     owner in the spec PR:** (a) keep it as the one isolation rule Baton keeps, since it protects
-     Baton's trusted path in every deployment, including the naive ones; or (b) move it behind the
-     executor as a `refusal` session kind, Baton refusing to run a trusted override on a runner
-     whose executor does not `provide` a name the course requires. Recommended: (a) — removing it
-     weakens the default trusted runner for no deployment's benefit.
+     owner in the spec PR:**
+     - (a) keep it, as an explicit exception to the owner's constraint and to this ticket's "no
+       sandbox logic in `src/`" and its exit criterion, both of which would name it;
+     - (b) move it behind the executor as a `refusal` session kind: Baton refuses to run a trusted
+       override on a runner whose executor does not `provide` the name the course requires. This
+       fails closed exactly as R-BTN-182 does today where no sandbox exists — security is not
+       weakened; what is lost is function: a deployment without such an executor (the naive,
+       `builtin` one) can no longer use trusted overrides at all.
+     Recommended: (b), which keeps the owner's constraint without an exception and costs only a
+     feature the simplest deployments rarely need; (a) if trusted overrides must work everywhere.
    Live tickets that build what this retires get a dated note mapping each item: B-70
    (isolation folded into `runner:session`), B-47 and B-117 (session and attached runners), B-12
    (fresh context, which sessions now carry), B-115 (in review; noted for its author).
@@ -211,8 +228,8 @@ B-186 (below).
   `instance`** — the runner's word,
   recorded, matched by name, never verified (R-BTN-46, R-BTN-174).
 - **The per-leg channel** — the runner authenticates a call by the channel it arrived on (one per
-  leg) and proxies only a closed list of calls (`baton leg note`, progress, hand-off, the refresh
-  request), never `advance`, `end` or a label. Whether a leg can reach another leg's channel or the
+  leg) and carries R-BTN-106's leg verbs (item 2), which the runner checks and turns into its own
+  calls; never a raw `advance` or `end`, or a label. Whether a leg can reach another leg's channel or the
   runner's key depends on the executor: under `builtin`, as today, it can (R-BTN-107).
 - **`agent_command`** (course field, `.baton/baton.json`) — written by pushers; runs inside the
   leg, as today.
@@ -241,7 +258,8 @@ B-186 (below).
   the leg stub enforce `reads_only` under every executor, so R-BTN-183's "a reviewer never runs
   the branch's code" never depends on one. `brief` carries `reads_only` as a hint only. Keep
   B-141's tests.
-- **B-185** (run ids) gives the executor its handle key and the run record its `environment` row;
+- **B-185** (run ids) gives the executor its handle key; this ticket adds the run record's
+  `executor_digest`, `environment` and `instance` columns;
   **B-186** (salvage) defines what `salvage` captures and where it goes.
 - **B-138** (a pinned released CLI) is the runner-side twin of `pinned`: a host that pins its
   executor and runs a working-tree CLI has pinned nothing.

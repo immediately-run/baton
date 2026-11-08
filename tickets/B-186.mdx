@@ -63,13 +63,18 @@ it can continue from there."
    - `git add -A` into it under the runner's usual `-c core.hooksPath=/dev/null
      -c core.fsmonitor=false`: untracked files included, ignored files not, `node_modules` and the
      install roots' links never;
-   - `git write-tree`, then `git commit-tree` with the checkout's `HEAD` as parent and trailers
-     `Baton-Ticket`, `Baton-Run-Id`, `Baton-Leg`, `Baton-End` (the end reason);
-   - nothing to capture (the tree equals `HEAD`'s) writes nothing.
+   - `git write-tree`, then `git commit-tree` whose parent is the **remote** tip the leg started
+     from (the ticket branch's remote tip, else the default branch's) — never the checkout's
+     `HEAD`, so commits the leg made and never pushed are not pushed with the draft; they are folded
+     into the draft's single diff instead, where masking sees them — with trailers `Baton-Ticket`,
+     `Baton-Run-Id`, `Baton-Leg`, `Baton-End` (the end reason);
+   - nothing to capture (the tree equals the parent's) writes nothing.
 2. **Bounded and masked.** A file over 5 MB, or files past 50 MB in total, are left out and listed
    in the commit message. A file matching any of R-BTN-144's seven masking classes (computed for
    that leg: the literals and the patterns, Baton's bearer prefixes and private-key blocks among
-   them) is left out and named, never pushed. A binary file is captured within the bounds.
+   them) is left out and named, never pushed: the whole diff from the parent is scanned, unpushed commits
+   included. A left-out tracked file keeps the parent's blob in the draft tree, so applying the draft
+   never deletes it. A binary file is captured within the bounds.
 3. **Pushed to a draft ref, never a branch:** each checkout's capture to its own repository's
    remote, at `refs/baton/wip/<tenant host>/<local ticket id>/<run_id>` (B-185 item 5) — never one
    repository's tree to another's remote, so a private repository's work never lands in a home
@@ -93,9 +98,8 @@ it can continue from there."
    `src/defaults/courses/create-pr/implement.md`).
 6. **create-pr resumes from the newest draft Baton recorded.** At the start of an implement or fix
    leg the leg script, not the agent, takes the newest draft named in this ticket's resume records
-   (`draft_ref` and `draft_sha`, and only if the ref still points at that sha). If its `base` is
-   ahead of the branch's tip (commits the failed leg made and never pushed), the script first
-   fast-forwards its local branch to `base`. Then, if its `base` is the branch's tip or an ancestor of it and it applies cleanly
+   (`draft_ref` and `draft_sha`, and only if the ref still points at that sha). If its `base` (the
+   remote tip it was parented on) is the branch's tip or an ancestor of it and it applies cleanly
    (`git checkout <draft> -- .` over the branch, or `git apply --3way` of `base..draft` when the
    branch moved), it applies it **uncommitted** and the instructions tell the agent: "an earlier
    attempt left these uncommitted changes (run `<run_id>`, ended `<reason>`); they are a draft
@@ -105,7 +109,8 @@ it can continue from there."
    would let a writer the forge restricts feed the implementer. Review, adjudicate and merge legs never apply a draft.
 7. **Retention.** When a writing leg of the ticket ends with its work pushed to the branch, or the
    ticket closes, the runner deletes that ticket's draft refs; otherwise the newest 3 per ticket
-   are kept, and a runner deletes drafts older than 14 days on its home when a claim ends.
+   are kept, and a runner deletes drafts older than 14 days, in each repository it pushed drafts
+   to, when a claim ends.
 8. **Agents still push early.** create-pr's implement and fix instructions gain one line: commit
    and push to the branch whenever the repository's checks pass. Salvage is for the ends where the
    agent never gets to.
@@ -155,6 +160,8 @@ it can continue from there."
   and named.
 - A branch that moved so the draft conflicts: nothing applied, the agent told the ref.
 - A runner killed mid-leg: on restart it salvages the dirty checkout under the dead claim's run id.
+- A leg with an unpushed local commit holding a credential: the draft's parent is the remote tip,
+  the commit is not pushed, and the credential-bearing file is left out with its parent blob kept.
 - A context refresh captures nothing and resets nothing.
 - A ticket with two repositories pushes each capture to its own repository's remote.
 - A runner restarted while its leg still runs and is reattachable (B-188) salvages nothing.

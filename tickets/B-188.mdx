@@ -42,9 +42,12 @@ each running leg).
 ### What to build
 
 1. **The lock becomes per ticket only.** R-BTN-4 is rewritten: at most one `active` claim per
-   ticket, and per runner at most the lower of its declared `concurrency` and its grant's
-   `max_claims` — an owner's ceiling set by the `approvers.roles` approver, default 1, so a
-   compromised runner can hold no more tickets than an owner allowed. A new migration drops the partial
+   ticket, and per runner at most the lower of its declared `concurrency` and `max_claims`: the
+   runner's held claims across all repositories are counted and compared with the claiming
+   repository's grant's `max_claims` — an owner's ceiling, the `max_claims` field of the grant's
+   role request (`PUT /v1/owner/{repository}/grants/{fingerprint}/role`), set by the
+   `approvers.roles` approver, default 1. A key with no grant (a bearer or seed key, a check
+   runner) has `max_claims` 1. A compromised runner can hold no more tickets than an owner allowed. A new migration drops the partial
    unique index `one_active_claim_per_worker` (0001; still on `claims(worker_id)` after 0005's
    rename) and Baton enforces the per-runner bound in the claim transaction instead. The per-ticket
    index stays.
@@ -64,7 +67,12 @@ each running leg).
    or reaped — reconnects to each still-running executor session and carries on; a session it cannot reach is
    salvaged (B-186) if possible and the claim ends `released:cannot-finish:transient`.
 6. **Dashboard and history** show a runner's held claims, and Running groups legs by runner.
-7. **Amend `docs/context/architecture.mdx`**: *Parallelism is horizontal* says a runner may hold
+7. **One checkout per claim.** Every claim gets a checkout of its own — a separate clone with its
+   own git dir, not a worktree sharing refs — so concurrent legs never write the same tree, one
+   claim's salvage reset (B-186) never touches another's, and §12.9's audit reads each claim's own
+   remote-tracking reflog. R-BTN-131's "one runner per checkout" becomes "one claim per checkout";
+   the runner keeps up to `k` clones, reused across claims.
+8. **Amend `docs/context/architecture.mdx`**: *Parallelism is horizontal* says a runner may hold
    several claims, each leg in its own executor session; the multiplexing it deferred is this,
    decided now that legs run outside the runner. The page was last changed through an
    owner-approved PR, so this edit needs the owner's approval in the spec PR (B-184 item 9 edits
@@ -96,7 +104,9 @@ each running leg).
 
 ### Tests
 
-- `k = 3`: three tickets' legs run at once; stopping one leaves the other two running.
+- `k = 3`: three tickets' legs run at once, each in its own checkout; stopping one, or salvaging
+  and resetting one, leaves the other two running and their trees untouched; each claim's audit
+  reports only its own pushes.
 - A runner killed and restarted within the lease reattaches to its running sessions; past the
   lease its claims are reaped as today.
 - A claim beyond the lower of `concurrency` and the grant's `max_claims` is refused in the claim
@@ -107,7 +117,7 @@ each running leg).
 
 ### Exit criteria
 
-- [ ] the spec PR (R-BTN-4's lock, R-BTN-72's loop, the heartbeat's fields, architecture.mdx) is merged with the
+- [ ] the spec PR (R-BTN-4's lock, R-BTN-131's checkout, R-BTN-72's loop, the heartbeat's fields, architecture.mdx) is merged with the
   owner's approval
 - [ ] built as above; the tests pass; `npm test` and `npm run typecheck` are green
 

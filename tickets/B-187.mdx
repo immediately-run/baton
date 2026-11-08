@@ -77,6 +77,10 @@ a container, nothing) is the deployment's, and Baton never learns it.
   verifies nothing about them").
 - **No isolation vocabulary:** the API, the schema and the dashboard say `run_label`, never
   sandbox, VM or container (B-184's agnosticism).
+- **No pretence about `no_chain_from`:** for a per-run grant it can never refuse — labels are
+  single-use and the claim-time check runs before a label exists — so marking a grant per-run
+  disables `no_chain_from` for it; independence then rests on per-run domains and the policy's
+  guarantees alone, and the policy view says so.
 - **No change for grants not marked `per-run`.**
 - **No per-run marking of a `trusted-runner` grant** (the merge runner stays one labelled domain).
 
