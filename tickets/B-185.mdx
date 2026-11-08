@@ -25,7 +25,7 @@ answer was "by composition, with gaps", and the owner agreed to a ticket for a f
 **Spec:** [BATON_SPEC §5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) ([R-BTN-63](../spec/BATON_SPEC/05-courses.md#sec-5-3)),
 [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-123](../spec/BATON_SPEC/08-runners.md#sec-8-3),
 [R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4)
-([R-BTN-145](../spec/BATON_SPEC/08-runners.md#sec-8-4)), [§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5)
+([R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4), [R-BTN-145](../spec/BATON_SPEC/08-runners.md#sec-8-4)), [§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5)
 ([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5)), [§9.8](../spec/BATON_SPEC/09-claims.md#sec-9-8)
 ([R-BTN-24](../spec/BATON_SPEC/09-claims.md#sec-9-8), [R-BTN-84](../spec/BATON_SPEC/09-claims.md#sec-9-8)),
 [§9.9](../spec/BATON_SPEC/09-claims.md#sec-9-9) ([R-BTN-20](../spec/BATON_SPEC/09-claims.md#sec-9-9)),
@@ -54,27 +54,32 @@ What exists, and where it falls short:
 
 ### What to build
 
-1. **Baton mints `run_id` when a leg run starts** — in the `advance` that starts it, and for an
-   adopted run when the adoption adds it — as `r_` plus 26 characters of Crockford base32: 48 bits
+1. **Baton mints `run_id` when a leg run starts** — in the `advance` that starts it, and, once adoption (R-BTN-39's
+   `baton ticket adopt`, unbuilt) adds runs, for an adopted run — as `r_` plus 26 characters of Crockford base32: 48 bits
    of the time read through `this.now` (R-BTN-32) and 80 bits from the core's existing random
    source (`src/core/db.ts`). Opaque to every reader; no rule parses it.
 2. **Stored and returned.** A new migration adds `claim_legs.id` (the surrogate §13.5 already
-   names) and `claim_legs.run_id TEXT UNIQUE`, backfilling existing rows with minted ids. The
+   names) and `claim_legs.run_id`, unique, backfilling existing rows with minted ids; SQLite cannot
+   add a primary key or a UNIQUE column in place, so the migration rebuilds the table (create,
+   copy, drop, rename) and recreates its indexes. The
    `advance` reply carries `run_id`; the history's leg rows (R-BTN-81), the run list behind
    `baton leg log` (R-BTN-128), `previous_attempts` and the resume record (R-BTN-24) carry it.
    Land the other §13.5 columns this needs (`session_url`, `leg_log_dir`, `head_sha`) in the same
    migration, or record in the PR why one stays out.
 3. **The runner exports it.** Every leg process gets `BATON_RUN_ID`; `BATON_LEG` stays unchanged
-   (R-BTN-145 keys process stopping on it). An archiver (R-BTN-20) names the run id in what it
+   (R-BTN-145 keys process stopping on it). Both new names join R-BTN-144's table of the only
+   environment names a leg is given. An archiver (R-BTN-20) names the run id in what it
    reports.
 4. **A refresh's session is `<run_id>.r<n>`.** The runner forms it (Baton knows of a refresh
-   only through the `context-handoff` activity, which records both session ids), exports it as
+   only through the `context-handoff` activity, which B-12 adds and which records both session
+   ids; until B-12 lands there is no refresh and no suffix but `.r0`), exports it as
    `BATON_SESSION_ID` (`<run_id>.r0` for the first session), and `session_url` reports name it.
 5. **Outside Baton, prefix the tenant.** Anything a runner writes to a place another tenant could
    also write — a forge ref, a bucket path — is keyed `<tenant host>/<run_id>` or a path form of
    it, the host taken from the claim's tenant URL. B-186's refs are the first user.
 6. **Leg logs move to the run id.** A run started after this lands writes under
-   `<root>/<repository id>/<local ticket id>/<leg>/<run_id>/`; `baton leg log` reads both forms.
+   `<root>/<tenant host>/<repository id>/<local ticket id>/<leg>/<run_id>/` (a bucket may serve
+   several tenants, item 5); `baton leg log` reads both forms.
 
 ### What not to do
 
@@ -103,10 +108,10 @@ What exists, and where it falls short:
 
 ### Tests
 
-- Two runs of one leg on one ticket get distinct run ids; an adopted run gets one.
+- Two runs of one leg on one ticket get distinct run ids (an adopted run's, once adoption lands).
 - The backfill gives every existing `claim_legs` row a distinct id.
-- A refresh exports `<run_id>.r1` to the second session, and the `context-handoff` activity names
-  both session ids.
+- Once B-12 lands: a refresh exports `<run_id>.r1` to the second session, and the
+  `context-handoff` activity names both session ids.
 - The `advance` reply, the history row and `previous_attempts` carry the same run id.
 - Each behaviour change names its `S-BTN-n` scenario (R-BTN-31).
 

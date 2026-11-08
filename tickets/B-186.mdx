@@ -51,9 +51,12 @@ it can continue from there."
 ### What to build
 
 1. **Capture at every leg end where the checkout exists** — a failed or timed-out `run`, a stop
-   or release (R-BTN-119, before `close` and `handoff`, so the hand-off can cite the draft), a
-   context refresh (R-BTN-123, before the fresh session starts), a suspension, and at runner start
-   for a checkout left dirty by a runner that died (its lock names the last claim and run id).
+   or release (R-BTN-119), a context refresh (R-BTN-123, before the fresh session starts), a
+   suspension — after `close` and `handoff` have run, so the capture falls outside the leg's audit
+   window (§12.9) and is reported as the runner's own push; and at runner start for a checkout left
+   dirty by a runner that died (its lock names the last claim and run id), unless that leg is still
+   running and reattachable (B-188). Every checkout the runner prepared for the leg is captured,
+   the home's and those of the ticket's other `repos:`.
    Not after a leg that finished cleanly with nothing uncommitted. The runner, never the agent:
    - a temporary index (`GIT_INDEX_FILE` under the git dir), never the leg's own;
    - `git add -A` into it under the runner's usual `-c core.hooksPath=/dev/null
@@ -63,27 +66,35 @@ it can continue from there."
      `Baton-Ticket`, `Baton-Run-Id`, `Baton-Leg`, `Baton-End` (the end reason);
    - nothing to capture (the tree equals `HEAD`'s) writes nothing.
 2. **Bounded and masked.** A file over 5 MB, or files past 50 MB in total, are left out and listed
-   in the commit message. A file containing any literal in R-BTN-144's masking set (computed for
-   that leg) is left out and named, never pushed. A binary file is captured within the bounds.
+   in the commit message. A file matching any of R-BTN-144's seven masking classes (computed for
+   that leg: the literals and the patterns, Baton's bearer prefixes and private-key blocks among
+   them) is left out and named, never pushed. A binary file is captured within the bounds.
 3. **Pushed to a draft ref, never a branch:** `refs/baton/wip/<tenant host>/<local ticket id>/<run_id>`
    on the home's remote (B-185 item 5), with the runner's own credential and a 60-second bound. A
    failed push keeps the commit in the local git dir under the same ref name and records
    `salvage-push-failed`; the next salvage on that runner retries it.
-4. **Recorded as resume data.** The runner reports activity `salvaged` whose detail's `resume`
-   carries `{draft: {ref, sha, base, files, bytes, left_out}}`; R-BTN-24 carries it into the resume
-   record, `previous_attempts` and `BATON_RESUME` unread. A draft Baton never heard of (a lost
-   lease, a dead runner) is still found by listing `refs/baton/wip/<tenant host>/<local ticket id>/*`.
-5. **The checkout is reset after capture**: `git reset --hard HEAD` and `git clean -fdx` outside the
-   install roots, so the next leg — any ticket's — starts clean. The implement instructions' "the
-   checkout may hold other work" line is removed.
-6. **create-pr resumes from the newest draft.** At the start of an implement or fix leg the leg
-   script, not the agent, looks for the newest draft of this ticket (resume record first, then the
-   ref listing): if its `base` is the branch's tip or an ancestor of it and it applies cleanly
+4. **Recorded as resume data — a core change.** Activity kinds and their detail keys are closed
+   lists (`src/core/validate.ts`), and §12's `resume` holds flat values only, at most 2 KB. So: a
+   new activity kind `salvaged` is added to `ACTIVITY_KINDS`, and its `resume` carries flat keys
+   `draft_ref`, `draft_sha`, `draft_base`, `draft_files`, `draft_bytes`, `draft_left_out` (a count;
+   the names are in the draft's commit message). R-BTN-24 carries it into the resume record,
+   `previous_attempts` and `BATON_RESUME` unread. A draft Baton never heard of (a lost lease, a
+   dead runner) is found by listing `refs/baton/wip/<tenant host>/<local ticket id>/*` — and only
+   shown, never applied (item 6).
+5. **The checkout is reset after capture**: `git reset --hard HEAD` and `git clean -fd` (not `-x`:
+   ignored files, which capture leaves out, are kept) outside the install roots, so the next leg — any ticket's — starts clean. The implement instructions' "the
+   checkout may hold other work" line is removed (both copies: `.baton/courses/create-pr/legs/implement.md` and
+   `src/defaults/courses/create-pr/implement.md`).
+6. **create-pr resumes from the newest draft Baton recorded.** At the start of an implement or fix
+   leg the leg script, not the agent, takes the newest draft named in this ticket's resume records
+   (`draft_ref` and `draft_sha`, and only if the ref still points at that sha): if its `base` is the branch's tip or an ancestor of it and it applies cleanly
    (`git checkout <draft> -- .` over the branch, or `git apply --3way` of `base..draft` when the
    branch moved), it applies it **uncommitted** and the instructions tell the agent: "an earlier
    attempt left these uncommitted changes (run `<run_id>`, ended `<reason>`); they are a draft
    from a failed run — review them before you commit any". If it does not apply, nothing is
-   applied and the agent is told the ref. Review, adjudicate and merge legs never apply a draft.
+   applied and the agent is told the ref. A draft found only by listing refs is named to the agent
+   as unverified and never applied: `refs/baton/*` is open to every writer (§12.8), so applying it
+   would let a writer the forge restricts feed the implementer. Review, adjudicate and merge legs never apply a draft.
 7. **Retention.** When a writing leg of the ticket ends with its work pushed to the branch, or the
    ticket closes, the runner deletes that ticket's draft refs; otherwise the newest 3 per ticket
    are kept, and a runner deletes drafts older than 14 days on its home when a claim ends.
@@ -97,8 +108,8 @@ it can continue from there."
   failed run's work into the PR.
 - **No draft for a leg that does not write:** review, adjudicate and `reads_only` legs are not
   salvaged and never receive one.
-- **No core change beyond what B-185 adds:** core reads no `draft` field; `salvaged` is an activity
-  like any other.
+- **No core reading of a draft:** core validates the new activity kind and its flat keys and reads
+  neither; nothing places a ticket or passes a gate on a draft.
 - **No capture by running repository code:** no hooks, no fsmonitor, no `npm` script.
 
 ### Trust
@@ -116,8 +127,9 @@ it can continue from there."
 
 ### Invariants
 
-- **The audit window** (§12.9): the salvage push is the runner's own, made after the leg's window
-  closes, and is not reported as the leg's push.
+- **The audit window** (§12.9): the salvage push is the runner's own, made after `close` and
+  `handoff` and so after the leg's window closes, and is not reported as the leg's push. R-BTN-72's
+  "The runner writes nothing to git itself" is amended in the spec PR to name this one write.
 - **Legs are stateless at their boundaries** (R-BTN-38): the draft is in git, where any runner
   finds it; nothing travels through a session's context.
 - **Idempotent side effects** (R-BTN-25): a ref per run id; re-running capture for one run
@@ -132,14 +144,17 @@ it can continue from there."
   and named.
 - A branch that moved so the draft conflicts: nothing applied, the agent told the ref.
 - A runner killed mid-leg: on restart it salvages the dirty checkout under the dead claim's run id.
+- A runner restarted while its leg still runs and is reattachable (B-188) salvages nothing.
+- A draft found only by listing refs is named to the agent and not applied.
 - A review leg after a failed implement leg starts with no draft applied.
 - Retention: a successful implement leg deletes the ticket's drafts.
 - Each behaviour change names its `S-BTN-n` scenario (R-BTN-31).
 
 ### Exit criteria
 
-- [ ] the spec PR (§9.4's release, R-BTN-44's lost-lease case, R-BTN-72's leg end, R-BTN-131's
-  reset, create-pr's resume step) is merged
+- [ ] the spec PR (§9.4's release, R-BTN-44's lost-lease case, R-BTN-72's leg end and its "writes
+  nothing to git" sentence, R-BTN-131's reset, §9.9's activity kinds, create-pr's resume step) is
+  merged
 - [ ] capture, push, record, reset, resume and retention are built; the tests pass; `npm test` and
   `npm run typecheck` are green
 

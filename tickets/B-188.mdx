@@ -27,11 +27,13 @@ ticket)" (FIELDHOUSE_SPEC §5, R-FH-79).
 
 This is a proposal: the spec half lands first, as its own spec PR, with the owner's approval.
 
-**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3),
+**Spec:** [BATON_SPEC §9.1](../spec/BATON_SPEC/09-claims.md#sec-9-1) ([R-BTN-4](../spec/BATON_SPEC/09-claims.md#sec-9-1), the lock: "at most one `active` claim per ticket and per runner"),
+[§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3),
 [R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1)
 ([R-BTN-3](../spec/BATON_SPEC/08-runners.md#sec-8-1), [R-BTN-9](../spec/BATON_SPEC/08-runners.md#sec-8-1), the heartbeat),
 [§9.2](../spec/BATON_SPEC/09-claims.md#sec-9-2) (the lease and the fence), [§9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5)
-(reaping), [§5.9](../spec/BATON_SPEC/05-courses.md#sec-5-9) ([R-BTN-174](../spec/BATON_SPEC/05-courses.md#sec-5-9));
+(reaping), [§5.9](../spec/BATON_SPEC/05-courses.md#sec-5-9) ([R-BTN-174](../spec/BATON_SPEC/05-courses.md#sec-5-9)),
+[§6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6) ([R-BTN-178](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-11), seats), [R-BTN-14](../spec/BATON_SPEC/08-runners.md#sec-8-1) (the runner secret);
 `docs/context/architecture.mdx` (*Parallelism is horizontal*).
 **Depends on:** B-184 (legs in executor sessions, not the runner's process), B-185 (run ids key
 each running leg).
@@ -39,21 +41,28 @@ each running leg).
 
 ### What to build
 
-1. **`baton runner start --concurrency <k>`** (default 1, which is today's runner exactly). The
+1. **The lock becomes per ticket only.** R-BTN-4 is rewritten: at most one `active` claim per
+   ticket, and per runner at most its declared `concurrency`. A new migration drops the partial
+   unique index `one_active_claim_per_worker` (0001; still on `claims(worker_id)` after 0005's
+   rename) and Baton enforces the per-runner bound in the claim transaction instead. The per-ticket
+   index stays.
+2. **`baton runner start --concurrency <k>`** (default 1, which is today's runner exactly). The
    runner keeps up to `k` claims, each on a different ticket, asking for recommendations while it
-   holds fewer than `k`. The heartbeat declares `concurrency: k` and lists the claims it holds.
-2. **Per-claim independence.** Each claim keeps its own fence, lease accounting, stop handling
+   holds fewer than `k`. The heartbeat declares `concurrency: k` and lists the claims it holds; its singular `fenced`
+   field becomes per claim.
+3. **Per-claim independence.** Each claim keeps its own fence, lease accounting, stop handling
    (R-BTN-119) and end; one claim's release, failure or supersession touches no other. Course
    code for each claim runs in that claim's executor session (B-184 item 4), never shared.
-3. **Capacity bounds `k`.** A runner never starts a leg past the seats its capabilities and
+4. **Capacity bounds `k`.** A runner never starts a leg past the seats its capabilities and
    readings allow (R-BTN-178): `k` is a ceiling, the capacity readings for its model credential
    the real bound.
-4. **Reattach after a restart.** The runner persists, per held claim, the claim id, run id and
-   executor handle in its state file. Restarted within the lease, it re-keys (R-BTN-14),
-   reconnects to each still-running executor session and carries on; a session it cannot reach is
+5. **Reattach after a restart.** The runner persists, per held claim, the claim id, run id and
+   executor handle in its state file. Restarted within the lease, it resumes with its persisted
+   runner secret — not a re-key, which R-BTN-14 accepts only for a runner holding no active claim
+   or reaped — reconnects to each still-running executor session and carries on; a session it cannot reach is
    salvaged (B-186) if possible and the claim ends `released:cannot-finish:transient`.
-5. **Dashboard and history** show a runner's held claims, and Running groups legs by runner.
-6. **Amend `docs/context/architecture.mdx`**: *Parallelism is horizontal* says a runner may hold
+6. **Dashboard and history** show a runner's held claims, and Running groups legs by runner.
+7. **Amend `docs/context/architecture.mdx`**: *Parallelism is horizontal* says a runner may hold
    several claims, each leg in its own executor session; the multiplexing it deferred is this,
    decided now that legs run outside the runner. The page was last changed through an
    owner-approved PR, so this edit needs the owner's approval in the spec PR (B-184 item 9 edits
@@ -62,8 +71,10 @@ each running leg).
 ### What not to do
 
 - **No two legs of one ticket at once:** one live claim per ticket is unchanged.
-- **No shared working tree between claims:** with `builtin` and `k > 1` each claim gets its own
-  worktree, or the runner refuses `--concurrency` above 1 with `builtin` and says why.
+- **No `k > 1` with `builtin`.** Legs of different tickets would run as one OS user, each able to
+  read the runner's secret and reach the others' channels (R-BTN-107, R-BTN-144): the runner
+  refuses `--concurrency` above 1 unless its executor declares that it runs each leg apart from
+  the runner's user, and says why.
 - **No change at `k = 1`.**
 
 ### Trust
@@ -84,13 +95,15 @@ each running leg).
 - `k = 3`: three tickets' legs run at once; stopping one leaves the other two running.
 - A runner killed and restarted within the lease reattaches to its running sessions; past the
   lease its claims are reaped as today.
-- `--concurrency 2` with `builtin` and one home checkout is refused, or gets separate worktrees.
+- `--concurrency 2` with `builtin` is refused with its reason.
+- A second claim beyond `concurrency` is refused in the claim transaction; the dropped index's
+  migration applies cleanly on a database holding active claims.
 - `k = 1` passes the full existing suite unchanged.
 - Each behaviour change names its `S-BTN-n` scenario (R-BTN-31).
 
 ### Exit criteria
 
-- [ ] the spec PR (R-BTN-72's loop, the heartbeat's fields, architecture.mdx) is merged with the
+- [ ] the spec PR (R-BTN-4's lock, R-BTN-72's loop, the heartbeat's fields, architecture.mdx) is merged with the
   owner's approval
 - [ ] built as above; the tests pass; `npm test` and `npm run typecheck` are green
 
