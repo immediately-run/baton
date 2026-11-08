@@ -64,9 +64,10 @@ a container, nothing) is the deployment's, and Baton never learns it.
    (R-BTN-181) from a per-run grant carry the run's domain; R-BTN-183's independent review
    compares those, unchanged otherwise: each review from a domain other than every writer domain
    of `H`, no two from one domain.
-5. **`no_chain_from` compares per-run domains** for a per-run grant: a review leg is refused only
-   when its run's domain is one that ran a named leg of the ticket, which a fresh label never
-   is. For every other grant it compares credentials, as today.
+5. **`no_chain_from` for a listed credential** refuses within one claim and against the
+   credential's unlabelled runs, as today; across claims it refuses only an unlabelled run. A
+   labelled run and its grant's unlabelled domain count as one domain (R-BTN-180). For every other
+   credential it compares credentials, as today.
 6. **Shown on the record.** The ticket's history (R-BTN-81) and the dashboard show a run's per-run
    domain, so an owner sees that a review ran under a label no writer used.
 
@@ -129,3 +130,5 @@ a container, nothing) is the deployment's, and Baton never learns it.
 ## Status
 
 _filed 2026-11-08._
+
+_(2026-11-08: rules re-read: R-BTN-63, R-BTN-106, R-BTN-180, R-BTN-183, R-BTN-188, R-BTN-189)_ — this ticket's spec half is in baton#197; the items above match it.

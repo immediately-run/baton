@@ -2547,23 +2547,29 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   that resolves to a forge path on the home's forge host, as R-BTN-92 reads a short name.
   S-BTN-202's row follows.
 
-- **2026-11-08 — R-BTN-63, R-BTN-81, R-BTN-123, R-BTN-128, R-BTN-144, R-BTN-180, R-BTN-181,
-  R-BTN-183, R-BTN-189, R-BTN-24, §8.3, §13, §14, §15** (B-185, B-187).
-  Rules changed: R-BTN-24, R-BTN-63, R-BTN-81, R-BTN-123, R-BTN-128, R-BTN-144, R-BTN-180,
-  R-BTN-181, R-BTN-183, R-BTN-189.
+- **2026-11-08 — R-BTN-24, R-BTN-63, R-BTN-81, R-BTN-106, R-BTN-123, R-BTN-128, R-BTN-144,
+  R-BTN-180, R-BTN-181, R-BTN-183, R-BTN-188, R-BTN-189, §13, §14, §15** (B-185, B-187).
+  Rules changed: R-BTN-24, R-BTN-63, R-BTN-81, R-BTN-106, R-BTN-123, R-BTN-128, R-BTN-144,
+  R-BTN-180, R-BTN-181, R-BTN-183, R-BTN-188, R-BTN-189.
   From the owner's design session on runner placement and leg isolation. The owner asked "Does
   each leg attempt have a unique execution id?" and agreed to a first-class one ("Yes"): every run
   gets an opaque `run_id` minted at its start (R-BTN-63), carried by the history, the resume
   record and the run list, exported as `BATON_RUN_ID` and `BATON_SESSION_ID` (R-BTN-144, R-BTN-123),
-  and keying leg-log paths under the tenant's host (R-BTN-128). The owner then ruled that a factory
-  whose legs run sandboxed need not guard against a compromised runner in its first edition, and
-  agreed to count review independence by a label the runner reports per run "over a second
-  dispatcher or over dropping the domain rule"; and that Baton stays "completely agnostic regarding
-  how runner sandbox legs, if at all". So a policy may list grants whose domain is per run
+  and keying leg-log paths under the tenant's host (R-BTN-128). The owner then ruled, for Fieldhouse: "I don't think it makes sense for the
+  initial iteration of fieldhouse to claim guarantees against a compromised runner if the leg
+  processes are sandboxed. That may come later if necessary." Offered a choice between counting
+  review independence by a label the runner reports per run, a second dispatcher on its own key,
+  or dropping the domain rule, the owner answered "yes" to the first; and asked that Baton "be
+  completely agnostic regarding how runner sandbox legs, if at all". So a policy may list grants whose domain is per run
   (`domains.per_run`, R-BTN-180): their runs carry single-use labels Baton compares and never
   interprets; `std:wrote@1`, `std:ran@1` and `std:review@1` carry the per-run domain (R-BTN-181)
-  and independent review compares them (R-BTN-183); `no_chain_from` cannot refuse such a grant
-  (§8.3). `independent-review` never holds while the list is non-empty; the new, weaker
+  and independent review compares them (R-BTN-183); `no_chain_from` (R-BTN-106) refuses a listed
+  credential only within one claim or against its unlabelled runs. A labelled run and its grant's
+  own unlabelled domain count as one, so listing or un-listing never makes a grant independent of
+  itself; only an `approvers.policy` change lists a credential, never a trusted-runner, checker or
+  domainless one, and its dry run names what the change disables (R-BTN-188). Review round 1 (two
+  fresh reviewers) found the cross-version self-review, the inert `no_chain_from` and the leg-log
+  directory in the claim reply; all fixed before merge. `independent-review` never holds while the list is non-empty; the new, weaker
   `independent-runs` does, and does not hold against a compromised per-run runner or a leg that
   can act as it (R-BTN-189, §12.8's outside list). S-BTN-204 and S-BTN-205's rows follow.
 

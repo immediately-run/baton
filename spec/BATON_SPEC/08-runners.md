@@ -311,10 +311,11 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
   - **`no_chain_from: [<leg>…]`** on a leg (course file): Baton refuses a claim or `advance` into
     it by a **credential** that has run any named leg on this ticket in any claim (`claim_legs`
     → claim → runner → credential; a row with a null claim, an adopted run, is skipped), `not-eligible`, rule `chain`; containers sharing one key
-    count as one. For a grant whose domain is per run (R-BTN-180) the comparison is of per-run
-    domains instead, which a fresh run label never matches: `no_chain_from` cannot refuse such a
-    grant, and its independence rests on R-BTN-183's per-run domains and the policy's guarantees.
-    The runner suspends instead.
+    count as one. The runner suspends instead. For a credential the policy lists in
+    `domains.per_run` (R-BTN-180), a named leg's run in another claim refuses only when it was
+    unlabelled; within one claim, and against the credential's unlabelled runs, the refusal
+    stands — so a listed credential may review across claims what it wrote in another claim
+    under another label, and never chains a writing leg into a review in one claim.
 - **R-BTN-107 (isolation: process, attached, session).** The runner declares `isolation` on its
   heartbeat.
   - **`process`** (default): legs are the runner's child processes, as its OS user.
@@ -351,8 +352,8 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     return (result discarded) and stops the process group as R-BTN-119 does after 30 s; (2) calls
     `handoff(ctx)` with `ctx.reason: 'context'`; (3) starts a fresh session on the same leg under
     the same claim, briefed with the hand-off and the inputs — in `process` mode by calling
-    `run(ctx)` again with `ctx.refresh: {n, handoff}`, the fresh session's `BATON_SESSION_ID` ending
-    `.r<n>`; (4) records activity `context-handoff` with both sessions' links and session ids
+    `run(ctx)` again with `ctx.refresh: {n, handoff}` — in every mode the fresh session's
+    `BATON_SESSION_ID` ends `.r<n>` — (4) records activity `context-handoff` with both sessions' links and session ids
     (R-BTN-113's rule; a failing link is dropped).
   - A refresh is not a run for `max_runs`, not a failed attempt, and never lets the lease lapse.
     Past `max_refreshes` the runner suspends at the leg's `from`.
@@ -538,10 +539,11 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     `file://<absolute path>`. The bucket matches `^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`; a prefix or
     path follows R-BTN-20's path rule. A `file:` root on the Cloudflare host, or any other form, is
     refused `invalid-params`.
-  - **The run's directory.** While a root is set, the claim reply and each `advance` reply that
-    starts a run carry `leg_log: {dir}`, where `dir` is
-    `<root>/<tenant host>/<repository id>/<local ticket id>/<leg>/<run_id>/` (R-BTN-63; a bucket
-    may serve several tenants). `baton leg log` also reads a run written before run ids, under
+  - **The run's directory.** While a root is set, each `advance` reply that starts a run carries
+    `leg_log: {dir}`, where `dir` is
+    `<root>/<tenant host>/<repository id>/<local ticket id>/<leg>/<run_id>/` (R-BTN-63; the prefix
+    keeps tenants sharing a bucket from colliding, not from writing each other's logs: who may
+    write a bucket is its owners'). `baton leg log` also reads a run written before run ids, under
     `<root>/<repository id>/<local ticket id>/<leg>/<run>-<claim id>/`. Baton records it as
     `claim_legs.leg_log_dir` and keeps nothing else about the log: no file names, sizes or
     digests. The runner writes a run only when the reply that started it named a directory.
@@ -554,7 +556,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     1 s after its first frame or at 256 KB, whichever comes first; an idle leg writes nothing.
     Every write is create-only — `If-None-Match: *` on `s3:`, `ifGenerationMatch=0` on `gs:`,
     `O_CREAT | O_EXCL` on `file:` — so no chunk is ever rewritten. When the run ends (completed,
-    stopped or released), the runner writes `<dir>/end.json` last: `{claim, leg, run, chunks,
+    stopped or released), the runner writes `<dir>/end.json` last: `{claim, leg, run, run_id, chunks,
     frames, bytes, gaps, truncated, ended_at}`. A runner that dies writes no `end.json`.
   - **Credentials.** The runner writes with the credentials its own environment provides: on
     `s3:` the AWS default chain (environment, profile, web identity, instance role), with

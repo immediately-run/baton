@@ -181,6 +181,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose per-run domains, which the policy lists and Baton compares without interpreting, with a
   weaker guarantee `independent-runs` beside an unchanged `independent-review`, over a second
   dispatcher on its own key for reviews or dropping the domain rule for a sandboxing deployment
-  (2026-11-08; R-BTN-180, R-BTN-183, R-BTN-189). Baton stays agnostic about whether runs are kept
+  (2026-11-08, the owner: "yes", to the per-run label over the other two; R-BTN-180, R-BTN-183,
+  R-BTN-189; FIELDHOUSE_SPEC's 2026-11-08 history entry holds the ruling it serves). Baton stays agnostic about whether runs are kept
   apart; the weaker guarantee says what it cannot withstand, and a floor on `independent-review`
   refuses the change.

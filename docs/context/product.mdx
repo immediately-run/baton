@@ -78,7 +78,8 @@ on which refs, who approves what, and whose attestations count (BATON_SPEC [R-BT
   coordination record, not a boundary, and no guarantee is required.
 - **The strict end.** The `protected` and `protected-hardware` presets turn the same state into a
   boundary. Trusted runners land only what the policy's attestations allow. Reviews count only
-  from independent domains, and human gates are satisfied only by a human-only key. A deployment
+  from independent domains (or, where the policy lists a credential's runs as domains of their
+  own, independent runs: `independent-runs`), and human gates are satisfied only by a human-only key. A deployment
   that depends on Baton requires named **guarantees**, such as `no-runner-lands`,
   `independent-review`, `tickets-approved` and `human-gates`, and lists them as **floors**. Baton
   then refuses any policy change that would break one of them, and stops the repository while one

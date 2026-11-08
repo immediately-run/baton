@@ -68,15 +68,15 @@ What exists, and where it falls short:
    migration, or record in the PR why one stays out.
 3. **The runner exports it.** Every leg process gets `BATON_RUN_ID`; `BATON_LEG` stays unchanged
    (R-BTN-145 keys process stopping on it). Both new names join R-BTN-144's table of the only
-   environment names a leg is given. An archiver (R-BTN-20) names the run id in what it
-   reports.
+   environment names a leg is given.
 4. **A refresh's session is `<run_id>.r<n>`.** The runner forms it (Baton knows of a refresh
    only through the `context-handoff` activity, which B-12 adds and which records both session
    ids; until B-12 lands there is no refresh and no suffix but `.r0`), exports it as
-   `BATON_SESSION_ID` (`<run_id>.r0` for the first session), and `session_url` reports name it.
+   `BATON_SESSION_ID` (`<run_id>.r0` for the first session).
 5. **Outside Baton, prefix the tenant.** Anything a runner writes to a place another tenant could
    also write — a forge ref, a bucket path — is keyed `<tenant host>/<run_id>` or a path form of
-   it, the host taken from the claim's tenant URL. B-186's refs are the first user.
+   it, the tenant host being the host of the tenant's configured origin (R-BTN-135) in
+   R-BTN-63's ref-safe form. B-186's refs are the first user.
 6. **Leg logs move to the run id.** A run started after this lands writes under
    `<root>/<tenant host>/<repository id>/<local ticket id>/<leg>/<run_id>/` (a bucket may serve
    several tenants, item 5); `baton leg log` reads both forms.
@@ -125,3 +125,5 @@ What exists, and where it falls short:
 ## Status
 
 _filed 2026-11-08._
+
+_(2026-11-08: rules re-read: R-BTN-63, R-BTN-106, R-BTN-180, R-BTN-183, R-BTN-188, R-BTN-189)_ — this ticket's spec half is in baton#197; the items above match it.
