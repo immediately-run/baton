@@ -14,7 +14,8 @@ description: "B-105 item 7: route choices (§6.10, R-BTN-176) form their atoms f
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/196
 depends_on:
   - B-105
 ---
@@ -54,3 +55,4 @@ readings; nothing in the route-choice stratum reads these tables.
 ## Status
 
 - 2026-11-02: the spec restructure's part 4 (B-166): route choices are gone (R-BTN-176 retired; B-167); the tables this ticket retires are read by nothing in core either way, so its plan stands, citing §6.10 and R-BTN-76 in place of R-BTN-176.
+- 2026-11-08: implemented (PR #196) — migration 0036 drops the tables and the FK children forced with them; the sync's `providers`/`prices` and the heartbeat's advisory fields ride the accept-and-ignore window; the suspension endpoints answer 404; S-BTN-203 verifies it. B-107's wider retirement (PR #149, open) overlaps: whichever lands first, the other trims.
