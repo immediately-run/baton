@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1187
 tier: judgement
-description: "R-BTN-72's runner claims one ticket and runs its legs one at a time, and the architecture page defers a runner multiplexing legs until a sandbox fleet's evidence is in. With legs in executor sandboxes (B-184) the runner mostly waits on I/O, so let it hold up to k claims at once — never two legs of one ticket, which one live claim per ticket already ensures — declaring k on its heartbeat, fencing each claim alone, and reattaching to its running legs after a restart within the lease. A runner without --concurrency behaves as today. Requires: B-184, B-185."
+description: "R-BTN-72's runner claims one ticket and runs its legs one at a time, and the architecture page defers a runner multiplexing legs until a sandbox fleet's evidence is in. With legs started through an executor (B-184), possibly elsewhere, the runner may mostly wait on I/O, so let it hold up to k claims at once — never two legs of one ticket, which one live claim per ticket already ensures — declaring k on its heartbeat, fencing each claim alone, and reattaching to its running legs after a restart within the lease. A runner without --concurrency behaves as today. Requires: B-184, B-185."
 topics:
   - baton
 owns: {}

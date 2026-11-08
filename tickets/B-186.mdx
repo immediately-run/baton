@@ -35,8 +35,7 @@ it can continue from there."
 `refs/baton/*` outside every guarantee, Decisions 2026-10-30), [§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9)
 (a leg's scope).
 **Depends on:** B-185 (the run id that names a draft).
-**Used by:** B-184 (its executor interface gains `salvage`), fieldhouse FLDH-52 (salvage before a
-leg's VM is discarded).
+**Used by:** B-184 (its executor interface gains `salvage`), any executor that discards a leg's environment (Fieldhouse's sandbox executor).
 
 ### Why
 

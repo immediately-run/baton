@@ -1,5 +1,5 @@
 ---
-title: "B-187 — Review domains from a sandbox label: a grant whose runner runs each leg in a fresh sandbox reports a per-run domain, which independent review and no_chain_from compare"
+title: "B-187 — Per-run domains: a grant whose runner reports a fresh label for every leg run is compared run by run in independent review and no_chain_from"
 id: B-187
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1186
 tier: judgement
-description: "A domain is a grant's label (R-BTN-180), and no_chain_from compares credentials, so a runner that runs every leg in a fresh sandbox of its own (B-184) is still one domain and is refused its own review legs, and merge.reviews can never count its reviews as independent. Let the approvers.roles approver mark a grant domain: per-run; its runner then reports each leg run's sandbox label (the executor's environment, with B-185's run id) on advance and end, Baton records std:wrote@1, std:ran@1 and std:review@1 with that per-run domain, refuses a label already used by another run, and no_chain_from and merge.reviews compare per-run domains for that grant. Baton verifies no label: it trusts the grant's runner, as it trusts every domain label today. Requires: B-185."
+description: "A domain is a grant's label (R-BTN-180), and no_chain_from compares credentials, so a runner that runs every leg in an environment of its own (an executor's concern, B-184) is still one domain and is refused its own review legs, and merge.reviews can never count its reviews as independent. Let the approvers.roles approver mark a grant domain: per-run; its runner then reports a label for each leg run (opaque to Baton; an executor's environment, say) on advance and end, Baton records std:wrote@1, std:ran@1 and std:review@1 with that per-run domain, refuses a label already used by another run, and no_chain_from and merge.reviews compare per-run domains for that grant. Baton verifies no label and knows nothing of what one names: it trusts the grant's runner, as it trusts every domain label today. Requires: B-185."
 topics:
   - baton
 owns: {}
@@ -21,7 +21,7 @@ depends_on:
 
 **Brief:** the owner, 2026-11-08, ruled that Fieldhouse's first edition does not guard against a
 compromised runner whose legs all run in sandboxes, and agreed to count review independence by a
-sandbox label the runner attests, over a second dispatcher or over dropping the domain rule
+label the runner attests for each leg's sandbox, over a second dispatcher or over dropping the domain rule
 (FIELDHOUSE_SPEC R-FH-80, R-FH-82 and its Decisions, 2026-11-08). With one runner credential,
 today's rules refuse that runner its own review legs.
 
@@ -32,44 +32,46 @@ This is a proposal: the spec half lands first, as its own spec PR, with the owne
 [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8): `independent-review`, `merge.reviews`),
 [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) (`no_chain_from`), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)
 ([R-BTN-46](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)).
-**Depends on:** B-185 (the run id a per-run label is bound to). Works with any executor; B-184
-makes the sandbox real.
+**Depends on:** B-185 (the run id a per-run label is bound to). Works with any executor; what a label stands for (a sandbox, a VM,
+a container, nothing) is the deployment's, and Baton never learns it.
 **Used by:** FIELDHOUSE_SPEC R-FH-82 (its section 5), FLDH-53's findings.
 
 ### What to build
 
 1. **A grant may be `domain: per-run`.** The `approvers.roles` approver may set a grant's domain
    to `per-run` instead of a label (`PUT /v1/owner/{repository}/grants/{fingerprint}/role`). Such a
-   grant's runner must report a `sandbox` label on every `advance` that starts a leg run and on
+   grant's runner must report a `run_label` on every `advance` that starts a leg run and on
    the `end` or `advance` that finishes it; a missing label is refused `invalid-params`.
-2. **The per-run domain** is `<grant fingerprint>/<sandbox label>`, the label 1–128 characters of
-   `[A-Za-z0-9_.:-]` (an executor's `environment`, B-184; a sandbox id). It is stored on the run's
+2. **The per-run domain** is `<grant fingerprint>/<run label>`, the label 1–128 characters of
+   `[A-Za-z0-9_.:-]` (opaque: an executor's `environment`, B-184, for instance). It is stored on the run's
    `claim_legs` row beside B-185's `run_id`.
-3. **A label is used once.** Baton refuses (`invalid-params`, rule `sandbox-reused`) a label any
-   earlier run of the same grant reported, on any ticket, so a sandbox that ran one leg cannot be
-   reported as fresh for another.
+3. **A label is used once.** Baton refuses (`invalid-params`, rule `label-reused`) a label any
+   earlier run of the same grant reported, on any ticket, so a label that named one run cannot
+   name another.
 4. **Attestations carry the per-run domain.** `std:wrote@1`, `std:ran@1` and `std:review@1`
    (R-BTN-181) from a per-run grant carry the run's domain; R-BTN-183's independent review
    compares those, unchanged otherwise: each review from a domain other than every writer domain
    of `H`, no two from one domain.
 5. **`no_chain_from` compares per-run domains** for a per-run grant: a review leg is refused only
-   when its run's domain is one that ran a named leg of the ticket, which a fresh sandbox never
+   when its run's domain is one that ran a named leg of the ticket, which a fresh label never
    is. For every other grant it compares credentials, as today.
 6. **Shown on the record.** The ticket's history (R-BTN-81) and the dashboard show a run's per-run
-   domain, so an owner sees that a review ran in a sandbox no writer used.
+   domain, so an owner sees that a review ran under a label no writer used.
 
 ### What not to do
 
 - **No verification Baton cannot do:** Baton checks a label's shape and its single use, never that
-  it names a real or fresh sandbox (R-BTN-46; R-BTN-180: "Baton compares domains as labels and
+  it names anything real or fresh (R-BTN-46; R-BTN-180: "Baton compares domains as labels and
   verifies nothing about them").
+- **No isolation vocabulary:** the API, the schema and the dashboard say `run_label`, never
+  sandbox, VM or container (B-184's agnosticism).
 - **No change for grants not marked `per-run`.**
 - **No per-run marking of a `trusted-runner` grant** (the merge runner stays one labelled domain).
 
 ### Trust
 
 - **`domain: per-run`** — set only by the `approvers.roles` approver, as every domain is.
-- **The `sandbox` label** — the runner's word. Marking a grant `per-run` is the owner's statement
+- **The `run_label`** — the runner's word. Marking a grant `per-run` is the owner's statement
   that the runner is trusted to report it honestly (FIELDHOUSE_SPEC R-FH-80); a compromised
   per-run runner can forge independence, which is exactly the risk that ruling accepts.
 
@@ -84,9 +86,9 @@ makes the sandbox real.
 
 ### Tests
 
-- A per-run grant implements and then reviews one ticket in two sandboxes: the review is admitted,
+- A per-run grant implements and then reviews one ticket under two labels: the review is admitted,
   and two such reviews satisfy `merge.reviews {count: 2}`.
-- The same grant reporting a label twice is refused `sandbox-reused`.
+- The same grant reporting a label twice is refused `label-reused`.
 - A per-run grant omitting the label on `advance` is refused.
 - A labelled grant behaves exactly as today (the existing scenarios pass unchanged).
 - Each behaviour change names its `S-BTN-n` scenario (R-BTN-31).
