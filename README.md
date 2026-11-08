@@ -17,7 +17,7 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 `@immediately-run/baton` is the `baton` command, published from this repository:
 
 ```sh
-npx --yes @immediately-run/baton@0.1.2 run   # a runner (§6.13), with BATON_KEY_FILE set
+npx --yes @immediately-run/baton@0.1.3 run   # a runner (§6.13), with BATON_KEY_FILE set
 ```
 
 From the package, `baton run`, `baton repo init`, `baton decision list` and the
@@ -30,9 +30,11 @@ Owners, administrators and runners run a pinned release only — `npx --yes
 @immediately-run/baton@<version>` (or an installed copy), never a checkout's CLI, whose code a
 push changes (B-138): a working tree's CLI refuses an owner or administrator key unless `--dev`
 is given, and `scripts/start-runner.sh` installs the pinned release outside every checkout it
-works. In a checkout, `node cli/baton.mjs` remains the development path — the repository
-commands (`tickets`, `repo`, `test-course`, `request`) and the reads run from it, and the
-management commands with `--dev`.
+works, probing that the release speaks the runner's interface before it starts. Pin a release
+that carries these commands — 0.1.3 is the first (older ones, like 0.1.2, predate B-138's guard
+and read the transition's `IR_BATON_*` credential names). In a checkout, `node cli/baton.mjs`
+remains the development path — the repository commands (`tickets`, `repo`, `test-course`,
+`request`) and the reads run from it, and the management commands with `--dev`.
 
 `baton run --lock` (R-BTN-178) and its tests (`npm test`, `npm run model:pr`) need util-linux
 `flock` on `PATH`; macOS has none — `brew install flock` gives one with the same flags.

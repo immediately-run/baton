@@ -359,6 +359,11 @@ describe('an owner or administrator key never runs a working-tree CLI (B-138)', 
     mkdirSync(dirname(released), { recursive: true });
     writeFileSync(released, '');
     expect(workingTreeOf(released)).toBeNull();
+    // Round 1, the dotfiles pattern: a $HOME that is itself a git repository does not make a
+    // released copy under it working-tree code — npm's node_modules boundary sits between the
+    // .git and the file, and no branch of the outer tree owns what npm laid down.
+    spawnSync('git', ['init', '-q', dir]);
+    expect(workingTreeOf(released)).toBeNull();
   });
 
   it('the CLI run from this checkout with -i exits 2, naming the pinned command; --dev overrides', () => {
@@ -371,6 +376,15 @@ describe('an owner or administrator key never runs a working-tree CLI (B-138)', 
     expect(refused.status).toBe(2);
     expect(refused.stderr).toContain(`npx --yes @immediately-run/baton@${version} owner grants baton -i ${file}`);
     expect(refused.stderr).toContain('working tree');
+    // Round 1: the suggested command survives a copy-paste — a key path with a space in it
+    // arrives shell-quoted, not as two arguments.
+    const spaced = join(dir, 'my keys');
+    mkdirSync(spaced);
+    const spacedKey = join(spaced, 'owner.key');
+    createApiKey(spacedKey);
+    const quoted = spawnSync('node', [cli, 'owner', 'grants', 'baton', '-i', spacedKey, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
+    expect(quoted.status).toBe(2);
+    expect(quoted.stderr).toContain(`-i '${spacedKey}'`);
     // The administrator path refuses the same way.
     const admin = spawnSync('node', [cli, 'admin', 'state', '-i', file, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
     expect(admin.status).toBe(2);
@@ -379,6 +393,11 @@ describe('an owner or administrator key never runs a working-tree CLI (B-138)', 
     const dev = spawnSync('node', [cli, 'owner', 'grants', 'baton', '--dev', '-i', file, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
     expect(dev.status).toBe(2);
     expect(dev.stderr).not.toContain('working tree');
+    // Round 1: a --dev that sits in a *value* position is that value, not the override —
+    // `--capabilities --dev` names the capability string "--dev", and the guard still refuses.
+    const asValue = spawnSync('node', [cli, 'owner', 'grant', 'baton', '--capabilities', '--dev', '-i', file, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
+    expect(asValue.status).toBe(2);
+    expect(asValue.stderr).toContain('working tree');
     // The other roles still run from a checkout: a read signed with any granted key is the
     // leg's own path, so it passes the guard (and fails on its request, as here).
     const board = spawnSync('node', [cli, 'board', 'baton', '-i', file, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
@@ -391,6 +410,8 @@ describe('an owner or administrator key never runs a working-tree CLI (B-138)', 
     createApiKey(file);
     await expect(main(['owner', 'grants', 'baton', '-i', file, '--url', ORIGIN])).rejects.toThrow(/working tree/);
     await expect(main(['admin', 'open', '-i', file, '--url', ORIGIN])).rejects.toThrow(/npx --yes @immediately-run\/baton@/);
+    // A value-position --dev is not the override in-process either.
+    await expect(main(['owner', 'grant', 'baton', '--capabilities', '--dev', '-i', file, '--url', ORIGIN])).rejects.toThrow(/working tree/);
     // --dev: the guard passes and the request itself goes out.
     const was = globalThis.fetch;
     const outWrite = process.stdout.write;

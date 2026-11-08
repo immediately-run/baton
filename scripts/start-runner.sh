@@ -24,21 +24,23 @@
 #                 grant does not allow is refused at the heartbeat.
 #   --cli         the released CLI the runner runs: the dist/baton.mjs of an installed
 #                 @immediately-run/baton (B-138). Never a checkout's cli/ — the script refuses
-#                 a CLI inside a git working tree, whose code a push (a branch a leg checks
-#                 out) changes. Default (BATON_CLI): a pinned release the script installs
-#                 itself, outside every checkout.
+#                 a CLI inside a git working tree (resolved through symlinks), whose code a push
+#                 (a branch a leg checks out) changes. Default (BATON_CLI): a pinned release the
+#                 script installs itself, outside every checkout.
 #   --cli-version  the release the default install pins (BATON_CLI_VERSION). Default: the
 #                 version this checkout's package.json names — the release this tree is or
 #                 becomes; npm only ever has approval-gated releases, so a push can re-pin
 #                 among those or stop the runner loudly (an unpublished name cannot install),
-#                 never install unreviewed code.
+#                 never install unreviewed code. The probe below refuses a pin that predates
+#                 the interface this script speaks (the BATON_* credential names, run's flags).
 #
 # Environment: BATON_KEY_FILE (or BATON_KEY / BATON_TOKEN) must name the worker key the owner
 # granted — the hostname must match the grant, and the grant is what the runner declares unless
 # --capabilities narrows it (runbook step 5). BATON_HOSTNAME
 # overrides the reported hostname; BATON_URL, BATON_REPOSITORY have defaults. BATON_CLI,
 # BATON_CLI_VERSION name --cli/--cli-version; BATON_CLI_HOME moves the default install
-# (default: ~/.local/share/immediately-run/baton/cli — a directory no leg writes).
+# (default: ~/.local/share/immediately-run/baton/cli — outside every checkout; every start
+# re-verifies the install's version and the hash recorded at install).
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -112,9 +114,10 @@ fi
 # The finding (2026-10-27, 5): this script used to run node "$ROOT/cli/baton.mjs" — the checkout
 # the legs themselves work in, so a branch a leg checks out changed the runner's own code at the
 # next restart. The CLI now comes from outside every checkout: --cli names an installed release
-# outright, else the script installs the pinned @immediately-run/baton into a directory no leg
-# writes ($BATON_CLI_HOME, default under ~). The release needs no checkout and no esbuild: its
-# dist/ is prebuilt (scripts/build-cli.mjs).
+# outright, else the script installs the pinned @immediately-run/baton into a directory
+# outside every checkout ($BATON_CLI_HOME, default under ~) and re-verifies the install at
+# every start. The release needs no checkout and no esbuild: its dist/ is prebuilt
+# (scripts/build-cli.mjs).
 if [ -n "$CLI_NAMED" ]; then
   CLI="$CLI_NAMED"
   CLI_WHERE="named by --cli (BATON_CLI)"
@@ -140,14 +143,44 @@ else
     npm install --no-fund --no-audit --prefix "$DEST" "@immediately-run/baton@$CLI_VERSION" \
       || die "npm could not install @immediately-run/baton@$CLI_VERSION into $DEST — is that version released? (npm view @immediately-run/baton versions; --cli-version pins another)"
   fi
+  # The pin is a property, not a hope (round 1): whatever sits at the install path is checked on
+  # every start — the version npm laid beside the CLI, and a hash of the CLI itself, recorded
+  # when this script installed (or adopted) it. Legs run as this user over the same $HOME, so a
+  # leg that writes the install changes the runner's own code at the next restart — finding 5's
+  # shape through another path — unless the next start refuses it here. A same-user forger can
+  # rewrite the record too; that race is the VM level's, this check catches every accidental
+  # and pushed-code path.
+  PKG_JSON="$DEST/node_modules/@immediately-run/baton/package.json"
+  INSTALLED_VERSION="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).version ?? ""' "$PKG_JSON" 2>/dev/null || true)"
+  [ "$INSTALLED_VERSION" = "$CLI_VERSION" ] \
+    || die "the pinned install at $DEST is version ${INSTALLED_VERSION:-unreadable}, not $CLI_VERSION — it was written after the install. Remove $DEST and start again to reinstall the pin"
+  SUM_FILE="$DEST/install.sha256"
+  CLI_SUM="$(node -e 'const {createHash}=require("crypto"),fs=require("fs");process.stdout.write(createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"))' "$CLI")" \
+    || die "cannot hash $CLI — is it readable?"
+  if [ -f "$SUM_FILE" ]; then
+    [ "$(tr -d '[:space:]' <"$SUM_FILE")" = "$CLI_SUM" ] \
+      || die "the pinned CLI at $CLI changed since it was installed (its sha256 no longer matches $SUM_FILE) — the runner's own code is not what was pinned (B-138). Remove $DEST and start again to reinstall the pin"
+  else
+    printf '%s\n' "$CLI_SUM" >"$SUM_FILE"   # adopting an install this script did not lay down (an older script's): recorded now, verified from the next start on
+  fi
 fi
 [ -f "$CLI" ] || die "the CLI to run ($CLI) does not exist — --cli names an installed release's dist/baton.mjs"
 
+# The CLI as it really is: through any symlink and relative spelling (round 1 — `npm link` names
+# a checkout's cli/baton.mjs through one) and absolute, so the walk, the probe and the launch all
+# run the same file.
+CLI="$(node -e 'process.stdout.write(require("fs").realpathSync(process.argv[1]))' "$CLI")" \
+  || die "cannot resolve $CLI — does it exist?"
+
 # A checkout's cli/ (or a dist/ built inside one) is code a push changes: refuse it, whichever
-# way it was named — the runner's own code is what a leg would run next.
+# way it was named — the runner's own code is what a leg would run next. A `.git` above a
+# node_modules boundary owns nothing below it (the CLI's own guard walks the same line): a
+# released copy installed under a $HOME that is itself a git repository — the dotfiles pattern —
+# is still a released copy.
 CLI_DIR="$(cd "$(dirname "$CLI")" && pwd -P)" || die "the CLI to run ($CLI) has no readable directory"
 WORKTREE="$CLI_DIR"
 while :; do
+  [ "$(basename "$WORKTREE")" = node_modules ] && break   # npm's boundary: released code
   if [ -e "$WORKTREE/.git" ]; then
     die "the CLI to run ($CLI) is inside the git working tree at $WORKTREE — a pushed branch would change the runner's own code (B-138). start-runner installs a pinned release outside every checkout; pass --cli <an installed release's dist/baton.mjs> instead"
   fi
@@ -155,15 +188,6 @@ while :; do
   [ "$PARENT" = "$WORKTREE" ] && break
   WORKTREE="$PARENT"
 done
-# The probe: `baton key create` loads the whole module (sign.mjs, jose) and exits 0 needing no
-# Baton and no credential — a command that works the same on every release (`run --help`, by
-# contrast, is newer than the releases this script may pin).
-PROBE_KEY="${TMPDIR:-/tmp}/baton-start-runner-probe.$$"
-if ! node "$CLI" key create "$PROBE_KEY" >/dev/null 2>&1; then
-  rm -f "$PROBE_KEY" "$PROBE_KEY.pub"
-  die "node cannot run $CLI (its 'key create' probe failed) — the runner needs node >= 22.13 (package.json engines) and a complete install"
-fi
-rm -f "$PROBE_KEY" "$PROBE_KEY.pub"
 
 [ -d "$HOME_DIR/.git" ] || [ -f "$HOME_DIR/.git" ] || die "$HOME_DIR is not a git checkout"
 GIT_DIR="$(git -C "$HOME_DIR" rev-parse --absolute-git-dir)"
@@ -212,6 +236,21 @@ RUN_ARGS=(run --harness "$HARNESS" --home "$HOME_DIR" --session "$SESSION")
 [ -n "${VERBOSE:-}" ] && RUN_ARGS+=(--verbose)
 [ -n "$URL" ] && RUN_ARGS+=(--url "$URL")
 [ -n "$CAPABILITIES" ] && RUN_ARGS+=(--capabilities "$CAPABILITIES")
+
+# The probe (round 1): prove the run path, not merely that node loads the file. The CLI runs
+# `run` with exactly the arguments the launch would pass, every credential variable (today's
+# BATON_* spellings and the transition's IR_BATON_* ones) stripped from its environment — a
+# release that speaks this script's interface parses those flags and stops at its credential
+# check (`no credential: BATON_KEY_FILE`, §6.4) before any network, so the probe is hermetic:
+# no Baton is contacted, nothing claims. A pin that predates the interface — 0.1.2, which reads
+# IR_BATON_* and knows no --verbose — fails here, loudly, instead of at 2am mid-leg.
+PROBE_ERR="$(env -u BATON_KEY_FILE -u BATON_KEY -u BATON_TOKEN \
+    -u IR_BATON_KEY_FILE -u IR_BATON_KEY -u IR_BATON_TOKEN \
+    node "$CLI" "${RUN_ARGS[@]}" 2>&1 1>/dev/null || true)"
+case "$PROBE_ERR" in
+  *"no credential: BATON_KEY_FILE"*) : ;;
+  *) die "the CLI to run ($CLI — $CLI_WHERE) does not speak this start script's interface: its 'run' did not reach today's credential check (BATON_KEY_FILE) — pin a release that carries it (--cli-version <version>; npm view @immediately-run/baton versions). It said: ${PROBE_ERR:-"(no output)"}" ;;
+esac
 
 note "credential:   $CRED"
 note "url:          ${URL:-default (https://baton.immediately.run)}"

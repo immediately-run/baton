@@ -25,14 +25,16 @@ consulting `code_repos`.
 Every command below was run end to end on 2026-11-05 — registration, a sync with no GitHub token,
 a runner's claim, its leg and its release — except the parts marked **untested**, which need a
 real GitHub repository. (The run predates B-138: the CLI was then `node cli/baton.mjs` from the
-checkout; these commands pin the released package, whose CLI is that code at its release
-commit.)
+checkout. The commands below pin `@immediately-run/baton@0.1.3` — the first release that carries
+them and B-138's guard; the registry's newest at writing, 0.1.2, predates both, and its `run`
+reads the transition's `IR_BATON_*` names, so until 0.1.3 publishes these pinned commands refuse
+loudly — the guard working, not a step to route around.)
 
 ## 0. What you need
 
 - Node 22.13 or later, git, and a checkout of `immediately-run/baton` at `main`
   (`npm ci` in it — it runs the local Baton, step 4). Every CLI command is the pinned release —
-  `npx --yes @immediately-run/baton@0.1.2` below — never the checkout's `cli/baton.mjs`, whose
+  `npx --yes @immediately-run/baton@0.1.3` below — never the checkout's `cli/baton.mjs`, whose
   owner and administrator commands refuse a key without `--dev` (B-138).
 - An agent harness the legs run: opencode (the default) or Claude Code (`--agent claude-code`).
 - `gh`, signed in as you, with push to the GitHub repository: the agents push branches and open
@@ -75,7 +77,7 @@ it was built from, so the scaffold pins the course to that release):
 
 ```sh
 cd ~/baton/home
-npx --yes @immediately-run/baton@0.1.2 repo init --course create-pr    # or --agent claude-code
+npx --yes @immediately-run/baton@0.1.3 repo init --course create-pr    # or --agent claude-code
 rm -rf .github                                                          # a plain home runs no Actions
 ```
 
@@ -97,17 +99,17 @@ npm run start:local -- --db ~/baton/baton.db --port 8787 --admin-keys ~/baton/ke
 ```
 
 It serves `http://127.0.0.1:8787`, loopback only. Leave it running; the database file is the
-whole Baton. `npx --yes @immediately-run/baton@0.1.2 admin -i ~/baton/keys/baton_admin open`
+whole Baton. `npx --yes @immediately-run/baton@0.1.3 admin -i ~/baton/keys/baton_admin open`
 prints a login link to the dashboard.
 
 ## 5. Register the home
 
 ```sh
 export BATON_URL=http://127.0.0.1:8787
-npx --yes @immediately-run/baton@0.1.2 admin -i ~/baton/keys/baton_admin repo add <you>/home --id home --forge git \
+npx --yes @immediately-run/baton@0.1.3 admin -i ~/baton/keys/baton_admin repo add <you>/home --id home --forge git \
   --remote ssh://localhost/<path to>/home.git --default-branch main \
   --owner-key ~/baton/keys/baton_owner.pub --sync-key ~/baton/keys/baton_sync.pub --cut-over
-npx --yes @immediately-run/baton@0.1.2 owner -i ~/baton/keys/baton_owner grant home --key ~/baton/keys/baton_runner.pub \
+npx --yes @immediately-run/baton@0.1.3 owner -i ~/baton/keys/baton_owner grant home --key ~/baton/keys/baton_runner.pub \
   --hostname "$(hostname -s)" --capabilities runner:leg-trees
 ```
 
@@ -143,19 +145,19 @@ reads.
 
 ```sh
 GITHUB_TOKEN=<the sync's token> BATON_URL=http://127.0.0.1:8787 \
-  npx --yes @immediately-run/baton@0.1.2 repo sync --root ~/baton/home --sync-key ~/baton/keys/baton_sync
+  npx --yes @immediately-run/baton@0.1.3 repo sync --root ~/baton/home --sync-key ~/baton/keys/baton_sync
 ```
 
 Check: it prints `the home is a plain git repository, not on GitHub — reading only the
 repositories tickets name in repos: (1)`, then `advanced at <sha> … accepted`; `npx --yes
-@immediately-run/baton@0.1.2 board -i ~/baton/keys/baton_owner home` lists `home:LIN-1` ready at
+@immediately-run/baton@0.1.3 board -i ~/baton/keys/baton_owner home` lists `home:LIN-1` ready at
 `filed`. With no ticket naming a repository, no token is needed at all.
 
 No webhook reaches a loopback Baton, so run the sync on a loop in its own terminal — once a
 minute is R-BTN-105's pace:
 
 ```sh
-while true; do GITHUB_TOKEN=… BATON_URL=… npx --yes @immediately-run/baton@0.1.2 repo sync \
+while true; do GITHUB_TOKEN=… BATON_URL=… npx --yes @immediately-run/baton@0.1.3 repo sync \
   --root ~/baton/home --sync-key ~/baton/keys/baton_sync; git -C ~/baton/home pull -q; sleep 60; done
 ```
 
@@ -170,7 +172,7 @@ One checkout per runner (architecture: one runner per checkout), each in its own
 ```sh
 git clone ~/baton/home.git ~/baton/runner1
 BATON_URL=http://127.0.0.1:8787 BATON_KEY_FILE=~/baton/keys/baton_runner \
-  npx --yes @immediately-run/baton@0.1.2 run --home ~/baton/runner1 --repository home --hostname "$(hostname -s)"
+  npx --yes @immediately-run/baton@0.1.3 run --home ~/baton/runner1 --repository home --hostname "$(hostname -s)"
 ```
 
 Check: the log shows `claimed home:LIN-1 at filed, queued leg implement`, then the leg's agent

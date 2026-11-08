@@ -192,11 +192,16 @@ execute far more than `.baton/` and `.claude/`:
   owner|admin -i KEY` from a `baton` checkout the worker pushes, and runners running the CLI
   from the leg checkout — pushed code reading the owner's and administrator's keys. B-138
   closed that: the docs name the pinned release only (`npx --yes @immediately-run/baton@<version>`),
-  the CLI refuses an owner or administrator key when it runs from a working tree (a `.git`
-  beside it) without `--dev`, and `start-runner.sh` installs the pinned release outside every
-  checkout and refuses a checkout's CLI. The residual is the `--dev` override and every command
-  that is not an owner's or an administrator's (the reads, `run`, the repository commands),
-  which still run a working tree's code with worker keys the VM level already holds;
+  the CLI refuses an owner or administrator key when it runs from a git working tree (a `.git`
+  at or above it, above npm's `node_modules` boundary — so a released copy stays released even
+  under a `$HOME` that is itself a repository) without `--dev`, and `start-runner.sh` installs
+  the pinned release outside every checkout, verifies the install's version and hash at every
+  start, and refuses a checkout's CLI. The residual is the `--dev` override and every command
+  that is not an owner's or an administrator's (the reads, `run`, the repository commands):
+  they still run a working tree's code — with worker keys the VM level already holds, and with
+  any key handed them, an owner's or administrator's included, for the CLI cannot tell a key's
+  role from its file: the refusal keys off the owner and administrator commands, where such a
+  key is the point of the command;
 - tests, `package.json` scripts, `.husky/`, `.envrc`, `.vscode/tasks.json`, `.mcp.json` servers,
   nested `CLAUDE.md`, `.claude/agents` and `.claude/commands`, in any checkout a leg or an owner
   session works in.
