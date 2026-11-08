@@ -42,7 +42,9 @@ each running leg).
 ### What to build
 
 1. **The lock becomes per ticket only.** R-BTN-4 is rewritten: at most one `active` claim per
-   ticket, and per runner at most its declared `concurrency`. A new migration drops the partial
+   ticket, and per runner at most the lower of its declared `concurrency` and its grant's
+   `max_claims` — an owner's ceiling set by the `approvers.roles` approver, default 1, so a
+   compromised runner can hold no more tickets than an owner allowed. A new migration drops the partial
    unique index `one_active_claim_per_worker` (0001; still on `claims(worker_id)` after 0005's
    rename) and Baton enforces the per-runner bound in the claim transaction instead. The per-ticket
    index stays.
@@ -53,9 +55,9 @@ each running leg).
 3. **Per-claim independence.** Each claim keeps its own fence, lease accounting, stop handling
    (R-BTN-119) and end; one claim's release, failure or supersession touches no other. Course
    code for each claim runs in that claim's executor session (B-184 item 4), never shared.
-4. **Capacity bounds `k`.** A runner never starts a leg past the seats its capabilities and
-   readings allow (R-BTN-178): `k` is a ceiling, the capacity readings for its model credential
-   the real bound.
+4. **Seats and readings.** Seats (R-BTN-178), which an administrator sets, bound the legs that
+   require a capped capability, whatever `k` is; a provider's readings advise the runner and its
+   course's ranking, and bind nothing.
 5. **Reattach after a restart.** The runner persists, per held claim, the claim id, run id and
    executor handle in its state file. Restarted within the lease, it resumes with its persisted
    runner secret — not a re-key, which R-BTN-14 accepts only for a runner holding no active claim
@@ -71,14 +73,16 @@ each running leg).
 ### What not to do
 
 - **No two legs of one ticket at once:** one live claim per ticket is unchanged.
-- **No `k > 1` with `builtin`.** Legs of different tickets would run as one OS user, each able to
-  read the runner's secret and reach the others' channels (R-BTN-107, R-BTN-144): the runner
-  refuses `--concurrency` above 1 unless its executor declares that it runs each leg apart from
-  the runner's user, and says why.
+- **No isolation rule.** The runner never asks whether its executor isolates legs (B-184's
+  agnosticism); what `k > 1` means under `builtin` is stated under Trust.
 - **No change at `k = 1`.**
 
 ### Trust
 
+- **Under `builtin`, the legs of all `k` claims share the runner's OS user**: each can read the
+  runner's secret and reach the others' channels (R-BTN-107, R-BTN-144), so a hostile leg can act
+  for any claim the runner holds. That is `builtin`'s cooperative bound, `k` times over; a
+  deployment that runs `k > 1` with untrusted legs uses an executor that keeps them apart.
 - **`concurrency` and the held-claims list on the heartbeat** — the runner's word, bounded by
   Baton's own record of which claims the runner holds; Baton never trusts the list over that.
 - **The state file's handles** — the runner's own file on its host, never read from a checkout.
@@ -95,8 +99,8 @@ each running leg).
 - `k = 3`: three tickets' legs run at once; stopping one leaves the other two running.
 - A runner killed and restarted within the lease reattaches to its running sessions; past the
   lease its claims are reaped as today.
-- `--concurrency 2` with `builtin` is refused with its reason.
-- A second claim beyond `concurrency` is refused in the claim transaction; the dropped index's
+- A claim beyond the lower of `concurrency` and the grant's `max_claims` is refused in the claim
+  transaction; the dropped index's
   migration applies cleanly on a database holding active claims.
 - `k = 1` passes the full existing suite unchanged.
 - Each behaviour change names its `S-BTN-n` scenario (R-BTN-31).

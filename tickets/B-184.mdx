@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1183
 tier: judgement
-description: "Baton dictates leg isolation in three places: R-BTN-107's closed list of modes and the built-in runner:session capability, repository code (a leg script's close and handoff, rank.mjs, the ticket source) run by the runner itself, and architecture.mdx's prescribed placement (several runners packed in one Firecracker sandbox). Replace them with one seam: the runner hands every leg to an executor (start, stop, end, exec) whose code the runner's host picks — builtin (today's child process, the default), home (.baton/executor.mjs), home-signed (the same, only at an owner-signed commit) or pinned (a host path and digest); the repository may hand each leg opaque executor data that only the executor reads; the runner declares its executor's source, digest and capability names, which Baton records and matches by name. A single-user cooperative setup pays nothing; a factory ships its own executor. Requires: none."
+description: "Baton dictates leg isolation in three places: R-BTN-107's closed list of modes and the built-in runner:session capability, repository code (a leg script's close and handoff, rank.mjs, the ticket source) run by the runner itself, and architecture.mdx's prescribed placement (several runners packed in one Firecracker sandbox). Replace them with one seam: the runner hands every leg to an executor (start, stop, end, exec) whose code the runner's host picks — builtin (today's child process, the default), home (.baton/executor.mjs), home-signed (the same, only at an owner-signed commit) or pinned (a host path and digest); the repository may hand each leg opaque executor data that only the executor reads; the runner declares its executor's source, digest and capability names, which Baton records and matches by name. A single-user cooperative setup pays nothing; a factory ships its own executor. Requires: B-185."
 topics:
   - baton
 owns: {}
@@ -79,9 +79,11 @@ B-186 (below).
    proxies to Baton with its own credential, so no executor needs to hand a leg a Baton credential.
    Whether a leg can nonetheless reach the runner's credential is the executor's matter: under
    `builtin` a leg runs as the runner's user and can read its state file and use its ssh-agent, as
-   today (R-BTN-107, R-BTN-144) — `builtin` binds only cooperating legs. The channel never relays a
-   call that names a run's identity or domain (`advance`, `end`, B-187's label): those are the
-   runner's own.
+   today (R-BTN-107, R-BTN-144) — `builtin` binds only cooperating legs. The channel carries R-BTN-106's leg verbs
+   unchanged (`status`, `output`, the one ending — `done`, `suspend`, `release`, `release
+   --blocked` — `yield`, `raise`, `await`, `next`), which the runner checks and turns into its
+   own `advance` or `end`, as today. It never carries a raw `advance` or `end`, or anything that
+   sets a run's label or instance (B-187): those the runner reports itself.
    For `builtin` the channel is a local socket; an isolating executor carries it however it likes
    (vsock, a forwarded socket) — the interface names an address, not a transport.
 3. **The executor's source is the runner host's choice** — `runner.json` `executor`, or
@@ -103,7 +105,17 @@ B-186 (below).
    (`rank.mjs`, R-BTN-98, before a claim), `source` (the ticket source's exports, R-BTN-74, where the
    runner calls them), `sync` (a course's `sync.mjs`, where a runner runs the sync) and `install`
    (the install roots' dependency installs, R-BTN-133). The kind is a word in `brief`; Baton says
-   nothing about how a session of any kind is run. For `builtin` every kind is a child process, as
+   nothing about how a session of any kind is run. Decided here, not left to the implementer:
+   - **Handles.** A `leg` session is keyed by its run id (B-185); any other session by a session id
+     the runner mints (`<kind>-<random>`), recorded only in the runner's log.
+   - **Where `home` loads its executor for sessions with no claim.** `rank`, `source` and `sync`
+     run before or outside a claim, so a `home` (or `home-signed`) executor for them is loaded
+     from the default branch's head the runner verified (R-BTN-143), as `rank.mjs` itself is.
+   - **Calls that take `ctx`.** `close`, `handoff`, `rank.mjs` and the ticket source's exports are
+     JavaScript calls: the runner runs them by `exec` of the existing wrapper (`legProcess.mjs`),
+     passing `ctx` as a JSON file and reading the result from a JSON file the wrapper writes,
+     bounded as today (2 minutes for `close` and `handoff`). A push `close` makes uses the
+     credential the executor gives the leg session, never the runner's. For `builtin` every kind is a child process, as
    close to today as makes no difference; a deployment's executor decides what each kind gets.
 5. **Executor data, opaque to Baton.** A course may give each leg an `executor` object in its
    course file, and a home may narrow it in `.baton/baton.json` (`legs.<course>.<leg>.executor`).
@@ -112,10 +124,12 @@ B-186 (below).
    and stores none of it (R-BTN-33). An executor documents and validates its own keys — a
    deployment that wants checking at sync time names a JSON schema in `.baton/baton.json`
    (`executor_schema`), which the sync applies as it applies other schemas (§5.5), without
-   reading it. An executor that cannot honour what it is given releases the claim
-   `released:cannot-finish:transient`, and the runner stops asking for that course's leg until it
-   restarts, so the ticket stays claimable by other runners: one runner's executor never holds a
-   ticket for all (`capability` would hold it at once). `builtin` ignores the data.
+   reading it. A leg that needs something only some executors offer requires one of their
+   `provides` names (item 7), so matching keeps it from the rest. An executor that still cannot
+   honour what it is given ends the leg `released:blocked` with kind `capability` and `ref` one
+   of its own `provides` names (R-BTN-126, §6.3): not a failed attempt, and only this runner stops
+   being offered the leg until it declares the name again (R-BTN-121); the ticket stays claimable
+   by every other runner. `builtin` ignores the data.
 6. **One way to start a leg.** `agent_command` becomes a per-leg course field (the home's
    `.baton/baton.json` value stays accepted as the default for every leg, through a dual-read
    window), passed to every executor in `brief`; `agent_wrapper` and `BATON_AGENT_WRAPPER` stay what they are — words composed in front of
@@ -126,11 +140,12 @@ B-186 (below).
    replaced by `executor: {source: builtin|home|home-signed|pinned, digest, api, provides: [names]}`.
    `provides` are capability names the executor states, matched by R-BTN-174 like any other
    declared capability and, like them, the runner's word: no name may start with `runner:` (those
-   are declared only by the runner's own code, R-BTN-133), and no repository policy knob reads
-   `source` or `provides` — a course may require a name, which only steers matching. The run
-   record carries `executor.digest`, an opaque `environment` string (what the leg ran on, e.g. an
-   image digest; it may repeat across runs) and an opaque `instance` string unique to the run (the
-   session's own id), all of which Baton stores and shows and never reads.
+   are declared only by the runner's own code, R-BTN-133), no name is derived from `source`, and
+   no repository policy knob reads `source` or `provides` — a course may require a name, which
+   only steers matching. The `advance` that starts a run carries three opaque short strings for
+   its record: `executor_digest`, `environment` (what the leg ran on, e.g. an image digest; it may
+   repeat across runs) and `instance` (the session's own id, unique to the run). Baton validates
+   their shape, stores and shows them, and never reads them.
 8. **`session` mode becomes an executor.** The Claude remote-session adapter becomes a standard
    executor Baton ships (`pinned`-loadable from the release), not a mode in the spec; the
    built-in capability `runner:session` is retired in favour of the executor's `provides`.
@@ -140,14 +155,28 @@ B-186 (below).
    scale comes from many concurrent legs, wherever the deployment runs them; placement and packing
    are the deployment's (Fieldhouse's, FLDH-52). The page was last changed through an
    owner-approved PR, so this edit needs the owner's approval in the spec PR. Its *A sandbox is one
-   domain* sentence (under *Parallelism is horizontal*) goes too: what a domain stands for is the
+   domain* sentence (under *Parallelism is horizontal*) and *Who decides what*'s "a threat that
+   needs a runner stopped belongs to the sandbox, the forge or the credential proxy" (reworded to
+   "to the deployment, the forge or the credential proxy") go too: what a domain stands for is the
    deployment's (B-187).
 10. **Retire the isolation vocabulary Baton already has.** Core's per-leg `isolation` gate
    (`src/core/gates.ts`, `graph.ts`; `course.ts` still accepts the field §5.2 says is refused),
    `runners.isolation`, R-BTN-3's "`vm` (Firecracker)" (the host `kind` stays a descriptive
    label no rule reads), R-BTN-180's domain as "the host or VM" (a label, meaning the
    deployment's), and the "containers" wording of §9.2 and `no_chain_from` (said of credentials
-   instead). Live tickets that build what this retires get a dated note mapping each item: B-70
+   instead). Two places need a replacement, not only a deletion, and the spec PR decides both:
+   - **Check legs require `runner:session`** (§10, R-BTN-107; S-BTN-64, G-BTN-90). With the
+     built-in capability retired, a check leg requires a capability name its course declares and a
+     deployment's executor `provides` (the standard course's default: `checks:withheld-credentials`),
+     and the withheld-credential rule stays Baton's, stated of the session, not of its isolation.
+   - **R-BTN-182 runs a trusted leg's `run.mjs` override in `bubblewrap`** and refuses it where
+     none exists — isolation logic in Baton, guarding Baton's own trusted runner. **Decision for the
+     owner in the spec PR:** (a) keep it as the one isolation rule Baton keeps, since it protects
+     Baton's trusted path in every deployment, including the naive ones; or (b) move it behind the
+     executor as a `refusal` session kind, Baton refusing to run a trusted override on a runner
+     whose executor does not `provide` a name the course requires. Recommended: (a) — removing it
+     weakens the default trusted runner for no deployment's benefit.
+   Live tickets that build what this retires get a dated note mapping each item: B-70
    (isolation folded into `runner:session`), B-47 and B-117 (session and attached runners), B-12
    (fresh context, which sessions now carry), B-115 (in review; noted for its author).
 
@@ -178,7 +207,8 @@ B-186 (below).
   host configuration, never by the data.
 - **`runner.json` `executor`** — the runner host's own file, written by whoever administers that
   host; never read from a checkout.
-- **The heartbeat's `executor` block and the run record's `environment`** — the runner's word,
+- **The heartbeat's `executor` block and the run record's `executor_digest`, `environment` and
+  `instance`** — the runner's word,
   recorded, matched by name, never verified (R-BTN-46, R-BTN-174).
 - **The per-leg channel** — the runner authenticates a call by the channel it arrived on (one per
   leg) and proxies only a closed list of calls (`baton leg note`, progress, hand-off, the refresh
@@ -193,12 +223,13 @@ B-186 (below).
   runners; nothing here moves code into Baton.
 - **Gates bind cooperating runners** (R-BTN-46): an executor's isolation is the deployment's
   control; Baton's guarantees (R-BTN-189) are unchanged and none starts depending on it.
-- **Capabilities are names** (R-BTN-174): `provides` and `runner:executor-source:*` are matched,
+- **Capabilities are names** (R-BTN-174): `provides` names are matched,
   never derived.
 - **The default is today's behaviour:** a runner with no `executor` setting runs every leg exactly
   as `process` mode does now; the full suite passes unchanged on both hosts (R-BTN-55).
 - **Filter fields only** (R-BTN-33): executor data is passed through and not stored; the run record gains
-  two opaque short strings (`digest`, `environment`), bounded like other record fields.
+  three opaque short strings (`executor_digest`, `environment`, `instance`), bounded like other
+  record fields.
 - **One clock** (R-BTN-32): the executor's timeouts are the runner's, read through its clock in
   tests.
 
@@ -206,9 +237,10 @@ B-186 (below).
 
 - **B-139** (sourced courses run from their source) decides *which* course code runs; this ticket
   decides *where*. Both are needed: B-139 alone still runs the source's code at the runner's level.
-- **B-141** (a `reads_only` leg runs no branch code) stays a course property Baton already knows
-  (`reads_only`), passed to the executor in `brief`; how an executor enforces it is the executor's.
-  Keep B-141's tests.
+- **B-141** (a `reads_only` leg runs no branch code) stays Baton's: its workspace and harness in
+  the leg stub enforce `reads_only` under every executor, so R-BTN-183's "a reviewer never runs
+  the branch's code" never depends on one. `brief` carries `reads_only` as a hint only. Keep
+  B-141's tests.
 - **B-185** (run ids) gives the executor its handle key and the run record its `environment` row;
   **B-186** (salvage) defines what `salvage` captures and where it goes.
 - **B-138** (a pinned released CLI) is the runner-side twin of `pinned`: a host that pins its
@@ -223,15 +255,18 @@ B-186 (below).
 - `home-signed`: refused at start with B-127 named while B-127 is unbuilt; once built, an unsigned
   change to `.baton/executor.mjs` keeps the last signed version in force.
 - `pinned`: a module whose bytes do not match the digest is refused at start.
-- Course code: a leg script's `run` and `rank.mjs` execute through a recording executor's `exec`,
-  never in the runner's process (the test asserts the runner's pid ran none of them).
-- The channel: a leg's `baton leg note` reaches Baton through the runner; a leg's attempt to send
-  `advance` through it is refused. Under a test executor that runs the leg as a different OS user,
-  the leg cannot read the runner's state file.
+- Repository code: a leg script's `close` and `handoff`, a ticket source's `read`, a course's
+  `sync.mjs` and an install each execute through a recording executor's `exec` with the right kind
+  (the test asserts the runner's pid ran none of them, and `close` receives its `ctx` and returns
+  its result through the files).
+- The channel: every R-BTN-106 verb a leg sends today still works (the existing scenarios pass); a
+  raw `advance` or a label sent through it is refused.
 - Executor data: a value that is not an object, or over the bound, fails the sync's check; a home's
-  `executor_schema` is applied at sync; an executor refusing its data ends the claim `released:cannot-finish:capability`.
-- Matching: a course requiring `runner:executor-source:pinned` is never offered to a `builtin`
-  runner, and carries a `capability` block (R-BTN-75) when no such runner is live.
+  `executor_schema` is applied at sync; an executor refusing its data ends the leg `released:blocked` with kind
+  `capability`, which counts as no failed attempt and leaves the ticket claimable by other runners.
+- Matching: a course requiring a `provides` name is never offered to a runner whose executor does
+  not state it, and carries a `capability` block (R-BTN-75) when no such runner is live; a
+  `provides` name starting `runner:` is refused.
 - Each behaviour change names its `S-BTN-n` scenario (R-BTN-31).
 
 ### Exit criteria
