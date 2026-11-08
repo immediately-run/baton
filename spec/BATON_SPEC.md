@@ -461,6 +461,7 @@ is stale. Never edit it by hand.
 | S-BTN-200 | a leg's end reaps its group | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-201 | the runner outlives its short waits | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-202 | a leg's scope | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-203 | the retired model tables (B-142) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

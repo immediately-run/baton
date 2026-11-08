@@ -448,7 +448,7 @@ export class Runner {
     const declaring = this.declaringList();
     const body: Record<string, unknown> = {
       hostname: this.o.hostname, session_name: this.o.session, harness: this.o.harness, kind: 'vm',
-      billing: {}, capabilities: declaring, tier_ceiling: this.o.tierCeiling ?? 'critical',
+      capabilities: declaring, tier_ceiling: this.o.tierCeiling ?? 'critical',
       ...(this.o.testHarness ? { test_harness: true } : {}),
       lease_timeout_s: s.lease_timeout_s ?? 900,
       courses: this.o.courses.map((c) => ({ repository: this.o.repository, course: c.course, version: c.version })),
