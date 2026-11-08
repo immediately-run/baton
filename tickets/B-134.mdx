@@ -14,7 +14,8 @@ description: "OWASP agentic mapping, hole 7 (ASI10): at each leg end the runner 
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/194
 depends_on: []
 ---
 
@@ -46,6 +47,12 @@ forge half; this ticket detects the rest and covers the time before them.
 - **Item 2 is a cooperative aid, not a control** (finding 16): it runs as the runner's OS user,
   inside the trust domain it audits, so a hostile leg can defeat it. Item 3, Baton's server-side
   cross-check of forge deliveries against open claims, is the security control.
+
+**After round 1** (2026-11-07): item 2's `pr` and `egress` evidence sources are deferred with
+the shape's slot kept for them (§12.9 records it): the runner has no forge reader to see PRs
+opened or commented on, and no VM egress log to read where Sand Pit does not export one — the
+pushes half and the server-side cross-check are built, and the source that fills each remaining
+kind arrives with the scope to judge it (a host list, for egress).
 
 ### Tests
 

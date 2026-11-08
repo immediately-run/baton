@@ -55,6 +55,9 @@ export interface Ctx {
   policies?: import('./policy').Policies;
   /** A repository's forge, for the knobs that a `git` repository refuses (R-BTN-188). */
   forgeOf?: (repository: string) => import('./links').Forge;
+  /** B-134: the leg scope audit — the claim answer's scope, and the reports an advance or an
+   *  end carries. */
+  scope?: import('./scope').Scope;
 }
 
 interface WorkerFacts {
@@ -912,6 +915,9 @@ export class Claims {
       ...(policy ? { policy_hash: policy.policy_hash, guarantees_hash: policy.guarantees_hash, floors_hash: policy.floors_hash } : {}),
       ...(legState ? { leg_state: legState } : {}),
       station: c.station, legs: c.offered_leg ? [c.offered_leg] : [], next: this.nextLegs(c.ticket_id, c.station),
+      // B-134: the ticket's scope — its home and its `repos:` — as lowercased forge paths. The
+      // runner audits each leg's pushes against this and reports what falls outside.
+      ...(this.c.scope ? { scope: this.c.scope.scopeOf(c.ticket_id) } : {}),
       ...(handoff ? { handoff_url: handoff } : {}), path, nonce: c.nonce, snapshot_sha: c.snapshot_sha,
       ...(defaultBranch ? { default_branch: defaultBranch } : {}),
       previous_attempts: previous.map((p) => ({
@@ -1037,6 +1043,12 @@ export class Claims {
       // under — BEFORE the resolution below, so a dead holding it named is gone from `has` and
       // the leg this advance starts is advised without it.
       this.reportTaken(workerId, claimId, c.ticket_id, run.seq, b.taken);
+      // B-134: the finished leg's scope audit, reported on the advance that finishes it — the
+      // actions outside the claim's ticket scope raise their findings (and their hold) here,
+      // and the report's dropped count (entries that failed their shape, actions beyond its
+      // sixteen) is logged as `taken-invalid` logs the taken's, never a refusal.
+      this.c.scope?.exceeded(claimId, b.scope_exceeded);
+      if (b.scope_exceeded?.dropped) this.event('scope-invalid', `worker:${workerId}`, { dropped: b.scope_exceeded.dropped, claim: claimId }, c.ticket_id, claimId);
     }
     // R-BTN-177: the route choices the course attaches to the leg being started resolve here, in
     // the advance's transaction — a snapshot stored with the leg run and carried as advice,
@@ -1156,6 +1168,11 @@ export class Claims {
     // in this transaction.
     const ending = this.runningLeg(c.id);
     if (ending) this.reportTaken(workerId, c.id, c.ticket_id, ending.seq, e.taken);
+    // B-134: the ending claim's leg-end scope audit, likewise — the actions outside the claim's
+    // ticket scope raise their findings (and their hold) in this transaction, and the report's
+    // dropped count is logged `scope-invalid`, never a refusal.
+    this.c.scope?.exceeded(c.id, e.scope_exceeded);
+    if (e.scope_exceeded?.dropped) this.event('scope-invalid', `worker:${workerId}`, { dropped: e.scope_exceeded.dropped, claim: c.id }, c.ticket_id, c.id);
     // R-BTN-126's capability branch (B-104): the holding the runner says it lost leaves its
     // declared set, its derived sets re-evaluate in this transaction, and the fleet's counts
     // follow — rule 4 refuses this runner at once. A valid blocked end is not a failed attempt,
@@ -1398,6 +1415,13 @@ export class Claims {
     this.upsertOverride(item, actor, { hold: 1, hold_reason: reason });
     this.event('override', actor, { hold: 1, hold_reason: reason }, item, (detail.claim_id as number) ?? null);
     this.event('held', actor, { hold_reason: reason, ...detail }, item, (detail.claim_id as number) ?? null);
+  }
+
+  /** B-134: with the owners' `scope_policy: hold`, a scope-exceeded finding parks its ticket
+   *  until an owner lifts the hold the way any hold is lifted (§8). The reason is the finding's
+   *  kind, so the dashboard names what held it; the actor is Baton, as every automatic hold's. */
+  holdForScope(item: string, claimId: number) {
+    this.hold(item, 'scope-exceeded', 'baton', { claim_id: claimId });
   }
 
   /** `POST /v1/ui/overrides/{item}` (§8, §11): `{expedite?, hold?}`. Lifting a hold clears its

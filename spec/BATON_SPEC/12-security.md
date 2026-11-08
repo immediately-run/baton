@@ -931,3 +931,41 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
   the sync refuses any other course file beside a `source`; runners load a sourced course's code only
   from the source, at a first-parent or release-tag commit, and decline a leg whose source they cannot
   verify.
+
+### 12.9 A leg's scope *(B-134)*
+
+A leg's scope is its ticket's home and `repos:` entries (R-BTN-140's `code_repos` once built;
+until then every `repos:` entry that resolves to a forge path on the home's forge host, as
+R-BTN-92 reads a short name under the home's owner), each by its whole forge path (a GitLab
+subgroup's `group/sub/repo` names its repository by all three segments). The claim answer
+carries it, and two halves report what a leg did outside it:
+
+- **The runner's audit is a cooperative aid, not a control.** At each leg's end the runner reads
+  the refs the leg's window moved in the home checkout — evidence the agent does not supply —
+  after the leg's close and hand-off have run, so a push either of them made is the leg's too.
+  A tracking ref that appeared or moved names a push only when the window's reflog entries say
+  so (`update by push`): a fetch moves tracking refs the same way and names nothing, and a
+  movement with no word of a push is not evidence of one. Each push is mapped to the repository
+  its remote's URL points at (the whole forge path) and the actions outside the scope are
+  reported with the claim, on the advance or end that finishes the leg (R-BTN-106) — at most
+  sixteen actions, with the count of any beyond them, and the report's own shape-drops counted
+  beside them, logged `scope-invalid`, never a refusal. The audit runs as the runner's OS user,
+  inside the trust domain it audits, so a hostile leg can defeat it; it is detection for the
+  honest and the mistaken, never a boundary. The report's shape carries two more kinds — `pr`
+  (opened or commented on) and `egress` (a host reached) — whose sources the runner does not
+  have: a forge reader and a VM egress log where Sand Pit exports one. They are deferred until
+  those sources exist, and an `egress` action is judged against nothing meanwhile (no host
+  scope is defined); the source that fills the shape arrives with the scope for it.
+- **The scope cross-check is the control.** Every push delivery (R-BTN-73) whose pusher the
+  pushed repository's owners named in their `worker_pushers` setting is checked against the
+  claims open at the time — a claim still holding its ticket as rule 3 reads it (active, or
+  completed and unconfirmed, or reaped fence-pending), so the delivery of an ordinary final
+  push (R-BTN-8: the push precedes the end) that lands after the claim's `end()` still finds
+  the claim that covers it: a push to a repository no open claim's scope covers records an
+  `unclaimed-write` finding. The forge's word, not the agent's.
+- **Findings.** Each `scope-exceeded` or `unclaimed-write` finding is one open row per shape,
+  listed under Needs you (§14) until an owner resolves it — the acknowledgement that it was
+  looked at, logged `scope-resolved`. With the owners' `scope_policy: hold`, a
+  `scope-exceeded` finding also holds its ticket until an owner lifts the hold (R-BTN-12); an
+  owner lifts it the way any hold is lifted. Both settings are R-BTN-66's: a hold that stops
+  holding, and a cross-check that names fewer pushers, are loosening (R-BTN-186).

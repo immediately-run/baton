@@ -2534,6 +2534,19 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   "past its start".
   S-BTN-199's row follows.
 
+- **2026-11-07 — §12.9 (new), R-BTN-73, R-BTN-106, §13, §14, §15** (B-134, OWASP ASI10 hole 7).
+  Rules changed: R-BTN-73, R-BTN-106.
+  A leg's scope — its ticket's home and `repos:` — is carried in the claim answer, audited at
+  each leg's end by the runner from its own git (a cooperative aid, not a control: it runs inside
+  the trust domain it audits), and cross-checked by Baton against the forge's push deliveries
+  for the owners' `worker_pushers` logins (the control). `scope-exceeded` findings (reported
+  with the claim) and `unclaimed-write` findings (a push no active claim covers) are listed
+  under Needs you until an owner resolves each; `scope_policy: hold` holds the ticket. R-BTN-73
+  states the one thing besides the want a delivery produces; R-BTN-106 states the leg-end audit.
+  `code_repos` (R-BTN-140) is not built yet, so until it is the scope holds every `repos:` entry
+  that resolves to a forge path on the home's forge host, as R-BTN-92 reads a short name.
+  S-BTN-202's row follows.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

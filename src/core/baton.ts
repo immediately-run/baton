@@ -34,6 +34,7 @@ import { History, HISTORY_PAGE_MAX } from './history';
 import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import { Policies, canonicalJson, sha256HexSync } from './policy';
+import { Scope } from './scope';
 import { randomHex } from './db';
 import type { Ports, Row, SqlValue, Store, Workflow } from './ports';
 
@@ -70,6 +71,8 @@ export class BatonCore {
   readonly questions: Questions;
   /** §12.8 (B-145): the repository policies, their floors, their guarantees. */
   readonly policies: Policies;
+  /** B-134: the leg scope audit — the claim answer's scope, the findings both halves raise. */
+  readonly scope: Scope;
   readonly store: Store;
   /** §12: workflows to dispatch once the current request or alarm has committed, one per
    *  repository and kind. */
@@ -93,7 +96,10 @@ export class BatonCore {
     this.policies.releaseForFloor = (repository) => this.claims.releaseForFloor(repository);
     this.courses = new Courses({ store, requiredBars: (repo) => this.admin.requiredBars(repo), policies: this.policies });
     this.observations = new Observations({ store, now: () => this.now() });
-    this.webhooks = new Webhooks({ store, now: () => this.now() });
+    // B-134: the scope audit, before the webhooks and the claims it serves — its hold callback
+    // reaches the claims, built later, through the closure.
+    this.scope = new Scope({ store, now: () => this.now(), hold: (ticket, claimId) => this.claims.holdForScope(ticket, claimId) });
+    this.webhooks = new Webhooks({ store, now: () => this.now(), scope: this.scope });
     const want = (wf: Workflow) => this.pendingDispatch.set(`${wf.repository}:${wf.kind}`, wf);
     // R-BTN-75: the blocks are written with their causes; `fits` is the claim gates' (R-BTN-77).
     // R-BTN-80, R-BTN-81: a decision's notices are queued and closed with it, and its history row written.
@@ -128,7 +134,7 @@ export class BatonCore {
     this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course), ontologies: this.ontologies,
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
-      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github' });
+      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
@@ -857,6 +863,17 @@ export class BatonCore {
         const ticket = this.ticketParam(override[1]);
         const body = await readJson(req);
         return json(tx(() => this.claims.setOverride(owner, ticket, body)));
+      }
+      // B-134: an owner resolves a scope finding — the acknowledgement that it was looked at.
+      // In the transaction, like every neighbouring `/v1/ui` mutation, so the resolution and
+      // its `scope-resolved` event land together.
+      const finding = /^\/v1\/ui\/scope\/(\d+)\/resolve$/.exec(p);
+      if (finding) {
+        const id = Number(finding[1]);
+        return json(tx(() => {
+          if (!this.scope.resolve(id, `owner:${owner}`)) throw new BatonError('not-found', `no open scope finding ${id}`);
+          return { ok: true };
+        }));
       }
       if (p === '/v1/ui/board/accept') {
         const body = await readJson(req);
@@ -1671,6 +1688,9 @@ export class BatonCore {
       limits: this.admin.view(now),
       // R-BTN-69: a refused course file, the previous one staying in force.
       needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), ontologies_refused: this.ontologies.refusals(), keys: this.keysNotice(),
+        // B-134: the open scope findings — a leg reported outside its ticket's scope, a worker
+        // push no open claim covers — until an owner resolves each.
+        scope: this.scope.needsYou(),
         // B-133: the person legs' questions with each option's computed action (R-BTN-116).
         questions: this.questions.needsYou() },
       // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.
