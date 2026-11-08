@@ -462,6 +462,8 @@ is stale. Never edit it by hand.
 | S-BTN-201 | the runner outlives its short waits | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-202 | a leg's scope | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-203 | the retired model tables (B-142) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-204 | run ids (B-185) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-205 | per-run domains (B-187) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

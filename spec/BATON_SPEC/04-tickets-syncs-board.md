@@ -509,7 +509,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
 - **R-BTN-81 (the ticket's history: a running record, not a replay log).** Per ticket Baton
   appends one row per thing it saw: a leg started, finished or given up (claim, runner, course
-  version, contract version, position, run number, `snapshot_sha`, `head_sha`); a position
+  version, contract version, position, run number, `run_id` (R-BTN-63), `snapshot_sha`, `head_sha`); a position
   confirmed; a fact arrival, and an arrival not applied (R-BTN-39); an adoption; a re-route; a
   block or unblocking; a condition opened or closed; a person leg's question posted, answered or
   expired (R-BTN-116); a call settled; a supersession; an outbox entry queued, delivered or

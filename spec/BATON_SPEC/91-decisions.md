@@ -178,4 +178,9 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a final retirement that ends everything scoped to the repository — sessions' reach, MCP keys and OAuth grants with their codes, sync, mirror and runner keys and registration tokens, active claims (fenced as a force-reap), outbox entries, wants and dispatches — exports only its tombstone and never re-registers its id, over a reversible flag each surface interprets: nothing scoped to it can come back to life (2026-11-03, B-173, written at the owner's request; R-BTN-47).
 - Chose process guards in the ticket commands and checks over reviewers catching the same faults round by round: a claim refused while its ticket cites a rule amended since the ticket was filed or last re-read it, unless the claimer names the ids it re-read, over a failing check, so a ruling never turns every older ticket's pull request red; and `### Trust` and `### Invariants` required of tickets filed from a cutover day over a sweep of the tickets already filed (2026-11-03, the owner, "I would like you to implement the process changes that prevent the sort of thrashing we are seeing now."; R-BTN-74, R-BTN-31).
 - Chose migration and scenario numbers taken as the next free one at merge, the branch merging main first, until Baton hands every identifier out (B-176), over a ledger of reservations in git: a ledger with git as the lock moved the race onto a file a branch could edit by hand, and Baton is the allocator (2026-11-03, the owner, "Wouldn't it be simpler to solve this if Baton also handed out ticket IDs?"; R-BTN-31, §13).
-
+- Chose per-run domains, which the policy lists and Baton compares without interpreting, with a
+  weaker guarantee `independent-runs` beside an unchanged `independent-review`, over a second
+  dispatcher on its own key for reviews or dropping the domain rule for a sandboxing deployment
+  (2026-11-08; R-BTN-180, R-BTN-183, R-BTN-189). Baton stays agnostic about whether runs are kept
+  apart; the weaker guarantee says what it cannot withstand, and a floor on `independent-review`
+  refuses the change.

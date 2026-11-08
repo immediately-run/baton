@@ -250,6 +250,14 @@ mean (R-BTN-50).
     required bars, prerequisites). The first `advance` starts the first leg; every leg a claim
     runs has its own `advance`. Baton records each leg a claim starts and finishes
     (`claim_legs`).
+  - **Every run has a run id.** The `advance` that starts a run, and an adoption that adds one,
+    mints its `run_id`: `r_` and 26 characters of Crockford base32, the first 48 bits the time read
+    through the clock (R-BTN-32), the rest random. It is opaque — no reader parses, sorts or
+    compares it except for equality; order comes from `started_at` and `seq` — and unique across
+    the tenant. The `advance` reply returns it; `claim_legs`, the history's leg rows (R-BTN-81),
+    `previous_attempts` and the resume record (R-BTN-24) and the run list (R-BTN-128) carry it.
+    Anything a runner writes outside Baton to a place another tenant could also write — a forge
+    ref, a bucket path — is keyed by the tenant's host and the run id.
   - **Baton's traversal record counts.** A ticket's runs of each leg and arrivals at each station
     are counted from Baton's own record — every leg a claim ran and every run an adoption added
     (`claim_legs`), and every fact arrival Baton applied, under resolved names (R-BTN-64).

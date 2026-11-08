@@ -311,7 +311,10 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
   - **`no_chain_from: [<leg>…]`** on a leg (course file): Baton refuses a claim or `advance` into
     it by a **credential** that has run any named leg on this ticket in any claim (`claim_legs`
     → claim → runner → credential; a row with a null claim, an adopted run, is skipped), `not-eligible`, rule `chain`; containers sharing one key
-    count as one. The runner suspends instead.
+    count as one. For a grant whose domain is per run (R-BTN-180) the comparison is of per-run
+    domains instead, which a fresh run label never matches: `no_chain_from` cannot refuse such a
+    grant, and its independence rests on R-BTN-183's per-run domains and the policy's guarantees.
+    The runner suspends instead.
 - **R-BTN-107 (isolation: process, attached, session).** The runner declares `isolation` on its
   heartbeat.
   - **`process`** (default): legs are the runner's child processes, as its OS user.
@@ -348,8 +351,9 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     return (result discarded) and stops the process group as R-BTN-119 does after 30 s; (2) calls
     `handoff(ctx)` with `ctx.reason: 'context'`; (3) starts a fresh session on the same leg under
     the same claim, briefed with the hand-off and the inputs — in `process` mode by calling
-    `run(ctx)` again with `ctx.refresh: {n, handoff}`; (4) records activity `context-handoff`
-    with both sessions' links (R-BTN-113's rule; a failing link is dropped).
+    `run(ctx)` again with `ctx.refresh: {n, handoff}`, the fresh session's `BATON_SESSION_ID` ending
+    `.r<n>`; (4) records activity `context-handoff` with both sessions' links and session ids
+    (R-BTN-113's rule; a failing link is dropped).
   - A refresh is not a run for `max_runs`, not a failed attempt, and never lets the lease lapse.
     Past `max_refreshes` the runner suspends at the leg's `from`.
 - **R-BTN-113 (a leg run carries its session's link).** A heartbeat may carry `session_url` for
@@ -463,6 +467,8 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     | `BATON_STATE` | path of the read-only state view (no runner secret) |
     | `BATON_SOCKET` | the local channel (R-BTN-106) |
     | `BATON_LEG` | `<claim id>.<leg>.<run>` (R-BTN-145) |
+    | `BATON_RUN_ID` | the run's `run_id` (R-BTN-63) |
+    | `BATON_SESSION_ID` | `<run_id>.r<n>`: the run's session, `n` counting R-BTN-123's refreshes from 0 |
     | `BATON_ACTIVITY` | set by a launcher for a child session it starts under an activity (§9.9) |
     | `BATON_RESUME` | path of a JSON file holding earlier claimants' text — resume records, end details, hand-off documents, claim `rationale` — which reaches a leg only as data, never inside its instructions |
     | `<NAME>` for `credential:<NAME>` | present only when the leg's `requires`, after role expansion (R-BTN-121), names it; every other declared `credential:` variable is removed |
@@ -534,6 +540,8 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     refused `invalid-params`.
   - **The run's directory.** While a root is set, the claim reply and each `advance` reply that
     starts a run carry `leg_log: {dir}`, where `dir` is
+    `<root>/<tenant host>/<repository id>/<local ticket id>/<leg>/<run_id>/` (R-BTN-63; a bucket
+    may serve several tenants). `baton leg log` also reads a run written before run ids, under
     `<root>/<repository id>/<local ticket id>/<leg>/<run>-<claim id>/`. Baton records it as
     `claim_legs.leg_log_dir` and keeps nothing else about the log: no file names, sizes or
     digests. The runner writes a run only when the reply that started it named a directory.

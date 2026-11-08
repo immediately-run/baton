@@ -191,8 +191,8 @@ B-186 (below).
        fails closed exactly as R-BTN-182 does today where no sandbox exists — security is not
        weakened; what is lost is function: a deployment without such an executor (the naive,
        `builtin` one) can no longer use trusted overrides at all.
-     Recommended: (b), which keeps the owner's constraint without an exception and costs only a
-     feature the simplest deployments rarely need; (a) if trusted overrides must work everywhere.
+     **Decided: (b)** (the owner, 2026-11-08: "Accepted", on moving it behind the executor, which
+     keeps the constraint with no exception). B-184's spec PR writes it.
    Live tickets that build what this retires get a dated note mapping each item: B-70
    (isolation folded into `runner:session`), B-47 and B-117 (session and attached runners), B-12
    (fresh context, which sessions now carry), B-115 (in review; noted for its author).

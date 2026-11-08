@@ -280,6 +280,8 @@ below answers.
 - a human-only key an agent session can use (always possible while the repository's `human_key`
   is `any`, which is why `human-gates` holds only under `hardware`);
 - a compromised host of trusted runners or of the protection checker (R-BTN-180);
+- for `independent-runs`, a compromised runner of a per-run grant, or a leg that can act as it:
+  Baton records its run labels and cannot tell whether runs were kept apart;
 - refs no forge rule restricts: on GitHub, `refs/baton/*`; Baton reads nothing from them that a
   trusted leg acts on;
 - a human who approves a change they misread;
@@ -333,6 +335,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     | `paths.tickets` — a ticket or goal change the merge runner merges needs a `std:approval@1`; a human's own merge of a ticket's PR (`merged-by-hand`, R-BTN-131), or of a request PR (R-BTN-131), is their approval of the ticket files it carries | `any` | `approval` | | trusted runners | R-BTN-183, R-BTN-184 |
     | `merge.trusted` — merge legs are trusted legs, and no course commits to the default branch | `false` | `true` | | Baton, the forge | R-BTN-182 |
     | `merge.reviews` — `{count}`: the `std:review@1` a merge needs at its head, from `count` distinct domains, each other than every writer domain | `{count: 0}` | `{count: 2}` | | trusted runners | R-BTN-183 |
+    | `domains.per_run` — the grant fingerprints whose domain is per run (R-BTN-180) | `[]` | `[]` | | Baton | R-BTN-180, R-BTN-183 |
     | `merge.checks` — `optional`, or `required`: the protected default branch's check runs pass at the head, or a `std:checks@1` the owner named a writer for | `optional` | `required` | | trusted runners, the forge | R-BTN-183 |
     | `tickets.created` — how a ticket a runner's action creates (a handler ticket, a call leg's child, a supersession's replacement) and a withdrawal reach git | `filed` | `proposed` | | Baton, trusted runners | R-BTN-161, R-BTN-165, R-BTN-171, R-BTN-180 |
     | `outbox.git`, `outbox.forge-check` — `{deliverers}`: which grant roles may deliver the kind, from `runner`, `trusted-runner` | `{deliverers: [runner]}`, each | `{deliverers: [trusted-runner]}`, each | | Baton | R-BTN-171 |
@@ -414,18 +417,21 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     | `no-runner-lands` | no runner updates the default branch, a tag or a branch outside its pattern; a runner's work lands only through the merge runner under `merge.*`, as reviewed as `merge.reviews` says, or by the human identity's own merge of its PR (`merged-by-hand`) | `refs.default_branch`, `refs.tags` and `refs.other` admit only `trusted-runner` and `human`; `paths.control` is not `any`; `merge.trusted`; `tickets.created` is `proposed`; `outbox.git` admits only `trusted-runner`; and the latest report from the protection checker, within 24 hours, matched (R-BTN-180) |
     | `control-paths-human` | no control path (courses, workflows, agent configuration, the ticket source) changes without a human landing it | `no-runner-lands`, and `paths.control` is `human` |
     | `tickets-approved` | no ticket or goal changes, and no ticket a runner creates is filed, without a human approval of that file: a `std:approval@1`, or the human's merge of the ticket's PR, or the request PR, carrying it | `no-runner-lands`; `paths.tickets` is `approval`; `tickets.created` is `proposed`; and `attestations` admits only `human` for `std:approval@1` |
-    | `independent-review` | a runner's change the merge runner lands has two reviews from domains other than its writers' and each other's; what the human merges by hand, the human has reviewed | `no-runner-lands`; `merge.reviews.count` ≥ 2; and `attestations` admits only `baton` for `std:review@1`, `std:wrote@1` and `std:ran@1` |
+    | `independent-review` | a runner's change the merge runner lands has two reviews from domains other than its writers' and each other's; what the human merges by hand, the human has reviewed | `no-runner-lands`; `merge.reviews.count` ≥ 2; `attestations` admits only `baton` for `std:review@1`, `std:wrote@1` and `std:ran@1`; and `domains.per_run` is empty |
+    | `independent-runs` | as `independent-review`, with per-run domains admitted: the two reviews ran under run labels no writer run of the change reported, as far as the deployment keeps a per-run grant's runs apart from each other and from its runner | `no-runner-lands`; `merge.reviews.count` ≥ 2; and `attestations` admits only `baton` for `std:review@1`, `std:wrote@1` and `std:ran@1` |
     | `human-gates` | no owner's agent session, and no delegated key, changes membership, roles or the policy, and every human approval is made on a hardware key no session can drive | `approvers.members`, `approvers.roles` and `approvers.policy` are human-only lists, and the repository's `human_key` is `hardware` |
     | `board-from-trusted` | nothing a trusted leg acts on comes from a runner's board post or from git verdicts | `no-runner-lands`; `inputs.board` excludes `machine`; and the `attestations` entries admit no `sync` writer for `std:arrival@1` or `std:decision@1`, and only `human` for `std:decision@1` (R-BTN-191) |
 
     Every guarantee holds against a compromised runner, within what its knobs' enforcers enforce
-    and nothing §12.8's list excludes. Against an injected owner's agent, one holds only together
+    and nothing §12.8's list excludes — except `independent-runs`, which does not hold against a
+    compromised runner of a per-run grant, nor against a leg that can act as that runner (under a
+    runner that keeps legs in its own trust boundary, any leg can read its key, R-BTN-144). Against an injected owner's agent, one holds only together
     with `human-gates`: an `owner` approver can grant a trusted role or a member, which no other
     guarantee constrains; and under `human_key: any` a human-only list is a promise about key
     custody, which is why `protected` does not claim `human-gates`. The `protected` preset holds
     all but `human-gates`, and `no-runner-lands`, with every guarantee that includes it, only once
-    the protection checker has reported a match; `protected-hardware` holds all six on the same
-    condition.
+    the protection checker has reported a match; `protected-hardware` holds all seven on the same
+    condition (neither preset lists a per-run grant, so each also holds `independent-runs`).
   - **Floors.** The policy's `floors` knob lists guarantees by name. Setting it is a policy change
     like any other, by `approvers.policy`, refused when a listed guarantee's policy conditions
     are not met by the document after the change. From then on Baton refuses any policy change after which a guarantee the
@@ -453,7 +459,13 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
 - **R-BTN-180 (roles, domains and protection).**
   - **Every grant has a role and a domain.** The role is `runner` or `trusted-runner` (R-BTN-182),
     and a `trusted-runner` grant may further be marked the repository's protection checker
-    (`checker`, below); the domain is a label naming the host or VM the grant's process runs in.
+    (`checker`, below); the domain is a label naming the host or VM the grant's process runs in — or, for a grant the
+    policy's `domains.per_run` lists, a **per-run domain**: `<grant fingerprint>/<run label>`, the
+    label the grant's runner reports once per run, on the `advance` that starts it (1–128
+    characters of `[A-Za-z0-9_.:-]`, a refresh keeping it), and never through a leg's channel.
+    Baton refuses a label the same grant reported for an earlier run (`invalid-params`, rule
+    `label-reused`) and an `advance` starting a run without one; it knows nothing of what a label
+    names. A `trusted-runner` grant is never per-run.
     All three are set by the `approvers.roles` approver (`PUT
     /v1/owner/{repository}/grants/{fingerprint}/role`), `trusted-runner` refused for an API-key
     credential (`invalid-params`; a trusted runner signs, R-BTN-159); a grant nobody marked is a
@@ -635,7 +647,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     `merge`'s stay in their course files, held by this check.
   - **Standard types:**
     - `std:wrote@1` (writer `baton`): a writing leg's reported commit range `start..head`, its
-      domain and its runner key;
+      domain (its run's per-run domain, for a per-run grant, R-BTN-180) and its runner key;
     - `std:ran@1` (writer `baton`): a leg ran the branch's code at `head` in its domain (every
       writing leg, and any leg its course does not mark `reads_only: true`);
     - `std:review@1` (writer `baton`): a review leg the course marks `approves: true` and
@@ -791,7 +803,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     PR conversation or, on a `git` repository, to the ticket's leg-state branch, never to the work
     branch (R-BTN-190, B-101), so a reviewer never becomes a writer.
   - **Independent review.** `merge.reviews.count` `std:review@1` at `H`, each from a domain other
-    than every writer domain of `H` and from a review claim that started at `H`, no two from one
+    than every writer domain of `H` (domains as R-BTN-180 assigns them, per run for a per-run grant) and from a review claim that started at `H`, no two from one
     domain. A chain any of whose `std:wrote@1` or `std:ran@1` carries a null domain never merges
     while `merge.reviews.count` ≥ 1: a writer nobody labelled cannot be told from its reviewers.
     A grant's domain is set by the `approvers.roles` approver (R-BTN-180).

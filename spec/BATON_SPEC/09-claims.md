@@ -251,8 +251,8 @@ end on an ended claim is refused `claim-ended`.
   (the one nested key allowed, §12), the last activity and its outcome, the legs run, the end
   reason and detail, and the transcript pointers. Core reads no particular
   activity kind. The claim response for a ticket with earlier ended claims carries
-  `previous_attempts`, the newest 10, newest first, each with its resume record, legs run and
-  hand-off URL, and `previous_attempts_total`;
+  `previous_attempts`, the newest 10, newest first, each with its resume record, legs run (each
+  with its `run_id`, R-BTN-63) and hand-off URL, and `previous_attempts_total`;
   a leg receives them only as data in `BATON_RESUME` (R-BTN-144). The ticket history read
   (R-BTN-81) serves the records pruned, as its route row's `resume` (§14), to its *reader*, so a
   claim through git continues the change (R-BTN-74). (`ctx.resume`, a condition's chosen restart, is R-BTN-162's
