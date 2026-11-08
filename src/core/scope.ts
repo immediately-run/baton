@@ -7,8 +7,9 @@
 //     audits (docs/security-model.mdx, review finding 16) — and reports the actions outside the
 //     scope with the claim (`scope-exceeded`).
 //   * Baton's half is the control: the forge's push deliveries for the worker identities the
-//     owners named are cross-checked against the claims open at the time. A push by one of them
-//     to a repository no active claim's scope covers is `unclaimed-write`.
+//     owners named are cross-checked against the claims open at the time (rule 3's reading of
+//     a claim still holding, as `openScopes` reads it). A push by one of them to a repository
+//     no open claim's scope covers is `unclaimed-write`.
 //
 // Each finding is raised under Needs you until an owner resolves it, and with the owners'
 // `scope_policy: hold` a scope-exceeded finding holds its ticket (an owner lifts the hold the
@@ -48,12 +49,22 @@ export function scopePaths(home: { forge: Forge; github: string; repos: string }
   return out;
 }
 
-/** The claims open now, as the forge cross-check reads them: each active claim's ticket scope. */
+/** The claims open now, as the forge cross-check reads them: each open claim's ticket scope.
+ *  "Open" is rule 3's reading of a claim still holding its ticket — active, or completed and
+ *  unconfirmed, or reaped fence-pending (src/core/claims.ts, rule 3) — and not `active` alone:
+ *  R-BTN-8 has the runner push the leg's evidence and hand-off first and end the claim at once,
+ *  so the delivery of an ordinary final push routinely lands seconds after `end()` commits, and
+ *  a redelivery after a blip minutes later; read against `active` alone, every late delivery of
+ *  a normal leg-end push would raise a false `unclaimed-write`. The window is exactly the
+ *  fence-unconfirmed one — once a completion is confirmed or a fence cleared, the claim no
+ *  longer covers. */
 export function openScopes(store: Store): { ticket: string; paths: Set<string> }[] {
   return store.exec<{ ticket_id: string; forge: Forge; github: string; repos: string }>(
     `SELECT c.ticket_id, p.forge, p.github, t.repos FROM claims c
      JOIN tickets t ON t.id = c.ticket_id JOIN repositories p ON p.id = t.repository_id
-     WHERE c.status = 'active' ORDER BY c.id`).toArray()
+     WHERE (c.status = 'active'
+            OR (c.status = 'completed' AND c.confirmed_at IS NULL)
+            OR (c.status = 'reaped' AND c.fence_pending = 1)) ORDER BY c.id`).toArray()
     .map((r) => ({ ticket: r.ticket_id, paths: scopePaths(r) }));
 }
 
@@ -93,7 +104,11 @@ export class Scope {
    *  Each is judged against the claim's ticket scope here — the runner's report is evidence,
    *  never the verdict — and each outside action raises one `scope-exceeded` finding on the
    *  ticket (one open row per target), one event and, with `scope_policy: hold`, a hold. An
-   *  action inside the scope records nothing. Returns what was raised, for the log line. */
+   *  action inside the scope records nothing, and so does an `egress` action: its target is a
+   *  host, the scope holds forge paths alone, and no host scope exists to judge it against —
+   *  nothing reports `egress` yet, and the source that fills that shape arrives with the scope
+   *  for it (§12.9); raising every egress reach as outside would be a finding nothing can
+   *  discharge. Returns what was raised, for the log line. */
   exceeded(claimId: number, report: ScopeReport): ScopeAction[] {
     if (!report?.actions.length) return [];
     const claim = this.rows<{ ticket_id: string; snapshot_sha: string }>('SELECT ticket_id, snapshot_sha FROM claims WHERE id = ?', claimId)[0];
@@ -105,7 +120,7 @@ export class Scope {
     const now = this.c.now();
     const raised: ScopeAction[] = [];
     for (const a of report.actions) {
-      if (scope.has(a.target.toLowerCase())) continue;
+      if (a.kind === 'egress' || scope.has(a.target.toLowerCase())) continue;
       raised.push(a);
       this.upsert(policy.repository_id, claim.ticket_id, claimId, 'scope-exceeded', a.target, { kind: a.kind, ref: a.ref ?? null, claim: claimId }, now);
       logEvent(this.c.store, now, 'scope-exceeded', 'baton', { ...a, claim: claimId, snapshot_sha: claim.snapshot_sha }, claim.ticket_id, claimId);
@@ -115,10 +130,11 @@ export class Scope {
   }
 
   /** B-134's control: a push delivery for a repository whose owners named the pusher among their
-   *  `worker_pushers` is cross-checked against the claims open at the time — a push by the
-   *  worker to a repository no active claim's scope covers is `unclaimed-write`. In the caller's
-   *  transaction; a push an open claim covers records nothing, and so does one by a login the
-   *  owners did not name (a human's push is not the fleet's). */
+   *  `worker_pushers` is cross-checked against the claims open at the time (rule 3's reading of a
+   *  claim still holding, as `openScopes` reads it) — a push by the worker to a repository no
+   *  open claim's scope covers is `unclaimed-write`. In the caller's transaction; a push an open
+   *  claim covers records nothing, and so does one by a login the owners did not name (a human's
+   *  push is not the fleet's). */
   pushDelivery(d: Delivery): void {
     if (d.event !== 'push' || d.pusher == null) return;
     const full = d.repository.toLowerCase();
@@ -167,9 +183,15 @@ export class Scope {
   }
 
   /** An owner resolves a finding — the acknowledgement that it was looked at, which is all a
-   *  finding waits on. Returns whether there was an open one to resolve. */
+   *  finding waits on. The resolution is one event (`scope-resolved`), in the caller's
+   *  transaction, like every neighbouring `/v1/ui` mutation leaves its row. Returns whether
+   *  there was an open one to resolve. */
   resolve(id: number, by: string): boolean {
-    this.c.store.exec('UPDATE scope_findings SET resolved_at = ?, resolved_by = ? WHERE id = ? AND resolved_at IS NULL', this.c.now(), by, id);
-    return (this.rows<{ n: number }>('SELECT changes() AS n')[0]?.n ?? 0) > 0;
+    const row = this.rows<{ repository_id: string }>('SELECT repository_id FROM scope_findings WHERE id = ? AND resolved_at IS NULL', id)[0];
+    if (!row) return false;
+    const now = this.c.now();
+    this.c.store.exec('UPDATE scope_findings SET resolved_at = ?, resolved_by = ? WHERE id = ?', now, by, id);
+    logEvent(this.c.store, now, 'scope-resolved', by, { id }, null, null, row.repository_id);
+    return true;
   }
 }

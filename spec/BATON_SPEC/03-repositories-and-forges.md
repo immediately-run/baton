@@ -299,8 +299,11 @@ repository reachable over SSH is enough (R-BTN-105).
 - **R-BTN-73 / R-BTN-95 (forge notifications are only triggers).** A notification records a
   want; it never computes or carries state. The one thing besides the want a delivery produces
   is the scope cross-check (B-134, §12.9): a push by a worker pusher of the owners'
-  `worker_pushers` setting to a repository no active claim's scope covers records an
-  `unclaimed-write` finding from the delivery's own fields — no repository content is read.
+  `worker_pushers` setting to a repository no open claim's scope covers records an
+  `unclaimed-write` finding from the delivery's own fields — no repository content is read
+  (an open claim is one still holding its ticket, as rule 3 reads it: active, or completed
+  and unconfirmed, or reaped fence-pending, so a delivery of an ordinary leg-end push that
+  lands after the claim's `end()` is still covered).
   - **Routes.** `POST /v1/github/webhook` takes the App's deliveries for every repository it is
     installed on (`X-Hub-Signature-256` under `BATON_GITHUB_WEBHOOK_SECRET`).
     `POST /v1/forges/{repository}/notify` takes a GitLab notification (`X-Gitlab-Token`

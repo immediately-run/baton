@@ -536,15 +536,17 @@ export interface End {
    *  and never arrives). */
   taken: { kept: TakenEntry[]; dropped: number } | null;
   /** B-134: the leg-end scope audit — actions the runner's own evidence (the refs the leg's
-   *  window moved) shows outside the claim's ticket scope, judged against that scope by the
-   *  core, never trusted as the verdict. Entries dropped for their shape are counted, so a
+   *  window moved, named as pushes by their reflog) shows outside the claim's ticket scope,
+   *  judged against that scope by the core, never trusted as the verdict. Entries dropped for
+   *  their shape, and actions beyond the report's sixteen, are counted in `dropped`, so a
    *  report is never silently shortened. */
   scope_exceeded: ScopeReport;
 }
 
 /** One action of a leg-end scope report (B-134): the kind of evidence and what it touched — a
- *  forge path (`owner/name`) for a push or a PR, a host for an egress reach. Shape-checked
- *  only; whether the action is inside the claim's ticket scope is the core's to judge. */
+ *  forge path (a repository's whole spelling, `owner/name` or a subgroup's `group/sub/repo`)
+ *  for a push or a PR, a host for an egress reach. Shape-checked only; whether the action is
+ *  inside the claim's ticket scope is the core's to judge. */
 export interface ScopeAction {
   kind: 'push' | 'pr' | 'egress';
   target: string;
@@ -553,7 +555,8 @@ export interface ScopeAction {
 }
 
 /** A leg-end scope report as the wire carries it and the store keeps it: the actions that
- *  passed their shape check and how many were dropped for it. Null is no report at all. */
+ *  passed their shape check and how many were dropped for it or beyond its sixteen. Null is
+ *  no report at all. */
 export type ScopeReport = { actions: ScopeAction[]; dropped: number } | null;
 
 /** One entry of a leg's `taken` (R-BTN-177): the alternative it ran for a route choice, and the
@@ -601,17 +604,29 @@ export function checkTaken(v: unknown): { kept: TakenEntry[]; dropped: number } 
   return { kept, dropped };
 }
 
-/** B-134: a leg-end scope report, `[{kind, target, ref?}]` — at most 16 entries, each a push, a
- *  PR or an egress reach naming the repository (a forge path) or the host it touched. Like
- *  `checkTaken`, a malformed entry is dropped and counted, never refused: the report rides the
- *  advance or end that finishes the leg and must not fail it. */
+/** B-134: a forge path as a scope report names its target — two to four segments of a
+ *  repository's spelling (a GitLab subgroup's `group/sub/repo` names its repository by all
+ *  three), the last the repository, none longer than a segment's own bound. This is
+ *  `isForgePath`'s shape without the forge to ask for; the scope a target is judged against
+ *  keeps the same spelling. */
+const FORGE_PATH = /^[A-Za-z0-9-]{1,39}(?:\/[A-Za-z0-9-]{1,39}){0,2}\/[A-Za-z0-9._-]{1,100}$/;
+
+/** B-134: a leg-end scope report, `{actions, dropped}` — at most 16 actions, each a push, a
+ *  PR or an egress reach naming the repository (a forge path) or the host it touched, and the
+ *  count of actions beyond them: what the runner truncated from its report and what this check
+ *  drops for a shape failure, logged `scope-invalid` by the claims. Like `checkTaken`, a
+ *  malformed ENTRY is dropped and counted, never refused: the report rides the advance or end
+ *  that finishes the leg and must not fail it. */
 export function checkScopeReport(v: unknown): ScopeReport {
   if (v === undefined || v === null) return null;
-  if (!Array.isArray(v) || v.length < 1) return null;
-  if (JSON.stringify(v).length > 4096) return null;
+  if (!isObj(v) || !Array.isArray(v.actions)) return null;
+  // 8 KB admits every honest report the entry caps spell (16 × (≤219-char target + ≤200-char
+  // ref + overhead) ≈ 7.3 KB) — a bound that dropped the whole report at a maximal honest one
+  // would hide exactly the findings it exists to carry.
+  if (JSON.stringify(v).length > 8192) return null;
   const actions: ScopeAction[] = [];
-  let dropped = 0;
-  for (const e of (v as unknown[]).slice(0, 16)) {
+  let dropped = Number.isInteger(v.dropped) && (v.dropped as number) >= 0 && (v.dropped as number) <= 1_000_000 ? v.dropped as number : 0;
+  for (const e of (v.actions as unknown[]).slice(0, 16)) {
     if (!isObj(e) || (e.kind !== 'push' && e.kind !== 'pr' && e.kind !== 'egress')) {
       dropped++;
       continue;
@@ -624,14 +639,14 @@ export function checkScopeReport(v: unknown): ScopeReport {
     // A push or a PR names the repository it touched (a forge path); an egress reach names the
     // host. Anything else is dropped and counted, never refused — the report rides the advance
     // or end that finishes the leg.
-    const shape = e.kind === 'egress' ? HOSTNAME : GIT_REPO;
+    const shape = e.kind === 'egress' ? HOSTNAME : FORGE_PATH;
     if (typeof e.target !== 'string' || !shape.test(e.target)) {
       dropped++;
       continue;
     }
     actions.push({ kind: e.kind, target: e.target, ...(ref != null ? { ref: ref as string } : {}) });
   }
-  dropped += Math.max(0, (v as unknown[]).length - 16);
+  dropped += Math.max(0, (v.actions as unknown[]).length - 16);
   return { actions, dropped };
 }
 

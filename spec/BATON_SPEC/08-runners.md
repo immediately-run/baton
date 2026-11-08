@@ -297,10 +297,13 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     may be corrected until the leg's deadline; nothing reaches Baton until it passes. Then
     `close`, `handoff` where it suspends or releases, and `advance` or `end`.
   - **The leg-end scope audit** (B-134, §12.9): at each leg's end the runner reads, from its own
-    git of the home checkout, the remote refs the leg's window moved, maps each to the
-    repository its remote points at, and reports the pushes outside the claim answer's `scope`
-    with the advance or end that finishes the leg — evidence the agent supplies none of, judged
-    against the scope by Baton, never by the runner (§12.9: a cooperative aid, not a control).
+    git of the home checkout, the remote refs the leg's window moved — after the leg's close and
+    hand-off have run, so their pushes are in the window — and names a push only where the
+    window's reflog says `update by push` (a fetch that moved the ref names nothing); each is
+    mapped to the repository its remote points at (the whole forge path) and the pushes outside
+    the claim answer's `scope` are reported with the advance or end that finishes the leg —
+    evidence the agent supplies none of, judged against the scope by Baton, never by the runner
+    (§12.9: a cooperative aid, not a control).
   - **A bounded run.** `baton runner start --legs <leg,…> [--max-legs <n>] [--until <instant>]`
     claims only tickets whose queued leg is named, chains only into named legs, runs at most
     `n` legs per claim (default 8) and starts none after `until`. A move outside the grant

@@ -917,8 +917,10 @@ export class Admin {
       sets.push(['scope_policy', b.scope_policy as string]);
     }
     if (b.worker_pushers !== undefined) {
+      // A forge login, or an app bot's `<app>[bot]` — the very identity per-claim push tokens
+      // (B-131) push as and the webhook side bounds the same way (its `MAX_PUSHER`).
       const w = b.worker_pushers === null ? [] : Array.isArray(b.worker_pushers) && b.worker_pushers.length <= 50
-        && b.worker_pushers.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 100 && /^[A-Za-z0-9-]+$/.test(x))
+        && b.worker_pushers.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 100 && /^[A-Za-z0-9-]+(\[bot\])?$/.test(x))
           ? [...new Set(b.worker_pushers as string[])] : bad('worker_pushers', 'must be null or a list of at most 50 forge logins');
       sets.push(['worker_pushers', JSON.stringify(w)]);
     }
@@ -966,7 +968,9 @@ export class Admin {
     if (pushers) {
       const was = JSON.parse(this.rows<{ v: string | null }>('SELECT worker_pushers AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? '[]') as string[];
       const next = JSON.parse(pushers[1]!) as string[];
-      if (was.some((p) => !next.includes(p))) return true;
+      // The cross-check matches logins case-blind, so a case-only rewrite names the same
+      // pushers and loosens nothing; only a login leaving the list does.
+      if (was.some((p) => !next.some((q) => q.toLowerCase() === p.toLowerCase()))) return true;
     }
     const bars = sets.find(([k]) => k === 'required_bars');
     if (!bars) return false;

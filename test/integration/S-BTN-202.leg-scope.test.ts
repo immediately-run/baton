@@ -11,7 +11,7 @@
 // half — reading the home checkout's refs around each leg — is unit-tested beside the runner.
 // Runs on both hosts.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { advance, adminSession, claimItem, cutover, endClaim, keyCall, ORIGIN, payload, register, rows, sessionCall, setAdminKeys, setClock, syncCall, syncToken, webhookCall } from '../helpers';
+import { advance, adminSession, claimItem, course, cutover, endClaim, keyCall, ORIGIN, payload, register, rows, sessionCall, setAdminKeys, setClock, syncCall, syncToken, webhookCall } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const board = inject('board');
@@ -81,13 +81,14 @@ describe('S-BTN-202 a leg\'s scope', () => {
     expect(c.scope).toEqual(['immediately-run/fieldhouse']);
     expect((await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
     // The leg ran, and its runner's audit found two pushes: one to docs (outside), one home
-    // (inside — its tracking ref moved too, but the scope covers it).
+    // (inside — its tracking ref moved too, but the scope covers it). The report carries its
+    // actions and the count of any beyond them (the envelope §14 spells).
     expect((await endClaim('vm-a', w.secret, c.claim_id, {
       end_reason: 'released:requested',
-      scope_exceeded: [
+      scope_exceeded: { actions: [
         { kind: 'push', target: 'immediately-run/docs', ref: 'refs/heads/claude/F-1-x' },
         { kind: 'push', target: 'immediately-run/fieldhouse', ref: 'refs/heads/claude/F-1-y' },
-      ],
+      ] },
     })).status).toBe(200);
     expect(await rows(`SELECT ticket_id, claim_id, json_extract(detail_json, '$.target') AS target, json_extract(detail_json, '$.ref') AS ref
                        FROM events WHERE kind = 'scope-exceeded'`)).toEqual([
@@ -107,7 +108,7 @@ describe('S-BTN-202 a leg\'s scope', () => {
     const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'fieldhouse:F-2' });
     await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' });
     expect((await endClaim('vm-a', w.secret, c.claim_id, {
-      end_reason: 'released:requested', scope_exceeded: [{ kind: 'push', target: 'immediately-run/docs', ref: 'refs/heads/claude/F-2-x' }],
+      end_reason: 'released:requested', scope_exceeded: { actions: [{ kind: 'push', target: 'immediately-run/docs', ref: 'refs/heads/claude/F-2-x' }] },
     })).status).toBe(200);
     expect(await overrideOf('fieldhouse:F-2')).toEqual({ hold: 1, hold_reason: 'scope-exceeded' });
     // An owner lifts the hold the way any hold is lifted, and resolves the finding itself.
@@ -118,6 +119,9 @@ describe('S-BTN-202 a leg\'s scope', () => {
     expect(open).toHaveLength(1);
     expect((await sessionCall(session, `/v1/ui/scope/${open[0].id}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status).toBe(200);
     expect(await findings()).toEqual([]);
+    // The resolution leaves its row in the log, like every neighbouring `/v1/ui` mutation.
+    expect(await rows(`SELECT json_extract(detail_json, '$.id') AS id FROM events WHERE kind = 'scope-resolved'`))
+      .toEqual([{ id: open[0].id }]);
     // An already-resolved finding resolves no further.
     expect((await sessionCall(session, `/v1/ui/scope/${open[0].id}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status).toBe(404);
   });
@@ -145,44 +149,73 @@ describe('S-BTN-202 a leg\'s scope', () => {
     await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' });
     expect((await pushToDocs('immediately-run-worker', 'scope-covered-3')).status).toBe(204);
     expect(await rows('SELECT count(*) AS n FROM events WHERE kind = \'unclaimed-write\'')).toEqual([{ n: 1 }]);
-    // The claim ends: the same push is uncovered again, and the finding — resolved below — is
-    // the one open row per shape, updated rather than stacked.
-    expect((await endClaim('vm-a', w.secret, c.claim_id, { end_reason: 'released:requested' })).status).toBe(200);
-    expect((await pushToDocs('immediately-run-worker', 'scope-uncovered-4')).status).toBe(204);
+    // The claim ends `done` naming a sha main will never carry, so it stays completed and
+    // unconfirmed — R-BTN-8's push-first ordering means the delivery of an ordinary final push
+    // routinely lands after `end()`, and §12.9 reads the open window as rule 3 does: the
+    // completed-unconfirmed claim still covers (round 1's blocking finding).
+    expect((await endClaim('vm-a', w.secret, c.claim_id, { end_reason: 'done', ended_at_sha: 'f'.repeat(40) })).status).toBe(200);
+    expect((await rows<{ status: string; confirmed: number | null }>('SELECT status, confirmed_at AS confirmed FROM claims WHERE id = ?', c.claim_id)))
+      .toEqual([{ status: 'completed', confirmed: null }]);
+    expect((await pushToDocs('immediately-run-worker', 'scope-late-4')).status).toBe(204);
+    expect(await rows('SELECT count(*) AS n FROM events WHERE kind = \'unclaimed-write\'')).toEqual([{ n: 1 }]);
+    // The window does end: a sync that reads F-3's closure confirms the claim, and the same
+    // push is uncovered again — the finding is the one open row per shape, updated not stacked.
+    // (The closure post is the normative shape — `tickets`/`closed`/`stations`, the interim
+    // `state`/`ready` posts cannot carry a closure — built directly, `payload` being the interim
+    // shape's helper; `syncCall` still takes the observation number first.)
+    const closed = await syncCall('/v1/sync/board', {
+      registry: [course()], sha: 'b'.repeat(40), parent_sha: FIELDHOUSE_SHA,
+      tickets: [], closed: [{ id: 'F-3', as: 'done' }], stations: {},
+    }, await fieldhouseToken());
+    expect([closed.status, await closed.text()]).toEqual([200, expect.any(String)]);
+    const after = await rows<{ confirmed: number | null }>('SELECT confirmed_at AS confirmed FROM claims WHERE id = ?', c.claim_id);
+    expect(after).toHaveLength(1);
+    expect(after[0].confirmed).not.toBeNull();
+    expect((await pushToDocs('immediately-run-worker', 'scope-uncovered-5')).status).toBe(204);
     expect(await rows('SELECT count(*) AS n FROM events WHERE kind = \'unclaimed-write\'')).toEqual([{ n: 2 }]);
     expect(await findings()).toHaveLength(1);
   });
 
-  it('a report of actions inside the scope records nothing, and entries that fail their shape are dropped and counted', async () => {
+  it('a report of actions inside the scope records nothing, and entries that fail their shape are dropped and counted, never silent', async () => {
     expect((await syncCall('/v1/sync/board', payload(FIELDHOUSE_SHA, null, fieldhouseBoard(['F-1'], {})), await fieldhouseToken())).status).toBe(200);
     await cutover(1, 'fieldhouse');
     const w = await register('vm-a', { courses: [{ repository: 'fieldhouse', course: 'roadmap-pr', version: 3 }] });
     const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'fieldhouse:F-1' });
     await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' });
-    // The pushed target is fieldhouse (in scope) and a malformed entry follows: nothing is
-    // raised for either, and the end is not refused for the malformed one.
+    // The pushed target is fieldhouse (in scope) and a malformed entry follows, with two
+    // actions the runner already truncated beyond the report's sixteen: nothing is raised for
+    // any of them, the end is not refused, and the count — the two it named and the one that
+    // failed its shape — is logged `scope-invalid`, the taken's counterpart, so nothing is
+    // silently shortened.
     expect((await endClaim('vm-a', w.secret, c.claim_id, {
       end_reason: 'released:requested',
-      scope_exceeded: [{ kind: 'push', target: 'immediately-run/fieldhouse', ref: 'refs/heads/claude/F-1-x' }, { kind: 'push', target: 'not a repo' }],
+      scope_exceeded: { actions: [{ kind: 'push', target: 'immediately-run/fieldhouse', ref: 'refs/heads/claude/F-1-x' }, { kind: 'push', target: 'not a repo' }], dropped: 2 },
     })).status).toBe(200);
     expect(await rows('SELECT count(*) AS n FROM events WHERE kind IN (\'scope-exceeded\', \'unclaimed-write\')')).toEqual([{ n: 0 }]);
     expect(await findings()).toEqual([]);
+    expect(await rows(`SELECT ticket_id, json_extract(detail_json, '$.dropped') AS dropped FROM events WHERE kind = 'scope-invalid'`))
+      .toEqual([{ ticket_id: 'fieldhouse:F-1', dropped: 3 }]);
   });
 
   it('the scope settings are owners\' settings: their shapes are checked, and a hold that stops holding is a loosening an approver admits', async () => {
     expect((await syncCall('/v1/sync/board', payload(FIELDHOUSE_SHA, null, fieldhouseBoard(['F-1'], {})), await fieldhouseToken())).status).toBe(200);
     await cutover(1, 'fieldhouse');
-    for (const [body, field] of [[{ scope_policy: 'punish' }, 'scope_policy'], [{ scope_policy: 1 }, 'scope_policy'], [{ worker_pushers: 'x' }, 'worker_pushers'], [{ worker_pushers: ['a b'] }, 'worker_pushers'], [{ worker_pushers: ['x' + 'y'.repeat(100)] }, 'worker_pushers']] as const) {
+    for (const [body, field] of [[{ scope_policy: 'punish' }, 'scope_policy'], [{ scope_policy: 1 }, 'scope_policy'], [{ worker_pushers: 'x' }, 'worker_pushers'], [{ worker_pushers: ['a b'] }, 'worker_pushers'], [{ worker_pushers: ['x' + 'y'.repeat(100)] }, 'worker_pushers'], [{ worker_pushers: ['app[bot]x'] }, 'worker_pushers'], [{ worker_pushers: ['a[b]'] }, 'worker_pushers']] as const) {
       const res = await keyCall(fieldOwner, '/v1/owner/fieldhouse/settings', body, 'PUT');
       expect([JSON.stringify(body), res.status, res.json.message?.split(':')[0]]).toEqual([JSON.stringify(body), 400, field]);
     }
+    // An app bot's `<app>[bot]` login — the identity per-claim push tokens (B-131) push as —
+    // is a login the setting admits, like any human's.
+    expect((await keyCall(fieldOwner, '/v1/owner/fieldhouse/settings', { worker_pushers: ['fieldhouse-runner[bot]', 'immediately-run-worker'] }, 'PUT')).status).toBe(200);
+    expect(await rows<{ v: string }>('SELECT worker_pushers AS v FROM repositories WHERE id = ?', 'fieldhouse'))
+      .toEqual([{ v: '["fieldhouse-runner[bot]","immediately-run-worker"]' }]);
     // Under the cooperative preset the owner is an approvers.policy approver (R-BTN-188), so the
     // owner's own loosening — hold back to report — is admitted; holding was tightening.
     expect((await keyCall(fieldOwner, '/v1/owner/fieldhouse/settings', { scope_policy: 'hold' }, 'PUT')).status).toBe(200);
     expect((await keyCall(fieldOwner, '/v1/owner/fieldhouse/settings', { scope_policy: 'report' }, 'PUT')).status).toBe(200);
     expect((await rows<{ v: string }>('SELECT scope_policy AS v FROM repositories WHERE id = ?', 'fieldhouse'))).toEqual([{ v: 'report' }]);
     // The settings event names what changed (the values as the event carries them).
-    expect(await rows<{ v: string }>(`SELECT json_extract(detail_json, '$.scope_policy') AS v FROM events WHERE kind = 'admin' AND json_extract(detail_json, '$.act') = 'settings' AND json_extract(detail_json, '$.repository') = 'fieldhouse'`))
+    expect(await rows<{ v: string }>(`SELECT json_extract(detail_json, '$.scope_policy') AS v FROM events WHERE kind = 'admin' AND json_extract(detail_json, '$.act') = 'settings' AND json_extract(detail_json, '$.repository') = 'fieldhouse' AND json_extract(detail_json, '$.scope_policy') IS NOT NULL`))
       .toEqual([{ v: 'hold' }, { v: 'report' }]);
   });
 });

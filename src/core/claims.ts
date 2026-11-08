@@ -1044,8 +1044,11 @@ export class Claims {
       // the leg this advance starts is advised without it.
       this.reportTaken(workerId, claimId, c.ticket_id, run.seq, b.taken);
       // B-134: the finished leg's scope audit, reported on the advance that finishes it — the
-      // actions outside the claim's ticket scope raise their findings (and their hold) here.
+      // actions outside the claim's ticket scope raise their findings (and their hold) here,
+      // and the report's dropped count (entries that failed their shape, actions beyond its
+      // sixteen) is logged as `taken-invalid` logs the taken's, never a refusal.
       this.c.scope?.exceeded(claimId, b.scope_exceeded);
+      if (b.scope_exceeded?.dropped) this.event('scope-invalid', `worker:${workerId}`, { dropped: b.scope_exceeded.dropped, claim: claimId }, c.ticket_id, claimId);
     }
     // R-BTN-177: the route choices the course attaches to the leg being started resolve here, in
     // the advance's transaction — a snapshot stored with the leg run and carried as advice,
@@ -1166,8 +1169,10 @@ export class Claims {
     const ending = this.runningLeg(c.id);
     if (ending) this.reportTaken(workerId, c.id, c.ticket_id, ending.seq, e.taken);
     // B-134: the ending claim's leg-end scope audit, likewise — the actions outside the claim's
-    // ticket scope raise their findings (and their hold) in this transaction.
+    // ticket scope raise their findings (and their hold) in this transaction, and the report's
+    // dropped count is logged `scope-invalid`, never a refusal.
     this.c.scope?.exceeded(c.id, e.scope_exceeded);
+    if (e.scope_exceeded?.dropped) this.event('scope-invalid', `worker:${workerId}`, { dropped: e.scope_exceeded.dropped, claim: c.id }, c.ticket_id, c.id);
     // R-BTN-126's capability branch (B-104): the holding the runner says it lost leaves its
     // declared set, its derived sets re-evaluate in this transaction, and the fleet's counts
     // follow — rule 4 refuses this runner at once. A valid blocked end is not a failed attempt,

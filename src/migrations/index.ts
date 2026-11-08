@@ -33,6 +33,7 @@ import personLegs from './0031_person_legs.sql';
 import answerDeferred from './0032_answer_deferred.sql';
 import ownerRuns from './0033_owner_runs.sql';
 import scopeAudit from './0034_scope_audit.sql';
+import scopeEvents from './0035_scope_events.sql';
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },
@@ -69,4 +70,5 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   // 0033 is B-110's (owner runs), renumbered at the merge behind B-7's 0031/0032; 0028 stays reserved for B-107 (#149).
   { id: 33, sql: ownerRuns },
   { id: 34, sql: scopeAudit },
+  { id: 35, sql: scopeEvents },
 ];

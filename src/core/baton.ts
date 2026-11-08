@@ -865,11 +865,15 @@ export class BatonCore {
         return json(tx(() => this.claims.setOverride(owner, ticket, body)));
       }
       // B-134: an owner resolves a scope finding — the acknowledgement that it was looked at.
+      // In the transaction, like every neighbouring `/v1/ui` mutation, so the resolution and
+      // its `scope-resolved` event land together.
       const finding = /^\/v1\/ui\/scope\/(\d+)\/resolve$/.exec(p);
       if (finding) {
         const id = Number(finding[1]);
-        if (!this.scope.resolve(id, `owner:${owner}`)) throw new BatonError('not-found', `no open scope finding ${id}`);
-        return json({ ok: true });
+        return json(tx(() => {
+          if (!this.scope.resolve(id, `owner:${owner}`)) throw new BatonError('not-found', `no open scope finding ${id}`);
+          return { ok: true };
+        }));
       }
       if (p === '/v1/ui/board/accept') {
         const body = await readJson(req);

@@ -60,7 +60,7 @@ reach it, each new one the next free number at merge as R-BTN-31 numbers a scena
 | `pushers` JSON (forge user ids) | `[]` | R-BTN-139 |
 | `code_repos` JSON `[{path, repo_id, former_paths}]` — owners write `path` only; Baton resolves `repo_id` and keeps `former_paths` | `[]` | R-BTN-140 |
 | `scope_policy` (`report`\|`hold`) — what a scope-exceeded finding does: Needs you alone, or a hold on its ticket | `report` | §12.9 |
-| `worker_pushers` JSON (forge logins) — the fleet's VM runners' pushes, cross-checked against open claims | `[]` | §12.9 |
+| `worker_pushers` JSON (forge logins) — the fleet's VM runners' pushes, cross-checked against open claims | none (NULL; an empty list once set — both spell "no pushers") | §12.9 |
 | `api_keys` | 1 | R-BTN-117 |
 | `checks` JSON `{<course>: {name, conclusions}}` | `{}` | R-BTN-114 |
 | `leg_log_root` — `s3://…`, `gs://…`, or on the local host `file:///…` | NULL (off) | R-BTN-128 |
@@ -183,7 +183,7 @@ Under §12.8 (proposal), `repository_policies` `(repository_id, version)` holds 
 `question-posted`, `question-answered`, `question-expired`, `question-dropped`, `answer-invalid`, `call-settled`,
 `superseded`, `course-closed`, `course-opened`, `capacity`,
 `parent-invalid`, `not-before-invalid`, `output-unclaimed`, `reading-refused`, `invalid-pointer`,
-`scope-exceeded`, `unclaimed-write`,
+`scope-exceeded`, `unclaimed-write`, `scope-invalid`, `scope-resolved`,
 `admin` (its act in `detail.action`), `frozen`, `unfrozen`, `sealed`, `imported`; *adoption:* `adopted`, `cutover`, `shadow-conflict`,
 `foreign-claim`.
 
