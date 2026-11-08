@@ -95,7 +95,8 @@ What exists, and where it falls short:
   not secret, not a capability: knowing one grants nothing.
 - **`BATON_SESSION_ID`'s suffix** — the runner's word, recorded in the `context-handoff` activity
   like the rest of that activity (R-BTN-46).
-- **The tenant prefix** — from the claim response's tenant URL, never from repository files.
+- **The tenant prefix** — the host of the tenant's configured origin (R-BTN-135, R-BTN-63's
+  ref-safe form), never from repository files.
 
 ### Invariants
 
@@ -117,7 +118,7 @@ What exists, and where it falls short:
 
 ### Exit criteria
 
-- [ ] the spec PR (R-BTN-63's reply, R-BTN-145's environment, R-BTN-123's session id, R-BTN-128's
+- [ ] the spec PR (R-BTN-63's reply, R-BTN-144's environment, R-BTN-123's session id, R-BTN-128's
   path, §13.5's columns) is merged
 - [ ] run ids are minted, stored, returned and exported as above; the tests pass; `npm test` and
   `npm run typecheck` are green

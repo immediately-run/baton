@@ -114,7 +114,12 @@ resisted, so nothing is signed for a verifier outside it.
 **Role, domain.** What a grant says about its runner's trust: its role (`runner`, or
 `trusted-runner` for the legs marked `trusted`) and its domain, a label for the host or VM it runs
 in, both set by the policy's `approvers.roles` approver. Two reviews count as independent when
-their domains differ; Baton compares the labels and verifies nothing about them (R-BTN-180).
+their domains differ — or, for a credential the policy lists in `domains.per_run`, when their
+**run labels** differ on one domain (a label the runner reports per run, used once). Baton
+compares the labels and verifies nothing about them (R-BTN-180).
+
+**Run id.** The opaque id Baton mints for every leg run at its start (`r_` and a ULID), carried
+by the history, the resume record and leg logs (R-BTN-63).
 
 **Pusher.** A forge author whose words count — a verdict, a marker, an approval — because the
 forge reports they can push the PR's base, or the owners list them in `pushers`. The one sense in

@@ -254,7 +254,9 @@ mean (R-BTN-50).
     mints its `run_id`: `r_` and a ULID — 26 characters of Crockford base32 encoding 48 bits of the
     time in milliseconds read through the clock (R-BTN-32) and 80 random bits from the core's
     random source, which tests replace as they replace the clock; a collision with an existing id
-    is refused by the column's unique index and a new one minted. It is opaque — no reader parses, sorts or
+    is refused by the column's unique index and a new one minted. Runs recorded before run ids are
+    given one when the migration adding the column runs, minted the same way from each run's
+    `started_at`. It is opaque — no reader parses, sorts or
     compares it except for equality; order comes from `started_at` and `seq` — and unique across
     the tenant. The `advance` reply returns it; `claim_legs`, the history's leg rows (R-BTN-81),
     `previous_attempts` and the resume record (R-BTN-24) and the run list (R-BTN-128) carry it.

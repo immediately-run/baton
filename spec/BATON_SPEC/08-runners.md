@@ -309,13 +309,13 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     `n` legs per claim (default 8) and starts none after `until`. A move outside the grant
     suspends at `reached`. This is the runner's discipline, not a Baton gate.
   - **`no_chain_from: [<leg>…]`** on a leg (course file): Baton refuses a claim or `advance` into
-    it by a **credential** that has run any named leg on this ticket in any claim (`claim_legs`
-    → claim → runner → credential; a row with a null claim, an adopted run, is skipped), `not-eligible`, rule `chain`; containers sharing one key
-    count as one. The runner suspends instead. For a credential the policy lists in
-    `domains.per_run` (R-BTN-180), a named leg's run in another claim refuses only when it was
-    unlabelled; within one claim, and against the credential's unlabelled runs, the refusal
-    stands — so a listed credential may review across claims what it wrote in another claim
-    under another label, and never chains a writing leg into a review in one claim.
+    it, `not-eligible`, rule `chain`, by a **credential** that has run any named leg on this ticket
+    (`claim_legs` → claim → runner → credential; a row with a null claim, an adopted run, is
+    skipped; containers sharing one key count as one) — in the same claim, or in another claim in
+    an unlabelled run. A labelled run in another claim (a credential `domains.per_run` lists,
+    R-BTN-180) does not refuse: a listed credential may review across claims what it wrote under
+    another label, and never chains a writing leg into a review within one claim. The runner
+    suspends instead.
 - **R-BTN-107 (isolation: process, attached, session).** The runner declares `isolation` on its
   heartbeat.
   - **`process`** (default): legs are the runner's child processes, as its OS user.
@@ -352,8 +352,9 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     return (result discarded) and stops the process group as R-BTN-119 does after 30 s; (2) calls
     `handoff(ctx)` with `ctx.reason: 'context'`; (3) starts a fresh session on the same leg under
     the same claim, briefed with the hand-off and the inputs — in `process` mode by calling
-    `run(ctx)` again with `ctx.refresh: {n, handoff}` — in every mode the fresh session's
-    `BATON_SESSION_ID` ends `.r<n>` — (4) records activity `context-handoff` with both sessions' links and session ids
+    `run(ctx)` again with `ctx.refresh: {n, handoff}`, its `BATON_SESSION_ID` ending `.r<n>`;
+    (4) records activity `context-handoff` with both sessions' links and session ids — in `session`
+    mode, whose child gets only the brief (R-BTN-107), this record is where the session id lives
     (R-BTN-113's rule; a failing link is dropped).
   - A refresh is not a run for `max_runs`, not a failed attempt, and never lets the lease lapse.
     Past `max_refreshes` the runner suspends at the leg's `from`.
