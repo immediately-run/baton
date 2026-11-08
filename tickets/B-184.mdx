@@ -47,7 +47,8 @@ the spec*), with the owner's approval; the implementing PR builds what that PR s
 horizontal*); `docs/security-model.mdx` (reach 1, options 17 and 19).
 **Depends on:** none. B-127 (owner-signed control) is needed only for the `home-signed` source;
 until it lands, `home-signed` is refused at start with a message naming B-127.
-**Used by:** fieldhouse FLDH-52 (the Firecracker executor). Overlaps B-139 and B-141 (below).
+**Used by:** fieldhouse FLDH-52 (the Firecracker executor). Overlaps B-139, B-141, B-185 and
+B-186 (below).
 
 ### What to build
 
@@ -61,7 +62,12 @@ until it lands, `home-signed` is refused at start with a message naming B-127.
    - `end(handle) → {status, result}` — the `baton-leg-result` block or the agent's last line, which
      the runner checks as R-BTN-106 says;
    - `exec(handle, argv, {cwd, timeout_s}) → {status, stdout, stderr}` — runs a command where the
-     leg runs (item 4).
+     leg runs (item 4);
+   - `salvage(handle) → {sha, ref} | null` — B-186's capture, run before the executor tears the
+     leg's environment down, on every end where that environment still exists; an executor whose
+     environment outlives the leg (`builtin`) may leave it to the runner.
+
+   A handle is keyed by the leg's `run_id` (B-185), and a refresh's session by its session id.
 
    The runner keeps everything Baton knows about — heartbeat, claim, lease, fencing, its key,
    result checking, leg logs (R-BTN-128, written from what the executor streams) and masking
@@ -171,6 +177,8 @@ until it lands, `home-signed` is refused at start with a message naming B-127.
 - **B-141** (a `reads_only` leg runs no branch code) becomes a `needs.runs_branch_code: false`
   that an executor honours; its harness is the first non-trivial `builtin` behaviour. Keep B-141's
   tests; re-express its mechanism through `needs` if B-141 has not landed first.
+- **B-185** (run ids) gives the executor its handle key and the run record its `environment` row;
+  **B-186** (salvage) defines what `salvage` captures and where it goes.
 - **B-138** (a pinned released CLI) is the runner-side twin of `pinned`: a host that pins its
   executor and runs a working-tree CLI has pinned nothing.
 

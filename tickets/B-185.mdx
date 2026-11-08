@@ -1,0 +1,122 @@
+---
+title: "B-185 — Every leg run has a run id: minted by Baton at the leg's start, one key for its logs, sessions, executor and salvage"
+id: B-185
+project: baton
+status: available
+updated: 2026-11-08
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1184
+tier: judgement
+description: "A leg run is identified today only by composition — claim_legs (claim_id, seq), the derived run number (a COUNT at advance), BATON_LEG=<claim id>.<leg>.<run> — which leaves a context refresh's sessions sharing one id, an adopted run with none, and every id unique only inside one tenant. The data model already promises a claim_legs id the schema lacks. Baton mints an opaque run_id at each leg's start, returns it in the advance reply, stores it on claim_legs and in the history; a refresh's session is <run_id>.r<n>; anything written outside Baton prefixes the tenant's host. BATON_LEG stays; BATON_RUN_ID joins it. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-08, asked whether each leg attempt has a unique execution id, while
+designing salvage of a failed leg's uncommitted work (B-186) and the leg executor (B-184). The
+answer was "by composition, with gaps", and the owner agreed to a ticket for a first-class id.
+
+**Spec:** [BATON_SPEC §5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) ([R-BTN-63](../spec/BATON_SPEC/05-courses.md#sec-5-3)),
+[§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-123](../spec/BATON_SPEC/08-runners.md#sec-8-3),
+[R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4)
+([R-BTN-145](../spec/BATON_SPEC/08-runners.md#sec-8-4)), [§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5)
+([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5)), [§9.8](../spec/BATON_SPEC/09-claims.md#sec-9-8)
+([R-BTN-24](../spec/BATON_SPEC/09-claims.md#sec-9-8), [R-BTN-84](../spec/BATON_SPEC/09-claims.md#sec-9-8)),
+[§9.9](../spec/BATON_SPEC/09-claims.md#sec-9-9) ([R-BTN-20](../spec/BATON_SPEC/09-claims.md#sec-9-9)),
+[§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) ([R-BTN-81](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7)),
+[§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)),
+[§13.5](../spec/BATON_SPEC/13-data-model.md#sec-13-5) (`claim_legs`).
+**Depends on:** none.
+**Used by:** B-186 (salvage refs are named by run id), B-184 (the executor's handle and the run
+record's `environment`).
+
+### Why
+
+What exists, and where it falls short:
+
+- `claim_legs` is keyed `(claim_id, seq)` (`src/migrations/0013_stations.sql`); §13.5 says it has
+  an `id`, `session_url`, `leg_log_dir` and `head_sha`, none of which a migration adds.
+- The run number is a `COUNT` of the ticket's rows for that leg, taken at `advance`
+  (`legFacts`, `src/core/claims.ts`) — a position, not an identity.
+- `BATON_LEG=<claim id>.<leg>.<run>` (R-BTN-145) and the leg log's `<run>-<claim id>` (R-BTN-128)
+  are unique in practice, but:
+  1. a context refresh (R-BTN-123) starts a second session — under B-184 possibly on another
+     machine — with the same `BATON_LEG`; only `ctx.refresh.n` tells them apart;
+  2. a run an adoption added (R-BTN-39) has a null claim and so no `BATON_LEG`;
+  3. claim ids are a tenant's integers: production, staging and a local host all issue claim
+     412, so anything keyed by them in a shared place — a forge ref, a log bucket — can collide.
+
+### What to build
+
+1. **Baton mints `run_id` when a leg run starts** — in the `advance` that starts it, and for an
+   adopted run when the adoption adds it — as `r_` plus 26 characters of Crockford base32: 48 bits
+   of the time read through `this.now` (R-BTN-32) and 80 bits from the core's existing random
+   source (`src/core/db.ts`). Opaque to every reader; no rule parses it.
+2. **Stored and returned.** A new migration adds `claim_legs.id` (the surrogate §13.5 already
+   names) and `claim_legs.run_id TEXT UNIQUE`, backfilling existing rows with minted ids. The
+   `advance` reply carries `run_id`; the history's leg rows (R-BTN-81), the run list behind
+   `baton leg log` (R-BTN-128), `previous_attempts` and the resume record (R-BTN-24) carry it.
+   Land the other §13.5 columns this needs (`session_url`, `leg_log_dir`, `head_sha`) in the same
+   migration, or record in the PR why one stays out.
+3. **The runner exports it.** Every leg process gets `BATON_RUN_ID`; `BATON_LEG` stays unchanged
+   (R-BTN-145 keys process stopping on it). An archiver (R-BTN-20) names the run id in what it
+   reports.
+4. **A refresh's session is `<run_id>.r<n>`.** The runner forms it (Baton knows of a refresh
+   only through the `context-handoff` activity, which records both session ids), exports it as
+   `BATON_SESSION_ID` (`<run_id>.r0` for the first session), and `session_url` reports name it.
+5. **Outside Baton, prefix the tenant.** Anything a runner writes to a place another tenant could
+   also write — a forge ref, a bucket path — is keyed `<tenant host>/<run_id>` or a path form of
+   it, the host taken from the claim's tenant URL. B-186's refs are the first user.
+6. **Leg logs move to the run id.** A run started after this lands writes under
+   `<root>/<repository id>/<local ticket id>/<leg>/<run_id>/`; `baton leg log` reads both forms.
+
+### What not to do
+
+- **No meaning in the id.** No reader sorts, parses or compares run ids except for equality;
+  order comes from `started_at` and `seq`.
+- **Do not replace `BATON_LEG`** or the run number: the run number stays what `max_runs` and the
+  dashboard count.
+- **No runner-minted run id.** The runner forms only the `.r<n>` suffix; the run id is Baton's.
+
+### Trust
+
+- **`run_id`** — minted by Baton, returned only to the holder and readers of the ticket's history;
+  not secret, not a capability: knowing one grants nothing.
+- **`BATON_SESSION_ID`'s suffix** — the runner's word, recorded in the `context-handoff` activity
+  like the rest of that activity (R-BTN-46).
+- **The tenant prefix** — from the claim response's tenant URL, never from repository files.
+
+### Invariants
+
+- **Migrations are append-only:** one new numbered file; no edit to 0013.
+- **One clock** (R-BTN-32): the time half of the id comes from `this.now`; tests fix it with
+  `setClock`, and the random half through a seam tests can fix (add one if `db.ts` has none).
+- **Filter fields only** (R-BTN-33): an id is a filter field; no body or note is stored.
+- **Existing readers keep working:** the history, `baton leg log` and resume records add a field
+  and remove none.
+
+### Tests
+
+- Two runs of one leg on one ticket get distinct run ids; an adopted run gets one.
+- The backfill gives every existing `claim_legs` row a distinct id.
+- A refresh exports `<run_id>.r1` to the second session, and the `context-handoff` activity names
+  both session ids.
+- The `advance` reply, the history row and `previous_attempts` carry the same run id.
+- Each behaviour change names its `S-BTN-n` scenario (R-BTN-31).
+
+### Exit criteria
+
+- [ ] the spec PR (R-BTN-63's reply, R-BTN-145's environment, R-BTN-123's session id, R-BTN-128's
+  path, §13.5's columns) is merged
+- [ ] run ids are minted, stored, returned and exported as above; the tests pass; `npm test` and
+  `npm run typecheck` are green
+
+## Status
+
+_filed 2026-11-08._
