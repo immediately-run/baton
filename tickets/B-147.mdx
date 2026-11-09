@@ -31,7 +31,7 @@ for `merge.reviews`); [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) grants 
 
 ### Requires
 
-Linux with `bubblewrap` for the sandbox test; otherwise a checkout and a terminal.
+~~Linux with `bubblewrap` for the sandbox test; otherwise~~ A checkout and a terminal.
 
 ### Why
 
@@ -54,10 +54,11 @@ read these attributes, and no ticket built them.
    either on while a live grant breaks it.
 4. **Rule `trusted`** (R-BTN-182): a leg its course marks `trusted: true` is offered to, and may be
    claimed, advanced and ended by, a trusted-runner grant only; no other leg is offered to one.
-5. **The refusal-only override**: `legs/<leg>.run.mjs` for a trusted leg runs under bubblewrap (or
+5. **The refusal-only override**: `legs/<leg>.run.mjs` for a trusted leg ~~runs under bubblewrap (or
    an equivalent; refused where none is available) with no network, no credential, a private PID
-   namespace and `/proc`, the computed diff as its only input, a fixed time, and no checkout, `.git`
-   or home; it returns `{refuse, reasons}` from a closed list.
+   namespace and `/proc`,~~ runs as any leg's code does, by the runner's executor (B-184), with
+   the computed diff as its only input~~, a fixed time, and no checkout, `.git`
+   or home~~; it returns `{refuse, reasons}` from a closed list.
 
 ### Do not
 
@@ -69,8 +70,8 @@ read these attributes, and no ticket built them.
 
 - **S-BTN-182** and the trust half of **S-BTN-180** on both hosts; S-BTN-189's clearing of
   owner-set trust when `approvers.trust` becomes human-only.
-- Unit: rule `trusted` both ways; `one_per_domain` with a null domain; the sandbox refusing network
-  and file access.
+- Unit: rule `trusted` both ways; `one_per_domain` with a null domain~~; the sandbox refusing network
+  and file access~~.
 
 ### Exit criteria
 
@@ -84,3 +85,5 @@ _(filed 2026-10-31 after baton#145's ticket audit: no ticket built the trust att
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) rewrites R-BTN-180: a grant carries `role` (`runner`, `trusted-runner`), a `checker` mark on a trusted-runner grant, `domain` (a label) and `set_by`, set by `approvers.roles` (review round one made the checker a mark, not a third role); no trust level, model family, `one_per_domain`, `default_trust` or `trusted_domain`, and no courier rows (B-159). Items 1 to 3 and the migration shrink to the three columns, the role route (`PUT …/grants/{fingerprint}/role`) and the clearing rule when `approvers.roles` becomes human-only; two null domains never count as distinct, and a null domain is never a trusted runner.)_
 
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): R-BTN-130's closed list is gone; what a delegated key reaches is R-BTN-186's, marked per registry entry (R-BTN-129).)_
+
+_2026-11-09: the owner retired R-BTN-182's `bubblewrap` requirement (baton#197): the override runs as any leg's code, by the runner's executor; keeping it from the trusted runner's credential is the deployment's (§12.8). Item 5 and Requires struck in place; the sandbox-refusing-network unit test goes with them. (2026-11-09: rules re-read: R-BTN-182)_

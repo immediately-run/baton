@@ -2580,6 +2580,20 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   `independent-runs` does, and does not hold against a compromised per-run runner or a leg that
   can act as it (R-BTN-189, §12.8's outside list). S-BTN-204 and S-BTN-205's rows follow.
 
+- **2026-11-09 — R-BTN-182, §12.8** (B-184).
+  Rules changed: R-BTN-182.
+  The owner: "I don't want the merge leg to be different from the other legs for the plain baton
+  scenario. For field house, we already have sandboxing, so it requires no special custom
+  infrastructure beyond potentially a dedicated sandbox Docker image. Even that might be
+  unnecessary." A trusted leg's `run.mjs` override runs as any leg's code does, by the runner's
+  own means; the `bubblewrap` requirement and the refusal where no sandbox exists are retired
+  (they were never built). It still may only add refusals, R-BTN-183 applied afterwards. That the
+  override cannot reach the trusted runner's credential joins §12.8's list of what the deployment
+  must make true. Retired text: "It runs in a sandbox with no network, no credential, a private PID
+  namespace and `/proc`, the computed diff as its only input, a fixed time, and no checkout, `.git`
+  or home directory (`bubblewrap` or an equivalent on Linux; where none is available the override
+  is refused, not run unsandboxed)."
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

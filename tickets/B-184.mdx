@@ -181,18 +181,16 @@ B-186 (below).
      A capability name that stands for executor behaviour is declared only from `executor.provides`
      — never from B-86's grant-default declaration or `runner.json` `capabilities` — so a
      `builtin` runner cannot claim it by configuration.
-   - **R-BTN-182 runs a trusted leg's `run.mjs` override in `bubblewrap`** and refuses it where
-     none exists — isolation logic in Baton, guarding Baton's own trusted runner. **Decision for the
-     owner in the spec PR:**
-     - (a) keep it, as an explicit exception to the owner's constraint and to this ticket's "no
-       sandbox logic in `src/`" and its exit criterion, both of which would name it;
-     - (b) move it behind the executor as a `refusal` session kind: Baton refuses to run a trusted
-       override on a runner whose executor does not `provide` the name the course requires. This
-       fails closed exactly as R-BTN-182 does today where no sandbox exists — security is not
-       weakened; what is lost is function: a deployment without such an executor (the naive,
-       `builtin` one) can no longer use trusted overrides at all.
-     **Decided: (b)** (the owner, 2026-11-08: "Accepted", on moving it behind the executor, which
-     keeps the constraint with no exception). B-184's spec PR writes it.
+   - **R-BTN-182 ran a trusted leg's `run.mjs` override in `bubblewrap`.** **Decided** (the owner,
+     2026-11-09: "I don't want the merge leg to be different from the other legs for the plain
+     baton scenario. For field house, we already have sandboxing, so it requires no special custom
+     infrastructure"; "yes, update all three"): the override is one more call into repository code,
+     run through the runner's executor like every other (item 4), with no sandbox named and no
+     refusal where none exists; it may still only add refusals, R-BTN-183 applied afterwards. Under
+     `builtin` it runs beside the merge runner's credential, so a repository relying on
+     `no-runner-lands` relies on its deployment's executor for this — §12.8's list of what the
+     deployment must make true says so. Written into the spec in baton#197 (supersedes the
+     2026-11-08 choice of (b)).
    Live tickets that build what this retires get a dated note mapping each item: B-70
    (isolation folded into `runner:session`), B-47 and B-117 (session and attached runners), B-12
    (fresh context, which sessions now carry), B-115 (in review; noted for its author).

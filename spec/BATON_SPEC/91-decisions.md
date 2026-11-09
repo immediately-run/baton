@@ -185,3 +185,8 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   R-BTN-189; FIELDHOUSE_SPEC's 2026-11-08 history entry holds the ruling it serves). Baton stays agnostic about whether runs are kept
   apart; the weaker guarantee says what it cannot withstand, and a floor on `independent-review`
   refuses the change.
+- Chose to run a trusted leg's override as any leg's code is run, the deployment keeping it from the
+  trusted runner's credential, over Baton sandboxing it with `bubblewrap` or refusing it without a
+  sandbox (2026-11-09, the owner: "I don't want the merge leg to be different from the other legs
+  for the plain baton scenario"; R-BTN-182, §12.8). Baton stays agnostic about isolation with no
+  exception; a deployment that relies on `no-runner-lands` already isolates repository code.

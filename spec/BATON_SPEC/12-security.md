@@ -273,7 +273,8 @@ below answers.
   branch is itself deployed puts `**` in `paths.protected` so a human approves every merge;
 - what the deployment must make true and Baton cannot observe: that a review leg runs no branch
   code, that a domain which ran a branch's code is reset before it serves another ticket, that a
-  trusted runner's domain is shared with no other grant, and where runners, trusted runners and
+  trusted runner's domain is shared with no other grant, that a trusted leg's override
+  (R-BTN-182) runs without the trusted runner's credential, and where runners, trusted runners and
   their keys live (never on a machine an agent session drives, for a deployment that relies on
   `human-gates`). Baton records the declarations (R-BTN-183); a deployment that relies on them
   states and enforces them itself;
@@ -800,12 +801,11 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
   - **Its credential is human-level for what it may do.** It runs as a workflow on the default
     branch or as a process, in a domain shared with no other grant; that no agent session runs
     there is the deployment's to make true (§12.8).
-  - **A course's `legs/<leg>.run.mjs` for a trusted leg may only add refusals.** It runs in a
-    sandbox with no network, no credential, a private PID namespace and `/proc`, the computed diff as
-    its only input, a fixed time, and no checkout, `.git` or home directory (`bubblewrap` or an
-    equivalent on Linux; where none is available the override is refused, not run unsandboxed). It
-    returns `{refuse, reasons}`, `reasons` from a closed list with path ids. The CLI applies
-    R-BTN-183 afterwards, whatever it returns.
+  - **A course's `legs/<leg>.run.mjs` for a trusted leg may only add refusals.** It runs as any
+    leg's code does, by the runner's own means — Baton names none for a trusted leg rather than
+    another — with the computed diff as its only input, and returns `{refuse, reasons}`, `reasons`
+    from a closed list with path ids. The CLI applies R-BTN-183 afterwards, whatever it returns.
+    That the override cannot reach the trusted runner's credential is the deployment's (§12.8).
 - **R-BTN-183 (what the merge runner merges).** At the PR's exact head `H`, under the policy's
   `merge` and `paths` (R-BTN-188), except a proposal merge, which R-BTN-180 defines alone:
   - **A domain that runs a branch's code is one of its writers.** Every `std:wrote@1` and `std:ran@1`
