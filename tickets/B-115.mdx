@@ -108,3 +108,5 @@ _(filed 2026-10-26)_
   #162 (the first exit criterion). The 24-hour hosting run waits on the owner — the
   `claude-cloud-session` and the `BATON_KEY`/`BATON_HOSTNAME`/`GH_TOKEN` secrets; nothing
   measured yet, nothing appended to `docs/lessons.mdx`.
+
+- 2026-11-09 (for its author): B-184's spec amendment retires `process` mode as a name — the default is now the `builtin` executor, which runs legs exactly as `process` mode did (R-BTN-107) — and the heartbeat's `isolation` field, replaced by `executor`; R-BTN-3's host `kind` stays, a label no rule reads. Nothing in this PR's script needs to change for the default; its wording should say `builtin` executor where it says `process` mode.

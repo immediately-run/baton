@@ -27,7 +27,8 @@ mean (R-BTN-50).
     resolve hook for the `tickets`, `stations` and `rank` calls only, a bare specifier there
     resolving as if from `.baton/`.
   - **Station functions and ticket sources** run — in the sync, the runner's re-verification
-    (R-BTN-5) — through the wrapper (R-BTN-133) in a
+    (R-BTN-5) — through the wrapper (R-BTN-133), by the executor's `exec` wherever a runner runs
+    them (R-BTN-107), in a
     read-only, verified worktree of the **whole** commit, as working directory; never in
     `ctx.checkout`.
   - **A source** is `courses[].source` = `<provider>/<namespace>/<repository>/<commit>/<path>`:
@@ -142,6 +143,8 @@ mean (R-BTN-50).
   | `no_chain_from` | leg | legs whose credential may not take this one on the same ticket (for a credential `domains.per_run` lists, across claims only under another label) | R-BTN-106 |
   | `stream` | leg | `false`: its output is never written to a leg log | R-BTN-128 |
   | `max_context`, `max_refreshes` | leg | context fraction (0.1–0.95) that triggers a fresh session, and how many | R-BTN-123 |
+  | `agent_command` | leg | the command its stub runs as the leg's agent, a string of 1–1,024 characters | R-BTN-131 |
+  | `executor` | leg | executor data: a JSON object Baton never reads, passed to the runner's executor | R-BTN-107 |
   | `check_command` | leg | a check course's verdict command: an argv, with `timeout_s` (default 1800, ≤ 7200) | R-BTN-153 |
 
   - **Validation.** Baton accepts a file only if: `start` names one station; `end` names at
@@ -162,7 +165,7 @@ mean (R-BTN-50).
     conditions, retries and deadlines (R-BTN-160, R-BTN-122, R-BTN-167); `timers`, `after_s` and
     `choice`, which were timers and choice stations (`deadline_s`, `stalled_s` and `expires`
     replace them); `compensate` and `kind: compensation`, which are the course's `cancel` leg
-    (R-BTN-168); `isolation`, which is the capability `runner:session` (R-BTN-107); a leg's
+    (R-BTN-168); `isolation`, since how a leg runs is the runner's executor's (R-BTN-107); a leg's
     `call`, which is its `spawns` (R-BTN-165); `checks`, which is the owners' setting
     (R-BTN-114); and `retry.non_retryable`, which is a type's `retryable` (R-BTN-160). A file
     that fails keeps the previous one in force and raises `baton.course-refused`.
@@ -526,6 +529,10 @@ mean (R-BTN-50).
     ```
 
     A type id matches `^[a-z][a-z0-9-]{0,31}$`; `values` is a pattern in R-BTN-108's engine; a
+    type declared `"from": "executor"` stands for what a runner's executor does, and a capability
+    of it counts for a runner only when its heartbeat's `executor.provides` names it (R-BTN-107) —
+    never from its declared `capabilities`, whether `runner.json`, `--capabilities` or the grant
+    (R-BTN-72) put it there, so a runner cannot claim it by configuration; a
     role expands to its list once (roles do not nest). Baton accepts the file only if every
     capability a leg lists, after expansion, is of a declared type with a matching value, or is
     built-in. A role naming `human-operator` or another role holds the file (R-BTN-157); so does a
@@ -639,7 +646,7 @@ mean (R-BTN-50).
   code of its own. "Standard" names where they live, not a privilege: the CLI reads them as any
   source. They assume no particular deployment and run under every preset; a
   course that relies on a deployment's own architecture and threat model (reviewers on clean,
-  separate domains, tests in a check-runner's sandbox) is that deployment's,
+  separate domains, tests in a check leg) is that deployment's,
   kept and sourced from its own repository: Fieldhouse's is FLDH-41. Their shared code is copied into each directory by `npm run courses`, checked in, and
   checked current by the baton repository's CI. Their legs require `runner:leg-trees`.
 
@@ -825,27 +832,35 @@ mean (R-BTN-50).
     opens its PR inside the claim, so it leaves the PR itself, which `verify: "pr"` refuses a claim
     without.
   - The standard courses declare `error.no-answer` (`interrupt`, `retryable: false`, R-BTN-162).
-  - **Stubs** run the repository's `agent_command` (R-BTN-74) with `BATON_COURSE`, `BATON_LEG`,
-    `BATON_TICKET_FILE` and `BATON_INSTRUCTIONS` (the source's `legs/<leg>.md` or the home's
-    override, at the claim's snapshot); a result-dependent leg reads the agent's last line
-    (`BATON_ANSWER`) and checks it against the course's values. The read is tolerant of prose and
-     strict about the answer (B-85): scanning backwards from the output's last non-blank line, the
-     first line that **begins** with one of the course's values as a whole word is the answer, with
-     at most one PR URL after it on that line (prose before or after it fails nothing); a value
-     word mid-line only is not an answer, and no such line fails the leg, naming the value wanted
-     and the last line read. The spawn is shell-free (B-84):
-    the command string splits into words as `sh` would — quotes, no substitutions — and runs as
-    `execFile(command, args)` with the ticket id, the leg and the checkout appended, stdin never
-    an open pipe (a closed fd — nothing to read), stdout and stderr captured pipes. A repository's
-    `agent_wrapper` — or a host's `BATON_AGENT_WRAPPER`, which wins — is one more command, split
-    the same way, whose words precede the agent's argv (B-95): Baton composes it and builds
-    nothing in its place (no capture, upload, retention or redaction), and the instruction
-    file's header names the precedence. The instruction file's header carries that contract for
-    `agent_command` authors, with the
+  - **The agent command.** A leg's agent command is the first of these present: the home's
+    `.baton/baton.json` `legs.<course>.<leg>.agent_command` (R-BTN-51), which lets a home change a
+    sourced course's command (R-BTN-134); the leg's `agent_command` in its course file
+    (R-BTN-69); the home's top-level `.baton/baton.json` `agent_command`, the default for every
+    leg; and the harness command `baton runner start --harness` fills when none of these names one
+    (B-83). The `.baton/baton.json` `agent_models` map's replacement of the command's `--model`
+    words applies to whichever command was chosen. The runner passes the leg's agent command to every executor in
+    `brief` (R-BTN-107), and the stub runs it inside the leg's session under every executor. A
+    repository's `agent_wrapper` — or `BATON_AGENT_WRAPPER` in the leg's environment, which wins
+    — is one more command whose words precede the agent's argv (B-95), inside the leg, under every
+    executor: Baton composes it and builds nothing in its place (no capture, upload, retention or
+    redaction), and the instruction file's header names the precedence. The spawn is shell-free
+    (B-84): each command string splits into words as `sh` would — quotes, no substitutions — and
+    runs as `execFile(command, args)` with the ticket id, the leg and the checkout appended, stdin
+    never an open pipe (a closed fd — nothing to read), stdout and stderr captured pipes. The
+    instruction file's header carries that contract for `agent_command` authors, with the
     completion rule it closes: the command's exit **is** the agent's, so a harness whose client
     can exit before its work (a client of a background service) must run its session in process
     (`opencode run --standalone`, or the equivalent) — else its truncated output fails the leg
-    while an orphaned session outlives and out-posts its claim. A leg whose stub claims a PR on
+    while an orphaned session outlives and out-posts its claim.
+  - **Stubs** run the leg's agent command with `BATON_COURSE`, `BATON_LEG`,
+    `BATON_TICKET_FILE` and `BATON_INSTRUCTIONS` (the source's `legs/<leg>.md` or the home's
+    override, at the claim's snapshot); a result-dependent leg reads the agent's last line
+    (`BATON_ANSWER`) and checks it against the course's values. The read is tolerant of prose and
+    strict about the answer (B-85): scanning backwards from the output's last non-blank line, the
+    first line that **begins** with one of the course's values as a whole word is the answer, with
+    at most one PR URL after it on that line (prose before or after it fails nothing); a value
+    word mid-line only is not an answer, and no such line fails the leg, naming the value wanted
+    and the last line read. A leg whose stub claims a PR on
     the forge — `create-pr`'s `implement` — verifies it there before returning its position (B-81):
     an open PR on a branch its course's `branch_pattern` maps to the ticket, in the checkout's
     repository or one the ticket's `repos:` names (B-29), and the checkout's branch, when it feeds
@@ -951,7 +966,7 @@ mean (R-BTN-50).
     report `abandoned` as an ordinary outcome, not a call settlement.
   - `integrate` (`built` → `integrated`) is an ordinary agent leg that reads the children's
     results through git.
-  - Its stubs call the repository's `agent_command`; the planning prompt is the repository's. A
+  - Its stubs call the leg's agent command (R-BTN-131); the planning prompt is the repository's. A
     repository that wants the plan approved first adds a person's leg (R-BTN-116).
 
 ### 5.9 Capabilities are the runner's statement
@@ -968,8 +983,8 @@ mean (R-BTN-50).
   credential, learns what a name means, calls a provider or checks a declaration: every
   capability rests on the runner's own statement (values 12).
   - **A grant bounds what counts.** A runner's capabilities for a repository are its declared
-    ones that its grant there admits (R-BTN-58), together with its declared `runner:`
-    capabilities (R-BTN-133). Rule 4 reads them (§6.6), `fleet_capabilities` counts them
+    ones and its executor's `provides` (R-BTN-107, R-BTN-121) that its grant there admits
+    (R-BTN-58), together with its declared `runner:` capabilities (R-BTN-133). Rule 4 reads them (§6.6), `fleet_capabilities` counts them
     (R-BTN-75), and the model (R-BTN-68) receives them as the runner's capabilities. A grant
     bounds what a runner declares, never what a capability means: a runner that declares an
     ability it lacks is only offered legs it cannot finish (R-BTN-66).

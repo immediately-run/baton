@@ -221,7 +221,7 @@ is stale. Never edit it by hand.
 | R-BTN-102 | a machine key is trusted with everything a machine does | [`08-runners.md`](BATON_SPEC/08-runners.md) |
 | R-BTN-105 | a sync reads the commit it syncs; a plain server needs nothing | [`03-repositories-and-forges.md`](BATON_SPEC/03-repositories-and-forges.md) |
 | R-BTN-106 | a session reports to its runner; the runner checks every move | [`08-runners.md`](BATON_SPEC/08-runners.md) |
-| R-BTN-107 | isolation: process, attached, session | [`08-runners.md`](BATON_SPEC/08-runners.md) |
+| R-BTN-107 | the executor: how a leg runs is the runner host's choice | [`08-runners.md`](BATON_SPEC/08-runners.md) |
 | R-BTN-108 | one envelope, named schemas, one validator | [`05-courses.md`](BATON_SPEC/05-courses.md) |
 | R-BTN-109 | station entry requirements | [`05-courses.md`](BATON_SPEC/05-courses.md) |
 | R-BTN-110 | standard output formats are a shared library, not core | [`05-courses.md`](BATON_SPEC/05-courses.md) |
@@ -361,7 +361,7 @@ is stale. Never edit it by hand.
 | S-BTN-61 | shared instances | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-62 | a session reports to its runner | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-63 | no review by its author's key | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-64 | session-only legs | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-64 | executor-only legs | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-65 | refinement | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-66 | entry requirements | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-67 | a person's leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
@@ -374,7 +374,7 @@ is stale. Never edit it by hand.
 | S-BTN-75 | a bounded run | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-76 | hostile values rendered | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-77 | host allowlists | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-78 | session mode | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-78 | the `session` executor | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-79 | schemas refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-80 | signatures and spawns | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-81 | a check nobody sends | [`15-verification.md`](BATON_SPEC/15-verification.md) |
@@ -466,6 +466,12 @@ is stale. Never edit it by hand.
 | S-BTN-205 | per-run domains (B-187) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-206 | opaque ticket versions, the board | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-207 | ticket versions through the sync and the runner | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-208 | the `builtin` executor | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-209 | executor sources | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-210 | repository code through `exec` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-211 | the per-leg channel | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-212 | executor data | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-213 | the executor's declaration and the run's record | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
@@ -616,3 +622,4 @@ is stale. Never edit it by hand.
 | G-BTN-165 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-166 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-167 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-168 | [`15-verification.md`](BATON_SPEC/15-verification.md) |

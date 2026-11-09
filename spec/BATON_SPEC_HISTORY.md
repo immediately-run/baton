@@ -2647,6 +2647,65 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   cache of the head snapshot". The owner also waived B-183's seventh scenario (replay against a
   moved version), which moves to B-190 with replay itself.
 
+- **2026-11-09 — R-BTN-3, R-BTN-19, R-BTN-51, R-BTN-72, R-BTN-98, R-BTN-106, R-BTN-107, R-BTN-113,
+  R-BTN-114, R-BTN-119, R-BTN-121, R-BTN-123, R-BTN-124, R-BTN-126, R-BTN-128, R-BTN-131,
+  R-BTN-133, R-BTN-134, R-BTN-144, R-BTN-145, R-BTN-153, R-BTN-155, R-BTN-174, R-BTN-180, R-BTN-181, R-BTN-182,
+  R-BTN-183, R-BTN-189, §6.6, §8, §9.2, §11, §12, §13, §14, §15** (B-184, the leg executor).
+  Rules changed: R-BTN-3, R-BTN-19, R-BTN-51, R-BTN-72, R-BTN-98, R-BTN-106, R-BTN-107, R-BTN-113,
+  R-BTN-114, R-BTN-119, R-BTN-121, R-BTN-123, R-BTN-124, R-BTN-126, R-BTN-128, R-BTN-131,
+  R-BTN-133, R-BTN-134, R-BTN-144, R-BTN-145, R-BTN-153, R-BTN-155, R-BTN-174, R-BTN-180, R-BTN-181, R-BTN-182,
+  R-BTN-183, R-BTN-189.
+  From the owner's design session on runner placement, 2026-11-08: "Ideally, baton does not
+  dictate the host, runner, leg process isolation policy: a single-user completely non-isolated
+  baton setup would not benefit from having this complexity within baton, while the full
+  fieldhouse software factory may require a highly complex and frequently evolving
+  architecture", and "Perhaps the 'start a leg' hook should be something that can be
+  reimplemented in each repo's `.baton/`"; Baton is to be "completely agnostic regarding how
+  runners sandbox legs, if at all". The session's answer: the hook may live in `.baton/`, but
+  whether a runner believes it is the runner's host's call, since the hook creates the sandbox
+  and a push that replaced it would be reach 1 (`docs/security-model.mdx`) — the precedent being
+  a host's `BATON_AGENT_WRAPPER` winning over a repository's `agent_wrapper`. R-BTN-107 is
+  rewritten as the executor rule (the same id): one versioned interface (`executor_api: 1`:
+  `start`, `stop`, `end`, `exec`, `salvage`) keyed by run id, four sources the host picks
+  (`builtin`, `home`, `home-signed`, `pinned`), every call into repository code by `exec` in a
+  session of its kind, executor data Baton never reads or stores, the heartbeat's `executor`
+  block in place of `isolation`, and three opaque strings on the run's record. `session` and
+  `attached` become executors Baton ships. The per-leg channel (R-BTN-106) carries only the leg
+  verbs. On 2026-11-09 the owner settled two choices B-184 left to this amendment: check legs
+  require `checks:withheld-credentials`, a capability only an executor's `provides` declares
+  (R-BTN-114, R-BTN-121), so a `builtin` runner runs none; and a leg's agent command is the first
+  present of the home's per-leg setting, the course file's per-leg `agent_command`, the home's
+  top-level `agent_command` and the `--harness` fill (R-BTN-131) — the top-level value is a
+  permanent default, never removed, which supersedes B-184 item 6's "dual-read window". The
+  trusted leg's override (R-BTN-182, the owner's 2026-11-09 choice recorded above) now names the
+  executor it runs through; §12.8's list says its isolation is the deployment's. Decided in the
+  drafting and flagged for the owner's approval: a silence reap of a claim whose leg runs under
+  any executor but `builtin` stays fence-pending until the executor's `stop` returns (R-BTN-19,
+  as `session` mode's was); the `pinned` digest's canonical listing and a directory-only bundle;
+  executor data bounded at 4 KB, checked by the sync and stripped from the posted course file;
+  the wrapper reading `ctx` from stdin and writing its result on stdout's last line; the run
+  strings' shape (1–256 printable ASCII without spaces); `--sessions` and `--attached` kept as
+  selectors of the shipped executors. Retired text: R-BTN-107's three modes — "`process`
+  (default): legs are the runner's child processes, as its OS user", "`attached`: `baton runner
+  start --attached` runs in the background inside an agent session's own container …", "`session`:
+  the runner starts one cloud session per agent leg through a session provider … The provider
+  adapter is runner code; core knows only the mode's name" — and "A leg that must run in `session`
+  mode requires the built-in capability `runner:session` (R-BTN-133), which only a runner started
+  in `session` mode declares"; R-BTN-133's `runner:` value `session`; R-BTN-114's "Check legs
+  require `runner:session` (R-BTN-107): no `process` or `attached` runner takes one"; R-BTN-153's
+  "a fresh sandbox … through the provider method `exec` … A runner whose provider has no `exec`
+  takes no verdict leg"; R-BTN-123's provider `contextUse(sessionId)`; R-BTN-3's "`vm`
+  (Firecracker)" (the host `kind` stays, a label no rule reads); R-BTN-180's domain as "a label
+  naming the host or VM the grant's process runs in"; §9.2's and `no_chain_from`'s "containers
+  sharing one key" (said of credentials); R-BTN-69's refusal of `isolation` "which is the
+  capability `runner:session`" (the field stays refused); the wrapper's `<ctx.json> <out.json>`
+  files; the heartbeat's `isolation`, `runners.isolation` and the run list's `mode`.
+  `docs/context/architecture.mdx`'s *Parallelism is horizontal* no longer prescribes Firecracker
+  sandboxes packing several runners under cgroups, nor says a sandbox is one domain; *Who decides
+  what* gives a threat to "the deployment, the forge or the credential proxy". No id is retired.
+  S-BTN-208–S-BTN-213 and G-BTN-168 are new; S-BTN-4, -64, -78, -88, -123 and G-BTN-14, -90
+  follow.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -4226,6 +4285,16 @@ changes):
   envelope is read from production's own `capacity` log (R-BTN-87); the load test runs on the
   local host (R3-1258). The owner's answer to BATON-UI-V2's Decision 7 ("we don't need staging at
   all") is the same ruling.
+
+- **The leg executor: how a leg runs is the runner host's choice** (2026-11-08 and 2026-11-09,
+  the owner; R-BTN-107, R-BTN-114, R-BTN-131; B-184). Rejected: Baton's closed list of modes
+  (`process`, `attached`, `session`), which made isolation a Baton concept a single-user setup
+  pays for and a factory outgrows; a repository-selected start hook every host obeys, which a push
+  could replace at the runner's level (reach 1); repository code (`close`, `handoff`, `rank.mjs`,
+  the ticket source) left in the runner's own process; a built-in `runner:session` for check legs
+  in place of a name the executor states; and a course-only `agent_command` with the home's value
+  read through a window, which would have broken every home that customizes a sourced course's
+  command.
 
 ## Review record
 

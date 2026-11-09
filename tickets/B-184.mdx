@@ -302,3 +302,5 @@ B-186 (below).
 ## Status
 
 _filed 2026-11-08._
+
+- 2026-11-09: the spec half is drafted on `claude/B-184-executor-spec` (R-BTN-107 rewritten as the executor rule). The owner settled two choices for it: check legs require `checks:withheld-credentials`, declared only from an executor's `provides` (R-BTN-114); and a leg's agent command is the first present of the home's `legs.<course>.<leg>.agent_command`, the course file's per-leg `agent_command`, the home's top-level `agent_command` (a permanent default) and the `--harness` fill (R-BTN-131) — item 6's "dual-read window" is superseded.

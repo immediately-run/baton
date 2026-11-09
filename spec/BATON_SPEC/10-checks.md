@@ -7,7 +7,7 @@ description: "A check course runs a repository's merge checks in place of a CI s
 A check course runs a repository's merge checks in place of a CI service. Baton schedules the
 check, a check-runner runs a command against the change's head, and a runner that holds the
 check App's key posts the verdict to the forge, whose branch protection is the gate. A check is as trustworthy as the
-registered check-runner keys, their legs' isolation and the check command on the default branch:
+registered check-runner keys, the executors their legs run under and the check command on the default branch:
 the change under test decides its command's exit status, which is what a test is, and cannot
 print its way to `success`.
 
@@ -37,9 +37,13 @@ print its way to `success`.
     - Only a check-runner claims or advances in a check ticket, and a check-runner claims nothing
       else. Baton holds this at every claim and every `advance` (`not-eligible`, rule
       `check-runner`), so the key that wrote a change never reports its check.
-  - **Isolation.** Check legs require `runner:session` (R-BTN-107): no `process` or `attached`
-    runner takes one (rule 4), and they run with every write-capable
-    credential and secret withheld, as replay does (R-BTN-84). Checks run only changes from the
+  - **Withheld credentials.** A check leg's session holds no write-capable credential or
+    secret, as replay's environment holds none (R-BTN-84). Every check leg lists
+    `checks:withheld-credentials` in `requires`, of a type its course declares `"from":
+    "executor"` (R-BTN-121), so only a runner whose executor `provides` it takes one (rule 4;
+    R-BTN-107) — never one that declares it from `runner.json` `capabilities` or the grant
+    (R-BTN-72), and so never a `builtin` runner — and with no such runner live the leg carries a
+    `capability` block (R-BTN-75). Checks run only changes from the
     repository's own branches, never a fork's: a leg's logic cannot be both generally useful and
     a sandbox for strangers' code.
   - **Conclusions are the owners'.** The owner setting `checks: {<course>: {name,
@@ -65,9 +69,9 @@ print its way to `success`.
     1. The runner checks that `check_sha` is the head of `check.head_ref`, so a `refs/pull/*`
        commit cannot pass as the branch's. When the branch has moved, the claim ends
        `released:stale-board`, not a failed attempt, and Baton records a sync want (R-BTN-94).
-    2. It runs the command **first**, in a fresh sandbox checked out at `check_sha`, before any
-       agent touches that sandbox, through the provider method `exec(argv, {cwd, timeout_s})
-       → {status}` (R-BTN-107). A runner whose provider has no `exec` takes no verdict leg.
+    2. It runs the command **first**, in the leg's session checked out at `check_sha`, before
+       any agent touches that session, by the executor's `exec(handle, argv, {cwd, timeout_s})`
+       (R-BTN-107), reading its `status`.
   - **Mapping the status.** Status 0 reaches the station mapped to `success`; any other status
     the one mapped to `failure`; a timeout or an `exec` error the one mapped to `timed_out`, or
     to `failure` where the map names no `timed_out`. An

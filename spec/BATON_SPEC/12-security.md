@@ -21,8 +21,9 @@ description: "BATON_SPEC — 12. Security."
   credential no session holds.
 - **Sensitive legs act on attestations** (R-BTN-181): typed facts only a trusted writer makes,
   re-checked by a trusted runner at the moment it acts.
-- **Cooperative, not a sandbox.** A leg runs as its runner's OS user, and nothing separates the
-  sessions of one user (R-BTN-14). Baton runs no repository code (R-BTN-98) and checks no
+- **Cooperative, not a sandbox.** Under the default executor a leg runs as its runner's OS user,
+  and nothing separates the sessions of one user (R-BTN-14); how any other executor runs a leg is
+  the deployment's, and Baton reads nothing of it (R-BTN-107). Baton runs no repository code (R-BTN-98) and checks no
   per-runner identity in git (R-BTN-46).
 - **Content is data.** Text from git, runners and forges reaches a model only as quoted data and
   a screen only as text (§12.3).
@@ -278,7 +279,8 @@ below answers.
 - what the deployment must make true and Baton cannot observe: that a review leg runs no branch
   code, that a domain which ran a branch's code is reset before it serves another ticket, that a
   trusted runner's domain is shared with no other grant, that a trusted leg's override
-  (R-BTN-182) runs without the trusted runner's credential, and where runners, trusted runners and
+  (R-BTN-182), run through the trusted runner's executor, cannot reach the trusted runner's
+  credential — its isolation is the deployment's, as every executor's is (R-BTN-107) — and where runners, trusted runners and
   their keys live (never on a machine an agent session drives, for a deployment that relies on
   `human-gates`). Baton records the declarations (R-BTN-183); a deployment that relies on them
   states and enforces them itself;
@@ -286,8 +288,7 @@ below answers.
   is `any`, which is why `human-gates` holds only under `hardware`);
 - a compromised host of trusted runners or of the protection checker (R-BTN-180);
 - for reviews counted by run label (R-BTN-180), a compromised runner of a listed credential, or a
-  leg that can act as it (under a runner whose legs share its trust boundary, every leg can: §8,
-  R-BTN-107): Baton records run labels and cannot tell whether runs were kept apart;
+  leg that can act as it (under `builtin`, every leg can: R-BTN-107): Baton records run labels and cannot tell whether runs were kept apart;
 - refs no forge rule restricts: on GitHub, `refs/baton/*`; Baton reads nothing from them that a
   trusted leg acts on;
 - a human who approves a change they misread;
@@ -457,7 +458,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     there or naming it in `repos:` (rule `floor`, `floor-broken`), and sends every running claim on
     such a ticket a `release` with reason `floor`, which ends it `released:floor`. The protection
     checker is exempt. Baton enforces this itself, never by asking runners: an ordinary `runner`
-    grant shares its sandbox with the code it builds, so a check it promised to make proves nothing.
+    grant may share its host with the code it builds, so a check it promised to make proves nothing.
   - **The read.** `GET /v1/repositories/{repository}/policy` answers owners, administrators and
     keys granted on the repository with `{repository, version, hash, policy, guarantees: {<name>:
     held | broken}, floors, at}`. A trusted runner reads it over its own authenticated connection
@@ -466,13 +467,13 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
 - **R-BTN-180 (roles, domains and protection).**
   - **Every grant has a role and a domain.** The role is `runner` or `trusted-runner` (R-BTN-182),
     and a `trusted-runner` grant may further be marked the repository's protection checker
-    (`checker`, below); the domain is a label naming the host or VM the grant's process runs in (1–128 characters of
-    `[A-Za-z0-9_.:-]`; no `/`). The role, the mark
+    (`checker`, below); the domain is a label (1–128 characters of
+    `[A-Za-z0-9_.:-]`; no `/`) whose meaning is the deployment's. The role, the mark
     and that label are set by the `approvers.roles` approver (`PUT
     /v1/owner/{repository}/grants/{fingerprint}/role`), `trusted-runner` refused for an API-key
     credential (`invalid-params`; a trusted runner signs, R-BTN-159); a grant nobody marked is a
     `runner` with no domain. Baton compares domains as labels and verifies nothing about them:
-    that a label names one host, and that a trusted runner's host runs no other grant, is the
+    what a label stands for, and that a trusted runner's domain runs no other grant, is the
     deployment's to make true (§12.8).
   - **Per-run domains.** The policy's `domains.per_run` (an `approvers.policy` change, checked
     against the floors like any other) lists credentials — by key fingerprint — whose runs each
@@ -688,7 +689,8 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     - `std:review@1` (writer `baton`): a review leg the course marks `approves: true` and
       `reads_only: true` ended `approve` at `head`, with its domain and its run's label if any;
     - `std:checks@1` (writer `service:<a check-runner's key>`, R-BTN-114): the course's check
-      commands, from protected course data, passed at `head` in a sandbox holding no credential;
+      commands, from protected course data, passed at `head` in a check leg's session holding no
+      credential (R-BTN-114);
       optional, since the forge's own check runs from the protected default branch suffice for
       `merge.checks` (R-BTN-183);
     - `std:approval@1` (writer `human`): the owner approved `head` with `value {paths, blobs,
@@ -792,8 +794,8 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
   non-human credential able to perform that leg's action. No other runner is offered a trusted leg
   or may claim, advance or end one (rule `trusted`), and neither is a grant marked `checker`
   (R-BTN-180) or a runner that delivers `forge-check` (R-BTN-115).
-  - **It runs no repository code but a trusted leg's override**, which it runs through its own
-    means as any leg's code (below), delivering the outbox included (R-BTN-171). It runs a CLI release installed by tarball integrity with the
+  - **It runs no repository code but a trusted leg's override**, which it runs through its
+    executor as any leg's code (below; R-BTN-107), delivering the outbox included (R-BTN-171). It runs a CLI release installed by tarball integrity with the
     release's own `npm-shrinkwrap.json`, so every dependency is pinned too, outside any checkout,
     with no user or project package configuration; and git plumbing.
   - **It re-checks at the moment it acts**, against Baton's record: every attestation it relies on
@@ -806,8 +808,8 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     branch or as a process, in a domain shared with no other grant; that no agent session runs
     there is the deployment's to make true (§12.8).
   - **A course's `legs/<leg>.run.mjs` for a trusted leg may only add refusals.** It runs as any
-    leg's code does, by the runner's own means — Baton names none for a trusted leg rather than
-    another — with the computed diff as its only input, and returns `{refuse, reasons}`, `reasons`
+    leg's code does, through the runner's executor (R-BTN-107) — Baton names no sandbox for a
+    trusted leg and refuses none for the lack of one — with the computed diff as its only input, and returns `{refuse, reasons}`, `reasons`
     from a closed list with path ids. The CLI applies R-BTN-183 afterwards, whatever it returns.
     That the override cannot reach the trusted runner's credential is the deployment's (§12.8).
 - **R-BTN-183 (what the merge runner merges).** At the PR's exact head `H`, under the policy's
@@ -816,7 +818,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     domain of `H`'s chain is a writer domain. A reviewer never runs the branch's code: a review leg is
     `reads_only: true`, reads the diff and the files as data, loads its agent configuration from the
     default branch and never from the branch, and runs no hook, install, build or test; tests run
-    only in a check-runner's sandbox (R-BTN-114) or the forge's workflows.
+    only in a check leg (R-BTN-114) or the forge's workflows.
   - **Baton records this; the deployment makes it true.** Baton cannot observe what a leg ran:
     `std:ran@1` follows from the course's declarations. A deployment relying on independent review
     must therefore (a) run review legs in an environment with no command execution and no
