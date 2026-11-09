@@ -356,6 +356,10 @@ export interface BatonRecord {
    *  the third round refused, its verdict a round apart from the one before it. */
   answers?: { ticket: string; decision: string; answer: string; answered_at?: number }[];
   legs?: RecordedLeg[];
+  /** B-183 (§4.3): each live ticket's last accepted version, keyed by local id, as the
+   *  observation handed it back — Baton's own record, for the source's code to judge its store's
+   *  read against (a lagging replica refuses to post; Baton never orders two versions). */
+  versions?: Record<string, string>;
 }
 
 /** The gate's reading of one ticket's PRs (B-110): the run-tests gate's state, the counted

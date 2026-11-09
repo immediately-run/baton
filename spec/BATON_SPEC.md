@@ -132,7 +132,7 @@ is stale. Never edit it by hand.
 | R-BTN-2 | cutover requires Workers Paid | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
 | R-BTN-3 | a runner exists from its first heartbeat | [`08-runners.md`](BATON_SPEC/08-runners.md) |
 | R-BTN-4 | the lock | [`09-claims.md`](BATON_SPEC/09-claims.md) |
-| R-BTN-5 | the runner reads and re-verifies the ticket from git | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-5 | the runner reads and re-verifies the ticket from git, by its version | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-6 | fencing | [`09-claims.md`](BATON_SPEC/09-claims.md) |
 | R-BTN-7 | status writes are fenced against holders | [`09-claims.md`](BATON_SPEC/09-claims.md) |
 | R-BTN-8 | git first | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
@@ -159,7 +159,7 @@ is stale. Never edit it by hand.
 | R-BTN-31 | scenarios are part of drafting | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | R-BTN-32 | one clock, with a production-inert test seam | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
 | R-BTN-33 | Baton holds filter fields, never content | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
-| R-BTN-34 | the runner reads and re-verifies the ticket from git | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-34 | the runner reads and re-verifies the ticket from git, by its version | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-35 | the ticket source and git win, except about what Baton owns | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
 | R-BTN-36 | git never records the holder | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
 | R-BTN-37 | shared modules are vendored by hash | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
@@ -464,6 +464,8 @@ is stale. Never edit it by hand.
 | S-BTN-203 | the retired model tables (B-142) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-204 | run ids (B-185) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-205 | per-run domains (B-187) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-206 | opaque ticket versions, the board | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-207 | ticket versions through the sync and the runner | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

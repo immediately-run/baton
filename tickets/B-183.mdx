@@ -12,7 +12,8 @@ description: "The ticket source (R-BTN-74) may already say a ticket is an issue 
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/190
 depends_on: []
 ---
 
@@ -170,5 +171,7 @@ fixture `custom` source backed by a JSON file outside git:
 _filed 2026-11-05._
 
 _2026-11-05 — expedited (EXPEDITE) at the owner's request: the owner needs Baton for work today._
+
+_2026-11-07 — [PR #190](https://github.com/immediately-run/baton/pull/190), review rounds 1–2: every code path the ticket names is built, tested and green — the scenarios for the first six behaviours exist and pass (S-BTN-202, S-BTN-203), the full suite and every CI check with them. The seventh, “replay against a current source whose version moved reports the mismatch”, has no substrate to test: `baton leg replay` and `leg_run_inputs` are spec'd (R-BTN-84, §9.8, and S-BTN-48's row) but built nowhere in `src/` — replay has been spec-ahead-of-code in this repository all along. Closing that letter is the owner's, as both review rounds posted: waive the scenario naming a follow-up ticket for replay, or amend the Tests list — the ask stands on the PR's R-BTN-84 thread and in its Deviations, and the values decision above is likewise recorded pending the owner in `91-decisions.md`._
 
 _2026-11-09: the owner answered the Decision needed — (a), the ticket-source wording, now in `docs/context/values.mdx` value 1 and R-BTN-35 on main — and waived the seventh scenario: replay has never been built, so item 9 and its test move to B-190, which builds replay with the version check. PR #190 merges main (its scenarios renumber past S-BTN-205) and drops its "pending the owner" Decisions line. (2026-11-09: rules re-read: R-BTN-35, R-BTN-84)_

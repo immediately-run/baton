@@ -18,9 +18,11 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
-import { claimScratch, courseOf, dropCourse, ensureSha, freshSecret, git, loadCourse, type CourseLoad } from './home';
+import { claimScratch, courseOf, dropCourse, ensureSha, freshSecret, git, loadCourse, loadTicketSource, type CourseLoad } from './home';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { StateFile, leaseLostFrom } from './state';
+import { bareTicketId } from '../defaults/ticket-state';
+import { MARKDOWN_SOURCE } from '../defaults/ticket-versions';
 
 const LEG_PROCESS = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
@@ -984,6 +986,46 @@ export class Runner {
     return courseOf(this.o.home, claim.snapshot_sha as string, want);
   }
 
+  /** B-183 (§4.5): whether the claim's ticket still reads at the version the claim names. Null:
+   *  it does — or there is nothing to compare, a board that held no version for the ticket or a
+   *  source that declared no way of reading, which run exactly as before. A string: why not, for
+   *  the log, and the claim releases `stale-board` before any leg runs. The version is the
+   *  source's opaque string (the markdown source's is the ticket file's blob id); the source at
+   *  the claim's snapshot decides how it is read — `pinned` at the version, `current` as the
+   *  store holds the ticket now — and Baton, never the runner, orders nothing. A source that
+   *  declares `versions` but exports no `read` cannot read at all — the CLI refuses one at load
+   *  (§4.2), so this is a source the snapshot broke — and the claim releases rather than run
+   *  with no re-verification (round 1). */
+  private async verifyTicketVersion(claim: Record<string, any>, scratch: string): Promise<string | null> {
+    const version = typeof claim.version === 'string' ? claim.version : '';
+    const how = (claim.ticket_source ?? null) as { versions?: string | null } | null;
+    if (version === '' || how?.versions == null) return null;
+    let src: Record<string, unknown> | null;
+    try {
+      src = await loadTicketSource(this.o.home, claim.snapshot_sha as string, scratch);
+    } catch (e) {
+      return `the ticket source at the snapshot would not load (${msg(e)})`;
+    }
+    if (src == null) src = MARKDOWN_SOURCE as unknown as Record<string, unknown>;
+    // A source that declares neither `versions` nor `read` is read as declaring nothing (§4.2):
+    // an existing custom source keeps working until it opts in.
+    if (typeof src.versions !== 'string' || !['pinned', 'current'].includes(src.versions)) return null;
+    if (typeof src.read !== 'function') return `the ticket source declares versions: ${JSON.stringify(src.versions)} but exports no read — the ticket cannot be re-verified at it (R-BTN-74)`;
+    const read = src.read as (id: string, o: { version?: string; checkout?: string }) => Promise<{ version?: unknown; ticket?: unknown } | null>;
+    const id = bareTicketId({ id: claim.ticket_id as string });
+    try {
+      if (src.versions === 'pinned') {
+        const out = await read(id, { version, checkout: this.o.home });
+        return out == null || out.ticket == null ? `the ticket cannot be read at its version ${version.slice(0, 16)}` : null;
+      }
+      const out = await read(id, { checkout: this.o.home });
+      if (out == null) return 'the ticket source no longer reads the ticket';
+      return out.version === version ? null : `the ticket's version is ${typeof out.version === 'string' && out.version !== '' ? out.version.slice(0, 16) : '(none)'}, the claim's ${version.slice(0, 16)}`;
+    } catch (e) {
+      return `the ticket source's read failed (${msg(e)})`;
+    }
+  }
+
   /** B-106 (R-BTN-178): take every lock the leg requires before the claim's work or the advance
    *  starts, and release those an earlier leg of the claim needed and this one does not — the
    *  lock is held from before the leg starts until the claim ends or leaves the legs requiring
@@ -1077,6 +1119,19 @@ export class Runner {
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
     const scratch = claimScratch();
+    // B-183 (§4.5, R-BTN-5/R-BTN-34): re-verify the ticket by its version before any leg runs.
+    // The claim names the ticket's `version` as the board holds it and how its source reads; the
+    // source at the claim's snapshot (else the CLI's markdown default) is the reader. A ticket
+    // that moved under the claim releases `stale-board`; one that did not runs. The two
+    // file-less cases (check tickets, a `cancel` claim) carry no version and are re-verified
+    // against Baton's record as before.
+    const versionWhy = await this.verifyTicketVersion(claim, course.scratch);
+    if (versionWhy != null) {
+      this.log(`baton: ${ticket}'s ticket moved under the claim — ${versionWhy}`);
+      dropCourse(course.scratch);
+      rmSync(scratch, { recursive: true, force: true });
+      return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+    }
     this.inflight = { claimId, ticket, course, leg: null, child: null, waiters: [] };
     this.closedDone = false;
     // §2e/R-BTN-63: the legs git evidences are every earlier attempt's, flattened; the claim's
@@ -1162,7 +1217,7 @@ export class Runner {
         const run = runNumber(course.graph, gitPath, legName, own);
         own.push(legName);
         const ctx = {
-          ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository },
+          ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}) },
           claim: { id: claimId, nonce: claim.nonce, station: at },
           leg: legName, run,
           snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },

@@ -108,9 +108,14 @@ export async function syncOnce(next, deps, { backoffMs = 30_000 } = {}) {
     payload ??= await deps.buildPayload();
     // Confirm-only re-posts the head itself (a no-op for the board, R-BTN-11) carrying the
     // confirmations, so one endpoint and one payload shape serve both; Baton applies them
-    // on that path (R3-1212).
+    // on that path (R3-1212). B-183: the body also names `read_sha`, the commit it was read
+    // at — the checkout's own `next`, which the head may be ahead of (two overlapping runs, a
+    // fetch that raced a push). Baton materializes a refresh's tickets only when they were
+    // read at the head it refreshes (§4.3); a body read at an ancestor would otherwise roll
+    // the ticket cache back to an older reading. At the head (`next === head.sha`) it names
+    // the head, and the refresh carries its tickets as a current source moved them.
     const body = d === 'confirm-only'
-      ? { ...payload, sha: head.sha, parent_sha: head.sha, confirmations: confirmed, observation: obs.observation }
+      ? { ...payload, sha: head.sha, parent_sha: head.sha, read_sha: next, confirmations: confirmed, observation: obs.observation }
       : { ...payload, sha: next, parent_sha: head.sha ?? null, confirmations: confirmed, observation: obs.observation, ...(d === 'force' ? { force: true } : {}) };
     const res = await deps.post(body);
     steps.push(res.ok ? 'accepted' : res.code);

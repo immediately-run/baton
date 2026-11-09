@@ -24,6 +24,7 @@ import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
+import { stampMarkdownVersions } from './ticket-versions';
 import { closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, RUN_TESTS_TIMEOUT_MS } from './ticket-state';
 
 /** The retired markers file's path (B-100): the sync no longer reads it — `baton repo
@@ -265,7 +266,9 @@ function stationsResult(value: unknown, from: string): StationsResult {
 interface Board {
   payload: { registry: Record<string, unknown>[]; tickets: TicketsResult['tickets']; closed: TicketsResult['closed']; stations: StationsResult['stations']; markers: StationsResult['markers']; course_data: Record<string, unknown>;
     /** §5.9 (B-104): the merged ontology, or the merge's error; absent, the repository has none. */
-    ontology?: { builtin?: string | null; program: Record<string, unknown> } | { error: string } };
+    ontology?: { builtin?: string | null; program: Record<string, unknown> } | { error: string };
+    /** B-183 (§4.4): the ticket source's declaration. */
+    source: { kind: 'markdown' | 'custom'; versions?: 'pinned' | 'current'; cli: string }; }
   /** A ticket's status at this reading for §6.7's confirmations: its file's, `live`, or null once closed. */
   statusOf: (id: string) => string | null;
 }
@@ -274,7 +277,6 @@ interface Board {
  * repository's own code or the CLI's defaults, the registry from `baton.json`'s courses. */
 async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void, record?: BatonRecord): Promise<Board> {
   const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
-  const ctx = { root, settings };
 
   // §5.9 (R-BTN-174, B-104): the default branch's head holds `.baton/ontology.json` or the
   // repository has no ontology — the file may name a built-in by version and retract, replace
@@ -291,15 +293,36 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     }
   }
 
-  // The ticket source: the repository's own, else the markdown default.
+  // The ticket source: the repository's own, else the markdown default. B-183 (R-BTN-74): a
+  // source declares how it reads a ticket (`versions`: 'pinned' at a version, 'current' as it is
+  // now) and may export `read(id, {version})`; the markdown default is pinned, each ticket's
+  // version its file's blob id at the commit being posted, so an unrelated commit changes no
+  // version. `ctx.versions` carries what the observation handed back (§4.3), for a source whose
+  // store can tell a stale read to refuse one.
   let result: TicketsResult;
+  let sourceKind: 'markdown' | 'custom' = 'markdown';
+  let sourceVersions: 'pinned' | 'current' | null = 'pinned';
   const own = join(root, '.baton', 'tickets.mjs');
+  const ctx = { root, settings, ...(record?.versions != null ? { versions: record.versions } : {}) };
   if (existsSync(own)) {
-    const mod = (await import(`${pathToFileURL(own).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default?: { tickets?: (ctx: unknown) => Promise<TicketsResult> } };
+    const mod = (await import(`${pathToFileURL(own).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default?: { tickets?: (ctx: unknown) => Promise<TicketsResult>; versions?: unknown; read?: unknown } };
     if (typeof mod.default?.tickets !== 'function') throw new Error('.baton/tickets.mjs default-exports no tickets(ctx)');
+    sourceKind = 'custom';
+    const declared = mod.default.versions;
+    if (declared !== undefined && declared !== null) {
+      if (declared !== 'pinned' && declared !== 'current') throw new Error(`.baton/tickets.mjs exports versions ${JSON.stringify(declared)} — "pinned" or "current" (R-BTN-74)`);
+      // A declaration exports `read` (round 1): a pinned source is read at its version, and a
+      // current one read now — the read-now comparison is a current source's whole staleness
+      // protection (§4.2), so a declaration without `read` is refused at load, not run with no
+      // re-verification at all.
+      if (typeof mod.default.read !== 'function') throw new Error(`.baton/tickets.mjs declares versions: ${JSON.stringify(declared)} but exports no read(id, {version}) — a declared source is read through its read (R-BTN-74)`);
+      sourceVersions = declared;
+    } else {
+      sourceVersions = null;
+    }
     result = await mod.default.tickets(ctx);
   } else {
-    result = ticketsMarkdown(readItems(root, settings.items), settings);
+    result = stampMarkdownVersions(root, ticketsMarkdown(readItems(root, settings.items), settings), settings.items);
   }
   const closedIds = new Set(result.closed.map((c) => c.id));
   const doneIds = new Set(result.closed.filter((c) => c.as === 'done').map((c) => c.id));
@@ -364,7 +387,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   // checkout git cannot answer for has no close history, and its frontmatter state stands.
   const closeCommits = closesByTicket((args) => git(root, ...args));
   for (const t of result.tickets) {
-    if (closedIds.has(t.id)) continue;
+    if (closedIds.has(t.id) || t.path == null) continue; // a pathless ticket (a tracker's) has no file to close on
     const commits = closeCommits.get(t.id) ?? [];
     const fm = existsSync(join(root, t.path)) ? parseFrontmatter(readFileSync(join(root, t.path), 'utf8')) : null;
     if (!commits.length && fm?.station === undefined) continue;
@@ -410,9 +433,20 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   }
   const status = new Map(result.tickets.map((t) => [t.id, t.display?.status ?? 'live']));
   return {
-    payload: { registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...ontologyField },
+    // B-183 (§4.4): the source's declaration — `kind`, how it reads (`versions`) and the CLI
+    // that posts — beside its tickets, each stamped with its `version` and `key` above.
+    payload: {
+      source: { kind: sourceKind, ...(sourceVersions ? { versions: sourceVersions } : {}), cli: cliVersion() },
+      registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...ontologyField,
+    },
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };
+}
+
+/** The CLI's own package version, for the board post's `source.cli` (§4.4, B-183): what the
+ *  repository's pinned CLI is, beside the ticket source's declaration. */
+function cliVersion(): string {
+  return (JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8')) as { version?: string }).version ?? '';
 }
 
 /** A sourced course (B-33, R-BTN-131) is the source's exactly, or the sync posts nothing: the
@@ -511,7 +545,7 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
   const dropped: string[] = [];
   for (const t of result.tickets) {
     const mine = byTicket.get(t.id);
-    if (mine == null) continue;
+    if (mine == null || t.path == null) continue; // a pathless ticket holds no marker state to fold
     byTicket.delete(t.id);
     const standard = builtIn(t.course_id);
     const interactive = t.course_id === 'create-spec'; // its marker legs' state is not in the forge (round 1, finding 4)
@@ -539,8 +573,9 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
   for (const id of dropped) log(`baton: ${id}'s lines dropped — ${closedIds.has(id) ? 'the ticket is closed' : 'not a live ticket on a course this fold covers'}`);
   rmSync(file);
   // Only what the migration touched (round 1, finding 10) — never `-A`.
-  gitRun(['add', '--', MARKERS_FILE_RETIRED, ...changed.map((id) => result.tickets.find((t) => t.id === id)!.path)]);
-  gitRun(['commit', '--no-gpg-sign', '-qm', 'baton: markers.jsonl folded into the tickets (B-100)', '--', MARKERS_FILE_RETIRED, ...changed.map((id) => result.tickets.find((t) => t.id === id)!.path)]);
+  const changedPaths = changed.map((id) => result.tickets.find((t) => t.id === id)!.path!);
+  gitRun(['add', '--', MARKERS_FILE_RETIRED, ...changedPaths]);
+  gitRun(['commit', '--no-gpg-sign', '-qm', 'baton: markers.jsonl folded into the tickets (B-100)', '--', MARKERS_FILE_RETIRED, ...changedPaths]);
   try {
     gitRun(['push', 'origin', `HEAD:${branch}`]);
   } catch {
@@ -593,11 +628,17 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   const syncOnceRun = () => syncOnce(git(root, 'rev-parse', 'HEAD'), {
     // B-110: the observation also carries Baton's own record a station function judges git
     // against — the owner's answers to posted decisions and the legs claims finished with an
-    // evidence pointer — read after the number like everything else this run posts.
+    // evidence pointer — read after the number like everything else this run posts. B-183: and
+    // each live ticket's last accepted version (§4.3), for the ticket source's own code to
+    // judge its store's read against.
     observe: async () => {
       const o = await asResult(async () => {
         const got = await api.observation();
-        record = { answers: Array.isArray(got.answers) ? got.answers : [], legs: Array.isArray(got.legs) ? got.legs : [] };
+        record = {
+          answers: Array.isArray(got.answers) ? got.answers : [],
+          legs: Array.isArray(got.legs) ? got.legs : [],
+          ...(got.versions && typeof got.versions === 'object' ? { versions: got.versions as Record<string, string> } : {}),
+        };
         return got;
       });
       if (o.ok !== false && Number.isSafeInteger(o.observation)) held = o.observation;
@@ -957,11 +998,22 @@ async function bundleSource(entrySource: string, outfile: string): Promise<void>
 const WRAPPERS: Record<'tickets' | 'stations', (course: string) => string> = {
   tickets: () => `import { readItems } from ${JSON.stringify(source('read-items.ts'))};
 import { ticketsMarkdown } from ${JSON.stringify(source('tickets-markdown.ts'))};
+import { stampMarkdownVersions, readTicketBlob } from ${JSON.stringify(source('ticket-versions.ts'))};
 export default {
   // The same signature the sync calls a repository's own source with: edit freely.
+  // B-183 (R-BTN-74): this source is pinned — a ticket is read at its version — and each
+  // ticket's version is its file's blob id at the commit the sync posts, so an unrelated
+  // commit changes no ticket's version. A ticket whose file is not at the commit is posted
+  // with no version.
+  versions: 'pinned',
   async tickets(ctx) {
     const files = readItems(ctx.root, ctx.settings.items);
-    return ticketsMarkdown(files, ctx.settings);
+    return stampMarkdownVersions(ctx.root, ticketsMarkdown(files, ctx.settings), ctx.settings.items);
+  },
+  // The ticket's blob at its version (§4.5): what the runner reads, exactly as it reads the
+  // file at the claim's snapshot today. \`checkout\` is the runner's home checkout.
+  async read(id, { version, checkout } = {}) {
+    return { version, ticket: readTicketBlob(checkout ?? process.cwd(), version) };
   },
 };
 `,

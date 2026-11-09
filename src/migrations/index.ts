@@ -35,6 +35,7 @@ import ownerRuns from './0033_owner_runs.sql';
 import scopeAudit from './0034_scope_audit.sql';
 import scopeEvents from './0035_scope_events.sql';
 import retireModelTables from './0036_retire_model_tables.sql';
+import ticketVersions from './0037_ticket_versions.sql';
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },
@@ -73,4 +74,5 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 34, sql: scopeAudit },
   { id: 35, sql: scopeEvents },
   { id: 36, sql: retireModelTables },
+  { id: 37, sql: ticketVersions },
 ];

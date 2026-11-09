@@ -2534,6 +2534,39 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   "past its start".
   S-BTN-199's row follows.
 
+- **2026-11-06 — B-183: opaque ticket versions.**
+  Rules changed: R-BTN-5, R-BTN-11, R-BTN-34, R-BTN-62, R-BTN-74, R-BTN-84, R-BTN-147
+  (R-BTN-35's rewording to "the ticket source is the truth about tickets" is B-183's decision
+  (a), which the owner took on 2026-11-09 and is recorded in its own entry, with value 1's edit).
+  Each posted ticket gains `version`, an opaque
+  string of 1–128 characters of `[A-Za-z0-9._:+/=-]` whose meaning is the ticket source's own,
+  compared by Baton for equality only (values 4: no ordering, no clock); a stable `key`
+  (default the ticket's `path`), by which a dropped-and-replaced ticket is `renumbered`
+  (first-class `renumbered` event, actor `sync`); and the
+  board names its `source` — `markdown` or `custom`, and how it reads: `versions: "pinned"` (at
+  a version) or `"current"` (as it is now), a declaration exporting `read(id, {version})`
+  accordingly — refused at load without one — run on the runner like its other exports. The
+  version contract is stated
+  (R-BTN-74): a version changes exactly when something a runner reads of the ticket changes, and
+  a digest of what `read` returns, optionally prefixed by the store's own stamp, is recommended
+  over a timestamp alone. The markdown source is pinned by the ticket file's blob id at the
+  posted commit — a blob id, not the commit's sha, so an unrelated commit changes no version —
+  and behaves exactly as before; a ticket whose file is not at the commit is posted with no
+  version at all, never a present-but-empty string §12.3 would refuse. A refresh may now add,
+  close or change any ticket whose version
+  differs from the row Baton holds, `version` an input of `row_hash` (R-BTN-11) — but only a
+  body read at the head it refreshes: the post carries `read_sha`, the commit its tickets were
+  read at, and a `confirm-only` re-post from a checkout behind the head (or an older CLI's post
+  naming none) changes no ticket row, never rolling the cache back (review round 1); a refresh
+  overtaken while its rows were hashed is refused by the new-head path's re-checks; the
+  observation
+  returns each live ticket's last accepted version for the source's own staleness judgement, and
+  `tickets(ctx)` reads its store after the number (R-BTN-62's obligation on the source); the
+  claim answer names the ticket's version and the source's way of reading, and the runner
+  re-verifies by it before any leg runs (R-BTN-5, R-BTN-34); replay records the version and the
+  digest of what `read` returned (R-BTN-84); a `custom` source with `versions: "current"` posting
+  to a repository whose floors include `tickets-approved` is refused `invalid-params`, naming
+  the guarantee (R-BTN-184). Scenarios S-BTN-206 and S-BTN-207.
 - **2026-11-07 — §12.9 (new), R-BTN-73, R-BTN-106, §13, §14, §15** (B-134, OWASP ASI10 hole 7).
   Rules changed: R-BTN-73, R-BTN-106.
   A leg's scope — its ticket's home and `repos:` — is carried in the claim answer, audited at

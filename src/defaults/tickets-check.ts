@@ -188,7 +188,8 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
     said.add(key);
   };
   for (const t of live) {
-    for (const dep of t.depends_on ?? []) if (!known.has(dep)) add({ path: t.path, message: `depends_on names ${dep}, which is neither live nor closed` });
+    const at = t.path ?? (used.items ?? 'tickets');
+    for (const dep of t.depends_on ?? []) if (!known.has(dep)) add({ path: at, message: `depends_on names ${dep}, which is neither live nor closed` });
   }
 
   // The markdown source's body line (B-111): `**Depends on:**` names exactly `depends_on`.
@@ -201,6 +202,7 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
     const isMine = (id: string): boolean => ownIds.has(id) || prefixes.has(id.replace(/\d+[a-z]?$/, ''));
     const texts = new Map(files.map((f) => [`${(used.items ?? 'tickets').replace(/\/$/, '')}/${f.path}`, f.text]));
     for (const t of result.tickets) {
+      if (t.path == null) continue; // a pathless ticket has no body line to compare
       const text = texts.get(t.path);
       if (text == null) continue;
       const named = dependsLine(text);
@@ -227,7 +229,9 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
   const stale: NonNullable<TicketsCheckResult['stale']> = [];
   const undetermined: string[] = [];
   for (const t of live) {
-    if (!/\.mdx?$/.test(t.path) || !existsSync(join(root, t.path))) continue;
+    // A pathless ticket (a tracker source's) has no file to read: the sections and stale-rule
+    // checks are over files, so it is not judged by them.
+    if (t.path == null || !/\.mdx?$/.test(t.path) || !existsSync(join(root, t.path))) continue;
     const text = readFileSync(join(root, t.path), 'utf8');
     const first = firsts.get(t.path);
     const filed = filingDate(text, first, today);
@@ -238,7 +242,7 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
     // line and the first commit git shows (sectionsDate).
     if (since && !sectionsExempt(parseFrontmatter(text))) {
       const isNew = fromId != null && atOrAbove(t.id, fromId);
-      if (isNew && !filedDate(text)) add({ path: t.path, message: `${t.id} is at or above check.sections_from_id (${check.sections_from_id}) and has no \`_filed YYYY-MM-DD\` line in its ## Status — the line \`baton ticket new\` writes; add the day it was filed` });
+      if (isNew && !filedDate(text)) add({ path: t.path ?? (used.items ?? 'tickets'), message: `${t.id} is at or above check.sections_from_id (${check.sections_from_id}) and has no \`_filed YYYY-MM-DD\` line in its ## Status — the line \`baton ticket new\` writes; add the day it was filed` });
       const missing = missingSections(text);
       const when = sectionsDate(text, first, today);
       if (missing.length) {
@@ -246,14 +250,14 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
           if (!isNew) undetermined.push(t.id);
         } else if (when.date >= since) {
           const { absent } = sectionGaps(text);
-          for (const s of missing) add({ path: t.path, message: `filed ${when.date}, on or after check.sections_since (${since}), and ${absent.includes(s) ? `has no ### ${s} section` : `its ### ${s} section is empty or still the skeleton's placeholder`} — ${sectionHint(s)}` });
+          for (const s of missing) add({ path: t.path ?? (used.items ?? 'tickets'), message: `filed ${when.date}, on or after check.sections_since (${since}), and ${absent.includes(s) ? `has no ### ${s} section` : `its ### ${s} section is empty or still the skeleton's placeholder`} — ${sectionHint(s)}` });
         }
       }
     }
     // Rules amended since the ticket answered for them: reported, never a finding.
     if (reportStale && 'date' in filed) {
       const amended = staleRules(text, filed.date, entries, rules.prefix);
-      if (amended.length) stale.push({ path: t.path, since: filed.date, rules: amended });
+      if (amended.length) stale.push({ path: t.path ?? (used.items ?? 'tickets'), since: filed.date, rules: amended });
     }
   }
   const notes: string[] = [];

@@ -269,7 +269,12 @@ end on an ended claim is refused `claim-ended`.
   [--against <sha>]` re-runs one recorded run on a runner, without a claim and writing nothing to
   Baton.
   - It reads the run from the ticket's history (snapshot sha, contract version) and its inputs
-    with digests from `leg_run_inputs`; clones with a read-only credential the course's scripts
+    with digests from `leg_run_inputs`; a run's inputs record the ticket's `version` and the
+    digest of what the source's `read` returned (B-183), so a replay fetches the ticket as the
+    run read it. Against a `current` source whose version has since moved, replay reports the
+    mismatch and refuses — it does not silently replay against new content; a `pinned` source's
+    version names the bytes themselves. It
+    clones with a read-only credential the course's scripts
     at that sha (which must pass R-BTN-143) and the ticket's code at the run's `head_sha`;
     fetches the inputs and fails on a digest mismatch.
   - It runs `run(ctx)` with `ctx.replay` set, in R-BTN-144's replay environment: no write-capable
