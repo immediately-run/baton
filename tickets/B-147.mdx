@@ -57,8 +57,8 @@ read these attributes, and no ticket built them.
 5. **The refusal-only override**: `legs/<leg>.run.mjs` for a trusted leg ~~runs under bubblewrap (or
    an equivalent; refused where none is available) with no network, no credential, a private PID
    namespace and `/proc`,~~ runs as any leg's code does, by the runner's executor (B-184), with
-   the computed diff as its only input~~, a fixed time, and no checkout, `.git`
-   or home~~; it returns `{refuse, reasons}` from a closed list.
+   the computed diff as its only input ~~, a fixed time, and no checkout, `.git`
+   or home~~ ; it returns `{refuse, reasons}` from a closed list.
 
 ### Do not
 
@@ -70,8 +70,8 @@ read these attributes, and no ticket built them.
 
 - **S-BTN-182** and the trust half of **S-BTN-180** on both hosts; S-BTN-189's clearing of
   owner-set trust when `approvers.trust` becomes human-only.
-- Unit: rule `trusted` both ways; `one_per_domain` with a null domain~~; the sandbox refusing network
-  and file access~~.
+- Unit: rule `trusted` both ways; `one_per_domain` with a null domain ~~; the sandbox refusing network
+  and file access~~ .
 
 ### Exit criteria
 

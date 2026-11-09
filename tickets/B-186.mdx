@@ -112,7 +112,8 @@ it can continue from there."
    are kept, and a runner deletes drafts older than 14 days, in each repository it pushed drafts
    to, when a claim ends.
 8. **Agents still push early.** create-pr's implement and fix instructions gain one line: commit
-   and push to the branch whenever the repository's checks pass. Salvage is for the ends where the
+   and push to the branch whenever the repository's checks pass (once B-189 lands: return a push
+   action). Salvage is for the ends where the
    agent never gets to.
 
 ### What not to do
@@ -143,8 +144,8 @@ it can continue from there."
 - **The audit window** (§12.9): under `builtin` the salvage push is the runner's own, made after
   `close` and `handoff` and so after the leg's window closes, and is not reported as the leg's
   push. Under an executor that salvages itself (B-184's `salvage`), the push is the executor's
-  act with the credential it chooses — Fieldhouse's pushes with the leg's own token and counts it
-  as the leg's push (FIELDHOUSE_SPEC R-FH-80). R-BTN-72's
+  act; once B-189 lands, a salvage push is a forge action the runner performs to the claim's own
+  draft ref (FIELDHOUSE_SPEC R-FH-80). R-BTN-72's
   "The runner writes nothing to git itself" is amended in the spec PR to name this one write.
 - **Legs are stateless at their boundaries** (R-BTN-38): the draft is in git, where any runner
   finds it; nothing travels through a session's context.

@@ -116,9 +116,10 @@ B-186 (below).
      which gains an argument naming the export to call (today it calls only `run`), passing `ctx`
      as JSON on stdin and reading the result as JSON from the last line of stdout — so it needs
      nothing beyond `exec`'s argv, stdin and stdout, on any executor — bounded as today (2 minutes
-     for `close` and `handoff`). A leg's pushes, pull requests and comments are
-     forge actions the runner performs after checking them (B-189); no leg session holds a forge
-     credential.
+     for `close` and `handoff`). Once B-189 lands, a leg's pushes, pull requests
+     and comments are forge actions the runner performs after checking them, and under an executor
+     that keeps legs apart no leg session holds a forge credential; under `builtin`, as today, a
+     leg can reach the runner's.
 
    For `builtin` every kind is a child process, as close to today as makes no difference; a deployment's executor decides what each kind gets.
 5. **Executor data, opaque to Baton.** A course may give each leg an `executor` object in its
@@ -238,7 +239,9 @@ B-186 (below).
 - **Baton runs no repository code** (R-BTN-98): the executor, `rank.mjs` and leg scripts run on
   runners; nothing here moves code into Baton.
 - **Gates bind cooperating runners** (R-BTN-46): an executor's isolation is the deployment's
-  control; Baton's guarantees (R-BTN-189) are unchanged and none starts depending on it.
+  control. One guarantee input already depends on it — that a trusted leg's override cannot reach
+  the trusted runner's credential (§12.8, R-BTN-182) — and B-189 makes the deployment's duty
+  explicit for all of them.
 - **Capabilities are names** (R-BTN-174): `provides` names are matched,
   never derived.
 - **The default is today's behaviour:** a runner with no `executor` setting runs every leg exactly

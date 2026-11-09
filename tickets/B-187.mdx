@@ -46,8 +46,7 @@ a container, nothing) is the deployment's, and Baton never learns it.
    states what a labelled review does not withstand: a
    compromised runner of a per-run grant, and — under `builtin`, where any leg can read the runner's
    key (R-BTN-144) — a hostile leg acting as that runner; it holds only as far as the deployment
-   keeps runs apart from each other and from the runner; a
-   Such a grant's runner reports a `run_label`
+   keeps runs apart from each other and from the runner. Such a grant's runner reports a `run_label`
    once per run, on the `advance` that starts it (the run's label is then stored; the finishing
    `advance` or `end` needs none, and an `advance` that both finishes one run and starts the next
    carries the new run's label); a missing label is refused `invalid-params`. A refresh (R-BTN-123)
@@ -101,7 +100,6 @@ a container, nothing) is the deployment's, and Baton never learns it.
   labelled runs, `independent-review` holds only as far as the deployment keeps runs apart from
   each other and from the runner — Baton cannot tell — never against a compromised runner; §12.8's
   *Outside every guarantee* list says so.
-- **`independent-review` is unchanged in strength:** it is never held while a grant is per-run.
 - **Validate before you write:** the label goes through `src/core/validate.ts` before SQL.
 - **Migrations are append-only:** one new file for the column.
 - **Filter fields only** (R-BTN-33).

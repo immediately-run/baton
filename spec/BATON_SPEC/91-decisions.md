@@ -190,4 +190,4 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   trusted runner's credential, over Baton sandboxing it with `bubblewrap` or refusing it without a
   sandbox (2026-11-09, the owner: "I don't want the merge leg to be different from the other legs
   for the plain baton scenario"; R-BTN-182, §12.8). Baton stays agnostic about isolation with no
-  exception; a deployment that relies on `no-runner-lands` already isolates repository code.
+  exception; keeping the override from the credential is a deployment duty (§12.8).

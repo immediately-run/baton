@@ -2578,11 +2578,16 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   un-listed key on its old label, and re-domaining as a way to self-independence. All fixed before
   merge. `independent-review` counts labelled runs as their own domains, and §12.8's outside list
   says it does not withstand a compromised runner of a listed credential or a leg that can act as
-  it (R-BTN-189). The first draft added a weaker `independent-runs` beside an `independent-review`
-  that never held with a listed credential; on 2026-11-09 the owner accepted collapsing it ("I
-  accept all recommendations"), since the split rested on a leg being able to act as its runner.
+  it (R-BTN-189).
   S-BTN-204 and S-BTN-205's rows follow.
 
+- **2026-11-09 — R-BTN-189, §12.8, §15** (B-187).
+  Rules changed: R-BTN-189.
+  The first draft of the 2026-11-08 entry added a weaker `independent-runs` beside an
+  `independent-review` that never held with a listed credential. After a runner-trust audit the
+  owner accepted collapsing it ("I accept all recommendations"): the split rested on a leg being
+  able to act as its runner. `independent-review` counts labelled runs as their own domains; the
+  `domains.per_run`-empty condition and the floor case are gone; S-BTN-205 follows.
 - **2026-11-09 — R-BTN-182, §12.8** (B-184).
   Rules changed: R-BTN-182.
   The owner: "I don't want the merge leg to be different from the other legs for the plain baton

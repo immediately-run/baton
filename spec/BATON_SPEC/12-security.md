@@ -788,7 +788,8 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
   non-human credential able to perform that leg's action. No other runner is offered a trusted leg
   or may claim, advance or end one (rule `trusted`), and neither is a grant marked `checker`
   (R-BTN-180) or a runner that delivers `forge-check` (R-BTN-115).
-  - **It runs no repository code**, delivering the outbox included (R-BTN-171). It runs a CLI release installed by tarball integrity with the
+  - **It runs no repository code but a trusted leg's override**, which it runs through its own
+    means as any leg's code (below), delivering the outbox included (R-BTN-171). It runs a CLI release installed by tarball integrity with the
     release's own `npm-shrinkwrap.json`, so every dependency is pinned too, outside any checkout,
     with no user or project package configuration; and git plumbing.
   - **It re-checks at the moment it acts**, against Baton's record: every attestation it relies on
