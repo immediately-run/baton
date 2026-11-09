@@ -50,8 +50,9 @@ state words land there too).
 
 ### Decision needed
 
-Six choices are the owner's. Each has a recommended default the other tickets are written
-against; the owner's answer, where it differs, changes the ticket named.
+Six choices were the owner's. Each had a recommended default the other tickets are written
+against. **Answered: every default, (a) in each** (the owner, 2026-11-09: "I take your
+recommendations"). The options stay recorded so the reasoning is not lost.
 
 - **(1) Tenant screens: read-only, or the brief's controls?** The brief listed register, retire
   and force-resync on `/repositories` and freeze, seal and export on `/state`. §14 gives every one
@@ -83,8 +84,8 @@ against; the owner's answer, where it differs, changes the ticket named.
   `src/dashboard/**` refuses the markup-parsing APIs; no `lint` script is added. **(b)** ESLint 9
   with `eslint-plugin-react`, scoped to the dashboard — B-193 adds it.
 
-Every default is a two-way door: each can be flipped by a later spec ticket without undoing
-code, so the tickets proceed on the defaults.
+Each is a two-way door: a later spec ticket can flip one without undoing code. The tickets
+proceed on the answers, which are the defaults.
 
 ### What to build
 
@@ -169,8 +170,8 @@ A spec PR, in the section files that own each rule, then `npm run spec:index`; n
    Providers and Suspensions (B-142 retired their tables; availability is a reading on
    `/instances`), Accept history (R-BTN-85 adopts git's value at once), Stream stdout/stderr
    (R-BTN-128: a log is its directory), the runner's model (R-BTN-3 names none), "Workers" (B-68:
-   runners). The Decision needed above is recorded with its defaults, marked pending the owner
-   where unanswered.
+   runners). The six answers of the Decision needed above are recorded as the owner's
+   (2026-11-09), one line each.
 8. **The brief.** Check `docs/context/design-brief.mdx` against the amended §11.4 and fix drift.
 
 ### What not to do
@@ -209,8 +210,8 @@ The new scenario is built by B-204 (API half) and B-207 (DOM half).
 - [ ] §11.4's screens and rules, R-BTN-129's `ui.view` and grammar, §12.3's rendering sentence,
       R-BTN-163's path and redirect, R-BTN-16's and §12.1's paths, §15's rows and the vocabulary
       page amended; `spec/BATON_SPEC.md` regenerated.
-- [ ] The decisions recorded, the Decision needed defaults marked pending where the owner has
-      not answered, the mockup's drops listed with reasons, the mockup linked from the history.
+- [ ] The decisions recorded, the six Decision needed answers among them, the mockup's drops
+      listed with reasons, the mockup linked from the history.
 - [ ] `check:spec`, `check:wiki` and the `spec:impact` checklist green in the PR body.
 
 ## Status
@@ -222,3 +223,8 @@ the PR): the Decision needed packet added; the screen-id grammar, refusal wordin
 precedence, Stop rule, `allowed` hint, redirect, R-BTN-16 and §12.1 paths and the renderer clause
 moved here so no screen ticket decides them; the transition settled by the owner (V2 replaces V1
 outright)._
+
+_2026-11-09 — the owner answered the Decision needed: (a) on all six ("I take your
+recommendations"). The tenant screens are read-only, route and adopt stay the CLI's, Stop is one
+click, `GET /v1/admin/state` keeps its shape as `stateView()`, the held post's Accept stays on
+Sync, and the markup-API source test stands in for ESLint._
