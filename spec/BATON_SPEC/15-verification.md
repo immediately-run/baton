@@ -14,22 +14,22 @@ description: "BATON_SPEC — 15. Verification: the model, the harness, scenarios
     process-group kills run for real. Sleep is `SIGSTOP` on harness and sidecar, a clock jump,
     then `SIGCONT`;
   - stub reviewer agents, fake OIDC tokens signed by a test key, and test keys of every
-    R-BTN-13 type, trusted only by the test bindings in `vitest.config.ts` and never by a
-    deployed Worker, `baton-staging` included;
+    R-BTN-13 type, trusted only by the test bindings in `vitest.config.ts` and never by the
+    deployed Worker;
   - fixture courses: docs' `roadmap-pr` where a scenario needs a course's logic, and the toy
     course `chore` (S-BTN-28).
 - **Where it runs.** `npm test` (alias `npm run test:baton`) on every PR and nightly on `main`;
-  docs runs the same suite from a sibling checkout when its Baton client files change.
-  `baton-staging` (its own Worker, hostname, secrets and tenant, R-BTN-135) runs S-BTN-1, -2
-  and -12 against each deploy with real OIDC, signed requests and real time, short timeouts
-  standing in for clock jumps.
+  docs runs the same suite from a sibling checkout when its Baton client files change. Every
+  scenario runs in the Workers runtime project and again on the local host; no scenario runs
+  against a deployed Worker, since the one deployment is production (§2.1) and holds the live
+  record.
 - **The load test.** `npm run test:load` drives R-BTN-87's envelope mix — runners
   heartbeating, claiming, advancing and ending; syncs posting boards of up to 5,000 tickets for
   20 repositories; dashboard reads; bursts — over 1,000,000 seeded history rows. It runs on the
-  local host in CI, and against `baton-staging` before cutover, seeded by a synthetic
-  `--with-history` export, with driver-generated keys an administrator registers and one real
-  staging repository's sync posting a generated 5,000-ticket board. It fails on any error or any
-  route over its latency budget, and reports the figures it reached (G-BTN-77).
+  local host in CI; the Cloudflare budgets are read from production's own alarm `capacity` log
+  and the live figures the dashboard shows against the envelope (R-BTN-87), since no other
+  deployment exists to load (B-224). It fails on any error or any route over its latency budget,
+  and reports the figures it reached (G-BTN-77).
 - **R-BTN-30 (scenarios are named and required).** A scenario is `S-BTN-<n>` with a fixed script
   and assertions; its test file is named for it. The table below is the set, and every scenario
   passes on the hosts it runs on (G-BTN-37). A gate `G-BTN-<n>` is an invariant the

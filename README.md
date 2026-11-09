@@ -323,10 +323,10 @@ whose writers you trust.
 ## Deploying
 
 `.github/workflows/baton-deploy.yml` runs the suite and then `wrangler deploy` (production,
-`baton.immediately.run`) and `wrangler deploy --env staging`
-(`baton-staging.immediately.run`) on every push to `main`. It needs the
-`CLOUDFLARE_API_TOKEN` secret in the `production` environment (R3-1208): Workers Scripts: Edit
-on the account, plus Zone: Read and Workers Routes: Edit on the `immediately.run` zone.
+`baton.immediately.run`) on every push to `main`. There is no staging instance: a home
+repository binds to one Baton, and every registered one binds to production (B-224). It needs
+the `CLOUDFLARE_API_TOKEN` secret in the `production` environment (R3-1208): Workers Scripts:
+Edit on the account, plus Zone: Read and Workers Routes: Edit on the `immediately.run` zone.
 
 With a sibling docs checkout present, the suite also fails when `src/shared/` or the board
 fixtures have drifted from docs.

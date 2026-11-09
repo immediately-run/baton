@@ -1,14 +1,15 @@
 name: baton-deploy
 
-# Deploy Baton (BATON_SPEC §3, R3-1207): on every push to main, the suite runs, then the
-# production Worker deploys and the staging Worker beside it. The test job is the same gate as
+# Deploy Baton (BATON_SPEC §2.1, R3-1207): on every push to main, the suite runs, then the
+# production Worker deploys. There is no staging Worker (B-224: a home repository binds to one
+# Baton, and every registered one binds to production). The test job is the same gate as
 # ci.yml; nothing deploys from a red head. A vendored-library change (src/shared/) is a change
 # here like any other, so a docs change reaches the Worker only through a re-vendoring PR
 # (R-BTN-37).
 #
 # The one secret is CLOUDFLARE_API_TOKEN, in this repository's `production` environment, set
 # by the owner in R3-1208: Workers Scripts: Edit on the account, plus Zone: Read and Workers
-# Routes: Edit on the immediately.run zone (wrangler resolves the zone and writes both routes).
+# Routes: Edit on the immediately.run zone (wrangler resolves the zone and writes the route).
 # Until it exists the deploy job fails at its first step, naming it.
 on:
   push:
@@ -62,7 +63,3 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: npx wrangler deploy
-      - name: Deploy staging
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: npx wrangler deploy --env staging

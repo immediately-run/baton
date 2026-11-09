@@ -117,10 +117,11 @@ These are its lessons, newest understanding first.
   the lesson is the reading habit.*
 
 - **One repository, one Baton.** The owner's decision: a git repository is served by a
-  single Baton, because two boards drift and contradict; staging does not register this
-  repository, and the seed lives in the top-level (production) vars only. Registration
-  is live now but survives fresh deployments only through that seed agreeing with what
-  `admin repo add` wrote. *Status: policy.*
+  single Baton, because two boards drift and contradict; the seed lives in the production
+  vars, and since B-224 (2026-11-09) production is the only deployment — the staging Worker
+  registered nothing and was retired. Registration is live now but survives fresh
+  deployments only through that seed agreeing with what `admin repo add` wrote. *Status:
+  policy.*
 
 ## 2026-10-21 — the resumed loop: B-71's review rounds
 

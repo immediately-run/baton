@@ -4215,6 +4215,18 @@ changes):
   repository** — a sparse tree could not run them and owning a course would not be a copy, so
   shared code is copied in by the source repository's own script.
 
+- **One deployed instance: production, no staging** (2026-11-09, the owner; §2.1, §15,
+  R-BTN-56; B-224, B-225). The owner: "A home repo can be associated with one baton server. In
+  the case of the baton, fieldhouse and immediately-run/hq home repos that is the production
+  baton instance at baton.immediately.run. This leaves the staging instance with no connected
+  repos, no data, and no reasonable way to test anything — might as well get rid of it
+  entirely." Rejected: keeping `baton-staging` as a smoke target after each deploy (it registers
+  no repository, so the smoke runs prove nothing a CI run does not), and gating production on
+  staging's health (the gate is the test job). The scenarios run in CI on both hosts; the
+  envelope is read from production's own `capacity` log (R-BTN-87); the load test runs on the
+  local host (R3-1258). The owner's answer to BATON-UI-V2's Decision 7 ("we don't need staging at
+  all") is the same ruling.
+
 ## Review record
 
 *(2026-10-14 — the amendment at `295ca61b` was reviewed adversarially by a fresh agent:

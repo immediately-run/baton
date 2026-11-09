@@ -197,3 +197,9 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   Baton holds what no write may decide."; values 1, R-BTN-35, R-BTN-74). The markdown source keeps
   every ticket in git, so a git-only repository reads exactly as before; this refines, for other
   ticket sources, the entry choosing git as the home of every ticket's content.
+- Chose one deployed instance, production at `baton.immediately.run`, over keeping a staging Worker
+  beside it (2026-11-09, the owner: "A home repo can be associated with one baton server … This
+  leaves the staging instance with no connected repos, no data, and no reasonable way to test
+  anything — might as well get rid of it entirely"; §2.1, §15, R-BTN-56). The scenarios run on
+  the local host and in the Workers runtime project; the envelope is read from production's own
+  `capacity` log (R-BTN-87); B-224 removes the deployment, B-225 the Cloudflare resources.
