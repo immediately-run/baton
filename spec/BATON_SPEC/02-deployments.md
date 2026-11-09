@@ -52,8 +52,9 @@ process for development and CI. Nothing crosses a tenant.
   numbered schema migrations (append-only; the object refuses to serve until all are applied),
   the wrangler configuration and the integration harness, deployed by a GitHub Action on
   `main`. immediately.run's own instance is `https://baton.immediately.run` (provisioned by
-  R3-1208); `baton-staging` is a separate tenant with its own Worker and hostname
-  (`wrangler.toml` `env.staging`).
+  R3-1208), and it is the only deployed instance: a home repository binds to one Baton
+  (R-BTN-56), every registered repository binds to production, and a staging instance would hold
+  nothing and test nothing (B-224; the owner, 2026-11-09).
 - **R-BTN-37 (shared modules are vendored by hash).** The Worker imports byte-identical copies
   of the pure modules it shares with docs — `baton.mjs`, `vocabulary.mjs`, `sessionUsage.mjs`
   and `batonSync.mjs` — from `src/shared/`, listed in `src/shared/manifest.json` with the docs

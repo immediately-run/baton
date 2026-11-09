@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1158
 tier: critical
-description: "Adversarial review finding 1 (2026-10-27): a push to baton main deploys production for every tenant with an account-wide Cloudflare token. Production deploys only from a human-only signed tag or approval; main deploys staging; the token is scoped to Baton's Worker; the job holding it installs nothing from the pushed lockfile; the security model gains a compromised-server section. Requires: none."
+description: "Adversarial review finding 1 (2026-10-27): a push to baton main deploys production for every tenant with an account-wide Cloudflare token. Production deploys only from a human-only signed tag or approval; a push to main deploys nothing (there is no staging, B-224); the token is scoped to Baton's Worker; the job holding it installs nothing from the pushed lockfile; the security model gains a compromised-server section. Requires: none."
 topics:
   - baton
 owns: {}
@@ -35,9 +35,8 @@ deploy); `docs/security-model.mdx` (reach 0).
 1. **A deploy is a human act.** `baton-deploy.yml` deploys production only from a tag signed by a
    human-only key (B-136), or after an approval in
    the `production` environment by a reviewer whose credentials no agent session holds. A push to
-   `main` deploys staging only.
-2. **Scope the Cloudflare token** to Baton's Worker scripts and routes, not the account; a second
-   token for staging.
+   `main` runs the suite and deploys nothing on its own (there is no staging instance, B-224).
+2. **Scope the Cloudflare token** to Baton's one Worker and its route, not the account.
 3. **Build before secrets.** The job that holds `CLOUDFLARE_API_TOKEN` runs no `npm ci` of the
    pushed lockfile: it deploys an artifact built and checked by an earlier job without the secret,
    so a poisoned dependency cannot read the token. It also restores no cache: no `cache: npm` on
@@ -58,8 +57,8 @@ deploy); `docs/security-model.mdx` (reach 0).
 
 - A check over the workflow file: the job that holds `CLOUDFLARE_API_TOKEN` has no `cache:` key
   and no `actions/cache` step, and runs no `npm ci`.
-- A drill on a fork or staging: a push to `main` deploys staging and not production; a production
-  deploy without the signed tag or the human approval is refused.
+- A drill on a fork: a push to `main` deploys nothing; a production deploy without the signed tag
+  or the human approval is refused.
 
 ### Exit criteria
 
@@ -72,3 +71,5 @@ deploy); `docs/security-model.mdx` (reach 0).
 _(2026-11-01: the dispatch credentials move out of Baton (BATON_SPEC [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), [R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8), B-152): the GitHub App's key and the forge dispatch tokens are the dispatch courier's, not Baton's; a compromised Baton exposes the webhook secrets, which verify deliveries and act on nothing.)_
 
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) reverses the note of 2026-11-01: the owner put a compromised Baton out of scope (B-160) and dropped the dispatch courier, so `BATON_GITHUB_APP_KEY` and the forge trigger tokens stay Worker secrets (R-BTN-94, §12.7); the recovery runbook (B-125) rotates them. This ticket's human-act deploy is unchanged and is the mitigation that remains for reach 0.)_
+
+_(2026-11-09: the staging deployment is retired — B-224, the owner: a home repository binds to one Baton, and every registered one binds to production, so staging held nothing and tested nothing. Item 1 no longer deploys staging from `main`; item 2 scopes one token to one Worker; the drill runs on a fork.)_

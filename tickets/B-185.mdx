@@ -49,7 +49,7 @@ What exists, and where it falls short:
   1. a context refresh (R-BTN-123) starts a second session — under B-184 possibly on another
      machine — with the same `BATON_LEG`; only `ctx.refresh.n` tells them apart;
   2. a run an adoption added (R-BTN-39) has a null claim and so no `BATON_LEG`;
-  3. claim ids are a tenant's integers: production, staging and a local host all issue claim
+  3. claim ids are a tenant's integers: production and a local host both issue claim
      412, so anything keyed by them in a shared place — a forge ref, a log bucket — can collide.
 
 ### What to build

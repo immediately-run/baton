@@ -2,8 +2,8 @@
 // `cloudflare` project runs every test in the Workers runtime; the `local` project runs every
 // integration scenario again against the local Node host (R-BTN-55), plus the tests only Node
 // can run. The test signing keys are made here, per run, and exist only in these bindings:
-// wrangler.toml has no BATON_TEST_BINDINGS, so no deployed Worker — baton-staging included —
-// ever trusts them, and a local start refuses them (src/local/main.ts).
+// wrangler.toml has no BATON_TEST_BINDINGS, so the deployed Worker never trusts them, and a
+// local start refuses them (src/local/main.ts).
 import { configDefaults, defineConfig, type Plugin } from 'vitest/config';
 import { cloudflareTest } from '@cloudflare/vitest-plugin';
 import { exportJWK, generateKeyPair } from 'jose';
@@ -38,10 +38,11 @@ async function testKeys() {
 }
 
 /** wrangler.toml's top-level `[vars]`: the production Worker's settings, which the local
- *  project's host takes too, so both hosts run with the same values. */
+ *  project's host takes too, so both hosts run with the same values. The block runs to the next
+ *  section header or to the end of the file — since B-224 removed `[env.staging]`, it is last. */
 function wranglerVars(): Record<string, string> {
   const toml = readFileSync(resolve(import.meta.dirname, 'wrangler.toml'), 'utf8');
-  const block = /^\[vars\]\n([\s\S]*?)(?=^\[)/m.exec(toml)?.[1] ?? '';
+  const block = /^\[vars\]\n([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(toml)?.[1] ?? '';
   // Basic strings ("…") and TOML literal strings ('…', for JSON values).
   return Object.fromEntries([...block.matchAll(/^([A-Z_]+) = (?:"([^"]*)"|'([^']*)')$/gm)].map((m) => [m[1], m[2] ?? m[3]]));
 }

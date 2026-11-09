@@ -12,7 +12,7 @@ tags:
   - roadmap-item
 order: 1050
 tier: critical
-description: "Live leg of the read-only view (BATON_SPEC §16.2 step 1): the dashboard behind its sign-in, the Ready view's order equal to the course's own claim order per tier on one snapshot, staging S-BTN-13 green after deploy. S-BTN-13, G-BTN-10. Requires: human-operator."
+description: "Live leg of the read-only view (BATON_SPEC §16.2 step 1): the dashboard behind its sign-in, the Ready view's order equal to the course's own claim order per tier on one snapshot, S-BTN-13 green in CI on the merge that deployed. S-BTN-13, G-BTN-10. Requires: human-operator."
 topics:
   - baton
   - verification
@@ -24,7 +24,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project.
-**Spec:** [BATON_SPEC §16.2](../spec/BATON_SPEC/16-adoption.md#sec-16-2) step 1 (exit), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the dashboard's Ready view, [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4) sign-in), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) (staging; [S-BTN-13](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-10](../spec/BATON_SPEC/15-verification.md#gates))
+**Spec:** [BATON_SPEC §16.2](../spec/BATON_SPEC/16-adoption.md#sec-16-2) step 1 (exit), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the dashboard's Ready view, [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4) sign-in), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) (where the scenarios run; [S-BTN-13](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-10](../spec/BATON_SPEC/15-verification.md#gates))
 **Depends on:** R3-1207, R3-1208
 
 ### Requires
@@ -53,13 +53,13 @@ A verification sitting (about 15 minutes), no code.
 
 ### Tests
 
-None to write. The automated half is S-BTN-13 on `baton-staging` after each deploy.
+None to write. The automated half is S-BTN-13 in CI, on both hosts, for the commit that deployed.
 
 ### Exit criteria
 
 - [ ] **live leg** (`human-operator`): `https://baton.immediately.run/` asks for the owner's sign-in (Access where configured, then R-BTN-155's code) and then shows the Ready view; another account is refused
 - [ ] **live leg** (`human-operator`): the Ready view's snapshot sha equals `git rev-parse origin/main` within one sync, and for `routine`, `judgement` and `critical` its order equals the course's own claim order at that sha (the compare tool exits 0)
-- [ ] the latest `baton-deploy` run shows staging `S-BTN-13` green
+- [ ] the latest `baton-deploy` run's test job shows `S-BTN-13` green
 - [ ] `npm run verify` green
 
 ## Status
@@ -67,3 +67,5 @@ None to write. The automated half is S-BTN-13 on `baton-staging` after each depl
 _(filed 2026-10-13)_
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — the exit is §16.2 step 1 as written, and the Providers check is dropped.)_
+
+_(2026-11-09: the staging deployment is retired — B-224, the owner: a home repository binds to one Baton, and every registered one binds to production, so staging held nothing and tested nothing. S-BTN-13 runs in CI's test job before the deploy; nothing runs against a deployed Worker.)_
