@@ -132,15 +132,14 @@ export function loadCourse(home: string, sha: string, course: string): CourseLoa
 
 /** B-183 (§4.5, R-BTN-74): the repository's ticket source at the claim's snapshot — its
  *  `.baton/tickets.mjs` extracted into the claim's scratch like a leg script — or null when the
- *  snapshot has none (the CLI's markdown default serves then). Returns the module's default
- *  export as the sync loads it; the caller reads its `versions` and `read`. */
-export async function loadTicketSource(home: string, sha: string, scratch: string): Promise<Record<string, unknown> | null> {
+ *  snapshot has none (the CLI's markdown default serves then). Returns the file's path: the
+ *  runner never imports it, it runs it through its executor (R-BTN-107, B-184). */
+export function extractTicketSource(home: string, sha: string, scratch: string): string | null {
   const bytes = readAt(home, sha, '.baton/tickets.mjs');
   if (bytes == null) return null;
   const to = join(scratch, 'baton-tickets-source.mjs');
   writeFileSync(to, bytes, { mode: 0o600 });
-  const mod = (await import(`${pathToFileURL(to).href}?at=${sha}`)) as { default?: Record<string, unknown> };
-  return mod.default ?? null;
+  return to;
 }
 
 /** B-86: the home checkout's head — the snapshot the next claim is most likely to be at, whose

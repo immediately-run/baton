@@ -39,6 +39,8 @@
     "test/unit/routes.test.ts",
     "test/integration/S-BTN-147.runner-half.test.ts",
     "test/integration/S-BTN-204.runner-half.test.ts",
+    "test/integration/S-BTN-209.executor-sources.test.ts",
+    "test/integration/S-BTN-210.exec-calls.test.ts",
     "test/unit/boundary-host.test.ts",
     "test/unit/cli.test.ts",
     "test/unit/sign.test.ts",

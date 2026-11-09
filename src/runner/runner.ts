@@ -18,7 +18,8 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
-import { claimScratch, courseOf, dropCourse, ensureSha, freshSecret, git, loadCourse, loadTicketSource, type CourseLoad } from './home';
+import { claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, type CourseLoad } from './home';
+import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { StateFile, leaseLostFrom } from './state';
 import { bareTicketId } from '../defaults/ticket-state';
@@ -103,6 +104,8 @@ export interface RunnerOptions {
   /** B-83: the harness command `--harness` chose, handed to the legs as BATON_AGENT_COMMAND —
    * what runs an agent leg when the snapshot's settings name no `agent_command`. */
   agentCommand?: string;
+  /** R-BTN-107 (B-184): the executor the runner's host chose — `builtin` when absent. */
+  executor?: Executor;
   /** Verbose (the owner, 2026-10-23): timestamp every line, name the claim's id and nonce,
    * log the leg's local command, and drain the leg child's stderr into the log — where the
    * stub reports the agent_command it resolved. A slice of B-23's leg observability. */
@@ -121,10 +124,20 @@ export interface RunnerOptions {
   auditRefs?: (home: string) => RefState | null;
 }
 
+/** The leg call in flight: its executor call, through which an abort line or a kill reaches it. */
 interface LegChild {
-  process: ReturnType<typeof spawn>;
-  resultPath: string;
-  ctxPath: string;
+  running: Running;
+}
+
+/** The outcome a wrapper call printed on its last stdout line (R-BTN-133). */
+function wrapperOutcome(stdout: string): { ok: boolean; result?: unknown; error?: string; aborted?: string | null } | null {
+  const last = stdout.trimEnd().split('\n').at(-1) ?? '';
+  try {
+    const out = JSON.parse(last) as { ok?: unknown };
+    return out && typeof out === 'object' && typeof out.ok === 'boolean' ? out as { ok: boolean } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The watcher a held lock runs: prints one line the moment the lock is its own, then polls the
@@ -258,6 +271,8 @@ export class Runner {
   private readonly state: StateFile;
   private readonly log: (line: string) => void;
   private readonly verbose: boolean;
+  /** R-BTN-107 (B-184): every leg and every call into repository code runs through it. */
+  private readonly executor: Executor;
   private readonly now: () => number;
   private beat: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
@@ -338,6 +353,7 @@ export class Runner {
   constructor(options: RunnerOptions) {
     this.o = { beatEvery: BEAT_MS, ...options };
     this.verbose = options.verbose ?? false;
+    this.executor = options.executor ?? builtinExecutor();
     this.log = this.verbose ? withTimestamps(options.log ?? (() => {})) : (options.log ?? (() => {}));
     this.now = options.now ?? batonNow;
     this.state = new StateFile(options.stateFile);
@@ -670,6 +686,7 @@ export class Runner {
     this.fenceToReport = this.inflight?.claimId ?? this.state.get().claim?.id ?? null;
     const child = this.inflight?.child;
     if (child) this.killGroup(child);
+    void this.stopSession('lease-lost');
   }
 
   /** The pending signal as the loop reads it — through a call, so a field-narrowed null at one
@@ -692,15 +709,54 @@ export class Runner {
     // release does — at its next safe point — so that is the signal it gets.
     const child = this.inflight.child;
     const wire = signal === 'course-changed' ? 'release' : signal;
-    if (child?.process.stdin && !child.process.stdin.destroyed) child.process.stdin.write(`${JSON.stringify({ abort: wire })}\n`);
+    child?.running.write(JSON.stringify({ abort: wire }));
   }
 
   private killGroup(child: LegChild): void {
-    try {
-      if (child.process.pid) process.kill(-child.process.pid, 'SIGKILL');
-    } catch {
-      // The group is already gone — the leg ended before the lease did.
-    }
+    child.running.kill();
+  }
+
+  /** R-BTN-107 (B-184): the session of the leg that ran last — its `close` and `handoff` run in
+   *  it, and it is stopped when the next leg starts or the claim ends. */
+  private session: { handle: Handle; checkout: string } | null = null;
+
+  /** Start a session of `kind` on the executor the host chose. */
+  private async startSession(kind: SessionKind, o: { session_id: string; run_id?: string; ticket?: string; leg?: string; snapshot_sha?: string; paths: string[]; env: Record<string, string> }): Promise<Handle> {
+    return await this.executor.start({
+      brief: { kind, ...o, checkout: this.o.home, wrapper: LEG_PROCESS },
+      executor: null, inputs: [], channel: null,
+    });
+  }
+
+  /** The session `close` and `handoff` run in: the last leg's, or — a hand-off with no leg run
+   *  in this claim yet — a fresh `leg` session over the claim's course scripts. */
+  private async legSession(): Promise<Handle> {
+    if (this.session) return this.session.handle;
+    const paths = this.inflight ? [this.inflight.course.scratch] : [];
+    const handle = await this.startSession('leg', { session_id: `leg-${randomBytes(6).toString('hex')}`, paths, env: this.baseEnv() });
+    this.session = { handle, checkout: this.o.home };
+    return handle;
+  }
+
+  /** The environment every session starts from: the runner's, with the parent markers (R-BTN-144). */
+  private baseEnv(): Record<string, string> {
+    const env: Record<string, string | undefined> = { ...process.env, BATON_PARENT: String(this.state.get().worker_id ?? ''), BATON_STATE: this.o.stateFile };
+    return Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => typeof e[1] === 'string'));
+  }
+
+  private async stopSession(reason: string): Promise<void> {
+    const s = this.session;
+    this.session = null;
+    if (s) await this.executor.stop(s.handle, reason).catch((e) => this.log(`baton: the executor's stop failed (${msg(e)})`));
+  }
+
+  /** One wrapper call (R-BTN-133) through the executor's `exec`: `node <wrapper> <call> <script>`,
+   *  its arguments on stdin's first line, its outcome on stdout's last. */
+  private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number): Running {
+    return this.executor.exec(h, ['node', LEG_PROCESS, call, script], {
+      cwd: this.o.home, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
+      ...(this.verbose ? { onStderr: (l: string) => this.log(`baton: ${call}: ${l}`) } : {}),
+    });
   }
 
   /** Take the spool (§6.8, §6.9): RENAME it aside, so lines a leg session appends while this
@@ -789,6 +845,8 @@ export class Runner {
    *  stop's last resort: a leg child that will not take its release must not outlive the
    *  runner as an orphan pushing against a claim the reaper takes. No leg in flight: nothing. */
   killInflight(): void {
+    // The call is killed; its session stays for the hand-off the release still writes, and
+    // goes when the claim ends.
     if (this.inflight?.child) this.killGroup(this.inflight.child);
   }
 
@@ -1000,13 +1058,11 @@ export class Runner {
     const version = typeof claim.version === 'string' ? claim.version : '';
     const how = (claim.ticket_source ?? null) as { versions?: string | null } | null;
     if (version === '' || how?.versions == null) return null;
-    let src: Record<string, unknown> | null;
-    try {
-      src = await loadTicketSource(this.o.home, claim.snapshot_sha as string, scratch);
-    } catch (e) {
-      return `the ticket source at the snapshot would not load (${msg(e)})`;
-    }
-    if (src == null) src = MARKDOWN_SOURCE as unknown as Record<string, unknown>;
+    // R-BTN-107 (B-184): the repository's ticket source runs only through the executor, in a
+    // `source` session; the CLI's own markdown source (no `.baton/tickets.mjs`) runs here.
+    const file = extractTicketSource(this.o.home, claim.snapshot_sha as string, scratch);
+    if (file != null) return await this.verifyBySource(file, claim, version, scratch);
+    const src = MARKDOWN_SOURCE as unknown as Record<string, unknown>;
     // A source that declares neither `versions` nor `read` is read as declaring nothing (§4.2):
     // an existing custom source keeps working until it opts in.
     if (typeof src.versions !== 'string' || !['pinned', 'current'].includes(src.versions)) return null;
@@ -1023,6 +1079,48 @@ export class Runner {
       return out.version === version ? null : `the ticket's version is ${typeof out.version === 'string' && out.version !== '' ? out.version.slice(0, 16) : '(none)'}, the claim's ${version.slice(0, 16)}`;
     } catch (e) {
       return `the ticket source's read failed (${msg(e)})`;
+    }
+  }
+
+  /** §4.5 (R-BTN-74) through the executor: the source's `versions` and `read`, each a wrapper call
+   *  in one `source` session, stopped when the check ends. Same answers as the in-process check. */
+  private async verifyBySource(file: string, claim: Record<string, any>, version: string, scratch: string): Promise<string | null> {
+    let handle: Handle;
+    try {
+      handle = await this.startSession('source', { session_id: `source-${randomBytes(6).toString('hex')}`, snapshot_sha: String(claim.snapshot_sha ?? ''), paths: [scratch], env: this.baseEnv() });
+    } catch (e) {
+      return `the executor could not start the ticket source's session (${msg(e)})`;
+    }
+    try {
+      const call = async (fn: string, args: unknown[]) => {
+        const out = wrapperOutcome((await this.wrapperCall(handle, fn, file, args, 120).result).stdout);
+        if (out == null) throw new Error(`the ticket source's ${fn} wrote no outcome`);
+        if (!out.ok) throw new Error(out.error ?? `the ticket source's ${fn} failed`);
+        return out.result;
+      };
+      let versions: unknown;
+      try {
+        versions = await call('describe', []);
+      } catch (e) {
+        return `the ticket source at the snapshot would not load (${msg(e)})`;
+      }
+      const v = (versions ?? {}) as { versions?: unknown; read?: boolean };
+      if (typeof v.versions !== 'string' || !['pinned', 'current'].includes(v.versions)) return null;
+      if (!v.read) return `the ticket source declares versions: ${JSON.stringify(v.versions)} but exports no read — the ticket cannot be re-verified at it (R-BTN-74)`;
+      const id = bareTicketId({ id: claim.ticket_id as string });
+      try {
+        if (v.versions === 'pinned') {
+          const out = await call('read', [id, { version, checkout: this.o.home }]) as { ticket?: unknown } | null;
+          return out == null || out.ticket == null ? `the ticket cannot be read at its version ${version.slice(0, 16)}` : null;
+        }
+        const out = await call('read', [id, { checkout: this.o.home }]) as { version?: unknown } | null;
+        if (out == null) return 'the ticket source no longer reads the ticket';
+        return out.version === version ? null : `the ticket's version is ${typeof out.version === 'string' && out.version !== '' ? out.version.slice(0, 16) : '(none)'}, the claim's ${version.slice(0, 16)}`;
+      } catch (e) {
+        return `the ticket source's read failed (${msg(e)})`;
+      }
+    } finally {
+      await this.executor.stop(handle, 'source-checked').catch(() => {});
     }
   }
 
@@ -1345,6 +1443,7 @@ export class Runner {
       }
     } finally {
       for (const w of this.inflight?.waiters.splice(0) ?? []) w([]);
+      await this.stopSession('claim-ended');
       this.inflight = null;
       this.pendingAbort = null;
       dropCourse(course!.scratch);
@@ -1404,9 +1503,6 @@ export class Runner {
     const script = course.scripts.get(leg);
     if (script == null) return { kind: 'missing' };
     const tag = randomBytes(4).toString('hex');
-    const ctxPath = join(scratch, `ctx-${leg}-${tag}.json`);
-    const resultPath = join(scratch, `result-${leg}-${tag}.json`);
-    writeFileSync(ctxPath, JSON.stringify(ctx));
     // R-BTN-177 (B-105): BATON_ADVICE holds the starting advance's advice — identifiers only,
     // data for the leg — and BATON_TAKEN names a file the leg may write `[{choice, alternative,
     // dead?}]` to. Both are created before each leg and removed after; a taken that is
@@ -1421,7 +1517,7 @@ export class Runner {
     // (BATON_PARENT — such a session never claims; BATON_STATE — the fence and the spool). B-97
     // dropped the transition's IR_BATON_* spellings: these two names are the only ones set.
     const parent = String(this.state.get().worker_id ?? '');
-    const childEnv = {
+    const childEnv: Record<string, string | undefined> = {
       ...process.env, BATON_PARENT: parent, BATON_STATE: this.o.stateFile,
       // R-BTN-144 (B-105): the advice the starting advance answered, and the file the leg's
       // taken goes in — both paths, the data in the files, never on the command line.
@@ -1441,21 +1537,32 @@ export class Runner {
       // (`runLeg`'s context), which is the primary path (round 4).
       ...(typeof ctx.default_branch === 'string' && ctx.default_branch !== '' ? { BATON_DEFAULT_BRANCH: ctx.default_branch } : {}),
     };
-    if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} ${basename(script)} (ctx ${basename(ctxPath)})`);
-    const child = spawn(process.execPath, [LEG_PROCESS, script, ctxPath, resultPath], {
-      detached: true, stdio: ['pipe', 'ignore', this.verbose ? 'pipe' : 'ignore'],
-      env: childEnv,
-    });
-    // B-108's streaming half: the leg child's stderr carries the stub's own verbose lines and
-    // its mirror of the agent's two streams — line-drained, every line timestamped.
-    if (this.verbose) drainLines(child.stderr!, (l) => this.log(`baton: ${leg}: ${l}`));
+    // R-BTN-107 (B-184): the leg runs in a session of the executor the host chose, keyed by its
+    // run id's first session; the previous leg's session goes first (its close and hand-off ran).
+    await this.stopSession('next-leg');
+    const sessionId = typeof ctx.run_id === 'string' ? `${ctx.run_id}.r0` : `leg-${tag}`;
+    const env = Object.fromEntries(Object.entries(childEnv).filter((e): e is [string, string] => typeof e[1] === 'string'));
+    let handle: Handle;
+    try {
+      handle = await this.startSession('leg', {
+        session_id: sessionId, ...(typeof ctx.run_id === 'string' ? { run_id: ctx.run_id } : {}), ticket: String((ctx.ticket as { id?: string })?.id ?? ''), leg,
+        snapshot_sha: String((ctx.snapshot as { sha?: string })?.sha ?? ''), paths: [scratch, course.scratch], env,
+      });
+    } catch (e) {
+      rmSync(advicePath, { force: true });
+      rmSync(takenPath, { force: true });
+      return { kind: 'crashed', error: `the executor could not start the leg's session (${msg(e)})` };
+    }
+    this.session = { handle, checkout: this.o.home };
+    if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} run ${basename(script)} (session ${sessionId}, executor ${this.executor.source})`);
+    const running = this.wrapperCall(handle, 'run', script, [ctx]);
     const inflight = this.inflight!;
-    inflight.child = { process: child, resultPath, ctxPath };
+    inflight.child = { running };
     let done = false;
-    const exited = new Promise<void>((resolve) => child.on('exit', () => {
+    const exited = running.result.then((r) => {
       done = true;
-      resolve();
-    }));
+      return r;
+    });
     const lost = new Promise<void>((resolve) => {
       const timer = setInterval(() => {
         // R-BTN-26: the fence computes the lease itself from the state file — the wall clock
@@ -1470,31 +1577,35 @@ export class Runner {
     });
     await Promise.race([exited, lost]);
     if (!done || this.lostLease) {
-      // The lease went (or the runner stops): kill the leg's whole group at once, no hand-off —
-      // the resume record covers it (R-BTN-24).
+      // The lease went (or the runner stops): kill the leg at once, no hand-off — the resume
+      // record covers it (R-BTN-24) — and stop its session.
       this.killGroup(inflight.child);
+      inflight.child = null;
+      await this.stopSession('lease-lost');
       return { kind: 'lease-lost' };
     }
-    // The wrapper ended on its own, so the kill above never ran — yet the leg's group can still
-    // hold processes the agent left behind (a held lock, a background check: 2026-11-04's run
-    // left eight flock holders and orphaned model replays burning a CPU each past their legs).
-    // A leg's end is its whole group's end whatever ended it (R-BTN-72, S-BTN-200): the wrapper
-    // is gone already, so only the leftovers feel this.
-    this.killGroup(inflight.child);
+    // A leg's end is its whole group's end whatever ended it (R-BTN-72, S-BTN-200): the
+    // executor's call kills what it left behind; the session lives on for close and hand-off.
+    const exit = await exited;
     inflight.child = null;
     // R-BTN-177: collect the leg's taken before the files go — reported on the advance or end
-    // that finishes this leg. A file that is unparseable or over 4 KB is dropped whole; each
-    // entry's `dead` holdings join the session's dead set, never declared on a beat again.
+    // that finishes this leg. Read through the session (the leg wrote it where it ran). A file
+    // that is unparseable or over 4 KB is dropped whole; each entry's `dead` holdings join the
+    // session's dead set, never declared on a beat again.
+    let takenText = '';
+    try {
+      takenText = (await this.executor.exec(handle, ['cat', takenPath], { cwd: this.o.home, timeout_s: 30 }).result).stdout;
+    } catch {
+      // The session went (a lost lease's stop): no taken to report.
+    }
+    writeFileSync(takenPath, takenText);
     this.pendingTaken = readTaken(takenPath);
     for (const entry of this.pendingTaken ?? []) for (const d of entry.dead) this.dead.add(d);
     rmSync(advicePath, { force: true });
     rmSync(takenPath, { force: true });
-    try {
-      const out = JSON.parse(readFileSync(resultPath, 'utf8')) as { ok: boolean; result?: unknown; error?: string };
-      return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: out.error ?? 'the leg script failed' };
-    } catch {
-      return { kind: 'crashed', error: 'the leg wrote no result' };
-    }
+    const out = wrapperOutcome(exit.stdout);
+    if (out == null) return { kind: 'crashed', error: 'the leg wrote no result' };
+    return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: out.error ?? 'the leg script failed' };
   }
 
   /** `close(ctx, result)`: the closing marker from the validated result (R-BTN-83), retried
@@ -1504,11 +1615,11 @@ export class Runner {
     if (script == null) return null;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const mod = (await import(`${pathToFileURL(script).href}?close=${randomBytes(4).toString('hex')}`)) as { close?: (ctx: unknown, result: unknown) => unknown; default?: { close?: (ctx: unknown, result: unknown) => unknown } };
-        const close = mod.close ?? mod.default?.close;
-        if (typeof close !== 'function') throw new Error('the script exports no close(ctx, result)');
-        const ref = await close(ctx, result);
-        return typeof ref === 'string' ? ref : null;
+        // R-BTN-107/R-BTN-133 (B-184): through the executor, in the leg's session, bounded at 2 minutes.
+        const out = wrapperOutcome((await this.wrapperCall(await this.legSession(), 'close', script, [ctx, result], 120).result).stdout);
+        if (out == null) throw new Error('the close wrote no outcome');
+        if (!out.ok) throw new Error(out.error ?? 'the close failed');
+        return typeof out.result === 'string' ? out.result : null;
       } catch (e) {
         this.log(`baton: the leg's close failed (${msg(e)}), attempt ${attempt + 1} of 3`);
       }
@@ -1521,11 +1632,11 @@ export class Runner {
   private async callHandoff(script: string | null, ctx: Record<string, unknown>, why?: string): Promise<string | null> {
     if (script == null) return null;
     try {
-      const mod = (await import(`${pathToFileURL(script).href}?handoff=${randomBytes(4).toString('hex')}`)) as { handoff?: (ctx: unknown) => unknown; default?: { handoff?: (ctx: unknown) => unknown } };
-      const handoff = mod.handoff ?? mod.default?.handoff;
-      if (typeof handoff !== 'function') throw new Error('the script exports no handoff(ctx)');
-      const url = await handoff(why != null ? { ...ctx, bug: why } : ctx);
-      return typeof url === 'string' ? url : null;
+      // R-BTN-107/R-BTN-133 (B-184): through the executor, in the leg's session, bounded at 2 minutes.
+      const out = wrapperOutcome((await this.wrapperCall(await this.legSession(), 'handoff', script, [why != null ? { ...ctx, bug: why } : ctx], 120).result).stdout);
+      if (out == null) throw new Error('the hand-off wrote no outcome');
+      if (!out.ok) throw new Error(out.error ?? 'the hand-off failed');
+      return typeof out.result === 'string' ? out.result : null;
     } catch (e) {
       this.log(`baton: the leg's handoff failed (${msg(e)}) — the resume record covers it (R-BTN-24)`);
       return null;

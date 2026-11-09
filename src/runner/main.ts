@@ -17,6 +17,11 @@ import { HARNESS_AGENTS, type Harness } from './harness';
 import { holdHome, legNeeds, readHead } from './home';
 import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 import { Runner, stampLine, withTimestamps } from './runner';
+import { loadExecutor } from './executor';
+import { fileURLToPath } from 'node:url';
+
+/** The CLI's wrapper (R-BTN-133), which every executor runs. */
+const LEG_WRAPPER = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
 export interface RunArgs {
   harness: Harness;
@@ -45,6 +50,9 @@ export interface RunArgs {
    * nonce beside the ticket, the leg's local command, and the leg child's stderr drained
    * into the log — where the stub reports the agent_command it resolved. */
   verbose: boolean;
+  /** R-BTN-107 (B-184): the executor source the runner's host chose — `--executor`, else the
+   *  host's `BATON_EXECUTOR`, else `builtin`. Never read from a checkout. */
+  executor: string;
 }
 
 /** `baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]
@@ -58,6 +66,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     session: env.BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
     repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? hostname(),
     tier: 'critical', capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false, locks: {},
+    executor: env.BATON_EXECUTOR ?? 'builtin',
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -79,6 +88,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     else if (a === '--hostname') out.hostname = value();
     else if (a === '--tier') out.tier = value();
     else if (a === '--course') out.course = value();
+    else if (a === '--executor') out.executor = value();
     else if (a === '--capabilities') out.capabilities = value().split(',').map((s) => s.trim()).filter(Boolean);
     else if (a === '--lock') {
       // R-BTN-178: `--lock <capability>=<path>`, repeatable — the capability is declared only
@@ -107,7 +117,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
 export const RUN_USAGE = [
   'usage: baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]',
   '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
-  '                 [--beat-every <ms>] [--course <id>] [--test-harness] [--verbose]',
+  '                 [--beat-every <ms>] [--course <id>] [--executor <source>] [--test-harness] [--verbose]',
   '',
   'Runs this machine\'s worker: it heartbeats, claims a ticket of a course its home checkout',
   'declares and runs each leg — one leg at a time.',
@@ -117,6 +127,9 @@ export const RUN_USAGE = [
   '                      serve the grant. A machine without a browser narrows, e.g. llm-call,create-pr.',
   '  --course <id>       narrows the courses served to this one, of those the home declares.',
   '                      Absent, the runner serves and declares every course the home declares.',
+  '  --executor <source> how legs run (R-BTN-107): builtin (the default — child processes) or',
+  '                      pinned:<dir>@sha256:<digest>, a host bundle loaded only when its digest',
+  '                      matches. Also BATON_EXECUTOR; never read from the repository.',
   '  --lock cap=path     one machine\'s singleton (R-BTN-178), repeatable: the capability is declared',
   '                      only while this runner holds an exclusive lock on the file, and it takes',
   '                      the lock before a claim for, or the advance into, a leg requiring it.',
@@ -370,7 +383,12 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // `fetch` (the Worker, or the local host); a test hands one in and sees the bodies the
   // heartbeat path composed without a Baton behind it.
   const transport = io.transport ?? ((req: Request) => fetch(req));
+  // R-BTN-107 (B-184): the executor the host chose, loaded before any claim — a pinned bundle
+  // whose digest does not match, or a source not built, refuses to start.
+  const executor = await loadExecutor(a.executor, { log: say, wrapper: LEG_WRAPPER, node: process.execPath });
+  if (a.executor !== 'builtin') say(`baton: executor ${executor.source}${executor.digest ? ` sha256:${executor.digest}` : ''}${executor.provides.length ? `, provides ${executor.provides.join(', ')}` : ''}`);
   runner = new Runner({
+    executor,
     api: new BatonApi({ url: a.url, transport, auth }, say),
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
