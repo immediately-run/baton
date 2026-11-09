@@ -191,3 +191,8 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   sandbox (2026-11-09, the owner: "I don't want the merge leg to be different from the other legs
   for the plain baton scenario"; R-BTN-182, §12.8). Baton stays agnostic about isolation with no
   exception; keeping the override from the credential is a deployment duty (§12.8).
+- Chose the ticket source as the truth about tickets and git about the code and its evidence, over
+  calling a tracker a cache git does not hold (2026-11-09, the owner, choosing B-183's recommended
+  wording: "The ticket source is the truth about tickets and git about the code and its evidence;
+  Baton holds what no write may decide."; values 1, R-BTN-35, R-BTN-74). The markdown source keeps
+  every ticket in git, so a git-only repository reads exactly as before.

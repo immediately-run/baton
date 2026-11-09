@@ -79,13 +79,14 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
     `course_data`, profiles, reports, `rationale`, a reading's `detail`. Core never reads them,
     `display`'s two keys above excepted, so it cannot stop a course from putting prose in one; doing so breaks this rule, and the
     CLI's default sources and standard station functions post no prose in them.
-- **R-BTN-35 (the home repository wins, except about what Baton owns).** Baton owns each
+- **R-BTN-35 (the ticket source and git win, except about what Baton owns).** Baton owns each
   ticket's course history and position (R-BTN-39), claims and leases, attestations (R-BTN-181)
   and owner state (R-BTN-66). When Baton and git disagree about those, Baton wins: an arrival it
   does not apply is recorded `arrival-unapplied` on the ticket (R-BTN-39), and git's other facts
-  are adopted and logged (R-BTN-85). About anything else, git is authoritative: every other ticket fact
-  Baton holds (its existence, filter fields, closure) is a cache of the head snapshot, which
-  Baton never edits. A runner acts on the ticket as `origin/<default branch>` has it, or as its branch does for a
+  are adopted and logged (R-BTN-85). About anything else, the ticket source is authoritative about tickets
+  and git about the code and its evidence: every other ticket fact Baton holds (its existence,
+  filter fields, closure) is a cache of what the source last posted — for the markdown source,
+  the head snapshot — which Baton never edits. A runner acts on the ticket as `origin/<default branch>` has it, or as its branch does for a
   course that keeps its record there (R-BTN-5, R-BTN-34); the next accepted snapshot overwrites the cached rows; **Resync** forces one.
   - **Staleness.** A snapshot observed after a claim's latest claim or `advance` (R-BTN-62)
     that shows the held ticket `closed` as `withdrawn`, or re-tiered above the holder's

@@ -88,9 +88,10 @@ then the code.
 8. **A stable key, not a path** (R-BTN-147, §4.4). A posted ticket may carry `key`, the source's
    stable name for the ticket (default: its `path`); `renumbered` is detected by `key`. `path`
    becomes optional for a ticket from a `custom` source with `versions: "current"`.
-9. **Replay records the version** (R-BTN-84). A run's inputs record the ticket's version and the
+9. ~~**Replay records the version** (R-BTN-84). A run's inputs record the ticket's version and the
    digest of what `read` returned; `baton leg replay` against a current source whose version moved
-   reports the mismatch and does not silently replay against new content.
+   reports the mismatch and does not silently replay against new content.~~ Moved to B-190, which
+   builds replay (the owner, 2026-11-09).
 
 ### Decision needed
 
@@ -98,6 +99,7 @@ then the code.
 facts come from the tracker while code, courses and evidence stay in git. Values are owner
 decisions, not this ticket's to rewrite.
 
+- **Answered: (a)** (the owner, 2026-11-09), written into values 1 and R-BTN-35 on main.
 - **(a) Reword to "the ticket source"** *(recommended)*: "The ticket source is the truth about
   tickets and git about the code and its evidence; Baton holds what no write may decide." The
   owner edits `docs/context/values.mdx`; R-BTN-35 follows in the spec PR.
@@ -150,7 +152,8 @@ fixture `custom` source backed by a JSON file outside git:
   fails the run and posts nothing;
 - a dropped-and-re-added ticket with the same `key` and a new id is `renumbered`;
 - a current source posting to a repository with a `tickets-approved` floor is refused;
-- replay against a current source whose version moved reports the mismatch.
+- ~~replay against a current source whose version moved reports the mismatch.~~ Waived for this
+  ticket (the owner, 2026-11-09); B-190 carries it.
 
 ### Exit criteria
 
@@ -167,3 +170,5 @@ fixture `custom` source backed by a JSON file outside git:
 _filed 2026-11-05._
 
 _2026-11-05 — expedited (EXPEDITE) at the owner's request: the owner needs Baton for work today._
+
+_2026-11-09: the owner answered the Decision needed — (a), the ticket-source wording, now in `docs/context/values.mdx` value 1 and R-BTN-35 on main — and waived the seventh scenario: replay has never been built, so item 9 and its test move to B-190, which builds replay with the version check. PR #190 merges main (its scenarios renumber past S-BTN-205) and drops its "pending the owner" Decisions line. (2026-11-09: rules re-read: R-BTN-35, R-BTN-84)_
