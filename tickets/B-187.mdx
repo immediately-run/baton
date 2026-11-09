@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1186
 tier: judgement
-description: "A domain is a grant's label (R-BTN-180), so a runner that runs every leg in an environment of its own is still one domain and is refused its own review legs. Let the policy (approvers.policy) list credentials in domains.per_run, never a trusted-runner, checker or domainless one; a listed credential's runner reports a single-use run label on the advance that starts each run; attestations carry the grant's domain and the label as separate fields; two runs on one domain differ only when both carry different labels, whichever key made either; no_chain_from still refuses within one claim and against unlabelled runs; independent-review never holds with a listed credential, the weaker independent-runs does. Baton verifies no label and knows nothing of what one names. Requires: B-185."
+description: "A domain is a grant's label (R-BTN-180), so a runner that runs every leg in an environment of its own is still one domain and is refused its own review legs. Let the policy (approvers.policy) list credentials in domains.per_run, never a trusted-runner, checker or domainless one; a listed credential's runner reports a single-use run label on the advance that starts each run; attestations carry the grant's domain and the label as separate fields; two runs on one domain differ only when both carry different labels, whichever key made either; no_chain_from still refuses within one claim and against unlabelled runs; independent-review counts labelled runs as their own domains (the weaker independent-runs of the first draft collapsed into it, the owner 2026-11-09). Baton verifies no label and knows nothing of what one names. Requires: B-185."
 topics:
   - baton
 owns: {}
@@ -41,13 +41,13 @@ a container, nothing) is the deployment's, and Baton never learns it.
 1. **A credential may be listed in `domains.per_run` — a policy change.** Marking a grant `per-run` changes what
    `independent-review` means for its work, so it is a change to the repository policy, governed
    by `approvers.policy` (R-BTN-186), not a role setting: the policy gains `domains.per_run:
-   [fingerprints]`. `independent-review`'s *holds when* gains "and `domains.per_run` is empty", so a
-   floor on it refuses the change. A new, weaker guarantee `independent-runs` promises the same
-   two reviews with per-run domains admitted, and states what it does not withstand: a
+   [fingerprints]`. `independent-review` counts per-run domains (no separate guarantee: the owner, 2026-11-09,
+   collapsed the weaker `independent-runs` of the first draft into it), and §12.8's outside list
+   states what a labelled review does not withstand: a
    compromised runner of a per-run grant, and — under `builtin`, where any leg can read the runner's
    key (R-BTN-144) — a hostile leg acting as that runner; it holds only as far as the deployment
    keeps runs apart from each other and from the runner; a
-   deployment that accepts per-run domains floors `independent-runs` instead. Such a grant's runner reports a `run_label`
+   Such a grant's runner reports a `run_label`
    once per run, on the `advance` that starts it (the run's label is then stored; the finishing
    `advance` or `end` needs none, and an `advance` that both finishes one run and starts the next
    carries the new run's label); a missing label is refused `invalid-params`. A refresh (R-BTN-123)
@@ -97,11 +97,10 @@ a container, nothing) is the deployment's, and Baton never learns it.
 
 ### Invariants
 
-- **R-BTN-189's guarantees keep their meaning for labelled grants.** For a per-run grant only
-  `independent-runs` can hold, and only as far as the deployment keeps runs apart from each other
-  and from the runner — Baton cannot tell — never against a compromised runner. The spec PR
-  amends R-BTN-189's "Every guarantee holds against a compromised runner" and §12.8's *Outside
-  every guarantee* list to say so, and the policy view shows it beside the guarantee.
+- **R-BTN-189's guarantees keep their meaning for labelled grants.** For a listed credential's
+  labelled runs, `independent-review` holds only as far as the deployment keeps runs apart from
+  each other and from the runner — Baton cannot tell — never against a compromised runner; §12.8's
+  *Outside every guarantee* list says so.
 - **`independent-review` is unchanged in strength:** it is never held while a grant is per-run.
 - **Validate before you write:** the label goes through `src/core/validate.ts` before SQL.
 - **Migrations are append-only:** one new file for the column.
@@ -112,19 +111,15 @@ a container, nothing) is the deployment's, and Baton never learns it.
 - A per-run grant implements and then reviews one ticket under two labels: the review is admitted,
   and two such reviews satisfy `merge.reviews {count: 2}`.
 - The same grant reporting a label twice is refused `label-reused`.
-- With `domains.per_run` non-empty, `independent-review` computes as broken and `independent-runs` as
-  held; with it empty, both behave as `independent-review` does today.
-- A floor naming `independent-review` refuses the policy change that adds a per-run grant; a floor
-  naming `independent-runs` admits it.
+- With a credential listed, `independent-review` computes held, its labelled reviews counting as
+  separate domains.
 - A per-run grant omitting the label on `advance` is refused.
 - A labelled grant behaves exactly as today (the existing scenarios pass unchanged).
 - Each behaviour change names its `S-BTN-n` scenario (R-BTN-31).
 
 ### Exit criteria
 
-- [ ] the spec PR (the policy's `domains.per_run`, R-BTN-189's `independent-review` condition, the new
-  `independent-runs` guarantee and its
-  "holds against a compromised runner" sentence, §12.8's outside list, R-BTN-181's attestations,
+- [ ] the spec PR (the policy's `domains.per_run`, R-BTN-189's `independent-review` promise, §12.8's outside list, R-BTN-181's attestations,
   R-BTN-183's comparison, §8.3's `no_chain_from`, the policy view's note) is merged with the
   owner's approval
 - [ ] built as above; the tests pass; `npm test` and `npm run typecheck` are green
@@ -134,3 +129,5 @@ a container, nothing) is the deployment's, and Baton never learns it.
 _filed 2026-11-08._
 
 _(2026-11-08: rules re-read: R-BTN-63, R-BTN-106, R-BTN-180, R-BTN-183, R-BTN-188, R-BTN-189)_ — this ticket's spec half is in baton#197; the items above match it.
+
+_2026-11-09: the owner accepted collapsing the weaker `independent-runs` into `independent-review` ("I accept all recommendations"): the split rested on a leg being able to act as its runner. Items and tests rewritten in place; the spec in baton#197 matches. (2026-11-09: rules re-read: R-BTN-189)_

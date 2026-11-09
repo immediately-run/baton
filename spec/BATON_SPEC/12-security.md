@@ -281,9 +281,9 @@ below answers.
 - a human-only key an agent session can use (always possible while the repository's `human_key`
   is `any`, which is why `human-gates` holds only under `hardware`);
 - a compromised host of trusted runners or of the protection checker (R-BTN-180);
-- for `independent-runs`, a compromised runner of a listed credential, or a leg that can act as
-  it (under a runner whose legs share its trust boundary, every leg can: §8, R-BTN-107): Baton
-  records run labels and cannot tell whether runs were kept apart;
+- for reviews counted by run label (R-BTN-180), a compromised runner of a listed credential, or a
+  leg that can act as it (under a runner whose legs share its trust boundary, every leg can: §8,
+  R-BTN-107): Baton records run labels and cannot tell whether runs were kept apart;
 - refs no forge rule restricts: on GitHub, `refs/baton/*`; Baton reads nothing from them that a
   trusted leg acts on;
 - a human who approves a change they misread;
@@ -314,8 +314,8 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     requirements the new `attestations` entries admit no writer for, tickets on a course whose
     `merge` leg a new `merge.trusted` leaves without a trusted runner, and, for a change to
     `domains.per_run`, the credentials listed or un-listed, the course legs whose `no_chain_from`
-    then admits a listed credential's labelled run from another claim (R-BTN-106), and
-    `independent-review` broken (`baton owner policy apply <preset> --dry-run`); `baton owner
+    then admits a listed credential's labelled run from another claim (R-BTN-106) (`baton owner
+    policy apply <preset> --dry-run`); `baton owner
     policy show` lists the per-run credentials beside the guarantees. Each change is logged `admin` with the versions and the
     knobs it changed. Every change is checked against the floors (R-BTN-189) and the current
     courses (R-BTN-181) in its transaction.
@@ -423,19 +423,18 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     | `no-runner-lands` | no runner updates the default branch, a tag or a branch outside its pattern; a runner's work lands only through the merge runner under `merge.*`, as reviewed as `merge.reviews` says, or by the human identity's own merge of its PR (`merged-by-hand`) | `refs.default_branch`, `refs.tags` and `refs.other` admit only `trusted-runner` and `human`; `paths.control` is not `any`; `merge.trusted`; `tickets.created` is `proposed`; `outbox.git` admits only `trusted-runner`; and the latest report from the protection checker, within 24 hours, matched (R-BTN-180) |
     | `control-paths-human` | no control path (courses, workflows, agent configuration, the ticket source) changes without a human landing it | `no-runner-lands`, and `paths.control` is `human` |
     | `tickets-approved` | no ticket or goal changes, and no ticket a runner creates is filed, without a human approval of that file: a `std:approval@1`, or the human's merge of the ticket's PR, or the request PR, carrying it | `no-runner-lands`; `paths.tickets` is `approval`; `tickets.created` is `proposed`; and `attestations` admits only `human` for `std:approval@1` |
-    | `independent-review` | a runner's change the merge runner lands has two reviews from domains other than its writers' and each other's; what the human merges by hand, the human has reviewed | `no-runner-lands`; `merge.reviews.count` ≥ 2; `attestations` admits only `baton` for `std:review@1`, `std:wrote@1` and `std:ran@1`; and `domains.per_run` is empty |
-    | `independent-runs` | as `independent-review`, with per-run domains admitted (R-BTN-180): two reviews from domains other than the writers' and each other's, where a labelled run counts as its own domain — which means something only as far as the deployment keeps a listed credential's runs apart from each other, from its runner and from other domains; under a runner whose legs share its trust boundary, any leg can report a label (§8, R-BTN-107) | `no-runner-lands`; `merge.reviews.count` ≥ 2; and `attestations` admits only `baton` for `std:review@1`, `std:wrote@1` and `std:ran@1` |
+    | `independent-review` | a runner's change the merge runner lands has two reviews from domains other than its writers' and each other's, runs compared as R-BTN-180 says — a labelled run of a credential `domains.per_run` lists counting as its own domain only as far as the deployment keeps that credential's runs apart (§12.8); what the human merges by hand, the human has reviewed | `no-runner-lands`; `merge.reviews.count` ≥ 2; and `attestations` admits only `baton` for `std:review@1`, `std:wrote@1` and `std:ran@1` |
     | `human-gates` | no owner's agent session, and no delegated key, changes membership, roles or the policy, and every human approval is made on a hardware key no session can drive | `approvers.members`, `approvers.roles` and `approvers.policy` are human-only lists, and the repository's `human_key` is `hardware` |
     | `board-from-trusted` | nothing a trusted leg acts on comes from a runner's board post or from git verdicts | `no-runner-lands`; `inputs.board` excludes `machine`; and the `attestations` entries admit no `sync` writer for `std:arrival@1` or `std:decision@1`, and only `human` for `std:decision@1` (R-BTN-191) |
 
     Every guarantee holds against a compromised runner, within what its knobs' enforcers enforce
-    and nothing §12.8's list excludes; `independent-runs` is the one §12.8's list limits further. Against an injected owner's agent, one holds only together
+    and nothing §12.8's list excludes. Against an injected owner's agent, one holds only together
     with `human-gates`: an `owner` approver can grant a trusted role or a member, which no other
     guarantee constrains; and under `human_key: any` a human-only list is a promise about key
-    custody, which is why `protected` does not claim `human-gates`. With `domains.per_run` empty the
-    `protected` preset holds all but `human-gates`, and `no-runner-lands`, with every guarantee
-    that includes it, only once the protection checker has reported a match; `protected-hardware`
-    holds all seven on the same condition. With it non-empty, neither holds `independent-review`.
+    custody, which is why `protected` does not claim `human-gates`. The `protected` preset holds all
+    but `human-gates`, and `no-runner-lands`, with every guarantee that includes it, only once the
+    protection checker has reported a match; `protected-hardware` holds all six on the same
+    condition.
   - **Floors.** The policy's `floors` knob lists guarantees by name. Setting it is a policy change
     like any other, by `approvers.policy`, refused when a listed guarantee's policy conditions
     are not met by the document after the change. From then on Baton refuses any policy change after which a guarantee the

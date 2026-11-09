@@ -2576,9 +2576,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   (one) that a listed key's second review would supersede its first, that a multi-repository
   ticket's labels counted under a policy that never listed the key, `no_chain_from` admitting an
   un-listed key on its old label, and re-domaining as a way to self-independence. All fixed before
-  merge. `independent-review` never holds while the list is non-empty; the new, weaker
-  `independent-runs` does, and does not hold against a compromised per-run runner or a leg that
-  can act as it (R-BTN-189, §12.8's outside list). S-BTN-204 and S-BTN-205's rows follow.
+  merge. `independent-review` counts labelled runs as their own domains, and §12.8's outside list
+  says it does not withstand a compromised runner of a listed credential or a leg that can act as
+  it (R-BTN-189). The first draft added a weaker `independent-runs` beside an `independent-review`
+  that never held with a listed credential; on 2026-11-09 the owner accepted collapsing it ("I
+  accept all recommendations"), since the split rested on a leg being able to act as its runner.
+  S-BTN-204 and S-BTN-205's rows follow.
 
 - **2026-11-09 — R-BTN-182, §12.8** (B-184).
   Rules changed: R-BTN-182.

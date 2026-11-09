@@ -49,7 +49,7 @@ horizontal*); `docs/security-model.mdx` (reach 1, options 17 and 19).
 **Depends on:** B-185 (a handle is keyed by the run id). B-186 defines `salvage`; until it lands,
 an executor's `salvage` may return null. B-127 (owner-signed control) is needed only for the `home-signed` source;
 until it lands, `home-signed` is refused at start with a message naming B-127.
-**Used by:** Fieldhouse's sandbox executor (FIELDHOUSE_SPEC section 5). Overlaps B-139, B-141, B-185 and
+**Used by:** B-189 (trusted runners; forge actions), Fieldhouse's sandbox executor (FIELDHOUSE_SPEC section 5). Overlaps B-139, B-141, B-185 and
 B-186 (below).
 
 ### What to build
@@ -116,8 +116,9 @@ B-186 (below).
      which gains an argument naming the export to call (today it calls only `run`), passing `ctx`
      as JSON on stdin and reading the result as JSON from the last line of stdout — so it needs
      nothing beyond `exec`'s argv, stdin and stdout, on any executor — bounded as today (2 minutes
-     for `close` and `handoff`). A push `close` makes uses the credential the executor gives the
-     leg session, never the runner's.
+     for `close` and `handoff`). A leg's pushes, pull requests and comments are
+     forge actions the runner performs after checking them (B-189); no leg session holds a forge
+     credential.
 
    For `builtin` every kind is a child process, as close to today as makes no difference; a deployment's executor decides what each kind gets.
 5. **Executor data, opaque to Baton.** A course may give each leg an `executor` object in its
