@@ -4,6 +4,8 @@
 import { describe, it, expect } from 'vitest';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { MIGRATIONS } from '../../src/migrations';
+import { mintRunId } from '../../src/core/db';
+import type { Store } from '../../src/core/ports';
 
 describe('migration 0005: work items become tickets (R3-1230)', () => {
   it('keeps every row under the new names', async () => {
@@ -440,6 +442,46 @@ describe('migration 0036: the model tables retire (B-142)', () => {
       sql.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
                 VALUES ('vm-2', 's', 'h', 'vm-1', 'opencode', 'vm', 'critical', 900000, '', 1, 1)`);
       expect(all('SELECT count(*) AS n FROM workers')).toEqual([{ n: 2 }]);
+    });
+  });
+});
+
+describe('migration 0038: run ids (B-185, S-BTN-204)', () => {
+  it('rebuilds claim_legs keeping every row, and the backfill gives each a distinct run id minted from its started_at', async () => {
+    const id = env.BATON.idFromName('migrations-0038');
+    await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
+      for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id <= 37)) sql.exec(m.sql);
+      sql.exec(`INSERT INTO claims (id, ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status) VALUES (1, 'docs:A', 1, 'r1', 'abcdef', 'sha', 1, 'active')`);
+      const T = Date.parse('2026-11-01T00:00:00Z');
+      sql.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, to_station, bars, started_at, started_observation, finished_at, evidence, route_choices_json, taken_json)
+                VALUES (1, 1, 'implement', 'filed', 'pr-open', '["x"]', ?, 3, ?, 'https://pr/1', '[{"choice":"c"}]', '[]')`, T, T + 1);
+      sql.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, started_at, started_observation, abandoned_at)
+                VALUES (1, 2, 'review', 'pr-open', ?, 4, ?)`, T + 2, T + 3);
+
+      sql.exec('PRAGMA foreign_keys = ON'); // as the host runs it
+      const m38 = MIGRATIONS.find((x) => x.id === 38)!;
+      sql.exec(m38.sql);
+      let draw = 0;
+      m38.backfill!({ exec: (q: string, ...p: unknown[]) => sql.exec(q, ...p) } as unknown as Store, (n) => new Uint8Array(n).fill(++draw));
+
+      const all = (q: string) => sql.exec(q).toArray() as Record<string, unknown>[];
+      expect(all(`SELECT id, claim_id, seq, leg, from_station, to_station, bars, started_at, started_observation, finished_at, abandoned_at, evidence, route_choices_json, taken_json
+                  FROM claim_legs ORDER BY seq`)).toEqual([
+        { id: 1, claim_id: 1, seq: 1, leg: 'implement', from_station: 'filed', to_station: 'pr-open', bars: '["x"]', started_at: T, started_observation: 3, finished_at: T + 1, abandoned_at: null, evidence: 'https://pr/1', route_choices_json: '[{"choice":"c"}]', taken_json: '[]' },
+        { id: 2, claim_id: 1, seq: 2, leg: 'review', from_station: 'pr-open', to_station: null, bars: '[]', started_at: T + 2, started_observation: 4, finished_at: null, abandoned_at: T + 3, evidence: null, route_choices_json: null, taken_json: null },
+      ]);
+      const ids = all('SELECT run_id, started_at FROM claim_legs ORDER BY seq') as { run_id: string; started_at: number }[];
+      expect(ids.map((r) => r.run_id)).toEqual([mintRunId(T, () => new Uint8Array(10).fill(1)), mintRunId(T + 2, () => new Uint8Array(10).fill(2))]);
+      expect(new Set(ids.map((r) => r.run_id)).size).toBe(2);
+      // The run id is unique, (claim_id, seq) still is, and the history has the column.
+      expect(() => sql.exec(`UPDATE claim_legs SET run_id = ? WHERE seq = 2`, ids[0].run_id)).toThrow(/UNIQUE/);
+      expect(() => sql.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, started_at, started_observation) VALUES (1, 2, 'fix', 'x', 1, 1)`)).toThrow(/UNIQUE/);
+      expect(all(`SELECT name FROM pragma_table_info('claim_legs') WHERE name IN ('head_sha', 'session_url', 'leg_log_dir') ORDER BY name`)).toEqual([{ name: 'head_sha' }, { name: 'leg_log_dir' }, { name: 'session_url' }]);
+      expect(all(`SELECT name FROM pragma_table_info('ticket_history') WHERE name = 'run_id'`)).toEqual([{ name: 'run_id' }]);
     });
   });
 });

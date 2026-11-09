@@ -34,7 +34,7 @@ import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import { Policies, canonicalJson, sha256HexSync } from './policy';
 import { Scope } from './scope';
-import { randomHex } from './db';
+import { randomHex, systemRandom } from './db';
 import type { Ports, Row, SqlValue, Store, Workflow } from './ports';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
@@ -47,6 +47,8 @@ const POLICY_SIGNATURE_NAMESPACE = 'baton-policy@1';
 export class BatonCore {
   /** The clock (R-BTN-32). Tests replace it; nothing else here reads the time. */
   now: () => number;
+  /** The random source (B-185: a run id's random half). Tests replace it, as the clock. */
+  random: (n: number) => Uint8Array;
 
   readonly workers: WorkerApi;
   readonly claims: Claims;
@@ -84,6 +86,7 @@ export class BatonCore {
 
   constructor(private readonly ports: Ports) {
     this.now = ports.clock ?? (() => Date.now());
+    this.random = ports.random ?? systemRandom;
     this.store = ports.store;
     this.dispatcher = (wf) => this.sendDispatch(wf);
     this.outside = ports.gate ? (work) => ports.gate!.outside(work) : (work) => work();
@@ -130,7 +133,7 @@ export class BatonCore {
       queued: (ticket) => this.queues.touch(ticket), reevaluate: (ticket) => this.blocks.write([ticket]), isHeld: (ticket) => this.blocks.isHeld(ticket),
       linkBases: (ticket) => this.blocks.linkBases(ticket), answersFrom: (repo) => this.policies.current(repo)?.policy.inputs.answers ?? 'git',
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
-    this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
+    this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course), ontologies: this.ontologies,
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
       policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope });
@@ -390,6 +393,7 @@ export class BatonCore {
       if (done.has(m.id)) continue;
       this.store.transaction(() => {
         this.store.script(m.sql);
+        m.backfill?.(this.store, (n) => this.random(n));
         this.store.exec('INSERT INTO _baton_migrations (id, applied_at) VALUES (?, ?)', m.id, this.now());
       });
     }
