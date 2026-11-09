@@ -1,0 +1,119 @@
+---
+title: BATON-UI-V2 — the dashboard as a walk down the entity tree, in React and TypeScript
+id: baton-ui-v2
+status: active
+tags:
+  - project
+description: Replace the dependency-free dashboard with a React and TypeScript app whose screens are the entities the REST API, the CLI and MCP already name — sign in, pick a repository, then one entity per screen, each drawn from that entity's REST reads with the registry actions ui.view places there — built from the owner's Claude Design mockup of 2026-11-09.
+kind: project
+nav: Project
+order: 6
+---
+
+_Project entity, filed 2026-11-09 from the owner's design session (B-17: the dashboard design
+iterated with Claude Design) and the owner's organizing rule for it, quoted below._
+
+**Design:** [`docs/design/baton-dashboard-v2.html`](../../docs/design/baton-dashboard-v2.html)
+(the Claude Design mockup, self-contained; its overview at
+[`baton-dashboard-v2-overview.png`](../../docs/design/baton-dashboard-v2-overview.png)) and
+[`docs/context/design-brief.mdx`](../../docs/context/design-brief.mdx), updated with what the
+design settled. **Spec:** [BATON_SPEC §11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4) (the
+dashboard), [§11.3](../../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-129](../../spec/BATON_SPEC/11-people.md#sec-11-3):
+one registry, every surface derived from it), [§14](../../spec/BATON_SPEC/14-api.md#sec-14) (the
+API), [§12.3](../../spec/BATON_SPEC/12-security.md#sec-12-3) (text, never markup).
+
+**Status:** `active` — author-set.
+
+## The organizing rule
+
+**Brief:** the owner, 2026-11-09: "I want the V2 API to be organized along the same concepts as
+the REST API, CLI and MCP. Under that assumption the dashboard becomes a walk down the same tree
+the URLs already draw — sign in, pick a repository, and every screen after that is one entity.
+Every screen = one entity's REST reads, with its controls the registry actions placed there by
+`ui.view` — so 'what I see' and 'what I can do' come from the same definition." The owner also
+chose React and TypeScript for the implementation, which replaces the brief's dependency-free
+rule, and noted that this flips the earlier task-view decision: Running and Ready collapse into
+Board and Tickets, Needs you into Conditions, with one overview strip per repository
+("running now · ready · needs you") so the task answers stay one glance away.
+
+The tree, as the owner drew it:
+
+- **Root `/`** — the caller's repositories (an administrator's all, an owner's theirs): head,
+  mode, ready count, open conditions. Sign-in at `/login`; nothing else is tenant-scoped for an
+  owner.
+- **One repository, `/repositories/{r}/…`**: **Board** `/board`; **Tickets** `/tickets`,
+  `/tickets/{t}`; **Goals** `/goals`; **Courses** `/courses`, `/courses/{c}`; **Conditions**
+  `/conditions`, `/conditions/{id}` (the Resolve page); **Runners** `/runners`,
+  `/runners/{name}`; **Credentials** `/grants`, `/owners`, `/tokens`, `/mcp-keys`,
+  `/sync-keys`, `/check-runners`; **Governance** `/policy`, `/settings`, `/bars`, `/consents`,
+  `/attestations`; **Sync** `/sync`.
+- **Tenant screens, an administrator's** — `/repositories` (the registry), `/instances`,
+  `/resources`, `/capacities`, `/settings`, `/state`, `/sessions`.
+
+The mockup draws the *content* of these screens — the Needs-you list, the timeline, the ticket
+table with its state column and reasons, the runner cards with lease bars and attempts, the course
+graph with queue depths, discrepancies, capacity — and its visual language (calm, dense, status by
+shape and label before colour, exceptions first). Its navigation (Overview, Tickets, Workers,
+Courses, Schemas) is *not* the design: the tree above is, and the mockup's sections are placed on
+the entity screens the tickets name. Its "Workers" are **runners** (B-68), and its "Schemas" view
+is out of scope: the declarative views and renderers are B-54's, and a schema registry screen is
+filed only when a route exists to read one from.
+
+## Items
+
+Filed 2026-11-09, in build order. Every ticket names its `S-BTN-n` scenarios at merge (R-BTN-31)
+and keeps §12.3: every value from a ticket, a runner or a reading is drawn as a text node, never
+as markup.
+
+- **B-191 — The spec amendment:** §11.4 rewritten as the entity tree; R-BTN-129's `ui` gains
+  `view`; §12.3's rendering rule stated for a component framework; the decisions recorded; the
+  brief confirmed.
+- **B-192 — Sessions read what they see:** a dashboard session is a `reader` on every repository
+  read it draws; `GET /v1/repositories` (the root read, with the overview strip's counts);
+  `GET /v1/actions` answers a session; `ui.view` placement in the registry.
+- **B-193 — The shell:** the React and TypeScript app, its build, the front serving it for every
+  screen path, sign-in per role, the router over the tree, polling with freshness, controls
+  derived from the caller's registry entries, the confirmation-code dialog, the root screen and
+  the repository overview strip.
+- **B-194 — Board and Tickets** (`/board`, `/tickets`, `/tickets/{t}`), with the ticket list and
+  detail reads.
+- **B-195 — Conditions** (`/conditions`, `/conditions/{id}` as the Resolve page), with the
+  one-condition read; person legs' answers.
+- **B-196 — Runners** (`/runners`, `/runners/{name}` with the 24-hour timeline), with the
+  repository-scoped fleet and timeline reads.
+- **B-197 — Courses** (`/courses`, `/courses/{c}`): the station and leg graph, queue depths,
+  per-ticket paths, stats, a leg's log from its edge.
+- **B-198 — Goals** (`/goals`), after B-122.
+- **B-199 — Credentials** (`/grants`, `/owners`, `/tokens`, `/mcp-keys`, `/sync-keys`,
+  `/check-runners`), read-only, the grants read extended.
+- **B-200 — Governance** (`/policy`, `/settings`, `/bars`, `/consents`, `/attestations`), with
+  the attestations read.
+- **B-201 — Sync** (`/sync`): head, observations, wanted, held posts and Discrepancies; resync.
+- **B-202 — Tenant screens** (`/repositories`, `/instances`, `/resources`, `/capacities`,
+  `/settings`, `/state`, `/sessions`), with the administrator reads they lack.
+- **B-203 — Cutover:** V1 removed, `GET /v1/ui/state` retired, the deploy builds the bundle,
+  S-BTN-76 and S-BTN-170 on the new renderer, the brief's "Where to look" current.
+
+```
+B-191 spec ── B-192 reads + ui.view (also B-25) ── B-193 shell (also B-76)
+                                                      ├── B-194 board + tickets
+                                                      ├── B-195 conditions (also B-55)
+                                                      ├── B-196 runners
+                                                      ├── B-197 courses
+                                                      ├── B-198 goals (also B-122)
+                                                      ├── B-199 credentials
+                                                      ├── B-200 governance
+                                                      ├── B-201 sync
+                                                      └── B-202 tenant
+B-194 … B-202 ── B-203 cutover
+```
+
+The critical path is B-191 → B-192 → B-193 → the screens → B-203. The screen tickets are
+independent of each other and may run in parallel once the shell lands (separate tickets never
+share a write target: each owns its screen directory under the shell's source tree).
+
+## Done when
+
+Every item above is done; the dashboard at the instance's origin is the V2 app; V1's page, script
+and `GET /v1/ui/state` are gone; and every screen in the tree is drawn from reads and controls a
+signed key could make the same way.

@@ -1,0 +1,162 @@
+---
+title: "B-193 — The V2 shell: a React and TypeScript dashboard built by esbuild, served for every screen path, with sign-in per role, the router over the entity tree, polling, controls derived from the caller's registry entries, the confirmation dialog, the root screen and the overview strip"
+id: B-193
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1192
+tier: judgement
+description: "Build the BATON-UI-V2 app's shell and nothing screen-specific beyond the root: src/ui-v2/ in React and TypeScript, one esbuild bundle the front serves at / and every screen path of §11.4's tree (deep links work); /login per role (R-BTN-155); a client router over the tree with the repository picker; one polling layer (10 s, ETag, freshness shown); controls built from GET /v1/actions and each entry's ui.view, so a session is never drawn what it cannot take; the destructive-confirm dialog and the 202 confirm-code dialog; the root screen (the caller's repositories) and the per-repository overview strip; light and dark; 375 px; text nodes only, lint-enforced. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-191
+  - B-192
+  - B-76
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): the dashboard is "a walk down the same tree the URLs
+already draw — sign in, pick a repository, and every screen after that is one entity", in React
+and TypeScript, from the Claude Design mockup
+([`docs/design/baton-dashboard-v2.html`](../docs/design/baton-dashboard-v2.html)) — whose visual
+language (calm, dense, status by shape and label before colour, exceptions first; the sidebar
+with counts; the "Live · updated 7 s ago · polls every 10 s" freshness line) this shell carries,
+and whose navigation the tree replaces.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4):
+sign-in, sessions, the confirmed-action list; the screens and the overview strip as B-191 amends
+them), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3):
+`GET /v1/actions`, `ui.view`), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3) (Rendering;
+links), [§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4):
+the cookies, `Origin`, the headers the front sets), [§12.2](../spec/BATON_SPEC/12-security.md#sec-12-2)
+(destructive actions take `confirm: true`), [§15](../spec/BATON_SPEC/15-verification.md#sec-15)
+([S-BTN-76](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-13](../spec/BATON_SPEC/15-verification.md#gates)).
+Context: `docs/context/design-brief.mdx` (the constraints a design must keep, as updated
+2026-11-09).
+
+**Depends on:** B-191 (the screens are specified), B-192 (`GET /v1/repositories`, `GET /v1/actions`
+for a session, `ui.view`), B-76 (owner sessions: the shell's sign-in has two roles and the root
+screen shows an owner its repositories).
+
+**Used by:** B-194 to B-203.
+
+### What to build
+
+1. **The source and the build.** `src/ui-v2/` holds the app: React 19, TypeScript under the
+   repository's `tsconfig`, no other runtime dependency; `npm run build:ui` runs esbuild (already
+   a devDependency, `build:cli`'s tool) to one `index.html`, one `app.js` and one `app.css` under
+   `src/ui-v2/dist/` (gitignored), minified, with no remote import, font or stylesheet. The
+   bundle is the dashboard's whole code (§12.3). `npm test`, `npm run typecheck` and the deploy
+   work from a clean checkout: the build runs before them (a `pre` script, or the test setup),
+   never by hand. The deploy workflow's one new step is `npm run build:ui` before `wrangler
+   deploy` — a CI change, so it lands in an owner-approved PR and is named in the PR body.
+2. **The front serves the shell for every screen.** `src/core/front.ts`'s `STATIC` map and
+   `PUBLIC` set grow from four exact paths to: the three assets (`/ui/app.js`, `/ui/app.css`,
+   and `/` → `index.html`), `/login`, and every path of §11.4's tree (`/repositories`,
+   `/repositories/*`, `/instances`, …, `/conditions/*` for the redirect), all answering the same
+   `index.html` bytes, which hold no data — the app reads the path. `/v1/*` is untouched; an
+   unknown path outside the tree is `404`. The R-BTN-16 headers stay on every answer.
+3. **Sign-in per role.** `/login?as=administrator|owner` heads itself by role, runs R-BTN-155's
+   steps (`POST /v1/login {role}`, shows the code, polls `{poll: true}`) and returns to the path
+   the visitor came for; signed out, every screen shows the sign-in with its two roles and
+   nothing else (no data, no controls); `ui.logout` in the shell's footer.
+4. **The router.** Client-side routing over the tree: the root `/`, `/repositories/{r}/<screen>`
+   with the repository in the URL, the tenant screens; the sidebar lists the current
+   repository's screens with the counts the reads give (tickets, runners alive/total, open
+   conditions, …), and the tenant screens for an administrator; the browser's back, forward
+   and reload land on the same screen. `/conditions/{id}` redirects to the tree path once the
+   condition's repository is read (B-191, R-BTN-163). Each screen is a component under
+   `src/ui-v2/screens/<entity>/`, registered by path pattern — the screen tickets add theirs
+   without touching the shell.
+5. **One polling layer.** A screen declares its reads; the layer fetches them every 10 seconds
+   with `If-None-Match`, keeps the last good answer on an error, and shows freshness
+   ("updated 7 s ago", "stale since …", a refusal's code) in the header. The repository
+   overview strip — running now · ready · needs you, each a link to `/board`, `/tickets` and
+   `/conditions` — reads `GET /v1/repositories` and is drawn on every screen of a repository.
+6. **Controls from the registry.** On sign-in and every minute the shell reads `GET /v1/actions`.
+   A screen asks the shell for the controls whose `ui.view` names it; the shell draws them with
+   the entry's `summary` as the label and the entry's `input` schema as the form (the shared
+   validator's subset, R-BTN-108, interpreted as today's `detailSchema.ts` is), and calls the
+   entry's `http` route (or its `ui` route while one remains). A control absent from the caller's
+   entries is not drawn, so an owner's session never sees an administrator's control and a
+   signed-out visitor sees none.
+7. **Two dialogs.** A destructive entry (§12.2) opens a confirm dialog that sends
+   `confirm: true`; a `202 {confirm_code}` answer (R-BTN-155) opens a dialog that shows the code
+   with the one line that completes it — `baton owner confirm <code>` or `baton admin confirm
+   <code>` by role — and polls the target read until the action's effect shows, or the two
+   minutes pass. Neither dialog pretends the page can confirm: only the minting key does.
+8. **The root screen.** The caller's repositories as cards: forge path, head (short sha and age),
+   mode, the strip's three counts, runners alive; a card opens `/repositories/{r}/board`. An
+   administrator's root also carries `seed_owners` as a notice (R-BTN-58). One repository and an
+   owner's session land on its board directly.
+9. **Rendering, theme, size, access.** Every value is a text child; `eslint-plugin-react`'s
+   `no-danger` and a unit test over the bundle refuse `dangerouslySetInnerHTML` and `innerHTML`;
+   a link is drawn only from a value the server already passed through §12.3's link rule, with
+   `rel="noopener noreferrer"` and the host shown. `prefers-color-scheme` light and dark; the
+   shell and the root screen read at 375 px with the sidebar as a drawer; headings per section;
+   every control reachable by keyboard; state never by colour alone (the mockup's shape marks:
+   ◆ unconfirmed, ‖ held, ▲ blocked, ✕ failed, ● running, ○ ready, ✓ done).
+10. **Tests.** Vitest with `@testing-library/react` under `test/ui/`: the router, the polling
+    layer's ETag and error paths, controls drawn from a fixture `GET /v1/actions`, both dialogs,
+    the rendering rule (a ticket title of `<img onerror>` reaches the DOM as text). B-191's new
+    scenario (the screen draws only its caller's actions) runs here against both hosts.
+
+### What not to do
+
+- No screen beyond the root and the strip: Board, Tickets, Conditions, Runners, Courses, Goals,
+  the credentials, governance, Sync and the tenant screens are their tickets'.
+- No second data path: nothing reads `GET /v1/ui/state`; a screen that needs a read the API lacks
+  files it in its own ticket.
+- No permission logic in the app: it draws what `GET /v1/actions` returns and shows the
+  server's refusal when a call is refused; it never hides a control by guessing a role.
+- No framework beyond React, no router or state library, no CSS framework, no remote asset; no
+  `localStorage` of anything but the theme override.
+- Do not remove V1 (`src/ui/`): B-203 does, once every screen exists.
+
+### Trust
+
+- **Everything drawn** — ticket titles, runner names, labels, reasons, detail, readings — is
+  untrusted text from the ticket source, runners and instruments (§12.3), passed through as
+  text nodes; links only where the server already validated them.
+- **The session cookie** is the only credential; the app holds no key and confirms nothing
+  itself (R-BTN-155: the minting key confirms).
+- **`GET /v1/actions`** — Baton's record of the caller's entries; the app treats it as a
+  drawing instruction, never as authority — `authorize` runs on the call.
+- **The path** — the repository id and entity ids in the URL are sent to the server as-is and
+  validated there (§12.3's identifier rules); the app renders a refusal as text.
+
+### Invariants
+
+- **Text, never markup** (§12.3, G-BTN-13, S-BTN-76): no `innerHTML`, no
+  `dangerouslySetInnerHTML`, no remote resource.
+- **One check** (R-BTN-129): no screen decides what a caller may do.
+- **R-BTN-155**: sign-in by a confirmed code; sessions scoped by role; the confirmed-action list
+  unchanged.
+- **R-BTN-16**: same-origin JSON, the front's headers on every static answer.
+- **The brief's constraints**: 375 px for the strip and the root; light and dark; course-agnostic
+  (no station or leg name in the shell's code).
+
+### Tests
+
+Named above; each a scenario or unit test numbered at merge: the shell's tests under `test/ui/`,
+B-191's scenario on both hosts, and S-BTN-76 extended with a run against the V2 renderer.
+
+### Exit criteria
+
+- [ ] `npm run build:ui` builds the bundle; the front serves it at `/` and every tree path; the
+      deploy builds it (owner-approved workflow change named in the PR body).
+- [ ] Sign-in per role, the router, the polling layer, the strip, the controls layer, both
+      dialogs and the root screen work on a local Baton (`npm run start:local`) against seeded
+      repositories, for an administrator's and an owner's session.
+- [ ] The tests above pass; `npm test`, `npm run typecheck`, `npm run lint` (with `no-danger`),
+      `npm run check:wiki` and `npm run check:tickets` are green; V1 still serves.
+
+## Status
+
+_filed 2026-11-09._

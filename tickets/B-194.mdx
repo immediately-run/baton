@@ -1,0 +1,162 @@
+---
+title: "B-194 — Board and Tickets: /board, /tickets and /tickets/{ticket} draw a repository's work from its reads, and the ticket page gathers every control a ticket has"
+id: B-194
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1193
+tier: judgement
+description: "Build the three work screens of BATON-UI-V2 and the two reads they lack. Board (/board): the repository as it stands — ready tickets in the matching order with requires, tier and eligible alive runners, live claims and their holders with lease ends, granted capabilities — from GET …/board. Tickets (/tickets): every live ticket with its state (ready, running, blocked, held, unconfirmed, suspended, merged today), course position and requires, filterable, from a new GET …/tickets list read. A ticket (/tickets/{ticket}): position, why it cannot move, history with input and output pointers, children, leg runs with transcripts and log directories, and its controls — hold, expedite, cancel, route, adopt, resolve, stop, and an administrator's force-reap, fence clear, completion confirm and release — from a new GET …/tickets/{ticket} read beside the existing per-ticket reads. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-193
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Board** `/board` — the repository as it stands:
+ready tickets in the matching order, live claims and their holders, granted capabilities.
+**Tickets** `/tickets` → `/tickets/{t}` — the work itself. A ticket page gathers every read
+about it: position (station, path, queued leg), why it can't move (blocks, prerequisites),
+history with input/output pointers, children, leg runs with transcripts and log dirs. Its
+controls live here too: hold/expedite/cancel, route, adopt, resolve, stop." The mockup's Tickets
+table (state column with its shape marks, the reason band under a row — Held by …, Retries
+exhausted, Decision open, No capable worker, Waiting on —, course position with holder and
+duration, requires as chips, the Ready/Running/Blocked/Unconfirmed/Merged-today filters and the
+tier ceiling) is the Tickets screen; its Workers cards' claim block (leg from → to, running for,
+lease reaps at with its bar, attempt n of m with backoff, output, earlier attempts) is the ticket
+page's claim section.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the Board and Tickets
+screens, carrying the retired Running and Ready views' content; "The actions"),
+[§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) ([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1):
+the board read), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`board`, `blocks`, `prerequisites`,
+`history`, `children`, `legs/{leg}/runs`, `blocked`, the overrides, `route`, `adopt`, `resolve`,
+`release`, the `/v1/ui/claims/*` actions), [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3)
+([R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3): a position), [§6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6)
+([R-BTN-12](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8) expedite and hold,
+[R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) blocks,
+[R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) prerequisites),
+[§4.6](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6) ([R-BTN-86](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6)
+children), [§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) ([R-BTN-81](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7)
+history), [§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5) ([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5):
+a run's log directory as text), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3)
+session links), [§9](../spec/BATON_SPEC/09-claims.md#sec-9) ([R-BTN-10](../spec/BATON_SPEC/09-claims.md#sec-9-6)
+confirmation, [R-BTN-19](../spec/BATON_SPEC/09-claims.md#sec-9-5) the fence, [R-BTN-119](../spec/BATON_SPEC/08-runners.md#sec-8-4)
+stopping a leg).
+
+**Depends on:** B-193 (the shell: router, polling, controls, dialogs).
+
+**Used by:** B-203.
+
+### What to build
+
+The two §14 rows first, then the code.
+
+1. **`GET /v1/repositories/{repository}/tickets`** (`repo.tickets`, read; callers the repository
+   reads' principals and a session): every live ticket's filter fields — `ticket_id`, `title`,
+   `course`, `tier`, `requires`, `tags`, `order`, `parent` — with its `position` (station, path
+   length, queued leg, R-BTN-83), its `state` (one of `ready`, `running`, `blocked`, `held`,
+   `unconfirmed`, `suspended`, `backing-off`, `waiting-person`, `closed`), the `reason` the
+   state carries (the holder and since when; the hold's `set_by` and reason; the first block's
+   kind and ref and `blocked_since`; the retry count against `max_runs`; the open condition's
+   type; the completion reported at), and `closed_at` for tickets closed in the last 24 hours;
+   `?state=`, `?q=` (a substring of id or title), `?tier=` and `?cursor=`, 100 a page. Built from
+   the rows `readyRows`, `claims.running`, `blocks.view` and `claims.needsYou` already read.
+2. **`GET /v1/repositories/{repository}/tickets/{ticket}`** (`ticket.show`, read; same callers):
+   one ticket's row as above plus its live claim (holder, hostname, session name, claimed at,
+   lease ends, deadline, run id, attempt n of `max_runs` with the next backoff, `session_url`,
+   `leg_log.dir` as text), its overrides (expedite, hold with reason and `set_by`), its open
+   conditions (ids and types), its parent and the ids of its children, and the resume record's
+   branches and PRs (R-BTN-24, as `history` returns them).
+3. **The Board** (`/repositories/{r}/board`): from `GET …/board` and `GET …/blocked`: the ready
+   list in the matching order (each with requires, tier, eligible alive runners by name, and
+   "nobody can take it" with the failed rule — the retired Ready view's content), the live
+   claims as holders (ticket, runner, leg, running for, lease ends, stalled when
+   `last_activity_at` is over 2 hours old, `condition-wait` — the retired Running view's), the
+   repository's granted capabilities, and `ready_by_tier`. The mockup's Overview page content
+   that belongs to a repository — the shadow/cut-over banner, the head line — sits at the top.
+4. **Tickets** (`/repositories/{r}/tickets`): the mockup's table from `repo.tickets`: ticket
+   (qualified id, title linking to its page), state with its shape mark and the reason band, course
+   position, requires as chips (a capability no alive runner holds marked as the mockup does);
+   the filter tabs with counts, the text filter and the tier ceiling as URL query parameters so
+   a filtered view is linkable; a real `<table>`, sortable by the columns the read orders by.
+5. **A ticket** (`/repositories/{r}/tickets/{t}`): sections, each from its read, each
+   independently polled: position (station, path as stations and legs run, queued leg and its
+   source: the course, a route, a decision), the claim (the mockup's claim block, with earlier
+   attempts and their ends), why it cannot move (`blocks` and `prerequisites` with `met`, `why`,
+   `since`, `until`, a `url` where one passed §12.3), history (`history` paged, each row's kind,
+   leg, run, reached, next leg, and its inputs and outputs as pointers — URIs drawn as links
+   only when `https://`, digests as text), children (`children` with station and blocked),
+   leg runs (`legs/{leg}/runs` per leg: run, runner, mode, started, ended, end, session link
+   under R-BTN-113, transcripts as repository paths, `log_dir` as text), and the controls the
+   shell places here by `ui.view`: hold, unhold, expedite, cancel, route (leg or clear), adopt
+   (at, next, ran), resolve (restart, condition), stop; for an administrator's session force-reap,
+   fence clear, the completion's confirm and release — each through the shell's dialogs, a
+   `202` through the confirm-code dialog.
+6. **Phone.** Tickets and the ticket page read at 375 px: the table collapses to one card per
+   row with the state first; the ticket page's sections stack.
+
+### What not to do
+
+- No new write: every control is an existing registry action; the ticket page places them.
+- No ticket body: the title is the one text the ticket source posts (R-BTN-33); the page links
+  the ticket's own page on its forge by `web_base` (R-BTN-92) for the rest.
+- No state computed in the app: `state` and `reason` come from the read; the app never derives
+  "blocked" from a claim's absence.
+- No course names in code: station, leg and tag names are data (the brief).
+
+### Trust
+
+- **The two new reads** — Baton's own rows, answered to the repository reads' principals and a
+  session of its repositories; every text in them (titles, hostnames, reasons, hold reasons,
+  condition types, URIs) is untrusted text validated on its write (§12.3) and drawn as a text
+  node; a URI is a link only when `https://` and already checked.
+- **The controls** — registry actions through `authorize`; the page sends what the form holds
+  and shows the refusal's code as text.
+- **Query parameters** — `state`, `q`, `tier`, `cursor` validated on the server
+  (`invalid-params`); `q` is matched, never interpreted.
+
+### Invariants
+
+- **Positions are Baton's** (R-BTN-39): the page shows the course history; no read or control
+  here places a ticket except `ticket.adopt` through its own gate.
+- **Filter fields only** (R-BTN-33).
+- **Text, never markup** (§12.3); **log directories as text** (R-BTN-128); **session links only
+  from `session_hosts`** (R-BTN-113).
+- **The confirmed-action list is R-BTN-155's**: unhold, expedite, the completion's confirm and
+  release, force-reap and the fence clear go through the code dialog; hold, cancel, stop,
+  resolve and route do not.
+- **An owner's session, its repositories** (R-BTN-155).
+
+### Tests
+
+Scenarios numbered at merge, on both hosts, with a fixture repository holding a ready, a
+running, a held, a blocked, an unconfirmed and a suspended ticket:
+
+- `repo.tickets` returns each with the expected `state` and `reason`; `?state=blocked` and
+  `?q=` filter; pages chain by cursor;
+- `ticket.show` carries the claim, attempts, overrides, conditions, children and resume;
+- the Board's ready order equals `GET …/board`'s and names eligible runners; a ticket nobody
+  can take names the failed rule;
+- under `test/ui/`: the ticket page draws an owner's session hold, cancel, stop and route and
+  not force-reap, an administrator's force-reap too (B-191's scenario, this screen); a hostile
+  title and hold reason reach the DOM as text; `log_dir` is text, a `session_url` on an
+  unlisted host is text.
+
+### Exit criteria
+
+- [ ] `repo.tickets` and `ticket.show` in §14 and the registry, with tests.
+- [ ] `/board`, `/tickets` and `/tickets/{ticket}` built under `src/ui-v2/screens/`, every
+      section from its read, every control from `ui.view`; usable at 375 px.
+- [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run lint`, `npm run check:wiki`
+      and `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09._

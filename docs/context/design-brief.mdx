@@ -10,6 +10,13 @@ tags: [context, design]
 on what, what is stuck, and what needs a person. It should read in five seconds and act in
 two clicks.</Lede>
 
+**The agreed design (the owner, 2026-11-09):** the Claude Design mockup
+[`docs/design/baton-dashboard-v2.html`](../design/baton-dashboard-v2.html) (self-contained; its
+overview in [`baton-dashboard-v2-overview.png`](../design/baton-dashboard-v2-overview.png)),
+built by the BATON-UI-V2 project ([`tickets/projects/baton-ui-v2.mdx`](../../tickets/projects/baton-ui-v2.mdx)).
+The mockup draws the *content* of the screens and their visual language; the dashboard's
+*organization* is the entity tree below, which the owner set when handing the mockup over.
+
 ## Who uses it
 
 - **The operator**, an instance administrator, most often on a laptop, sometimes on a phone.
@@ -23,7 +30,7 @@ two clicks.</Lede>
    nobody can take, git overruling Baton.
 2. **What is running?** Each active claim: ticket, worker, leg, how long, when its lease runs
    out, and whether it is stalled.
-3. **Who is working?** Workers alive or dead, what each can do, what each holds.
+3. **Who is working?** Runners alive or dead, what each can do, what each holds.
 4. **What happened today?** A 24-hour timeline: one lane per worker, claims as bars,
    activities nested inside them.
 5. **What is ready?** The queue in Baton's order, and, separately, what nobody can take and why.
@@ -35,10 +42,14 @@ two clicks.</Lede>
 7. **Where did git overrule Baton?** Discrepancies by kind and age: what Baton had, what git
    showed.
 8. **Is the instance healthy?** Capacity — request rate and live counts against the
-   envelope — and the instance view workers rank from (shared resources and their readings).
+   envelope — and the instance view runners rank from (shared resources and their readings).
 
-These map to §14's views: Needs you (1), Running (2), Workers (3), Timeline (4), Ready (5),
-Courses (6), Discrepancies (7), Capacity and the instance view, formerly Advice (8).
+These are answered on the entity screens of [BATON_SPEC §11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4)
+(as B-191 amends it): the overview strip on every repository screen — running now · ready ·
+needs you — and Conditions (1); Board (2); Runners (3); a runner's page (4); Board and Tickets
+(5); Courses (6); Sync (7); the tenant screens `/state` and `/instances` (8). Running, Ready and
+Needs you are no longer screens of their own (the owner, 2026-11-09): the task answers stay one
+glance away on the strip, and each screen is one entity.
 
 ## What it does
 
@@ -49,22 +60,32 @@ repositories, an administrator's everywhere; force-reap (with confirmation), con
 confirm or release an unconfirmed completion, force a resync onto a rewritten head, and cut over a
 repository — an administrator's only (BATON_SPEC [R-BTN-155](../../spec/BATON_SPEC/11-people.md#sec-11-4)). Every control is a registry action
 behind the same `authorize` as the CLI and the API ([R-BTN-129](../../spec/BATON_SPEC/11-people.md#sec-11-3)). Repositories, owners, grants,
-probes, owner bars and required bars are shown read-only: they are managed from the CLI.
+probes, owner bars and required bars are shown read-only, each screen naming the CLI command
+that changes it.
 
 ## Constraints a design must keep
 
-- **Text, never markup.** Everything from tickets and workers is untrusted text. It is shown
-  as text, never rendered as HTML or Markdown.
-- **Polling, not push.** The page reads one state endpoint every 10 seconds. Show how fresh
-  the data is.
-- **Small and dependency-free.** One HTML page, one stylesheet, one ES module, no framework,
-  no build step, no external fonts or scripts.
+- **Text, never markup.** Everything from tickets and runners is untrusted text. It is shown
+  as a text node, never rendered as HTML or Markdown — no `innerHTML`, no
+  `dangerouslySetInnerHTML` ([BATON_SPEC §12.3](../../spec/BATON_SPEC/12-security.md#sec-12-3)).
+- **Polling, not push.** Each screen polls its entity's reads every 10 seconds, with `ETag`.
+  Show how fresh the data is.
+- **One entity per screen.** The dashboard is a walk down the tree the REST API, the CLI and MCP
+  already draw: sign in (`/login`), pick a repository (`/`), then one entity per screen under
+  `/repositories/{r}/…` — Board, Tickets, Goals, Courses, Conditions, Runners, the credentials,
+  the governance knobs, Sync — and the tenant screens for an administrator. Every screen is
+  drawn from that entity's REST reads, and its controls are the registry actions `ui.view`
+  places there (R-BTN-129), so what a session sees and what it can do come from one definition.
+- **React and TypeScript, one built bundle.** The owner's choice (2026-11-09) replaces the earlier
+  dependency-free rule: React with no other runtime dependency, TypeScript, one esbuild bundle
+  built from this repository, no external fonts or scripts, nothing loaded from another origin.
 - **Accessible.** Real tables for tabular data, headings per section, keyboard reachable,
   never colour alone for state.
 - **Light and dark.** Follow the system setting.
 - **Course-agnostic.** Station, leg and tag names are data. Nothing in the layout may assume
   `roadmap-pr`'s names.
-- **Phone-readable.** "Needs you" and "Running" must work at 375 px wide.
+- **Phone-readable.** The overview strip, Conditions and the Resolve page, and Board must work
+  at 375 px wide.
 
 ## The feel
 
@@ -75,4 +96,6 @@ second. Exceptions stand out; the normal case recedes.
 ## Where to look
 
 The current page is `src/ui/` (`index.html`, `app.css`, `app.js`), served at the instance's
-origin; its data is `GET /v1/ui/state`. The view list is [BATON_SPEC §14](../../spec/BATON_SPEC/14-api.md#sec-14) (`spec/BATON_SPEC/14-api.md`).
+origin; its data is `GET /v1/ui/state`. V2 is built under `src/ui-v2/` by the BATON-UI-V2 tickets
+(B-191 to B-203) and replaces it; its data is the entity reads of [BATON_SPEC §14](../../spec/BATON_SPEC/14-api.md#sec-14).
+The screens are [BATON_SPEC §11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4).

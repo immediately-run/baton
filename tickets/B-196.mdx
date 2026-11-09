@@ -1,0 +1,153 @@
+---
+title: "B-196 — Runners: /runners is the fleet granted on a repository, /runners/{name} is one runner with its claim, activity and 24-hour timeline, read by a session through repository-scoped runner reads"
+id: B-196
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1195
+tier: judgement
+description: "Build the Runners screens of BATON-UI-V2 and the two reads they lack. /runners lists the runners granted on the repository — alive or dead, harness, tier ceiling, capabilities declared and granted, tags, courses, lease timeout, last seen, last activity, the claim held and its current activity, credential kind — as the mockup's runner cards; /runners/{name} is one runner with that card, its earlier attempts and the 24-hour timeline the retired Timeline view drew: claims as bars, activities nested under them by kind, failed ones marked, each segment's label, detail, session link and log directory; its controls are the status request and wind-down messages and, on its live claim, Stop. Adds GET …/runners and GET …/runners/{name} (with ?since= for the timeline), the session's and keys' view of what GET /v1/runner/fleet shows a machine key. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-193
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Runners** `/runners` → `/runners/{name}` — the fleet
+granted here: alive/dead, claim held, current activity; the per-runner page carries the 24h
+timeline." The mockup's Workers page — a card per runner with its name, state mark (● Working,
+◆ Silent 18 min, ○ Idle, ✕ Dead), model and harness, last report, capability chips, then the claim
+block (ticket, leg from → to, running for, lease reaps at with its bar and minutes left, attempt n
+of m with backoff, output, earlier attempts with their failure's text) and the row of controls
+(Open harness session ↗, Stream stdout / stderr, Status, Interrupt leg…) — is the Runners list;
+its Overview Timeline (one lane per runner, claims as bars, activities inside, a legend of
+released, silent, reaped and activity) is the runner page's timeline. "Workers" reads "runners"
+(B-68).
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the Runners screens,
+carrying the retired Runners and Timeline views' content), [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1)
+([R-BTN-3](../spec/BATON_SPEC/08-runners.md#sec-8-1): a runner's fields; [R-BTN-9](../spec/BATON_SPEC/08-runners.md#sec-8-1):
+the lease timeout; [R-BTN-91](../spec/BATON_SPEC/08-runners.md#sec-8-1): the doorbell),
+[§8.2](../spec/BATON_SPEC/08-runners.md#sec-8-2) ([R-BTN-146](../spec/BATON_SPEC/08-runners.md#sec-8-2):
+grants per repository), [§5.9](../spec/BATON_SPEC/05-courses.md#sec-5-9) ([R-BTN-174](../spec/BATON_SPEC/05-courses.md#sec-5-9):
+declared and granted capabilities), [§6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)
+([R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7): the fleet view),
+[§9.9](../spec/BATON_SPEC/09-claims.md#sec-9-9) (activities and transcripts),
+[§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3):
+session links), [§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5) ([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5):
+log directories as text), [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-119](../spec/BATON_SPEC/08-runners.md#sec-8-4):
+Stop), [§6.9](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-9) (messages: status
+request, wind-down), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET /v1/runner/fleet`,
+`POST /v1/ui/messages`).
+
+**Depends on:** B-193 (the shell).
+
+**Used by:** B-203.
+
+### What to build
+
+The §14 rows first, then the code.
+
+1. **`GET /v1/repositories/{repository}/runners`** (`repo.runners`, read; callers the repository
+   reads' principals and a session): every runner holding an accepted grant on the repository
+   (R-BTN-146), alive or dead within the retention `workersView` uses today: `name`
+   (hostname and session name), `alive`, `last_seen_at`, `last_activity_at`, `harness`, `kind`,
+   `isolation`, `tier_ceilings`, `capabilities` (declared) and `granted` (this repository's
+   grant, R-BTN-174), `tags`, `courses` (ids and versions for this repository), `lease_timeout_s`,
+   `credential` (kind, registering token id if any, role and domain from the grant), and
+   `claim` — null, or this repository's claim it holds: ticket, station, leg, run id, claimed at,
+   lease ends, deadline, attempt n of `max_runs`, `session_url`, `leg_log.dir`, and the current
+   `activity` (kind, label, started). A runner's claim on another repository shows as
+   `busy_elsewhere: true` with no detail. What `/v1/runner/fleet` shows a machine key for the
+   repository (R-BTN-99), from `workers.workersView` and `claims.running`.
+2. **`GET /v1/repositories/{repository}/runners/{name}`** (`runner.show`, read; same callers):
+   the runner's row plus `?since=` (default 24 hours, at most 7 days) of its timeline on this
+   repository: `claims` (id, ticket, leg, started, ended, end reason — released, silent, reaped,
+   done, suspended), each with its `activities` (id, parent, kind, label, source, started,
+   ended, outcome, detail as the validated object, R-BTN-3 and §9.9), `session_url` and
+   `log_dir`; and the runner's earlier attempts on its live ticket (the attempts table's rows for
+   that ticket, each with end reason and detail). From `claims.timeline`.
+3. **`/repositories/{r}/runners`**: the mockup's cards, alive first, then silent (alive but
+   `last_activity_at` old — the Running view's "stalled" rule), idle, dead; each card the
+   runner's line (name, state mark and text, harness, kind, tier ceiling, last report), its
+   capability chips (granted ones marked), and its claim block from `claim`, with the mockup's
+   lease bar (claimed at to lease ends, now marked), attempt and backoff; a dead runner's card
+   says what its reap did ("its claim on … was reaped; retries …") from the read, as text. The
+   card's controls, from `ui.view`: **Status** (`runner.message` `status_request`), **Wind
+   down** (`wind-down`), and on the claim **Stop** (`leg.stop`, destructive, through the confirm
+   dialog, R-BTN-119); **Open session** only where `session_url` passed `session_hosts`
+   (R-BTN-113), as a link with the host shown. The mockup's "Stream stdout / stderr" is not
+   built: a leg's log is read from its directory by `baton leg log` (R-BTN-128), which the card
+   names as text beside `log_dir`.
+4. **`/repositories/{r}/runners/{name}`**: the card, then the timeline: one lane, the window's
+   claims as bars coloured and labelled by end (released, silent, reaped, running), activities
+   nested under each by kind, failed ones marked by shape; hovering or focusing a segment shows
+   its label, detail, session link and log directory as text; `?since=` as a URL query (24 h
+   default, 7 d max); then the earlier attempts. A `<table>` of the same claims and activities
+   below the drawing, for screen readers and phones.
+5. **The fleet line.** The sidebar's Runners count is alive/total from `repo.runners`; the root
+   screen's `runners_alive` agrees.
+6. **Phone.** The cards stack at 375 px with the controls under the claim; the timeline is the
+   table.
+
+### What not to do
+
+- No tenant-wide fleet here: an owner's session sees the runners granted on its repositories,
+  an administrator's the same screen per repository; a runner's work elsewhere is
+  `busy_elsewhere`, no more (R-BTN-155).
+- No log streaming, no new runner-side channel: logs are R-BTN-128's directory, read by the CLI.
+- No message kind beyond the registry's: `status_request`, `wind-down` and `release` (Stop) as
+  `POST /v1/ui/messages` admits them, each its own action by `match`.
+- No capability meaning: a chip is a name (R-BTN-174); nothing in the screen says what a
+  capability is for.
+
+### Trust
+
+- **The two reads** — Baton's rows; hostnames, session names, labels, detail, harness and
+  capability names are a runner's own statements (R-BTN-3, §12.3), validated on the heartbeat
+  and drawn as text; `session_url` is a link only because R-BTN-113 already checked its host.
+- **Status, wind-down and Stop** — registry actions through `authorize`; Stop refuses a ticket
+  the runner does not hold (`forbidden`); an owner's session reaches only runners holding its
+  repositories' claims.
+- **`?since=`** — validated on the server (`invalid-params` over 7 days).
+
+### Invariants
+
+- **Capabilities are the runner's statement** (R-BTN-174): drawn, matched by name, never judged.
+- **Log directories as text** (R-BTN-128); **session links only from `session_hosts`**
+  (R-BTN-113).
+- **Stop is one click plus `confirm: true`** (R-BTN-119, §12.2), never a confirm code
+  (R-BTN-155).
+- **Text, never markup** (§12.3).
+- **An owner's session, its repositories** (R-BTN-155).
+
+### Tests
+
+Scenarios numbered at merge, on both hosts, with a fixture of two granted runners (one holding a
+claim with two activities, one dead after a reap) and one granted elsewhere:
+
+- `repo.runners` lists the two with `alive`, `granted`, the claim's lease and activity, the dead
+  one's reap; the third is absent; a runner busy on another repository is `busy_elsewhere`;
+- `runner.show` returns the 24-hour claims with nested activities and refuses `?since=` over 7
+  days;
+- under `test/ui/`: the cards order alive, silent, idle, dead; Stop sends `release` with
+  `confirm: true` and draws the refusal for a runner not holding the ticket; a `session_url`
+  on an unlisted host is text; the timeline table lists what the drawing draws; a hostile
+  activity label is text.
+
+### Exit criteria
+
+- [ ] `repo.runners` and `runner.show` in §14 and the registry, with tests.
+- [ ] `/runners` and `/runners/{name}` built; the fleet count agrees with the root read.
+- [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run lint`, `npm run check:wiki`
+      and `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09._

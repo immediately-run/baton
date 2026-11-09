@@ -1,0 +1,143 @@
+---
+title: "B-192 — Sessions read what they see: a dashboard session is a reader on every read it draws, GET /v1/repositories is the root, GET /v1/actions answers a session, and ui.view places each control"
+id: B-192
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1191
+tier: judgement
+description: "The API half of BATON-UI-V2's rule that every screen is one entity's REST reads. Today a session reads one monolith, GET /v1/ui/state, and the repository reads admit keys but not sessions. Add session to the callers of every GET /v1/repositories/{r}/… and GET /v1/owner/{r}/… read a screen draws (an owner's on its repositories, an administrator's everywhere); add GET /v1/repositories, the root read — the caller's repositories with head, mode and the overview strip's counts (running, ready, needs you); answer GET /v1/actions to a session with each entry's ui; give every registry entry the ui.view B-191 specifies, checked by check:actions. Leaves GET /v1/ui/state in place until B-203. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-191
+  - B-25
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "Every screen = one entity's REST reads, with its
+controls the registry actions placed there by `ui.view` — so 'what I see' and 'what I can do'
+come from the same definition."
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the screens, as B-191
+amends it), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3):
+`callers`, `ui`, `GET /v1/actions`, "A caller is never shown an action it cannot take"),
+[§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (the dashboard session's row; [R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1):
+the state is readable with a key), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (the route table),
+[§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4):
+same-origin JSON for a session).
+
+**Depends on:** B-191 (the screens and `ui.view` are specified), B-25 (the registry the entries
+live in; `GET /v1/actions`).
+
+**Used by:** B-193 and every screen ticket.
+
+### What to build
+
+The spec rows first (§14, §12.1's session row), then the code; R-BTN-129's rule that the router
+is generated from the registry means each change below is a registry entry.
+
+1. **Sessions are readers.** Every `GET /v1/repositories/{repository}/…` read a screen draws —
+   `board`, `tickets/{ticket}/blocks`, `…/prerequisites` (already), `…/history`, `…/children`,
+   `…/legs/{leg}/runs`, `blocked`, `conditions`, `courses`, `stats`, `policy` — and the owner
+   reads `GET /v1/owner/{repository}/grants` and `…/policy/log` gain
+   `{principal: "session", roles: ["administrator", "owner"], scope: "repository"}` in their
+   `callers`: an owner's session on the repositories its key still owns, an administrator's on
+   every repository, a target elsewhere `forbidden` (R-BTN-155). §12.1's dashboard-session row
+   says "the repository reads (§14) on its repositories" in place of the two routes it lists
+   today. `leg.runs`, whose callers are owner and admin, admits a session of either role.
+2. **The root read**, `GET /v1/repositories` (`repo.list`, effect `read`): callers a session of
+   either role, an owner key (its repositories) and an administrator key (all). Each row:
+   `id`, `github` (the forge path), `forge`, `web_base`, `default_branch`, `head` (sha and
+   received_at), `mode`, `running` (live claims), `ready` (ready tickets), `needs_you` (open
+   conditions and queued person legs, R-BTN-163), `runners_alive`, `courses` (ids and versions)
+   — the overview strip's three counts and the root screen's card, from the queries `uiState`
+   already runs (`adminView`, `readyRows`, `claims.running`, `claims.needsYou`). An
+   administrator's answer also carries `seed_owners` as `GET /v1/admin/repositories` does;
+   that route stays the registry screen's read (B-202).
+3. **`GET /v1/actions` answers a session** (`actions.list`): the caller's entries with `input`
+   and `ui`, filtered as `authorize` would filter them — an owner's session sees only entries
+   whose `callers` list `session` for owners, and, for repository-scoped ones, only when the
+   session still owns at least one repository. The dashboard reads its controls from this,
+   nowhere else.
+4. **`ui.view` on every entry.** Give each dashboard control its screens, by B-191's names
+   (`ticket.hold`, `ticket.expedite`, `ticket.cancel`, `ticket.route`, `ticket.adopt`,
+   `ticket.resolve`, `leg.stop` on `repository/tickets/{ticket}`; `ticket.resolve` also on
+   `repository/conditions/{condition}`; `claim.force-reap`, `claim.fence-clear`, the completion
+   confirm and release on `repository/tickets/{ticket}`; the adoption confirm and `admin.repo.*`
+   on `tenant/repositories`; freeze, seal, export on `tenant/state`; `admin.sessions.revoke` on
+   `tenant/sessions`; `owner.sync.want` and the resync on `repository/sync`; `runner.message`'s
+   status request and wind-down on `repository/runners/{name}`; and so on down the tree).
+   `check:actions` fails a `view` naming no screen and lists every screen without a control.
+5. **Pagination and freshness.** Every list read a screen polls takes `cursor` and returns
+   `next_cursor` (HMAC-bound as R-BTN-130's list tools are, under `CursorKey`), and every read
+   answers `ETag` and honours `If-None-Match` with `304`, as `/v1/runner/fleet` does
+   (R-BTN-99), so a 10-second poll of an unchanged screen moves no body.
+6. **Nothing retired yet.** `GET /v1/ui/state` and `GET /v1/admin/state` keep answering, built
+   from the same queries, until B-203 removes the first and settles the second.
+
+### What not to do
+
+- No new screen-specific read here: the ticket list and detail (B-194), the condition detail
+  (B-195), the runner reads (B-196), `goals` (B-198), `attestations` (B-200), `sync` (B-201) and
+  the tenant reads (B-202) are filed with their screens.
+- No write gains a session caller it does not have: the confirmed-action list (R-BTN-155) and
+  the write callers are untouched.
+- Do not filter inside the dashboard: the server answers an owner's session only its
+  repositories' rows, as the board read already does for `GET /v1/ui/state`.
+
+### Trust
+
+- **A session's reads** — the session cookie is the credential (R-BTN-155), checked on every
+  request against its role and repositories; a read on a repository the key no longer owns is
+  `forbidden`, the same answer as for a repository that does not exist (no existence oracle).
+- **`GET /v1/repositories` and `GET /v1/actions`** — Baton's own record, answered to the
+  caller's role only; nothing in them is written by the caller.
+- **`ui.view`** — registry data in this repository, written by PR, read by the dashboard to
+  place controls; it grants nothing — `authorize` runs on every call whatever the screen drew.
+- **Cursors** — HMAC-bound to the caller, action and input; a forged or foreign cursor is
+  `invalid-params`.
+
+### Invariants
+
+- **One check** (R-BTN-129): no route, screen or read decides permissions; every entry's
+  `callers` are the decision, through `authorize`.
+- **An owner's session reaches only its repositories** (R-BTN-155), on every read it gains.
+- **Readable with a key** (R-BTN-179): every session read is the same entry a signed key of the
+  session's role calls, same query, same JSON.
+- **Filter fields only** (R-BTN-33): the root read and the list reads carry ids, counts and
+  positions, never a body.
+- **One clock** (R-BTN-32); **both hosts** (R-BTN-55).
+
+### Tests
+
+Each a scenario numbered at merge, on both hosts:
+
+- an owner's session reads `board`, `history`, `conditions`, `courses`, `stats`, `grants` and
+  `policy/log` of its repository and is `forbidden` on another's; an administrator's reads
+  both; a runner key keeps today's answers;
+- `GET /v1/repositories` as an owner's session lists its repositories with `running`, `ready`
+  and `needs_you` equal to the board's live claims, its ready rows and the open conditions;
+  as an administrator's, every repository and `seed_owners`;
+- `GET /v1/actions` as an owner's session names `ticket.hold` with its `ui.view` and not
+  `claim.force-reap`; as an administrator's, both; as a delegated key, `unauthenticated`
+  (R-BTN-130);
+- `check:actions` fails a fixture entry whose `view` names `repository/nowhere`;
+- an unchanged poll with `If-None-Match` is `304`; a tampered cursor is `invalid-params`.
+
+### Exit criteria
+
+- [ ] §14 rows and §12.1's session row amended; `spec:index` current.
+- [ ] Every read above admits a session; `repo.list` and the session's `actions.list` exist;
+      every control entry carries `ui.view`; `check:actions` enforces it.
+- [ ] The scenarios above pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green; `GET /v1/ui/state` is unchanged.
+
+## Status
+
+_filed 2026-11-09._

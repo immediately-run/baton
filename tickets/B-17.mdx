@@ -2,8 +2,8 @@
 title: "B-17 — [OP] Baton dashboard design: iterate with Claude Design from the design brief, then file its implementation tickets"
 id: B-17
 project: baton
-status: available
-updated: 2026-11-04
+status: in-review
+updated: 2026-11-09
 repos:
   - baton
 tags:
@@ -45,8 +45,8 @@ The brief exists, but no ticket takes it through a design to a dashboard that im
 
 ### Exit criteria
 
-- [ ] a design agreed by the owner, linked from the brief
-- [ ] its implementation tickets filed
+- [x] a design agreed by the owner, linked from the brief
+- [x] its implementation tickets filed
 
 ## Status
 
@@ -60,3 +60,11 @@ should take it. Next: the owner iterates the brief with Claude Design and export
 agreed design here; a pickup then files the implementation tickets citing §11.4 and the design,
 each keeping §12.3 (`textContent`, no remote resource), and updates the brief with what the
 design settled.)_
+
+_2026-11-09: the owner iterated the brief with Claude Design and handed over the mockup, now
+`docs/design/baton-dashboard-v2.html`, with the organizing rule for it: the dashboard follows the
+entity tree of the REST API, the CLI and MCP, one entity per screen, controls placed by `ui.view`,
+in React and TypeScript. The implementation tickets are the BATON-UI-V2 project,
+`tickets/projects/baton-ui-v2.mdx`: B-191 (the spec amendment) to B-203 (the cutover). The brief
+is updated with what the design settled. Both exit criteria are met when that branch merges;
+`in-review` until then._

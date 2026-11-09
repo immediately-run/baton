@@ -1,0 +1,142 @@
+---
+title: "B-197 — Courses: /courses and /courses/{course} draw each course as stations and legs with their states, queue depths, the tickets on it and their paths, its stats, and a leg's log from its edge"
+id: B-197
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1196
+tier: judgement
+description: "Build the Courses screens of BATON-UI-V2 from the reads that exist — GET …/courses, GET …/stats, GET …/board and B-194's ticket list — plus one new read, GET …/courses/{course}, which joins them for one course: the station and leg graph with every leg an edge carrying its state (ready, running, blocked by kind and when found, backing off) in shape, label and colour and never a blocked station (R-BTN-126); each leg's queue depth against max_queue and the intake state (R-BTN-79); the tickets on the course by station with their paths, the claim's legs since, what a suspended ticket waits for, the newest hand-off, the queued leg and its source (R-BTN-83); off-graph transitions; the course's stats (wait and run times, ends by reason, suspensions, advice overridden); and each leg's runs with their log directories as text (R-BTN-128). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-193
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Courses** `/courses` → `/courses/{c}` — station/leg
+graph with queue depths, per-ticket paths, stats." The mockup's Courses page — per course a
+header line (repository, course and version, runners at n, p50 over 7 days), the graph as
+stations (circles, "235 resting") joined by legs ("implement, 1 on leg"; a leg marked ▲ when
+blocked), and a table per leg (from → to, output, requires, timeout, retries, wait, run, fails
+with a slow wait highlighted) — is the course page. The design brief's question 6 names what the
+view answers.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the Courses screens,
+carrying the retired Courses view's content), [§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2)
+(the course file; [R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2): a refused file keeps the
+previous in force), [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) ([R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3):
+a position and the queued leg's source), [§5.4](../spec/BATON_SPEC/05-courses.md#sec-5-4)
+([R-BTN-79](../spec/BATON_SPEC/05-courses.md#sec-5-4): legs are queues, `max_queue`, intake),
+[§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2):
+a prerequisite failing during a leg blocks the edge), [§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4)
+(retries and backoff), [§9.3](../spec/BATON_SPEC/09-claims.md#sec-9-3) (hand-offs),
+[§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5) ([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5):
+a leg's log opens from its edge, as text), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`courses`,
+`stats`, `legs/{leg}/runs`, `blocked`). Context: `docs/context/design-brief.mdx` question 6.
+
+**Depends on:** B-193 (the shell).
+
+**Used by:** B-203.
+
+### What to build
+
+The §14 row first, then the code.
+
+1. **`GET /v1/repositories/{repository}/courses/{course}`** (`course.show`, read; the repository
+   reads' principals and a session): the course file as last accepted (its stations, legs with
+   `from`, `to`, `kind`, `requires`, `max_runs`, `timeout`, `outputs` and `conditions` names,
+   `max_queue`), its `version` and the refused newer version if one is listed under conditions
+   (R-BTN-69); per leg its **queue** (`depth`, `max_queue`, `intake` open or closed, R-BTN-79),
+   its **state** across the tickets on it — counts of ready, running, blocked (by block kind,
+   and whether found before a start or during a run, R-BTN-126), backing off — and the leg's
+   runs of the window (`?since=`, default 24 hours) as `legs/{leg}/runs` returns them; per
+   station the tickets resting there; **tickets on the course** — each ticket's station, path
+   (stations and legs run, with run ids), the live claim's legs since the claim, what a
+   suspended one waits for (the station and the condition or prerequisite), its newest hand-off
+   (the resume record's pointer, as text), its blocks, its queued leg and the leg's `source`
+   (course, route, decision; R-BTN-83), parent and children ids; **off-graph** transitions logged
+   in the window (§5's `off-graph`); and the course's **stats** as `GET …/stats` gives them,
+   over the same window. Built from `courses.ts`, `stations.ts`, `queues.ts`, `blocks.ts`,
+   `history.ts` and `stats.ts`, aggregates and ids only.
+2. **`/repositories/{r}/courses`**: one card per course from `GET …/courses` and
+   `course.show`'s header fields: course id and version, the mockup's header line, the graph
+   drawn small (stations and legs with their depth and state), and the per-leg table (from → to,
+   requires as chips, timeout, retries, wait, run, fails — the stats' medians and rates); a card
+   opens the course page. A refused course file is a notice on its card, naming the version
+   kept.
+3. **`/repositories/{r}/courses/{course}`**: the graph drawn large as inline SVG from the course
+   file — stations as nodes with their resting count, legs as edges with their state as shape
+   and label first (▲ blocked, ● running, ○ ready, ↻ backing off) and colour second, never a
+   station for a blocked leg (R-BTN-126); an edge's depth against `max_queue`, over as a marked
+   edge and the intake state in text; clicking or focusing an edge opens its panel: the leg's
+   fields, its runs of the window (run, runner, started, ended, end, session link under
+   R-BTN-113, transcripts, `log_dir` as text with the `baton leg log <ticket> <leg>` line beside
+   it, R-BTN-128), its blocked tickets with block kind and when found; clicking a station opens
+   its tickets. Below: the tickets on the course as a `<table>` (ticket linking to its page,
+   station, path drawn as the stations and legs run, the claim's legs since, waits-for,
+   hand-off, blocks, queued leg and source, parent and children), the off-graph transitions,
+   and the stats tables (per station and leg wait and run times, ends by reason and detail,
+   suspensions, advice overridden) over `?since=` as a URL query. The accessible name and role
+   on each `<g>` (the brief's accessibility rule), and the tables carry everything the drawing
+   does.
+4. **Course-agnostic.** Station, leg, tag and output names are data from the course file; the
+   screen holds none of `roadmap-pr`'s or `create-pr`'s names (the brief).
+5. **Phone.** The course page reads at 375 px: the graph scrolls horizontally inside its box,
+   the tables stack.
+
+### What not to do
+
+- No control here: a course is changed by a commit (§5.7); a ticket's controls are on its page
+  (B-194). The screen is read-only.
+- No log bytes: a run's log is its directory, as text (R-BTN-128).
+- No course validation in the app: a refused file is what the read says it is (R-BTN-69).
+- No stats computed in the browser: wait, run and fail figures are `stats`' aggregates.
+
+### Trust
+
+- **`course.show`** — Baton's rows and the course file as last accepted (an opaque blob, §12.3:
+  JSON drawn as text and as the graph's node and edge labels, every name a text node);
+  hand-off pointers, transcripts and log directories as text; session links only where
+  R-BTN-113 passed them.
+- **`?since=`** — validated on the server.
+- Nothing is written.
+
+### Invariants
+
+- **A blocked leg is a marked edge, never a station** (R-BTN-126).
+- **Queue depth is advice** (R-BTN-79): over `max_queue` is a mark and a text, never a refusal
+  drawn as one.
+- **Positions are Baton's** (R-BTN-39): the paths shown are the course history.
+- **Course-agnostic** (the brief); **text, never markup** (§12.3); **log directories as text**
+  (R-BTN-128).
+- **An owner's session, its repositories** (R-BTN-155).
+
+### Tests
+
+Scenarios numbered at merge, on both hosts, with a fixture course of four stations and three legs,
+tickets resting at each, one leg's edge blocked by a prerequisite found during a run, one over
+`max_queue`, one off-graph transition and a refused newer course file:
+
+- `course.show` returns the graph, each leg's queue and state counts, the tickets with paths
+  and sources, the off-graph row, the refused version and the stats; `?since=` bounds the runs;
+- under `test/ui/`: the SVG draws the blocked edge marked and no blocked station; the
+  over-`max_queue` edge is marked with its intake text; the edge panel lists runs with
+  `log_dir` as text; the tables hold the same tickets and runs as the drawing; station names
+  from the fixture appear nowhere in the screen's source.
+
+### Exit criteria
+
+- [ ] `course.show` in §14 and the registry, with tests.
+- [ ] `/courses` and `/courses/{course}` built, read-only, accessible, course-agnostic.
+- [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run lint`, `npm run check:wiki`
+      and `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09._

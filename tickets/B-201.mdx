@@ -1,0 +1,124 @@
+---
+title: "B-201 — Sync: /sync is the mirror's view of a repository — head, observations, wanted runs, held posts and Discrepancies, where git and Baton disagreed — with resync as its control"
+id: B-201
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1200
+tier: judgement
+description: "Build the Sync screen of BATON-UI-V2 and the read it lacks. /repositories/{r}/sync shows the repository's head (sha, received at, ticket count, the source declaration), the observation counter and the outstanding number if one is, the last accepted and the last refused post with its reason (head-moved, stale-observation, snapshot-rejected), sync wants and dispatches (wanted since, last dispatch, the adapter), held posts awaiting acceptance, the mode (shadow or cut over) and the retired-claims-by-git record — the Discrepancies the old view drew: every place git overruled Baton in the last 7 days by kind and age, Baton's value, git's, the observation and a link to the ticket's history. Its controls, by ui.view: resync (one click), and for an administrator's session the forced resync onto a rewritten head (confirmed) and, in shadow, cut over (confirmed). Adds GET …/sync. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-193
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Sync** `/sync` — the mirror's view: head,
+observations, wanted, and Discrepancies (where git and Baton disagreed)." The mockup's
+Discrepancies table (kind, ticket, Baton had struck through, git showed, age, action: Accept
+history, Confirm adoption) and its shadow banner ("SHADOW · docs: git holds its claims, Baton
+records them. Cut docs over…") are this screen's rows.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the Sync screen, carrying
+the retired Discrepancies view; R-BTN-155: a forced resync and cut over are confirmed, a resync is
+not), [§4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) ([R-BTN-11](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3):
+heads advance by compare-and-set, the forced resync; [R-BTN-62](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3):
+observations), [§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) ([R-BTN-85](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7):
+every disagreement with git is logged), [§3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3)
+([R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3): wants and dispatch;
+[R-BTN-105](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3)), [§16.1](../spec/BATON_SPEC/16-adoption.md#sec-16-1)
+([R-BTN-28](../spec/BATON_SPEC/16-adoption.md#sec-16-1): cutover, adoptions),
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) (`POST /v1/ui/resync`, `POST /v1/ui/cutover`,
+`POST /v1/ui/adoptions/{claim}/confirm`, `owner.sync.want`, `GET /v1/sync/wanted`).
+
+**Depends on:** B-193 (the shell).
+
+**Used by:** B-203.
+
+### What to build
+
+The §14 row first, then the code.
+
+1. **`GET /v1/repositories/{repository}/sync`** (`repo.sync`, read; the repository reads'
+   principals and a session): `head` (`sha`, `parent_sha`, `received_at`, `ticket_count`,
+   `observation`, `source` — the last accepted post's source declaration, B-183),
+   `observation` (`last`, `outstanding` with its age if one is, R-BTN-62), `last_post`
+   (accepted or refused, with the refusal code and the `sha` it carried), `wanted` (the sync
+   and mirror wants: `since`, `last_dispatch_at`, the adapter kind, R-BTN-94), `held` (the held
+   posts: `sha`, `parent_sha`, `ticket_count`, `received_at`, `auto_accept_at` — today's
+   `uiState().held`), `mode` (`shadow` or `cut-over`, `cutover_at`, R-BTN-28), `adoptions`
+   (pending adoption requests with runner name and ticket, an administrator's only), and
+   `discrepancies` (`?since=`, default 7 days: each with `kind`, `ticket`, `baton_had`,
+   `git_showed`, `observation`, `at`, R-BTN-85 — `history.view`'s rows). Built from
+   `observations.ts`, `history.ts`, `cutover.ts` and the held-posts query.
+2. **`/repositories/{r}/sync`**: sections in this order — the mode banner (the mockup's, with
+   **Cut over** for an administrator's session in shadow, by `ui.view`, through the confirm-code
+   dialog); the head line (sha linking to the forge commit through `web_base`, R-BTN-92, age,
+   ticket count, source kind) with **Resync** (`POST /v1/ui/resync`, one click, R-BTN-155) and,
+   for an administrator's session, **Force resync onto …** (a sha field; `force: true`, the
+   confirm-code dialog); the observation counter and an outstanding number's age; the last
+   post, its refusal spelt out; wants and dispatches; held posts with their auto-accept time;
+   pending adoptions with **Confirm adoption** (administrator's, confirmed); and
+   **Discrepancies** as the mockup's `<table>`, Baton's value struck through only as a style on a
+   text node, each row linking the ticket's history (B-194's page), `?since=` as a URL query.
+3. **Counts.** The sidebar's Sync entry carries the number of discrepancies in the window and
+   marks an outstanding observation older than 10 minutes.
+4. **Phone.** The banner, head line and Resync fit 375 px; the table collapses to cards.
+
+### What not to do
+
+- No sync logic in the app: ancestry, acceptance and head moves are the server's (R-BTN-11);
+  the screen shows what the read says.
+- No "Accept history" control: R-BTN-85 logs a discrepancy and the snapshot's value stands; the
+  mockup's button has no action in the registry and is not drawn. If the owner wants one, it is
+  a registry action first.
+- No board post from a session: a resync is a dispatch (`POST /v1/ui/resync`), never a post.
+
+### Trust
+
+- **`repo.sync`** — Baton's rows; shas and kinds are validated identifiers; `baton_had` and
+  `git_showed` are text (§12.3) drawn as text; a forge link is built from `web_base` only
+  (R-BTN-92).
+- **Resync** — a dispatch, an owner's session on its repositories; **forced resync** and **cut
+  over** — an administrator's session, confirmed by the minting key (R-BTN-155), `sha` validated
+  on the server.
+- **Adoption confirm** — an administrator's, confirmed; names the requesting runner as the read
+  shows it.
+
+### Invariants
+
+- **Heads advance by compare-and-set** (R-BTN-11); a forced resync is the one exception and is
+  confirmed.
+- **Every disagreement is logged and shown** (R-BTN-85); the screen hides none.
+- **R-BTN-155's confirmed list**: forced resync, cut over and adoption confirm through the code;
+  resync not.
+- **Text, never markup** (§12.3); **an owner's session, its repositories** (R-BTN-155).
+
+### Tests
+
+A scenario numbered at merge, on both hosts, with a fixture repository in shadow holding an
+outstanding observation, a held post, a refused post (`head-moved`), a want, a pending adoption
+and two discrepancies:
+
+- `repo.sync` returns each section; `adoptions` is absent for an owner's session; `?since=`
+  bounds discrepancies;
+- under `test/ui/`: Resync sends the dispatch with no confirm; Force resync and Cut over draw
+  only for an administrator's session and open the confirm-code dialog; the Discrepancies table
+  links each ticket's history; a hostile `git_showed` is text.
+
+### Exit criteria
+
+- [ ] `repo.sync` in §14 and the registry, with tests.
+- [ ] `/sync` built with its three controls by role.
+- [ ] The scenario passes; `npm test`, `npm run typecheck`, `npm run lint`, `npm run check:wiki`
+      and `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09._

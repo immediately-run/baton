@@ -1,0 +1,155 @@
+---
+title: "B-202 — Tenant screens: /repositories, /instances, /resources, /capacities, /settings, /state and /sessions for an administrator's session, with the administrator reads they lack"
+id: B-202
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1201
+tier: judgement
+description: "Build the seven tenant screens of BATON-UI-V2, an administrator's session only: /repositories (the registry — every repository's row with register, change, retire and force-resync as its controls, confirmed where R-BTN-155 says); /instances (the instance view runners rank from, each instance's state and readings, R-BTN-99); /resources (external resources, their schemas and instances, with their readings); /capacities (each capability's seats held against its capacity, R-BTN-178); /settings (link hosts, session hosts, check app id); /state (frozen or sealed, the day's request and row-write counts against the envelope, export, freeze, unfreeze, seal); /sessions (live dashboard sessions by role, key and age, revoke all). Adds GET /v1/admin/instances, …/resources, …/capacities, …/settings, …/state as a tenant read, …/sessions; GET /v1/admin/repositories exists. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-193
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Tenant screens (admins only)** — `/repositories`
+registry (register/retire/force-resync), `/instances`, `/resources` with readings,
+`/capacities`, `/settings`, `/state` (freeze/seal/export), `/sessions`." The mockup's Capacity
+cards (requests per minute, live claims, alive runners, live tickets, each against its envelope
+with a bar) and its Instance view table (instance, usage and reset, state mark) are `/state` and
+`/instances`.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the tenant screens;
+"Instances and Capacity, which are tenant-wide, are an administrator's"; R-BTN-155: cut over,
+forced resync and adoptions are an administrator's confirmed actions),
+[§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) ([R-BTN-47](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1):
+registered repositories; [R-BTN-138](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1):
+immutable forge ids), [§6.3](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3)
+([R-BTN-76](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3), [R-BTN-101](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3):
+resources, instances, readings), [§6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)
+([R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7): the instance view),
+[§6.11](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-11) ([R-BTN-178](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-11):
+capacities), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3) ([R-BTN-87](../spec/BATON_SPEC/02-deployments.md#sec-2-3):
+the capacity envelope), [§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) ([R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8):
+freeze, seal, export, import), [§11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) ([R-BTN-57](../spec/BATON_SPEC/11-people.md#sec-11-2)),
+[§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7) (the check app), [§14](../spec/BATON_SPEC/14-api.md#sec-14)
+(`GET /v1/admin/repositories`, `POST /v1/admin/repositories`, `…/resync`, `…/instances`,
+`…/resources`, `…/capacities`, `…/settings`, `…/freeze`, `…/seal`, `…/export`,
+`…/sessions/revoke`).
+
+**Depends on:** B-193 (the shell).
+
+**Used by:** B-203.
+
+### What to build
+
+The §14 rows first, then the code. Every read below has callers `admin` (a key) and
+`{principal: "session", roles: ["administrator"], scope: "instance"}`; an owner's session is
+`forbidden` on all of them and the shell draws no tenant screen for it.
+
+1. **The reads.** `GET /v1/admin/instances` (`admin.instance.list`): the instance view R-BTN-99
+   serves runners, each instance with its resource, `serves`, `repositories`, state (available,
+   until) and its readings by source (runner, probe, administrator) with `detail` as the
+   validated object and `valid_for`; `GET /v1/admin/resources` (`admin.resource.list`): each
+   resource with `scope`, `detail_schema` (a blob) and its instances; `GET /v1/admin/capacities`
+   (`admin.capacity.list`): each capability with a capacity, the seats held and by which claims
+   (R-BTN-178); `GET /v1/admin/settings` (`admin.settings.show`): `link_hosts`, `session_hosts`,
+   `check_app_id`; `GET /v1/admin/tenant` (`admin.tenant`): `frozen`, `sealed`, the day's
+   request and row-write counts and the live counts (claims, runners, tickets, repositories)
+   against the envelope (R-BTN-87), the storage used, and the retention windows in force;
+   `GET /v1/admin/sessions` (`admin.session.list`): live dashboard sessions — role, minting
+   key's fingerprint, repositories for an owner's, bound at, last seen, client address, the
+   caller's own marked. `GET /v1/admin/state` (B-118) is untouched here; B-203 settles it.
+2. **`/repositories`** (the registry): from `GET /v1/admin/repositories`: a `<table>` — id, forge
+   path, forge, web base, default branch, weight, tiers, head (sha, age), mode, courses,
+   sync keys and CI identity, `seed_owners` marked — and its controls by `ui.view`:
+   **Register** (`admin.repo.add`: the entry's `input` as the form), **Change** (`admin.repo.set`,
+   `confirm: true` for a path change, R-BTN-138), **Retire** (`admin.repo.retire`, destructive,
+   the confirm dialog), **Force resync** (`admin.repo.resync`, destructive, and through the
+   confirm-code dialog as R-BTN-155's forced resync). An owner's repositories listed read-only at
+   the root `/` (B-193) are a different screen; this one is the registry.
+3. **`/instances`**: the mockup's Instance view table — instance, resource, what it serves, state
+   mark and text, the newest reading's summary (usage, reset) as text, source and age, `valid_for`
+   — a row expanding to every reading by source with `detail` pretty-printed; a stale reading
+   marked. Control by `ui.view`: **Set reading** and **Clear reading** (`admin.reading.set`, the
+   administrator's reading or clear, R-BTN-76).
+4. **`/resources`**: each resource with its scope, `detail_schema` pretty-printed and its
+   instances linking to `/instances`; **Add resource**, **Add instance** (`admin.resource.add`,
+   `admin.instance.add`) by `ui.view`, each from its entry's schema.
+5. **`/capacities`**: a `<table>` of capability, capacity, seats held, the holding claims
+   (ticket and runner, linking to their pages); **Set capacity** (`admin.capacity.set`, 1–64
+   or clear).
+6. **`/settings`**: link hosts, session hosts and the check app id as text; **Set**
+   (`admin.settings.set`).
+7. **`/state`**: frozen or sealed as the page's banner; the mockup's Capacity cards from
+   `admin.tenant` (requests per minute, live claims, alive runners, live tickets, each against
+   its envelope with a bar and the numbers as text), the day's row writes, storage; controls by
+   `ui.view`: **Freeze**, **Unfreeze**, **Seal** (each a confirm dialog; seal shows its
+   `conflict` naming active claims as text), **Export** (`admin.export`, downloading
+   `baton.owner-state/v1` by an `<a download>` the shell builds from the response; `with_history`
+   as a checkbox). No import from the dashboard.
+8. **`/sessions`**: the sessions table; **Revoke all** (`admin.sessions.revoke`, destructive,
+   the confirm dialog; the caller's own session ends too, and the shell returns to sign-in).
+9. **Phone.** Each table collapses to cards; `/state`'s banner and cards fit 375 px.
+
+### What not to do
+
+- No tenant screen for an owner's session, and no owner-scoped data on them: the reads refuse
+  it and the shell lists none.
+- No secret sink: `admin keys set`, `admin forge-secrets set`, the GitHub App flows and
+  `admin.import` stay the CLI's (R-BTN-136, §12.7).
+- No reading computed in the app: states and staleness are the read's.
+- No probe, grant or key management here: grants are per repository (B-199); probes are
+  `admin probe add` by CLI, listed on `/resources` read-only.
+
+### Trust
+
+- **The six reads** — Baton's rows and the administrator's own configuration; instance names,
+  reading `detail`, client addresses and hostnames are untrusted text or validated blobs
+  (§12.3), drawn as text or pretty-printed JSON; answered to an administrator's key or session
+  only.
+- **The controls** — administrator actions through `authorize`; destructive ones with
+  `confirm: true`; the forced resync through the confirm code (R-BTN-155); every form field is
+  validated on the server (`invalid-params` as text).
+- **Export** — the owner-state file, served to the administrator's session as a download; the
+  app never parses it.
+
+### Invariants
+
+- **Administrators only** (R-BTN-57, R-BTN-155): no entry here lists an owner's session.
+- **One role per key** (§12.1); **a registration is insert-only** (R-BTN-47) and a path change
+  takes `confirm: true` (R-BTN-138).
+- **Readings are statements, not grants** (R-BTN-76): shown, never judged.
+- **The envelope is advice to the operator** (R-BTN-87): bars and numbers, no refusal drawn.
+- **Text, never markup** (§12.3).
+
+### Tests
+
+Scenarios numbered at merge, on both hosts, with a fixture of two repositories (one in shadow),
+two instances with readings from a runner and a probe, one capacity half held, two sessions (an
+administrator's and an owner's):
+
+- each read answers the administrator's session and refuses the owner's; `admin.tenant`'s
+  counts equal the live rows;
+- under `test/ui/`: the registry draws Register, Change, Retire and Force resync, the last
+  through the confirm-code dialog; Retire opens the confirm dialog; `/state` shows the envelope
+  bars and `frozen` after Freeze; Revoke all ends the caller's session and returns to sign-in;
+  an owner's session has no tenant entry in the sidebar; a hostile instance name is text.
+
+### Exit criteria
+
+- [ ] The six reads in §14 and the registry, with tests.
+- [ ] The seven screens built with their controls by `ui.view`.
+- [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run lint`, `npm run check:wiki`
+      and `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09._

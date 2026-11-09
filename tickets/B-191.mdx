@@ -1,0 +1,145 @@
+---
+title: "B-191 — BATON-UI-V2 spec: the dashboard is a walk down the entity tree; R-BTN-129's ui names the screen; the rendering rule stated for a component framework"
+id: B-191
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1190
+tier: judgement
+description: "Amend BATON_SPEC for the V2 dashboard the owner designed on 2026-11-09: §11.4's view list becomes the entity tree (sign in, pick a repository, one entity per screen, each drawn from that entity's REST reads with the registry actions ui.view places there); R-BTN-129's ui field gains view, checked by check:actions; §12.3's rendering rule is stated for a built React and TypeScript bundle (text nodes, never innerHTML or dangerouslySetInnerHTML, nothing loaded from another origin); the Resolve page moves under its repository; G-BTN-13 and S-BTN-76 follow; the decisions are recorded. Spec only. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-09, handing over the Claude Design mockup
+([`docs/design/baton-dashboard-v2.html`](../docs/design/baton-dashboard-v2.html)): "I want the V2
+API to be organized along the same concepts as the REST API, CLI and MCP. Under that assumption
+the dashboard becomes a walk down the same tree the URLs already draw — sign in, pick a
+repository, and every screen after that is one entity. Every screen = one entity's REST reads,
+with its controls the registry actions placed there by `ui.view` — so 'what I see' and 'what I
+can do' come from the same definition." The owner chose React and TypeScript, which replaces the
+brief's dependency-free rule, and noted the flip of the task-view decision: Running and Ready
+collapse into Board and Tickets, Needs you into Conditions, with one overview strip per
+repository. The tree itself is on the project page, `tickets/projects/baton-ui-v2.mdx`.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4)
+and "The views", "The actions"), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3)
+([R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3): the `ui` field), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3)
+(Rendering), [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3):
+the Resolve page a delivery runner links to), [§15](../spec/BATON_SPEC/15-verification.md#sec-15)
+([S-BTN-76](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-13](../spec/BATON_SPEC/15-verification.md#gates),
+[G-BTN-100](../spec/BATON_SPEC/15-verification.md#gates)), [§91](../spec/BATON_SPEC/91-decisions.md).
+
+**Depends on:** none.
+
+**Used by:** B-192, and through it every BATON-UI-V2 ticket.
+
+### What to build
+
+A spec PR, in the section files that own each rule, then `npm run spec:index`; no code. Follow
+`docs/context/spec-writing.mdx`: amend in place, one home per statement, cite elsewhere.
+
+1. **§11.4 "The views" becomes "The screens".** Replace the view list (Runners, Timeline,
+   Running, Ready, Instances, Needs you, Resolve, Capacity, Courses, Discrepancies) with the
+   entity tree, stated once:
+   - the dashboard is served at the origin's `/`; `/login` is the sign-in (R-BTN-155, unchanged);
+     the root `/` lists the caller's repositories — every registered one for an administrator's
+     session, the key's own for an owner's — each with head, mode, ready count and open
+     conditions, and nothing else is tenant-scoped for an owner;
+   - under `/repositories/{repository}`: `/board`, `/tickets`, `/tickets/{ticket}`, `/goals`,
+     `/courses`, `/courses/{course}`, `/conditions`, `/conditions/{condition}`, `/runners`,
+     `/runners/{name}`, `/grants`, `/owners`, `/tokens`, `/mcp-keys`, `/sync-keys`,
+     `/check-runners`, `/policy`, `/settings`, `/bars`, `/consents`, `/attestations`, `/sync`;
+     each screen names what it shows in one sentence, carrying over what the retired views said
+     (the Running and Ready content to Board and Tickets, Needs you's to Conditions, Timeline's
+     to the runner screens, Discrepancies' to Sync, the Courses view's to the course screens);
+   - the tenant screens, an administrator's session only: `/repositories`, `/instances`,
+     `/resources`, `/capacities`, `/settings`, `/state`, `/sessions`;
+   - **the rule**: every screen is drawn from one entity's REST reads (§14 rows whose callers
+     admit `session`), and its controls are the registry actions whose `ui.view` names it
+     (R-BTN-129), so a session is never drawn a control it cannot take and never shown a value a
+     signed key of its role could not read;
+   - **the overview strip**: each repository's screens carry one line — running now, ready,
+     needs you — with counts linking to `/board`, `/tickets` and `/conditions`;
+   - polling every 10 seconds per screen's reads, freshness shown; an owner's session scoped to
+     its repositories as R-BTN-155 says; the Resolve page is `/repositories/{repository}/conditions/{condition}`,
+     and the origin-relative `/conditions/{condition}` a delivery runner may have linked
+     (R-BTN-163) redirects there.
+   Keep "The actions" paragraph, re-pointing "from Needs you" to the Conditions screen.
+2. **R-BTN-129's `ui`.** `ui` becomes `{view: [<screen>…], route?}`: `view` names the screens
+   of §11.4's tree the control appears on, by their path pattern (`repository/tickets/{ticket}`,
+   `tenant/state`); `route` stays what it is today (the `/v1/ui/*` route an entry also serves,
+   while any remain). `check:actions` fails an entry whose `view` names no screen, and lists
+   (never fails) a screen of the tree no entry places a control on. Say in the same bullet that
+   `GET /v1/actions` is answered to a session too, with `ui` included, so the dashboard reads
+   its controls from it (B-192 builds that).
+3. **§12.3 Rendering.** Reword for a component framework, one statement: the dashboard renders
+   every value as a text node — a React text child or `textContent` — never through `innerHTML`,
+   `dangerouslySetInnerHTML` or any API that parses markup; a blob only as pretty-printed JSON;
+   the page is one bundle built from this repository and loads no script, style, font or data
+   from another origin. §5.5's clause "through `textContent`" and §11.4's cite this sentence.
+4. **R-BTN-163.** The Resolve page's path becomes the tree's; the redirect from item 1 is stated
+   here, where the link is minted.
+5. **§15.** S-BTN-76's `ui` column reads "text node"; G-BTN-13 reads "the dashboard never sets
+   `innerHTML` or `dangerouslySetInnerHTML`"; G-BTN-100 is unchanged. Add one scenario row,
+   numbered at merge: *the screen draws only its caller's actions* — an owner's session on
+   `/repositories/{r}/tickets/{t}` is drawn hold, cancel, stop and route and not force-reap; an
+   administrator's is drawn force-reap; a delegated key's `GET /v1/actions` names neither
+   screen controls nor a `ui` it may act through.
+6. **Decisions** (`91-decisions.md`, one line each, the owner, 2026-11-09): the dashboard
+   follows the entity tree of the API, the CLI and MCP, one entity per screen, controls from
+   `ui.view`; React and TypeScript with a build step replace the dependency-free rule (the
+   brief's constraint retires); Running, Ready and Needs you are not screens — Board, Tickets
+   and Conditions are, with the overview strip. The reasoning, with the mockup's link, in
+   `BATON_SPEC_HISTORY.md`'s Decisions in full.
+7. **The brief.** `docs/context/design-brief.mdx` was updated when this project was filed; the
+   PR checks it against the amended §11.4 and fixes any drift (the brief cites, never repeats).
+
+### What not to do
+
+- No API rows here beyond the `ui` field and `GET /v1/actions` for sessions: the reads each
+  screen needs are B-192's and the screen tickets', filed with their code.
+- No change to R-BTN-155's sign-in, sessions or the confirmed-action list: the tree changes
+  where controls sit, not who may press them.
+- Do not keep the old view names as aliases in the spec: the retired names go to the history's
+  Migrations, as command names do under R-BTN-127.
+
+### Trust
+
+No new input: this ticket writes spec text. The one trust statement it adds is the rendering
+rule's — every value from a ticket, a runner, a reading or a course is untrusted text (§12.3)
+and reaches the screen only as a text node; `ui.view` is registry data in this repository,
+written by a PR, and names screens, never principals.
+
+### Invariants
+
+- **One check** (R-BTN-129): the tree places controls; `authorize` still decides them. No screen
+  gains a permission rule of its own.
+- **Text, never markup** (§12.3, G-BTN-13): the amended sentence is at least as strict as today's.
+- **One home per statement** (`spec-writing.mdx`): the tree is stated in §11.4 once; every other
+  mention cites it; `npm run check:spec` passes with no new patch note.
+- **R-BTN-155 unchanged**: the confirmed-action list is the whole list, before and after.
+
+### Tests
+
+Spec only: `npm run spec:index`, `npm run check:spec`, `npm run check:wiki`, and `npm run
+spec:impact -- R-BTN-129 R-BTN-163` with every listed citation updated or named in the PR body.
+The scenario row of item 5 is tested by B-193.
+
+### Exit criteria
+
+- [ ] §11.4's screens, R-BTN-129's `ui.view`, §12.3's rendering sentence, R-BTN-163's path and
+      §15's rows amended in their section files; `spec/BATON_SPEC.md` regenerated.
+- [ ] The three decisions recorded, with the mockup linked from the history.
+- [ ] `check:spec`, `check:wiki` and the `spec:impact` checklist green in the PR body.
+
+## Status
+
+_filed 2026-11-09._
