@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1202
 tier: judgement
-description: "The first cutover ticket of BATON-UI-V2, once every screen exists. Account for each key of V1's needs_you object — the claims' unconfirmed, attempts, held_items, regressed, stale_skills, fence_pending, bars_mismatch, unacknowledged_releases; the blocks' blocked_capability and instances_unknown; the notices' no_owner_channel and pool_unclaimed; the stations' course_changed; adoptions, courses_refused, ontologies_refused, keys, scope, questions — naming the V2 screen that shows each or filing the gap, with B-57 the owner of what becomes a condition. Then retire GET /v1/ui/state, uiState()'s assembly and its §14 row, and POST /v1/ui/claims/{id}/resolve, which V1 alone called; keep every /v1/ui write route V2 calls. Update the brief's Where to look, the README and the history's Migrations with the retired view names. No workflow edit. Requires: every screen ticket and B-57."
+description: "The first cutover ticket of BATON-UI-V2, once every screen exists. Account for each key of V1's needs_you object — the claims' unconfirmed, attempts, held_items, regressed, stale_skills, fence_pending, bars_mismatch, unacknowledged_releases; the blocks' blocked_capability and instances_unknown; the notices' no_owner_channel and pool_unclaimed; the stations' course_changed; adoptions, courses_refused, ontologies_refused, keys, scope, questions — naming the V2 screen that shows each or filing the gap, with B-57 the owner of what becomes a condition. Then retire GET /v1/ui/state, uiState()'s assembly and its §14 row, and POST /v1/ui/claims/{id}/resolve, which V1 alone called; keep every /v1/ui write route V2 calls. Update the brief's Where to look, the README and the history's Migrations with the retired view names. No workflow edit. Requires: B-209, B-210, B-222, B-219, B-211, B-212, B-223, B-198, B-199, B-200, B-213, B-220, B-214, B-215, B-57."
 topics:
   - baton
 owns: {}
@@ -18,14 +18,16 @@ prs: []
 depends_on:
   - B-209
   - B-210
-  - B-195
+  - B-222
+  - B-219
   - B-211
   - B-212
+  - B-223
   - B-198
   - B-199
   - B-200
   - B-213
-  - B-201
+  - B-220
   - B-214
   - B-215
   - B-57
@@ -43,9 +45,10 @@ an entry may carry a `ui` route; [R-BTN-127](../spec/BATON_SPEC/11-people.md#sec
 names in the history's Migrations), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (the Dashboard
 rows), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) ([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1)).
 
-**Depends on:** B-209, B-210, B-195, B-211, B-212, B-198, B-199, B-200, B-213, B-201, B-214,
-B-215 (every screen of the tree exists), B-57 (every Needs-you listing is a `baton.<sub>`
-condition, so Conditions can show them).
+**Depends on:** B-209, B-210, B-222, B-219, B-211, B-212, B-223, B-198, B-199, B-200, B-213,
+B-220, B-214, B-215 (every screen of the tree exists; B-222 built the completion's confirm and
+release routes this ticket's removal relies on), B-57 (every Needs-you listing is a
+`baton.<sub>` condition, so Conditions can show them).
 
 **Used by:** B-216.
 
@@ -53,26 +56,28 @@ condition, so Conditions can show them).
 
 1. **The listing ledger**, written into this ticket's PR body and checked by a test: for each key
    of `uiState().needs_you` — `unconfirmed`, `attempts`, `held_items`, `regressed`,
-   `stale_skills`, `fence_pending`, `bars_mismatch`, `unacknowledged_releases` (claims),
+   `stale_skills`, `fence_pending`, `bars_mismatch`, `unacknowledged_releases`, `policy` (claims;
+   `policy` the legs waiting on a required bar),
    `blocked_capability`, `instances_unknown` (blocks), `no_owner_channel`, `pool_unclaimed`
    (notices), `course_changed` (stations), `adoptions`, `courses_refused`, `ontologies_refused`,
    `keys`, `scope`, `questions` — the V2 screen that shows it: a `baton.<sub>` condition on
    Conditions (B-57's work, B-195's screen) for the claims', blocks', notices' and stations'
-   listings, the refused courses and ontologies and the keys notice; adoptions on Sync (B-201);
-   scope findings on the ticket page (B-210); questions on Conditions (B-195). A key B-57 did
+   listings, the refused courses and ontologies and the keys notice; adoptions on Sync (B-220);
+   scope findings on the ticket page (B-210, B-222); questions on Conditions (B-219). A key B-57 did
    not make a condition and no screen shows is a gap: file it as a ticket in this project
    before removing the route — this ticket does not finish with a listing lost. The test
    asserts the ledger's keys equal `needs_you`'s at the moment of removal.
-2. **Retire `GET /v1/ui/state`**: the route, `uiState()`'s assembly and `ui.state`'s §14 row;
-   every query it composed is behind an entity read. `GET /v1/admin/state` keeps answering by
-   the renamed `stateView()` until B-216 settles it (Decision 4a).
+2. **Retire `GET /v1/ui/state`**: the route and `ui.state`'s §14 row; every query it composed
+   is behind an entity read. `uiState()` itself stays, serving `GET /v1/admin/state`, and B-216
+   renames it `stateView()` (Decision 4a) — one ticket renames, this one removes a route.
 3. **The `/v1/ui/*` routes.** Keep every write route V2 calls (`/v1/ui/messages`,
    `/v1/ui/overrides/{ticket}`, `/v1/ui/conditions/{condition}/resolve`, `/v1/ui/resync`,
    `/v1/ui/board/accept`, `/v1/ui/scope/{id}/resolve`, `/v1/ui/claims/{id}/reap`,
    `…/fence-clear`, `…/confirm`, `…/release`, `/v1/ui/cutover`, `/v1/ui/adoptions/{claim}/confirm`,
    `/v1/ui/logout`): they are the session's write surface, with R-BTN-16's `Origin` rule and
    R-BTN-155's codes. Remove `POST /v1/ui/claims/{id}/resolve`, which V1 alone called and which
-   `…/confirm` and `…/release` replaced (it has no §14 row). `check:actions` green.
+   B-222's `…/confirm` and `…/release` replaced (it has no §14 row); the `@model` annotation
+   moved with them. `check:actions` and `model:links` green.
 4. **Docs.** `docs/context/design-brief.mdx`'s "Where to look" names `src/dashboard/` and the
    entity reads and drops V1; the README's Layout and Commands are current;
    `BATON_SPEC_HISTORY.md`'s Migrations list the retired view names (Needs you, Running, Ready,
@@ -117,3 +122,7 @@ _filed 2026-11-09._
 _2026-11-09 — revised after review: `admin.state` and the renderer scenarios split out to B-216;
 V1's removal moved to B-193 (the owner needs no transition); the `/v1/ui/*` routes decided
 rather than left to `check:actions`; every `needs_you` key listed; no workflow edit here._
+
+_2026-11-09 — revised after the second review: depends on B-222, which builds the confirm and
+release routes the removed one did the work of; `policy` added to the ledger; the rename left to
+B-216._

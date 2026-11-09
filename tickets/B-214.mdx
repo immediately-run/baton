@@ -45,10 +45,11 @@ screens from an owner).
 ### What to build
 
 1. **`/repositories`** (`src/dashboard/screens/tenant/Registry.tsx`): from `GET
-   /v1/admin/repositories` — a `<table>` with id, forge path (linking the forge by `web_base`),
-   forge, default branch, weight, tiers, head (sha, age), mode, courses, sync keys and CI
-   identity, retired rows marked, `seed_owners` marked and explained (R-BTN-58); what the root
-   `/` does not show (the full row, retired repositories). The commands `baton admin repo add
+   /v1/admin/repositories?retired=1` as B-202 extends it — a `<table>` with id, forge path
+   (linking the forge by `web_base`), forge, default branch, weight, `tiers`, head (sha, age),
+   mode, courses, `sync_keys` and `ci_identity`, retired rows marked by `retired_at`,
+   `seed_owners` marked and explained (R-BTN-58); what the root `/` does not show (the full row,
+   retired repositories). The commands `baton admin repo add
    <forge path> --owner-key <pub> […]`, `… repo set <id> […]`, `… repo retire <id>` and `… repo
    resync <repository> --force [<sha>]` as text; no control (Decision 1a; the session's forced
    resync lives on each repository's Sync screen, B-201).
@@ -96,3 +97,5 @@ extended); every command line matches R-BTN-127's tree; a hostile instance name 
 ## Status
 
 _filed 2026-11-09, split from B-202 after review._
+
+_2026-11-09 — revised after the second review: the registry's columns come from B-202's extended `admin.repo.list`._

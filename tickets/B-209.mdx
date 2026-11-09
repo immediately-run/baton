@@ -42,14 +42,15 @@ from B-207).
 
 ### What to build
 
-1. **Board** (`src/dashboard/screens/board/`), two sections: **Ready** — from `GET …/board`'s
-   `ready` in Baton's order, each row the ticket (linking its page), tier, requires as chips,
-   the eligible alive runners by name, and for a ticket none can take the failed rule as text
-   (the gate's `rule` word); `ready_by_tier` as a one-line summary above. **Running** — the
-   board's `holders` joined with `repo.tickets`' running rows: ticket, runner (linking its
-   page), leg, running for, lease ends (a bar from claimed-at to lease-end, now marked, as the
-   mockup's runner cards draw it), `stalled` where the read says so, `condition-wait` where the
-   leg waits on a condition. Below, the repository's `granted_capabilities` as chips. No control
+1. **Board** (`src/dashboard/screens/board/`), two sections, each from one filtered read
+   followed to its end by cursor (bounded by the envelope's 5,000 tickets): **Ready** — from
+   `repo.tickets?state=ready` in Baton's order (the same order as `GET …/board`'s `ready`), each
+   row the ticket (linking its page), tier, requires as chips, the eligible alive runners by
+   name, and for a ticket none can take `failed_rule` as text; `GET …/board`'s `ready_by_tier`
+   as a one-line summary above. **Running** — from `repo.tickets?state=running`: ticket, runner
+   (hostname and session name, linking its page), leg, running for, lease ends (a bar from
+   `since` to `lease_ends_at`, now marked, as the mockup's runner cards draw it), `stalled` where
+   the read says so, `condition_wait` linking the condition where the leg waits on one. Below, the repository's `granted_capabilities` as chips. No control
    on the Board: a ticket's controls are on its page.
 2. **Tickets** (`src/dashboard/screens/tickets/`): the mockup's table from `repo.tickets` — a
    real `<table>` with columns ticket (qualified id, title linking the page), state (the shape
@@ -100,3 +101,7 @@ and hold reason are text; the 375 px cards.
 ## Status
 
 _filed 2026-11-09, split from B-194 after review._
+
+_2026-11-09 — revised after the second review: the Board reads the filtered ticket list to its
+end rather than joining the board's holders against one page; runner names, `stalled` and
+`condition_wait` come from B-194's detail._

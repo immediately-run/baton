@@ -10,13 +10,13 @@ tags:
   - roadmap-item
 order: 1207
 tier: judgement
-description: "The last shell ticket of BATON-UI-V2 and its first screen: / draws the caller's repositories from repo.list — forge path, head (short sha and age), mode, the three counts, runners alive — as cards opening /repositories/{r}/board, with seed_owners as a notice for an administrator; one repository for an owner's session lands on its board directly. The overview strip is drawn by the shell on every repository screen from the same read: running now · ready · needs you (reading 'conditions' until B-57), each linking to /board, /tickets and /conditions, a SHADOW mark where the repository is not cut over, and the exclusive goal's title when repo.list carries one. Requires: B-206, B-204."
+description: "The last shell ticket of BATON-UI-V2 and its first screen: / draws the caller's repositories from repo.list — forge path, head (short sha and age), mode, the three counts, runners alive — as cards opening /repositories/{r}/board, with seed_owners as a notice for an administrator; one repository for an owner's session lands on its board directly. The overview strip is drawn by the shell on every repository screen from the same read: running now · ready · needs you (reading 'conditions' until B-57), each linking to /board, /tickets and /conditions, a SHADOW mark where the repository is not cut over, and the exclusive goal's title when repo.list carries one. Requires: B-221, B-204."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
-  - B-206
+  - B-221
   - B-204
 ---
 
@@ -35,7 +35,7 @@ B-204), [§11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) ([R-BTN-58](../spec/B
 mode), [§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) ([R-BTN-92](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1):
 `web_base` for the forge link).
 
-**Depends on:** B-206 (the shell), B-204 (`repo.list`).
+**Depends on:** B-221 (the router and polling layer), B-204 (`repo.list`).
 
 **Used by:** B-198, B-199, B-200, B-209, B-212, B-214, B-215 (every screen that needs nothing
 from B-207).
@@ -57,7 +57,9 @@ from B-207).
    B-204), each a link to `/board`, `/tickets` and `/conditions`; the head's short sha and age;
    a `SHADOW` mark where `mode` is not `cut-over` (text, as the mockup's badge); and, when
    `exclusive_goal` is set, "exclusive goal: title" linking `/goals` (B-198 fills the field).
-   The sidebar's counts for Tickets, Runners and Conditions come from the same row.
+   The sidebar's counts — Tickets (`ready` and `running`), Runners (`runners_alive` of
+   `runners_total`), Conditions (`needs_you`), Sync (`discrepancies_7d`) — come from the same
+   row and from nothing else; no screen supplies a count.
 3. **Phone.** The cards stack at 375 px; the strip wraps to two lines and stays above the
    screen's content.
 
@@ -98,3 +100,5 @@ is text; 375 px wraps.
 ## Status
 
 _filed 2026-11-09, split from B-193 after review._
+
+_2026-11-09 — revised after the second review: depends on B-221 (the split shell); the sidebar's four counts named from `repo.list` alone._

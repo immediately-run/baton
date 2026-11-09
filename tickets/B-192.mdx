@@ -1,5 +1,5 @@
 ---
-title: "B-192 — Sessions read the repository reads: the front resolves a session cookie on every GET the registry admits it for, every repository and owner read a screen draws admits a session, and the two reads nobody owns — children and courses — are built"
+title: "B-192 — Sessions read the repository reads: the front resolves a session cookie on every GET the registry admits it for, and every repository and owner read a screen draws admits a session through authorize"
 id: B-192
 project: baton-ui-v2
 status: available
@@ -10,13 +10,14 @@ tags:
   - roadmap-item
 order: 1191
 tier: judgement
-description: "The first API half of BATON-UI-V2's rule that every screen is one entity's REST reads. Today the front attaches the session principal only under /v1/ui/*, and the repository reads admit keys but not sessions. Make the front resolve a session cookie on any GET whose registry entry lists session (a signed or bearer request is that key's, cookie ignored; R-BTN-16's Origin checks apply); add a session caller to board, blocks, blocked, history, stats, policy, the owner grants and policy/log reads, and to prerequisites, legs/{leg}/runs and conditions as B-10, B-23 and B-55 build them; build GET …/tickets/{ticket}/children and GET …/courses, which §14 lists and no ticket owns; amend §12.1's session row and R-BTN-16. Requires: B-191, B-10, B-23, B-55."
+description: "The first API half of BATON-UI-V2's rule that every screen is one entity's REST reads. Today the front attaches the session principal only under /v1/ui/*, and the repository reads admit keys but not sessions. Make the front resolve a session cookie on any GET whose registry entry lists session (a signed or bearer request is that key's, cookie ignored; R-BTN-16's Origin checks apply), on /v1/repositories/* and the two /v1/owner/* reads alike; add the session caller to board, blocks, blocked, history, stats, policy, the owner grants and policy/log reads, and to prerequisites (already a session's in §14), legs/{leg}/runs and conditions as B-10, B-23 and B-55 build them; make an unregistered or unowned repository answer forbidden on these reads for every principal; amend §12.1's session row and R-BTN-16. Requires: B-191, B-25, B-10, B-23, B-55."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
   - B-191
+  - B-25
   - B-10
   - B-23
   - B-55
@@ -25,22 +26,21 @@ depends_on:
 **Brief:** the owner, 2026-11-09 (B-191): "Every screen = one entity's REST reads."
 
 **Spec:** [BATON_SPEC §11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3):
-`callers`; a session authorizes as `session` with its role), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4)
-([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): an owner's session only its repositories),
+`callers`; a session authorizes as `session` with its role; the one `authorize`),
+[§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4):
+an owner's session only its repositories; the refusal rule as B-191 amends it),
 [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (the session row; [R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1):
 the state readable with a key), [§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4):
 same-origin JSON, the `Origin` and `Sec-Fetch-Site` checks), [§14](../spec/BATON_SPEC/14-api.md#sec-14)
-(the repository reads; `children`, `courses`), [§4.6](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6)
-([R-BTN-86](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6): children),
-[§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2):
-the course file as last accepted; [R-BTN-121](../spec/BATON_SPEC/05-courses.md#sec-5-2)).
+(the repository reads).
 
-**Depends on:** B-191 (the screens and the session paths are specified), B-10 (`prerequisites`),
-B-23 (`legs/{leg}/runs`), B-55 (`GET …/conditions`) — the reads this ticket adds a session caller
-to must exist. The reads that exist today (`board`, `blocks`, `blocked`, `history`, `stats`,
-`policy`, `grants`) need none of them.
+**Depends on:** B-191 (the screens and the session paths are specified), B-25 (the registry,
+`src/shared/actions.mjs`, and `authorize` — the callers this ticket adds are entries there),
+B-10 (`prerequisites`), B-23 (`legs/{leg}/runs`), B-55 (`GET …/conditions`). The reads that
+exist today (`board`, `blocks`, `blocked`, `history`, `stats`, `policy`, `grants`,
+`policy/log`) need only B-25.
 
-**Used by:** B-194, B-196, B-197, B-202, B-204, B-205, B-206, B-213.
+**Used by:** B-194, B-196, B-197, B-202, B-205, B-213, B-217, B-221; B-195, B-201, B-206 (the session reads and the registry they rest on).
 
 ### What to build
 
@@ -48,74 +48,66 @@ The §12.1 and §14 rows first, then the code.
 
 1. **The front resolves a session on any admitted GET** (`src/core/front.ts`): a request carrying
    the `__Host-baton_session` cookie to a route whose registry entry lists `session` is the
-   session's, with R-BTN-16's `Origin`/`Sec-Fetch-Site` checks as on `/v1/ui/*`; a request that
-   carries a signature or a bearer is that key's and its cookie is ignored. Until B-25's registry
-   drives the router, the front holds the same fact as a list in `src/core/screens.ts`'s
-   neighbour `sessionReads.ts`, deleted when B-25 generates it.
+   session's, with R-BTN-16's `Origin`/`Sec-Fetch-Site` checks as on `/v1/ui/*` today; this
+   covers `/v1/repositories/*` and the `/v1/owner/{repository}/grants` and `…/policy/log` reads,
+   which today demand a signature. A request that carries a signature or a bearer is that key's
+   and its cookie is ignored. The list of admitted routes is the registry's (B-25), read by the
+   front; no second list.
 2. **Session callers** — `{principal: "session", roles: ["administrator", "owner"], scope:
    "repository"}` — on `GET /v1/repositories/{repository}/board`, `…/tickets/{ticket}/blocks`,
-   `…/prerequisites`, `…/history`, `…/children`, `…/legs/{leg}/runs` (its callers are owner and
-   admin: a session of either role), `blocked`, `conditions`, `courses`, `stats`, `policy`, and
-   `GET /v1/owner/{repository}/grants`, `…/policy/log`. The core's `authorize` answers an owner's
-   session on the repositories its key still owns, an administrator's everywhere, a target
-   elsewhere `forbidden` (R-BTN-155, R-BTN-129). The scope check runs on the server; nothing is
-   filtered in a client.
-3. **`GET /v1/repositories/{repository}/tickets/{ticket}/children`** (`ticket.children`, read;
-   the repository reads' principals and a session): `{children: [{ticket_id, station, blocked,
-   closed?}]}` as §14 states it, from the tickets whose `parent` is the ticket (R-BTN-86) joined
-   with `stations.ts` and `blocks.ts`.
-4. **`GET /v1/repositories/{repository}/courses`** (`repo.courses`, read; same callers): each
-   course file as last accepted — id, version, the file as an opaque blob, its capability types
-   and roles (R-BTN-121, R-BTN-157) — and `refused: {version, reason}` where a newer file was
-   refused (R-BTN-69), from `courses.ts`.
-5. **§12.1 and R-BTN-16** as B-191 words them: the session row names the reads; R-BTN-16 says a
+   `…/history`, `…/legs/{leg}/runs` (its callers are owner and admin: a session of either
+   role), `blocked`, `conditions`, `stats`, `policy`, and `GET /v1/owner/{repository}/grants`,
+   `…/policy/log`; `…/prerequisites` already lists a session in §14 and the code follows.
+   `authorize` answers an owner's session on the repositories its key still owns, an
+   administrator's everywhere.
+3. **One refusal** (B-191's rule): on these reads a repository the caller cannot read — unowned,
+   ungranted, unregistered or retired — answers `forbidden` for every principal (today an
+   unregistered one answers `not-found`, `baton.ts`'s repository routes), so there is no
+   existence oracle; an entity id not found in a readable repository stays `not-found`.
+4. **§12.1 and R-BTN-16** as B-191 words them: the session row names the reads; R-BTN-16 says a
    session's reads outside `/v1/ui/*` are Baton's to authenticate.
 
 ### What not to do
 
 - No new write caller: the confirmed-action list (R-BTN-155) and every write's callers are
   untouched.
-- No read built here beyond `children` and `courses`: the ticket list and detail (B-194), the
-  runner reads (B-196), `course.show` (B-197), `sync` (B-201), the tenant reads (B-202) and
-  `attestations` (B-213) are their tickets'.
-- No `GET /v1/ui/state` change: it keeps answering until B-203.
-- No ETag or cursor here: B-205.
+- No read built here: `children`, `courses` and `schemas` are B-217's; the ticket, runner,
+  course, sync, tenant and attestation reads are their tickets'.
+- No `GET /v1/ui/state` change; no ETag or cursor (B-205).
 
 ### Trust
 
 - **A session's read** — the cookie is the credential (R-BTN-155), checked on every request
-  against its role and repositories; a read on a repository the key no longer owns is
-  `forbidden`, the same answer as for one that does not exist.
+  against its role and repositories; a repository the key cannot read is `forbidden`, the same
+  for none.
 - **A request with both a key and a cookie** — the key's; the cookie decides nothing, so a page
   cannot borrow a key's reach and a key cannot borrow a session's.
-- **`children` and `courses`** — Baton's rows and an opaque blob (the course file, §12.3),
-  answered to the repository reads' principals.
 
 ### Invariants
 
-- **One check** (R-BTN-129): `authorize` decides every added caller.
+- **One check** (R-BTN-129): `authorize` decides every added caller; the front keeps no list of
+  its own.
 - **An owner's session reaches only its repositories** (R-BTN-155).
 - **Readable with a key** (R-BTN-179): a session read is the same entry, query and JSON a key gets.
-- **Same-origin** (R-BTN-16) on every session request.
-- **Both hosts** (R-BTN-55).
+- **Same-origin** (R-BTN-16) on every session request; **both hosts** (R-BTN-55).
 
 ### Tests
 
 Scenarios numbered at merge, on both hosts:
 
-- an owner's session reads each listed read on its repository and is `forbidden` on another's;
-  an administrator's reads both; a runner key's answers are unchanged;
-- a request with a cookie and a valid signature is the key's (an owner key's session cookie
-  plus a runner's signature answers the runner's view);
+- an owner's session reads each listed read on its repository and is `forbidden` on another's
+  and on an unregistered id; an administrator's reads both; a runner key's answers are unchanged
+  except that an unregistered repository is now `forbidden`;
+- a request with a cookie and a valid signature is the key's;
 - a session request with a foreign `Origin` is refused as `/v1/ui/*` refuses it today;
-- `ticket.children` lists a fixture parent's children with station and blocked; `repo.courses`
-  returns the accepted file and the refused newer version.
+- `/v1/owner/{r}/grants` answers an owner's session without a signature.
 
 ### Exit criteria
 
-- [ ] §12.1's session row, R-BTN-16's paragraph and the §14 rows amended; `spec:index` current.
-- [ ] The front resolves sessions on admitted GETs; every read above admits a session;
-      `children` and `courses` exist.
+- [ ] §12.1's session row, R-BTN-16's paragraph and the §14 callers amended; `spec:index`
+      current.
+- [ ] The front resolves sessions on admitted GETs from the registry; every read above admits a
+      session; the one refusal holds.
 - [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
       `npm run check:tickets` are green.
 
@@ -123,7 +115,9 @@ Scenarios numbered at merge, on both hosts:
 
 _filed 2026-11-09._
 
-_2026-11-09 — revised after review: split into B-192 (this), B-204 (the root read, the session's
-actions, `ui.view`) and B-205 (ETag and cursors); the front's cookie rule decided; dependencies on
-B-10, B-23 and B-55 added, since the reads they build did not exist; `children` and `courses`
-built here because no ticket owned them._
+_2026-11-09 — revised after review: split into B-192 (this), B-204 and B-205; the front's cookie
+rule decided; B-10, B-23 and B-55 added as the builders of reads this one admits sessions to._
+
+_2026-11-09 — revised after the second review: B-25 added (the registry and `authorize` are its);
+`children` and `courses` moved to B-217 with the schemas read; the refusal rule applied to every
+principal; `prerequisites` noted as already a session's in §14._

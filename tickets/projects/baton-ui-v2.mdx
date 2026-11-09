@@ -4,7 +4,7 @@ id: baton-ui-v2
 status: active
 tags:
   - project
-description: Replace the dashboard with a React and TypeScript app whose screens are the entities the REST API, the CLI and MCP already name — sign in, pick a repository, then one entity per screen, each drawn from that entity's REST reads with the registry actions ui.view places there — built from the owner's Claude Design mockup of 2026-11-09, in twenty-six half-day tickets.
+description: Replace the dashboard with a React and TypeScript app whose screens are the entities the REST API, the CLI and MCP already name — sign in, pick a repository, then one entity per screen, each drawn from that entity's REST reads with the registry actions ui.view places there — built from the owner's Claude Design mockup of 2026-11-09, in thirty-three half-day tickets.
 kind: project
 nav: Project
 order: 6
@@ -12,9 +12,10 @@ order: 6
 
 _Project entity, filed 2026-11-09 from the owner's design session (B-17: the dashboard design
 iterated with Claude Design) and the owner's organizing rule for it, quoted below. Revised the
-same day after an independent review of the first thirteen tickets (102 findings): the set is
-now twenty-six tickets of about half a day each, with the cross-cutting decisions made once in
-B-191 and B-193._
+same day after two independent reviews (102 findings on the first thirteen tickets; a second
+round on the twenty-six that followed): the set is now thirty-three tickets of about half a day
+each, every route a screen reads or writes built by a ticket in its dependency closure, and the
+cross-cutting decisions made once in B-191 and B-193._
 
 **Design:** [`docs/design/baton-dashboard-v2.html`](../../docs/design/baton-dashboard-v2.html)
 (the Claude Design mockup, self-contained; its overview at
@@ -61,80 +62,94 @@ graph with queue depths, discrepancies, capacity — and its visual language (ca
 shape and label before colour, exceptions first). Its navigation (Overview, Tickets, Workers,
 Courses, Schemas) is *not* the design: the tree above is, and the mockup's sections are placed on
 the entity screens the tickets name. What the mockup draws and the tickets do not build, each
-with its reason, is recorded once in B-191's Decisions: Schemas (no read exists; B-54's
-renderers), Providers and Suspensions (B-142 retired their tables; a provider's availability is a
-reading on `/instances`), Accept history (R-BTN-85 adopts git's value at once), Stream
-stdout/stderr (R-BTN-128: a log is its directory), the runner's model (R-BTN-3 names none), the
-fleet-wide timeline (the owner's tree puts it on the runner page), "Workers" (B-68: runners);
-its Limits block is split across the credential screens (B-199), Governance (B-200) and
-`/resources` (B-214, where probe keys are listed).
+with its reason, is recorded once in B-191's Decisions: Schemas (no page; B-217's schemas read
+serves the renderer only), Providers and Suspensions (B-142 retired their tables; a provider's
+availability is a reading on `/instances`), Accept history (R-BTN-85 adopts git's value at once),
+Stream stdout/stderr (R-BTN-128: a log is its directory), the runner's model (R-BTN-3 names
+none), the fleet-wide timeline (the owner's tree puts it on the runner page), runners grouped by
+state (R-BTN-3 groups them by hostname), "Workers" (B-68: runners); its Limits block is split
+across the credential screens (B-199), Governance (B-200) and `/resources` (B-214, where probe
+keys are listed).
 
-## The owner's six answers
+## The owner's answers
 
 B-191's Decision needed packet was answered on 2026-11-09 ("I take your recommendations"), (a)
-in each: (1) the tenant screens are read-only, (2) route and adopt stay the CLI's, (3) Stop is
-one click, (4) `GET /v1/admin/state` keeps its shape as `stateView()`, (5) the held post's
-Accept stays on Sync, (6) no ESLint — a source test over `src/dashboard/**` is the gate. The
-tickets are written against exactly these; each remains a two-way door for a later spec ticket.
+in each of its first six: (1) the tenant screens are read-only, (2) route and adopt stay the
+CLI's, (3) Stop is one click, (4) `GET /v1/admin/state` keeps its shape as `stateView()`, (5)
+the held post's Accept stays on Sync, (6) no ESLint — a source test over `src/dashboard/**` is
+the gate. Three more, found by the second review, are applied on their defaults and await the
+owner's word: (7) the deploy order stays production-then-staging, (8) a per-tenant request
+counter is built so R-BTN-87's rates can be shown, (9) runners are grouped by hostname as
+R-BTN-3 says. Each remains a two-way door for a later spec ticket.
 
 ## Items
 
 Filed 2026-11-09, in build order. Every ticket names its `S-BTN-n` scenarios at merge (R-BTN-31)
-and keeps §12.3: every value from a ticket, a runner or a reading is drawn as a text node. A
-screen ticket depends on the ticket that builds every route it reads or writes; a route no ticket
-builds is built by the ticket that first needs it, named in its What to build.
+and keeps §12.3: every value from a ticket, a runner or a reading is drawn as a text node or
+through R-BTN-112's renderer. **A screen ticket depends on the ticket that builds every route it
+reads or writes**; a route no ticket builds is built by the ticket that first needs it, named in
+its What to build (B-192's front rule, B-195's session attestation path, B-201's `/v1/ui/resync`,
+B-206's `ui.logout`, B-217's three reads, B-222's confirm and release).
 
 - **Spec and API** — **B-191** the spec amendment (§11.4 as the tree with its rules, R-BTN-129's
-  `ui.view`, §12.3 for a component framework, the redirect, R-BTN-16, the decisions);
-  **B-192** sessions read the repository reads (the front's cookie rule, session callers,
-  `children` and `courses` built); **B-204** the root read `GET /v1/repositories`, `GET
-  /v1/actions` for a session, `ui.view` on every entry and `src/core/screens.ts`; **B-205** ETag
-  and cursors.
+  `ui.view`, §12.3 for a component framework, the redirect, R-BTN-16, the decisions and the
+  packet); **B-192** sessions read the repository reads (the front's cookie rule, session
+  callers, one refusal); **B-217** `children`, `courses` and `schemas`; **B-204** `GET
+  /v1/repositories` with the counts and the session's role, `GET /v1/actions` for a session,
+  `ui.view`; **B-205** ETag and cursors.
 - **The shell** — **B-193** toolchain and serving (`src/dashboard/`, esbuild, text delivery to
-  both hosts, the `ui` vitest project, the source gate, V1 removed); **B-206** sign-in, router,
-  polling, refusals, theme, 375 px; **B-207** controls from the registry, the schema form, the
-  two dialogs; **B-208** the root screen and the strip.
-- **Tickets** — **B-194** `repo.tickets` and `ticket.show`; **B-209** Board and Tickets screens;
-  **B-210** the ticket page.
-- **Conditions** — **B-195** `condition.show`, the redirect, the Conditions list and the Resolve
-  page.
+  both hosts and the CLI bundle, `screens.ts`, the `ui` vitest project, the source gate, V1
+  removed); **B-206** the frame, `Text` and `View`, sign-in per role, `ui.logout`; **B-221** the
+  router, polling, refusals, theme, drawer; **B-207** controls from the registry, the schema
+  form, the two dialogs; **B-208** the root screen and the strip.
+- **Tickets** — **B-194** `repo.tickets`; **B-218** `ticket.show` with `allowed`; **B-209** Board
+  and Tickets screens; **B-210** the ticket page's sections; **B-222** its controls and the
+  completion's confirm and release routes.
+- **Conditions** — **B-195** `condition.show`, the list read's order and `answerable`, the
+  redirect, the session's attestation path; **B-219** the Conditions list and the Resolve page.
 - **Runners** — **B-196** `repo.runners` and `runner.show`; **B-211** the runner screens with
   the timeline.
-- **Courses** — **B-197** `course.show`; **B-212** the course screens with the layout function.
+- **Courses** — **B-197** `course.show` with `?summary=1`; **B-212** the layout function,
+  `CourseGraph` and `/courses`; **B-223** the course page.
 - **Goals** — **B-198** `/goals` on B-122's read.
-- **Credentials and governance** — **B-199** the grants read extended and six credential
-  screens; **B-200** policy, settings, bars and consents screens; **B-213** `attestation.list`
-  and `/attestations`.
-- **Sync** — **B-201** `repo.sync`, `/v1/ui/resync` built, the Accept row, the Sync screen.
-- **Tenant** — **B-202** the tenant reads; **B-214** registry, instances, resources, capacities;
-  **B-215** settings, state, sessions.
+- **Credentials and governance** — **B-199** the grants read extended (MCP keys, tokens, sync
+  keys, check-runners, consents) and six credential screens; **B-200** policy, settings, bars
+  and consents screens; **B-213** `attestation.list` and `/attestations` (after B-146).
+- **Sync** — **B-201** `repo.sync`, `/v1/ui/resync` built, the Accept row; **B-220** the Sync
+  screen.
+- **Tenant** — **B-202** the tenant reads, the request counter, the registry read extended;
+  **B-214** registry, instances, resources, capacities; **B-215** settings, state, sessions.
 - **Cutover** — **B-203** the listing ledger, `ui.state` retired, docs; **B-216** `stateView()`,
-  the renderer scenarios, the staging check.
+  S-BTN-170 per repository, the renderer scenarios, the staging check.
 
 ```
-B-191 ─┬─ B-193 ──────────────────────────────────┐
-       ├─ B-192 (also B-10, B-23, B-55) ─┬─ B-205  │
-       └─ B-204 (also B-25)              │         │
-B-193 + B-192 + B-76 ── B-206 ─┬─ B-207 (+B-204)
-                               └─ B-208 (+B-204)
-B-192 + B-205 ── B-194 ─┬─ B-209 (+B-208)
-                        └─ B-210 (+B-207, B-23, B-10)
-B-207 + B-55 + B-56 ── B-195
+outside the project, none started: B-23 → B-24 → B-25 → B-76; B-10; B-55 → B-56 → B-57; B-146; B-171; B-122
+
+B-191 ─┬─ B-193 ─────────────────────────────────────────┐
+       ├─ B-192 (also B-25, B-10, B-23, B-55) ─┬─ B-217   │
+       │                                       └─ B-205   │
+       └─ B-204 (also B-193, B-25, B-55)                  │
+B-193 + B-192 + B-204 + B-217 + B-76 ── B-206 ── B-221 (+B-205) ─┬─ B-207 (+B-204)
+                                                                  └─ B-208 (+B-204)
+B-192 + B-205 ── B-194 ── B-218
+B-194 + B-208 ── B-209            B-218 + B-221 + B-217 + B-23 + B-10 ── B-210 ── B-222 (+B-207, B-218, B-171)
+B-192 + B-205 + B-55 + B-56 ── B-195 ── B-219 (+B-207)
 B-192 + B-205 ── B-196 ── B-211 (+B-207)
-B-192 + B-205 + B-23 ── B-197 ── B-212 (+B-208)
-B-208 + B-122 ── B-198
-B-208 ── B-199 ── B-200
-B-207 + B-192 + B-205 ── B-213
-B-207 + B-205 ── B-201
+B-192 + B-205 + B-23 ── B-197 ── B-212 (+B-217, B-221) ── B-223
+B-208 + B-122 ── B-198           B-208 ── B-199 ── B-200
+B-207 + B-195 + B-146 + B-205 ── B-213
+B-192 + B-205 ── B-201 ── B-220 (+B-207)
 B-192 + B-205 ── B-202 ─┬─ B-214 (+B-208)
                         └─ B-215 (+B-208)
 every screen + B-57 ── B-203 ── B-216
 ```
 
-The critical path is B-191 → B-192 → B-206 → B-207 → a screen → B-203 → B-216. The screen tickets
-are independent of each other once the shell lands (separate tickets never share a write target:
-each owns its screen directory under `src/dashboard/screens/`, and the one shared read, the
-grants read, has one writer, B-199).
+The critical path starts outside the project — B-23, B-24, B-25 and B-76 for the registry and
+owner sessions; B-55, B-56 and B-57 for conditions — then runs B-191 → B-192 → B-206 → B-221 →
+B-207 → a screen → B-203 → B-216. The screen tickets are independent of each other once the
+shell lands. Shared write targets are kept to one writer: the grants read is B-199's, the
+sidebar and the strip are B-206's and B-208's (screens only fill `repo.list` fields), `front.ts`
+is edited by B-192, B-193 and B-195 in dependency order, and the deploy workflow by B-193 alone.
 
 ## Done when
 

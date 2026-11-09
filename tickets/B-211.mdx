@@ -46,19 +46,23 @@ an interactive SVG group carries its own accessible name.
 ### What to build
 
 1. **`/repositories/{r}/runners`** (`src/dashboard/screens/runners/`): one card per row of
-   `repo.runners`, in the read's order, grouped under headings Working, Silent (alive and
-   `last_activity_at` over 2 hours old), Idle, Dead: the name line (hostname and session name,
-   the state mark and word, harness and kind, tier ceiling, "last report n ago"), capability
+   `repo.runners`, grouped by hostname as R-BTN-3 says (Decision 9a; the mockup's grouping by
+   state is not followed), each host's cards in state order — working, silent (alive and
+   `last_activity_at` over 2 hours old), idle, dead — with the state as each card's mark: the
+   name line (hostname and session name, the state mark and word, harness and kind, tier
+   ceiling, "last report n ago"), capability
    chips (granted ones marked), then the claim block from `claim` — ticket linking its page,
    leg, running for, the lease bar from `claimed_at` to `lease_ends_at` with now marked and
    minutes left, attempt n of `max_runs` with `next_backoff_until`, `log_dir` as text with the
    `baton leg log` line, the current activity's kind and label — or "idle since", or for a dead
    runner "lost its heartbeat at …; its claim on … was reaped" from `reaped_at` and the
-   history, as text; `busy_elsewhere` as "working on another repository". Controls by `ui.view`
-   on `repository/runners/{runner}` through B-207 with context `{repository, to_runner_id,
-   ticket_id}`: **Status** (`status_request`), **Wind down** (`wind-down`), **Stop** on the
-   claim (`release`, one click, Decision 3a), and **Open session** as a plain link only where
-   `session_url` is set (host shown).
+   history, as text; `busy_elsewhere` as "working on another repository"; the newest
+   `last_report` payload as text with its age under the card (the reply a Status request
+   produces), and `transcript_url` as a link where set. Controls by `ui.view` on
+   `repository/runners/{runner}` through B-207 with context `{repository, to_runner_id,
+   ticket_id}`: **Status** (`runner.status-request`), **Wind down** (`runner.wind-down`), **Stop**
+   on the claim (`leg.stop`, one click, Decision 3a), and **Open session** as a plain link only
+   where `session_url` is set (host shown).
 2. **`/repositories/{r}/runners/{runner}`**: the card; `profile` through `View` where its
    schema has a view, else pretty-printed; the earlier `attempts`; then the **timeline** from
    `runner.show.window`: inline SVG, one lane, time left to right over `since` to now with hour
@@ -70,8 +74,7 @@ an interactive SVG group carries its own accessible name.
    default, 7 d max). Under the drawing, the same claims and activities as a `<table>` for
    screen readers and phones. A pure layout helper in `src/dashboard/lib/timeline.ts`
    (time to x, nesting) is unit-tested.
-3. **The fleet line.** The sidebar's Runners count is alive/total from `repo.runners`.
-4. **Phone.** Cards stack at 375 px with the controls under the claim; the timeline is the table.
+3. **Phone.** Cards stack at 375 px with the controls under the claim; the timeline is the table.
 
 ### What not to do
 
@@ -95,8 +98,9 @@ an interactive SVG group carries its own accessible name.
 
 ### Tests
 
-Under `test/ui/` with fixture reads: the cards group by state and draw the lease bar; Stop
-sends `release` with no dialog and draws a `forbidden` as text; an unlisted `session_url` is
+Under `test/ui/` with fixture reads: the cards group by hostname, order by state within a host
+and draw the lease bar; `last_report` is drawn as text under the card; Stop sends `release` with
+no dialog and draws a `forbidden` as text; an unlisted `session_url` is
 text; the timeline's bars and nested segments match the fixture and the table lists the same
 rows; a segment's `<g>` has an accessible name; a hostile label is text; `?since=` round-trips.
 
@@ -109,3 +113,7 @@ rows; a segment's `<g>` has an accessible name; a hostile label is text; `?since
 ## Status
 
 _filed 2026-11-09, split from B-196 after review._
+
+_2026-11-09 — revised after the second review: grouped by hostname per R-BTN-3 (Decision 9a);
+the Status reply drawn from `last_report`; the sidebar count line dropped (`repo.list` is the
+one source)._

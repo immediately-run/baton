@@ -25,7 +25,7 @@ depends_on:
 ([R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7): `ETag` and `304` on the
 fleet and instance views), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3):
 cursors HMAC-bound under `CursorKey`), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3)
-(the per-credential rate limit, [R-BTN-135](../spec/BATON_SPEC/02-deployments.md#sec-2-2)),
+(Admission: the per-credential rate limit),
 [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) ([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1):
 the board's shape is fixed for keys), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`history`'s
 `?before=&limit=`; the Requests paragraph).
@@ -33,7 +33,7 @@ the board's shape is fixed for keys), [§14](../spec/BATON_SPEC/14-api.md#sec-14
 **Depends on:** B-192 (the reads a session may call).
 
 **Used by:** B-194, B-195, B-196, B-197, B-201, B-202, B-213 (every new list read follows the
-convention), B-206 (the polling layer sends `If-None-Match`).
+convention), B-221 (the polling layer sends `If-None-Match`).
 
 ### What to build
 
@@ -105,3 +105,5 @@ Scenarios numbered at merge, on both hosts:
 ## Status
 
 _filed 2026-11-09, split from B-192 after review._
+
+_2026-11-09 — revised after the second review: the per-credential limit cited to §2.3's Admission paragraph, not R-BTN-135._

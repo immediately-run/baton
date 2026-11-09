@@ -10,14 +10,16 @@ tags:
   - roadmap-item
 order: 1203
 tier: judgement
-description: "The second API half of BATON-UI-V2: the two reads the shell itself needs. GET /v1/repositories (repo.list) answers the caller's repositories — every registered one for an administrator, the key's own for an owner — each with head, mode, tiers, weight, courses, the strip's three counts (running, ready, needs_you), runners alive and the exclusive goal if any. GET /v1/actions (actions.list) answers a dashboard session its own registry entries with their ui, so the shell draws controls from it and nothing else. Every registry entry a session may call carries ui.view naming its screens from src/core/screens.ts, and check:actions fails a view that names no screen or sits on an entry no session can call. Requires: B-191, B-25."
+description: "The second API half of BATON-UI-V2: the two reads the shell itself needs. GET /v1/repositories (repo.list) answers the caller's repositories — every registered one for an administrator, the key's own for an owner — each with head, mode, tiers, weight, courses, the sidebar's and strip's counts (running, ready, needs_you, runners alive and total, discrepancies of 7 days) and the exclusive goal if any, plus the session's role at the top level. GET /v1/actions (actions.list) answers a dashboard session its own registry entries with their ui, so the shell draws controls from it and nothing else. Every registry entry a session may call carries ui.view naming its screens from src/core/screens.ts (B-193's table), and check:actions fails a view that names no screen or sits on an entry no session can call. Requires: B-191, B-193, B-25, B-55."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
   - B-191
+  - B-193
   - B-25
+  - B-55
 ---
 
 **Brief:** the owner, 2026-11-09 (B-191): "its controls the registry actions placed there by
@@ -34,29 +36,31 @@ strip and the screen-id grammar as B-191 amends them), [§12.1](../spec/BATON_SP
 mode), [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3):
 what needs a person), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET /v1/admin/repositories`).
 
-**Depends on:** B-191 (the grammar and the screens), B-25 (the registry the entries and
-`GET /v1/actions` live in).
+**Depends on:** B-191 (the grammar and the screens), B-193 (`src/core/screens.ts`), B-25 (the
+registry the entries and `GET /v1/actions` live in), B-55 (the conditions table `needs_you`
+counts).
 
-**Used by:** B-207, B-208.
+**Used by:** B-207, B-208; B-206 (`repo.list.session.role`).
 
 ### What to build
 
 The §14 rows first, then the code.
 
-1. **`src/core/screens.ts`**: the one table of screens — `[{id, path, role}]` with `id` in
-   B-191's grammar (`root`, `tenant/state`, `repository/tickets/{ticket}`), `path` the URL pattern
-   (`/repositories/{repository}/tickets/{ticket}`), `role` `any` or `administrator` — imported by
-   the front (the served paths), the client router (B-206) and `check:actions`. Baton's own, so
-   not under the vendored `src/shared/`.
+1. **`src/core/screens.ts`** is B-193's table; `check:actions` imports it here for `ui.view`'s
+   allowed names, so the front, the router (B-221) and the check read one list.
 2. **`GET /v1/repositories`** (`repo.list`, read): callers an administrator key, an owner key,
    and `{principal: "session", roles: ["administrator", "owner"], scope: "instance"}`. Rows: the
    registry row's `id`, `github`, `forge`, `web_base`, `default_branch`, `weight`, `tiers`,
    `courses` (ids and versions), `head: {sha, received_at, observation}`, `mode` (`shadow` or
    `cut-over`, R-BTN-28), `running` (live claims), `ready` (ready tickets), `needs_you` (open
    conditions and queued person legs, R-BTN-163 — until B-57 lands this counts conditions only,
-   and the strip's label reads "conditions"), `runners_alive`, `exclusive_goal: {id, title} |
-   null` (filled by B-122's goals; null until then), and `link_hosts`, `session_hosts` once, at
-   the top level, for the client's link rule (§12.3). An administrator's answer also carries
+   and the strip's label reads "conditions"), `runners_alive`, `runners_total` (runners with an
+   accepted grant), `discrepancies_7d` (R-BTN-85's rows of the last 7 days), `exclusive_goal:
+   {id, title} | null` (filled by B-122's goals; null until then); and at the top level, once,
+   `session: {role: administrator | owner} | null` (the caller's session role, which the
+   sidebar and the code dialog need; null for a key), `link_hosts` and `session_hosts` for the
+   client's link rule (§12.3). The sidebar's and the strip's counts come from this row and from
+   nothing else (B-208). An administrator's answer also carries
    `seed_owners` as `GET /v1/admin/repositories` does (R-BTN-58). From `adminView`, `readyRows`,
    `claims.running` and the conditions count; an owner's answer is its repositories only.
 3. **`GET /v1/actions` for a session** (`actions.list`): the caller's entries as the registry
@@ -64,17 +68,20 @@ The §14 rows first, then the code.
    minus `delegated`, filtered as `authorize` filters them: an owner's session sees the entries
    listing `session` for owners, and repository-scoped ones only while it still owns a
    repository; an administrator's every entry listing `session`. A delegated key is
-   `unauthenticated` (R-BTN-130). The answer carries an `ETag` (B-205's rule) since the shell
-   re-reads it every minute.
-4. **`ui.view` on every session-callable entry**, by B-191's defaults: `ticket.hold`,
-   `ticket.unhold`, `ticket.expedite`, `ticket.cancel`, `ticket.resolve`, `leg.stop`, the
-   completion confirm and release, `claim.force-reap`, `claim.fence-clear` on
-   `repository/tickets/{ticket}`; `ticket.resolve` also on `repository/conditions/{condition}`;
-   `attestation.add` on `repository/conditions/{condition}` (a person leg's answer) and
-   `repository/attestations`; `runner.message`'s status request and wind-down on
-   `repository/runners/{runner}`, `leg.stop` there too; the resync, forced resync, cut over,
-   adoption confirm and (Decision 5a) board accept on `repository/sync`; `ui.logout` on `root`.
-   Route, adopt and every administrator key action get none (Decisions 1a, 2a).
+   `unauthenticated` (R-BTN-130).
+4. **`ui.view` on every session-callable entry**, by B-191's defaults, each placed by the
+   ticket that builds or already has the route: here, on the entries whose routes exist today
+   or are B-25's — `ticket.hold`, `ticket.unhold`, `ticket.expedite`, `ticket.cancel`,
+   `claim.force-reap`, `scope.resolve` (`POST /v1/ui/scope/{id}/resolve`) on
+   `repository/tickets/{ticket}`; `leg.stop` (`POST /v1/ui/messages` with `kind: release`, by
+   `match`) on `repository/tickets/{ticket}` and `repository/runners/{runner}`;
+   `runner.status-request` and `runner.wind-down` (the same route's other kinds, by `match`) on
+   `repository/runners/{runner}`; cut over and the adoption confirm on `repository/sync`;
+   `attestation.add` on `repository/conditions/{condition}` and `repository/attestations`. The
+   rest are placed by their builders: `ticket.resolve` by B-56, `claim.fence-clear` by B-171,
+   `claim.confirm` and `claim.release` by B-222, `repo.resync` and `repo.accept-post` by B-201,
+   `ui.logout` by B-206 — each on the screens B-191 names. Route, adopt and every administrator
+   key action get none (Decisions 1a, 2a).
    `check:actions` fails a `view` naming no screen in `screens.ts` or set on an entry whose
    `callers` list no `session`, and lists every screen without a control.
 
@@ -106,9 +113,12 @@ The §14 rows first, then the code.
 
 Scenarios numbered at merge, on both hosts:
 
-- `repo.list` as an owner's session lists its repositories with `running`, `ready`, `needs_you`
-  equal to the board's live claims, its ready rows and the open conditions; as an
-  administrator's, every repository and `seed_owners`; as a runner key, `forbidden`;
+- `repo.list` as an owner's session lists its repositories with `running`, `ready`,
+  `needs_you`, `runners_alive`, `runners_total` and `discrepancies_7d` equal to the board's live
+  claims, its ready rows, the open conditions, the granted runners and the history's rows, and
+  `session.role` `owner`; as an administrator's, every repository, `seed_owners` and
+  `session.role` `administrator`; as an owner key, the rows with `session` null; as a runner
+  key, `forbidden`;
 - `actions.list` as an owner's session names `ticket.hold` with `ui.view` and not
   `claim.force-reap`; as an administrator's both; as a delegated key `unauthenticated` (B-191's
   scenario, API half);
@@ -117,11 +127,17 @@ Scenarios numbered at merge, on both hosts:
 
 ### Exit criteria
 
-- [ ] `screens.ts`, `repo.list` and the session's `actions.list` exist with their §14 rows;
-      every session-callable entry carries `ui.view`; `check:actions` enforces both rules.
+- [ ] `repo.list` and the session's `actions.list` exist with their §14 rows; every
+      session-callable entry whose route exists carries `ui.view`; `check:actions` enforces both
+      rules against B-193's `screens.ts`.
 - [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run check:actions`,
       `npm run check:wiki` and `npm run check:tickets` are green.
 
 ## Status
 
 _filed 2026-11-09, split from B-192 after review._
+
+_2026-11-09 — revised after the second review: `screens.ts` moved to B-193; `session.role`,
+`runners_total` and `discrepancies_7d` added so one read feeds the sidebar and the strip;
+`ui.view` placed only on entries whose routes exist, the rest by their builders; B-55 added for
+the conditions count; the ETag sentence dropped (B-205 covers every session read)._

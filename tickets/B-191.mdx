@@ -50,9 +50,10 @@ state words land there too).
 
 ### Decision needed
 
-Six choices were the owner's. Each had a recommended default the other tickets are written
+Six choices were the owner's; each had a recommended default the other tickets are written
 against. **Answered: every default, (a) in each** (the owner, 2026-11-09: "I take your
-recommendations"). The options stay recorded so the reasoning is not lost.
+recommendations"). The options stay recorded so the reasoning is not lost. Three more were
+found by the second review (7 to 9); each is applied on its default and awaits the owner's word.
 
 - **(1) Tenant screens: read-only, or the brief's controls?** The brief listed register, retire
   and force-resync on `/repositories` and freeze, seal and export on `/state`. §14 gives every one
@@ -84,8 +85,21 @@ recommendations"). The options stay recorded so the reasoning is not lost.
   `src/dashboard/**` refuses the markup-parsing APIs; no `lint` script is added. **(b)** ESLint 9
   with `eslint-plugin-react`, scoped to the dashboard — B-193 adds it.
 
+- **(7) The deploy order.** `baton-deploy.yml` deploys production, then staging, on every
+  push to `main`, so B-193's merge puts a sign-in-less placeholder on production and B-216's
+  staging check runs after production. **(a) accept for this project** *(default; follows the
+  owner's "the transition doesn't need to be smooth")*: no workflow change beyond B-193's build
+  step. **(b)** staging first — a workflow change the owner makes.
+- **(8) The tenant's request figures.** R-BTN-87 says the dashboard shows each envelope figure,
+  "rates as 5-minute means" among them, and Baton counts no requests today. **(a) build a
+  per-tenant request counter** with a 5-minute mean in B-202 *(default; the spec stays)*.
+  **(b)** amend R-BTN-87 to live counts only.
+- **(9) Runner grouping.** R-BTN-3 says the dashboard groups runners by hostname; the mockup
+  groups them by state. **(a) by hostname, the state as each card's mark** *(default; no spec
+  change)*. **(b)** by state, amending R-BTN-3's sentence.
+
 Each is a two-way door: a later spec ticket can flip one without undoing code. The tickets
-proceed on the answers, which are the defaults.
+proceed on the answers and the defaults.
 
 ### What to build
 
@@ -111,11 +125,13 @@ A spec PR, in the section files that own each rule, then `npm run spec:index`; n
    - **the strip**: every repository screen carries running now · ready · needs you, linking to
      `/board`, `/tickets` and `/conditions`, and the repository's mode where it is not cut over;
    - **polling**: every 10 seconds per screen, `If-None-Match`, paused while the page is hidden;
-     freshness shown;
-   - **refusals**: a repository the session cannot read, or none, answers `forbidden` and the
-     screen says "This repository is not yours or does not exist" with a link to `/`; an entity
-     id not found in a readable repository answers `not-found` and the screen says "No such
-     ticket" (condition, runner, course) — one component, one wording;
+     freshness shown; the one exception is the confirmation-code dialog, which polls its
+     screen's reads every 5 seconds for the code's two minutes;
+   - **refusals**: on the repository and owner reads, a repository the caller cannot read — or
+     none — answers `forbidden` for every principal (B-192 changes the reads that answer
+     `not-found` today), and the screen says "This repository is not yours or does not exist"
+     with a link to `/`; an entity id not found in a readable repository answers `not-found` and
+     the screen says "No such ticket" (condition, runner, course) — one component, one wording;
    - **target-dependent controls**: an action whose answer depends on the target's policy
      (`ticket.unhold`, a person leg's answer, `attestation.add`) is drawn only where the read
      says the caller may take it (`allowed: [<action id>]`, or `answerable`, `writable_types`,
@@ -124,8 +140,8 @@ A spec PR, in the section files that own each rule, then `npm run spec:index`; n
    - **ticket state**: one word per ticket from `unconfirmed`, `running`, `waiting-person`,
      `held`, `blocked`, `backing-off`, `suspended`, `ready`, `closed`, in that precedence, with
      `reasons` listing every other that applies; the Tickets tabs are Ready, Running, Blocked
-     (`blocked`, `waiting-person`, `backing-off`, `suspended`), Unconfirmed and Closed today
-     (`closed` in the last 24 hours) — the same words in `docs/context/vocabulary.mdx`;
+     (`held`, `blocked`, `waiting-person`, `backing-off`, `suspended` — the mockup counts a held
+     ticket under Blocked), Unconfirmed and Closed today (`closed` in the last 24 hours) — the same words in `docs/context/vocabulary.mdx`;
    - **Stop** is one click (Decision 3a), and the confirmed-action list is R-BTN-155's, unchanged.
    Keep "The actions", re-pointing "from Needs you" to the Conditions screen.
 2. **R-BTN-129's `ui`.** `ui` becomes `{view: [<screen id>…], route?}`. A screen id is `root`,
@@ -137,7 +153,8 @@ A spec PR, in the section files that own each rule, then `npm run spec:index`; n
    them, minus `delegated`, with `ui`); a delegated key stays `unauthenticated` there (R-BTN-130).
 3. **§12.3 Rendering.** One statement: the dashboard renders every value as a text node (a React
    text child or `textContent`); a value whose schema carries a view is drawn by R-BTN-112's
-   `ui` renderer, any other blob only as pretty-printed JSON; the dashboard's own source
+   `ui` renderer — its node tree mapped to elements with text children, the schema fetched from
+   `GET …/schemas` (B-217) — any other blob only as pretty-printed JSON; the dashboard's own source
    (`src/dashboard/**`) never uses `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`,
    `insertAdjacentHTML`, `document.write`, `DOMParser` or `createContextualFragment` — React is
    the only code that touches the DOM; the page is one bundle built from this repository and
@@ -165,19 +182,20 @@ A spec PR, in the section files that own each rule, then `npm run spec:index`; n
    history): the dashboard follows the entity tree, one entity per screen, controls from
    `ui.view`; React and TypeScript with a build step replace the dependency-free rule; Running,
    Ready and Needs you are not screens — Board, Tickets, Conditions and the strip are; V2
-   replaces V1 outright, no transition; the timeline is per runner, not fleet-wide; and the
+   replaces V1 outright, no transition; the timeline is per runner, not fleet-wide; runners are
+   grouped by hostname as R-BTN-3 says, not by state as the mockup draws them; and the
    mockup elements not built, with their reason — Schemas (no read exists; B-54's renderers),
    Providers and Suspensions (B-142 retired their tables; availability is a reading on
    `/instances`), Accept history (R-BTN-85 adopts git's value at once), Stream stdout/stderr
    (R-BTN-128: a log is its directory), the runner's model (R-BTN-3 names none), "Workers" (B-68:
    runners). The six answers of the Decision needed above are recorded as the owner's
-   (2026-11-09), one line each.
+   (2026-11-09), one line each; items 7 to 9 as defaults pending the owner.
 8. **The brief.** Check `docs/context/design-brief.mdx` against the amended §11.4 and fix drift.
 
 ### What not to do
 
-- No API rows beyond `ui`, `GET /v1/actions` and the redirect: each read is filed with its code
-  (B-192, B-204 and the screen tickets).
+- No API rows beyond `ui`, `GET /v1/actions`, the redirect and `resolve_url`'s path: each read
+  is filed with its code (B-192, B-204, B-217 and the screen tickets).
 - No change to R-BTN-155's sign-in, sessions or confirmed list beyond Decision 3's sentence.
 - No old view name kept as an alias: the retired names go to the history's Migrations.
 

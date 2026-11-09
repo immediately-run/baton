@@ -41,11 +41,16 @@ the state readable with a key, by the same queries), [§12.3](../spec/BATON_SPEC
    /v1/admin/state` only (R-BTN-57), built from the same functions the entity reads use
    (`readyRows`, `claims.running`, `workersView`, `history.view`, …) so the two cannot drift.
    Its §14 row reads "the state in one request for a terminal, built by the functions the
-   entity reads use". S-BTN-170 is rewritten: with the fake clock held, each section of
-   `stateView()` equals the matching entity read's first page — `repositories` to `repo.list`,
-   `ready` and `running` to the board and `repo.tickets`, `workers` to `repo.runners`,
-   `discrepancies` to `repo.sync`, `limits` to `owner.grant.list`, `blocked` to `blocked`,
-   `resources` to `admin.instance.list` — asserted on both hosts.
+   entity reads use". S-BTN-170 is rewritten: with the fake clock held, for each registered
+   repository r, each section of `stateView()` filtered to r equals r's entity read followed
+   over every page — `repositories[r]` to `repo.list`'s row, `ready` and `running` to
+   `repo.tickets?state=ready|running`, `workers` (granted on r) to `repo.runners`, `timeline`
+   to each runner's `runner.show` window, `discrepancies` and `held` to `repo.sync`, `limits[r]`
+   to `owner.grant.list`, `blocked` to `blocked`, `needs_you`'s keys to the homes B-203's ledger
+   names — and the tenant-wide sections equal the tenant reads: `resources` to
+   `admin.instance.list`, `workers` as a whole to the union of `repo.runners` over every
+   repository plus the runners granted nowhere; `ready_by_tier` is the board's — asserted on both
+   hosts.
 2. **The renderer scenarios.** S-BTN-76 and G-BTN-13 amended to name the V2 renderer and run
    against it: fixture rows carrying `<img onerror>`, `{{x}}`, backticks and a `javascript:`
    link in a ticket title, a hold reason, an activity label, a reading `detail`, a condition
@@ -59,11 +64,11 @@ the state readable with a key, by the same queries), [§12.3](../spec/BATON_SPEC
 3. **Staging check.** After this PR's merge deploys (the workflow B-193 changed deploys
    production then staging on every push to `main`), the agent opens
    `https://baton-staging.immediately.run/` and every path of `src/core/screens.ts` with a
-   fixture id, signs in as an administrator through `baton admin open` where a human is present
-   to confirm the code, and records in the PR body the paths exercised and the console clean of
-   errors. The agent triggers no deploy (`workflow_dispatch` is the owner's) and changes no
-   workflow. Production receives the same build first; the owner knows this order and accepted
-   it for this project.
+   fixture id — the owner runs `baton admin open` and binds the code (an administrator key is
+   the owner's to use, never the agent's), the agent drives only the browser — and records in
+   the PR body the paths exercised and the console clean of errors. The agent triggers no
+   deploy (`workflow_dispatch` is the owner's) and changes no workflow. Production receives the
+   same build first (B-191's Decision 7, applied on its default).
 4. **The project page.** `tickets/projects/baton-ui-v2.mdx`'s Done when is checked line by line
    against the deployed instance and marked in its Status.
 
@@ -103,3 +108,7 @@ every screen with a control; the staging record in the PR body.
 ## Status
 
 _filed 2026-11-09, split from B-203 after review._
+
+_2026-11-09 — revised after the second review: the equality stated per repository over every
+page with each section's counterpart named; the deploy order cited to B-191's Decision 7; the
+owner binds the sign-in code._

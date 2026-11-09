@@ -37,10 +37,10 @@ the resume record), [§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5) ([R-BTN-12
 [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`courses` — B-192 builds it; `stats` with its
 `off-graph`; `legs/{leg}/runs`).
 
-**Depends on:** B-192 (`GET …/courses`, sessions on the reads), B-205 (cursor and window
-conventions), B-23 (`legs/{leg}/runs`, whose rows the read embeds).
+**Depends on:** B-192 (sessions on the reads), B-205 (cursor and window conventions), B-23
+(`legs/{leg}/runs`, whose rows the read embeds). `GET …/courses` itself is B-217's.
 
-**Used by:** B-212.
+**Used by:** B-212, B-223.
 
 ### What to build
 
@@ -53,11 +53,14 @@ and ids only.
    for the tickets:
    - `course: {id, version, file}` — the file as last accepted, an opaque blob (stations, legs
      with `from`, `to`, `kind`, `requires`, `max_runs`, `timeout`, `outputs`, `conditions`,
-     `max_queue`); `refused: {version, reason} | null` (R-BTN-69);
+     `max_queue`); `refused: {version, reason} | null` (R-BTN-69); `runners: {declaring, alive}`
+     — the runners whose heartbeat names this course for the repository, and how many are alive
+     (the mockup's "workers at 7");
    - `legs: [{leg, queue: {depth, max_queue, intake: open | closed}, state: {ready, running,
      blocked: [{kind, found: before | during, count}], backing_off}, runs: [...]}]` — `runs`
      as `legs/{leg}/runs` returns them, within the window (R-BTN-128: `log_dir` as text);
-   - `stations: [{station, resting}]`;
+   - `stations: [{station, resting, arrived_today}]` — `arrived_today` the tickets that reached
+     the station in the last 24 hours (the mockup's "18 today" on the end station);
    - `tickets: [...]`, `next_cursor` — 100 a page, ordered by station in the file's order then
      Baton's order, each `{ticket_id, title, station, path: [{leg, reached, run_id}], claim_legs
      (the live claim's legs since it started), waits_for (a suspended ticket's station and
@@ -66,7 +69,9 @@ and ids only.
    - `off_graph` and `stats` for the window, as `GET …/stats?since=` gives them (wait and run
      times per station and leg, ends by reason and detail, suspensions, advice overridden).
    The graph's counts (`legs[].state`, `stations[].resting`) are aggregates over every ticket,
-   not over the page. A course not in the repository's registry is `not-found`.
+   not over the page. `?summary=1` answers `course`, `refused`, `runners`, `legs` without their
+   `runs`, `stations` and `stats` only — no tickets, no runs — for the list screen (B-212), which
+   polls one per course. A course not in the repository's registry is `not-found`.
 
 ### What not to do
 
@@ -93,10 +98,11 @@ Scenarios numbered at merge, on both hosts, with a fixture course of four statio
 legs, tickets at each station, one edge blocked by a prerequisite found during a run, one leg over
 `max_queue` with intake closed, one off-graph transition and a refused newer file:
 
-- `course.show` returns the file and `refused`, each leg's queue and state counts, the stations'
-  resting counts, the first page of tickets with paths and sources and a `next_cursor`, the
-  window's runs with `log_dir`, `off_graph` and `stats`; the counts equal the whole, not the
-  page; `?since=` bounds the runs; an unknown course is `not-found`.
+- `course.show` returns the file and `refused`, `runners`, each leg's queue and state counts, the
+  stations' resting and `arrived_today` counts, the first page of tickets with paths and sources
+  and a `next_cursor`, the window's runs with `log_dir`, `off_graph` and `stats`; the counts equal
+  the whole, not the page; `?since=` bounds the runs; `?summary=1` carries no tickets or runs;
+  an unknown course is `not-found`.
 
 ### Exit criteria
 
@@ -111,3 +117,6 @@ _filed 2026-11-09._
 _2026-11-09 — revised after review: the false "reads that exist" claim corrected — `GET …/courses`
 is B-192's and `legs/{leg}/runs` B-23's; the screens split out to B-212; the ticket list paged;
 `off_graph` taken from `stats`._
+
+_2026-11-09 — revised after the second review: `runners`, `arrived_today` and `?summary=1`
+added for the list screen; `GET …/courses` is now B-217's._

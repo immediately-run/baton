@@ -1,0 +1,90 @@
+---
+title: "B-223 — The course page: /courses/{course} draws the graph large with an edge panel of runs and logs, a station panel of resting tickets, the tickets on the course paged by cursor, off-graph rows and the stats tables"
+id: B-223
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1222
+tier: judgement
+description: "The second half of BATON-UI-V2's Courses screens, on B-197's course.show and B-212's CourseGraph. /repositories/{r}/courses/{course}: the graph large; focusing or clicking an edge opens its panel — the leg's fields, its blocked tickets by kind and when found, its window's runs with session links as passed and log directories as text beside the baton leg log line (R-BTN-128); a station's panel lists its resting tickets; below, the tickets on the course as a table loaded by cursor (ticket, station, path, the claim's legs since, waits-for, hand-off as text, blocks, queued leg and source, parent and children), the off-graph rows and the stats tables; ?since= as URL query. Read-only, course-agnostic, accessible, 375 px. Requires: B-212."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-212
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "station/leg graph with queue depths, per-ticket
+paths, stats." The brief's question 6 — how a course performs, a leg's log opening from its edge
+— is what this page answers.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the course page, carrying
+the retired Courses view's content), [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2)
+([R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2)), [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3)
+([R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3): the queued leg's source),
+[§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5) ([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5):
+a leg's log opens from its edge, as text), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3)
+([R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§9.3](../spec/BATON_SPEC/09-claims.md#sec-9-3)
+(hand-offs), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`course.show`).
+
+**Depends on:** B-212 (the layout, `CourseGraph` and the list; through it B-197 and B-221).
+
+**Used by:** B-203.
+
+### What to build
+
+1. **`/repositories/{r}/courses/{course}`** (`src/dashboard/screens/courses/CoursePage.tsx`):
+   `CourseGraph` large from `course.show` (the full read, `?since=` as URL query, 24 h default,
+   7 d max). Focusing or clicking an edge opens its panel: the leg's fields (from, to, kind,
+   requires as chips, `max_runs`, timeout, output names as text), its blocked tickets by block
+   kind and whether found before a start or during a run (R-BTN-126), and its window's runs
+   (run, run id, runner linking its page, started, ended, end, `session_url` as a link only as
+   the server passed it, transcripts as repository paths, `log_dir` as text with the `baton leg
+   log <ticket> <leg>` line, R-BTN-128). Focusing a station opens its panel: the resting tickets
+   linking their pages.
+2. **Below the graph**: the tickets on the course as a `<table>` loaded by `next_cursor`
+   ("more") — ticket linking its page, station, path drawn as the stations and legs run, the
+   claim's legs since, waits-for, hand-off as text, blocks, queued leg and its source (course,
+   route, decision; R-BTN-83), parent and children; the off-graph rows; the stats tables (per
+   station and leg wait and run times, ends by reason and detail, suspensions, advice
+   overridden) as the read gives them. The tables carry everything the drawing does.
+3. **Course-agnostic** (the same source test as B-212's). **Phone**: the graph scrolls
+   horizontally in its box at 375 px; the panels open below it; the tables stack.
+
+### What not to do
+
+- No control; no log bytes; no stats or counts computed in the browser; no course validation.
+
+### Trust
+
+- **Every value** is `course.show`'s text through `Text`; session links only as passed; log
+  directories and hand-off pointers as text. Nothing is written.
+
+### Invariants
+
+- **A blocked leg is a marked edge, never a station** (R-BTN-126); **log directories as text**
+  (R-BTN-128); **session links only from `session_hosts`** (R-BTN-113); **positions are Baton's**
+  (R-BTN-39); **course-agnostic**; **text, never markup** (§12.3).
+
+### Tests
+
+Under `test/ui/` with B-197's fixture: the edge panel lists the leg's runs with `log_dir` as
+text and an unlisted `session_url` as text; the station panel lists its tickets; the tickets table
+loads a second page by cursor and holds what the drawing holds; `?since=` round-trips; the
+fixture's station names appear nowhere in the source; a hostile hand-off pointer is text.
+
+### Exit criteria
+
+- [ ] `/courses/{course}` built, read-only, accessible, usable on a local Baton at desktop and
+      375 px.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-212 after the second review._

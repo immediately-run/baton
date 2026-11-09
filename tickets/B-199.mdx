@@ -52,7 +52,10 @@ B-207 is needed).
 The §14 row first, then the code (`admin.ts`'s `grantsView`).
 
 1. **Extend `GET /v1/owner/{repository}/grants`** (`owner.grant.list`): beside `owners`,
-   `grants`, `mcp_keys`, `settings` and `bars`, answer `tokens: [{id, role, capabilities,
+   `grants`, `settings` and `bars` (what `grantsView` answers today), answer `mcp_keys: [{id,
+   name, minter, actions, expires_at, last_used_at, client_host, client_addr}]` (§14 names the
+   field and the code lacks it; the keys exist from B-25, in this ticket's closure), `tokens:
+   [{id, role, capabilities,
    max_tier, expires_at, uses_left, registered: [credential_id]}]` (R-BTN-117), `sync_keys:
    [{fingerprint, role: sync | mirror, added_by, added_at}]` (R-BTN-93), `check_runners:
    [{fingerprint, name, capabilities, max_tier}]` (R-BTN-114), `consents: [{home, consented,
@@ -123,3 +126,6 @@ _filed 2026-11-09._
 _2026-11-09 — revised after review: `consents` moved here from B-200 (one writer of the grants
 read); the B-73 conditional removed; probes sent to B-202's `/resources`; the command names to be
 verified against R-BTN-127's tree by a test._
+
+_2026-11-09 — revised after the second review: `mcp_keys` (with `id`) listed among the
+additions, since `grantsView` does not answer it today._

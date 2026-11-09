@@ -34,7 +34,7 @@ Context: `docs/context/design-brief.mdx` (React and TypeScript, one built bundle
 
 **Depends on:** B-191 (the screen paths and the rendering rule are specified).
 
-**Used by:** B-206, and through it every screen ticket.
+**Used by:** B-206, and through it every screen ticket; B-204 (`screens.ts`).
 
 ### What to build
 
@@ -47,16 +47,25 @@ Context: `docs/context/design-brief.mdx` (React and TypeScript, one built bundle
    `src/dashboard/dist/app.js` and `dist/app.css`, and copies `index.html` there; the HTML
    references `/dashboard/app.js` and `/dashboard/app.css` with no inline script. `react`,
    `react-dom`, `@types/react`, `@types/react-dom`, `jsdom` and `@testing-library/react` are
-   devDependencies pinned exactly (the bundle is Worker text; the npm package's `files` carries
-   none of it). `pretest`, `pretypecheck`, `predev` and `prestart:local` run `build:ui`, so
-   `npm ci && npm test` works from a clean checkout and `ci.yml` needs no edit.
-3. **Delivery to both hosts as text** (R-BTN-55): `wrangler.toml`'s Text rule gains
-   `**/dashboard/dist/*.js` (its `**/*.html` and `**/*.css` already match), and
-   `scripts/bundle.mjs`'s text plugin the same path, so `front.ts` imports the three files as V1's
-   are imported today. Not Workers assets: that would change the Worker's deploy shape and break
+   devDependencies pinned exactly: the bundle is text the Worker and the local host embed, and
+   the published CLI embeds it too — `scripts/build-cli.mjs` bundles `cli/baton.mjs`, which
+   reaches `src/local/host.ts` and so `front.ts` — exactly as V1's files are embedded today.
+   `pretest`, `pretest:baton`, `pretest:no-quint`, `pretypecheck`, `predev`, `prestart:local`
+   and `prebuild:cli` run `build:ui`, and `build-cli.mjs` gets the same text plugin as
+   `bundle.mjs`, so `npm ci && npm test`, `npm run typecheck` and `npm run check:package` each
+   work from a clean checkout and `ci.yml`'s test and release jobs need no edit.
+3. **Delivery to both hosts as text** (R-BTN-55): `wrangler.toml`'s Text rule replaces
+   `**/ui/*.js` with `**/dashboard/dist/*.js` (its `**/*.html` and `**/*.css` already match),
+   and `scripts/bundle.mjs`'s text plugin replaces its `ui/app.js` filter with the same path, so
+   `front.ts` imports the three files as V1's are imported today. Not Workers assets: that would change the Worker's deploy shape and break
    the local host's parity.
-4. **The front serves the shell** (`src/core/front.ts`): `GET /`, `/login`, and every `path` in
-   `src/core/screens.ts` with its parameters filled by any id-shaped segment, answer `index.html`
+4. **`src/core/screens.ts` and the front.** `screens.ts` is the one table of screens B-191
+   specifies — `[{id, path, role}]` with `id` in the grammar (`root`, `tenant/state`,
+   `repository/tickets/{ticket}`), `path` the URL pattern, `role` `any` or `administrator` —
+   built here, since the front serves from it now and B-221's router and B-204's
+   `check:actions` read it later; Baton's own, so not under the vendored `src/shared/`. The
+   front (`src/core/front.ts`): `GET /`, `/login`, and every `path` in `screens.ts` with its
+   parameters filled by any id-shaped segment, answer `index.html`
    (one set of bytes, no data); `/dashboard/app.js` and `/dashboard/app.css` answer the assets;
    `GET /conditions/{id}` is B-195's redirect (served as the shell here until then); any other
    path outside `/v1` is `404`. The R-BTN-16 headers stay on every answer. V1's `src/ui/`
@@ -113,12 +122,15 @@ Context: `docs/context/design-brief.mdx` (React and TypeScript, one built bundle
   the tree; the bundle test fails on a fixture with a remote `src`;
 - the front answers `index.html` for `/`, `/login`, `/repositories/x/tickets/B-1`,
   `/instances`; `404` for `/nope` and `/ui/app.js`; the assets with their content types; the
-  R-BTN-16 headers on each — on both hosts.
+  R-BTN-16 headers on each — on both hosts;
+- `npm run check:package` from a clean checkout builds and installs the CLI with the dashboard
+  embedded.
 
 ### Exit criteria
 
-- [ ] `src/dashboard/` builds to `dist/`; both hosts serve it; V1 is gone; the `ui` vitest
-      project and `tsconfig.dashboard.json` run under `npm test` and `npm run typecheck`.
+- [ ] `src/dashboard/` builds to `dist/`; both hosts and the CLI bundle embed it; V1 is gone;
+      `screens.ts` exists; the `ui` vitest project and `tsconfig.dashboard.json` run under
+      `npm test` and `npm run typecheck`; `check:package` passes from a clean checkout.
 - [ ] The source gate and the origin test exist and pass.
 - [ ] The deploy workflow and `wrangler.toml` changes are in the PR and named for owner
       approval; README and brief current.
@@ -133,3 +145,8 @@ B-207 (controls and dialogs) and B-208 (root and strip); the directory named `sr
 delivery as text to both hosts decided; the vitest and tsconfig additions decided; the source gate
 replaces a bundle test and ESLint (Decision 6a); V1 removed here, since the owner needs no
 transition._
+
+_2026-11-09 — revised after the second review: `screens.ts` built here (its users come before
+B-204); the CLI bundle and the release job covered by `prebuild:cli` and the text plugin in
+`build-cli.mjs`; the Text rule and the bundler filter replace V1's paths rather than add to
+them._

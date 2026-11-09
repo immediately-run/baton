@@ -1,5 +1,5 @@
 ---
-title: "B-210 — The ticket page: /tickets/{ticket} gathers every read about a ticket — position, claim and attempts, why it cannot move, history with input and output pointers, children, leg runs with transcripts and log directories — and every control a session has on it"
+title: "B-210 — The ticket page's sections: /tickets/{ticket} gathers every read about a ticket — head, position, claim and attempts, why it cannot move, open conditions and scope findings, history with pointers, children, leg runs — read-only"
 id: B-210
 project: baton-ui-v2
 status: available
@@ -10,123 +10,104 @@ tags:
   - roadmap-item
 order: 1209
 tier: judgement
-description: "The ticket page of BATON-UI-V2: sections each from its own read, polled together — ticket.show (position, claim with the mockup's lease bar and attempts, overrides, open conditions, scope findings, parent and children, resume), blocks and prerequisites (why it cannot move), history paged by before with inputs and outputs as pointers, children, legs/{leg}/runs per leg with session links under session_hosts and log directories as text — and its controls by ui.view: hold, unhold, expedite, cancel, resolve, Stop (one click), the scope finding's acknowledgement, and for an administrator's session force-reap, fence clear, the completion's confirm and release; route and adopt named as CLI lines (Decision 2a). Requires: B-194, B-207, B-23, B-10."
+description: "The read-only half of BATON-UI-V2's ticket page: sections each from its own read, polled together — ticket.show (head, position, the mockup's claim block with lease bar and attempts, overrides, open conditions, scope findings, parent and children, resume, the forge link), blocks and prerequisites as the why-it-cannot-move table, history paged by before with inputs and outputs as pointers (an https URI a link only after the client's link rule with the repository's web_base), children, and legs/{leg}/runs per leg with session links as passed and log directories as text. Its controls are B-222's. Requires: B-218, B-221, B-217, B-23, B-10."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
-  - B-194
-  - B-207
+  - B-218
+  - B-221
+  - B-217
   - B-23
   - B-10
 ---
 
 **Brief:** the owner, 2026-11-09 (B-191): "A ticket page gathers every read about it: position
 (station, path, queued leg), why it can't move (blocks, prerequisites), history with
-input/output pointers, children, leg runs with transcripts and log dirs. Its controls live here
-too." The mockup's runner cards' claim block (`workers.txt`: leg from → to, running for, lease
-reaps at with its bar and minutes left, attempt n of m with backoff, output, earlier attempts
-with the failure's text) is this page's claim section; the Output name is text.
+input/output pointers, children, leg runs with transcripts and log dirs." The mockup's runner
+cards' claim block (`workers.txt`) is this page's claim section; its Output name is text.
 
-**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the ticket page; "The
-actions"; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): which of its controls are
-confirmed), [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2)),
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the ticket page),
+[§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2)),
 [§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) ([R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1)),
 [§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) ([R-BTN-81](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7):
 history), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5) ([R-BTN-82](../spec/BATON_SPEC/05-courses.md#sec-5-5):
 inputs and outputs as URIs), [§4.6](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6)
 ([R-BTN-86](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6)), [§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5)
-([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5): log directories as text), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3)
-([R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4)
-([R-BTN-119](../spec/BATON_SPEC/08-runners.md#sec-8-4): Stop), [§9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5)
-([R-BTN-19](../spec/BATON_SPEC/09-claims.md#sec-9-5): the fence), [§9.6](../spec/BATON_SPEC/09-claims.md#sec-9-6)
-([R-BTN-10](../spec/BATON_SPEC/09-claims.md#sec-9-6)), [§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9)
-(scope findings and their acknowledgement), [§14](../spec/BATON_SPEC/14-api.md#sec-14)
-(`ticket.show`, `blocks`, `prerequisites`, `history`, `children`, `legs/{leg}/runs`,
-`/v1/ui/overrides/{ticket}`, `/v1/ui/messages`, `/v1/ui/claims/*`, `/v1/ui/scope/{id}/resolve`).
+([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5)), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3)
+([R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9)
+(scope findings), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3) (links: the client applies
+`links.mjs` again), [§14](../spec/BATON_SPEC/14-api.md#sec-14).
 
-**Depends on:** B-194 (`ticket.show`), B-207 (controls and dialogs), B-23 (`legs/{leg}/runs`),
-B-10 (`prerequisites`).
+**Depends on:** B-218 (`ticket.show`), B-221 (the router and polling layer), B-217
+(`ticket.children`), B-23 (`legs/{leg}/runs`), B-10 (`prerequisites`).
 
-**Used by:** B-203.
+**Used by:** B-222, B-203.
 
 ### What to build
 
 1. **Sections** (`src/dashboard/screens/tickets/TicketPage.tsx`, one component per section
-   under it), all declared to the polling layer together:
+   under it), all declared to the polling layer together, every value through `Text` or
+   `View`:
    - **Head**: qualified id, title, course, tier, tags, requires as chips, `web_url` as the one
-     outward link (host shown), parent linking its page, the state word and mark.
+     outward link (host shown), parent linking its page, the state mark and word.
    - **Position**: station, the path as stations and legs run with run ids, the queued leg and
-     its `source` (course, route or decision; R-BTN-83) — from `ticket.show`.
+     its `source` (course, route or decision; R-BTN-83) — from `ticket.show`; beneath it the
+     lines `baton ticket route <ticket> <leg>` and `baton ticket adopt <ticket> …` as text
+     (Decision 2a).
    - **Claim**: the mockup's block from `ticket.show.claim` — runner linking its page, leg,
-     running for, the lease bar, deadline, attempt n of `max_runs` and `next_backoff_until`,
-     `session_url` as a link only where the read passed it (R-BTN-113), `log_dir` as text with
-     the `baton leg log <ticket> <leg>` line beside it (R-BTN-128); then the earlier `attempts`
-     with their end reason and detail as text.
+     running for, the lease bar (claimed at to lease end, now marked, minutes left), deadline,
+     attempt n of `max_runs` and `next_backoff_until`, `session_url` as a link only where the
+     read passed it (R-BTN-113), `log_dir` as text with the `baton leg log <ticket> <leg>` line
+     (R-BTN-128); then the earlier `attempts` with end reason and detail as text.
    - **Why it cannot move**: `blocks` (kind, ref linking a ticket or naming a capability, since,
-     until) and `prerequisites` for the queued leg (`met`, `why`, `since`, `until`, `url` where
-     given, `found`), as a `<table>`.
-   - **Open conditions and scope findings**: condition ids and types linking the Resolve page
-     (B-195); scope findings (§12.9) with kind, target and ref as text and their one control.
+     until) and `prerequisites` for the queued leg (`met`, `why`, `since`, `until`, `url` after
+     the client's link rule, `found`), as a `<table>`.
+   - **Open conditions and scope findings**: condition ids and types linking the Resolve page;
+     scope findings (§12.9) with kind, target and ref as text (their acknowledgement is B-222's
+     control).
    - **History**: `history` paged by `?before=` ("earlier" loads more), each row's kind, leg,
      run, reached, next leg, and its `inputs` and outputs as pointers: a `git:` or `s3://` URI
-     as text with its digest, an `https://` URI as a link only when the client-side
-     `links.mjs` rule passes it with the repository's `web_base` (§12.3).
-   - **Children**: `children` with station and blocked, linking each.
+     as text with its digest, an `https://` URI as a link only when the client's `links.mjs`
+     rule passes it with the repository's `web_base` and `link_hosts` from `repo.list` (§12.3).
+   - **Children**: `ticket.children` with station and blocked, linking each.
    - **Leg runs**: for each leg the path names, `legs/{leg}/runs` — run, run id, runner, mode,
-     started, ended, end, session link under R-BTN-113, transcripts as repository paths (text),
+     started, ended, end, session link as passed, transcripts as repository paths (text),
      `log_dir` as text.
-2. **Controls** by `ui.view` through B-207, context `{repository, ticket_id, claim_id}`:
-   hold, unhold (only where `ticket.show` carries `allowed` naming it — an approver's session,
-   R-BTN-186), expedite and clear expedite, cancel (the confirm dialog), resolve (where exactly
-   one open condition offers restarts, the restart buttons inline; else "resolve on the
-   condition's page"), Stop (one click, Decision 3a), the scope finding's acknowledgement
-   (`POST /v1/ui/scope/{id}/resolve`, one click, §12.9); for an administrator's session
-   force-reap, fence clear (where `fence_pending`), the completion's confirm and release (where
-   `unconfirmed`) — each a `202` through the code dialog as R-BTN-155 lists them. Route and
-   adopt are not controls (Decision 2a): the page shows `baton ticket route <ticket> <leg>` and
-   `baton ticket adopt <ticket> …` as text under Position.
-3. **Phone.** The sections stack at 375 px; the controls row wraps under the head.
+2. **Phone.** The sections stack at 375 px.
 
 ### What not to do
 
-- No body; no state computed in the client; no control the registry does not place here.
-- No route or adopt button (Decision 2a); no dialog on Stop (Decision 3a).
-- No log bytes: `log_dir` is text (R-BTN-128).
+- No control here (B-222); no body; no state computed in the client; no log bytes.
 
 ### Trust
 
-- **Every section** draws its read's text through `Text`; URIs become links only by the shared
-  link rule with the read's `web_base`; `session_url` only as the server passed it.
-- **Every control** is a registry action through `authorize`; the page sends the context and the
-  form, and draws a refusal as text; `allowed` gates unhold on the server's word.
+- **Every section** draws its read's text through `Text` or `View`; URIs become links only by
+  the client's link rule; `session_url` only as the server passed it.
 
 ### Invariants
 
-- **R-BTN-155's confirmed list**: unhold, expedite, the completion's confirm and release,
-  force-reap and the fence clear go through the code dialog; hold, cancel, Stop, resolve and the
-  scope acknowledgement do not.
 - **Log directories as text** (R-BTN-128); **session links only from `session_hosts`**
-  (R-BTN-113); **text, never markup** (§12.3).
-- **Positions are Baton's** (R-BTN-39); **an owner's session, its repositories** (R-BTN-155).
+  (R-BTN-113); **text, never markup** (§12.3); **positions are Baton's** (R-BTN-39); **an owner's
+  session, its repositories**.
 
 ### Tests
 
-Under `test/ui/` with fixture reads and a fixture `GET /v1/actions`: every section draws its
-fixture; the owner's entries draw hold, cancel, Stop and not force-reap, the administrator's
-force-reap too (B-191's scenario on this screen); unhold appears only with `allowed`; Stop sends
-with no dialog; cancel opens the confirm dialog; a `202` opens the code dialog; `log_dir`, a
-`git:` URI and an unlisted `session_url` are text; an `https://` URI under `web_base` is a link;
-the route and adopt lines are text.
+Under `test/ui/` with fixture reads: every section draws its fixture; `log_dir`, a `git:` URI and
+an unlisted `session_url` are text; an `https://` URI under `web_base` is a link; the route and
+adopt lines are text; a hostile title is text; the sections stack at 375 px.
 
 ### Exit criteria
 
-- [ ] `/tickets/{ticket}` built with every section and control above, usable on a local Baton
-      for both roles at desktop and 375 px.
+- [ ] `/tickets/{ticket}` built with every section above, usable on a local Baton at desktop
+      and 375 px.
 - [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
       `npm run check:tickets` are green.
 
 ## Status
 
 _filed 2026-11-09, split from B-194 after review._
+
+_2026-11-09 — revised after the second review: the controls split out to B-222 together with
+the two routes they need; the client's link rule applied to history and prerequisite links._

@@ -10,14 +10,15 @@ tags:
   - roadmap-item
 order: 1212
 tier: judgement
-description: "The attestations read and screen of BATON-UI-V2. attestation.list: every attestation of the repository — id, type, subject, value as a blob, writer (fingerprint or mcp id, and the writer class the policy judged it as), domain and run label where the grant carries them, written at, lapses at, revoked at — all readable by the repository reads' principals and a session; ?subject=, ?type=, ?live=1 and ?cursor=; and writable_types, the types the caller may write as owner under the policy in force, computed by authorize. /attestations: the table with the filters as URL query, each value expandable through R-BTN-112's renderer or as pretty-printed text, lapsed and revoked rows marked, and one control by ui.view — Add attestation (attestation.add, writer owner) with its type a select of writable_types; revocation is the CLI's. Requires: B-207, B-192, B-205."
+description: "The attestations read and screen of BATON-UI-V2. attestation.list: every attestation of the repository — id, type, subject, value as a blob, writer (fingerprint or mcp id, and the writer class the policy judged it as), domain and run label where the grant carries them, written at, lapses at, revoked at — all readable by the repository reads' principals and a session; ?subject=, ?type=, ?live=1 and ?cursor=; and writable_types, the types the caller may write as owner under the policy in force, computed by authorize. /attestations: the table with the filters as URL query, each value expandable through R-BTN-112's renderer or as pretty-printed text, lapsed and revoked rows marked, and one control by ui.view — Add attestation (attestation.add, writer owner) with its type a select of writable_types; revocation is the CLI's. Requires: B-207, B-195, B-146, B-205."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
   - B-207
-  - B-192
+  - B-195
+  - B-146
   - B-205
 ---
 
@@ -32,8 +33,9 @@ B-191 amends it; R-BTN-155: an attestation is not a confirmed action), [§5.5](.
 renderer), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3), [§14](../spec/BATON_SPEC/14-api.md#sec-14)
 (`POST`, `DELETE …/attestations`).
 
-**Depends on:** B-207 (controls), B-192 (sessions on the repository reads), B-205 (the cursor
-convention).
+**Depends on:** B-207 (controls), B-195 (a session writes an owner attestation; sessions on
+the reads through B-192), B-146 (R-BTN-181's attestation store and routes — today only
+`std:decision@1` answers are kept, in the person-leg tables), B-205 (the cursor convention).
 
 **Used by:** B-203.
 
@@ -44,8 +46,10 @@ The §14 row first, then the code.
 1. **`GET /v1/repositories/{repository}/attestations`** (`attestation.list`, read; the repository
    reads' principals and a session — every attestation of a repository is readable by its
    readers, there is no narrower class): `attestations`, each `id`, `type`, `subject`, `value`,
-   `writer` (`credential`, and `class`: owner, human, service, runner or sync), `domain` and
-   `run_label` where the grant carries them, `written_at`, `lapses_at`, `revoked_at`; then
+   `writer` (`credential`, and `class` as R-BTN-181 names writers: `human`, `owner`, `baton`,
+   `instrument`, `runner`, `admin`, `sync`, or `service:<fingerprint>`), `domain` and
+   `run_label` where the grant carries them, `at`, `lapses_at`, `revoked_at` (R-BTN-181's
+   shape); then
    `next_cursor` and `writable_types` (a list of types); `?subject=`
    (a ticket id or commit), `?type=`, `?live=1` (not lapsed, not revoked), `?cursor=`, 100 a
    page, newest first. `writable_types` is the list of `type`s the caller may write as `owner`
@@ -53,13 +57,14 @@ The §14 row first, then the code.
    `allowed` rule); empty for a key or session the policy admits for none.
 2. **`/repositories/{r}/attestations`** (`src/dashboard/screens/governance/Attestations.tsx`):
    the `<table>` — type, subject (a ticket id linking its page, a commit as text), writer and
-   class, domain and run label, written at, lapses at — with the filters as URL query, load-more
+   class, domain and run label, at, lapses at — with the filters as URL query, load-more
    by cursor, lapsed and revoked rows marked by word; each row expands to its `value` through
    `View` where the type's schema has a view (R-BTN-112), else pretty-printed text. One control
    by `ui.view` on `repository/attestations` through B-207: **Add attestation**
    (`attestation.add`, writer `owner`, not confirmed), drawn only when `writable_types` is not
    empty, its form from the entry's `input` with `type` a select of `writable_types`, `subject`
-   text, `value` a JSON text field validated on the server, `lapses_at` optional. Revocation is
+   text, `value` a JSON text field validated on the server, `lapses_at` optional; the call is
+   B-195's session path onto `POST …/attestations`. Revocation is
    `baton attestation revoke <repository> <id>` as text (destructive and a credential action; a
    session does not revoke).
 3. **Phone.** Cards at 375 px; the value expands in place.
@@ -105,3 +110,6 @@ text; a value with a view goes through `View`.
 ## Status
 
 _filed 2026-11-09, split from B-200 after review._
+
+_2026-11-09 — revised after the second review: depends on B-146 (the store) and B-195 (the
+session's write path); R-BTN-181's field name `at` and its writer list used._

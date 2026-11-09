@@ -1,0 +1,120 @@
+---
+title: "B-222 — The ticket page's controls and the two routes they lack: hold, unhold, expedite, cancel, resolve, Stop, the scope acknowledgement, and an administrator's force-reap, fence clear and the completion's confirm and release — the last two built as POST /v1/ui/claims/{id}/confirm and …/release over claims.resolve"
+id: B-222
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1221
+tier: judgement
+description: "The controls half of BATON-UI-V2's ticket page, through B-207 by ui.view with context {repository, ticket_id, claim_id, to_runner_id, condition_id}: hold; unhold only where ticket.show's allowed names it; expedite and clear; cancel (the confirm dialog); resolve inline where exactly one open condition offers restarts; Stop (one click, Decision 3a); the scope finding's acknowledgement (POST /v1/ui/scope/{id}/resolve, one click); and for an administrator's session force-reap, fence clear (B-171's route) and the completion's confirm and release — §14 lists POST /v1/ui/claims/{id}/confirm and …/release and no code serves them, so this ticket builds both over claims.resolve's confirm | release, each 202 {confirm_code} per R-BTN-155, keeping its @model annotation for model:links. Requires: B-210, B-207, B-218, B-171."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-210
+  - B-207
+  - B-218
+  - B-171
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "Its controls live here too: hold/expedite/cancel,
+route, adopt, resolve, stop." Route and adopt are CLI lines by Decision 2a (B-210 draws them as
+text).
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ("The actions"; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4):
+unhold, expedite, the completion's confirm and release, force-reap and the fence clear are
+confirmed; hold, cancel, Stop, resolve and the scope acknowledgement are not; the `allowed`
+rule), [§6.8](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8) ([R-BTN-12](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8)),
+[§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8):
+unhold is an approver's), [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-119](../spec/BATON_SPEC/08-runners.md#sec-8-4):
+Stop), [§9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5) ([R-BTN-19](../spec/BATON_SPEC/09-claims.md#sec-9-5):
+the fence), [§9.6](../spec/BATON_SPEC/09-claims.md#sec-9-6) ([R-BTN-10](../spec/BATON_SPEC/09-claims.md#sec-9-6):
+confirming or releasing an unconfirmed completion), [§12.2](../spec/BATON_SPEC/12-security.md#sec-12-2)
+(destructive actions), [§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9) (the scope
+acknowledgement), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`/v1/ui/overrides/{ticket}`,
+`/v1/ui/messages`, `/v1/ui/conditions/{condition}/resolve`, `/v1/ui/scope/{id}/resolve`,
+`/v1/ui/claims/{id}/reap`, `…/fence-clear`, `…/confirm`, `…/release`).
+
+**Depends on:** B-210 (the page's sections), B-207 (controls and dialogs), B-218 (`ticket.show`'s
+`allowed`, `claim.runner_id` and the condition ids), B-171 (`claim.fence-clear`).
+
+**Used by:** B-203 (which removes `/v1/ui/claims/{id}/resolve` once these replace it).
+
+### What to build
+
+The §14 rows exist for every route; the code first for the two that lack it, then the controls.
+
+1. **`POST /v1/ui/claims/{id}/confirm` and `…/release`** (`claim.confirm`, `claim.release`; an
+   administrator's session; `{}`; `202 {confirm_code}` per R-BTN-155): built over
+   `claims.resolve`'s `confirm | release` (today's `POST /v1/ui/claims/{id}/resolve`, which V1
+   called with `{action}` and which B-203 removes once these exist), keeping its `@model`
+   annotation so `model:links` still names the implementation; `ui.view` on
+   `repository/tickets/{ticket}` for both; a scenario on both hosts for each, with the code
+   confirmed by the minting key.
+2. **The controls** (`src/dashboard/screens/tickets/TicketControls.tsx`) through B-207 by
+   `ui.view` with context `{repository, ticket_id, claim_id: claim.claim_id, to_runner_id:
+   claim.runner_id, condition_id}` (the last set only when exactly one condition is open):
+   - **hold** and **cancel** (cancel through the confirm dialog), **expedite** and **clear
+     expedite** (the code dialog), **unhold** (the code dialog; drawn only where `ticket.show`'s
+     `allowed` names `ticket.unhold`, R-BTN-186);
+   - **resolve**: where exactly one open condition offers restarts, its restart buttons inline
+     (`ticket.resolve` through B-56's route); otherwise "resolve on the condition's page" linking
+     each condition;
+   - **Stop**: one click, no dialog (Decision 3a), `leg.stop` through `POST /v1/ui/messages` with
+     `to_runner_id`, `kind: release` and a payload of the ticket id and `reason: requested`;
+   - **acknowledge** on each open scope finding (`scope.resolve`, `POST
+     /v1/ui/scope/{id}/resolve`, one click, §12.9; its `ui.view` from B-204);
+   - for an administrator's session: **force-reap** (`claim.force-reap`, the code dialog),
+     **clear fence** where `fence_pending` (`claim.fence-clear`, B-171's, the code dialog),
+     **confirm completion** and **release completion** where the state is `unconfirmed`
+     (item 1's routes, the code dialog).
+   Each refusal is drawn beside its control as text.
+3. **Phone.** The controls row wraps under the head at 375 px.
+
+### What not to do
+
+- No route or adopt button (Decision 2a); no dialog on Stop (Decision 3a); no control the
+  registry does not place here.
+- No permission logic: unhold follows `allowed`; everything else is drawn from the session's
+  entries and refused by the server if need be.
+
+### Trust
+
+- **Every control** is a registry action through `authorize`; the page sends the context and the
+  form and draws a refusal as text.
+- **`claim.confirm` and `claim.release`** — an administrator's session, confirmed by the minting
+  key (R-BTN-155); the same core function V1 called.
+
+### Invariants
+
+- **R-BTN-155's confirmed list**: unhold, expedite, the completion's confirm and release,
+  force-reap and the fence clear go through the code dialog; hold, cancel, Stop, resolve and the
+  acknowledgement do not.
+- **Destructive takes `confirm: true`** (§12.2) except Stop (Decision 3a). **One check**
+  (R-BTN-129). **Both hosts** (R-BTN-55) for the two routes.
+
+### Tests
+
+Scenarios numbered at merge, on both hosts: `claim.confirm` and `claim.release` answer `202`
+to an administrator's session and act on confirmation, `forbidden` to an owner's. Under
+`test/ui/` with a fixture `GET /v1/actions` and `ticket.show`: the owner's entries draw hold,
+cancel, Stop, resolve and not force-reap, the administrator's force-reap, clear fence, confirm
+and release too (B-191's scenario on this screen); unhold appears only with `allowed`; Stop sends
+with `to_runner_id` and no dialog; cancel opens the confirm dialog; expedite opens the code
+dialog; the acknowledgement sends one click.
+
+### Exit criteria
+
+- [ ] `claim.confirm` and `claim.release` built with tests; every control above drawn by
+      `ui.view` and usable on a local Baton for both roles.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run model:links`,
+      `npm run check:wiki` and `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-210 after the second review._

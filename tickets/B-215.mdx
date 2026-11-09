@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1214
 tier: judgement
-description: "Three read-only tenant screens of BATON-UI-V2 for an administrator's session (Decision 1a). /settings: link hosts, session hosts and the check app id from admin.settings.show, naming baton admin settings set; /state: frozen or sealed as the page's banner, the mockup's Capacity cards from admin.tenant — live claims, alive runners, live tickets and repositories each against its envelope figure, the day's requests and row writes, storage — naming baton admin freeze, unfreeze, seal, export and import as text; /sessions: the live dashboard sessions from admin.session.list with the caller's own marked, naming baton admin sessions revoke --all. No control. Requires: B-202, B-208."
+description: "Three read-only tenant screens of BATON-UI-V2 for an administrator's session (Decision 1a). /settings: link hosts, session hosts and the check app id from admin.settings.show, naming baton admin settings set; /state: the mockup's Capacity cards from admin.tenant — live runners, repositories, tickets, history rows and claims, and the 5-minute request rate and burst, each against R-BTN-87's envelope figure with a bar — and storage, naming baton admin export and import as text and recording that freeze and seal (R-BTN-88) are unbuilt and will add their banner; /sessions: the live dashboard sessions from admin.session.list with the caller's own marked, naming baton admin sessions revoke --all. No control. Requires: B-202, B-208."
 topics:
   - baton
 owns: {}
@@ -24,12 +24,12 @@ depends_on:
 `/sessions`"; Decision 1a in B-191, answered by the owner on 2026-11-09, makes them read-only and keeps export
 CLI-only under either answer. The mockup's Capacity cards (`root.png`: Requests / min 38 / 600,
 Live claims 2 / 7, Alive workers 3 / 16, Live tickets 241 / 5,000, each with a bar) are `/state`;
-the requests card is the day's count, since 600 a minute is a per-credential limit (R-BTN-135),
-not the tenant's.
+the requests card is R-BTN-87's 5-minute mean against 20 a second (Decision 8a), since 600 a
+minute is §2.3's per-credential admission limit, not the tenant's.
 
 **Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the tenant screens;
 Capacity), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3) ([R-BTN-87](../spec/BATON_SPEC/02-deployments.md#sec-2-3):
-the envelope; [R-BTN-135](../spec/BATON_SPEC/02-deployments.md#sec-2-2)), [§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8)
+the envelope, rates as 5-minute means; Admission: the per-credential limit), [§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8)
 ([R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8): freeze, seal, export, import),
 [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4):
 sessions live at most 4 hours; `admin.sessions.revoke`), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5)
@@ -49,13 +49,14 @@ sessions live at most 4 hours; `admin.sessions.revoke`), [§5.5](../spec/BATON_S
    `session_hosts` as lists, `check_app_id` as text, each with its one-line meaning (R-BTN-112,
    R-BTN-113, §12.7); `baton admin settings set [--link-hosts …] [--session-hosts …]
    [--check-app-id <id>]` as text.
-2. **`/state`**: a banner when `frozen` or `sealed` (R-BTN-88) with what each means for writes;
-   the mockup's cards from `admin.tenant` — live claims, alive runners, live tickets and
-   repositories, each as "n / envelope" with a bar and the numbers as text; the day's requests
-   and row writes as cards with no bar (no envelope applies); storage. `baton admin freeze`,
-   `admin unfreeze`, `admin seal`, `admin export [--with-history]` and `admin import <file>` as
-   text; no control, and no export link (Decision 1: the whole tenant's state is never behind a
-   cookie).
+2. **`/state`**: the mockup's cards from `admin.tenant` — live runners, repositories, tickets,
+   history rows and claims, and the 5-minute request rate and the largest 5-second burst, each
+   as "n / envelope" with a bar and the numbers as text (R-BTN-87: every figure against the
+   envelope); storage. `baton admin export [--with-history]` and `admin import <file>` as text;
+   no control, and no export link (Decision 1: the whole tenant's state is never behind a
+   cookie). Freeze and seal (R-BTN-88) are built by no ticket: the screen carries no banner and
+   names no freeze command until the ticket that builds them adds both, which B-203's ledger
+   records as a gap.
 3. **`/sessions`**: a `<table>` of the live sessions — role, key fingerprint, repositories (an
    owner's), bound at, last seen, client address, the caller's own marked "this session";
    `baton admin sessions revoke --all` as text.
@@ -78,8 +79,8 @@ sessions live at most 4 hours; `admin.sessions.revoke`), [§5.5](../spec/BATON_S
 
 ### Tests
 
-Under `test/ui/` with fixtures: the banner appears for `frozen`; the cards draw each live count
-against its envelope and the day's counts without a bar; `/sessions` marks the caller's own;
+Under `test/ui/` with fixtures: the cards draw each live count and the rate against its
+envelope figure with a bar; `/sessions` marks the caller's own;
 every command line matches R-BTN-127's tree; no control is drawn; a hostile client address is
 text.
 
@@ -92,3 +93,6 @@ text.
 ## Status
 
 _filed 2026-11-09, split from B-202 after review._
+
+_2026-11-09 — revised after the second review: the request rate drawn against R-BTN-87's
+envelope (Decision 8a); the frozen and sealed banner dropped until R-BTN-88 is built._

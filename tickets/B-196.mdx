@@ -52,14 +52,19 @@ The two §14 rows first, then the code, reusing `workerApi.ts`'s `workersView` a
    accepted (R-BTN-146) — Baton prunes no runner row, so a dead one stays until its key is
    revoked — each `{runner_id, hostname, session_name, alive, last_seen_at, last_activity_at,
    reaped_at, harness, kind, isolation, tier_ceilings, capabilities, granted, tags, courses,
-   lease_timeout_s, credential: {kind, token_id?, role, domain?}, claim, busy_elsewhere}`:
+   lease_timeout_s, credential: {kind, token_id?, role, domain?}, last_report, transcript_url,
+   claim, busy_elsewhere}`:
    `alive` is `reaped_at` null and `last_seen_at` within `lease_timeout` (as `workersView`
    computes it); `granted` the repository's grant capabilities (R-BTN-174); `courses` the
    runner's course versions for this repository; `claim` null or this repository's claim it
    holds — `{claim_id, ticket_id, station, leg, run_id, claimed_at, lease_ends_at,
    deadline_at, attempt, max_runs, next_backoff_until, session_url, log_dir, activity: {kind,
-   label, started_at} | null}`; `busy_elsewhere` true when it holds a claim on another
-   repository, with no detail. Ordered alive first, then by `last_seen_at` descending. The
+   label, started_at} | null}`; `last_report` the newest `status_report` message's `{payload,
+   sent_at}` or null (what `workersView` serves today — the reply to a Status request);
+   `transcript_url` the newest transcript's link built from validated parts as today, or null
+   (§11.4's "transcript link"); `busy_elsewhere` true when it holds a claim on another
+   repository, with no detail. Ordered by hostname then session name (R-BTN-3: the dashboard
+   groups runners by hostname). The
    `profile` blob is not in the list (it is on `runner.show`).
 2. **`GET /v1/repositories/{repository}/runners/{runner}`** (`runner.show`, read; same callers):
    the row above plus `profile` (the opaque blob, §12.3), `attempts` (earlier attempts on its
@@ -114,3 +119,6 @@ _filed 2026-11-09._
 
 _2026-11-09 — revised after review: the screens split out to B-211; the URL key decided
 (`runner_id`); the retention stated (no pruning; alive by lease); the model dropped by rule._
+
+_2026-11-09 — revised after the second review: `last_report` and `transcript_url` added so the
+Status request has a visible reply; the order follows R-BTN-3's grouping by hostname._

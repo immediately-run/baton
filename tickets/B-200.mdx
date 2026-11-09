@@ -58,7 +58,7 @@ owner bars and required bars), [§3.4](../spec/BATON_SPEC/03-repositories-and-fo
    session needs no administrator read). `baton owner settings set <repository> […]` as text.
 3. **`/repositories/{r}/bars`**: the owner bars in force and scheduled (course, tag, legs,
    applies, starts, ends, release holders, reason, set by — `mcp:<id>` drawn with the key's
-   name from `mcp_keys`) and the required bars (course, except legs, tag prefix) from the
+   name by joining `mcp_keys[].id`, which B-199 adds to the read) and the required bars (course, except legs, tag prefix) from the
    grants read's `bars` and `settings`; `baton owner bar add …`, `baton owner bar lift
    <repository> <id>` and `baton owner bar follow <repository> <course>` as text — a lift is an
    approver's by key (R-BTN-186), not a session's.
@@ -108,3 +108,5 @@ _filed 2026-11-09._
 _2026-11-09 — revised after review: the attestations read and screen split out to B-213;
 `consents` taken from B-199's read; the `policy/log` hedge removed; `tiers` and `weight` from
 `repo.list`._
+
+_2026-11-09 — revised after the second review: the `mcp:<id>` join names B-199's `id`._

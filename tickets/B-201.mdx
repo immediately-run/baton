@@ -1,5 +1,5 @@
 ---
-title: "B-201 — Sync: GET …/sync is the mirror's view of a repository — head, observations, wants, held posts, mode, adoptions and Discrepancies — and /sync draws it with resync, the held post's accept, and the administrator's confirmed forced resync, cut over and adoption confirm"
+title: "B-201 — The sync read and its two session writes: GET …/sync is the mirror's view of a repository, POST /v1/ui/resync is built, and POST /v1/ui/board/accept gets its §14 row"
 id: B-201
 project: baton-ui-v2
 status: available
@@ -10,39 +10,33 @@ tags:
   - roadmap-item
 order: 1200
 tier: judgement
-description: "The Sync read and screen of BATON-UI-V2. repo.sync: head (sha, parent, received at, ticket count, observation, the source declaration), the observation counter and an outstanding number's age, the last post accepted or refused with its code, wants and dispatches, held posts, mode and cutover time, pending adoptions (an administrator's only) and the discrepancies of ?since= (7 days default) with R-BTN-85's stored fields sub, baton, git, observation. /repositories/{r}/sync draws it: the mode banner, the head line, the counter, the last post, wants, held posts, adoptions and the Discrepancies table linking each ticket's history; its controls by ui.view — Resync (one click; this ticket builds POST /v1/ui/resync), Accept a held post (Decision 5a; this ticket gives /v1/ui/board/accept its §14 row), and for an administrator's session Force resync onto a sha, Cut over and Confirm adoption, each through the confirm-code dialog. Requires: B-207, B-205."
+description: "The API half of the Sync screen of BATON-UI-V2. repo.sync: head (sha, parent, received at, ticket count, observation, the source declaration), the observation counter and an outstanding number's age, the last post accepted or refused with its code, wants and dispatches, held posts, mode and cutover time, pending adoptions (an administrator's only) and the discrepancies of ?since= with R-BTN-85's stored fields. POST /v1/ui/resync (repo.resync): §14 lists it and no code serves it — built here, a session of either role on its repositories, force and sha an administrator's confirmed action, with B-76's owner-session scoping. POST /v1/ui/board/accept (repo.accept-post, Decision 5a): exists in code, gets its §14 row and ui.view. Requires: B-192, B-205."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
-  - B-207
+  - B-192
   - B-205
 ---
 
 **Brief:** the owner, 2026-11-09 (B-191): "**Sync** `/sync` — the mirror's view: head,
-observations, wanted, and Discrepancies (where git and Baton disagreed)." The mockup's
-Discrepancies table (kind, ticket, Baton had struck through, git showed, age) and its SHADOW
-banner with "Cut docs over…" are this screen's rows; its "Accept history" button is not built
-(R-BTN-85 adopts git's value at once — B-191's drop list) and its "Confirm adoption" is.
+observations, wanted, and Discrepancies (where git and Baton disagreed)."
 
-**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the Sync screen, carrying
-the retired Discrepancies view; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): a forced
-resync, cut over and an adoption confirm are confirmed, a resync is not),
-[§4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) ([R-BTN-11](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3):
+**Spec:** [BATON_SPEC §4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) ([R-BTN-11](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3):
 heads by compare-and-set, the forced resync; [R-BTN-62](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3):
 observations), [§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) ([R-BTN-85](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7):
 `{sub, baton, git, observation}`), [§3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3)
 ([R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3): wants and dispatch),
 [§16.1](../spec/BATON_SPEC/16-adoption.md#sec-16-1) ([R-BTN-28](../spec/BATON_SPEC/16-adoption.md#sec-16-1):
-cutover and adoptions), [§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1)
-([R-BTN-92](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1): the forge link),
-[§14](../spec/BATON_SPEC/14-api.md#sec-14) (`POST /v1/ui/resync`, `POST /v1/ui/cutover`,
-`POST /v1/ui/adoptions/{claim}/confirm`; `/v1/ui/board/accept` has no row yet).
+cutover and adoptions), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4):
+a forced resync is confirmed, a resync is not), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`POST
+/v1/ui/resync`; `/v1/ui/board/accept` has no row).
 
-**Depends on:** B-207 (controls and dialogs), B-205 (the window parameter).
+**Depends on:** B-192 (sessions on the repository reads; the registry), B-205 (the window and
+response conventions).
 
-**Used by:** B-203.
+**Used by:** B-220.
 
 ### What to build
 
@@ -56,58 +50,42 @@ The §14 rows first, then the code.
    received_at, auto_accept_at}]` (today's `uiState().held`), `mode: {mode: shadow | cut-over,
    cutover_at}` (R-BTN-28), `adoptions: [{claim, ticket, runner_id, hostname, session_name,
    requested_at}]` — present for an administrator only — and `discrepancies: [{sub, ticket,
-   baton, git, observation, at}]` for `?since=` (7 days default, 30 at most), R-BTN-85's
-   stored fields. From `observations.ts`, `history.ts`, `cutover.ts` and the held-posts query.
-2. **`POST /v1/ui/resync`** (`repo.resync`): the §14 row exists and the route does not; build
-   it — a session of either role on its repositories, `{repository, force?, sha?}`; without
-   `force` it dispatches the sync and answers `{ok: true}`; with `force` and `sha` an
-   administrator's session only, `202 {confirm_code}` and on confirmation the head reset to
-   `sha` (R-BTN-11). `admin.repo.resync` stays the key's route.
-3. **`POST /v1/ui/board/accept`** (`repo.accept-post`, Decision 5a): the route exists; give it
-   its §14 row — a session of either role on its repositories, `{repository, sha}`, accepts the
-   held post with that sha, `{ok: true}`, unconfirmed (R-BTN-155 does not list it; it accepts a
-   post the sync already made) — and its `ui.view` on `repository/sync`.
-4. **`/repositories/{r}/sync`** (`src/dashboard/screens/sync/`), in this order: the mode banner
-   (the mockup's `SHADOW` line; **Cut over** for an administrator's session by `ui.view`, the
-   code dialog); the head line — sha linking the forge commit through `web_base` (R-BTN-92),
-   age, ticket count, source kind — with **Resync** (one click) and, for an administrator's
-   session, **Force resync onto …** (a `sha` field; the code dialog); the observation counter
-   with an outstanding number's age (marked past 10 minutes); the last post and its refusal
-   spelt out as text; wants and dispatches; held posts with their auto-accept time and
-   **Accept** (one click); pending adoptions with **Confirm adoption** (an administrator's; the
-   code dialog, naming the requesting runner); and **Discrepancies** as the mockup's `<table>`
-   — kind (`sub`), ticket linking its page's history section, "Baton had" (`baton`, drawn
-   struck through as a style on a text node), "Git showed" (`git`), observation, age — with
-   `?since=` as URL query.
-5. **Counts.** The sidebar's Sync entry shows the window's discrepancy count and marks an
-   outstanding observation older than 10 minutes.
-6. **Phone.** The banner, head line and Resync fit 375 px; the table collapses to cards.
+   baton, git, observation, at}]` for `?since=` (7 days default, 30 at most), R-BTN-85's stored
+   fields, from `history.view`. From `observations.ts`, `history.ts`, `cutover.ts` and the
+   held-posts query.
+2. **`POST /v1/ui/resync`** (`repo.resync`): the §14 row exists and no code serves it; build it —
+   a session of either role on its repositories (B-76's owner-session rule: its repositories
+   only), `{repository, force?, sha?}`; without `force` it dispatches the sync (as a webhook
+   does) and answers `{ok: true}`; with `force` and `sha` an administrator's session only,
+   `202 {confirm_code}` and on confirmation the head reset to `sha` (R-BTN-11). `admin.repo.resync`
+   stays the key's route. `ui.view` on `repository/sync`.
+3. **`POST /v1/ui/board/accept`** (`repo.accept-post`, Decision 5a): the route exists
+   (`baton.ts`); give it its §14 row — a session of either role on its repositories,
+   `{repository, sha}`, accepts the held post with that sha, `{ok: true}`, unconfirmed (it
+   accepts a post the sync already made; R-BTN-155 does not list it) — and `ui.view` on
+   `repository/sync`.
 
 ### What not to do
 
-- No sync logic in the client: ancestry and acceptance are the server's (R-BTN-11).
-- No "Accept history" (R-BTN-85); no board post from a session — a resync is a dispatch.
-- No duplicate of the forced resync elsewhere: B-214's registry screen names
-  `baton admin repo resync` as text and draws no control.
+- No screen (B-220); no sync logic beyond what exists: ancestry and acceptance are the
+  server's (R-BTN-11).
+- No "Accept history" action (R-BTN-85); no board post from a session.
 
 ### Trust
 
-- **`repo.sync`** — Baton's rows; `baton` and `git` are text (§12.3) through `Text`; shas and
-  kinds validated identifiers; the forge link from `web_base` only; `adoptions` to an
-  administrator only.
+- **`repo.sync`** — Baton's rows; `baton` and `git` are text (§12.3); shas and kinds validated
+  identifiers; `adoptions` to an administrator only.
 - **Resync and Accept** — a session on its repositories, through `authorize`; a resync is a
   dispatch Baton already performs on a webhook, an accept takes a post the sync made.
-- **Forced resync, cut over, adoption confirm** — an administrator's session, confirmed by the
-  minting key (R-BTN-155); `sha` validated on the server.
+- **Forced resync** — an administrator's session, confirmed by the minting key (R-BTN-155);
+  `sha` validated on the server.
 
 ### Invariants
 
 - **Heads advance by compare-and-set** (R-BTN-11); the forced resync is the exception and is
-  confirmed.
-- **Every disagreement is logged and shown** (R-BTN-85).
-- **R-BTN-155's confirmed list**: forced resync, cut over and the adoption confirm through the
-  code; resync and accept not.
-- **Text, never markup** (§12.3); **an owner's session, its repositories** (R-BTN-155).
+  confirmed. **Every disagreement is logged** (R-BTN-85).
+- **R-BTN-155's confirmed list**: forced resync through the code; resync and accept not.
+- **An owner's session, its repositories**; **both hosts** (R-BTN-55).
 
 ### Tests
 
@@ -115,23 +93,23 @@ Scenarios numbered at merge, on both hosts, with a repository in shadow holding 
 observation, a held post, a refused post (`head-moved`), a want, a pending adoption and two
 discrepancies: `repo.sync` returns each section with R-BTN-85's field names, `adoptions` absent
 for an owner's session, `?since=` bounding discrepancies; `POST /v1/ui/resync` dispatches for an
-owner's session and refuses `force` to it, answers `202` to an administrator's; `board/accept`
-accepts the held post for an owner's session. Under `test/ui/`: Resync and Accept send with no
-dialog; Force resync, Cut over and Confirm adoption draw only for an administrator and open the
-code dialog; the table links each ticket; a hostile `git` value is text.
+owner's session on its repository, refuses it `force` and another repository, and answers `202`
+to an administrator's with `force` and `sha`; `board/accept` accepts the held post for an owner's
+session.
 
 ### Exit criteria
 
-- [ ] `repo.sync` and `repo.accept-post`'s rows in §14 and the registry; `POST /v1/ui/resync`
-      built; tests for each.
-- [ ] `/sync` built with its controls by role, usable at desktop and 375 px.
-- [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
-      `npm run check:tickets` are green.
+- [ ] `repo.sync`, `repo.resync` and `repo.accept-post` in §14, the registry and the code, with
+      tests.
+- [ ] `npm test`, `npm run typecheck`, `npm run check:wiki` and `npm run check:tickets` green.
 
 ## Status
 
 _filed 2026-11-09._
 
-_2026-11-09 — revised after review: `/v1/ui/resync` built here (it existed only as a row); the
-held post's Accept placed here (Decision 5a); R-BTN-85's stored field names used; the forced
-resync kept on this screen only._
+_2026-11-09 — revised after review: `/v1/ui/resync` built here; the held post's Accept placed
+here (Decision 5a); R-BTN-85's stored field names used._
+
+_2026-11-09 — revised after the second review: the screen split out to B-220; B-76's
+owner-session scoping of `/v1/ui/resync` applies to the route built here (B-76 item 3 amended
+to say so)._

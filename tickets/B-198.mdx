@@ -34,8 +34,8 @@ goal is and what its read answers; this ticket cites it and adds nothing to it.
 **Depends on:** B-208 (the shell and the strip; no control is needed), B-122 (goals: the files,
 the sync posting them, the order, `GET …/goals` with a session caller — its item 6 lists the
 fields this screen draws: per goal `id`, `title`, `status`, `priority`, `exclusive`, `needs`,
-`open` with each ticket's state and `critical_path`, `done`, `blocked` with each ticket's blocks
-and the condition id where a block is an open condition; met when every need is done).
+`open` with each ticket's position and `critical_path`, `done`, `blocked` with each ticket's
+blocks and the condition id where a block is an open condition; met when every need is done).
 
 **Used by:** B-203.
 
@@ -45,8 +45,8 @@ and the condition id where a block is an open condition; met when every need is 
    `GET …/goals`, active first by `priority`, then paused, met and withdrawn behind a toggle:
    the title as text, the priority, `exclusive` as a marked word, a progress line (done of
    needed as a bar with the numbers as text), then the open work as a `<table>` in the read's
-   order — ticket linking its page, state mark and word (the same words as B-194's), position,
-   `critical_path` — and the blocked tickets with their first block: a block whose `kind` is an
+   order — ticket linking its page, position (station and queued leg), a blocked mark where the
+   ticket is in `blocked`, `critical_path` — and the blocked tickets with their first block: a block whose `kind` is an
    open condition links `/conditions/{condition}`, a missing capability names it as a chip,
    another ticket links it. No control: a goal is a file in git (B-122), changed by a commit;
    the card names no command because none exists for it.
@@ -94,3 +94,6 @@ _filed 2026-11-09._
 _2026-11-09 — revised after review: the conditional "adds a field if B-122 lacks it" removed — B-122
 item 6 now lists the read's fields and its session caller, amended in the same commit; the strip
 change moved to B-204's field, filled here._
+
+_2026-11-09 — revised after the second review: B-122's read carries positions, not the §11.4
+state word, so goals need nothing from B-194 and the precedence is computed once._

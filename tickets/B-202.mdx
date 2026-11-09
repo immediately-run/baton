@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1201
 tier: judgement
-description: "The reads the tenant screens of BATON-UI-V2 lack, each with callers admin (a key) and an administrator's session, scope instance, an owner's session forbidden: admin.instance.list — the instance view runners rank from with each instance's state and its readings by source (R-BTN-99, R-BTN-76); admin.resource.list — the resources with their detail schemas, instances and the probe keys (instrument keys, shown read-only per §11.4); admin.settings.show — link hosts, session hosts, check app id; admin.tenant — frozen, sealed, the day's request and row-write counts and the live counts against R-BTN-87's envelope, storage; admin.session.list — the live dashboard sessions by role, key, repositories, age and client address. GET /v1/admin/capacities exists in code and gets its §14 row. GET /v1/admin/repositories and GET /v1/admin/state are untouched. Requires: B-192, B-205."
+description: "The reads the tenant screens of BATON-UI-V2 lack, each with callers admin (a key) and an administrator's session, scope instance, an owner's session forbidden: admin.instance.list — the instance view runners rank from with each instance's state and its readings by source (R-BTN-99, R-BTN-76); admin.resource.list — the resources with their detail schemas, instances and the probe keys (instrument keys, shown read-only per §11.4); admin.settings.show — link hosts, session hosts, check app id; admin.tenant — the live counts and a new per-tenant request counter with its 5-minute mean against R-BTN-87's envelope, each figure named (Decision 8a); admin.session.list — the live dashboard sessions by role, key, repositories, age and client address. GET /v1/admin/capacities exists in code and gets its §14 row; GET /v1/admin/repositories gains tiers, sync keys, CI identity and retired rows for the registry screen. Freeze and seal (R-BTN-88) are built by no ticket and are not reported. Requires: B-192, B-205."
 topics:
   - baton
 owns: {}
@@ -34,8 +34,8 @@ readings, probes), [§6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#
 ([R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7): the instance view),
 [§6.11](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-11) ([R-BTN-178](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-11):
 capacities), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3) ([R-BTN-87](../spec/BATON_SPEC/02-deployments.md#sec-2-3):
-the envelope; [R-BTN-135](../spec/BATON_SPEC/02-deployments.md#sec-2-2): the per-credential rate
-limit, which is not a tenant number), [§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8)
+the envelope, rates as 5-minute means; Admission: the per-credential rate limit, which is not
+a tenant number), [§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8)
 ([R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8): frozen, sealed),
 [§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7) (the check app id), [§14](../spec/BATON_SPEC/14-api.md#sec-14)
 (`PUT /v1/admin/settings`, `PUT /v1/admin/capacities`, `GET /v1/admin/repositories`).
@@ -62,16 +62,24 @@ The §14 rows first, then the code. Every read's callers: `admin` (a key) and `{
    holders: [{claim_id, ticket_id, runner_id}]}` (R-BTN-178).
 4. **`GET /v1/admin/settings`** (`admin.settings.show`): `{link_hosts, session_hosts,
    check_app_id}` (R-BTN-112, R-BTN-113, §12.7).
-5. **`GET /v1/admin/tenant`** (`admin.tenant`): `{frozen, sealed, today: {requests, row_writes},
-   live: {claims, runners, tickets, repositories}, envelope: {...}, storage_bytes}` — the
-   envelope's numbers from R-BTN-87's §2.3 table, each live count beside its envelope figure;
-   the mockup's "requests / min 38 / 600" is not drawn as a tenant figure, since 600 a minute is
-   R-BTN-135's per-credential limit — the day's request count is.
+5. **`GET /v1/admin/tenant`** (`admin.tenant`): `{live: {runners, repositories, tickets,
+   history_rows, claims}, rate: {requests_per_s_5m, burst_5s_max}, envelope: {runners: 50,
+   repositories: 20, tickets: 5000, history_rows: 1000000, requests_per_s_5m: 20, burst_5s: 100},
+   storage_bytes}` — R-BTN-87's figures, each live one beside its envelope value, "rates as
+   5-minute means". The request counter is new (Decision 8a): the core counts verified requests
+   per 5-second bucket in the tenant's object (in memory, as the MCP rate counter is; a restart
+   empties it), and answers the 5-minute mean and the largest 5-second bucket of the window. The
+   mockup's "requests / min 38 / 600" is not drawn: 600 a minute is §2.3's per-credential
+   admission limit, not a tenant figure. `frozen` and `sealed` are not reported: R-BTN-88's
+   freeze and seal are built by no ticket, and when one builds them it adds the two fields and
+   `/state`'s banner (B-215 names the gap).
 6. **`GET /v1/admin/sessions`** (`admin.session.list`): the live dashboard sessions — `{id, role,
    key_fingerprint, repositories, bound_at, last_seen_at, client_addr, current}` (`current` the
    caller's own); ended sessions are not listed (they live at most 4 hours, R-BTN-155).
-7. **Unchanged:** `GET /v1/admin/repositories` (the registry read B-214 draws), `GET
-   /v1/admin/state` (B-216 settles it).
+7. **`GET /v1/admin/repositories`** (`admin.repo.list`) gains, per row, `tiers`, `sync_keys:
+   [{fingerprint, role}]`, `ci_identity`, `retired_at`, and `?retired=1` to include retired
+   repositories — the registry screen's columns (B-214); its §14 row follows. `GET
+   /v1/admin/state` is untouched (B-216 settles it).
 
 ### What not to do
 
@@ -91,20 +99,24 @@ The §14 rows first, then the code. Every read's callers: `admin` (a key) and `{
 
 - **Administrators only** (R-BTN-57, R-BTN-155).
 - **Readings are statements** (R-BTN-76): returned, never judged beyond `stale`.
-- **The envelope is the operator's advice** (R-BTN-87); **filter fields only** (R-BTN-33);
-  **both hosts** (R-BTN-55).
+- **The envelope is the operator's advice** (R-BTN-87): every figure shown, none refused here.
+- **Filter fields only** (R-BTN-33); **both hosts** (R-BTN-55); **one clock** (R-BTN-32): the
+  counter reads time through `this.now`.
 
 ### Tests
 
 Scenarios numbered at merge, on both hosts, with two instances holding readings from a runner
 and a probe (one stale), one capacity half held, two sessions: each read answers the
 administrator's key and session and refuses the owner's session; `admin.tenant`'s live counts
-equal the rows; `admin.session.list` marks the caller's own and lists no ended session;
-`admin.resource.list` lists the probe key.
+equal the rows and its rate reflects a burst of verified requests under the fake clock;
+`admin.session.list` marks the caller's own and lists no ended session; `admin.resource.list`
+lists the probe key; `admin.repo.list` carries `tiers`, `sync_keys`, `ci_identity` and, with
+`?retired=1`, a retired row.
 
 ### Exit criteria
 
-- [ ] The five new reads and the capacities row in §14 and the registry, built, with tests.
+- [ ] The five new reads, the capacities row and the registry read's new fields in §14 and the
+      registry, built, with tests; the request counter in core.
 - [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
       `npm run check:tickets` are green.
 
@@ -115,3 +127,7 @@ _filed 2026-11-09._
 _2026-11-09 — revised after review: the screens split out to B-214 and B-215; every write
 control dropped (Decision 1a); the existing capacities read documented rather than rebuilt;
 probes added; the per-credential limit kept off the tenant figures._
+
+_2026-11-09 — revised after the second review: the request counter built (Decision 8a) with
+R-BTN-87's envelope spelt out; `frozen` and `sealed` dropped (R-BTN-88 is unbuilt); the registry
+read extended for B-214's columns._
