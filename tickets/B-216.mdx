@@ -1,0 +1,105 @@
+---
+title: "B-216 — Cutover, part two: GET /v1/admin/state keeps its shape as stateView(), S-BTN-170 asserts each section equals the matching entity read, and S-BTN-76, G-BTN-13 and B-191's scenario run against every V2 screen; the deployed dashboard is checked on staging"
+id: B-216
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1215
+tier: judgement
+description: "The last BATON-UI-V2 ticket. Decision 4a: GET /v1/admin/state keeps today's shape, built by one named core function stateView() (what uiState() was), so a terminal keeps one request (R-BTN-179, B-118), and S-BTN-170 asserts each of its sections equals the first page of the matching entity read at the same instant. S-BTN-76 (hostile values rendered) and G-BTN-13 run against the V2 renderer: markup and javascript: in a ticket title, a hold reason, an activity label, a reading detail and a condition's detail reach every screen as text; a link to an unlisted host is text; B-191's scenario runs on every screen with a control. After the merge's deploy the agent reads baton-staging.immediately.run — every tree path, sign-in — and records what it exercised; it triggers no deploy. Requires: B-203."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-203
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): the project is done when "every screen in the tree is
+drawn from reads and controls a signed key could make the same way"
+(`tickets/projects/baton-ui-v2.mdx`). Decision 4a (B-191) keeps `GET /v1/admin/state`.
+
+**Spec:** [BATON_SPEC §11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) ([R-BTN-57](../spec/BATON_SPEC/11-people.md#sec-11-2):
+`GET /v1/admin/state`), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) ([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1):
+the state readable with a key, by the same queries), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3),
+[§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-76](../spec/BATON_SPEC/15-verification.md#scenarios),
+[S-BTN-170](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-13](../spec/BATON_SPEC/15-verification.md#gates),
+[G-BTN-100](../spec/BATON_SPEC/15-verification.md#gates)), [§16.2](../spec/BATON_SPEC/16-adoption.md#sec-16-2)
+(the reference deployment), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET /v1/admin/state`'s row).
+
+**Depends on:** B-203 (`ui.state` retired; every screen exists).
+
+**Used by:** none; closes the project.
+
+### What to build
+
+1. **`stateView()`** in core: `uiState()` renamed, its body unchanged in shape, serving `GET
+   /v1/admin/state` only (R-BTN-57), built from the same functions the entity reads use
+   (`readyRows`, `claims.running`, `workersView`, `history.view`, …) so the two cannot drift.
+   Its §14 row reads "the state in one request for a terminal, built by the functions the
+   entity reads use". S-BTN-170 is rewritten: with the fake clock held, each section of
+   `stateView()` equals the matching entity read's first page — `repositories` to `repo.list`,
+   `ready` and `running` to the board and `repo.tickets`, `workers` to `repo.runners`,
+   `discrepancies` to `repo.sync`, `limits` to `owner.grant.list`, `blocked` to `blocked`,
+   `resources` to `admin.instance.list` — asserted on both hosts.
+2. **The renderer scenarios.** S-BTN-76 and G-BTN-13 amended to name the V2 renderer and run
+   against it: fixture rows carrying `<img onerror>`, `{{x}}`, backticks and a `javascript:`
+   link in a ticket title, a hold reason, an activity label, a reading `detail`, a condition
+   `detail` and an attestation `value` are drawn on the ticket page, the Tickets table, the
+   runner page, `/instances`, the Resolve page and `/attestations` as text, in the `ui` vitest
+   project against the screens' components, and a link whose host is not in `link_hosts`,
+   `session_hosts` or under `web_base` is text. G-BTN-100's renderers row names
+   `src/dashboard/` and the source gate. B-191's scenario (the screen draws only its caller's
+   actions) runs on every screen with a control: the ticket page, Conditions and the Resolve
+   page, the runner screens, Sync, Attestations.
+3. **Staging check.** After this PR's merge deploys (the workflow B-193 changed deploys
+   production then staging on every push to `main`), the agent opens
+   `https://baton-staging.immediately.run/` and every path of `src/core/screens.ts` with a
+   fixture id, signs in as an administrator through `baton admin open` where a human is present
+   to confirm the code, and records in the PR body the paths exercised and the console clean of
+   errors. The agent triggers no deploy (`workflow_dispatch` is the owner's) and changes no
+   workflow. Production receives the same build first; the owner knows this order and accepted
+   it for this project.
+4. **The project page.** `tickets/projects/baton-ui-v2.mdx`'s Done when is checked line by line
+   against the deployed instance and marked in its Status.
+
+### What not to do
+
+- Do not reshape `GET /v1/admin/state` into a union of paged reads (Decision 4a) or a second
+  query.
+- No deploy triggered, no workflow edited, no production check that a staging check does not
+  also cover.
+- No new screen or control.
+
+### Trust
+
+- **`stateView()`** is answered to an administrator's key only (R-BTN-57), built from functions
+  already bounded by their reads' callers.
+- **The scenarios** are the trust statement of the whole project: every value that reached V1
+  as `textContent` reaches V2 as a text node, proven on both hosts and in the DOM project.
+
+### Invariants
+
+- **Readable with a key** (R-BTN-179): `stateView()` equals the entity reads, by test.
+- **Text, never markup** (§12.3, G-BTN-13, S-BTN-76).
+- **One check** (R-BTN-129); **both hosts** (R-BTN-55).
+
+### Tests
+
+S-BTN-170 rewritten and green; S-BTN-76 and G-BTN-13 amended and green; B-191's scenario over
+every screen with a control; the staging record in the PR body.
+
+### Exit criteria
+
+- [ ] `stateView()` serves `GET /v1/admin/state`; S-BTN-170 asserts the equality on both hosts.
+- [ ] S-BTN-76, G-BTN-13 and B-191's scenario run against V2 and pass.
+- [ ] The staging paths recorded in the PR body; the project page's Done when checked;
+      `npm test`, `npm run typecheck`, `npm run check:wiki` and `npm run check:tickets` green.
+
+## Status
+
+_filed 2026-11-09, split from B-203 after review._

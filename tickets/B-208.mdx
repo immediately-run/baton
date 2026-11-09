@@ -1,0 +1,100 @@
+---
+title: "B-208 — The root screen and the overview strip: / lists the caller's repositories as cards from GET /v1/repositories, and every repository screen carries running now · ready · needs you with the mode mark"
+id: B-208
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1207
+tier: judgement
+description: "The last shell ticket of BATON-UI-V2 and its first screen: / draws the caller's repositories from repo.list — forge path, head (short sha and age), mode, the three counts, runners alive — as cards opening /repositories/{r}/board, with seed_owners as a notice for an administrator; one repository for an owner's session lands on its board directly. The overview strip is drawn by the shell on every repository screen from the same read: running now · ready · needs you (reading 'conditions' until B-57), each linking to /board, /tickets and /conditions, a SHADOW mark where the repository is not cut over, and the exclusive goal's title when repo.list carries one. Requires: B-206, B-204."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-206
+  - B-204
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Root — `/`**: your repositories (admins see all,
+owners theirs), each card showing head, mode, ready count, open conditions"; "worth one overview
+strip per repository ('running now · ready · needs you') so the task answers stay one glance
+away." The mockup's Overview head line — "docs board immediately-run/docs@cabec94c · 241 live
+tickets · 2 legs running on 3 alive workers · received 2026-10-16 16:56 UTC" and the SHADOW
+banner — is the strip's content.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the root screen and the
+strip as B-191 amends them; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): an owner's
+session its repositories), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET /v1/repositories`,
+B-204), [§11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) ([R-BTN-58](../spec/BATON_SPEC/11-people.md#sec-11-2):
+`seed_owners`), [§16.1](../spec/BATON_SPEC/16-adoption.md#sec-16-1) ([R-BTN-28](../spec/BATON_SPEC/16-adoption.md#sec-16-1):
+mode), [§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) ([R-BTN-92](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1):
+`web_base` for the forge link).
+
+**Depends on:** B-206 (the shell), B-204 (`repo.list`).
+
+**Used by:** B-198, B-199, B-200, B-209, B-212, B-214, B-215 (every screen that needs nothing
+from B-207).
+
+### What to build
+
+1. **The root screen** (`src/dashboard/screens/root/`): from `repo.list`, one card per
+   repository — forge path (linking the forge through `web_base`, R-BTN-92, host shown), head's
+   short sha and age, mode as a text mark, the three counts, runners alive, course ids — opening
+   `/repositories/{r}/board`; ordered by `needs_you` descending then id, so the repository that
+   needs a person is first. An administrator's root carries `seed_owners` as a notice naming
+   the repositories whose owners are all the seed's (R-BTN-58) with the CLI line that adds an
+   owner. An owner's session with one repository is sent to its board. An empty list draws
+   "No repository is registered" (an administrator) or "Your key owns no repository" (an
+   owner) with the relevant CLI line as text.
+2. **The strip** (`src/dashboard/app/Strip.tsx`), drawn by the shell on every
+   `repository/*` screen from the same `repo.list` row: "running now n · ready n · needs you n"
+   (the third labelled "conditions" until B-57 lands, since the count is conditions only —
+   B-204), each a link to `/board`, `/tickets` and `/conditions`; the head's short sha and age;
+   a `SHADOW` mark where `mode` is not `cut-over` (text, as the mockup's badge); and, when
+   `exclusive_goal` is set, "exclusive goal: title" linking `/goals` (B-198 fills the field).
+   The sidebar's counts for Tickets, Runners and Conditions come from the same row.
+3. **Phone.** The cards stack at 375 px; the strip wraps to two lines and stays above the
+   screen's content.
+
+### What not to do
+
+- No control on the root or the strip: cut over lives on Sync (B-201), everything else on its
+  entity's screen.
+- No second read: the root and the strip draw `repo.list` only; the board's own numbers are the
+  board's.
+- No ordering by anything the read does not carry.
+
+### Trust
+
+- **`repo.list`** — Baton's record for the caller's role; the forge path, head sha and goal
+  title are text through `Text`; the forge link is built from `web_base` only (R-BTN-92).
+- Nothing is written.
+
+### Invariants
+
+- **An owner's session, its repositories** (R-BTN-155): the server answers them; the client lists
+  what it gets.
+- **Text, never markup** (§12.3).
+- **375 px** for the strip (the brief).
+
+### Tests
+
+Under `test/ui/` with a fixture `repo.list`: the cards order by `needs_you`; an administrator's
+`seed_owners` notice; an owner's single repository redirects to its board; the strip's three
+links and the SHADOW mark; the "conditions" label; the exclusive goal line; a hostile forge path
+is text; 375 px wraps.
+
+### Exit criteria
+
+- [ ] `/` and the strip render on a local Baton for both roles.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-193 after review._

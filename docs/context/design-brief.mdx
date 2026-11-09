@@ -76,6 +76,8 @@ that changes it.
   the governance knobs, Sync — and the tenant screens for an administrator. Every screen is
   drawn from that entity's REST reads, and its controls are the registry actions `ui.view`
   places there (R-BTN-129), so what a session sees and what it can do come from one definition.
+  A control whose answer depends on the repository's policy is drawn only where the read says
+  the session may take it; the page never reads the policy to decide.
 - **React and TypeScript, one built bundle.** The owner's choice (2026-11-09) replaces the earlier
   dependency-free rule: React with no other runtime dependency, TypeScript, one esbuild bundle
   built from this repository, no external fonts or scripts, nothing loaded from another origin.
@@ -96,6 +98,8 @@ second. Exceptions stand out; the normal case recedes.
 ## Where to look
 
 The current page is `src/ui/` (`index.html`, `app.css`, `app.js`), served at the instance's
-origin; its data is `GET /v1/ui/state`. V2 is built under `src/ui-v2/` by the BATON-UI-V2 tickets
-(B-191 to B-203) and replaces it; its data is the entity reads of [BATON_SPEC §14](../../spec/BATON_SPEC/14-api.md#sec-14).
+origin; its data is `GET /v1/ui/state`. V2 is built under `src/dashboard/` by the BATON-UI-V2
+tickets (B-191 to B-216; the project page is `tickets/projects/baton-ui-v2.mdx`) and replaces it
+outright — the owner ruled the transition needs no smoothing (2026-11-09); its data is the entity
+reads of [BATON_SPEC §14](../../spec/BATON_SPEC/14-api.md#sec-14).
 The screens are [BATON_SPEC §11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4).

@@ -1,0 +1,102 @@
+---
+title: "B-209 — Board and Tickets screens: /board is the repository as it stands — ready in Baton's order with eligible runners, live claims and their holders, granted capabilities — and /tickets is the mockup's table with its state column, reason bands, tabs and filters"
+id: B-209
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1208
+tier: judgement
+description: "Two read-only screens of BATON-UI-V2 under /repositories/{r}. Board: from GET …/board and repo.tickets — the ready list in the matching order (requires, tier, eligible alive runners by name; 'nobody can take it' with the failed rule — the retired Ready view), the live claims as holders (ticket, runner, leg, running for, lease ends, stalled, condition-wait — the retired Running view), ready_by_tier and the repository's granted capabilities. Tickets: the mockup's table from repo.tickets — qualified id and title linking the ticket page, state with its shape mark and the reason band, course position, requires as chips (one no alive runner holds marked) — with the tabs' counts, the text filter and the tier ceiling as URL query. Both read at 375 px. Requires: B-194, B-208."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-194
+  - B-208
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Board** `/board` — the repository as it stands:
+ready tickets in the matching order, live claims and their holders, granted capabilities";
+"Running/Ready collapse into Board and Tickets". The mockup's Tickets page (`tickets.png`) is
+the Tickets screen as drawn: its "Output implement.result v2" style links to the dropped Schemas
+view are text here.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (Board and Tickets; the
+tab mapping; stalled is `last_activity_at` over 2 hours old), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1)
+([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1): the board read's `ready`,
+`ready_by_tier`, `holders`, `granted_capabilities`), [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6)
+(matching: the failed rule), [§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1)
+([R-BTN-61](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1): the order is Baton's),
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) (`board`, `repo.tickets`). Context: the brief —
+Board at 375 px.
+
+**Depends on:** B-194 (`repo.tickets`), B-208 (the shell with the strip; Board needs no control
+from B-207).
+
+**Used by:** B-203.
+
+### What to build
+
+1. **Board** (`src/dashboard/screens/board/`), two sections: **Ready** — from `GET …/board`'s
+   `ready` in Baton's order, each row the ticket (linking its page), tier, requires as chips,
+   the eligible alive runners by name, and for a ticket none can take the failed rule as text
+   (the gate's `rule` word); `ready_by_tier` as a one-line summary above. **Running** — the
+   board's `holders` joined with `repo.tickets`' running rows: ticket, runner (linking its
+   page), leg, running for, lease ends (a bar from claimed-at to lease-end, now marked, as the
+   mockup's runner cards draw it), `stalled` where the read says so, `condition-wait` where the
+   leg waits on a condition. Below, the repository's `granted_capabilities` as chips. No control
+   on the Board: a ticket's controls are on its page.
+2. **Tickets** (`src/dashboard/screens/tickets/`): the mockup's table from `repo.tickets` — a
+   real `<table>` with columns ticket (qualified id, title linking the page), state (the shape
+   mark and word: ◆ unconfirmed, ● running, ? waiting-person, ‖ held, ▲ blocked, ↻ backing-off,
+   ◇ suspended, ○ ready, ✓ closed) with the reason band under the row drawn from `detail` (the
+   mockup's "Held by operator: …", "Retries exhausted … 3 of 3", "Decision open", "No capable
+   worker — needs real-iphone", "Waiting on docs:R3-1200"), course position (station, holder and
+   duration or wait), requires as chips with one no alive runner holds marked; the tabs All,
+   Ready, Running, Blocked, Unconfirmed, Closed today with `counts`, the text filter and the
+   tier ceiling as `?state=`, `?q=`, `?tier=` in the URL so a view is linkable; "Showing n of
+   total" and a load-more by cursor. No client sort (the order is Baton's).
+3. **Phone.** At 375 px the Board's rows and the Tickets table become one card per ticket with
+   the state first; the tabs scroll horizontally.
+
+### What not to do
+
+- No control here; no state or order computed in the client; no second read beyond `board` and
+  `repo.tickets`.
+- No station or leg name in code: the position is text from the read.
+- No banner: the mode mark is the strip's (B-208).
+
+### Trust
+
+- **Everything drawn** is the two reads' text through `Text`; chips are capability names as the
+  runner and course stated them (R-BTN-174).
+- Nothing is written.
+
+### Invariants
+
+- **The order is Baton's** (R-BTN-61); **positions are Baton's** (R-BTN-39).
+- **Text, never markup** (§12.3); **course-agnostic**; **375 px** (the brief names Board).
+- **An owner's session, its repositories** (R-BTN-155).
+
+### Tests
+
+Under `test/ui/` with fixture reads: the Board's Ready order equals the fixture's; the failed
+rule is drawn for an untakeable ticket; Running draws the lease bar and `stalled`; the Tickets
+table draws each state's mark and reason band; the tabs carry the fixture's counts and set
+`?state=`; `?q=` and `?tier=` round-trip through the URL; no sort control exists; a hostile title
+and hold reason are text; the 375 px cards.
+
+### Exit criteria
+
+- [ ] `/board` and `/tickets` built and usable on a local Baton at desktop and 375 px.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-194 after review._

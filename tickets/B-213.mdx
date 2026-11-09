@@ -1,0 +1,107 @@
+---
+title: "B-213 — Attestations: GET …/attestations lists a repository's typed statements with their writers and lapses and says which types the caller may write; /attestations draws them with Add attestation where the read allows it"
+id: B-213
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1212
+tier: judgement
+description: "The attestations read and screen of BATON-UI-V2. attestation.list: every attestation of the repository — id, type, subject, value as a blob, writer (fingerprint or mcp id, and the writer class the policy judged it as), domain and run label where the grant carries them, written at, lapses at, revoked at — all readable by the repository reads' principals and a session; ?subject=, ?type=, ?live=1 and ?cursor=; and writable_types, the types the caller may write as owner under the policy in force, computed by authorize. /attestations: the table with the filters as URL query, each value expandable through R-BTN-112's renderer or as pretty-printed text, lapsed and revoked rows marked, and one control by ui.view — Add attestation (attestation.add, writer owner) with its type a select of writable_types; revocation is the CLI's. Requires: B-207, B-192, B-205."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-207
+  - B-192
+  - B-205
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "`/attestations` — … people's signed statements."
+
+**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8):
+attestations, their writers, lapses, `attestation.add` and `attestation.revoke`; [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8):
+a session is `owner`, never `human`; [R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8):
+domain and run label), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the `allowed` rule as
+B-191 amends it; R-BTN-155: an attestation is not a confirmed action), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5)
+([R-BTN-112](../spec/BATON_SPEC/05-courses.md#sec-5-5): a value with a view is drawn by the `ui`
+renderer), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3), [§14](../spec/BATON_SPEC/14-api.md#sec-14)
+(`POST`, `DELETE …/attestations`).
+
+**Depends on:** B-207 (controls), B-192 (sessions on the repository reads), B-205 (the cursor
+convention).
+
+**Used by:** B-203.
+
+### What to build
+
+The §14 row first, then the code.
+
+1. **`GET /v1/repositories/{repository}/attestations`** (`attestation.list`, read; the repository
+   reads' principals and a session — every attestation of a repository is readable by its
+   readers, there is no narrower class): `attestations`, each `id`, `type`, `subject`, `value`,
+   `writer` (`credential`, and `class`: owner, human, service, runner or sync), `domain` and
+   `run_label` where the grant carries them, `written_at`, `lapses_at`, `revoked_at`; then
+   `next_cursor` and `writable_types` (a list of types); `?subject=`
+   (a ticket id or commit), `?type=`, `?live=1` (not lapsed, not revoked), `?cursor=`, 100 a
+   page, newest first. `writable_types` is the list of `type`s the caller may write as `owner`
+   under the policy in force, computed by `authorize` with the caller as principal (B-191's
+   `allowed` rule); empty for a key or session the policy admits for none.
+2. **`/repositories/{r}/attestations`** (`src/dashboard/screens/governance/Attestations.tsx`):
+   the `<table>` — type, subject (a ticket id linking its page, a commit as text), writer and
+   class, domain and run label, written at, lapses at — with the filters as URL query, load-more
+   by cursor, lapsed and revoked rows marked by word; each row expands to its `value` through
+   `View` where the type's schema has a view (R-BTN-112), else pretty-printed text. One control
+   by `ui.view` on `repository/attestations` through B-207: **Add attestation**
+   (`attestation.add`, writer `owner`, not confirmed), drawn only when `writable_types` is not
+   empty, its form from the entry's `input` with `type` a select of `writable_types`, `subject`
+   text, `value` a JSON text field validated on the server, `lapses_at` optional. Revocation is
+   `baton attestation revoke <repository> <id>` as text (destructive and a credential action; a
+   session does not revoke).
+3. **Phone.** Cards at 375 px; the value expands in place.
+
+### What not to do
+
+- No policy read in the client: `writable_types` is the server's word; the control is drawn on
+  it and the server decides again on the call.
+- No `human` attestation from a session (R-BTN-185); no revoke from a session.
+- No value rendered as markup: `View` or pretty-printed text only.
+
+### Trust
+
+- **`attestation.list`** — Baton's rows: `value` and `subject` are validated JSON and identifiers
+  (§12.3), `writer` a fingerprint or `mcp:<id>`; drawn through `View` and `Text`.
+- **`writable_types`** — computed by `authorize`; a drawing hint, not authority.
+- **`attestation.add` from a session** — writer `owner` (R-BTN-181), bounded by the policy on the
+  server; `invalid-params` and `forbidden` drawn as text.
+
+### Invariants
+
+- **A session writes as `owner`, never `human`** (R-BTN-185); **an attestation is not confirmed**
+  (R-BTN-155).
+- **Text, never markup** (§12.3); **an owner's session, its repositories** (R-BTN-155); **both
+  hosts** (R-BTN-55).
+
+### Tests
+
+A scenario numbered at merge, on both hosts, with three attestations (one lapsed, one revoked,
+one `human`) under two policies: `attestation.list` filters by subject, type and live, pages,
+and answers `writable_types` non-empty under the admitting policy and empty under the other;
+an owner's session reads it. Under `test/ui/`: Add attestation is drawn only with
+`writable_types`, its type select lists them; a `human` row shows its class; a hostile subject is
+text; a value with a view goes through `View`.
+
+### Exit criteria
+
+- [ ] `attestation.list` in §14 and the registry, with tests.
+- [ ] `/attestations` built with its one control.
+- [ ] The scenario and tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-200 after review._

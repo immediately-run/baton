@@ -1,5 +1,5 @@
 ---
-title: "B-198 — Goals: /goals lists each goal's open work in order, its done count and what blocks it"
+title: "B-198 — Goals: /goals lists each goal's open work in Baton's order, its done count and what blocks it, from B-122's read"
 id: B-198
 project: baton-ui-v2
 status: available
@@ -10,96 +10,87 @@ tags:
   - roadmap-item
 order: 1197
 tier: judgement
-description: "Build the Goals screen of BATON-UI-V2 on B-122's read: /repositories/{r}/goals lists the repository's goals from GET …/goals — each goal's id, title, status, priority and exclusive flag, its open work in Baton's order (the ready tickets first, then the rest of the goal's chain), its done count against its need, and the blocked tickets with their blocks, so a goal waiting on a person shows as such and links to Conditions; a met goal is shown met. Read-only: a goal is a file in git. Requires: none."
+description: "The read-only Goals screen of BATON-UI-V2 on the read B-122 builds: /repositories/{r}/goals draws each goal's id, title, status, priority and exclusive flag, its open work in Baton's order with each ticket's state and critical-path length, its done count against its need, and its blocked tickets with their first block — a block that is an open condition linking the Resolve page — active goals first by priority, met shown met. B-122's item 6 now names the read's fields and its session caller, so this ticket adds no field; it fills repo.list's exclusive_goal (B-204's field) when a goal is exclusive. Requires: B-208, B-122."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
-  - B-193
+  - B-208
   - B-122
 ---
 
 **Brief:** the owner, 2026-11-09 (B-191): "**Goals** `/goals` — the objectives: each goal's open
-work in order, done count, and what blocks it." The goals themselves are B-122's (the owner,
-2026-10-27): a named objective in a home repository whose open work ranks first, by priority.
+work in order, done count, and what blocks it." Goals are B-122's (the owner, 2026-10-27).
 
 **Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the Goals screen),
-[§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) and
 [§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) ([R-BTN-61](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1):
-the default order and the merge, which B-122 extends for goals), [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2)
+the order, which B-122 extends), [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2)
 ([R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2): blocks),
-[§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET /v1/repositories/{repository}/goals`, as B-122
-adds it). B-122's spec amendment is the home of what a goal is; this ticket cites it.
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET /v1/repositories/{repository}/goals`, the row
+B-122 adds with the fields its item 6 lists). B-122's spec amendment is the one home of what a
+goal is and what its read answers; this ticket cites it and adds nothing to it.
 
-**Depends on:** B-193 (the shell), B-122 (goals: the files, the sync posting them, the order and
-`GET …/goals`).
+**Depends on:** B-208 (the shell and the strip; no control is needed), B-122 (goals: the files,
+the sync posting them, the order, `GET …/goals` with a session caller — its item 6 lists the
+fields this screen draws: per goal `id`, `title`, `status`, `priority`, `exclusive`, `needs`,
+`open` with each ticket's state and `critical_path`, `done`, `blocked` with each ticket's blocks
+and the condition id where a block is an open condition; met when every need is done).
 
 **Used by:** B-203.
 
 ### What to build
 
-1. **The read.** B-122 adds `GET /v1/repositories/{repository}/goals` for its dashboard item;
-   this ticket makes sure its callers admit a session (B-192's rule) and that it answers, per
-   goal: `id`, `title`, `status` (`active`, `paused`, `met`, `withdrawn`), `priority`,
-   `exclusive`, `needs` (ticket ids), `open` (the goal's open work in the order Baton offers it,
-   each ticket with its state and position as B-194's `repo.tickets` gives them), `done` (count
-   and ids), and `blocked` (the open tickets with their blocks, R-BTN-75, and the condition id
-   where the block is an open condition). A goal whose `needs` are all done is `met` in the
-   answer whatever its file says (B-122 item 6). If B-122 lands without some field, this ticket
-   adds it to the row and the §14 row, in B-122's terms.
-2. **`/repositories/{r}/goals`**: one card per goal, active first by priority, then paused, met
-   and withdrawn behind a toggle: the title as text, the priority, `exclusive` as a marked
-   word, a progress line (done of needed, as a bar with the numbers), then the open work as a
-   `<table>` in order (ticket linking to its page, state with its shape mark, position, the
-   critical-path length B-122 computes where the read gives it), and the blocked tickets with
-   their first block's kind and ref — a block that is an open condition links to the Conditions
-   screen's row (`/conditions/{condition}`), a missing capability names it, another ticket
-   links to it. The board's expedite lane is not a goal; the card says nothing about it.
-3. **The strip.** When a goal is `exclusive`, the repository's overview strip (B-193) carries the
-   goal's title after the three counts — the one place the exclusive setting is visible without
-   opening this screen.
-4. **Phone.** Cards stack; the table collapses to one line per ticket.
+1. **`/repositories/{r}/goals`** (`src/dashboard/screens/goals/`): one card per goal from
+   `GET …/goals`, active first by `priority`, then paused, met and withdrawn behind a toggle:
+   the title as text, the priority, `exclusive` as a marked word, a progress line (done of
+   needed as a bar with the numbers as text), then the open work as a `<table>` in the read's
+   order — ticket linking its page, state mark and word (the same words as B-194's), position,
+   `critical_path` — and the blocked tickets with their first block: a block whose `kind` is an
+   open condition links `/conditions/{condition}`, a missing capability names it as a chip,
+   another ticket links it. No control: a goal is a file in git (B-122), changed by a commit;
+   the card names no command because none exists for it.
+2. **`exclusive_goal` in `repo.list`.** B-204 defined the field as null; this ticket fills it
+   in `repo.list`'s query from the goals table when a goal is `exclusive` and active, so B-208's
+   strip shows it. One line in core, one scenario.
+3. **Phone.** Cards stack at 375 px; the table collapses to one line per ticket.
 
 ### What not to do
 
-- No goal editing: a goal is a file in git (B-122), changed by a commit; the screen draws no
-  control.
-- No ordering in the app: the order is the read's, as Baton offers it.
-- No project references: a goal names tickets (B-122 item 2); the screen shows no project.
+- No goal field added here: B-122's item 6 is the home; a field it lacks is B-122's to add.
+- No ordering, state or progress computed in the client.
+- No project shown: a goal names tickets (B-122 item 2).
 
 ### Trust
 
-- **`GET …/goals`** — Baton's rows from the posted goal fields (filter fields only, R-BTN-33):
-  `id`, `title`, `status`, `priority`, `needs`, each untrusted text validated on the board post
-  (§12.3) and drawn as a text node; the open work and blocks are Baton's own computation.
-- Nothing is written.
+- **`GET …/goals`** — Baton's rows from posted filter fields (R-BTN-33): `id`, `title`,
+  `status`, `priority` are untrusted text validated on the board post (§12.3), drawn through
+  `Text`; `open`, `done` and `blocked` are Baton's computation.
+- **`exclusive_goal`** — the same row, surfaced; nothing written.
 
 ### Invariants
 
-- **Filter fields only** (R-BTN-33): no goal body is posted or drawn.
-- **Positions are Baton's** (R-BTN-39); **blocks are stored** (R-BTN-75).
+- **Filter fields only** (R-BTN-33); **positions are Baton's** (R-BTN-39); **blocks are stored**
+  (R-BTN-75).
 - **Text, never markup** (§12.3); **an owner's session, its repositories** (R-BTN-155).
 
 ### Tests
 
-A scenario numbered at merge, on both hosts, with B-122's fixture (a goal needing T1, T1
-depending on T2 and T3, T3 blocked on a person's condition; a second goal met; a third
-`exclusive`):
-
-- the read lists the goals with `open` in Baton's order, `done` counts and `blocked` naming the
-  condition; the met goal is `met`;
-- under `test/ui/`: the cards order active by priority; the blocked row links the condition;
-  the strip names the exclusive goal; a hostile goal title is text.
+Under `test/ui/` with B-122's fixture (a goal needing T1, which depends on T2 and T3, T3 blocked
+on a person's condition; a met goal; an exclusive goal): the cards order active by priority; the
+met goal is shown met; the blocked row links the condition; a hostile title is text. One scenario
+on both hosts: `repo.list.exclusive_goal` names the exclusive goal and is null without one.
 
 ### Exit criteria
 
-- [ ] The goals read admits a session and carries the fields above (added here if B-122 left
-      any out, with its §14 row).
-- [ ] `/goals` built, read-only; the strip shows an exclusive goal.
-- [ ] The scenario passes; `npm test`, `npm run typecheck`, `npm run lint`, `npm run check:wiki`
-      and `npm run check:tickets` are green.
+- [ ] `/goals` built, read-only; `exclusive_goal` filled.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
 
 ## Status
 
 _filed 2026-11-09._
+
+_2026-11-09 — revised after review: the conditional "adds a field if B-122 lacks it" removed — B-122
+item 6 now lists the read's fields and its session caller, amended in the same commit; the strip
+change moved to B-204's field, filled here._

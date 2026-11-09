@@ -1,5 +1,5 @@
 ---
-title: "B-199 — Credentials: /grants, /owners, /tokens, /mcp-keys, /sync-keys and /check-runners show who may work on a repository, read-only, from one extended grants read"
+title: "B-199 — Credentials: /grants, /owners, /tokens, /mcp-keys, /sync-keys and /check-runners show who may work on a repository, read-only, from the one grants read extended with tokens, sync keys, check-runners and consents"
 id: B-199
 project: baton-ui-v2
 status: available
@@ -10,115 +10,116 @@ tags:
   - roadmap-item
 order: 1198
 tier: judgement
-description: "Build the six credential screens of BATON-UI-V2 under /repositories/{r}: grants (each key's fingerprint, hostname, label, capabilities, max tier, role and domain, checker mark, sync flag, who set and granted it and when, its other repositories, pending or accepted), owners (fingerprints, kinds, human-only marks), tokens (registration tokens: id, role, scope, TTL, uses left, what each registered), MCP keys (name, minter, actions, expiry, last use, client), sync keys (fingerprint, role sync or mirror) and check-runners (fingerprint, name, capabilities, max tier) — read-only as §11.4 says, each naming the CLI command that changes it, with the one confirmed action that is a session's by R-BTN-155 where it applies. Extends GET /v1/owner/{repository}/grants with tokens, sync_keys and check_runners. Requires: none."
+description: "Six read-only credential screens of BATON-UI-V2 under /repositories/{r}, each a table from one field of GET /v1/owner/{repository}/grants — which this ticket extends with tokens, sync_keys, check_runners and consents (the field B-200's /consents reads), and with kind, human_only and added_at on owners and pending, sync and checker on grants — each naming the R-BTN-127 command that changes it, verified against the tree. No control: no credential write admits a session, and B-73 places its own approval control when it lands. Requires: B-208."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
-  - B-193
+  - B-208
 ---
 
 **Brief:** the owner, 2026-11-09 (B-191): "**Credentials** — `/grants`, `/owners`, `/tokens`,
-`/mcp-keys`, `/sync-keys`, `/check-runners` — who may work here (read-only per the spec; changes
-by CLI or confirmed action)." The mockup's Limits section ("What agents cannot change. Read-only
-here; change them with `baton owner …` or `baton admin …`") is the shape: a table per kind, the
-command named beside it.
+`/mcp-keys`, `/sync-keys`, `/check-runners` — who may work here (read-only per the spec;
+changes by CLI or confirmed action)." The mockup's Limits block ("What agents cannot change.
+Read-only here; change them with `baton owner …` or `baton admin …`"; Owners, Grants, Probes,
+Owner bars, Settings) is the shape: a table per kind with the command beside it. Probes are
+tenant-wide and move to `/resources` (B-202); bars and settings to Governance (B-200).
 
 **Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ("Repositories, owners,
-grants, MCP keys, instrument keys and bars are shown read-only"; R-BTN-155's confirmed-action
-list), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) ([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1):
-`GET /v1/owner/{repository}/grants` is the dashboard's limits over one repository; one role per
-key), [§11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) ([R-BTN-58](../spec/BATON_SPEC/11-people.md#sec-11-2):
-owners and grants), [§8.2](../spec/BATON_SPEC/08-runners.md#sec-8-2) ([R-BTN-146](../spec/BATON_SPEC/08-runners.md#sec-8-2):
-accepted and pending grants, the sync flag; [R-BTN-117](../spec/BATON_SPEC/08-runners.md#sec-8-2):
-registration tokens), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3):
-MCP keys listed with the repository's credentials), [§3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2)
-([R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2): sync keys),
-[§10](../spec/BATON_SPEC/10-checks.md#sec-10) ([R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10):
+grants, MCP keys, instrument keys and bars are shown read-only"), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1)
+([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1): the grants read is the limits over one
+repository; one role per key; bearers only as hashes), [§11.2](../spec/BATON_SPEC/11-people.md#sec-11-2)
+([R-BTN-58](../spec/BATON_SPEC/11-people.md#sec-11-2): owners and grants), [§8.2](../spec/BATON_SPEC/08-runners.md#sec-8-2)
+([R-BTN-146](../spec/BATON_SPEC/08-runners.md#sec-8-2): accepted and pending grants, the sync
+flag; [R-BTN-117](../spec/BATON_SPEC/08-runners.md#sec-8-2): registration tokens),
+[§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3):
+MCP keys listed with the credentials; [R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3): the
+command tree), [§3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) ([R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2):
+sync keys), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4):
+code-repository consents), [§10](../spec/BATON_SPEC/10-checks.md#sec-10) ([R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10):
 check-runners), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8):
-role, domain, checker; [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8): human-only keys),
+role, domain, checker; [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8): human-only),
 [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET /v1/owner/{repository}/grants`).
 
-**Depends on:** B-193 (the shell).
+**Depends on:** B-208 (the shell; a session reads the grants read since B-192; no control from
+B-207 is needed).
 
-**Used by:** B-203.
+**Used by:** B-200 (the `consents` field), B-203.
 
 ### What to build
 
-The §14 row first, then the code.
+The §14 row first, then the code (`admin.ts`'s `grantsView`).
 
 1. **Extend `GET /v1/owner/{repository}/grants`** (`owner.grant.list`): beside `owners`,
-   `grants`, `mcp_keys`, `settings` and `bars`, answer `tokens` (`id`, `role`, `capabilities`,
-   `max_tier`, `expires_at`, `uses_left`, `registered` — the credential ids it registered,
-   R-BTN-117), `sync_keys` (`fingerprint`, `role` sync or mirror, `added_by`, `added_at`,
-   R-BTN-93), `check_runners` (`fingerprint`, `name`, `capabilities`, `max_tier`, R-BTN-114),
-   and on each owner `kind` (ssh or api), `human_only` (R-BTN-185) and `added_at`; on each grant
-   `pending` (not yet accepted, R-BTN-146), `sync` and `checker`. One read for the six screens
-   (one entity, credentials, six kinds), as R-BTN-179 already frames it; a session of either role
-   calls it (B-192).
-2. **The six screens**, each a `<table>` from one field of the read, with the kind's CLI command
-   named above it as text (R-BTN-127's names: `baton owner grant add …`, `baton owner owner add
-   …`, `baton owner token create …`, `baton owner mcp-key create …`, `baton owner sync-key add
-   …`, `baton owner check-runner add …`), and a line saying what each is for in one sentence of
-   core's vocabulary:
+   `grants`, `mcp_keys`, `settings` and `bars`, answer `tokens: [{id, role, capabilities,
+   max_tier, expires_at, uses_left, registered: [credential_id]}]` (R-BTN-117), `sync_keys:
+   [{fingerprint, role: sync | mirror, added_by, added_at}]` (R-BTN-93), `check_runners:
+   [{fingerprint, name, capabilities, max_tier}]` (R-BTN-114), `consents: [{home, consented,
+   by, at, withdrawn_at}]` (R-BTN-140: each home that lists this repository in `code_repos`),
+   and on each owner `kind` (ssh or api), `human_only`, `added_at`; on each grant `pending`
+   (R-BTN-146), `sync`, `checker`. One read for the credential screens and B-200's `/consents`.
+2. **The six screens** (`src/dashboard/screens/credentials/`), each a `<table>` from one field,
+   headed by one sentence in core's vocabulary and the exact R-BTN-127 command that changes
+   it, copied from the tree in §11.3 (`baton owner grant add <repository> --key <pub>
+   --capabilities <a,b> […]` and `… grant revoke …`; `baton owner owner add <repository> <pub>`;
+   `baton owner token create <repository> --role runner […]`; `baton owner mcp-key create
+   <repository> --name <name> […]`; `baton owner sync-key add <repository> <pub> --role
+   sync|mirror`; `baton owner check-runner add <repository> <pub> --name <hostname> […]`) as
+   text:
    - `/grants`: fingerprint (short, full on focus), hostname, label, capabilities as chips, max
-     tier, role and domain, checker, sync, pending, set by, granted by and at, other
-     repositories; pending grants marked;
-   - `/owners`: fingerprint, kind, human-only, added at; a repository whose owners are all the
-     deploy seed's carries the `seed_owners` notice (R-BTN-58);
-   - `/tokens`: id, role, scope, expiry, uses left, what it registered;
+     tier, role and domain, checker, sync, pending (marked), set by, granted by and at, other
+     repositories;
+   - `/owners`: fingerprint, kind, human-only, added at; the `seed_owners` notice where
+     `repo.list` flags the repository (R-BTN-58);
+   - `/tokens`: id, role, capabilities, max tier, expiry, uses left, what it registered;
    - `/mcp-keys`: name, minter, actions (each id), expiry, last used, client host and address;
    - `/sync-keys`: fingerprint, role, added by and at;
    - `/check-runners`: fingerprint, name, capabilities, max tier.
-3. **The controls that are a session's.** Only what R-BTN-155 lists and R-BTN-129's `callers`
-   give a session: today none of the credential writes list `session`, so the screens draw no
-   control; if B-73's `owner.mcp-key.approve` (an owner's confirmed action) lands, `/mcp-keys`
-   places it by `ui.view` through the confirm-code dialog. The screens never draw a control the
-   registry does not give them.
-4. **Phone.** Each table collapses to one card per row at 375 px, the fingerprint first.
+   No control: no credential write lists a session (§12.2, R-BTN-155), and B-73's
+   `owner.mcp-key.approve`, when it lands, places itself on `repository/mcp-keys` by `ui.view`
+   (the control belongs to the ticket that builds the action).
+3. **Phone.** Each table collapses to one card per row at 375 px, the fingerprint first.
 
 ### What not to do
 
-- No credential write from the dashboard: revocations, additions, role changes and flags stay
-  the CLI's (`owner.grant.revoke`, …, §12.2), which the screens name.
-- No secret: a token's or MCP key's value is returned once at minting and is never in a read.
-- No second read: the six screens poll one `owner.grant.list`.
+- No credential write from the dashboard; no secret in any read (bearers are hashes, §12.1).
+- No second read: six screens, one `owner.grant.list`.
+- No conditional on B-73.
 
 ### Trust
 
 - **The extended read** — Baton's rows: fingerprints, hostnames, labels, names, client hosts
-  and addresses are untrusted text validated on write (§12.3) and drawn as text; nothing in it
-  is a secret (bearers are stored as hashes, §12.1).
-- **Who may read it** — an owner's session on its repositories, an administrator's everywhere,
-  an owner key as today (R-BTN-179); a runner key is `forbidden`.
-- Nothing is written.
+  and addresses are untrusted text validated on write (§12.3), drawn through `Text`; an
+  owner's session on its repositories, an administrator's everywhere, an owner key as today
+  (R-BTN-179); a runner key `forbidden`. Nothing is written.
 
 ### Invariants
 
-- **Read-only** (§11.4): no credential changes from these screens.
-- **One role per key** (§12.1): the screens show the role; they never show a key under two.
-- **Bearer secrets only as hashes** (§12.1): no value in any read.
+- **Read-only** (§11.4); **one role per key** and **bearers only as hashes** (§12.1).
 - **Text, never markup** (§12.3); **an owner's session, its repositories** (R-BTN-155).
 
 ### Tests
 
 A scenario numbered at merge, on both hosts, with a fixture repository holding two owners (one
-human-only), an accepted and a pending grant, a registration token that registered one
-credential, an MCP key, a sync key and a check-runner:
-
-- `owner.grant.list` returns the six collections with the fields above and no secret; an
-  owner's session reads it, a runner key is `forbidden`;
-- under `test/ui/`: each screen lists its rows, the pending grant is marked, the command line
-  is text, no control is drawn for a session without an entry; a hostile label is text.
+human-only), an accepted and a pending grant, a token that registered one credential, an MCP key,
+a sync key, a check-runner and one consent: `owner.grant.list` returns every collection with the
+fields above and no secret; an owner's session reads it; a runner key is `forbidden`. Under
+`test/ui/`: each screen lists its rows, the pending grant is marked, every command line matches
+R-BTN-127's tree (a test reads the names from the registry's command table), no control is drawn,
+a hostile label is text.
 
 ### Exit criteria
 
-- [ ] `owner.grant.list` extended in §14, the registry and the code, with tests.
-- [ ] The six screens built, read-only, each naming its command.
-- [ ] The scenario passes; `npm test`, `npm run typecheck`, `npm run lint`, `npm run check:wiki`
-      and `npm run check:tickets` are green.
+- [ ] `owner.grant.list` extended in §14, the registry and `grantsView`, with tests.
+- [ ] The six screens built, read-only, each naming its verified command.
+- [ ] The scenario and tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
 
 ## Status
 
 _filed 2026-11-09._
+
+_2026-11-09 — revised after review: `consents` moved here from B-200 (one writer of the grants
+read); the B-73 conditional removed; probes sent to B-202's `/resources`; the command names to be
+verified against R-BTN-127's tree by a test._

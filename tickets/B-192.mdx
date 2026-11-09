@@ -1,5 +1,5 @@
 ---
-title: "B-192 — Sessions read what they see: a dashboard session is a reader on every read it draws, GET /v1/repositories is the root, GET /v1/actions answers a session, and ui.view places each control"
+title: "B-192 — Sessions read the repository reads: the front resolves a session cookie on every GET the registry admits it for, every repository and owner read a screen draws admits a session, and the two reads nobody owns — children and courses — are built"
 id: B-192
 project: baton-ui-v2
 status: available
@@ -10,134 +10,120 @@ tags:
   - roadmap-item
 order: 1191
 tier: judgement
-description: "The API half of BATON-UI-V2's rule that every screen is one entity's REST reads. Today a session reads one monolith, GET /v1/ui/state, and the repository reads admit keys but not sessions. Add session to the callers of every GET /v1/repositories/{r}/… and GET /v1/owner/{r}/… read a screen draws (an owner's on its repositories, an administrator's everywhere); add GET /v1/repositories, the root read — the caller's repositories with head, mode and the overview strip's counts (running, ready, needs you); answer GET /v1/actions to a session with each entry's ui; give every registry entry the ui.view B-191 specifies, checked by check:actions. Leaves GET /v1/ui/state in place until B-203. Requires: none."
+description: "The first API half of BATON-UI-V2's rule that every screen is one entity's REST reads. Today the front attaches the session principal only under /v1/ui/*, and the repository reads admit keys but not sessions. Make the front resolve a session cookie on any GET whose registry entry lists session (a signed or bearer request is that key's, cookie ignored; R-BTN-16's Origin checks apply); add a session caller to board, blocks, blocked, history, stats, policy, the owner grants and policy/log reads, and to prerequisites, legs/{leg}/runs and conditions as B-10, B-23 and B-55 build them; build GET …/tickets/{ticket}/children and GET …/courses, which §14 lists and no ticket owns; amend §12.1's session row and R-BTN-16. Requires: B-191, B-10, B-23, B-55."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
   - B-191
-  - B-25
+  - B-10
+  - B-23
+  - B-55
 ---
 
-**Brief:** the owner, 2026-11-09 (B-191): "Every screen = one entity's REST reads, with its
-controls the registry actions placed there by `ui.view` — so 'what I see' and 'what I can do'
-come from the same definition."
+**Brief:** the owner, 2026-11-09 (B-191): "Every screen = one entity's REST reads."
 
-**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the screens, as B-191
-amends it), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3):
-`callers`, `ui`, `GET /v1/actions`, "A caller is never shown an action it cannot take"),
-[§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (the dashboard session's row; [R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1):
-the state is readable with a key), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (the route table),
-[§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4):
-same-origin JSON for a session).
+**Spec:** [BATON_SPEC §11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3):
+`callers`; a session authorizes as `session` with its role), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4)
+([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): an owner's session only its repositories),
+[§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (the session row; [R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1):
+the state readable with a key), [§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4):
+same-origin JSON, the `Origin` and `Sec-Fetch-Site` checks), [§14](../spec/BATON_SPEC/14-api.md#sec-14)
+(the repository reads; `children`, `courses`), [§4.6](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6)
+([R-BTN-86](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6): children),
+[§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2):
+the course file as last accepted; [R-BTN-121](../spec/BATON_SPEC/05-courses.md#sec-5-2)).
 
-**Depends on:** B-191 (the screens and `ui.view` are specified), B-25 (the registry the entries
-live in; `GET /v1/actions`).
+**Depends on:** B-191 (the screens and the session paths are specified), B-10 (`prerequisites`),
+B-23 (`legs/{leg}/runs`), B-55 (`GET …/conditions`) — the reads this ticket adds a session caller
+to must exist. The reads that exist today (`board`, `blocks`, `blocked`, `history`, `stats`,
+`policy`, `grants`) need none of them.
 
-**Used by:** B-193 and every screen ticket.
+**Used by:** B-194, B-196, B-197, B-202, B-204, B-205, B-206, B-213.
 
 ### What to build
 
-The spec rows first (§14, §12.1's session row), then the code; R-BTN-129's rule that the router
-is generated from the registry means each change below is a registry entry.
+The §12.1 and §14 rows first, then the code.
 
-1. **Sessions are readers.** Every `GET /v1/repositories/{repository}/…` read a screen draws —
-   `board`, `tickets/{ticket}/blocks`, `…/prerequisites` (already), `…/history`, `…/children`,
-   `…/legs/{leg}/runs`, `blocked`, `conditions`, `courses`, `stats`, `policy` — and the owner
-   reads `GET /v1/owner/{repository}/grants` and `…/policy/log` gain
-   `{principal: "session", roles: ["administrator", "owner"], scope: "repository"}` in their
-   `callers`: an owner's session on the repositories its key still owns, an administrator's on
-   every repository, a target elsewhere `forbidden` (R-BTN-155). §12.1's dashboard-session row
-   says "the repository reads (§14) on its repositories" in place of the two routes it lists
-   today. `leg.runs`, whose callers are owner and admin, admits a session of either role.
-2. **The root read**, `GET /v1/repositories` (`repo.list`, effect `read`): callers a session of
-   either role, an owner key (its repositories) and an administrator key (all). Each row:
-   `id`, `github` (the forge path), `forge`, `web_base`, `default_branch`, `head` (sha and
-   received_at), `mode`, `running` (live claims), `ready` (ready tickets), `needs_you` (open
-   conditions and queued person legs, R-BTN-163), `runners_alive`, `courses` (ids and versions)
-   — the overview strip's three counts and the root screen's card, from the queries `uiState`
-   already runs (`adminView`, `readyRows`, `claims.running`, `claims.needsYou`). An
-   administrator's answer also carries `seed_owners` as `GET /v1/admin/repositories` does;
-   that route stays the registry screen's read (B-202).
-3. **`GET /v1/actions` answers a session** (`actions.list`): the caller's entries with `input`
-   and `ui`, filtered as `authorize` would filter them — an owner's session sees only entries
-   whose `callers` list `session` for owners, and, for repository-scoped ones, only when the
-   session still owns at least one repository. The dashboard reads its controls from this,
-   nowhere else.
-4. **`ui.view` on every entry.** Give each dashboard control its screens, by B-191's names
-   (`ticket.hold`, `ticket.expedite`, `ticket.cancel`, `ticket.route`, `ticket.adopt`,
-   `ticket.resolve`, `leg.stop` on `repository/tickets/{ticket}`; `ticket.resolve` also on
-   `repository/conditions/{condition}`; `claim.force-reap`, `claim.fence-clear`, the completion
-   confirm and release on `repository/tickets/{ticket}`; the adoption confirm and `admin.repo.*`
-   on `tenant/repositories`; freeze, seal, export on `tenant/state`; `admin.sessions.revoke` on
-   `tenant/sessions`; `owner.sync.want` and the resync on `repository/sync`; `runner.message`'s
-   status request and wind-down on `repository/runners/{name}`; and so on down the tree).
-   `check:actions` fails a `view` naming no screen and lists every screen without a control.
-5. **Pagination and freshness.** Every list read a screen polls takes `cursor` and returns
-   `next_cursor` (HMAC-bound as R-BTN-130's list tools are, under `CursorKey`), and every read
-   answers `ETag` and honours `If-None-Match` with `304`, as `/v1/runner/fleet` does
-   (R-BTN-99), so a 10-second poll of an unchanged screen moves no body.
-6. **Nothing retired yet.** `GET /v1/ui/state` and `GET /v1/admin/state` keep answering, built
-   from the same queries, until B-203 removes the first and settles the second.
+1. **The front resolves a session on any admitted GET** (`src/core/front.ts`): a request carrying
+   the `__Host-baton_session` cookie to a route whose registry entry lists `session` is the
+   session's, with R-BTN-16's `Origin`/`Sec-Fetch-Site` checks as on `/v1/ui/*`; a request that
+   carries a signature or a bearer is that key's and its cookie is ignored. Until B-25's registry
+   drives the router, the front holds the same fact as a list in `src/core/screens.ts`'s
+   neighbour `sessionReads.ts`, deleted when B-25 generates it.
+2. **Session callers** — `{principal: "session", roles: ["administrator", "owner"], scope:
+   "repository"}` — on `GET /v1/repositories/{repository}/board`, `…/tickets/{ticket}/blocks`,
+   `…/prerequisites`, `…/history`, `…/children`, `…/legs/{leg}/runs` (its callers are owner and
+   admin: a session of either role), `blocked`, `conditions`, `courses`, `stats`, `policy`, and
+   `GET /v1/owner/{repository}/grants`, `…/policy/log`. The core's `authorize` answers an owner's
+   session on the repositories its key still owns, an administrator's everywhere, a target
+   elsewhere `forbidden` (R-BTN-155, R-BTN-129). The scope check runs on the server; nothing is
+   filtered in a client.
+3. **`GET /v1/repositories/{repository}/tickets/{ticket}/children`** (`ticket.children`, read;
+   the repository reads' principals and a session): `{children: [{ticket_id, station, blocked,
+   closed?}]}` as §14 states it, from the tickets whose `parent` is the ticket (R-BTN-86) joined
+   with `stations.ts` and `blocks.ts`.
+4. **`GET /v1/repositories/{repository}/courses`** (`repo.courses`, read; same callers): each
+   course file as last accepted — id, version, the file as an opaque blob, its capability types
+   and roles (R-BTN-121, R-BTN-157) — and `refused: {version, reason}` where a newer file was
+   refused (R-BTN-69), from `courses.ts`.
+5. **§12.1 and R-BTN-16** as B-191 words them: the session row names the reads; R-BTN-16 says a
+   session's reads outside `/v1/ui/*` are Baton's to authenticate.
 
 ### What not to do
 
-- No new screen-specific read here: the ticket list and detail (B-194), the condition detail
-  (B-195), the runner reads (B-196), `goals` (B-198), `attestations` (B-200), `sync` (B-201) and
-  the tenant reads (B-202) are filed with their screens.
-- No write gains a session caller it does not have: the confirmed-action list (R-BTN-155) and
-  the write callers are untouched.
-- Do not filter inside the dashboard: the server answers an owner's session only its
-  repositories' rows, as the board read already does for `GET /v1/ui/state`.
+- No new write caller: the confirmed-action list (R-BTN-155) and every write's callers are
+  untouched.
+- No read built here beyond `children` and `courses`: the ticket list and detail (B-194), the
+  runner reads (B-196), `course.show` (B-197), `sync` (B-201), the tenant reads (B-202) and
+  `attestations` (B-213) are their tickets'.
+- No `GET /v1/ui/state` change: it keeps answering until B-203.
+- No ETag or cursor here: B-205.
 
 ### Trust
 
-- **A session's reads** — the session cookie is the credential (R-BTN-155), checked on every
-  request against its role and repositories; a read on a repository the key no longer owns is
-  `forbidden`, the same answer as for a repository that does not exist (no existence oracle).
-- **`GET /v1/repositories` and `GET /v1/actions`** — Baton's own record, answered to the
-  caller's role only; nothing in them is written by the caller.
-- **`ui.view`** — registry data in this repository, written by PR, read by the dashboard to
-  place controls; it grants nothing — `authorize` runs on every call whatever the screen drew.
-- **Cursors** — HMAC-bound to the caller, action and input; a forged or foreign cursor is
-  `invalid-params`.
+- **A session's read** — the cookie is the credential (R-BTN-155), checked on every request
+  against its role and repositories; a read on a repository the key no longer owns is
+  `forbidden`, the same answer as for one that does not exist.
+- **A request with both a key and a cookie** — the key's; the cookie decides nothing, so a page
+  cannot borrow a key's reach and a key cannot borrow a session's.
+- **`children` and `courses`** — Baton's rows and an opaque blob (the course file, §12.3),
+  answered to the repository reads' principals.
 
 ### Invariants
 
-- **One check** (R-BTN-129): no route, screen or read decides permissions; every entry's
-  `callers` are the decision, through `authorize`.
-- **An owner's session reaches only its repositories** (R-BTN-155), on every read it gains.
-- **Readable with a key** (R-BTN-179): every session read is the same entry a signed key of the
-  session's role calls, same query, same JSON.
-- **Filter fields only** (R-BTN-33): the root read and the list reads carry ids, counts and
-  positions, never a body.
-- **One clock** (R-BTN-32); **both hosts** (R-BTN-55).
+- **One check** (R-BTN-129): `authorize` decides every added caller.
+- **An owner's session reaches only its repositories** (R-BTN-155).
+- **Readable with a key** (R-BTN-179): a session read is the same entry, query and JSON a key gets.
+- **Same-origin** (R-BTN-16) on every session request.
+- **Both hosts** (R-BTN-55).
 
 ### Tests
 
-Each a scenario numbered at merge, on both hosts:
+Scenarios numbered at merge, on both hosts:
 
-- an owner's session reads `board`, `history`, `conditions`, `courses`, `stats`, `grants` and
-  `policy/log` of its repository and is `forbidden` on another's; an administrator's reads
-  both; a runner key keeps today's answers;
-- `GET /v1/repositories` as an owner's session lists its repositories with `running`, `ready`
-  and `needs_you` equal to the board's live claims, its ready rows and the open conditions;
-  as an administrator's, every repository and `seed_owners`;
-- `GET /v1/actions` as an owner's session names `ticket.hold` with its `ui.view` and not
-  `claim.force-reap`; as an administrator's, both; as a delegated key, `unauthenticated`
-  (R-BTN-130);
-- `check:actions` fails a fixture entry whose `view` names `repository/nowhere`;
-- an unchanged poll with `If-None-Match` is `304`; a tampered cursor is `invalid-params`.
+- an owner's session reads each listed read on its repository and is `forbidden` on another's;
+  an administrator's reads both; a runner key's answers are unchanged;
+- a request with a cookie and a valid signature is the key's (an owner key's session cookie
+  plus a runner's signature answers the runner's view);
+- a session request with a foreign `Origin` is refused as `/v1/ui/*` refuses it today;
+- `ticket.children` lists a fixture parent's children with station and blocked; `repo.courses`
+  returns the accepted file and the refused newer version.
 
 ### Exit criteria
 
-- [ ] §14 rows and §12.1's session row amended; `spec:index` current.
-- [ ] Every read above admits a session; `repo.list` and the session's `actions.list` exist;
-      every control entry carries `ui.view`; `check:actions` enforces it.
-- [ ] The scenarios above pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
-      `npm run check:tickets` are green; `GET /v1/ui/state` is unchanged.
+- [ ] §12.1's session row, R-BTN-16's paragraph and the §14 rows amended; `spec:index` current.
+- [ ] The front resolves sessions on admitted GETs; every read above admits a session;
+      `children` and `courses` exist.
+- [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
 
 ## Status
 
 _filed 2026-11-09._
+
+_2026-11-09 — revised after review: split into B-192 (this), B-204 (the root read, the session's
+actions, `ui.view`) and B-205 (ETag and cursors); the front's cookie rule decided; dependencies on
+B-10, B-23 and B-55 added, since the reads they build did not exist; `children` and `courses`
+built here because no ticket owned them._

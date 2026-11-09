@@ -1,0 +1,128 @@
+---
+title: "B-206 — The shell: sign-in per role, the router over the entity tree with the sidebar, one polling layer with freshness, the refusal screens, theme and 375 px"
+id: B-206
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1205
+tier: judgement
+description: "The second shell ticket of BATON-UI-V2: the layout (the mockup's sidebar with counts, header with the freshness line), sign-in per role on /login and on any screen while signed out (R-BTN-155's code flow, returning to the path the visitor is on), the client router generated from src/core/screens.ts with the repository picker and the tenant entries for an administrator, one polling layer (a screen declares its reads; fetched together every 10 seconds with If-None-Match, paused while hidden, stopped on unauthenticated, freshness from the last 200 or 304), the two refusal screens §11.4 words, light and dark by prefers-color-scheme, and a 375 px layout with the sidebar as a drawer. No entity screen yet. Requires: B-193, B-192, B-76."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-193
+  - B-192
+  - B-76
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "sign in, pick a repository, and every screen after
+that is one entity". The mockup's shell — the sidebar (Baton, the origin, the entries with their
+counts, "Live · updated 7 s ago · Polls every 10 s") and the page header — is this ticket's
+layout; its phone render stacks the sidebar under the content, which this ticket replaces with a
+drawer (decision below).
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4):
+sign-in by a confirmed code, per role; sessions; the screens, polling and refusal rules as B-191
+amends them), [§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4):
+the pending and session cookies), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3)
+([R-BTN-135](../spec/BATON_SPEC/02-deployments.md#sec-2-2): 600 calls a minute per credential),
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) (`POST /v1/login`, `GET /v1/repositories`,
+`POST /v1/ui/logout`). Context: the brief's constraints (phone-readable, light and dark,
+accessible).
+
+**Depends on:** B-193 (the toolchain and serving), B-192 (session reads for the sidebar's counts;
+B-204's `repo.list` is read by the router but the shell renders without it), B-76 (owner
+sessions: the sign-in has two roles).
+
+**Used by:** B-207, B-208.
+
+### What to build
+
+1. **Layout.** The mockup's frame: a sidebar (brand and origin; the current repository's screens
+   with counts; the tenant screens for an administrator's session; the freshness line) and a
+   main column with a page header. Components under `src/dashboard/app/`; the two shared
+   rendering components `src/dashboard/lib/Text.tsx` (string coercion only) and
+   `src/dashboard/lib/View.tsx` (mounts `src/shared/view.mjs`'s `renderUi` into a ref'd
+   container that React does not own — the renderer writes through `textContent`), which every
+   screen uses for a value from a read.
+2. **Sign-in.** `/login?as=administrator|owner` heads itself by role and runs R-BTN-155's steps:
+   `POST /v1/login {role}`, show the eight-character code with the one CLI line that binds it
+   (`baton admin open` or `baton owner open`), poll `{poll: true}` every two seconds, and on the
+   session cookie go to `/`. On any screen while signed out (a read answers `unauthenticated`),
+   the shell draws the same sign-in in place, keeps the URL it is on, and continues there once
+   signed in; no return URL is carried in a query (an open-redirect surface), the path is the
+   page's own. `ui.logout` in the sidebar's footer, back to the sign-in.
+3. **The router.** Client-side, generated from `src/core/screens.ts` (imported into the bundle
+   as data): each entry's `path` pattern maps to a screen component registered by `id` under
+   `src/dashboard/screens/`; history push on navigation, back and forward and reload land on the
+   same screen; an unregistered screen id draws "not built yet" with the screen's name (the
+   screen tickets fill them). The repository picker is the root screen (B-208); the sidebar
+   lists the current repository's screens and, for an administrator's session, the tenant
+   screens; an owner's session sees no tenant entry (the router hides a `role: administrator`
+   screen for an owner, and the server refuses it anyway).
+4. **The polling layer.** A screen declares its reads (`useReads([...])`); the layer fetches a
+   screen's reads together every 10 seconds with `If-None-Match` (B-205), keeps the last good
+   answer on an error, pauses while `document.visibilityState` is hidden and fetches at once on
+   return, stops and shows sign-in on `unauthenticated`, and re-reads `GET /v1/actions` on
+   sign-in and every 60 seconds (B-207 consumes it). Freshness ("updated 7 s ago", "stale since
+   12:04 — forbidden") is measured from the last `200` or `304` by the browser's clock. Worst
+   case is well under R-BTN-135's 600 a minute per credential.
+5. **Refusals**, one component with §11.4's wording: a repository the session cannot read or
+   none — "This repository is not yours or does not exist", linking `/`; an entity not found —
+   "No such ticket" (condition, runner, course, goal) with the id as text. A read's other
+   refusal codes are drawn as the code and message, as text, in the freshness line.
+6. **Theme, size, access.** `prefers-color-scheme` light and dark through CSS custom properties,
+   with a three-way override (system, light, dark) in the footer kept in `localStorage` — the
+   only thing stored there; at 375 px the sidebar is a drawer opened from the header (chosen
+   over the mockup's bottom list because a deep screen needs its navigation without scrolling),
+   the main column single; headings per section, every control reachable by keyboard, focus
+   visible, state never by colour alone.
+
+### What not to do
+
+- No entity screen, no control, no dialog: B-207 and B-208 and the screen tickets.
+- No permission logic: the sidebar hides tenant entries by the session's role as `repo.list`
+  reports it; everything else is drawn or refused by the server's answer.
+- No return URL parameter; no `localStorage` beyond the theme override; no polling while hidden.
+
+### Trust
+
+- **The pending and session cookies** are the only credentials; the shell holds no key and
+  reads no secret (R-BTN-155; the code it shows is Baton's own, bound by the key holder).
+- **Everything drawn** from a read is untrusted text through `Text` or `View` (§12.3).
+- **The URL** is sent to the server as-is and validated there; the client matches it against
+  `screens.ts` and interprets nothing.
+
+### Invariants
+
+- **R-BTN-155**: sign-in by a confirmed code; the role is the session's; an owner's session sees
+  no administrator screen.
+- **Text, never markup** (§12.3): `Text` and `View` are the only paths from a read to the DOM.
+- **The brief's constraints**: 375 px, light and dark, keyboard, course-agnostic.
+- **One polling rule** (§11.4): 10 seconds, `If-None-Match`, paused when hidden.
+
+### Tests
+
+Under `test/ui/` (jsdom) with fixture answers: the sign-in page runs the code flow and lands on
+`/`; a screen's `unauthenticated` draws sign-in and keeps the URL; the router maps every
+`screens.ts` entry and hides `role: administrator` entries for an owner; the polling layer sends
+`If-None-Match`, keeps the last answer on an error, pauses when hidden, stops on
+`unauthenticated`; the refusal component draws both wordings; a hostile string through `Text`
+and through `View` reaches the DOM as text; the drawer opens at 375 px.
+
+### Exit criteria
+
+- [ ] The shell renders on a local Baton for an administrator's and an owner's session: sign-in,
+      sidebar, router, polling, freshness, refusals, theme, 375 px.
+- [ ] The tests above pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-193 after review._

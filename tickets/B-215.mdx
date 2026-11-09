@@ -1,0 +1,94 @@
+---
+title: "B-215 — Tenant screens, part two: /settings, /state and /sessions, read-only for an administrator's session, with the mockup's Capacity cards drawn against R-BTN-87's envelope"
+id: B-215
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1214
+tier: judgement
+description: "Three read-only tenant screens of BATON-UI-V2 for an administrator's session (Decision 1a). /settings: link hosts, session hosts and the check app id from admin.settings.show, naming baton admin settings set; /state: frozen or sealed as the page's banner, the mockup's Capacity cards from admin.tenant — live claims, alive runners, live tickets and repositories each against its envelope figure, the day's requests and row writes, storage — naming baton admin freeze, unfreeze, seal, export and import as text; /sessions: the live dashboard sessions from admin.session.list with the caller's own marked, naming baton admin sessions revoke --all. No control. Requires: B-202, B-208."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-202
+  - B-208
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "`/settings`, `/state` (freeze/seal/export),
+`/sessions`"; Decision 1a in B-191 makes them read-only pending the owner, and keeps export
+CLI-only under either answer. The mockup's Capacity cards (`root.png`: Requests / min 38 / 600,
+Live claims 2 / 7, Alive workers 3 / 16, Live tickets 241 / 5,000, each with a bar) are `/state`;
+the requests card is the day's count, since 600 a minute is a per-credential limit (R-BTN-135),
+not the tenant's.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the tenant screens;
+Capacity), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3) ([R-BTN-87](../spec/BATON_SPEC/02-deployments.md#sec-2-3):
+the envelope; [R-BTN-135](../spec/BATON_SPEC/02-deployments.md#sec-2-2)), [§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8)
+([R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8): freeze, seal, export, import),
+[§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4):
+sessions live at most 4 hours; `admin.sessions.revoke`), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5)
+([R-BTN-112](../spec/BATON_SPEC/05-courses.md#sec-5-5): `link_hosts`), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3)
+([R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3): `session_hosts`), [§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7)
+(the check app), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3):
+`admin settings set`, `admin freeze|unfreeze|seal|export|import`, `admin sessions revoke`),
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) (B-202's reads).
+
+**Depends on:** B-202 (the reads), B-208 (the shell).
+
+**Used by:** B-203.
+
+### What to build
+
+1. **`/settings`** (`src/dashboard/screens/tenant/Settings.tsx`): `link_hosts` and
+   `session_hosts` as lists, `check_app_id` as text, each with its one-line meaning (R-BTN-112,
+   R-BTN-113, §12.7); `baton admin settings set [--link-hosts …] [--session-hosts …]
+   [--check-app-id <id>]` as text.
+2. **`/state`**: a banner when `frozen` or `sealed` (R-BTN-88) with what each means for writes;
+   the mockup's cards from `admin.tenant` — live claims, alive runners, live tickets and
+   repositories, each as "n / envelope" with a bar and the numbers as text; the day's requests
+   and row writes as cards with no bar (no envelope applies); storage. `baton admin freeze`,
+   `admin unfreeze`, `admin seal`, `admin export [--with-history]` and `admin import <file>` as
+   text; no control, and no export link (Decision 1: the whole tenant's state is never behind a
+   cookie).
+3. **`/sessions`**: a `<table>` of the live sessions — role, key fingerprint, repositories (an
+   owner's), bound at, last seen, client address, the caller's own marked "this session";
+   `baton admin sessions revoke --all` as text.
+4. **Phone.** Cards stack at 375 px.
+
+### What not to do
+
+- No control (Decision 1a); no export from the dashboard under any answer; no import.
+- No envelope figure invented: a card without an envelope has no bar.
+
+### Trust
+
+- **Every value** is the reads' text through `Text`; client addresses and fingerprints as text;
+  answered to an administrator's session only. Nothing is written.
+
+### Invariants
+
+- **Administrators only** (R-BTN-57, R-BTN-155); **read-only** (§11.4, Decision 1a).
+- **The envelope is the operator's advice** (R-BTN-87); **text, never markup** (§12.3).
+
+### Tests
+
+Under `test/ui/` with fixtures: the banner appears for `frozen`; the cards draw each live count
+against its envelope and the day's counts without a bar; `/sessions` marks the caller's own;
+every command line matches R-BTN-127's tree; no control is drawn; a hostile client address is
+text.
+
+### Exit criteria
+
+- [ ] The three screens built, read-only, usable on a local Baton for an administrator's session.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-202 after review._

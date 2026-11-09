@@ -1,5 +1,5 @@
 ---
-title: "B-195 — Conditions: /conditions is what waits on a person, /conditions/{condition} is the Resolve page with one restart click, and a person leg's answer is given there"
+title: "B-195 — Conditions: /conditions is what waits on a person, /conditions/{condition} is the Resolve page with one restart click and the person leg's answer where the read says the session may give it, and /conditions/{id} redirects from the front"
 id: B-195
 project: baton-ui-v2
 status: available
@@ -10,129 +10,136 @@ tags:
   - roadmap-item
 order: 1194
 tier: judgement
-description: "Build the Conditions screens of BATON-UI-V2 — the old Needs you as an entity screen. /conditions lists the repository's open conditions and queued person legs from GET …/conditions?open=1&person=1 (R-BTN-163), by severity then age, each with its restarts or options, its question's link and the tickets it would unblock; /conditions/{condition} is the Resolve page a delivery runner links to: the one condition, its detail and restarts, one click resolving it (ticket.resolve), signed out asking for sign-in and returning to itself; a person leg's entry takes the answer (attestation.add, std:decision@1) where the policy admits an owner writer, else names baton decision answer. Adds GET …/conditions/{condition}, the one-condition read. Requires: none."
+description: "The Conditions screens of BATON-UI-V2 — the old Needs you as an entity screen — and the two things they lack. GET …/conditions/{condition} (condition.show): one condition with its restarts, what it would unblock, and for a person leg its question with answerable, computed by authorize for the caller; the list read's questions rows gain the same answerable and ?open=1 answers in severity-then-age order. /conditions lists open conditions and queued person legs from GET …/conditions?open=1&person=1, each with its kind mark, ticket, detail, age, what it unblocks and its restarts as one-click buttons (POST /v1/ui/conditions/{condition}/resolve, B-56's route) or its options as buttons where answerable; /conditions/{condition} is the Resolve page a delivery runner links to, returning to itself after sign-in. The front answers GET /conditions/{id} with a 302 to the tree path when the core finds the id among the session's repositories. Requires: B-207, B-55, B-56."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
-  - B-193
+  - B-207
   - B-55
+  - B-56
 ---
 
 **Brief:** the owner, 2026-11-09 (B-191): "**Conditions** `/conditions` → `/conditions/{id}` —
 what waits on a person (the old 'Needs you' as an entity screen); the Resolve page is the detail
-view, one restart click." The mockup's Needs you list — a row per item with its kind mark
-(◆ Unconfirmed, ? Decision open, ‖ Held, ▲ Nobody can take, ✕ Retries exhausted), the ticket,
-one sentence of why, and its one or two actions at the right (Confirm / Release, Answer…,
-Release hold / Cancel…, View blocked, Retry once more / Hold) — is the Conditions screen's row.
+view, one restart click." The mockup's Needs you list (`root.txt`: a row per item with its kind
+mark — ◆ Unconfirmed, ? Decision open, ‖ Held, ▲ Nobody can take, ✕ Retries exhausted — the
+ticket, one sentence, its actions at the right) is this screen's row.
 
 **Spec:** [BATON_SPEC §7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3):
-the debugger, resolving, Baton's own conditions, the Resolve page), [§7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1)
-([R-BTN-160](../spec/BATON_SPEC/07-conditions.md#sec-7-1): a condition's fields, `url`),
-[§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4) ([R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4):
-a person's leg and its question), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)
-([R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8): `attestation.add`; the policy's writer
-list), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the Conditions screens as B-191 amends
-them; R-BTN-155: resolving and a person leg's answer are not confirmed actions),
-[§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET …/conditions`, `ticket.resolve`,
+the debugger, resolving in one step, the Resolve page and its redirect as B-191 amends it),
+[§7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1) ([R-BTN-160](../spec/BATON_SPEC/07-conditions.md#sec-7-1):
+a condition's fields), [§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4)
+([R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4): a person's leg, its
+question and options), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8):
+`attestation.add` and the policy's writer list), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4)
+(the Conditions screens; R-BTN-155: resolving and answering are not confirmed; the `allowed` rule),
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET …/conditions`, `POST /v1/ui/conditions/{condition}/resolve`,
 `POST …/attestations`).
 
-**Depends on:** B-193 (the shell), B-55 (the `conditions` row and `GET …/conditions`: today's
-Needs you is `notices.ts` and the `needs_you` object, which B-56 and B-57 fold into conditions;
-this screen reads conditions only).
+**Depends on:** B-207 (controls and dialogs), B-55 (the `conditions` row and `GET …/conditions`),
+B-56 (`POST /v1/ui/conditions/{condition}/resolve`, the session's one-step resolve).
 
 **Used by:** B-203.
 
 ### What to build
 
-The §14 row first, then the code.
+The §14 rows first, then the code.
 
 1. **`GET /v1/repositories/{repository}/conditions/{condition}`** (`condition.show`, read; the
-   repository reads' principals and a session): the one condition as the list returns it —
-   `condition_id`, `ticket`, `leg`, `type`, `disposition`, `handler`, `restarts` (each with the
-   station it resumes at), `default`, `severity`, `url` (only if it passed §12.3), `detail`,
-   `raised_at`, `closed_at`, `outcome` — plus `unblocks` (the ticket ids its closing would make
-   ready, from `ticket_blocks`) and, for a `hitl` type bound to a person leg, the leg's
-   `question` as `GET …/conditions?person=1` returns it. `not-found` for another repository's
-   condition is the same answer as for none.
-2. **`/repositories/{r}/conditions`**: the open conditions and queued person legs from
-   `GET …/conditions?open=1&person=1`, ordered by severity then age (R-BTN-163), each row: the
-   kind mark and type (core's `baton.*` types named plainly: unconfirmed completion, held, nobody
-   can take, retries exhausted, stalled, contract, course refused, queue over, scope finding,
-   sign-in burst), the ticket (linking to its page), the one-sentence `detail` as text, since
-   when, the tickets it would unblock, and its controls: each restart as a button (one click,
-   `ticket.resolve {restart, condition_id}`); a person leg's options as buttons where the
-   policy's `attestations` admits an `owner` writer for `std:decision@1` (the answer is
-   `attestation.add`), else the line `baton decision answer <ticket> <option>` as text; the
-   question's `url` as a link. `?type=` and `?ticket=` filters as URL query; closed conditions
-   behind a toggle (`?open=0`), 100 a page.
-3. **The Resolve page**, `/repositories/{r}/conditions/{condition}`: the one condition from
-   `condition.show`, its detail pretty-printed as text (a blob as JSON, §12.3), its restarts as
-   the page's controls, the ticket's position beside it, and what it unblocks. Signed out, the
-   shell's sign-in with a return to this path (R-BTN-163); the legacy `/conditions/{condition}`
-   redirects here (B-193). After a resolve, the page polls until `closed_at` is set and says so.
-4. **Counts.** The overview strip's "needs you" count is this screen's open count; the
-   sidebar's Conditions count is the same number.
-5. **Phone.** The list reads at 375 px with the controls under each row; the Resolve page is the
-   screen a person opens from a phone notification, so its restart buttons are large and the
-   whole page fits without horizontal scroll.
+   repository reads' principals and a session): the condition as the list returns it
+   (`condition_id`, `ticket`, `leg`, `type`, `disposition`, `handler`, `restarts` each with the
+   station it resumes at, `default`, `severity`, `url` where it passed §12.3, `detail`,
+   `raised_at`, `closed_at`, `outcome`), plus `unblocks` (ticket ids its closing would make
+   ready, from `ticket_blocks`), `allowed` (`["ticket.resolve"]` where the caller may resolve
+   it), and for a `hitl` type on a person leg `question: {asks, options: [{id, reached}],
+   url?, answerable}` — `answerable` true when `authorize` says this caller may write the
+   `std:decision@1` under the policy in force (R-BTN-181, R-BTN-116). `not-found` for another
+   repository's id, the same as for none.
+2. **The list read** (`GET …/conditions`, B-55's): `?open=1` answers in severity then age order
+   (R-BTN-163), and each `questions` row carries `answerable` as above — two §14 row changes.
+3. **The redirect** (`src/core/front.ts` and one core lookup): `GET /conditions/{id}` with a
+   session whose repositories hold the id answers `302` to
+   `/repositories/{r}/conditions/{id}`; otherwise the shell is served, which shows sign-in or
+   `not-found` (B-191, R-BTN-163). `resolve_url` in the list read is the tree path.
+4. **`/repositories/{r}/conditions`** (`src/dashboard/screens/conditions/`): the rows from
+   `GET …/conditions?open=1&person=1`, in the read's order: the kind mark and a plain name for
+   core's types (unconfirmed completion, held, nobody can take, retries exhausted, stalled,
+   contract, course refused, queue over, sign-in burst; a course's own type by its name), the
+   ticket linking its page, `detail` as text, since when, what it unblocks, and the controls:
+   each restart a one-click button (`POST /v1/ui/conditions/{condition}/resolve {restart}`,
+   placed by `ui.view` on `repository/conditions/{condition}` and drawn in the row too); a
+   person leg's options as buttons where `answerable` (each an `attestation.add` of a
+   `std:decision@1`), else the line `baton decision answer <ticket> <option>` as text; the
+   question's `url` as a link. `?type=` and `?ticket=` as URL query; closed conditions behind a
+   toggle (`?open=0`); load-more by the read's cursor.
+5. **The Resolve page**, `/repositories/{r}/conditions/{condition}`: from `condition.show` —
+   the condition, `detail` through `View` where its type's schema has a view, else as
+   pretty-printed text; the restarts as large one-click buttons; the ticket's position beside
+   it; what it unblocks. Signed out, the shell's sign-in in place, returning to this path; after
+   a resolve, the page polls until `closed_at` is set and says so. The one control not drawn
+   is a code dialog: resolving and answering are not confirmed (R-BTN-155).
+6. **Counts.** The strip's "needs you" count is this read's open count; the sidebar's the same.
+7. **Phone.** The list's controls sit under each row at 375 px; the Resolve page fits without
+   horizontal scroll (it is the page a person opens from a notification).
 
 ### What not to do
 
-- No second source of Needs you: the screen reads `conditions` only; what B-56 and B-57 have not
-  yet moved into conditions is not drawn here (it stays on V1 until they land, and B-203
-  removes V1 only once every listing is a condition).
-- No answer the policy does not admit: the app draws the options as buttons only when the read
-  says an owner writer is admitted; it never posts an attestation to find out.
-- No handler or restart logic in the app: the restarts are the condition's; the server
-  refuses one it does not offer (`invalid-params`), shown as text.
-- A resolve and an answer are one click (R-BTN-155): no confirm dialog on them.
+- No second source of Needs you: this screen reads conditions only; what B-56 and B-57 have
+  not yet made a condition (B-203's list) is not drawn here.
+- No permission logic: options are buttons only when `answerable`; restarts only when
+  `allowed`; the app posts nothing to find out.
+- No confirm dialog on a resolve or an answer (R-BTN-155).
 
 ### Trust
 
-- **`condition.show`** — Baton's row; `detail`, `type`, `url` and a question's `asks` and
-  options are untrusted text validated on the raise (R-BTN-160, §12.3) and drawn as text; `url`
-  is a link only because the server already dropped one that failed the link rule.
-- **A restart click** — `ticket.resolve` through `authorize`: an owner's session on its
-  repositories, an administrator's anywhere; never a delegated key (R-BTN-186).
-- **A person leg's answer** — `attestation.add` as writer `owner` (R-BTN-181), bounded by the
-  policy's writer list; the option id is validated on the server.
-- **The path's condition id** — sent as-is, validated by §12.3's id rule; a foreign or missing id
-  answers `not-found` with no existence oracle.
+- **`condition.show` and the list** — Baton's rows; `detail`, `type`, `asks`, options and `url`
+  are untrusted text validated on the raise (§12.3), drawn as text or through R-BTN-112's
+  renderer; `url` is a link only because the server already applied the link rule.
+- **`answerable` and `allowed`** — computed by `authorize` with the session as principal; the
+  client draws on that word and the server decides again on the call.
+- **A restart click** — `ticket.resolve` as a session (B-56's route); never a delegated key.
+- **An answer** — `attestation.add` as writer `owner`, bounded by the policy on the server.
+- **The redirect** — the core looks the id up within the session's repositories; nothing
+  outside them is revealed, and a miss serves the shell.
 
 ### Invariants
 
-- **R-BTN-163**: open conditions and queued person legs, by severity then age; resolving in one
-  step; the Resolve page returns to itself after sign-in.
-- **R-BTN-116**: the answer is a `std:decision@1`; where the policy admits no owner writer the
-  screen names the command and posts nothing.
-- **R-BTN-155**: resolving and answering are not confirmed actions; nothing here is.
-- **Text, never markup** (§12.3).
-- **An owner's session, its repositories** (R-BTN-155).
+- **R-BTN-163**: open conditions and queued person legs by severity then age; one-step
+  resolving; the Resolve page returns to itself.
+- **R-BTN-116**: an answer is a `std:decision@1`; where the session may not write it, the
+  command is named and nothing is posted.
+- **R-BTN-155**: nothing here is confirmed. **Text, never markup** (§12.3). **An owner's session,
+  its repositories** (R-BTN-155).
 
 ### Tests
 
-Scenarios numbered at merge, on both hosts, with a fixture raising a `hitl` condition with two
-restarts, a core `baton.retries`, and a queued person leg under two policies (owner writer
-admitted, not admitted):
+Scenarios numbered at merge, on both hosts, with a fixture `hitl` condition with two restarts, a
+core `baton.retries`, and a person leg under two policies (owner writer admitted, not):
 
-- `condition.show` returns the condition with `unblocks` and, for the person leg, its
-  `question`; another repository's id is `not-found`;
-- the list orders by severity then age and filters by `?type=` and `?ticket=`;
-- under `test/ui/`: a restart click sends `ticket.resolve` with the condition id and the page
-  shows `closed_at` after the poll; the person leg draws option buttons under the admitting
-  policy and the `baton decision answer` line under the other; signed out, the Resolve page
-  shows sign-in and returns to its path; a hostile `detail` is text.
+- `condition.show` returns `unblocks`, `allowed` and the question with `answerable` true under
+  one policy and false under the other; another repository's id is `not-found`;
+- `?open=1` orders by severity then age; `GET /conditions/{id}` is `302` for a session holding
+  the repository and the shell otherwise;
+- under `test/ui/`: a restart click sends the resolve and the page shows `closed_at` after the
+  poll; options are buttons only when `answerable`, else the command line; signed out, the
+  Resolve page shows sign-in and keeps its path; a hostile `detail` is text.
 
 ### Exit criteria
 
-- [ ] `condition.show` in §14 and the registry, with tests.
-- [ ] `/conditions` and `/conditions/{condition}` built; the legacy path redirects; the strip's
-      count agrees with the list.
-- [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run lint`, `npm run check:wiki`
-      and `npm run check:tickets` are green.
+- [ ] `condition.show`, the list read's `answerable` and order, `resolve_url` and the redirect in
+      §14 and the code, with tests.
+- [ ] `/conditions` and `/conditions/{condition}` built and usable on a local Baton at desktop
+      and 375 px.
+- [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
 
 ## Status
 
 _filed 2026-11-09._
+
+_2026-11-09 — revised after review: `answerable` and `allowed` added to the reads so the client
+reads no policy; the redirect moved to the front with a core lookup; B-56 added as the owner of
+the session's resolve route; scope findings moved to the ticket page (B-210), where their
+acknowledgement lives._

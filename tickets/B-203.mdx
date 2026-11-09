@@ -1,5 +1,5 @@
 ---
-title: "B-203 — Cutover to V2: the V1 page, script and GET /v1/ui/state retire, admin.state is settled, the deploy builds the bundle, and the renderer scenarios run against the new dashboard"
+title: "B-203 — Cutover, part one: every listing V1's Needs you drew has a V2 home or a filed gap, GET /v1/ui/state and the /v1/ui routes V2 does not call retire, and the brief, README and history Migrations are current"
 id: B-203
 project: baton-ui-v2
 status: available
@@ -10,127 +10,110 @@ tags:
   - roadmap-item
 order: 1202
 tier: judgement
-description: "Finish BATON-UI-V2 once every screen exists: remove src/ui/ (V1's page, stylesheet and module) and the front's serving of it; retire GET /v1/ui/state and every /v1/ui/* route whose action has an http route of its own, keeping the ui routes R-BTN-129 still names; settle GET /v1/admin/state as the one-request aggregate of the entity reads a terminal wants (R-BTN-179, B-118), built from the same queries; make sure every Needs-you listing V1 drew is a condition on the Conditions screen or named as a gap; run S-BTN-76, S-BTN-170 and G-BTN-13 against the V2 renderer; verify the deploy builds and serves the bundle on staging; update the brief's Where to look and the README's src/ui row; retire the old view names in the history's Migrations. Requires: none."
+description: "The first cutover ticket of BATON-UI-V2, once every screen exists. Account for each key of V1's needs_you object — the claims' unconfirmed, attempts, held_items, regressed, stale_skills, fence_pending, bars_mismatch, unacknowledged_releases; the blocks' blocked_capability and instances_unknown; the notices' no_owner_channel and pool_unclaimed; the stations' course_changed; adoptions, courses_refused, ontologies_refused, keys, scope, questions — naming the V2 screen that shows each or filing the gap, with B-57 the owner of what becomes a condition. Then retire GET /v1/ui/state, uiState()'s assembly and its §14 row, and POST /v1/ui/claims/{id}/resolve, which V1 alone called; keep every /v1/ui write route V2 calls. Update the brief's Where to look, the README and the history's Migrations with the retired view names. No workflow edit. Requires: every screen ticket and B-57."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
-  - B-194
+  - B-209
+  - B-210
   - B-195
-  - B-196
-  - B-197
+  - B-211
+  - B-212
   - B-198
   - B-199
   - B-200
+  - B-213
   - B-201
-  - B-202
+  - B-214
+  - B-215
+  - B-57
 ---
 
-**Brief:** the owner, 2026-11-09 (B-191): the V2 dashboard replaces V1; "Running/Ready collapse
-into Board and Tickets, Needs you into Conditions". The project is done when the dashboard at the
-instance's origin is the V2 app and V1 is gone (`tickets/projects/baton-ui-v2.mdx`, Done when).
+**Brief:** the owner, 2026-11-09 (B-191): "Needs you into Conditions"; the project is done when
+V1 and `GET /v1/ui/state` are gone (`tickets/projects/baton-ui-v2.mdx`, Done when). V1's files
+and paths went with B-193; what remains of V1 is its state route and the listings only it
+drew.
 
-**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the screens; "The
-actions"), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3):
-an entry may carry a `ui` route; `check:actions`), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1)
-([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1): the state readable with a key),
-[§11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) ([R-BTN-57](../spec/BATON_SPEC/11-people.md#sec-11-2):
-`GET /v1/admin/state`), [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3):
-every Needs-you listing is a condition), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3),
-[§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-76](../spec/BATON_SPEC/15-verification.md#scenarios),
-[S-BTN-170](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-13](../spec/BATON_SPEC/15-verification.md#gates),
-[G-BTN-100](../spec/BATON_SPEC/15-verification.md#gates)), [§14](../spec/BATON_SPEC/14-api.md#sec-14)
-(the Dashboard rows), [§16.2](../spec/BATON_SPEC/16-adoption.md#sec-16-2) (the reference
-deployment's rollout).
+**Spec:** [BATON_SPEC §7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3):
+every Needs-you listing is a condition — B-57's half), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4)
+(the screens; "The actions"), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3):
+an entry may carry a `ui` route; [R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3): retired
+names in the history's Migrations), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (the Dashboard
+rows), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) ([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1)).
 
-**Depends on:** B-194, B-195, B-196, B-197, B-198, B-199, B-200, B-201, B-202 (every screen of the
-tree exists).
+**Depends on:** B-209, B-210, B-195, B-211, B-212, B-198, B-199, B-200, B-213, B-201, B-214,
+B-215 (every screen of the tree exists), B-57 (every Needs-you listing is a `baton.<sub>`
+condition, so Conditions can show them).
 
-**Used by:** none; closes the project.
+**Used by:** B-216.
 
 ### What to build
 
-1. **Every listing accounted for.** Before removing V1, list what its Needs you drew
-   (`uiState().needs_you`: the claims', blocks', notices', stations', adoptions, refused courses
-   and ontologies, the keys notice, scope findings, questions) and find each on a V2 screen: a
-   condition on Conditions (R-BTN-163), an adoption on Sync, a refused course on Courses, the
-   keys notice and seed owners on the tenant screens. A listing with no home is a gap: file it
-   as a ticket (B-56 and B-57 own the moves into conditions) and keep V1 serving until it has
-   one — this ticket does not finish with a listing lost.
-2. **Remove V1.** Delete `src/ui/index.html`, `app.css` and `app.js`; the front's `STATIC` map
-   serves only the V2 bundle (B-193); the README's `src/ui/` row describes `src/ui-v2/` (or the
-   directory is renamed to `src/ui/` in the same PR, with B-193's paths updated — the
-   implementer's choice, stated in the PR body).
-3. **Retire `GET /v1/ui/state`.** Remove the route, `uiState()`'s assembly and `ui.state`'s
-   §14 row; every query it composed is now behind an entity read (B-192 to B-202). Remove each
-   `/v1/ui/*` route whose action has an `http` route the dashboard now calls directly, and keep
-   the `ui` routes R-BTN-129 still names (`/v1/ui/resync`, `/v1/ui/overrides/{ticket}`,
-   `/v1/ui/conditions/{condition}/resolve`, `/v1/ui/messages`, the claim and adoption
-   confirmations, cutover, logout) — or, where B-192's registry work gave each of them an
-   `http` row a session may call, retire the `ui` route and amend R-BTN-129's `ui` bullet to say
-   `route` is gone; `check:actions` decides which, and the §14 Dashboard rows follow.
-4. **Settle `GET /v1/admin/state`** (B-118, R-BTN-57): it stays, as the one-request answer a
-   terminal reads — the union of `repo.list`, each repository's `board`, `tickets`, `runners`,
-   `conditions`, `sync` and the tenant reads, by the same functions — so the dashboard and a
-   terminal cannot drift (R-BTN-179), and S-BTN-170 asserts the union equals the parts.
-5. **The scenarios.** S-BTN-76 (hostile values rendered) and G-BTN-13 run against the V2
-   renderer: markup and `javascript:` in a ticket title, a hold reason, an activity label, a
-   reading detail and a condition's detail reach each screen as text; a link to an unlisted host
-   is text. G-BTN-100's renderers row names the V2 bundle. B-191's scenario (the screen draws
-   only its caller's actions) runs on every screen with a control.
-6. **The deploy.** `baton-deploy.yml` builds the bundle before `wrangler deploy` (B-193's step,
-   confirmed here on staging): `baton-staging.immediately.run` serves V2 at `/`, every tree path
-   deep-links, and `/login` signs an administrator in; the production deploy follows on merge.
-   A CI change: in an owner-approved PR, named in its body.
-7. **Docs.** `docs/context/design-brief.mdx`'s "Where to look" names `src/ui-v2/` (or `src/ui/`)
-   and the entity reads; the README's layout table and Commands (`build:ui`) are current;
+1. **The listing ledger**, written into this ticket's PR body and checked by a test: for each key
+   of `uiState().needs_you` — `unconfirmed`, `attempts`, `held_items`, `regressed`,
+   `stale_skills`, `fence_pending`, `bars_mismatch`, `unacknowledged_releases` (claims),
+   `blocked_capability`, `instances_unknown` (blocks), `no_owner_channel`, `pool_unclaimed`
+   (notices), `course_changed` (stations), `adoptions`, `courses_refused`, `ontologies_refused`,
+   `keys`, `scope`, `questions` — the V2 screen that shows it: a `baton.<sub>` condition on
+   Conditions (B-57's work, B-195's screen) for the claims', blocks', notices' and stations'
+   listings, the refused courses and ontologies and the keys notice; adoptions on Sync (B-201);
+   scope findings on the ticket page (B-210); questions on Conditions (B-195). A key B-57 did
+   not make a condition and no screen shows is a gap: file it as a ticket in this project
+   before removing the route — this ticket does not finish with a listing lost. The test
+   asserts the ledger's keys equal `needs_you`'s at the moment of removal.
+2. **Retire `GET /v1/ui/state`**: the route, `uiState()`'s assembly and `ui.state`'s §14 row;
+   every query it composed is behind an entity read. `GET /v1/admin/state` keeps answering by
+   the renamed `stateView()` until B-216 settles it (Decision 4a).
+3. **The `/v1/ui/*` routes.** Keep every write route V2 calls (`/v1/ui/messages`,
+   `/v1/ui/overrides/{ticket}`, `/v1/ui/conditions/{condition}/resolve`, `/v1/ui/resync`,
+   `/v1/ui/board/accept`, `/v1/ui/scope/{id}/resolve`, `/v1/ui/claims/{id}/reap`,
+   `…/fence-clear`, `…/confirm`, `…/release`, `/v1/ui/cutover`, `/v1/ui/adoptions/{claim}/confirm`,
+   `/v1/ui/logout`): they are the session's write surface, with R-BTN-16's `Origin` rule and
+   R-BTN-155's codes. Remove `POST /v1/ui/claims/{id}/resolve`, which V1 alone called and which
+   `…/confirm` and `…/release` replaced (it has no §14 row). `check:actions` green.
+4. **Docs.** `docs/context/design-brief.mdx`'s "Where to look" names `src/dashboard/` and the
+   entity reads and drops V1; the README's Layout and Commands are current;
    `BATON_SPEC_HISTORY.md`'s Migrations list the retired view names (Needs you, Running, Ready,
-   Timeline, Instances, Capacity, Discrepancies as views) with the screens that replaced them,
-   as R-BTN-127 does for command names.
-8. **The project page.** `tickets/projects/baton-ui-v2.mdx`'s Done when is checked against the
-   deployed instance, and B-17 is closed if it still stands open.
+   Timeline, Instances, Capacity, Discrepancies, Resolve as a bare path) with the screens that
+   replaced them, as R-BTN-127 does for command names. B-17's PR is merged or the owner closes
+   it; this ticket touches it not.
 
 ### What not to do
 
-- Do not remove V1 while a Needs-you listing has no V2 home (item 1).
-- Do not keep `GET /v1/ui/state` "for compatibility": nothing but V1 reads it, and a second
-  source of truth drifts (R-BTN-179's reason).
-- Do not rewrite `admin.state` as a new query: it is the union of the entity reads' functions.
-- No new screen or control: gaps found here are filed, not built.
+- Do not retire `ui.state` while a listing has no home (item 1).
+- Do not touch `GET /v1/admin/state`'s shape (B-216) or any workflow (B-193 made the one change).
+- No new screen or control: a gap is filed, not built.
 
 ### Trust
 
-- **Removal** adds no input. `admin.state` is answered to an administrator's key only
-  (R-BTN-57), built from functions already bounded by their reads' callers.
-- **The scenarios** are the trust statement: every value that reached V1 as `textContent`
-  reaches V2 as a text node, proven on both hosts.
+Removal adds no input. The ledger test is the trust statement: nothing a person needed to see
+in V1 is silently gone.
 
 ### Invariants
 
-- **No listing lost** (R-BTN-163): what Needs you showed, Conditions or another screen shows.
-- **Readable with a key** (R-BTN-179): `admin.state` equals the union of the reads.
-- **Text, never markup** (§12.3, G-BTN-13, S-BTN-76).
-- **One check** (R-BTN-129): `check:actions` is green with no route outside the registry.
+- **No listing lost** (R-BTN-163).
+- **One check** (R-BTN-129): `check:actions` green, no route outside the registry.
 - **Both hosts** (R-BTN-55).
 
 ### Tests
 
-S-BTN-76, S-BTN-170 and G-BTN-13 amended and green against V2; B-191's scenario over every screen;
-a unit test that no file under `src/` references `/v1/ui/state` or `src/ui/`; `check:actions`
-green; a staging run noted in the PR body with the paths exercised.
+The ledger test (item 1); `check:actions`; a unit test that no file under `src/` references
+`/v1/ui/state` or `/v1/ui/claims/{id}/resolve`; the full suite green on both hosts.
 
 ### Exit criteria
 
-- [ ] Every V1 listing has a V2 home or a filed ticket; V1's files and `GET /v1/ui/state` are
-      gone; the `ui` routes are as `check:actions` and R-BTN-129 settle them.
-- [ ] `admin.state` is the union of the entity reads, asserted by S-BTN-170.
-- [ ] Staging serves V2 for every tree path; the deploy builds the bundle (owner-approved
-      workflow change).
-- [ ] Brief, README, history Migrations and the project page current; `npm test`,
-      `npm run typecheck`, `npm run lint`, `npm run check:actions`, `npm run check:wiki` and
-      `npm run check:tickets` are green.
+- [ ] The ledger in the PR body with every key homed or a gap ticket filed; its test passes.
+- [ ] `GET /v1/ui/state` and `POST /v1/ui/claims/{id}/resolve` gone; the kept routes as listed;
+      `check:actions` green.
+- [ ] Brief, README and history Migrations current; `npm test`, `npm run typecheck`,
+      `npm run check:wiki` and `npm run check:tickets` green.
 
 ## Status
 
 _filed 2026-11-09._
+
+_2026-11-09 — revised after review: `admin.state` and the renderer scenarios split out to B-216;
+V1's removal moved to B-193 (the owner needs no transition); the `/v1/ui/*` routes decided
+rather than left to `check:actions`; every `needs_you` key listed; no workflow edit here._

@@ -1,0 +1,98 @@
+---
+title: "B-214 — Tenant screens, part one: /repositories (the registry), /instances, /resources and /capacities, read-only for an administrator's session, each naming its CLI command"
+id: B-214
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1213
+tier: judgement
+description: "Four read-only tenant screens of BATON-UI-V2 for an administrator's session (Decision 1a). /repositories: the registry from GET /v1/admin/repositories — every registered repository's full row, seed_owners and retired ones marked — naming baton admin repo add, set, retire and resync as text; /instances: the mockup's Instance view table from admin.instance.list with each instance's state and newest reading, expanding to every reading by source, stale ones marked; /resources: each resource with its schema and instances, and the probe keys; /capacities: each capability's seats held with the holding claims. An owner's session has none of them in its sidebar and is refused by the reads. Requires: B-202, B-208."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-202
+  - B-208
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): the tenant screens for administrators; Decision 1a in
+B-191 makes them read-only pending the owner. The mockup's Instance view (`root.txt`: "anthropic
+· 5h window — 62% used · resets 19:40 UTC — ● OK"; "real-iphone — No device attached to any
+alive worker — ▲ Unavailable") is `/instances`; its Limits → Probes line is on `/resources`.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the tenant screens;
+repositories and instrument keys shown read-only), [§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1)
+([R-BTN-47](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1): the registry row;
+[R-BTN-138](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1)), [§11.2](../spec/BATON_SPEC/11-people.md#sec-11-2)
+([R-BTN-58](../spec/BATON_SPEC/11-people.md#sec-11-2): `seed_owners`), [§6.3](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3)
+([R-BTN-76](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3), [R-BTN-101](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3)),
+[§6.11](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-11) ([R-BTN-178](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-11)),
+[§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3):
+`admin repo add|set|retire|resync`, `admin probe add`, `admin resource add`, `admin instance
+add`, `admin reading set`, `admin capacity set`), [§14](../spec/BATON_SPEC/14-api.md#sec-14)
+(`GET /v1/admin/repositories`, B-202's reads).
+
+**Depends on:** B-202 (the reads), B-208 (the shell; the router hides `role: administrator`
+screens from an owner).
+
+**Used by:** B-203.
+
+### What to build
+
+1. **`/repositories`** (`src/dashboard/screens/tenant/Registry.tsx`): from `GET
+   /v1/admin/repositories` — a `<table>` with id, forge path (linking the forge by `web_base`),
+   forge, default branch, weight, tiers, head (sha, age), mode, courses, sync keys and CI
+   identity, retired rows marked, `seed_owners` marked and explained (R-BTN-58); what the root
+   `/` does not show (the full row, retired repositories). The commands `baton admin repo add
+   <forge path> --owner-key <pub> […]`, `… repo set <id> […]`, `… repo retire <id>` and `… repo
+   resync <repository> --force [<sha>]` as text; no control (Decision 1a; the session's forced
+   resync lives on each repository's Sync screen, B-201).
+2. **`/instances`**: the mockup's table from `admin.instance.list` — instance, resource, what it
+   serves, state mark and word (available, unavailable until), the newest reading's summary
+   (its `detail` through `View` where the resource's `detail_schema` carries a view, else the
+   first fields as text), source and age, `stale` marked — each row expanding to every reading
+   by source with `detail` pretty-printed. `baton admin reading set <instance> […]` as text.
+3. **`/resources`**: each resource with scope, `detail_schema` pretty-printed and its instances
+   linking `/instances`; the probe keys as a `<table>` (fingerprint, label, added at). `baton
+   admin resource add <name> […]`, `… instance add <name> […]`, `… probe add --key <pub> --label
+   <l>` as text.
+4. **`/capacities`**: a `<table>` of capability, capacity, seats held, the holding claims
+   (ticket and runner linking their pages). `baton admin capacity set <capability> <n>` as text.
+5. **Phone.** Tables collapse to cards at 375 px.
+
+### What not to do
+
+- No control (Decision 1a); no owner-scoped data; no reading or state computed in the client.
+- No key or secret management: `admin keys set` and the GitHub App flows stay the CLI's.
+
+### Trust
+
+- **Every value** is the reads' text through `Text` or `View`; answered to an administrator's
+  session only; the forge link from `web_base`. Nothing is written.
+
+### Invariants
+
+- **Administrators only** (R-BTN-57, R-BTN-155); **read-only** (§11.4, Decision 1a).
+- **Readings are statements** (R-BTN-76); **text, never markup** (§12.3).
+
+### Tests
+
+Under `test/ui/` with fixtures: the registry marks `seed_owners` and retired rows and draws no
+control; `/instances` marks a stale reading and expands by source; `/resources` lists the probe;
+`/capacities` links the holders; an owner's session has no tenant entry (B-206's router test
+extended); every command line matches R-BTN-127's tree; a hostile instance name is text.
+
+### Exit criteria
+
+- [ ] The four screens built, read-only, usable on a local Baton for an administrator's session.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-202 after review._
