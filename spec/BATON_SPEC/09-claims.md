@@ -80,7 +80,7 @@ is `active` until it ends
   The holder queries (this one and R-BTN-7's) answer `held_by_other` relative to the runner the
   request names; asked
   by the key alone, Baton counts every active claim as another's, a claim of a runner of the
-  same key included, since every container of a cloud environment shares one key (§8.1).
+  same key included, since several runners may share one credential (§8.1).
   Baton maps a branch to tickets through every course's current or previous `branch_pattern`,
   among tickets whose home repository or `code_repos` reach that repository (R-BTN-140), naming
   only tickets of repositories granted to the key and following former paths (R-BTN-141). A
@@ -197,14 +197,15 @@ end on an ended claim is refused `claim-ended`.
     refuse it (R-BTN-88), so a seal waiting on the claim can proceed. The dialog shows the runner's last-seen
     time and says what the clear gives up: a process the old incarnation still runs can push
     until its own lease check fails (`last_ok + lease_timeout − 4 min`, R-BTN-26) — on a
-    `session`-mode leg, whose child makes no checks, until the child is interrupted — and the next
+    leg under an executor other than `builtin`, which may make no checks of its own, until the
+    executor's `stop` returns (R-BTN-107) — and the next
     claimant's re-read of git (R-BTN-25) is then the only protection. Nothing a runner does
     extends a fence, and no other person's act ends one early.
   - A silence reap is not fence-pending — every check of that runner already computes the lease
-    as lost — except on a claim running a `session`-mode leg (R-BTN-107), whose child session
-    makes no checks: every reap of such a claim is fence-pending, and the runner reports `fenced`
-    for it only once the provider confirms the child session interrupted or archived. A child the
-    runner cannot reach before `fence_deadline` is not fenced: its later pushes are not noticed
+    as lost — except on a claim running a leg under an executor other than `builtin` (R-BTN-107),
+    whose session may make no lease checks of its own: every reap of such a claim is
+    fence-pending, and the runner reports `fenced` for it only once the executor's `stop` has
+    returned. A session the runner cannot reach before `fence_deadline` is not fenced: its later pushes are not noticed
     (R-BTN-46); the next claimant re-reads git before it writes (R-BTN-25).
 
 ### 9.6 Confirming an end

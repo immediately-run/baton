@@ -23,7 +23,9 @@ live solely in Baton, and both are exportable (R-BTN-88).
                         #   protocol_files, source?, facts?}]; imports?;
                         #   conditions? (bindings,
                         #   R-BTN-161); for the CLI's defaults (R-BTN-74): items, default_course,
-                        #   repos, agent_command, agent_wrapper (B-95); check: {depends_line,
+                        #   repos, agent_command, agent_wrapper (B-95); legs: {<course>:
+                        #   {<leg>: {agent_command?, executor?}}} (R-BTN-131, R-BTN-107);
+                        #   executor_schema (R-BTN-107); check: {depends_line,
                         #   sections_since, sections_from_id, rules} (B-111; R-BTN-74 says what
                         #   each does and what CI judges with them: the ticket check and commands
                         #   alone read them; default off);
@@ -42,7 +44,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
   A sourced entry's fields default from its source's `entry.json` (R-BTN-134).
   - `course.json` is the course's whole state machine; `baton.json` names courses and
-    settings, never legs.
+    settings, and of a leg only the home's settings for how it runs (`legs`: its agent command and
+    executor data), never its stations, edges or contract.
   - `branch_pattern` (default `claude/{ticket}-*`; grammar in R-BTN-141) maps a pushed branch
     to the course's tickets for the branch-holder query (§9) and finds an earlier attempt's
     branch (R-BTN-25). Without `{repository}`, a branch may map to tickets of two repositories,

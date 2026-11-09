@@ -54,8 +54,8 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
 - **Baton holds the lock; it does not police the work.** A refusal keeps cooperating workers
   from colliding; a capability, `human-operator` included, is a runner's own statement; Baton's
   permissions cover only its own state — who takes a repository's leases, who changes its
-  settings (values 12). A threat that needs a runner stopped belongs to the sandbox, the forge
-  or the credential proxy, not here.
+  settings (values 12). A threat that needs a runner stopped belongs to the deployment, the
+  forge or the credential proxy, not here.
   A repository's policy may opt into one exception: Baton's trusted runners decide what lands,
   and the forge lets only them and the human-only identity land it ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 - **Policy, not modes.** Every rule about authority and trust is a knob of one versioned policy
@@ -98,20 +98,12 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
 - **Several dozen parallel workers** — humans and agents — are the load the architecture
   is for, provided they work separate tickets.
 - **Parallelism is horizontal: more runners, not bigger runners.** A runner works one
-  leg at a time by design, and scale comes from many runners — the end state being
-  firecracker sandboxes (the `fc-opencode` work), each hosting **several** runner
-  processes on their own legs: a sandbox's memory is fixed at boot, so runners are
-  packed into it rather than sized per leg, each under a cgroup memory limit and the
-  limits deliberately oversubscribed to use the allocation well. The cgroup is the blast
-  radius — one runner over its limit dies alone, its claim reaps, the sandbox and its
-  siblings keep working — which makes a runner's death legible (B-94's log line) and
-  its recovery routine (the `reaped:silent` path). A single process multiplexing legs
-  across threads or subprocesses is a possible later evolution, decided when the sandbox
-  fleet's evidence is in — not the plan.
-  A sandbox is one domain, the label its grants carry (BATON_SPEC [R-BTN-180](../../spec/BATON_SPEC/12-security.md#sec-12-8)), so several runners
-  in one sandbox count as one for independent review — unless the policy lists their credential
-  in `domains.per_run`, when each run counts as its own domain and keeping runs apart is the
-  deployment's ([R-BTN-180](../../spec/BATON_SPEC/12-security.md#sec-12-8)); Fieldhouse runs one runner per VM (FLDH-13).
+  leg at a time by design, and scale comes from many concurrent legs, wherever the deployment
+  runs them. Where runners are placed, how they are packed onto machines and how a leg is kept
+  apart from its runner are the deployment's (Fieldhouse's, FLDH-52): a runner hands each leg to
+  the executor its host chose, and Baton records what the runner declares and prescribes no
+  placement (BATON_SPEC [R-BTN-107](../../spec/BATON_SPEC/08-runners.md#sec-8-3)). A single
+  process multiplexing legs is a possible later evolution, not the plan.
 
 ## Where code lives
 

@@ -61,3 +61,5 @@ _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-han
 - 2026-11-02: the spec restructure's part 4 (B-166): rule `chain` reads the course file's `no_chain_from` alone; the owners' `required_independence` is gone (R-BTN-106; B-168).
 
 _2026-11-08: R-BTN-106's rule `chain` now refuses a credential `domains.per_run` lists only within one claim or against its unlabelled runs (baton#197, B-187); for every other credential it is unchanged. Re-read R-BTN-106 and R-BTN-180 before building on it._
+
+- 2026-11-09: B-184's spec amendment turns `attached` and `session` from runner modes into executors Baton ships, loadable as `pinned` from the release and selected by `--attached` and `--sessions` (R-BTN-107); `runner:session` is retired (R-BTN-133). The local channel is now the per-leg channel (R-BTN-106), a Unix socket under `builtin` and any transport elsewhere, carrying only the leg verbs. This ticket's session-mode and attached items map onto those executors; the bounded run and the channel's verbs are unchanged. Re-read R-BTN-106 and R-BTN-107 before building on it.

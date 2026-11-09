@@ -46,3 +46,5 @@ R-BTN-123 is specified; this ticket builds it.
 - [ ] merged under the review gate
 
 ## Status
+
+- 2026-11-09: B-184's spec amendment moves fresh context onto the executor: context use is reported on the leg's channel under every executor (the shipped `session` executor reports its provider's reading there), the provider's `contextUse` is gone, and a refresh stops the session by `stop` and starts the next by `start` keyed `<run_id>.r<n>` — under `builtin`, by `ctx.signal` and a second `run(ctx)` as before (R-BTN-123, R-BTN-107). Re-read R-BTN-123 before building on it.

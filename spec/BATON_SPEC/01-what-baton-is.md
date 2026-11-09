@@ -281,7 +281,8 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   every judgement that needs a leg's or profile's meaning runs on the runner.
   - A course may ship `rank.mjs` in its course directory. CLI runners, sidecars and launchers
     load it from the remote default branch's head through a verified tree (R-BTN-133,
-    R-BTN-134) and run it in a child process with the leg's environment (R-BTN-144). Its
+    R-BTN-134) and run it by their executor's `exec` in a `rank` session (R-BTN-107), with the
+    leg's environment (R-BTN-144). Its
     default export `rank(view)` makes no Baton request and may make any other.
   - `view = {runner: {tags, profile, harness} | null, candidates, fleet, instances, now}`:
     `candidates` this course's entries of `GET /v1/runner/recommendations?all=1` (of

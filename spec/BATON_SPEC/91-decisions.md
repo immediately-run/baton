@@ -134,7 +134,9 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 **Runners, people and surfaces**
 
 - Chose sessions that report moves to their runner over sessions holding a claim credential (2026-10-17; R-BTN-106).
-- Chose `attached` and `session` modes for cloud sessions over giving a child session a scoped claim token (2026-10-17; R-BTN-107).
+- Chose one executor seam — every leg and every call into repository code through a versioned module whose code the runner's host picks (`builtin`, `home`, `home-signed`, `pinned`), Baton recording its source, digest and `provides` and matching only names — over a closed list of isolation modes in the spec, Baton prescribing placement, or a repository-selected hook a host did not opt into; cloud sessions and attached sessions are executors Baton ships, still never a child holding a scoped claim token (2026-11-08, the owner; R-BTN-107).
+- Chose a check leg's withheld credentials as the capability `checks:withheld-credentials`, of a type declared `"from": "executor"` that only an executor's `provides` can declare, over the retired built-in `runner:session` or a name a grant or `runner.json` could declare, so a `builtin` runner never runs a check leg (2026-11-09, the owner; R-BTN-114, R-BTN-121, R-BTN-107).
+- Chose a leg's agent command as the first present of the home's per-leg `.baton/baton.json` setting, the course file's per-leg `agent_command`, the home's top-level `agent_command` (a permanent default) and the `--harness` fill, over a course-only field with the home's value read through a window (2026-11-09, the owner; R-BTN-131).
 - Chose a runner that refreshes a filling session under the same claim over losing the lease (2026-10-17; R-BTN-123).
 - Chose stopping a leg through the authenticated release path over control from a viewer's stream (2026-10-17; R-BTN-119).
 - Chose a noun-verb CLI renamed outright over aliases (2026-10-17; R-BTN-127); and one tree holding every command the specification names, with help generated from the registry's command table, over commands defined where each rule happens to name them (2026-11-02, B-166 part 3, B-157).
@@ -186,8 +188,8 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   split rested on a leg being able to act as its runner; R-BTN-180, R-BTN-183, R-BTN-189). Baton
   stays agnostic about whether runs are kept apart; §12.8's list says what a labelled review
   cannot withstand.
-- Chose to run a trusted leg's override as any leg's code is run, the deployment keeping it from the
-  trusted runner's credential, over Baton sandboxing it with `bubblewrap` or refusing it without a
+- Chose to run a trusted leg's override as any leg's code is run, through the runner's executor,
+  the deployment keeping it from the trusted runner's credential, over Baton sandboxing it with `bubblewrap` or refusing it without a
   sandbox (2026-11-09, the owner: "I don't want the merge leg to be different from the other legs
   for the plain baton scenario"; R-BTN-182, §12.8). Baton stays agnostic about isolation with no
   exception; keeping the override from the credential is a deployment duty (§12.8).
