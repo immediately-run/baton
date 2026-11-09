@@ -160,7 +160,7 @@ is stale. Never edit it by hand.
 | R-BTN-32 | one clock, with a production-inert test seam | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
 | R-BTN-33 | Baton holds filter fields, never content | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
 | R-BTN-34 | the runner reads and re-verifies the ticket from git, by its version | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
-| R-BTN-35 | the home repository wins, except about what Baton owns | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
+| R-BTN-35 | the ticket source and git win, except about what Baton owns | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
 | R-BTN-36 | git never records the holder | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
 | R-BTN-37 | shared modules are vendored by hash | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
 | R-BTN-38 | legs are stateless at their boundaries | [`09-claims.md`](BATON_SPEC/09-claims.md) |

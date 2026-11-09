@@ -1,4 +1,4 @@
-// S-BTN-202 opaque ticket versions (BATON_SPEC §4.2 R-BTN-74, §4.3 R-BTN-11/R-BTN-62/R-BTN-147,
+// S-BTN-206 opaque ticket versions (BATON_SPEC §4.2 R-BTN-74, §4.3 R-BTN-11/R-BTN-62/R-BTN-147,
 // §4.4, §4.5 R-BTN-5/R-BTN-34; B-183), the board's half: a ticket's `version` is its source's
 // opaque string, stored on the row and compared for equality only; a source declares how it
 // reads (`versions`: pinned at a version, current as it is now); a refresh — the head's own
@@ -14,7 +14,7 @@
 // hashed is refused as a new head is; a refresh that writes rows checks the courses it names
 // and clears the closure of a ticket it re-adds; an existing ticket that moves onto a dropped
 // key keeps its own hold; two tickets of one post never share a key. The sync's and the
-// runner's halves are S-BTN-203's (Node only: real git).
+// runner's halves are S-BTN-207's (Node only: real git).
 import { describe, it, expect, beforeEach } from 'vitest';
 import { claimItem, claimRow, cutover, Git, observe, placed, register, rows, setClock, syncCall, withCore } from '../helpers';
 import { checkPayload } from '../../src/core/board';
@@ -37,7 +37,7 @@ beforeEach(async () => {
   await cutover();
 });
 
-describe('S-BTN-202 opaque ticket versions', () => {
+describe('S-BTN-206 opaque ticket versions', () => {
   it('a current-source ticket edited with no commit reaches the board in a refresh: changed, added and closed tickets', async () => {
     const git = new Git();
     git.add('T-1', tracked('T-1', 'rev-1:aaaaaaaa'), FILED);

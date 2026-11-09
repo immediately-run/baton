@@ -1,4 +1,4 @@
-// S-BTN-203 opaque ticket versions, the sync's and the runner's halves (BATON_SPEC §4.2
+// S-BTN-207 opaque ticket versions, the sync's and the runner's halves (BATON_SPEC §4.2
 // R-BTN-74, §4.3 R-BTN-11/R-BTN-62, §4.5 R-BTN-5/R-BTN-34; B-183), Node only: a real sync over
 // a real repository. A fixture `custom` ticket source with `versions: "current"` — backed by a
 // JSON file outside git, its version the store's own stamp over a digest of the ticket, its order
@@ -8,7 +8,7 @@
 // store read is behind what the board holds refuses, failing the run and posting nothing. The
 // markdown source is pinned: each ticket's version is its file's blob id at the posted commit, an
 // unrelated commit changes no version and stales no claim, and a refresh writes no ticket row.
-// The board's half is S-BTN-202's, on both hosts.
+// The board's half is S-BTN-206's, on both hosts.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
@@ -159,7 +159,7 @@ afterEach(() => {
   repos.length = 0;
 });
 
-describe('S-BTN-203 ticket versions through the sync and the runner', () => {
+describe('S-BTN-207 ticket versions through the sync and the runner', () => {
   it('a current-source ticket edited with no commit reaches the board in a refresh; a new one boards the same way', async () => {
     repo = new Repo(true);
     repos.push(repo);
