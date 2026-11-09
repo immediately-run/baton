@@ -1,5 +1,5 @@
 ---
-title: "B-216 — Cutover, part two: GET /v1/admin/state keeps its shape as stateView(), S-BTN-170 asserts each section equals the matching entity read, and S-BTN-76, G-BTN-13 and B-191's scenario run against every V2 screen; the deployed dashboard is checked on staging"
+title: "B-216 — Cutover, part two: GET /v1/admin/state keeps its shape as stateView(), S-BTN-170 asserts each section equals the matching entity read, and S-BTN-76, G-BTN-13 and B-191's scenario run against every V2 screen; the deployed dashboard is checked on production after the merge"
 id: B-216
 project: baton-ui-v2
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1215
 tier: judgement
-description: "The last BATON-UI-V2 ticket. Decision 4a: GET /v1/admin/state keeps today's shape, built by one named core function stateView() (what uiState() was), so a terminal keeps one request (R-BTN-179, B-118), and S-BTN-170 asserts each of its sections equals the first page of the matching entity read at the same instant. S-BTN-76 (hostile values rendered) and G-BTN-13 run against the V2 renderer: markup and javascript: in a ticket title, a hold reason, an activity label, a reading detail and a condition's detail reach every screen as text; a link to an unlisted host is text; B-191's scenario runs on every screen with a control. After the merge's deploy the agent reads baton-staging.immediately.run — every tree path, sign-in — and records what it exercised; it triggers no deploy. Requires: B-203."
+description: "The last BATON-UI-V2 ticket. Decision 4a: GET /v1/admin/state keeps today's shape, built by one named core function stateView() (what uiState() was), so a terminal keeps one request (R-BTN-179, B-118), and S-BTN-170 asserts each of its sections equals the first page of the matching entity read at the same instant. S-BTN-76 (hostile values rendered) and G-BTN-13 run against the V2 renderer: markup and javascript: in a ticket title, a hold reason, an activity label, a reading detail and a condition's detail reach every screen as text; a link to an unlisted host is text; B-191's scenario runs on every screen with a control. After the merge's deploy the agent reads baton.immediately.run — the only deployment anyone uses (Decision 7c: no staging) — every tree path and the sign-in, and records what it exercised; it triggers no deploy. Requires: B-203."
 topics:
   - baton
 owns: {}
@@ -61,14 +61,14 @@ the state readable with a key, by the same queries), [§12.3](../spec/BATON_SPEC
    `src/dashboard/` and the source gate. B-191's scenario (the screen draws only its caller's
    actions) runs on every screen with a control: the ticket page, Conditions and the Resolve
    page, the runner screens, Sync, Attestations.
-3. **Staging check.** After this PR's merge deploys (the workflow B-193 changed deploys
-   production then staging on every push to `main`), the agent opens
-   `https://baton-staging.immediately.run/` and every path of `src/core/screens.ts` with a
-   fixture id — the owner runs `baton admin open` and binds the code (an administrator key is
-   the owner's to use, never the agent's), the agent drives only the browser — and records in
-   the PR body the paths exercised and the console clean of errors. The agent triggers no
-   deploy (`workflow_dispatch` is the owner's) and changes no workflow. Production receives the
-   same build first (B-191's Decision 7, applied on its default).
+3. **Production check.** After this PR's merge deploys (the workflow B-193 changed deploys on
+   every push to `main`), the agent opens `https://baton.immediately.run/` — production, the
+   one deployment anyone uses; the owner ruled this project needs no staging (B-191's Decision
+   7c) — and every path of `src/core/screens.ts` with a real id, read-only: the owner runs
+   `baton admin open` and binds the code (an administrator key is the owner's to use, never the
+   agent's), the agent drives only the browser and presses no control, and records in the PR
+   body the paths exercised and the console clean of errors. The agent triggers no deploy
+   (`workflow_dispatch` is the owner's) and changes no workflow.
 4. **The project page.** `tickets/projects/baton-ui-v2.mdx`'s Done when is checked line by line
    against the deployed instance and marked in its Status.
 
@@ -76,8 +76,8 @@ the state readable with a key, by the same queries), [§12.3](../spec/BATON_SPEC
 
 - Do not reshape `GET /v1/admin/state` into a union of paged reads (Decision 4a) or a second
   query.
-- No deploy triggered, no workflow edited, no production check that a staging check does not
-  also cover.
+- No deploy triggered, no workflow edited, no control pressed on production during the check,
+  no staging check (Decision 7c).
 - No new screen or control.
 
 ### Trust
@@ -96,13 +96,13 @@ the state readable with a key, by the same queries), [§12.3](../spec/BATON_SPEC
 ### Tests
 
 S-BTN-170 rewritten and green; S-BTN-76 and G-BTN-13 amended and green; B-191's scenario over
-every screen with a control; the staging record in the PR body.
+every screen with a control; the production check's record in the PR body.
 
 ### Exit criteria
 
 - [ ] `stateView()` serves `GET /v1/admin/state`; S-BTN-170 asserts the equality on both hosts.
 - [ ] S-BTN-76, G-BTN-13 and B-191's scenario run against V2 and pass.
-- [ ] The staging paths recorded in the PR body; the project page's Done when checked;
+- [ ] The production paths recorded in the PR body; the project page's Done when checked;
       `npm test`, `npm run typecheck`, `npm run check:wiki` and `npm run check:tickets` green.
 
 ## Status
@@ -112,3 +112,6 @@ _filed 2026-11-09, split from B-203 after review._
 _2026-11-09 — revised after the second review: the equality stated per repository over every
 page with each section's counterpart named; the deploy order cited to B-191's Decision 7; the
 owner binds the sign-in code._
+
+_2026-11-09 — the owner answered Decision 7: no staging at all. The post-merge check runs on
+production, read-only._

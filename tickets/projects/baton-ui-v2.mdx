@@ -77,10 +77,11 @@ B-191's Decision needed packet was answered on 2026-11-09 ("I take your recommen
 in each of its first six: (1) the tenant screens are read-only, (2) route and adopt stay the
 CLI's, (3) Stop is one click, (4) `GET /v1/admin/state` keeps its shape as `stateView()`, (5)
 the held post's Accept stays on Sync, (6) no ESLint — a source test over `src/dashboard/**` is
-the gate. Three more, found by the second review, are applied on their defaults and await the
-owner's word: (7) the deploy order stays production-then-staging, (8) a per-tenant request
-counter is built so R-BTN-87's rates can be shown, (9) runners are grouped by hostname as
-R-BTN-3 says. Each remains a two-way door for a later spec ticket.
+the gate. Three more, found by the second review, were answered the same day: (7) "we don't
+need staging at all" — B-216 checks production, read-only, and no workflow changes beyond
+B-193's build step; (8) a per-tenant request counter is built so R-BTN-87's rates can be shown;
+(9) runners are grouped by hostname as R-BTN-3 says. Each remains a two-way door for a later
+spec ticket.
 
 ## Items
 
@@ -120,7 +121,7 @@ B-206's `ui.logout`, B-217's three reads, B-222's confirm and release).
 - **Tenant** — **B-202** the tenant reads, the request counter, the registry read extended;
   **B-214** registry, instances, resources, capacities; **B-215** settings, state, sessions.
 - **Cutover** — **B-203** the listing ledger, `ui.state` retired, docs; **B-216** `stateView()`,
-  S-BTN-170 per repository, the renderer scenarios, the staging check.
+  S-BTN-170 per repository, the renderer scenarios, the production check.
 
 ```
 outside the project, none started: B-23 → B-24 → B-25 → B-76; B-10; B-55 → B-56 → B-57; B-146; B-171; B-122
