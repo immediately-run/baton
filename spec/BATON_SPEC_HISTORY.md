@@ -2536,10 +2536,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 - **2026-11-06 — B-183: opaque ticket versions.**
   Rules changed: R-BTN-5, R-BTN-11, R-BTN-34, R-BTN-62, R-BTN-74, R-BTN-84, R-BTN-147
-  (R-BTN-35's text is unchanged: its rewording to "the ticket source is the truth about tickets"
-  is B-183's decision (a), which the owner has not taken — values are the owner's, value 1 still
-  names git, and the spec amendment follows the owner's edit to `docs/context/values.mdx`, never
-  precedes it; the decision is recorded pending in 91-decisions.md, review round 1).
+  (R-BTN-35's rewording to "the ticket source is the truth about tickets" is B-183's decision
+  (a), which the owner took on 2026-11-09 and is recorded in its own entry, with value 1's edit).
   Each posted ticket gains `version`, an opaque
   string of 1–128 characters of `[A-Za-z0-9._:+/=-]` whose meaning is the ticket source's own,
   compared by Baton for equality only (values 4: no ordering, no clock); a stable `key`
@@ -2568,8 +2566,74 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   re-verifies by it before any leg runs (R-BTN-5, R-BTN-34); replay records the version and the
   digest of what `read` returned (R-BTN-84); a `custom` source with `versions: "current"` posting
   to a repository whose floors include `tickets-approved` is refused `invalid-params`, naming
-  the guarantee (R-BTN-184). Scenarios S-BTN-202 and S-BTN-203.
+  the guarantee (R-BTN-184). Scenarios S-BTN-206 and S-BTN-207.
+- **2026-11-07 — §12.9 (new), R-BTN-73, R-BTN-106, §13, §14, §15** (B-134, OWASP ASI10 hole 7).
+  Rules changed: R-BTN-73, R-BTN-106.
+  A leg's scope — its ticket's home and `repos:` — is carried in the claim answer, audited at
+  each leg's end by the runner from its own git (a cooperative aid, not a control: it runs inside
+  the trust domain it audits), and cross-checked by Baton against the forge's push deliveries
+  for the owners' `worker_pushers` logins (the control). `scope-exceeded` findings (reported
+  with the claim) and `unclaimed-write` findings (a push no active claim covers) are listed
+  under Needs you until an owner resolves each; `scope_policy: hold` holds the ticket. R-BTN-73
+  states the one thing besides the want a delivery produces; R-BTN-106 states the leg-end audit.
+  `code_repos` (R-BTN-140) is not built yet, so until it is the scope holds every `repos:` entry
+  that resolves to a forge path on the home's forge host, as R-BTN-92 reads a short name.
+  S-BTN-202's row follows.
 
+- **2026-11-08 — R-BTN-24, R-BTN-63, R-BTN-69, R-BTN-81, R-BTN-106, R-BTN-123, R-BTN-128, R-BTN-144,
+  R-BTN-180, R-BTN-181, R-BTN-183, R-BTN-188, R-BTN-189, §13, §14, §15** (B-185, B-187).
+  Rules changed: R-BTN-24, R-BTN-63, R-BTN-69, R-BTN-81, R-BTN-106, R-BTN-123, R-BTN-128, R-BTN-144,
+  R-BTN-180, R-BTN-181, R-BTN-183, R-BTN-188, R-BTN-189.
+  From the owner's design session on runner placement and leg isolation. The owner asked "Does
+  each leg attempt have a unique execution id?" and agreed to a first-class one ("Yes"): every run
+  gets an opaque `run_id` minted at its start (R-BTN-63), carried by the history, the resume
+  record and the run list, exported as `BATON_RUN_ID` and `BATON_SESSION_ID` (R-BTN-144, R-BTN-123),
+  and keying leg-log paths under the tenant's host (R-BTN-128). The owner then ruled, for Fieldhouse: "I don't think it makes sense for the
+  initial iteration of fieldhouse to claim guarantees against a compromised runner if the leg
+  processes are sandboxed. That may come later if necessary." Offered a choice between counting
+  review independence by a label the runner reports per run, a second dispatcher on its own key,
+  or dropping the domain rule, the owner answered "yes" to the first; and asked that Baton "be
+  completely agnostic regarding how runner sandbox legs, if at all". So a policy may list grants whose domain is per run
+  (`domains.per_run`, R-BTN-180): their runs carry single-use labels Baton compares and never
+  interprets; `std:wrote@1`, `std:ran@1` and `std:review@1` carry the grant's domain and the run's
+  label as separate fields (R-BTN-181), a labelled run's attestations superseding only their own
+  label's, and independent review compares them (R-BTN-183) — a label counting only under a
+  repository that listed the credential, and two runs by one runner key always one domain; `no_chain_from` (R-BTN-106) refuses a listed
+  credential only within one claim or against its unlabelled runs. A run carries its grant's domain and its label as separate fields,
+  and a labelled run and any unlabelled run on the same domain count as one, whichever key made
+  either, so listing or un-listing never makes a grant independent of
+  itself; only an `approvers.policy` change lists a credential, never a trusted-runner, checker or
+  domainless one, and its dry run names what the change disables (R-BTN-188). Review: round 1 (two fresh
+  reviewers) found the cross-version self-review, the inert `no_chain_from` and the leg-log
+  directory in the claim reply; round 2 (one) the same-host second key and B-187's drift; round 3
+  (one) that a listed key's second review would supersede its first, that a multi-repository
+  ticket's labels counted under a policy that never listed the key, `no_chain_from` admitting an
+  un-listed key on its old label, and re-domaining as a way to self-independence. All fixed before
+  merge. `independent-review` counts labelled runs as their own domains, and §12.8's outside list
+  says it does not withstand a compromised runner of a listed credential or a leg that can act as
+  it (R-BTN-189).
+  S-BTN-204 and S-BTN-205's rows follow.
+
+- **2026-11-09 — R-BTN-189, §12.8, §15** (B-187).
+  Rules changed: R-BTN-189.
+  The first draft of the 2026-11-08 entry added a weaker `independent-runs` beside an
+  `independent-review` that never held with a listed credential. After a runner-trust audit the
+  owner accepted collapsing it ("I accept all recommendations"): the split rested on a leg being
+  able to act as its runner. `independent-review` counts labelled runs as their own domains; the
+  `domains.per_run`-empty condition and the floor case are gone; S-BTN-205 follows.
+- **2026-11-09 — R-BTN-182, §12.8** (B-184).
+  Rules changed: R-BTN-182.
+  The owner: "I don't want the merge leg to be different from the other legs for the plain baton
+  scenario. For field house, we already have sandboxing, so it requires no special custom
+  infrastructure beyond potentially a dedicated sandbox Docker image. Even that might be
+  unnecessary." A trusted leg's `run.mjs` override runs as any leg's code does, by the runner's
+  own means; the `bubblewrap` requirement and the refusal where no sandbox exists are retired
+  (they were never built). It still may only add refusals, R-BTN-183 applied afterwards. That the
+  override cannot reach the trusted runner's credential joins §12.8's list of what the deployment
+  must make true. Retired text: "It runs in a sandbox with no network, no credential, a private PID
+  namespace and `/proc`, the computed diff as its only input, a fixed time, and no checkout, `.git`
+  or home directory (`bubblewrap` or an equivalent on Linux; where none is available the override
+  is refused, not run unsandboxed)."
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

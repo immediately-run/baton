@@ -59,3 +59,5 @@ _(2026-10-20: text corrected to the current spec — the claim nonce is public, 
 
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): the runner is `baton runner start` everywhere the spec names it, `baton run` included (R-BTN-127, R-BTN-131).)_
 - 2026-11-02: the spec restructure's part 4 (B-166): rule `chain` reads the course file's `no_chain_from` alone; the owners' `required_independence` is gone (R-BTN-106; B-168).
+
+_2026-11-08: R-BTN-106's rule `chain` now refuses a credential `domains.per_run` lists only within one claim or against its unlabelled runs (baton#197, B-187); for every other credential it is unchanged. Re-read R-BTN-106 and R-BTN-180 before building on it._

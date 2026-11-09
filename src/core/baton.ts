@@ -7,11 +7,10 @@
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
 import { MIGRATIONS } from '../migrations';
 import { BatonError, errorResponse, json } from './http';
-import { checkPayload, DEFAULT_COURSE, inPeak, nextPeakChange, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
+import { checkPayload, DEFAULT_COURSE, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
-import { priceFor } from '../shared/sessionUsage.mjs';
 import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { WorkerApi } from './workerApi';
@@ -34,6 +33,7 @@ import { History, HISTORY_PAGE_MAX } from './history';
 import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import { Policies, canonicalJson, sha256HexSync } from './policy';
+import { Scope } from './scope';
 import { randomHex } from './db';
 import type { Ports, Row, SqlValue, Store, Workflow } from './ports';
 
@@ -70,6 +70,8 @@ export class BatonCore {
   readonly questions: Questions;
   /** §12.8 (B-145): the repository policies, their floors, their guarantees. */
   readonly policies: Policies;
+  /** B-134: the leg scope audit — the claim answer's scope, the findings both halves raise. */
+  readonly scope: Scope;
   readonly store: Store;
   /** §12: workflows to dispatch once the current request or alarm has committed, one per
    *  repository and kind. */
@@ -93,7 +95,10 @@ export class BatonCore {
     this.policies.releaseForFloor = (repository) => this.claims.releaseForFloor(repository);
     this.courses = new Courses({ store, requiredBars: (repo) => this.admin.requiredBars(repo), policies: this.policies });
     this.observations = new Observations({ store, now: () => this.now() });
-    this.webhooks = new Webhooks({ store, now: () => this.now() });
+    // B-134: the scope audit, before the webhooks and the claims it serves — its hold callback
+    // reaches the claims, built later, through the closure.
+    this.scope = new Scope({ store, now: () => this.now(), hold: (ticket, claimId) => this.claims.holdForScope(ticket, claimId) });
+    this.webhooks = new Webhooks({ store, now: () => this.now(), scope: this.scope });
     const want = (wf: Workflow) => this.pendingDispatch.set(`${wf.repository}:${wf.kind}`, wf);
     // R-BTN-75: the blocks are written with their causes; `fits` is the claim gates' (R-BTN-77).
     // R-BTN-80, R-BTN-81: a decision's notices are queued and closed with it, and its history row written.
@@ -128,7 +133,7 @@ export class BatonCore {
     this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course), ontologies: this.ontologies,
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
-      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github' });
+      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
@@ -418,7 +423,15 @@ export class BatonCore {
         if (req.method === 'GET' && url.pathname === '/v1/sync/head') return json(this.head((await this.verifySync(req, 'sync')).repo.id));
         // R-BTN-62: the next number of the repository's counter, before the sync reads anything.
         if (req.method === 'POST' && url.pathname === '/v1/sync/observation') {
-          const repo = (await this.verifySync(req, 'sync')).repo.id;
+          const { repo: { id: repo }, req: signed } = await this.verifySync(req, 'sync');
+          // R-BTN-62 (Release): a run that will not post gives its number back; only the
+          // outstanding number is voided, so a stale release voids nothing.
+          const release = ((await readJson(signed).catch(() => null)) as { release?: unknown } | null)?.release;
+          if (release !== undefined) {
+            if (!Number.isSafeInteger(release)) throw new BatonError('invalid-params', 'release must be the number this credential was handed (R-BTN-62)');
+            this.observations.release(repo, release as number);
+            return json({ released: release });
+          }
           // R-BTN-67: with the owner bars in force or scheduled for the repository, each with its course.
           // B-110: and Baton's own record a station function judges git against — the owner's
           // answers to the sync's decisions, and the legs claims finished with an evidence
@@ -821,12 +834,6 @@ export class BatonCore {
         const body = await readJson(req);
         return json(tx(() => this.workers.sendMessage(owner, body)));
       }
-      if (p === '/v1/ui/suspensions') {
-        const body = await readJson(req);
-        return json(tx(() => this.workers.setSuspension(owner, body)));
-      }
-      const lift = /^\/v1\/ui\/suspensions\/(\d+)\/lift$/.exec(p);
-      if (lift) return json(tx(() => this.workers.liftSuspension(owner, Number(lift[1]))));
       const reap = /^\/v1\/ui\/claims\/(\d+)\/reap$/.exec(p);
       if (reap) {
         const body = await readJson(req);
@@ -852,6 +859,17 @@ export class BatonCore {
         const ticket = this.ticketParam(override[1]);
         const body = await readJson(req);
         return json(tx(() => this.claims.setOverride(owner, ticket, body)));
+      }
+      // B-134: an owner resolves a scope finding — the acknowledgement that it was looked at.
+      // In the transaction, like every neighbouring `/v1/ui` mutation, so the resolution and
+      // its `scope-resolved` event land together.
+      const finding = /^\/v1\/ui\/scope\/(\d+)\/resolve$/.exec(p);
+      if (finding) {
+        const id = Number(finding[1]);
+        return json(tx(() => {
+          if (!this.scope.resolve(id, `owner:${owner}`)) throw new BatonError('not-found', `no open scope finding ${id}`);
+          return { ok: true };
+        }));
       }
       if (p === '/v1/ui/board/accept') {
         const body = await readJson(req);
@@ -1582,37 +1600,19 @@ export class BatonCore {
     return refused;
   }
 
-  /** The reference data the sync posts with every snapshot (§7.3, §7.4): providers, peak
-   *  schedules, per-model prices and limits, the reviewer catalog. Each
-   *  table is a copy of a docs file, never edited here, so it is rewritten whole: an account
-   *  the file no longer lists is deleted. (Nothing references `model_providers` yet; when
-   *  workers and suspensions do, R3-1211 decides what retiring a referenced account means.)
+  /** The reference data the sync posts with every snapshot (§7.3, §7.4): the reviewer catalog
+   *  and matrix. Each table is a copy of a docs file, never edited here, so it is rewritten
+   *  whole. The model tables' blocks — `providers`, `prices` — are gone (B-142): what they
+   *  carried is a reading or a course rule (§6.3, R-BTN-76), and a sync that still posts them
+   *  is accepted with the fields ignored.
    *  Returns whether the payload carried fleet data this repository may not write. */
   private reference(repo: string, p: BoardPayload): boolean {
     const exec = (q: string, ...a: unknown[]) => this.store.exec(q, ...a);
     // §6.8, R-BTN-66: a repository's transcript repositories are its owners' setting, never read
     // from a board post (R3-1240); a sync that still sends them is not refused for it.
     // The rest is the instance's: only the fleet repository writes it (interim, R3-1231 2b).
-    const carries = p.providers != null || p.matrix != null || p.reviewers != null;
+    const carries = p.matrix != null || p.reviewers != null;
     if (this.registry.fleetRepository() !== repo) return carries;
-    if (p.providers) {
-      exec('DELETE FROM provider_models');
-      const ids = p.providers.accounts.map((a) => a.id);
-      exec(`DELETE FROM model_providers WHERE id NOT IN (${ids.map(() => '?').join(', ') || "''"})`, ...ids);
-      for (const a of p.providers.accounts) {
-        exec(`INSERT INTO model_providers (id, name, billing, window_limits_json) VALUES (?, ?, ?, ?)
-              ON CONFLICT (id) DO UPDATE SET name = excluded.name, billing = excluded.billing, window_limits_json = excluded.window_limits_json`,
-          a.id, a.name, a.billing, a.window_limits ? JSON.stringify(a.window_limits) : null);
-      }
-      exec('DELETE FROM peak_schedules');
-      for (const s of p.providers.peak_schedules) exec('INSERT INTO peak_schedules (id, rules_json, factor) VALUES (?, ?, ?)', s.id, JSON.stringify(s.rules), s.factor);
-      for (const m of p.providers.models) {
-        const price = priceFor(m.model, p.prices);
-        exec(`INSERT INTO provider_models (provider_id, model_id, input_per_m, output_per_m, cache_read_per_m, cache_write_per_m, monthly_limit_usd, peak_schedule_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          m.provider, m.model, price?.input ?? null, price?.output ?? null, price?.cacheRead ?? null, price?.cacheWrite5m ?? null, m.monthly_limit_usd, m.peak_schedule ?? null);
-      }
-    }
     const catalog = p.reviewers ?? p.matrix?.agents;
     if (catalog && p.matrix) {
       exec('DELETE FROM reviewer_agents');
@@ -1773,31 +1773,24 @@ export class BatonCore {
     const ready = this.readyRows(repositories);
     const byTier = this.readyByTier(ready);
 
-    const schedules = new Map(this.sql<{ id: string; rules_json: string; factor: number }>('SELECT id, rules_json, factor FROM peak_schedules').map((s) => [s.id, s]));
-    const providers = this.sql<{ id: string; name: string; billing: string; window_limits_json: string | null }>('SELECT id, name, billing, window_limits_json FROM model_providers ORDER BY id').map((a) => {
-      const models = this.sql<{ model_id: string; monthly_limit_usd: number | null; peak_schedule_id: string | null }>(
-        'SELECT model_id, monthly_limit_usd, peak_schedule_id FROM provider_models WHERE provider_id = ? ORDER BY model_id', a.id);
-      const peaks = [...new Set(models.map((m) => m.peak_schedule_id).filter((x): x is string => !!x))].map((id) => {
-        const s = schedules.get(id);
-        if (!s) return { schedule: id, in_peak: null, next_change: null, factor: null };
-        const rules = JSON.parse(s.rules_json);
-        return { schedule: id, in_peak: inPeak(rules, now), next_change: nextPeakChange(rules, now), factor: s.factor, models: models.filter((m) => m.peak_schedule_id === id).map((m) => m.model_id) };
-      });
-      return { id: a.id, name: a.name, billing: a.billing, window_limits: a.window_limits_json ? JSON.parse(a.window_limits_json) : null, models, peaks };
-    });
-
     const held = this.sql(
       `SELECT repository_id, sha, parent_sha, head_sha, ticket_count, received_at, auto_accept_at FROM held_snapshots
        WHERE accepted_at IS NULL ORDER BY received_at`);
-    const suspensions = this.sql(`SELECT id, provider_id, model_id, mode, starts_at, ends_at, reason, set_by, lifted_at FROM provider_suspensions
-                                  WHERE lifted_at IS NULL AND (ends_at IS NULL OR ends_at > ?) ORDER BY starts_at`, now);
+    // B-142: `providers` and `suspensions` served here no more — the model tables they read are
+    // gone; an unavailable provider is a reading (§6.3, R-BTN-76) and a peak preference a rule
+    // in the course (§6.10), never a dashboard row.
     return {
-      server_time: now, repositories, ready, ready_by_tier: byTier, providers, held, workers: this.workers.workersView(now), suspensions,
+      server_time: now, repositories, ready, ready_by_tier: byTier, held, workers: this.workers.workersView(now),
       running: this.claims.running(now), timeline: this.claims.timeline(now),
       // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
       limits: this.admin.view(now),
       // R-BTN-69: a refused course file, the previous one staying in force.
-      needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), ontologies_refused: this.ontologies.refusals(), keys: this.keysNotice() },
+      needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), ontologies_refused: this.ontologies.refusals(), keys: this.keysNotice(),
+        // B-134: the open scope findings — a leg reported outside its ticket's scope, a worker
+        // push no open claim covers — until an owner resolves each.
+        scope: this.scope.needsYou(),
+        // B-133: the person legs' questions with each option's computed action (R-BTN-116).
+        questions: this.questions.needsYou() },
       // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.
       blocked: this.blocks.view(),
       // R-BTN-85: the disagreements with git of the last 7 days, by kind.

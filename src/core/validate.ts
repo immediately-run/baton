@@ -43,8 +43,6 @@ export function checkRepositoryId(v: unknown, field = 'repository'): string {
   if (typeof v !== 'string' || !REPOSITORY_ID.test(v)) throw new BatonError('invalid-params', `${field}: must be a repository id`);
   return v;
 }
-const ACCOUNT = /^[a-z0-9_]{1,64}$/;
-const PREFIX = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MODEL = /^[A-Za-z0-9._/:-]{1,200}$/;
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** A typed holding (R-BTN-174, B-104): `<type>:<value>` — the type a course type such as `key`,
@@ -99,8 +97,9 @@ export interface Heartbeat {
   harness: 'opencode' | 'claude-code';
   kind: 'vm' | 'local' | 'cloud';
   model_id?: string;
-  model_provider_id?: string;
-  billing: Record<string, string>;
+  /** B-142: the model tables' fields are gone and read nowhere — a heartbeat still carrying
+   *  `model_provider_id`, `billing`, `usage` or `rate_limits` is accepted with them ignored,
+   *  until no registered runner posts them. */
   capabilities: string[];
   /** R-BTN-60: course-defined strings the tag gate matches. */
   tags: string[];
@@ -116,8 +115,6 @@ export interface Heartbeat {
   test_harness: boolean;
   fenced?: { claim_id: number };
   transcripts: TranscriptReport[];
-  usage: { provider_id: string; model_id: string; hour: number; usd_list: number }[];
-  rate_limits: { provider_id: string; model_id?: string; resets_at?: number }[];
   transcript_refusals: { index: number; code: string; message: string }[];
   /** R-BTN-76: the account instances it uses (absent declares none), and the strings refused as names. */
   uses: { names: string[]; refused: { instance: string; code: string }[] };
@@ -149,13 +146,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   if (b.harness !== 'opencode' && b.harness !== 'claude-code') bad('harness', "must be 'opencode' or 'claude-code'");
   if (b.kind !== 'vm' && b.kind !== 'local' && b.kind !== 'cloud') bad('kind', "must be 'vm', 'local' or 'cloud'");
   const model_id = optional(b.model_id, matches(MODEL, 'model_id'));
-  const model_provider_id = optional(b.model_provider_id, matches(ACCOUNT, 'model_provider_id'));
-  if (!isObj(b.billing)) bad('billing', 'must map provider prefixes to accounts');
-  const billing: Record<string, string> = {};
-  for (const [prefix, account] of Object.entries(b.billing as object)) {
-    matches(PREFIX, `billing prefix ${prefix}`)(prefix);
-    billing[prefix] = matches(ACCOUNT, `billing.${prefix}`)(account);
-  }
   // B-104 (R-BTN-174): a declaration may hold a typed holding — `<type>:<value>`, R-BTN-121's
   // labels — beside the legacy names. Shape only: a holding is the runner's own statement,
   // checked by nothing (§11.1's refusal deleted), bounded at matching by the grant.
@@ -186,10 +176,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   if (b.isolation !== undefined && !ISOLATIONS.includes(b.isolation as Heartbeat['isolation'])) bad('isolation', `must be one of ${ISOLATIONS.join(', ')}`);
   const transcripts = (b.transcripts ?? []) as unknown[];
   if (!Array.isArray(transcripts) || transcripts.length > 50) bad('transcripts', 'must be a list of at most 50');
-  const usage = (b.usage ?? []) as unknown[];
-  if (!Array.isArray(usage) || usage.length > 100) bad('usage', 'must be a list of at most 100');
-  const rate_limits = (b.rate_limits ?? []) as unknown[];
-  if (!Array.isArray(rate_limits) || rate_limits.length > 50) bad('rate_limits', 'must be a list of at most 50');
   return {
     hostname,
     session_name,
@@ -198,8 +184,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     harness: b.harness as Heartbeat['harness'],
     kind: b.kind as Heartbeat['kind'],
     model_id,
-    model_provider_id,
-    billing,
     capabilities,
     tags,
     tier_ceiling: tier as Heartbeat['tier_ceiling'],
@@ -217,19 +201,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
-    usage: usage.map((u, i) => {
-      if (!isObj(u)) bad(`usage[${i}]`, 'must be an object');
-      const x = u as Record<string, unknown>;
-      if (!isTime(x.hour) || (x.hour as number) % 3_600_000 !== 0) bad(`usage[${i}].hour`, 'must be the start of a UTC hour in epoch ms');
-      if (typeof x.usd_list !== 'number' || !Number.isFinite(x.usd_list) || x.usd_list < 0) bad(`usage[${i}].usd_list`, 'must be a non-negative number');
-      return { provider_id: matches(ACCOUNT, `usage[${i}].provider_id`)(x.provider_id), model_id: matches(MODEL, `usage[${i}].model_id`)(x.model_id), hour: x.hour as number, usd_list: x.usd_list as number };
-    }),
-    rate_limits: rate_limits.map((r, i) => {
-      if (!isObj(r)) bad(`rate_limits[${i}]`, 'must be an object');
-      const x = r as Record<string, unknown>;
-      if (x.resets_at !== undefined && !isTime(x.resets_at)) bad(`rate_limits[${i}].resets_at`, 'must be epoch ms');
-      return { provider_id: matches(ACCOUNT, `rate_limits[${i}].provider_id`)(x.provider_id), model_id: optional(x.model_id, matches(MODEL, `rate_limits[${i}].model_id`)), resets_at: x.resets_at as number | undefined };
-    }),
   };
 }
 
@@ -397,28 +368,6 @@ export function checkMessage(body: unknown): { to_worker_id: number; kind: 'rele
   return { to_worker_id: b.to_worker_id as number, kind: 'release', payload: { ticket_id, reason: x.reason } };
 }
 
-export function checkSuspension(body: unknown, now: number) {
-  if (!isObj(body)) bad('body', 'must be a JSON object');
-  const b = body as Record<string, unknown>;
-  const provider_id = matches(ACCOUNT, 'provider_id')(b.provider_id);
-  const model_id = optional(b.model_id, matches(MODEL, 'model_id'));
-  const mode = b.mode ?? 'no-new-work';
-  if (mode !== 'no-new-work' && mode !== 'stop') bad('mode', "must be 'no-new-work' or 'stop'");
-  if (b.starts_at !== undefined && !isTime(b.starts_at)) bad('starts_at', 'must be epoch ms');
-  const starts_at = (b.starts_at as number | undefined) ?? now;
-  if (b.ends_at !== undefined && b.ends_at !== null && (!isTime(b.ends_at) || (b.ends_at as number) <= Math.max(starts_at, now))) {
-    bad('ends_at', 'must be epoch ms after starts_at and after now');
-  }
-  return {
-    provider_id,
-    model_id: model_id ?? null,
-    mode: mode as 'no-new-work' | 'stop',
-    starts_at,
-    ends_at: (b.ends_at as number | null | undefined) ?? null,
-    reason: optional(b.reason, (v) => freeText(v, 'reason')) ?? null,
-  };
-}
-
 export function checkShadowReport(body: unknown) {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
@@ -535,7 +484,29 @@ export interface End {
    *  choices by the claims (a file that is unparseable or over 4 KB was dropped by the runner
    *  and never arrives). */
   taken: { kept: TakenEntry[]; dropped: number } | null;
+  /** B-134: the leg-end scope audit — actions the runner's own evidence (the refs the leg's
+   *  window moved, named as pushes by their reflog) shows outside the claim's ticket scope,
+   *  judged against that scope by the core, never trusted as the verdict. Entries dropped for
+   *  their shape, and actions beyond the report's sixteen, are counted in `dropped`, so a
+   *  report is never silently shortened. */
+  scope_exceeded: ScopeReport;
 }
+
+/** One action of a leg-end scope report (B-134): the kind of evidence and what it touched — a
+ *  forge path (a repository's whole spelling, `owner/name` or a subgroup's `group/sub/repo`)
+ *  for a push or a PR, a host for an egress reach. Shape-checked only; whether the action is
+ *  inside the claim's ticket scope is the core's to judge. */
+export interface ScopeAction {
+  kind: 'push' | 'pr' | 'egress';
+  target: string;
+  /** The ref a push moved, when the evidence names one. */
+  ref?: string;
+}
+
+/** A leg-end scope report as the wire carries it and the store keeps it: the actions that
+ *  passed their shape check and how many were dropped for it or beyond its sixteen. Null is
+ *  no report at all. */
+export type ScopeReport = { actions: ScopeAction[]; dropped: number } | null;
 
 /** One entry of a leg's `taken` (R-BTN-177): the alternative it ran for a route choice, and the
  *  holdings it found dead. Shape-checked only; attachment and membership are the claims' to
@@ -580,6 +551,52 @@ export function checkTaken(v: unknown): { kept: TakenEntry[]; dropped: number } 
   }
   dropped += Math.max(0, (v as unknown[]).length - 16);
   return { kept, dropped };
+}
+
+/** B-134: a forge path as a scope report names its target — two to four segments of a
+ *  repository's spelling (a GitLab subgroup's `group/sub/repo` names its repository by all
+ *  three), the last the repository, none longer than a segment's own bound. This is
+ *  `isForgePath`'s shape without the forge to ask for; the scope a target is judged against
+ *  keeps the same spelling. */
+const FORGE_PATH = /^[A-Za-z0-9-]{1,39}(?:\/[A-Za-z0-9-]{1,39}){0,2}\/[A-Za-z0-9._-]{1,100}$/;
+
+/** B-134: a leg-end scope report, `{actions, dropped}` — at most 16 actions, each a push, a
+ *  PR or an egress reach naming the repository (a forge path) or the host it touched, and the
+ *  count of actions beyond them: what the runner truncated from its report and what this check
+ *  drops for a shape failure, logged `scope-invalid` by the claims. Like `checkTaken`, a
+ *  malformed ENTRY is dropped and counted, never refused: the report rides the advance or end
+ *  that finishes the leg and must not fail it. */
+export function checkScopeReport(v: unknown): ScopeReport {
+  if (v === undefined || v === null) return null;
+  if (!isObj(v) || !Array.isArray(v.actions)) return null;
+  // 8 KB admits every honest report the entry caps spell (16 × (≤219-char target + ≤200-char
+  // ref + overhead) ≈ 7.3 KB) — a bound that dropped the whole report at a maximal honest one
+  // would hide exactly the findings it exists to carry.
+  if (JSON.stringify(v).length > 8192) return null;
+  const actions: ScopeAction[] = [];
+  let dropped = Number.isInteger(v.dropped) && (v.dropped as number) >= 0 && (v.dropped as number) <= 1_000_000 ? v.dropped as number : 0;
+  for (const e of (v.actions as unknown[]).slice(0, 16)) {
+    if (!isObj(e) || (e.kind !== 'push' && e.kind !== 'pr' && e.kind !== 'egress')) {
+      dropped++;
+      continue;
+    }
+    const ref = e.ref;
+    if (ref !== undefined && (typeof ref !== 'string' || ref.length > 200 || !/^[A-Za-z0-9._\/-]+$/.test(ref))) {
+      dropped++;
+      continue;
+    }
+    // A push or a PR names the repository it touched (a forge path); an egress reach names the
+    // host. Anything else is dropped and counted, never refused — the report rides the advance
+    // or end that finishes the leg.
+    const shape = e.kind === 'egress' ? HOSTNAME : FORGE_PATH;
+    if (typeof e.target !== 'string' || !shape.test(e.target)) {
+      dropped++;
+      continue;
+    }
+    actions.push({ kind: e.kind, target: e.target, ...(ref != null ? { ref: ref as string } : {}) });
+  }
+  dropped += Math.max(0, (v.actions as unknown[]).length - 16);
+  return { actions, dropped };
 }
 
 /** §6.5's ends: `done`, `suspended:<station>` and `released:<reason>`, each with an optional
@@ -630,7 +647,7 @@ export function checkEnd(body: unknown): End {
     }
     prerequisite = { kind: 'capability', ref: (p as { ref: string }).ref };
   }
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), taken: checkTaken(b.taken) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), taken: checkTaken(b.taken), scope_exceeded: checkScopeReport(b.scope_exceeded) };
 }
 
 export interface Advance {
@@ -643,6 +660,8 @@ export interface Advance {
   /** R-BTN-177 (B-105): what the finished leg wrote to BATON_TAKEN, reported on the advance or
    *  end that finishes it. */
   taken: { kept: TakenEntry[]; dropped: number } | null;
+  /** B-134: the finished leg's scope audit, reported on the advance or end that finishes it. */
+  scope_exceeded: ScopeReport;
 }
 
 /** `POST /v1/runner/claims/{id}/advance` (R-BTN-63, §11): the leg to start; `reached`, the
@@ -657,7 +676,7 @@ export function checkAdvance(body: unknown): Advance {
   const raw = b.bars ?? [];
   if (!Array.isArray(raw) || raw.length > TAGS_MAX || !raw.every((t) => typeof t === 'string' && TAG.test(t))) bad('bars', `must be a list of at most ${TAGS_MAX} tags`);
   if (b.course !== undefined && JSON.stringify(b.course).length > 4096) bad('course', 'must be at most 4 KB');
-  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), taken: checkTaken(b.taken) };
+  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), taken: checkTaken(b.taken), scope_exceeded: checkScopeReport(b.scope_exceeded) };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */

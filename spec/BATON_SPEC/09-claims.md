@@ -28,7 +28,7 @@ is `active` until it ends
   - The response carries `claim_id`, `ticket_id`, `station`, `legs` (the queued leg, R-BTN-83),
     `next`, `handoff_url?`, `path`, `snapshot_sha`, `default_branch`
     (R-BTN-143), `nonce` (6 hex, public: written in markers and the mirror's claim note, R-BTN-17),
-    `previous_attempts` (R-BTN-24), `leg_log?` (R-BTN-128),
+    `previous_attempts` (R-BTN-24),
     `check_sha?`/`check_head_ref?` (R-BTN-153), and `resume?` (the conditions' restarts, a list,
     R-BTN-162).
   - The runner then reads the ticket from git and re-verifies it (R-BTN-34, R-BTN-5).
@@ -36,8 +36,8 @@ is `active` until it ends
   ticket in one session is the norm and the cheapest path. Each leg starts with
   `POST /v1/runner/claims/{id}/advance` naming it (R-BTN-63): Baton checks the edge and the gates
   in one transaction and moves the claim on (event `advanced`, a new `claim_legs` row with its
-  run number, `started_at` and `head_sha`) or refuses. The reply carries the leg's resolved
-  inputs (R-BTN-82) and Baton's advice flags; the course's own advice is `rank.mjs`'s (R-BTN-98).
+  run number, `run_id` (R-BTN-63), `started_at` and `head_sha`) or refuses. The reply carries the
+  run's `run_id`, its `leg_log` directory (R-BTN-128), the leg's resolved inputs (R-BTN-82) and Baton's advice flags; the course's own advice is `rank.mjs`'s (R-BTN-98).
 - **R-BTN-38 (legs are stateless at their boundaries).** Each leg reads its input from, and
   leaves its output in, the ticket's repositories and their changes. Nothing a leg needs travels
   through a session's context, so any session can run any leg whose input is in place; a
@@ -251,8 +251,8 @@ end on an ended claim is refused `claim-ended`.
   (the one nested key allowed, §12), the last activity and its outcome, the legs run, the end
   reason and detail, and the transcript pointers. Core reads no particular
   activity kind. The claim response for a ticket with earlier ended claims carries
-  `previous_attempts`, the newest 10, newest first, each with its resume record, legs run and
-  hand-off URL, and `previous_attempts_total`;
+  `previous_attempts`, the newest 10, newest first, each with its resume record, legs run (each
+  with its `run_id`, R-BTN-63) and hand-off URL, and `previous_attempts_total`;
   a leg receives them only as data in `BATON_RESUME` (R-BTN-144). The ticket history read
   (R-BTN-81) serves the records pruned, as its route row's `resume` (§14), to its *reader*, so a
   claim through git continues the change (R-BTN-74). (`ctx.resume`, a condition's chosen restart, is R-BTN-162's

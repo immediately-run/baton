@@ -400,3 +400,46 @@ describe('migration 0029: the repository policy tables (B-145)', () => {
     });
   });
 });
+
+// B-142 — migration 0036 retires the pre-route-choice model tables: a database at 0035 holding
+// rows in every one — providers, models, schedules, suspensions, a worker's billing rows and
+// its usage — keeps its workers (less model_provider_id) and loses the tables whole, children
+// before parents, so nothing references what is gone and no code path reads a row.
+describe('migration 0036: the model tables retire (B-142)', () => {
+  it('drops every retired table and the workers row’s model_provider_id, keeping the rest', async () => {
+    const id = env.BATON.idFromName('migrations-0036');
+    await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
+      for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id <= 35)) sql.exec(m.sql);
+      sql.exec(`INSERT INTO repositories (id, github, default_branch, sync_workflow) VALUES ('docs', 'immediately-run/docs', 'main', '.github/workflows/baton-sync.yml')`);
+      sql.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('vm-1', 'vm-1', '[]')`);
+      sql.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, model_id, model_provider_id, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+                VALUES ('vm-1', 's', 'h', 'vm-1', 'opencode', 'vm', 'zai-coding-plan/glm-5.3', 'zai', 'critical', 900000, '', 1, 1)`);
+      sql.exec(`INSERT INTO model_providers (id, name, billing) VALUES ('zai', 'Z.AI', 'subscription')`);
+      sql.exec(`INSERT INTO peak_schedules (id, rules_json, factor) VALUES ('zai', '{"days":[1],"hoursUtc":[[1,4]]}', 0.5)`);
+      sql.exec(`INSERT INTO provider_models (provider_id, model_id, monthly_limit_usd, peak_schedule_id) VALUES ('zai', 'glm-5.3', 10, 'zai')`);
+      sql.exec(`INSERT INTO worker_providers (worker_id, prefix, provider_id) VALUES (1, 'zai-coding-plan', 'zai')`);
+      sql.exec(`INSERT INTO provider_suspensions (provider_id, mode, starts_at, set_by) VALUES ('zai', 'no-new-work', 1, 'owner:x')`);
+      sql.exec(`INSERT INTO usage_reports (worker_id, provider_id, model_id, hour, usd_list) VALUES (1, 'zai', 'glm-5.3', 0, 1.5)`);
+      sql.exec(`INSERT INTO rate_limit_events (provider_id, worker_id, at) VALUES ('zai', 1, 1)`);
+
+      sql.exec('PRAGMA foreign_keys = ON'); // as the host runs it
+      sql.exec(MIGRATIONS.find((x) => x.id === 36)!.sql);
+
+      const all = (q: string) => sql.exec(q).toArray() as Record<string, unknown>[];
+      for (const gone of ['model_providers', 'provider_models', 'peak_schedules', 'provider_suspensions', 'worker_providers', 'usage_reports', 'rate_limit_events']) {
+        expect(all(`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = '${gone}'`)).toEqual([{ n: 0 }]);
+      }
+      // The worker keeps its row, minus the retired column; and a new worker registers against
+      // the migrated schema.
+      expect(all('SELECT hostname, session_name, model_id FROM workers')).toEqual([{ hostname: 'vm-1', session_name: 's', model_id: 'zai-coding-plan/glm-5.3' }]);
+      expect(all(`SELECT name FROM pragma_table_info('workers') WHERE name = 'model_provider_id'`)).toEqual([]);
+      sql.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+                VALUES ('vm-2', 's', 'h', 'vm-1', 'opencode', 'vm', 'critical', 900000, '', 1, 1)`);
+      expect(all('SELECT count(*) AS n FROM workers')).toEqual([{ n: 2 }]);
+    });
+  });
+});
