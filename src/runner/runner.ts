@@ -1174,6 +1174,8 @@ export class Runner {
       nextLegs = (firstAnswer.next ?? nextLegs) as NextLegs;
       advice = firstAnswer.advice ?? advice;
       advanceAdvice = firstAnswer.advice ?? null;
+      // R-BTN-63 (B-185): the run's id, minted by Baton at the advance that started it.
+      let runId = typeof firstAnswer.run_id === 'string' ? firstAnswer.run_id : null;
       for (;;) {
         // A drain (2026-10-24): the leg that ran is complete; the claim ends here with its
         // hand-off and the runner exits without claiming again — SIGTERM's graceful path.
@@ -1219,7 +1221,7 @@ export class Runner {
         const ctx = {
           ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}) },
           claim: { id: claimId, nonce: claim.nonce, station: at },
-          leg: legName, run,
+          leg: legName, run, ...(runId ? { run_id: runId } : {}),
           snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
           // The claim answer names the repository's default branch (R-BTN-34; §5.8's marker
           // legs, B-96's review round 2): the stub hands it to the close, so a marker line goes
@@ -1336,6 +1338,7 @@ export class Runner {
         nextLegs = (answer.next ?? nextLegs) as NextLegs;
         advice = answer.advice ?? advice;
         advanceAdvice = answer.advice ?? null;
+        runId = typeof answer.run_id === 'string' ? answer.run_id : null;
         legName = verdict.leg;
         handoffUrl = null;
         resume = null;
@@ -1352,9 +1355,9 @@ export class Runner {
   /** One `advance`, its refusal settled by §6.13: off-graph ends `released:course-changed`; an
    * `entry` refusal (R-BTN-109) ends `released:cannot-finish:contract-output`; every other
    * refusal suspends at the station the claim reached, never releasing. */
-  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[] }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown } | { settle: Record<string, unknown> }> {
+  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[] }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string } | { settle: Record<string, unknown> }> {
     try {
-      return await this.o.api.advance(claimId, body) as { station?: string; next?: NextLegs; advice?: unknown };
+      return await this.o.api.advance(claimId, body) as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string };
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
       const kind = refusalKind(e.ruleCode);
@@ -1423,6 +1426,9 @@ export class Runner {
       // R-BTN-144 (B-105): the advice the starting advance answered, and the file the leg's
       // taken goes in — both paths, the data in the files, never on the command line.
       BATON_ADVICE: advicePath, BATON_TAKEN: takenPath,
+      // R-BTN-144 (B-185): the run's id, and its session — `<run_id>.r0`, the first session;
+      // a refresh (R-BTN-123, B-12) counts on from there. Absent when the advance named none.
+      ...(typeof ctx.run_id === 'string' ? { BATON_RUN_ID: ctx.run_id, BATON_SESSION_ID: `${ctx.run_id}.r0` } : {}),
       // B-83: the harness command of `--harness`, for a stub whose snapshot's settings name no
       // agent_command — a fill for an absence, never an override.
       ...(this.o.agentCommand ? { BATON_AGENT_COMMAND: this.o.agentCommand } : {}),

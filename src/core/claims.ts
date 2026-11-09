@@ -5,7 +5,7 @@
 // SQLite refuse a second holder, never check-then-insert without them (R-BTN-4).
 import { BatonError } from './http';
 import { transcriptUrl } from './links';
-import { isUniqueViolation, logEvent, randomHex } from './db';
+import { isUniqueViolation, logEvent, mintRunId, randomHex, type Random } from './db';
 import { fitsTier, capabilitiesOf, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
 import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
@@ -33,6 +33,8 @@ const GIT_ENDS = new Set(['done', 'superseded', 'deferred', 'deprioritized']);
 export interface Ctx {
   store: Store;
   now: () => number;
+  /** B-185: the core's random source, for a run id's random half; absent, the system's. */
+  random?: Random;
   /** Where each ticket is, and its course's graph (R-BTN-70). */
   stations: Stations;
   /** The owners' bars and settings (R-BTN-66, R-BTN-67). */
@@ -940,25 +942,25 @@ export class Claims {
 
   /** The legs a claim ran, in order (R-BTN-24, R-BTN-63). */
   private legsOf(claimId: number) {
-    return this.rows<{ seq: number; leg: string; from_station: string; to_station: string | null; finished_at: number | null; abandoned_at: number | null }>(
-      'SELECT seq, leg, from_station, to_station, finished_at, abandoned_at FROM claim_legs WHERE claim_id = ? ORDER BY seq', claimId)
-      .map((l) => ({ leg: l.leg, from: l.from_station, reached: l.to_station, outcome: l.finished_at != null ? 'finished' : l.abandoned_at != null ? 'abandoned' : 'running' }));
+    return this.rows<{ seq: number; leg: string; run_id: string | null; from_station: string; to_station: string | null; finished_at: number | null; abandoned_at: number | null }>(
+      'SELECT seq, leg, run_id, from_station, to_station, finished_at, abandoned_at FROM claim_legs WHERE claim_id = ? ORDER BY seq', claimId)
+      .map((l) => ({ leg: l.leg, ...(l.run_id ? { run_id: l.run_id } : {}), from: l.from_station, reached: l.to_station, outcome: l.finished_at != null ? 'finished' : l.abandoned_at != null ? 'abandoned' : 'running' }));
   }
 
   /** The claim's running leg, if any: its last started leg not yet finished or given up. */
   private runningLeg(claimId: number) {
-    return this.rows<{ seq: number; leg: string; from_station: string }>(
-      'SELECT seq, leg, from_station FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
+    return this.rows<{ seq: number; leg: string; from_station: string; run_id: string | null }>(
+      'SELECT seq, leg, from_station, run_id FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
   }
 
   /** R-BTN-81: what a leg row of the history carries — the leg's run number on the ticket (its
    *  runs under any claim, this one included), the claim's snapshot and the course's version. */
-  private legFacts(claimId: number, leg: string) {
+  private legFacts(claimId: number, leg: string, runId: string | null = null) {
     const c = this.rows<{ ticket_id: string; worker_id: number; snapshot_sha: string; course_id: string | null }>(
       'SELECT ticket_id, worker_id, snapshot_sha, course_id FROM claims WHERE id = ?', claimId)[0];
     const run = this.rows<{ n: number }>('SELECT COUNT(*) AS n FROM claim_legs l JOIN claims k ON k.id = l.claim_id WHERE k.ticket_id = ? AND l.leg = ?', c.ticket_id, leg)[0].n;
     const version = c.course_id ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(c.ticket_id), c.course_id)[0]?.version ?? null : null;
-    return { ticket: c.ticket_id, row: { claim_id: claimId, worker_id: c.worker_id, leg, run, snapshot_sha: c.snapshot_sha, course_version: version } };
+    return { ticket: c.ticket_id, row: { claim_id: claimId, worker_id: c.worker_id, leg, run, run_id: runId, snapshot_sha: c.snapshot_sha, course_version: version } };
   }
 
   /** An active claim of this worker, for `advance` and `end`. */
@@ -1047,7 +1049,7 @@ export class Claims {
     const n = this.handedOut(repo);
     if (run) {
       this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', at, now, b.evidence, claimId, run.seq);
-      const f = this.legFacts(claimId, run.leg);
+      const f = this.legFacts(claimId, run.leg, run.run_id);
       this.c.history?.record(f.ticket, { kind: 'leg-finished', ...f.row, reached: at, next_leg: leg, ...(b.evidence ? { detail: { evidence: b.evidence } } : {}) });
       // R-BTN-177 (B-105): the finished leg's reported taken, judged against the snapshot it ran
       // under — BEFORE the resolution below, so a dead holding it named is gone from `has` and
@@ -1066,9 +1068,20 @@ export class Claims {
     const attached = this.legRouteChoices(repo, c.course_id, leg);
     const resolved = attached.length ? this.c.ontologies?.resolveFor(workerId, repo, attached, now) ?? null : null;
     const seq = (this.rows<{ s: number | null }>('SELECT MAX(seq) AS s FROM claim_legs WHERE claim_id = ?', claimId)[0].s ?? 0) + 1;
-    this.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, bars, started_at, started_observation, route_choices_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      claimId, seq, leg, at, JSON.stringify(b.bars), now, n, resolved ? JSON.stringify(resolved.route_choices) : null);
-    const started = this.legFacts(claimId, leg);
+    // R-BTN-63 (B-185): the run's id, minted here; a collision with an existing id is refused by
+    // the column's unique index and a new one minted.
+    let runId = '';
+    for (let tries = 0; ; tries++) {
+      runId = mintRunId(now, this.c.random);
+      try {
+        this.exec(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation, route_choices_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          claimId, seq, runId, leg, at, JSON.stringify(b.bars), now, n, resolved ? JSON.stringify(resolved.route_choices) : null);
+        break;
+      } catch (e) {
+        if (!isUniqueViolation(e) || !/run_id/.test(String(e)) || tries >= 8) throw e;
+      }
+    }
+    const started = this.legFacts(claimId, leg, runId);
     this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}), ...(resolved ? { route_choices: resolved.route_choices.map((r) => r.choice) } : {}) } });
     // R-BTN-62: only a reading numbered above the counter now can judge the claim stale.
     this.exec('UPDATE claims SET station = ?, leg = ?, claim_observation = ? WHERE id = ?', at, leg, n, claimId);
@@ -1077,7 +1090,7 @@ export class Claims {
     this.writeSeats(claimId, item, leg);
     this.event('advanced', `worker:${workerId}`, { from: station, reached: at, leg, ...(b.bars.length ? { bars: b.bars } : {}), ...(b.evidence ? { evidence: b.evidence } : {}) }, c.ticket_id, claimId);
     this.c.dispatch?.('sync', c.ticket_id); // R-BTN-73: after every advance
-    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), advice: resolved ?? null };
+    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), advice: resolved ?? null, run_id: runId };
   }
 
   /** The route choices a course entry attaches to a leg (R-BTN-177): the `route_choices` map the
@@ -1311,7 +1324,7 @@ export class Claims {
     }
     if (run) {
       // R-BTN-81: the run's end, with the position the holder reported (B-38 makes it provisional).
-      const f = this.legFacts(claimId, run.leg);
+      const f = this.legFacts(claimId, run.leg, run.run_id);
       this.c.history?.record(f.ticket, { kind: opts.finished ? 'leg-finished' : 'leg-abandoned', ...f.row, reached, next_leg: opts.next ?? null, detail: { end_reason: reason } });
     }
     // R-BTN-62: only a reading numbered above the counter's value now can confirm this end. §2e:
