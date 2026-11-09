@@ -78,8 +78,9 @@ in each of its first six: (1) the tenant screens are read-only, (2) route and ad
 CLI's, (3) Stop is one click, (4) `GET /v1/admin/state` keeps its shape as `stateView()`, (5)
 the held post's Accept stays on Sync, (6) no ESLint — a source test over `src/dashboard/**` is
 the gate. Three more, found by the second review, were answered the same day: (7) "we don't
-need staging at all" — B-216 checks production, read-only, and no workflow changes beyond
-B-193's build step; (8) a per-tenant request counter is built so R-BTN-87's rates can be shown;
+need staging at all" — B-216 checks production, read-only, no workflow changes beyond B-193's
+build step, and the staging instance itself is retired by B-224 and B-225 in the `baton`
+project; (8) a per-tenant request counter is built so R-BTN-87's rates can be shown;
 (9) runners are grouped by hostname as R-BTN-3 says. Each remains a two-way door for a later
 spec ticket.
 

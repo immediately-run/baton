@@ -92,7 +92,10 @@ of the owner's own, 8 and 9 on their defaults.
   owner makes; **(c) no staging at all** *(the owner's answer, 2026-11-09: "we don't need
   staging at all")*: this project checks nothing on staging — B-216's post-merge check runs
   against production, which is the only deployment anyone uses — and no workflow changes beyond
-  B-193's build step. Retiring the staging deploy itself is outside this project.
+  B-193's build step. The owner then ruled on the instance itself (2026-11-09: a home
+  repository binds to one Baton, and all three bind to production, so staging holds nothing and
+  tests nothing): its retirement is B-224 (the workflow, `wrangler.toml`, spec and docs) and
+  B-225 (the Cloudflare resources, an operator's), in the `baton` project.
 - **(8) The tenant's request figures.** R-BTN-87 says the dashboard shows each envelope figure,
   "rates as 5-minute means" among them, and Baton counts no requests today. **(a) build a
   per-tenant request counter** with a 5-minute mean in B-202 *(answered (a), the owner,
