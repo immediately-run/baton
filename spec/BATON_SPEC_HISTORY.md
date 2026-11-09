@@ -2602,6 +2602,18 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   or home directory (`bubblewrap` or an equivalent on Linux; where none is available the override
   is refused, not run unsandboxed)."
 
+- **2026-11-09 — R-BTN-35, values 1** (B-183).
+  Rules changed: R-BTN-35.
+  B-183 (opaque ticket versions, baton#190) asked the owner to settle values 1 and R-BTN-35, which
+  named git as the truth about the work although a tracker may now be the ticket source. The owner
+  chose the recommended wording: "The ticket source is the truth about tickets and git about the
+  code and its evidence; Baton holds what no write may decide." `docs/context/values.mdx` value 1 and
+  R-BTN-35 now say so; a git-only repository reads exactly as before. Retired text: R-BTN-35's
+  title "the home repository wins, except about what Baton owns" and "About anything else, git is
+  authoritative: every other ticket fact Baton holds (its existence, filter fields, closure) is a
+  cache of the head snapshot". The owner also waived B-183's seventh scenario (replay against a
+  moved version), which moves to B-190 with replay itself.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
