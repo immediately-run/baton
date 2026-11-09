@@ -195,4 +195,5 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   calling a tracker a cache git does not hold (2026-11-09, the owner, choosing B-183's recommended
   wording: "The ticket source is the truth about tickets and git about the code and its evidence;
   Baton holds what no write may decide."; values 1, R-BTN-35, R-BTN-74). The markdown source keeps
-  every ticket in git, so a git-only repository reads exactly as before.
+  every ticket in git, so a git-only repository reads exactly as before; this refines, for other
+  ticket sources, the entry choosing git as the home of every ticket's content.
