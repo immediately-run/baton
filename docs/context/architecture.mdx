@@ -108,7 +108,9 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
   across threads or subprocesses is a possible later evolution, decided when the sandbox
   fleet's evidence is in — not the plan.
   A sandbox is one domain, the label its grants carry (BATON_SPEC [R-BTN-180](../../spec/BATON_SPEC/12-security.md#sec-12-8)), so several runners
-  in one sandbox count as one for independent review; Fieldhouse runs one runner per VM (FLDH-13).
+  in one sandbox count as one for independent review — unless the policy lists their credential
+  in `domains.per_run`, when each run counts as its own domain and keeping runs apart is the
+  deployment's ([R-BTN-180](../../spec/BATON_SPEC/12-security.md#sec-12-8)); Fieldhouse runs one runner per VM (FLDH-13).
 
 ## Where code lives
 

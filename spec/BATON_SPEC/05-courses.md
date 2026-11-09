@@ -139,7 +139,7 @@ mean (R-BTN-50).
   | `stalled_s` | leg | how long the leg may be posted `waiting` before `baton.stalled` is raised; default 259,200 (72 h) | R-BTN-167 |
   | `conditions` | leg | narrows the condition types it may raise (`[]`: none) | R-BTN-160 |
   | `spawns` | leg | the courses of the children it files (for a call leg, the courses it calls), their contract and their `lifetime` | R-BTN-111, R-BTN-165, R-BTN-168 |
-  | `no_chain_from` | leg | legs whose credential may not take this one on the same ticket | R-BTN-106 |
+  | `no_chain_from` | leg | legs whose credential may not take this one on the same ticket (for a credential `domains.per_run` lists, across claims only under another label) | R-BTN-106 |
   | `stream` | leg | `false`: its output is never written to a leg log | R-BTN-128 |
   | `max_context`, `max_refreshes` | leg | context fraction (0.1–0.95) that triggers a fresh session, and how many | R-BTN-123 |
   | `check_command` | leg | a check course's verdict command: an argv, with `timeout_s` (default 1800, ≤ 7200) | R-BTN-153 |
@@ -250,6 +250,20 @@ mean (R-BTN-50).
     required bars, prerequisites). The first `advance` starts the first leg; every leg a claim
     runs has its own `advance`. Baton records each leg a claim starts and finishes
     (`claim_legs`).
+  - **Every run has a run id.** The `advance` that starts a run, and an adoption that adds one,
+    mints its `run_id`: `r_` and a ULID — 26 characters of Crockford base32 encoding 48 bits of the
+    time in milliseconds read through the clock (R-BTN-32) and 80 random bits from the core's
+    random source, which tests replace as they replace the clock; a collision with an existing id
+    is refused by the column's unique index and a new one minted. Runs recorded before run ids are
+    given one when the migration adding the column runs, minted the same way from each run's
+    `started_at`. It is opaque — no reader parses, sorts or
+    compares it except for equality; order comes from `started_at` and `seq` — and unique across
+    the tenant. The `advance` reply returns it; `claim_legs`, the history's leg rows (R-BTN-81),
+    `previous_attempts` and the resume record (R-BTN-24) and the run list (R-BTN-128) carry it.
+    Anything a runner writes outside Baton to a place another tenant could also write — a forge
+    ref, a bucket path — is keyed by the **tenant host** and the run id: the host of the tenant's
+    configured origin (R-BTN-135), lowercased, a port joined with `-` (`baton.immediately.run`,
+    `localhost-8787`), so it is safe in a git ref name and a path.
   - **Baton's traversal record counts.** A ticket's runs of each leg and arrivals at each station
     are counted from Baton's own record — every leg a claim ran and every run an adoption added
     (`claim_legs`), and every fact arrival Baton applied, under resolved names (R-BTN-64).

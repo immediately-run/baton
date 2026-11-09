@@ -89,10 +89,11 @@ branch).
    touching only the paths they name, and one `std:approval@1` whose subject is that ticket at that
    commit covers exactly those paths and blobs; `merge.reviews`, `merge.checks`, `authorship` and
    continuity do not apply.
-4. **The course override** `legs/merge.run.mjs` only adds refusals: it runs in a sandbox with no
-   network, no credential, a private PID namespace, the computed diff as its only input and a fixed
-   time, and returns `{refuse, reasons}` from a closed list; where no sandbox is available it is
-   refused, not run (R-BTN-182).
+4. **The course override** `legs/merge.run.mjs` only adds refusals: it ~~runs in a sandbox with no
+   network, no credential, a private PID namespace,~~ runs as any leg's code, through the runner's
+   executor (B-184), with the computed diff as its only input ~~and a fixed time~~, and returns
+   `{refuse, reasons}` from a closed list ~~; where no sandbox is available it is refused, not run~~
+   (R-BTN-182).
 5. **Pins** (R-BTN-182, R-BTN-189): its own configuration pins the `human_only` public keys, Baton's
    attestation key, the tenant signing keys, and the hashes of the policy and its floors. It reports
    its pins in each heartbeat and acts on nothing in the repository while one differs from Baton's
@@ -176,3 +177,5 @@ _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructu
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): R-BTN-130's closed list is gone; what a delegated key reaches is R-BTN-186's, marked per registry entry (R-BTN-129).)_
 
 _(2026-11-03: R-BTN-183 counts a check run only when it concluded `success` (the 2026-11-02 security review's follow-up, PR #167), and R-BTN-184 counts a human's merge of a request PR (R-BTN-131) as approval of the ticket files it carries, as a ticket's PR's merge is; item 2's checks line reads accordingly.)_
+
+_2026-11-09: the owner retired R-BTN-182's sandbox requirement for the override (baton#197): it runs as any leg's code, the deployment keeping it from the merge credential (§12.8). Item 4 struck in place. B-189 retires much of this ticket's forge-enforced premise; re-read it before building. (2026-11-09: rules re-read: R-BTN-182)_

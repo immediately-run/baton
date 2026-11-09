@@ -1,0 +1,164 @@
+---
+title: "B-189 — Trusted runners: no-runner-lands and the runner-distrust machinery retire; legs hold no forge credential, and the runner publishes their work"
+id: B-189
+project: baton
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1188
+tier: judgement
+description: "§12.8 assumes a runner may be compromised because it ran repository code in its own trust boundary. With every call into repository code going through an executor (B-184) and the owner ruling that legs hold no forge credential, nothing below a trusted runner can write the forge, so the machinery that guarded against runners retires: the guarantee no-runner-lands, the refs.* knobs, the protection-checker role, the separate trusted-runner role (any runner may hold the merge credential), the machine-key board distinction, key span and one key per tenant. The remaining guarantees rest on one deployment duty instead — repository code never runs in a runner's trust boundary, and no leg holds a forge credential — and on the merge leg as the one way a change lands. Legs return forge actions (push this branch, open this PR, post this comment); the runner validates each against the ticket's scope and performs it with its own credential. Under the builtin executor Baton makes no security promise. Requires: B-184, B-187."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-184
+  - B-187
+---
+
+**Brief:** the owner, 2026-11-09, after a runner-trust audit (three reviewers over BATON_SPEC,
+FIELDHOUSE_SPEC and `docs/security-model.mdx`): "no-runner-lands is a vestigial structure from
+when the runner was assumed to be untrusted because it executed repository code unsandboxed.
+This is not the case any longer, as we have transitioned to keeping the runner outside the
+sandbox." On legs and the forge: "'Legs never hold a forge write token.' Agree", then, offered
+that legs hold no forge credential at all, the executor publishing their work, opening PRs and
+posting comments from their results: "I accept all recommendations"; and, on "plain Baton under
+builtin makes no security promises at all": "Ok". The audit's list is the map for this ticket.
+
+This is a proposal: the spec half lands first, as its own spec PR, with the owner's approval,
+together with B-184's spec half, which it depends on, once baton#197 has merged.
+
+**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8),
+[R-BTN-182](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-183](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-184](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-187](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-191](../spec/BATON_SPEC/12-security.md#sec-12-8); the outside list),
+[§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9), [§12](../spec/BATON_SPEC/12-security.md#sec-12)'s
+preamble and [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1), [§10](../spec/BATON_SPEC/10-checks.md#sec-10) ([R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10), [R-BTN-115](../spec/BATON_SPEC/10-checks.md#sec-10)),
+[§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1)–[§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5)
+([R-BTN-102](../spec/BATON_SPEC/08-runners.md#sec-8-2), [R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3), [R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5), [R-BTN-143](../spec/BATON_SPEC/08-runners.md#sec-8-4), [R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4), [R-BTN-146](../spec/BATON_SPEC/08-runners.md#sec-8-2)), [§3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3)
+([R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2)), [§2](../spec/BATON_SPEC/02-deployments.md#sec-2) (one machine key per tenant),
+[§6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6) (rule `trusted`, readings),
+[§7](../spec/BATON_SPEC/07-conditions.md#sec-7) ([R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8)), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15), 91-decisions (14, 23,
+26, 28, 30, 31, 114, 121, 128, 129); `docs/security-model.mdx`.
+**Depends on:** B-184 (the executor: repository code never in the runner's process), B-187
+(per-run labels, which `independent-review` counts).
+**Used by:** FIELDHOUSE_SPEC §5 (R-FH-80, R-FH-83, R-FH-86).
+
+### What to build
+
+1. **A deployment duty replaces the runner distrust.** §12.8 states, among what the deployment must
+   make true and Baton cannot observe: no repository code runs in a runner's trust boundary; no
+   leg holds a forge credential; and the forge admits only the merge credential and the human
+   identity to the default branch and tags — the forge's setup being the deployment owner's, which
+   `baton repo protect --print | --check` helps them check. Decision 91:14 (a protected default
+   branch only a deterministic merge runner and humans land on) stands, restated as this duty. Every guarantee holds against hostile legs and hostile content
+   only where the deployment keeps that duty; none holds against a compromised runner. Under the
+   `builtin` executor the duty is not kept, and Baton says so: it makes no security promise.
+2. **`no-runner-lands` retires**, with what only served it: the `refs.*` knobs and the
+   `baton-legs/*` constant's runner admission, `outbox.git`'s and `outbox.forge-check`'s role
+   restrictions (any runner holding the credential delivers), the protection checker's role, mark,
+   domain rule and report, `baton.unprotected`, and the guarantee's checker condition.
+   `baton repo protect --print | --check` stays as a tool a person runs; nothing in Baton depends on
+   its result. Decisions 91:114, 91:121 and 91:129 are superseded, with the owner's words.
+3. **Stored floors naming `no-runner-lands`** are rewritten by the migration that retires it: the
+   name is dropped from every policy version's `floors` going forward (a new version, logged
+   `admin`, naming the change), never silently; a policy change naming it afterwards is refused
+   `invalid-params`. S-BTN-190's fixture is rewritten to the remaining guarantees.
+4. **The guarantees rebase.** `control-paths-human`, `tickets-approved`, `independent-review` and
+   `board-from-trusted` no longer include `no-runner-lands`; each rests on "a change reaches the
+   default branch only through the merge leg (R-BTN-183) or the human identity's own merge",
+   which trusted runners running a pinned Baton (B-138) keep, under item 1's duty. Their *holds
+   when* conditions keep their own knobs (`paths.control`, `paths.tickets`, `tickets.created`,
+   `merge.reviews`, `attestations`). `human-gates` is unchanged. The presets and the floors keep
+   working over the remaining five.
+5. **The trusted-runner role becomes credential routing.** Any runner whose host holds the merge
+   credential may run a merge leg. The credential a runner performs forge actions with (item 6) is a
+   different forge identity from the merge credential, one the forge does not admit to the default
+   branch or tags; R-BTN-182's "holds the only non-human credential able to perform
+   that leg's action" stays as the rule that no sandbox ever holds it. Rule `trusted`'s checker and
+   `forge-check` exclusions, "in a domain shared with no other grant", R-BTN-115's merge-host
+   separation and R-BTN-171's withholding note retire. R-BTN-183's whole merge gate stays: it is the
+   deterministic gate against hostile content and pushers.
+6. **Legs hold no forge credential; the runner publishes their work.** A leg's script and agent
+   return **forge actions** with their result — push these commits to this ref, open or update
+   this pull request with this text, post this comment or review on it — and the runner performs
+   them with its own credential after checking each against the claim's scope (§12.9): a push only
+   to the claim's own ticket branch (matching the course's `branch_pattern`), fast-forward only,
+   never the default branch, a tag or another ticket's branch; a salvage draft to the claim's own
+   `refs/baton/wip/…` ref (B-186); leg state to the ticket's own `baton-legs/<ticket>` branch
+   (R-BTN-190); a pull request only from the ticket's branch to the default branch, in the home or
+   a `repos:` entry of the ticket; a comment or review only on the ticket's own pull requests. Which
+   kinds a leg may return follows its course properties (a `reads_only` leg returns comments and
+   reviews only). Text is data, checked as R-BTN-106 checks a move. A refused action ends the leg
+   `released:cannot-finish:spec` naming it. The executor carries the commits out of the leg's
+   environment (B-184's `exec`, a bundle); a leg gets its checkout read-only from the runner,
+   never a clone credential. The standard courses' `close` and `handoff`, and their instructions,
+   return actions instead of calling `git push` or `gh`.
+7. **The machine-key board distinction retires.** `inputs.board`'s `machine` class,
+   `baton.machine-post`, R-BTN-143's never-posted-older-commit clause, R-BTN-146's key span with
+   `runner_grants.sync` and `baton.span-changed`, and §2's one machine key per tenant. What stays:
+   board content is computed by repository code (`sync.mjs`), so a trusted leg re-checks every fact
+   against git and acts on no board post's word, and no `sync` writer is admitted for
+   `std:arrival@1` or `std:decision@1` (any pusher can write a verdict).
+8. **Review independence follows.** `no_chain_from` keeps its within-claim refusal (a continuing
+   session carries the writer's context) and compares runs as R-BTN-180 says; §12.8's "a
+   compromised runner that is itself one of the reviewers" becomes "a hostile or injected review
+   leg"; readings lose their writer restrictions against a lying runner, keeping the re-check
+   against git.
+9. **Rationales reworded, rules kept**: Baton stops a repository whose floor is broken (one
+   enforcement point, not distrust of runners); §12's preamble and §8's opening say Baton dictates
+   no isolation and the executor decides; R-BTN-128's "a leg log is a diagnostic, not evidence" and
+   R-BTN-145's "a hostile leg" survivor hold under `builtin`; §12.9's leg-end audit becomes item
+   5's scope check on actions, the forge cross-check staying.
+10. **Kept as cheap defence in depth**, said so in the spec: R-BTN-144's credential stripping and
+   masking classes 1–2, label-reuse checks (B-187), per-key limits (R-BTN-187), fencing.
+11. **`docs/security-model.mdx` is rewritten** around pushers, sandboxed legs and owner sessions:
+    reach 1 and the "Hardening against a compromised runner" options that served it are marked
+    superseded with this ticket (options 4, 5, 8, 16, and the runner halves of 3 and 17); reaches 0,
+    2 and 3 and their options keep their value.
+
+### What not to do
+
+- **No new isolation vocabulary.** Item 1's duty is stated of the deployment; Baton checks nothing
+  about it (B-184's agnosticism).
+- **Do not weaken R-BTN-183.** Every check of the merge gate stays.
+- **Do not reopen signed authorship here** (the owner, 2026-11-09: not now).
+
+### Trust
+
+- **Forge actions** — written by a leg (hostile content). The runner admits only the three kinds,
+  each checked against the ticket's scope before it acts; the leg never sees the credential.
+- **The merge credential** — held by a runner's host, never in a sandbox (R-BTN-182).
+- **The deployment duty** — the deployment's word, recorded in §12.8's outside list; Baton cannot
+  observe it.
+
+### Invariants
+
+- **R-BTN-183's merge gate** is unchanged.
+- **Baton runs no repository code** (R-BTN-98); forge actions are data the runner validates.
+- **Migrations are append-only**: dropping columns (`runner_grants.sync`, the checker mark,
+  `repositories.protection_json`) is a new migration; data is kept readable through one release.
+- **Filter fields only** (R-BTN-33): a forge action's text is passed to the forge, never stored.
+
+### Tests
+
+- A leg returning a push to the default branch, a tag, or a branch outside the pattern, a pull
+  request from another branch, or a comment on another pull request: each refused, the leg ended
+  `cannot-finish:spec`; a valid push, pull request and comment performed by the runner.
+- A leg's environment holds no forge credential (scanned) under a test executor that keeps legs
+  apart.
+- A repository with no protection checker and no `refs.*` knobs holds the four rebased guarantees
+  under `protected`.
+- Each behaviour change names its `S-BTN-n` scenario (R-BTN-31).
+
+### Exit criteria
+
+- [ ] the spec PR (with B-184's spec half) is merged with the owner's approval, the Decisions it
+  supersedes recorded, `docs/security-model.mdx` rewritten
+- [ ] built as above; the tests pass; `npm test` and `npm run typecheck` are green
+
+## Status
+
+_filed 2026-11-09._
