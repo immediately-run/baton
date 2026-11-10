@@ -48,7 +48,9 @@ jobs:
           # The sync reads every repository a live ticket names in `repos:`; the Actions token
           # reads this repository only, so a private sibling (docs, fieldhouse) 404s and fails
           # the run (docs/standard-courses.mdx). BATON_GITHUB_READ_TOKEN is a fine-grained,
-          # read-only token over the repositories `.baton/baton.json` maps; without it, the Actions
+          # read-only token (Pull requests, Contents, Actions, Metadata: a fine-grained token holds no
+          # Checks, so a private repository's CI is its workflow runs, B-226) over the repositories
+          # `.baton/baton.json` maps; without it, the Actions
           # token. Never name it BATON_SYNC_TOKEN: the CLI sends that variable to Baton as its
           # bearer. A repository secret is readable by a workflow pushed to any branch; that is
           # accepted while the token is read-only and every writer here already reads those

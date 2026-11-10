@@ -3,7 +3,9 @@
 // the next page. A POST to /graphql is answered from the same routes — each `p<n>: pullRequest(number:
 // n)` alias built from that PR's check-runs, commits, reviews and comments routes, as GitHub's GraphQL
 // would give them — so one fixture states a PR's facts for both paths, and a REST list of more than
-// 100 items is a connection whose first page overflows.
+// 100 items is a connection whose first page overflows. A repository in `checksForbidden` answers
+// as it does to a fine-grained token (B-226): GraphQL refuses each head's `checkSuites` (FORBIDDEN,
+// with its path, the rest of the answer intact) and REST's check-runs is a 403.
 
 type Routes = Record<string, unknown>;
 
@@ -49,7 +51,8 @@ function prNode(routes: Routes, repo: string, n: number): unknown {
 }
 
 /** A fetch answering `routes`; `calls` records each request as its REST key, or `graphql <owner/name> <numbers>`. */
-export function githubFake(routes: Routes, calls: string[] = []) {
+export function githubFake(routes: Routes, calls: string[] = [], { checksForbidden = [] as string[] } = {}) {
+  const forbidden = (repo: string) => checksForbidden.some((r) => r.toLowerCase() === repo.toLowerCase());
   return async (url: string, init?: { method?: string; body?: string }): Promise<Response> => {
     const u = new URL(url);
     if (u.pathname === '/graphql') {
@@ -58,11 +61,18 @@ export function githubFake(routes: Routes, calls: string[] = []) {
       const numbers = [...query.matchAll(/p(\d+): pullRequest\(number: (\d+)\)/g)].map((m) => Number(m[2]));
       calls.push(`graphql ${repo} ${numbers.join(',')}`);
       if (!(`/repos/${repo}/pulls?state=all` in routes)) return Response.json({ data: { repository: null }, errors: [{ type: 'NOT_FOUND', message: `Could not resolve to a Repository with the name '${repo}'.` }] });
-      return Response.json({ data: { repository: Object.fromEntries(numbers.map((n) => [`p${n}`, prNode(routes, repo, n)])) } });
+      const repository = Object.fromEntries(numbers.map((n) => [`p${n}`, prNode(routes, repo, n)]));
+      if (!forbidden(repo)) return Response.json({ data: { repository } });
+      for (const [alias, node] of Object.entries(repository)) if (node) (node as any).head.nodes[0].commit.checkSuites = null;
+      return Response.json({
+        data: { repository },
+        errors: Object.keys(repository).map((alias) => ({ type: 'FORBIDDEN', path: ['repository', alias, 'head', 'nodes', 0, 'commit', 'checkSuites'], message: 'Resource not accessible by personal access token' })),
+      });
     }
     u.searchParams.delete('per_page');
     const key = `${u.pathname}${u.search}`;
     calls.push(key);
+    if (/^\/repos\/[^/]+\/[^/]+\/commits\/[^/]+\/check-runs/.test(key) && forbidden(key.split('/').slice(2, 4).join('/'))) return new Response('{"message":"Resource not accessible by personal access token"}', { status: 403 });
     if (!(key in routes)) return new Response('{}', { status: 404 });
     const [body, next] = page(routes[key]);
     return new Response(JSON.stringify(body), { headers: next ? { link: `<https://api.github.com${next}>; rel="next"` } : {} });

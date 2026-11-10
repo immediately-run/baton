@@ -811,14 +811,39 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     return checked(await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), url);
   };
   /** One GraphQL query, one request of the budget (B-35). An answer carrying `errors` fails the
-   * sync, as a failed REST read does: no partial reading is posted. */
-  const graphql = async (query: string, variables: Record<string, unknown>): Promise<any> => {
+   * sync, as a failed REST read does: no partial reading is posted — except, B-226, errors that
+   * are all a refusal of a head's check suites (`checksRefused`): a fine-grained token cannot
+   * hold Checks, so on a private repository GitHub answers everything else and refuses those.
+   * Such an answer is returned with `checksRefused` set, and the caller reads the checks from
+   * the head's workflow runs instead. Every error names its path, so a refusal says what. */
+  const graphql = async (query: string, variables: Record<string, unknown>): Promise<{ data: any; checksRefused: boolean }> => {
     spend();
     const url = `${GITHUB_API}/graphql`;
     const res = checked(await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'baton-sync' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), `${url} (${String(variables.owner)}/${String(variables.name)})`);
-    const body = (await res.json()) as { data?: any; errors?: { message?: string }[] };
-    if (body.errors?.length) throw new Error(`GitHub GraphQL (${String(variables.owner)}/${String(variables.name)}): ${body.errors.map((e) => e.message ?? '?').join('; ')}`);
-    return body.data;
+    const body = (await res.json()) as { data?: any; errors?: { message?: string; type?: string; path?: (string | number)[] }[] };
+    const errors = body.errors ?? [];
+    const checksRefused = errors.length > 0 && body.data != null && errors.every((e) => e.type === 'FORBIDDEN' && (e.path ?? []).includes('checkSuites'));
+    if (errors.length && !checksRefused) {
+      throw new Error(`GitHub GraphQL (${String(variables.owner)}/${String(variables.name)}): ${errors.map((e) => `${e.message ?? '?'}${e.path?.length ? ` (at ${e.path.join('.')})` : ''}`).join('; ')}`);
+    }
+    return { data: body.data, checksRefused };
+  };
+  /** B-226: the repositories whose check runs this token may not read — a fine-grained token on a
+   * private repository, which GitHub offers no Checks permission. Their heads' checks are the
+   * head commit's Actions workflow runs (Actions: read), said once a repository. */
+  const checksFromActions = new Set<string>();
+  /** The head's checks as its workflow runs give them: a run's conclusion once it has completed,
+   * null while it runs — the same "finished or not" the check runs answer. Refused too (no
+   * Actions: read), the sync fails naming both permissions. */
+  const actionChecks = async (repo: string, sha: string): Promise<(string | null)[]> => {
+    try {
+      const runs = await all<any>(`/repos/${repo}/actions/runs?head_sha=${sha}`, (b) => b.workflow_runs);
+      return runs.map((r) => (r.status === 'completed' && r.conclusion ? String(r.conclusion) : null));
+    } catch (e) {
+      const { status, limited } = e as { status?: number; limited?: boolean };
+      if (status === 403 && !limited) throw new Error(`${(e as Error).message} — ${repo}: this token can read neither the head's check runs (Checks, which a fine-grained token cannot hold) nor its workflow runs (give it Actions: read)`);
+      throw e;
+    }
   };
   /** Every item of a paged list; `pick` takes a page's items from its body. */
   const all = async <T>(path: string, pick: (body: any) => T[] = (b) => b as T[]): Promise<T[]> => {
@@ -887,7 +912,11 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     for (let i = 0; i < owned.length; i += GRAPHQL_BATCH) {
       const batch = owned.slice(i, i + GRAPHQL_BATCH);
       const [owner, name] = repo.split('/');
-      const data = await graphql(detailQuery(batch.map((pr) => pr.number)), { owner, name });
+      const { data, checksRefused } = await graphql(detailQuery(batch.map((pr) => pr.number)), { owner, name });
+      if (checksRefused && !checksFromActions.has(repo.toLowerCase())) {
+        checksFromActions.add(repo.toLowerCase());
+        log(`baton: ${repo}: this token cannot read check runs (a fine-grained token holds no Checks) — its PRs' checks are their heads' workflow runs (B-226)`);
+      }
       for (const pr of batch) detail.set(pr.number, await detailOf(repo, pr, data?.repository?.[`p${pr.number}`]));
     }
     return listed.map((pr) => {
@@ -903,7 +932,9 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     const head = node.head?.nodes?.[0]?.commit;
     const suites = head?.checkSuites;
     const overflow = suites?.pageInfo?.hasNextPage || (suites?.nodes ?? []).some((cs: any) => cs?.checkRuns?.pageInfo?.hasNextPage);
-    const checks = head?.oid !== pr.head.sha || overflow
+    const checks = checksFromActions.has(repo.toLowerCase())
+      ? await actionChecks(repo, pr.head.sha)
+      : head?.oid !== pr.head.sha || overflow
       ? (await all<any>(`/repos/${repo}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null)
       // A run not yet completed has no conclusion: null, as the REST list gives it.
       : (suites?.nodes ?? []).flatMap((cs: any) => cs?.checkRuns?.nodes ?? []).map((c: any) => (c.status === 'COMPLETED' && c.conclusion ? String(c.conclusion).toLowerCase() : null));
@@ -965,7 +996,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     const out: any[] = [];
     let after: string | null = null;
     for (;;) {
-      const s: any = (await graphql(query, { q: `repo:${repo} is:pr author:${author}`, after, owner, name }))?.search;
+      const s: any = (await graphql(query, { q: `repo:${repo} is:pr author:${author}`, after, owner, name })).data?.search;
       // Search answers at most 1000 results: past that the reading would be truncated.
       if ((s?.issueCount ?? 0) > 1000) throw new Error(`GitHub search (${repo}, author ${author}): ${s.issueCount} PRs, past search's 1000 — the sync will not post a truncated reading`);
       for (const n of s?.nodes ?? []) {
