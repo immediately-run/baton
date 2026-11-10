@@ -1,11 +1,11 @@
-// ../../../../tmp/baton-bundle-dtOQ10/entry.ts
+// ../../../../../baton-bundle-pcQTUc/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync as rmSync2, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
 import { pathToFileURL } from "node:url";
 
-// src/defaults/agent-words.ts
+// ../cli/src/defaults/agent-words.ts
 function splitWords(command) {
   const words = [];
   const SHELL_SYNTAX = /* @__PURE__ */ new Set(["<", ">", ">>", "<<", "|", "||", "&&", ";", "&", "(", ")"]);
@@ -57,12 +57,12 @@ function splitWords(command) {
   return words;
 }
 
-// src/defaults/ticket-state.ts
+// ../cli/src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 
-// src/defaults/tickets-markdown.ts
+// ../cli/src/defaults/tickets-markdown.ts
 function parseFrontmatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!m) return null;
@@ -93,7 +93,7 @@ var unquote = (v) => {
   return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
 };
 
-// src/defaults/ticket-state.ts
+// ../cli/src/defaults/ticket-state.ts
 var MACHINE_KEYS = ["station", "next_leg", "claim"];
 var CLOSE_TIMEOUT_MS = 12e4;
 var GIT_NONINTERACTIVE_ENV = {
@@ -283,7 +283,7 @@ async function closeTicket(ctx, result, run2 = exec) {
   }
 }
 
-// src/defaults/pr-close.ts
+// ../cli/src/defaults/pr-close.ts
 var PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 var verdictLine = (verdict) => `<!-- baton:verdict ${verdict} -->`;
 function commentLine(leg, result) {
@@ -316,7 +316,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// src/defaults/course-pr.ts
+// ../cli/src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
 var CREATE_SPEC_COURSE = {
   start: "requested",
@@ -344,8 +344,9 @@ var CREATE_SPEC_COURSE = {
 var SPEC_BOUNDS = {
   legs: { open: "converse", opened: "spec-open", back: "address", backTo: "spec-open" },
   back: "address",
-  rounds: CREATE_SPEC_COURSE.legs.address.max_runs,
-  adjudicates: true
+  rounds: CREATE_SPEC_COURSE.legs.review.max_runs,
+  adjudicates: true,
+  gate: false
 };
 function branchMatches(pattern, branch) {
   const p = pattern.toLowerCase();
@@ -375,7 +376,7 @@ function branchMatches(pattern, branch) {
 }
 var matchPatterns = (branchPatterns) => (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, "*"));
 
-// src/defaults/pr-verify.ts
+// ../cli/src/defaults/pr-verify.ts
 var bareId = (t) => {
   if (t.home && t.id.startsWith(`${t.home}:`)) return t.id.slice(t.home.length + 1);
   const colon = t.id.indexOf(":");
@@ -472,7 +473,7 @@ function verifyPrOpen(ask, run2) {
   throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
 }
 
-// ../../../../tmp/baton-bundle-dtOQ10/entry.ts
+// ../../../../../baton-bundle-pcQTUc/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
@@ -599,7 +600,7 @@ async function standard(ctx) {
   void out;
   await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
   if (process.env.BATON_VERBOSE) process.stderr.write("baton: create-pr/implement ticket " + ctx.ticket.id + ": the forge verified an open PR on a branch matching " + patterns.join(" or ") + "\n");
-  return { reached: "pr-open", next: "review" };
+  return { reached: "pr-open", next: "run-tests" };
 }
 var closeCtx2 = (ctx) => ({ ...ctx, ...ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === "string" && process.env.BATON_DEFAULT_BRANCH !== "" ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {} });
 var close = (ctx, result) => prClose(closeCtx2(ctx), result);

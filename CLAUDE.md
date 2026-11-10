@@ -68,4 +68,4 @@ decision there is a change to Baton, not a change in Baton.
 
 ## Commands
 
-`npm test` · `npm run typecheck` · `npm run vendor` · `npm run fixtures`
+`npm test` (no Quint; `npm run test:full` adds it and takes hours — run it only when asked) · `npm run typecheck` · `npm run vendor` · `npm run fixtures`

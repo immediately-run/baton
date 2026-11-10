@@ -76,11 +76,13 @@ checkout, run the CLI as `node cli/baton.mjs`.
 
 ## Commands
 
-- `npm test` (alias `npm run test:baton`) — the suite on both hosts, with a fake clock; `npx vitest --project local`
-  (or `cloudflare`) runs one.
-- `npm run test:no-quint` — the suite and `model:links` without quint: no model-drawn replay, no
-  `traces`, no `model:quick`. It is all hosted CI and the deploy run (R-BTN-68): Quint runs only on
-  the author's machine: in `npm test`, in `npm run model:pr` (about half an hour), whose report a PR
+- `npm test` (the same as `npm run test:no-quint`) — the suite on both hosts, with a fake clock,
+  and `model:links`, without Quint: no model-drawn replay, no `traces`, no `model:quick`. It is
+  all hosted CI, the deploy run and `create-pr`'s `run-tests` gate run (R-BTN-68).
+  `npx vitest --project local` (or `cloudflare`) runs one host; `npm run test:baton` is vitest alone.
+- `npm run test:full` — the suite with Quint: the model-drawn replay, `traces` and `model:quick`
+  (hours on a small machine). Quint runs only on the author's machine, when asked for: in
+  `npm run test:full`, in `npm run model:pr` (about half an hour), whose report a PR
   that changes what the model checks read (the model, the core, the scenarios, …) carries in its
   body, and in the weekly `npm run model:full` on `main` (about three hours).
 - `npm run start:local -- --db <path> --port <n>` — Baton as a local process (below).
@@ -92,7 +94,7 @@ checkout, run the CLI as `node cli/baton.mjs`.
   `close`, and a ticket runs the shortest route to a confirmed done. Exit 1 names each violation.
 - `npm run typecheck` — the Worker, the local host and the Node scripts.
 - `npm run model:links`, `npm run traces` — the code against the formal model (R3-1244; `model/README.md`).
-  `npm test` runs both after the suite, and the model's own checks; `npm run model:pr` and
+  `npm run test:full` runs both after the suite, and the model's own checks; `npm run model:pr` and
   `model:full` run `traces` too, on a fresh set.
 - `node cli/baton.mjs tickets new|claim|set|done` — file, claim and move tickets with git as the
   lock, each one commit pushed straight to the default branch from a throwaway worktree (B-112;
