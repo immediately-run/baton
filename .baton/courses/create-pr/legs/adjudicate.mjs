@@ -1,11 +1,11 @@
-// ../../../../tmp/baton-bundle-kz3UlD/entry.ts
+// ../../../../../baton-bundle-13Qdr7/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync as rmSync2, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
 import { pathToFileURL } from "node:url";
 
-// src/defaults/agent-words.ts
+// ../cli/src/defaults/agent-words.ts
 function splitWords(command) {
   const words = [];
   const SHELL_SYNTAX = /* @__PURE__ */ new Set(["<", ">", ">>", "<<", "|", "||", "&&", ";", "&", "(", ")"]);
@@ -57,7 +57,7 @@ function splitWords(command) {
   return words;
 }
 
-// src/defaults/answer.ts
+// ../cli/src/defaults/answer.ts
 var PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 var WRAPPED = /^([`'"*_]+)(.+)\1$/;
 function answerOn(line, values) {
@@ -97,12 +97,12 @@ function requireAnswer(out, ask, leg, opts = {}) {
   throw new Error(`the ${leg} agent printed no ${ask.name} (${values}) as its last line${last === "" ? " \u2014 its output was empty" : ` \u2014 its last line was ${JSON.stringify(last)}`}`);
 }
 
-// src/defaults/ticket-state.ts
+// ../cli/src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 
-// src/defaults/tickets-markdown.ts
+// ../cli/src/defaults/tickets-markdown.ts
 function parseFrontmatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!m) return null;
@@ -133,7 +133,7 @@ var unquote = (v) => {
   return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
 };
 
-// src/defaults/ticket-state.ts
+// ../cli/src/defaults/ticket-state.ts
 var MACHINE_KEYS = ["station", "next_leg", "claim"];
 var CLOSE_TIMEOUT_MS = 12e4;
 var GIT_NONINTERACTIVE_ENV = {
@@ -323,7 +323,7 @@ async function closeTicket(ctx, result, run2 = exec) {
   }
 }
 
-// src/defaults/pr-close.ts
+// ../cli/src/defaults/pr-close.ts
 var PR_URL2 = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 var verdictLine = (verdict) => `<!-- baton:verdict ${verdict} -->`;
 function commentLine(leg, result) {
@@ -356,7 +356,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../../../tmp/baton-bundle-kz3UlD/entry.ts
+// ../../../../../baton-bundle-13Qdr7/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
