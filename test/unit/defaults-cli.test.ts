@@ -1460,6 +1460,39 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     expect(calls).toEqual(['/repos/o/r/pulls?state=all', '/repos/o/site/pulls?state=all', 'graphql o/site 7', '/repos/o/site/collaborators/x/permission']);
   });
 
+  it('a private repository a fine-grained token reads: check suites refused, the checks are the head\'s workflow runs; any other error still fails, naming its path (B-226)', async () => {
+    const routes = {
+      '/repos/o/r/pulls?state=all': [],
+      '/repos/o/priv/pulls?state=all': [pr(7, 'claude/A-1-x', 'open'), pr(9, 'claude/A-1-y', 'open')],
+      '/repos/o/priv/commits/s7/check-runs': { check_runs: [{ conclusion: 'success' }] },
+      '/repos/o/priv/actions/runs?head_sha=s7': { workflow_runs: [{ status: 'completed', conclusion: 'success' }, { status: 'in_progress', conclusion: null }] },
+      '/repos/o/priv/actions/runs?head_sha=s9': { workflow_runs: [{ status: 'completed', conclusion: 'failure' }] },
+      '/repos/o/priv/pulls/7/commits': [{ sha: 'c1', commit: { committer: { date: '2026-10-02T00:00:00Z' }, message: 'x' } }],
+      '/repos/o/priv/pulls/7/reviews': [],
+      '/repos/o/priv/issues/7/comments': [who('MEMBER', '<!-- baton:verdict approve -->', '2026-10-05T00:00:00Z')],
+      ...may('o/priv', 'x', 'write'),
+    };
+    vi.stubGlobal('fetch', githubFake(routes, calls, { checksForbidden: ['o/priv'] }));
+    const lines: string[] = [];
+    const facts = await githubFacts(dir, (l) => lines.push(l), (p) => p.repository === 'o/priv', [{ repository: 'o/priv', tickets: ['A-1'] }]);
+    // The rest of the GraphQL answer stands: commits and verdicts as before; the checks come from Actions.
+    expect(facts.map((f) => [f.number, f.checks])).toEqual([[7, ['success', null]], [9, ['failure']]]);
+    expect(facts[0]).toMatchObject({ pushedAt: Date.parse('2026-10-02T00:00:00Z') });
+    expect(facts[0].reviews.map((r) => r.body)).toEqual(['<!-- baton:verdict approve -->']);
+    expect(lines.filter((l) => l.includes('workflow runs'))).toEqual(['baton: o/priv: this token cannot read check runs (a fine-grained token holds no Checks) — its PRs\' checks are their heads\' workflow runs (B-226)']);
+    expect(calls).toEqual(['/repos/o/r/pulls?state=all', '/repos/o/priv/pulls?state=all', 'graphql o/priv 7,9', '/repos/o/priv/actions/runs?head_sha=s7', '/repos/o/priv/collaborators/x/permission', '/repos/o/priv/actions/runs?head_sha=s9']);
+    // No Actions: read either: the sync fails, naming both permissions.
+    const noActions = githubFake({ ...routes, '/repos/o/priv/actions/runs?head_sha=s7': undefined }, [], { checksForbidden: ['o/priv'] });
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.includes('/actions/runs') ? new Response('{}', { status: 403 }) : noActions(url, init)));
+    await expect(githubFacts(dir, () => {}, () => true, [{ repository: 'o/priv', tickets: ['A-1'] }])).rejects.toThrow(/neither the head's check runs .* nor its workflow runs \(give it Actions: read\)/);
+    // A refusal of anything but the check suites fails the sync as before, now naming where.
+    const other = githubFake(routes);
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.endsWith('/graphql')
+      ? Response.json({ data: { repository: { p7: null } }, errors: [{ type: 'FORBIDDEN', path: ['repository', 'p7', 'commits'], message: 'Resource not accessible by personal access token' }] })
+      : other(url, init)));
+    await expect(githubFacts(dir, () => {}, () => true, [{ repository: 'o/priv', tickets: ['A-1'] }])).rejects.toThrow('GitHub GraphQL (o/priv): Resource not accessible by personal access token (at repository.p7.commits)');
+  });
+
   it('a plain-git home is never read: only the repositories tickets name in repos:, and with none no request and no token (B-182, S-BTN-106)', async () => {
     const plain = mkdtempSync(join(tmpdir(), 'baton-plain-'));
     try {

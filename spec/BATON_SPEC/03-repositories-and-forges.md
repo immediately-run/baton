@@ -417,8 +417,12 @@ repository reachable over SSH is enough (R-BTN-105).
     never posted. On GitHub it lists PRs over REST and reads live tickets' PRs over GraphQL, at
     most 25 PRs a query per repository (head-commit check runs through check suites, latest run
     per check; commit dates; reviews; issue comments); an overflowing first page or a head read
-    at another commit is read over REST in full; an answer with `errors` fails the sync. Built:
-    B-29, B-35.
+    at another commit is read over REST in full; an answer with `errors` fails the sync, naming
+    each error's path — except one whose errors all refuse a head's check suites, which a
+    fine-grained token on a private repository cannot read (no such token holds Checks). That
+    answer stands, and that repository's heads' checks are their Actions workflow runs (a
+    completed run's conclusion, none while it runs; a check run of no workflow is not seen
+    there); a token that cannot read those either fails the sync. Built: B-29, B-35, B-226.
   - **The `branch` course** (a course directory of the baton repository, `facts:
     ["branches"]`; `baton repo init --course branch`) reads the home repository's git alone:
     - stations `filed` → `pushed` → `reviewed` → `merged`, with `fixed` between `reviewed` and

@@ -2621,6 +2621,17 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   owner accepted collapsing it ("I accept all recommendations"): the split rested on a leg being
   able to act as its runner. `independent-review` counts labelled runs as their own domains; the
   `domains.per_run`-empty condition and the floor case are gone; S-BTN-205 follows.
+- **2026-11-10 — R-BTN-96** (B-226).
+  Rules changed: R-BTN-96.
+  The sync had posted no board since 2026-11-07: its GraphQL read of fieldhouse#16 and #17's head
+  check suites was refused (`Resource not accessible by personal access token`), and any error
+  failed the sync. GitHub offers fine-grained tokens no Checks permission, and public baton read
+  without it. The owner, 2026-11-10: "I would very much prefer to use fine-grained personal access
+  tokens instead of creating a GitHub app. Because anybody using Baton would then need to create a
+  GitHub app." An answer whose errors all refuse check suites now stands, and that repository's
+  checks are its heads' Actions workflow runs. Retired text: "an answer with `errors` fails the
+  sync."
+
 - **2026-11-09 — R-BTN-182, §12.8** (B-184).
   Rules changed: R-BTN-182.
   The owner: "I don't want the merge leg to be different from the other legs for the plain baton
