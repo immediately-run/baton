@@ -102,6 +102,28 @@ export function ensureSha(home: string, sha: string, fetch: () => void): boolean
   }
 }
 
+/** B-228 (R-BTN-34: the tree is prepared at the claim's sha): bring the home checkout to the
+ *  claim's snapshot before a leg runs, so the leg — and an executor that copies the checkout —
+ *  starts from the code the claim was decided on, never from wherever the home last stood. Only
+ *  a fast-forward, and only on `defaultBranch` with no tracked change: a home that is ahead of the
+ *  snapshot, diverged, on another branch or edited is left exactly as it is, and the reason is
+ *  returned for the log. Null: the home is at the snapshot now. */
+export function advanceHome(home: string, sha: string, defaultBranch: string | null): string | null {
+  const head = git(home, ['rev-parse', 'HEAD']).trim();
+  const target = git(home, ['rev-parse', `${sha}^{commit}`]).trim();
+  if (head === target) return null;
+  const branch = (() => { try { return git(home, ['symbolic-ref', '--short', '-q', 'HEAD']).trim(); } catch { return ''; } })();
+  if (defaultBranch == null || branch !== defaultBranch) return `the home is on ${branch || 'a detached HEAD'}, not ${defaultBranch ?? 'the default branch'}`;
+  if (git(home, ['status', '--porcelain', '--untracked-files=no']).trim() !== '') return 'the home has tracked changes';
+  try {
+    git(home, ['merge-base', '--is-ancestor', head, target]);
+  } catch {
+    return `the home's ${head.slice(0, 10)} is not behind the snapshot`;
+  }
+  git(home, ['merge', '--ff-only', '-q', target]);
+  return null;
+}
+
 /** Load a claim's course from the snapshot: the graph, and every leg script the snapshot's
  * `legs/` holds, extracted to a scratch directory (deleted by the runner when the claim ends). */
 export function loadCourse(home: string, sha: string, course: string): CourseLoad {

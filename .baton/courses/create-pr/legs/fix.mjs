@@ -1,4 +1,4 @@
-// ../../../../tmp/baton-bundle-eNDH3X/entry.ts
+// ../../../../tmp/baton-bundle-04TH3y/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, rmSync as rmSync2, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -316,7 +316,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../../../tmp/baton-bundle-eNDH3X/entry.ts
+// ../../../../tmp/baton-bundle-04TH3y/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
@@ -387,7 +387,26 @@ async function standard(ctx) {
       if (echo) process.stderr.write(c);
     });
     child.on("error", (e) => reject(e));
+    let stopped = null;
+    const onAbort = () => {
+      if (stopped != null) return;
+      stopped = String(ctx.signal.reason ?? "release");
+      child.kill("SIGTERM");
+      setTimeout(() => child.kill("SIGKILL"), 3e3).unref();
+    };
+    if (ctx.signal) {
+      if (ctx.signal.aborted) onAbort();
+      else ctx.signal.addEventListener("abort", onAbort, { once: true });
+    }
+    child.on("exit", () => {
+      if (stopped != null) reject(new Error("the agent was stopped: " + stopped));
+    });
     child.on("close", (code, sig) => {
+      if (ctx.signal) ctx.signal.removeEventListener("abort", onAbort);
+      if (stopped != null) {
+        reject(new Error("the agent was stopped: " + stopped));
+        return;
+      }
       if (code === 0) {
         resolve(so);
         return;

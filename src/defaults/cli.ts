@@ -1209,7 +1209,23 @@ async function standard(ctx) {
     });
     child.stderr.on('data', (c) => { if (se.length < 2048) se = (se + String(c)).slice(-2048); if (echo) process.stderr.write(c); });
     child.on('error', (e) => reject(e));
+    // B-227: a release (the runner's abort line, \`ctx.signal\`) stops the agent at once — its
+    // TERM, then KILL after a grace — so the leg reaches its safe point inside the runner's
+    // immediate-stop window and the claim is released with its hand-off, not left to the reaper.
+    let stopped = null;
+    const onAbort = () => {
+      if (stopped != null) return;
+      stopped = String(ctx.signal.reason ?? 'release');
+      child.kill('SIGTERM');
+      setTimeout(() => child.kill('SIGKILL'), 3000).unref();
+    };
+    if (ctx.signal) { if (ctx.signal.aborted) onAbort(); else ctx.signal.addEventListener('abort', onAbort, { once: true }); }
+    // A stopped agent is done when it exits: a child of its own may still hold its pipes open
+    // (\`close\` would wait for that), and the session's end takes whatever is left.
+    child.on('exit', () => { if (stopped != null) reject(new Error('the agent was stopped: ' + stopped)); });
     child.on('close', (code, sig) => {
+      if (ctx.signal) ctx.signal.removeEventListener('abort', onAbort);
+      if (stopped != null) { reject(new Error('the agent was stopped: ' + stopped)); return; }
       if (code === 0) { resolve(so); return; }
       // The failure names its cause with a tail, not a single line (2026-10-24): the last
       // lines of both streams, bounded, so the log alone can diagnose the death.

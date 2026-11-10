@@ -965,6 +965,29 @@ describe('baton repo init, through the built CLI', () => {
     }
   }, 60_000);
 
+  it('a release stops the agent at once: the stub TERMs it on ctx.signal and the leg rejects as stopped, inside the immediate-stop window (B-227)', async () => {
+    const agent = join(root, 'slow-agent.sh');
+    writeFileSync(agent, '#!/bin/sh\nsleep 60\necho done\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const implement = join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent }));
+      const snapshot = { sha: commitAll(root) };
+      const stop = new AbortController();
+      const started = Date.now();
+      const leg = (await load(implement)).run({ ticket: { id: 'B-1' }, checkout: root, snapshot, signal: stop.signal });
+      setTimeout(() => stop.abort('release'), 500);
+      await expect(leg).rejects.toThrow('the agent was stopped: release');
+      expect(Date.now() - started).toBeLessThan(10_000);
+    } finally {
+      writeFileSync(settingsFile, before);
+      rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 30_000);
+
   it('the stub prepends the agent_wrapper — the host’s BATON_AGENT_WRAPPER over the file — and the example wrapper passes the answer through with a byte-identical log (B-95)', async () => {
     // A wrapper sees the whole leg command as its arguments. Here it hands them to a reporter
     // (a node script, so nothing in a shell re-splits them), then runs the agent as its own

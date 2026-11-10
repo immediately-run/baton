@@ -34,7 +34,7 @@
       ],
       "branch_pattern": "claude/{ticket}-*",
       "protocol_files": [],
-      "source": "github/immediately-run/baton/ff270d2cbfd5272a90425bc2d0cd9403ebcb26ff/create-pr"
+      "source": "github/immediately-run/baton/fe2e2a06683d7980aff19ee63dcb95530c9d6a4f/create-pr"
     }
   ]
 }
