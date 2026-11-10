@@ -9,14 +9,7 @@ them and print the verdict after — blocking in the foreground on each: start e
 each test run as a synchronous call and keep acting until it returns; your harness ends your
 process at your final message, so a job left in the background dies orphaned and the round is
 lost — "waiting" or "I'll resume when they land" in an output is always wrong. An output that
-ends on anything else loses the round. A machine reads that line: the line must be exactly the one
-word, or the word followed by one PR URL (`approve https://github.com/<owner>/<name>/pull/<n>`)
-— no other word before or after, no punctuation, nothing else after it in your whole output;
-if it does not parse, the leg fails and the round is lost. Baton writes the verdict line on
-the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other
-repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on
-the same line: `changes https://github.com/<owner>/<name>/pull/<n>`. The ticket's PRs are one
-change: review them together, and post your review once, on that PR.
+ends on anything else loses the round. Baton writes the verdict line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on the same line: `changes https://github.com/<owner>/<name>/pull/<n>`. The ticket's PRs are one change: review them together, and post your review once, on that PR.
 
 > **How the stub runs you** — Baton's contract for the `agent_command` author: your command
 > line splits into words as `sh` would (quotes honoured, no substitutions) and executes
@@ -26,24 +19,19 @@ change: review them together, and post your review once, on that PR.
 > completion: a harness that is a client of a background service must keep its session in
 > process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
 > work ends leaves truncated output and an orphaned session posting to a claim that no longer
-> exists (B-84).
+> exists (B-84). A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
+> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95).
 
 ## The round
 
-- **Read `$BATON_ADVICE` first.** When the repository attaches route choices to this leg, the
-  file named by `BATON_ADVICE` (B-105, R-BTN-177) carries the advice — for this repository,
-  `reviewer-1` and `reviewer-2` — each choice's advised alternative and a ranked fallback list.
-  The advised alternative's `model:` capability maps to a provider model through this
-  repository's `agent_models` (`.baton/baton.json`): `zai-coding-plan/glm-5.3` for GLM,
-  `anthropic/claude-opus-5-5` for Opus — the same ids below, and the ones the stub's
-  `--model` rewrite uses. No file, no advice, or an advised `null`: fall back to the two fixed
-  models below.
+- **Which model reviews is the repository's choice** (§6.10, R-BTN-131). Your command's own
+  `--model` is the one the stub runs; Baton delivers no advice about a model, a key or a route,
+  and no `$BATON_ADVICE` file exists. A repository that picks a reviewer at run time writes a
+  leg override that reads its own configuration.
 - **Round one gets two blind reviewers.** If you can start independent sub-agents, start two,
-  from fresh contexts, **on exactly these two models, one reviewer each: `zai-coding-plan/glm-5.3`
-  and `anthropic/claude-opus-5-5`** — name the model when you start each sub-agent; if the model
-  you are already running on is one of them, the other sub-agent takes the other model. Try no
-  other provider: the alternatives configured here are broken or redundant, and a failed launch
-  wastes the round's clock. Give each this file, the ticket and the
+  from fresh contexts, ideally on two different models — the models your repository's own
+  configuration or instructions name. Give each this file, the ticket and the
   PR, and tell neither about the other. Two blind passes find defects one pass misses. Without
   sub-agents, review once, slowly.
 - **Later rounds get one fresh reviewer**, who reads the earlier reviews and their replies and

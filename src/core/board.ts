@@ -144,8 +144,6 @@ export interface BoardPayload {
   matrix?: { families: Record<string, string[]>; agents: Record<string, { reviews_on: string; bills: string[]; models?: Record<string, string> }> };
   /** The course registry (R-BTN-48, §7.1); absent, the courses in force stay. */
   registry?: RegistryEntry[];
-  /** §5.9 (R-BTN-174, B-104): the merged ontology, or why the merge failed; absent, none. */
-  ontology?: { builtin?: string | null; program: unknown } | { error: string };
   /** §6.8: the transcript repositories from `baton.json`; absent, the defaults stand. */
   transcript_repos?: string[];
   /** §4.4 (R-BTN-191): the sync's attestations, this run's observation. Only `std:decision@1` —
@@ -246,15 +244,12 @@ export function checkPayload(body: unknown): BoardPayload {
   // `min_skills_version` is gone (R-BTN-22: each course's version is the skills version); a
   // sync that still sends it is not refused for it, and Baton reads it nowhere.
   checkReference(p);
-  if (p.ontology !== undefined) {
-    const o = p.ontology as { builtin?: unknown; program?: unknown; error?: unknown };
-    if (!o || typeof o !== 'object' || Array.isArray(o)) throw new BatonError('invalid-params', 'ontology must be {builtin?, program} or {error}');
-    if ('error' in o) {
-      if (typeof o.error !== 'string' || !o.error.length || o.error.length > 500) throw new BatonError('invalid-params', "ontology.error must be the merge's reason, short plain text");
-    } else if (o.program === undefined || typeof o.program !== 'object' || (o.builtin !== undefined && o.builtin !== null && typeof o.builtin !== 'string')) {
-      throw new BatonError('invalid-params', 'ontology must be {builtin?, program} or {error}');
-    }
-  }
+  // §5.9 (B-167): the capability ontology is gone from core. A post that still carries a field
+  // the restructure retired is taken with the field ignored — the sync's own logging is the
+  // record, and the history's Migrations entry "part 4's retired fields" says until when.
+  // (`route_choices` on a registry entry is ignored the same way, in `checkRegistry`.)
+  const retired = p as BoardPayload & { ontology?: unknown };
+  if (retired.ontology !== undefined) delete retired.ontology;
   // R-BTN-191's envelope (§4.4): a typed fact about one ticket of the post. The shape here; each
   // type's own validation — and whether Baton applies the fact — is where the type is read
   // (R-BTN-116 reads `std:decision@1`; the other types arrive with B-146 and B-120).

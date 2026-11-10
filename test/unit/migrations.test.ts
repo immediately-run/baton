@@ -485,3 +485,62 @@ describe('migration 0038: run ids (B-185, S-BTN-204)', () => {
     });
   });
 });
+
+// B-167 — migration 0039 retires the capability ontology and the route choices: a database at
+// 0038 holding a program, derived sets, refusals, hysteresis rows, a course's and a run's route
+// choices and a `taken-invalid` event keeps every other row and loses the tables and columns the
+// retired reads used, so nothing references what is gone and no code path reads a row.
+describe('migration 0039: the ontology and route choices retire (B-167)', () => {
+  it('drops the retired tables and columns, keeping the rows beside them and the event log minus taken-invalid', async () => {
+    const id = env.BATON.idFromName('migrations-0039');
+    await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
+      for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id <= 38)) sql.exec(m.sql);
+      sql.exec(`INSERT INTO repositories (id, github, default_branch, sync_workflow) VALUES ('docs', 'immediately-run/docs', 'main', '.github/workflows/baton-sync.yml')`);
+      sql.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('vm-1', 'vm-1', '[]')`);
+      sql.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+                VALUES ('vm-1', 's', 'h', 'vm-1', 'opencode', 'vm', 'critical', 900000, '', 1, 1)`);
+      sql.exec(`INSERT INTO courses (repository_id, id, version, skill, course_json, step_kinds, min_worker_version, report_horizon_h, route_choices_json)
+                VALUES ('docs', 'roadmap-pr', 3, 'next', '{}', '[]', 3, 6, '{"implement":["codegen"]}')`);
+      sql.exec(`INSERT INTO external_resources (name, scope, detail_schema, atoms_from, base_chain_json) VALUES ('anthropic-capacity', 'account', '{}', 'any', '["std:api-capacity@1"]')`);
+      sql.exec(`INSERT INTO claims (id, ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status) VALUES (1, 'docs:A', 1, 'r1', 'abcdef', 'sha', 1, 'active')`);
+      sql.exec(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, started_at, started_observation, route_choices_json, taken_json)
+                VALUES (1, 1, 'r_01', 'implement', 'filed', 1, 1, '[{"choice":"codegen"}]', '[{"choice":"codegen"}]')`);
+      sql.exec(`INSERT INTO ontologies (repository_id, digest, fixed_json, program_json, snapshot_sha, accepted_at) VALUES ('docs', 'd', '[]', '{}', 'sha', 1)`);
+      sql.exec(`INSERT INTO worker_derived (worker_id, repository_id, capability, evaluated_at) VALUES (1, 'docs', 'model:x', 1)`);
+      sql.exec(`INSERT INTO worker_derived_inputs (worker_id, repository_id, input_digest, limited, evaluated_at) VALUES (1, 'docs', 'i', 0, 1)`);
+      sql.exec(`INSERT INTO ontology_refusals (repository_id, reason, detail, at) VALUES ('docs', 'program', 'x', 1)`);
+      sql.exec(`INSERT INTO route_last (worker_id, repository_id, choice, alternative, demoted, resolved_at) VALUES (1, 'docs', 'codegen', 'a', 0, 1)`);
+      sql.exec(`INSERT INTO events (at, kind, actor, ticket_id) VALUES (1, 'advanced', 'worker:1', 'docs:A')`);
+      sql.exec(`INSERT INTO events (at, kind, actor, ticket_id) VALUES (2, 'taken-invalid', 'worker:1', 'docs:A')`);
+
+      sql.exec('PRAGMA foreign_keys = ON'); // as the host runs it
+      sql.exec(MIGRATIONS.find((x) => x.id === 39)!.sql);
+
+      const all = (q: string) => sql.exec(q).toArray() as Record<string, unknown>[];
+      for (const gone of ['ontologies', 'worker_derived', 'worker_derived_inputs', 'ontology_refusals', 'route_last']) {
+        expect(all(`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = '${gone}'`)).toEqual([{ n: 0 }]);
+      }
+      const cols = (table: string) => all(`SELECT name FROM pragma_table_info('${table}')`).map((r) => r.name);
+      expect(cols('courses')).not.toContain('route_choices_json');
+      expect(cols('courses')).not.toContain('report_horizon_h');
+      expect(cols('claim_legs')).not.toContain('route_choices_json');
+      expect(cols('claim_legs')).not.toContain('taken_json');
+      expect(cols('external_resources').sort()).toEqual(['detail_schema', 'name', 'scope']);
+      // What is beside the retired reads is kept whole.
+      expect(all(`SELECT id, version FROM courses`)).toEqual([{ id: 'roadmap-pr', version: 3 }]);
+      expect(all(`SELECT name FROM external_resources`)).toEqual([{ name: 'anthropic-capacity' }]);
+      expect(all(`SELECT seq, leg, run_id FROM claim_legs`)).toEqual([{ seq: 1, leg: 'implement', run_id: 'r_01' }]);
+      // The event log keeps every kind but the taken's.
+      expect(all(`SELECT kind FROM events ORDER BY seq`)).toEqual([{ kind: 'advanced' }]);
+      // The narrowed check refuses a new `taken-invalid`, and takes the kinds the restructure kept.
+      expect(() => sql.exec(`INSERT INTO events (at, kind, actor) VALUES (3, 'taken-invalid', 'worker:1')`)).toThrow(/CHECK/);
+      sql.exec(`INSERT INTO events (at, kind, actor) VALUES (4, 'advice-overridden', 'worker:1')`);
+      sql.exec(`INSERT INTO courses (repository_id, id, version, skill, course_json, step_kinds, min_worker_version) VALUES ('docs', 'runbook', 1, 'run', '{}', '[]', 1)`);
+      sql.exec(`INSERT INTO external_resources (name, scope, detail_schema) VALUES ('bench', 'service', '{}')`);
+    });
+  });
+});

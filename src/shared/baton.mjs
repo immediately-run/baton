@@ -197,11 +197,11 @@ export function claimBlocks(claim) {
  * `{ok: false, rule, code}` naming the first rule that refuses. The reference for every
  * rule: the server's candidate query is tested against it (G-BTN-40).
  *
- * - `worker`: `{tier_ceiling, declared, model_id, model_provider_id, billing, courses, derived?}`
- *   — `declared` the capability/role names as the heartbeat sent them, `billing`
- *   `{prefix: accountId}`, `courses` the `{repository, course, version}` its checkouts run,
- *   `derived` (B-104, R-BTN-174) what the item's repository's ontology derives from the
- *   worker's granted holdings — D(H), from a current set.
+ * - `worker`: `{tier_ceiling, declared, model_id, model_provider_id, billing, courses}`
+ *   — `declared` the capability/role names as the heartbeat sent them and its key admits,
+ *   `billing` `{prefix: accountId}`, `courses` the `{repository, course, version}` its checkouts
+ *   run. Nothing is derived (R-BTN-174): a capability a runner means to offer is one it
+ *   declares, and the caller hands in what the grant admits.
  * - `item`: `{id, repository, course, tier, tags, requires, expedite}` — `requires` the
  *   clause's names, `null` when it has none; `expedite` true for the expedite lane or an
  *   expedite override.
@@ -220,13 +220,10 @@ export function isEligible(worker, item, ctx) {
 
   if ((ctx.claims ?? []).some(claimBlocks) || override?.hold) return refuse(3);
 
-  // Rule 4 (R-BTN-174, B-104): H ∪ D(H) — the holdings (declared ∩ grant, a granted key's) and
-  // what the repository's ontology derives from them; `worker.derived` is D(H) for the item's
-  // repository, handed in by the caller that read a current set. A derivation satisfies a need
-  // the grant never names; a grant bounds holdings only.
+  // Rule 4 (R-BTN-174): capabilities are matched by name — the holds (declared ∩ grant, a
+  // granted key's; the caller hands in what its grant admits) against the ticket's clause.
   const held = capabilitiesOf(worker.declared);
-  const derived = new Set(worker.derived ?? []);
-  for (const need of capabilitiesOf(item.requires)) if (!held.has(need) && !derived.has(need)) return refuse(4);
+  for (const need of capabilitiesOf(item.requires)) if (!held.has(need)) return refuse(4);
 
   // Rule 5 in the item's repository's ladder (R-BTN-66); the caller resolves the worker's
   // ceiling for that repository. No ladder given: docs' three tiers.

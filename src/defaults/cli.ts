@@ -31,7 +31,6 @@ import { closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachi
  *  migrate-markers` does, once, and deletes it. */
 const MARKERS_FILE_RETIRED = join('.baton', 'markers.jsonl');
 import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
-import { mergeOntology } from './ontologyMerge';
 import { readItems } from './read-items';
 import { parseFrontmatter, ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 import { readTicketSettings } from './tickets-config';
@@ -134,7 +133,6 @@ interface CourseEntry {
   min_worker_version?: number;
   skill?: string;
   step_kinds?: string[];
-  report_horizon_h?: number;
   branch_pattern?: string;
   previous_branch_pattern?: string;
   protocol_files?: string[];
@@ -175,7 +173,7 @@ const defaultSkill = (course: string): string => `baton-${course}`;
 /** The `courses` entry `baton repo init` writes: every R-BTN-51 field, so a repository edits
  * them where the spec says rather than discovering them. */
 function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source'>> {
-  return { id: course, version: 1, min_worker_version: 1, skill: defaultSkill(course), step_kinds: legs, report_horizon_h: 6, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
+  return { id: course, version: 1, min_worker_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
 export interface SyncArgs {
@@ -265,8 +263,6 @@ function stationsResult(value: unknown, from: string): StationsResult {
 /** What one reading of the repository posts (§7.1): every field but the protocol's own. */
 interface Board {
   payload: { registry: Record<string, unknown>[]; tickets: TicketsResult['tickets']; closed: TicketsResult['closed']; stations: StationsResult['stations']; markers: StationsResult['markers']; course_data: Record<string, unknown>;
-    /** §5.9 (B-104): the merged ontology, or the merge's error; absent, the repository has none. */
-    ontology?: { builtin?: string | null; program: Record<string, unknown> } | { error: string };
     /** B-183 (§4.4): the ticket source's declaration. */
     source: { kind: 'markdown' | 'custom'; versions?: 'pinned' | 'current'; cli: string }; }
   /** A ticket's status at this reading for §6.7's confirmations: its file's, `live`, or null once closed. */
@@ -277,21 +273,6 @@ interface Board {
  * repository's own code or the CLI's defaults, the registry from `baton.json`'s courses. */
 async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void, record?: BatonRecord): Promise<Board> {
   const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
-
-  // §5.9 (R-BTN-174, B-104): the default branch's head holds `.baton/ontology.json` or the
-  // repository has no ontology — the file may name a built-in by version and retract, replace
-  // or extend it. A merge that cannot be made posts `ontology: {error}` and the rest of the
-  // board as usual; a malformed file is the same kind of answer, never a failed sync.
-  let ontologyField: { ontology?: { builtin?: string | null; program: Record<string, unknown> } | { error: string } } = {};
-  const ontologyPath = join(root, '.baton', 'ontology.json');
-  if (existsSync(ontologyPath)) {
-    try {
-      const merged = mergeOntology(JSON.parse(readFileSync(ontologyPath, 'utf8')) as Record<string, unknown>);
-      ontologyField = 'error' in merged ? { ontology: { error: merged.error } } : { ontology: { builtin: merged.builtin, program: merged.program } };
-    } catch (e) {
-      ontologyField = { ontology: { error: `.baton/ontology.json is not JSON: ${e instanceof Error ? e.message : String(e)}` } };
-    }
-  }
 
   // The ticket source: the repository's own, else the markdown default. B-183 (R-BTN-74): a
   // source declares how it reads a ticket (`versions`: 'pinned' at a version, 'current' as it is
@@ -427,7 +408,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     registry.push({
       ...courseSchemas(root, c.id),
       id: c.id, version: c.version, min_worker_version: c.min_worker_version ?? c.version, skill: c.skill ?? defaultSkill(c.id), course,
-      step_kinds: c.step_kinds ?? Object.keys(course.legs ?? {}), ...(c.report_horizon_h != null ? { report_horizon_h: c.report_horizon_h } : {}),
+      step_kinds: c.step_kinds ?? Object.keys(course.legs ?? {}),
       branch_pattern: branchPatterns[0], ...(c.previous_branch_pattern ? { previous_branch_pattern: c.previous_branch_pattern } : {}),
     });
   }
@@ -437,7 +418,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     // that posts — beside its tickets, each stamped with its `version` and `key` above.
     payload: {
       source: { kind: sourceKind, ...(sourceVersions ? { versions: sourceVersions } : {}), cli: cliVersion() },
-      registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...ontologyField,
+      registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData,
     },
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };
@@ -1084,7 +1065,7 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * outcome (B-81) reads it from the forge before returning its position — the agent's exit 0 is
  * not the leg's outcome. The bundled `close` writes the closing marker where the course's
  * convention puts it. */
-function stubSource(b: BuiltIn, course: string, leg: string): string {
+export function stubSource(b: BuiltIn, course: string, leg: string): string {
   const { ask, position, verify } = b.legs[leg];
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
@@ -1098,7 +1079,7 @@ function stubSource(b: BuiltIn, course: string, leg: string): string {
   const closeHelpers = b.reads === 'prs' ? `\nimport { ticketsBranch } from ${JSON.stringify(source('ticket-state.ts'))};` : '';
   const values = ask ? ask.values.join(' or ') : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, ${b.reads === 'prs' ? 'readFileSync, ' : ''}rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -1111,35 +1092,7 @@ const GIT_BOUND_MS = ${CLOSE_TIMEOUT_MS}, GIT_ENV = ${JSON.stringify(GIT_NONINTE
 // B-93: stderr is captured, never inherited — the stub runs in the runner's own log, where a
 // quiet 'no origin' or a failed forge probe printed as a failure. A caller that reports one
 // reads it from the error (\`e.stderr\`); nothing else of git's rides the log unasked.
-const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });
-// R-BTN-177 (B-105): the advice first, the command's own words as the fallback. BATON_ADVICE
-// names a file holding the starting advance's advice — identifiers only. When one of its route
-// choices resolved an alternative whose needs name exactly one model: capability, and the
-// snapshot's settings carry an \`agent_models\` map from that capability to the value the
-// agent command's --model word takes, the command's --model value is replaced by it. No advice,
-// no map, no --model word or no match: the command runs exactly as written, today's model.
-function advisedCommand(words, settings, adviceFile) {
-  if (!adviceFile) return words;
-  let advice;
-  try { advice = JSON.parse(readFileSync(adviceFile, 'utf8')); } catch { return words; }
-  const choices = advice && Array.isArray(advice.route_choices) ? advice.route_choices : [];
-  const map = settings && settings.agent_models && typeof settings.agent_models === 'object' ? settings.agent_models : {};
-  const model = (rc) => Array.isArray(rc && rc.needs) ? rc.needs.find((n) => typeof n === 'string' && n.startsWith('model:')) : undefined;
-  for (const rc of choices) {
-    if (!rc || typeof rc !== 'object') continue;
-    const alt = rc.alternative ?? (Array.isArray(rc.ranked) && rc.ranked[0] ? rc.ranked[0].alternative : null);
-    if (alt == null) continue;
-    const ranked = Array.isArray(rc.ranked) ? rc.ranked.find((r) => r && r.alternative === alt) : null;
-    // The per-alternative key first (two alternatives of one choice may need the same model on
-    // different providers), then the model capability alone.
-    const mapped = map[rc.choice + '/' + alt] ?? map[model(ranked)];
-    if (typeof mapped !== 'string' || mapped === '') continue;
-    const at = words.findIndex((w) => w === '--model');
-    if (at >= 0 && at + 1 < words.length && words[at + 1] !== mapped) words[at + 1] = mapped;
-    return words;
-  }
-  return words;
-}${ask ? `
+const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
 import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
@@ -1189,13 +1142,11 @@ async function standard(ctx) {
   // \`baton run --harness\` chose — fills their absence, never overrides their choice.
   const settingsCommand = typeof settings.agent_command === 'string' && settings.agent_command !== '' ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? '';
   if (settingsCommand === '') throw new Error('.baton/baton.json names no agent_command — run \`baton repo init --agent opencode\` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none');
-  // R-BTN-177 (B-105): the advice first, the command's own words as the fallback. BATON_ADVICE
-  // holds the starting advance's advice; when one of its route choices resolved an alternative
-  // and \`agent_models\` in the snapshot's settings maps it — keyed \`<choice>/<alternative>\`,
-  // or by the alternative's single \`model:\` need — that value replaces the words after
-  // --model. The words are split ONCE (a rebuild from a string would shatter a quoted prompt);
-  // no advice, no map or no match — the words the settings wrote run exactly as they were.
-  const agentWords = advisedCommand(splitWords(settingsCommand), settings, process.env.BATON_ADVICE);
+  // §6.10 (R-BTN-131, B-167): the course's choice of model is the repository's own — the
+  // words \`agent_command\` carries, run exactly as written. Baton delivers no advice and core
+  // resolves no route; a repository that picks its model at run time writes a leg override
+  // (R-BTN-131) that reads its own configuration or the instance views (R-BTN-99).
+  const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(' ');${verify ? `
   // What this leg's verification looks for (B-81): the course's branch patterns, as the
   // snapshot's settings carry them, and the repositories the ticket's repos: names — the
@@ -1776,9 +1727,6 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     await put(relative(root, pagePath), (abs) => writeFileSync(abs, page), true);
     log(`baton: ${relative(root, pagePath)} — how tickets work in this repository, generated`);
   }
-  // §5.9 (R-BTN-174, B-104): the ontology scaffold names the first built-in; a repository
-  // retracts, replaces or extends it from here, or deletes the file to have no ontology.
-  await put('.baton/ontology.json', (abs) => writeFileSync(abs, `${JSON.stringify({ version: 1, builtin: 'baton@1', entries: [], route_choices: [] }, null, 2)}\n`));
   // B-95: the worked example of a leg wrapper, there to be copied and named; a repository already
   // has one once it is.
   await put(`.baton/${WRAPPER_EXAMPLE}`, (abs) => writeFileSync(abs, wrapperExample()));

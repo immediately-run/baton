@@ -1,11 +1,11 @@
-// ../../../../../baton-bundle-qs6LvE/entry.ts
+// ../../../../tmp/baton-bundle-eNDH3X/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync as rmSync2, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync as rmSync2, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
 import { pathToFileURL } from "node:url";
 
-// ../cli/src/defaults/agent-words.ts
+// src/defaults/agent-words.ts
 function splitWords(command) {
   const words = [];
   const SHELL_SYNTAX = /* @__PURE__ */ new Set(["<", ">", ">>", "<<", "|", "||", "&&", ";", "&", "(", ")"]);
@@ -57,12 +57,12 @@ function splitWords(command) {
   return words;
 }
 
-// ../cli/src/defaults/ticket-state.ts
+// src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 
-// ../cli/src/defaults/tickets-markdown.ts
+// src/defaults/tickets-markdown.ts
 function parseFrontmatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!m) return null;
@@ -93,7 +93,7 @@ var unquote = (v) => {
   return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
 };
 
-// ../cli/src/defaults/ticket-state.ts
+// src/defaults/ticket-state.ts
 var MACHINE_KEYS = ["station", "next_leg", "claim"];
 var CLOSE_TIMEOUT_MS = 12e4;
 var GIT_NONINTERACTIVE_ENV = {
@@ -283,7 +283,7 @@ async function closeTicket(ctx, result, run2 = exec) {
   }
 }
 
-// ../cli/src/defaults/pr-close.ts
+// src/defaults/pr-close.ts
 var PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 var verdictLine = (verdict) => `<!-- baton:verdict ${verdict} -->`;
 function commentLine(leg, result) {
@@ -316,34 +316,10 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../../../../baton-bundle-qs6LvE/entry.ts
+// ../../../../tmp/baton-bundle-eNDH3X/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
-function advisedCommand(words, settings, adviceFile) {
-  if (!adviceFile) return words;
-  let advice;
-  try {
-    advice = JSON.parse(readFileSync(adviceFile, "utf8"));
-  } catch {
-    return words;
-  }
-  const choices = advice && Array.isArray(advice.route_choices) ? advice.route_choices : [];
-  const map = settings && settings.agent_models && typeof settings.agent_models === "object" ? settings.agent_models : {};
-  const model = (rc) => Array.isArray(rc && rc.needs) ? rc.needs.find((n) => typeof n === "string" && n.startsWith("model:")) : void 0;
-  for (const rc of choices) {
-    if (!rc || typeof rc !== "object") continue;
-    const alt = rc.alternative ?? (Array.isArray(rc.ranked) && rc.ranked[0] ? rc.ranked[0].alternative : null);
-    if (alt == null) continue;
-    const ranked = Array.isArray(rc.ranked) ? rc.ranked.find((r) => r && r.alternative === alt) : null;
-    const mapped = map[rc.choice + "/" + alt] ?? map[model(ranked)];
-    if (typeof mapped !== "string" || mapped === "") continue;
-    const at = words.findIndex((w) => w === "--model");
-    if (at >= 0 && at + 1 < words.length && words[at + 1] !== mapped) words[at + 1] = mapped;
-    return words;
-  }
-  return words;
-}
 async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read its override at");
@@ -367,7 +343,7 @@ async function standard(ctx) {
   const settings = JSON.parse(show(".baton/baton.json"));
   const settingsCommand = typeof settings.agent_command === "string" && settings.agent_command !== "" ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? "";
   if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
-  const agentWords = advisedCommand(splitWords(settingsCommand), settings, process.env.BATON_ADVICE);
+  const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(" ");
   const rel = ".baton/courses/create-pr/legs/fix.md";
   const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel]).trim() !== "";

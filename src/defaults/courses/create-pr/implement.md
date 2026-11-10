@@ -5,12 +5,12 @@ is `$BATON_TICKET_FILE`; you are in a checkout of the repository. When you finis
 ticket is open and its checks are running. Baton's closing marker is written for you after you
 return; do not write it.
 
-The model you run on may have been chosen by advice (B-105, R-BTN-177): when the repository
-attaches a route choice to this leg, the stub reads `$BATON_ADVICE` and runs the
-`agent_command` under the advised alternative's `agent_models` entry; with no advice you run
-the command's own fixed model. Either way the work is the same. If you find a capability your
-advised alternative depends on is unusable, write `[{choice, alternative, dead}]` — the next
-ranked alternative and the holdings you found dead — to the file `$BATON_TAKEN` names.
+The model you run on is the repository's own choice (§6.10, R-BTN-131): the stub runs this
+repository's `agent_command` exactly as `.baton/baton.json` writes it, and Baton delivers no
+advice about a model, a key or a route. A repository whose leg picks its model at run time
+writes a leg override that reads its own configuration. If the model or a provider key the
+command needs is unusable, say so in your final output and carry on with what works — not by
+declaring a capability you no longer hold.
 
 > **How the stub runs you** — Baton's contract for the `agent_command` author: your command
 > line splits into words as `sh` would (quotes honoured, no substitutions) and executes

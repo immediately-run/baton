@@ -1,7 +1,8 @@
--- 0027_route_choices.sql — route choices (BATON_SPEC §6.10, R-BTN-176/R-BTN-177, B-105): what a
--- resource's readings may steer (atoms_from), the x-baton-base chain a registration proved, the
--- hysteresis rows each resolution writes, and the two columns a leg run carries its route-choice
--- snapshot and its reported taken in.
+-- 0027_route_choices.sql — route choices (BATON_SPEC §6.10, B-105; its rules are retired —
+-- BATON_SPEC_HISTORY.md — and 0039 drops what this file builds): what a resource's readings may
+-- steer (atoms_from), the x-baton-base chain a registration proved, the hysteresis rows each
+-- resolution writes, and the two columns a leg run carries its route-choice snapshot and its
+-- reported taken in.
 
 -- R-BTN-76 as R-BTN-176 amends it: whether runners' readings, besides administrators' and
 -- instrument keys', may steer route choices for a resource. 'admin' (the default) hears only

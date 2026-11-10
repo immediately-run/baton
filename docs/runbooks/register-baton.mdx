@@ -257,10 +257,12 @@ node cli/baton.mjs owner -i ~/.ssh/baton_repo_owner grant baton --key worker.pub
 The hostname must be what the machine reports (`hostname`, or `BATON_HOSTNAME`), or its heartbeats
 are refused. Capabilities are from `src/shared/vocabulary.mjs` (`authentication`, `llm-call`,
 `create-pr`, `drivable-browser`, `agent-venue`); only an administrator grants `human-operator`.
-The `key:` labels in the grant above are this repository's route-choice holdings (B-105,
-R-BTN-176): a runner declares the provider keys it holds, the ontology derives what models they
-amount to, and the `codegen` and `reviewer` route choices advise on them — grant the ones the
-machine actually holds and let `--capabilities` narrow the rest away.
+The `key:` labels in the grant above are ordinary capabilities a runner declares (§5.9,
+R-BTN-174): a machine that holds a provider key says so, and a leg that requires the name is
+offered only to runners that declared it and are granted it. Baton derives nothing — there is
+no ontology and no route choice in core (B-167) — so grant the `key:` names the machine holds,
+and let `--capabilities` narrow the rest away. Which provider and model a leg runs on is the
+repository's `agent_command` or a leg override, never a Baton decision (§6.10).
 
 The grant *is* the machine's capability declaration (B-86): `baton run` with no `--capabilities`
 declares what the grant allows on the repositories it serves, so the runner and the grant cannot

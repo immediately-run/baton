@@ -13,13 +13,13 @@
 // holder bars (R-BTN-60, R-BTN-67, rule 8); required bars (R-BTN-67); reaping a dead worker
 // and force-reaping a live one, with the fence (§9.5, R-BTN-19, R-BTN-26); any pusher writing
 // git (R-BTN-66); the owner resolving a flagged completion (§9.6).
-// In sync with the 2026-10-22 spec: rule 4 reads H ∪ D(H) — the ontology's derived capabilities
-// join the holdings before the check (R-BTN-174; §5.9 names the model's abstraction: it
-// receives the union as the runner's capabilities); route choices are advice that never
-// refuses (R-BTN-177). Seats are modelled (R-BTN-178, B-106): a capability with a capacity
-// has that many, held by the claims whose tickets require it and refused past by rule 11 —
-// an instance with no capped capability never checks it. README.md's *Not modelled* says what
-// else that abstracts (a leg's own requires among it).
+// In sync with the spec's 2026-11-02 restructure, part 4 (B-167): rule 4 matches capabilities by
+// name (R-BTN-174) — a runner's declared and granted capabilities and nothing else; the capability
+// ontology and route choices are gone (BATON_SPEC_HISTORY.md, Retired). Seats are modelled
+// (R-BTN-178, B-106): a capability with a capacity has that many, held by the claims whose
+// tickets require it and refused past by rule 11 — an instance with no capped capability never
+// checks it. README.md's *Not modelled* says what else that abstracts (a leg's own requires
+// among it).
 // Abstracted: wall-clock time (timeouts and the 30-minute and 6-hour flags are
 // "eventually"), held histories (R-BTN-11), more than one repository (R-BTN-61), course
 // changes and renames (R-BTN-64), tiers, grants and requires (rules 4-7). README.md says why.
@@ -47,11 +47,9 @@ module baton {
   // checks drop and re-declare it), what each worker is granted on the repository (R-BTN-58), and
   // each ticket's posted `requires`, expanded. R-BTN-76: the registered resources, one `service`
   // instance each, and each leg's needs — the sync's `needs` and the course's `requires.resources`.
-  // R-BTN-174 (2026-10-22): what a runner has for a repository is H ∪ D(H) — its holdings
-  // (declared ∩ grant, its declared `runner:` capabilities beside them) and what the
-  // repository's ontology derives from them; §5.9 hands the model that union as the runner's
-  // capabilities, so DECLARED stands for it and the ontology's own evaluation, acceptance and
-  // alarm cycle are not modelled (README.md, *Not modelled*).
+  // R-BTN-174: what a runner has for a repository is its declared holdings (declared ∩ grant,
+  // its declared `runner:` capabilities beside them) — matched by name, nothing derived
+  // (B-167). DECLARED is that statement and the model receives it whole (R-BTN-68).
   const DECLARED: str -> Set[str]
   const GRANTED: str -> Set[str]
   const REQUIRES: str -> Set[str]
@@ -431,9 +429,8 @@ module baton {
   // ... and rule 8 for this worker, on the queued leg (R-BTN-83)
   def claimableBy(t: str, w: str): bool =
     ticketClaimable(t) and barred(t, st.queued.get(t), "claim", Set()).intersect(TAGS.get(w)).size() == 0
-  // §6.6 rule 4: the ticket's `requires` within what the worker has — H ∪ D(H) (R-BTN-174:
-  // DECLARED stands for the union, the grant bounding the holdings a derivation starts from;
-  // a derived capability is a capability like any other to this check). A leg's own
+  // §6.6 rule 4: the ticket's `requires` within what the worker has — its declarations the
+  // grant admits, matched by name (R-BTN-174; nothing is derived, B-167). A leg's own
   // `requires.capabilities` join it for that leg once B-10 builds them.
   def rule4(w: str, t: str): bool = REQUIRES.get(t).subseteq(st.declared.get(w).intersect(GRANTED.get(w)))
   def workerFree(w: str): bool =
@@ -652,8 +649,7 @@ module baton {
   // end carrying the reading). The end drops the capability from the runner's declared set, or
   // stores the reading and an `end`-sourced need on the leg; the rows follow in its transaction
   // (R-BTN-75's counts), so the ticket is blocked only when no other live runner can take it.
-  // R-BTN-174: that same transaction re-evaluates the runner's derived sets — D(H) shrinks with
-  // the holding it rested on — which here is the declared set's atomic shrink, by construction.
+  // R-BTN-174 (B-167): the declared set shrinks in that same transaction, atomically.
   // @impl pending — `released:blocked` for capability and resource prerequisites (R-BTN-126, B-21)
   action endBlockedOn(w: str, kind: str, x: str): bool = all {
     workerCanAct(w), workerClaim(w).size() == 1, not(st.pushed.get(w)),

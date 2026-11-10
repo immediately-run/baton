@@ -25,14 +25,13 @@ ends on anything else loses the round. Baton writes the verdict line on the PR f
 
 ## The round
 
-- **Read `$BATON_ADVICE` first** (B-105, R-BTN-177). When the repository attaches route choices
-  to this leg, the file it names carries the advice: each choice's advised `model:` capability
-  and a ranked fallback list. Map the advised capability to the provider model your repository's
-  `agent_models` names; that model is the one the reviewer runs, taking the next ranked
-  alternative when it is unusable. No file, no advice, or an advised `null`: fall back to the
-  models your repository's own instructions name below.
+- **Which model reviews is the repository's choice** (§6.10, R-BTN-131). Your command's own
+  `--model` is the one the stub runs; Baton delivers no advice about a model, a key or a route,
+  and no `$BATON_ADVICE` file exists. A repository that picks a reviewer at run time writes a
+  leg override that reads its own configuration.
 - **Round one gets two blind reviewers.** If you can start independent sub-agents, start two,
-  from fresh contexts, ideally on two different models. Give each this file, the ticket and the
+  from fresh contexts, ideally on two different models — the models your repository's own
+  configuration or instructions name. Give each this file, the ticket and the
   PR, and tell neither about the other. Two blind passes find defects one pass misses. Without
   sub-agents, review once, slowly.
 - **Later rounds get one fresh reviewer**, who reads the earlier reviews and their replies and
