@@ -267,9 +267,11 @@ the runner's credentials under any other executor is that executor's, never Bato
     the time of its last answered beat before the process goes, so "died tracelessly" cannot
     happen. **The immediate stop is a safe point (B-109):** SIGINT, SIGHUP and a second SIGTERM
     release the leg in flight at its next safe point — its hand-off written, its claim ended
-    `released:requested` — and exit with the signal's code once the loop ends; a leg child that
-    will not take the release has its whole group killed after ten seconds (the lease-loss
-    mechanism), so no orphaned leg keeps pushing against a claim the reaper took.
+    `released:requested` — and exit with the signal's code once the loop ends; the standard
+    courses' stubs take a release by stopping their agent at once. A leg that will not take it has
+    its call killed after ten seconds (the lease-loss mechanism) and its session stopped
+    (R-BTN-107), waited on for at most ten more, so no orphaned leg — and no executor's sandbox —
+    keeps pushing against a claim the reaper took.
   - **A course's `cancel` leg** (R-BTN-168) is an ordinary leg with a script, which Baton alone
     queues. The outbox is no leg: a runner that delivers claims entries, not legs (R-BTN-171).
   - **Leg sessions** a script starts get `BATON_PARENT=<runner id>`, `BATON_SOCKET`

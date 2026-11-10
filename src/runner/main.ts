@@ -361,11 +361,13 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
       // A leg child that will not take the release: after ten seconds its whole group is
       // killed (the lease-loss mechanism, `killInflight`) and this process leaves — the claim
       // ends by the reaper, the resume record covers the leg (R-BTN-24).
+      // B-227: its session is stopped too — an executor's sandbox does not outlive the runner —
+      // waited on for at most another HARD_STOP_MS.
       hardStop = setTimeout(() => {
-        runner!.killInflight();
-        syncLogStamped(a.verbose, `baton: ${signal} — the leg did not stop; its group is killed and this process exits`);
-        release();
-        process.exit(exitCode);
+        syncLogStamped(a.verbose, `baton: ${signal} — the leg did not stop; its call is killed, its session stopped, and this process exits`);
+        const leave = () => { release(); process.exit(exitCode); };
+        setTimeout(leave, HARD_STOP_MS);
+        void runner!.hardStop().finally(leave);
       }, HARD_STOP_MS);
       hardStop.unref?.();
       return;
