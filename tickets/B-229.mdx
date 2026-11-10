@@ -1,0 +1,47 @@
+---
+title: "B-229 — A claim outlives its runner: a restart's new session never ends the last one's claim, and expired leases stay on the board for weeks"
+id: B-229
+project: baton
+status: available
+updated: 2026-11-10
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1228
+tier: judgement
+description: "Found on vltava2, 2026-11-10. (1) The runner's orphan check reads the claim from its own session's state file, and each start is a new session with a new file, so a restart after a hard stop never ends the previous session's claim: claim 123 on B-150 stayed held by worker 32 until it was ended by hand. (2) The board's holders still list twelve claims of oc-vltava2-vm0 whose leases ended between 2026-10-30 and 2026-11-06 (B-112, B-101, B-106, B-108, R3-1210, B-110, B-115, B-4, B-52, B-16, B-7, B-182); their tickets cannot be claimed. Find why they are not reaped — status active past its lease, or reaped with a fence pending from a worker that will never beat again — and end them; and have a restarted runner end what its host's earlier sessions still hold. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** see the description. The runner's state files live in
+`~/.cache/immediately-run/baton/run-<session>.json`; a host's earlier sessions are the other
+files there with a `claim`.
+
+**Spec:** [BATON_SPEC §9](../spec/BATON_SPEC/09-claims.md) (leases, reaping,
+fences), R-BTN-19, R-BTN-24.
+
+**Depends on:** none.
+
+**Used by:** none.
+
+### What to build
+
+To be designed: first read the twelve claims' rows (status, `fence_pending`, `lease_ends_at`) on
+production, then decide between the reaper, the fence rule and the runner's start.
+
+### Trust
+
+To be written with the design.
+
+### Invariants
+
+To be written with the design.
+
+## Status
+
+_filed 2026-11-10._

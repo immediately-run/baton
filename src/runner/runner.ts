@@ -18,7 +18,7 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
-import { claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, type CourseLoad } from './home';
+import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, type CourseLoad } from './home';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { StateFile, leaseLostFrom } from './state';
@@ -850,6 +850,14 @@ export class Runner {
     if (this.inflight?.child) this.killGroup(this.inflight.child);
   }
 
+  /** B-227: the immediate stop's last resort, when the leg would not take its release in time:
+   *  the call is killed and its session stopped — an executor's sandbox ends with the runner,
+   *  never outliving it — before the caller exits. The claim is left to the reaper (R-BTN-24). */
+  async hardStop(): Promise<void> {
+    this.killInflight();
+    await this.stopSession('hard-stop');
+  }
+
   /** B-109: the immediate stop — a safe point, not an abandonment. The leg in flight is
    *  released at its next safe point (its hand-off written, the claim ended
    *  `released:requested`), and the loop ends without claiming again. `stopped` stays false
@@ -1212,6 +1220,15 @@ export class Runner {
         return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
       }
       course = loadCourse(this.o.home, claim.snapshot_sha, this.claimCourse(claim));
+      // B-228: the legs start from the snapshot's code — the home fast-forwarded to it when it
+      // can be; otherwise it runs as it stands, and the log says why.
+      let stays: string | null;
+      try {
+        stays = advanceHome(this.o.home, claim.snapshot_sha, typeof claim.default_branch === 'string' && claim.default_branch !== '' ? claim.default_branch : null);
+      } catch (e) {
+        stays = `the fast-forward failed (${msg(e)})`;
+      }
+      if (stays) this.log(`baton: the home stays at its own commit for ${ticket}, not the snapshot ${String(claim.snapshot_sha).slice(0, 10)}: ${stays}`);
     } catch (e) {
       this.log(`baton: the claim's course would not load (${msg(e)})`);
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);

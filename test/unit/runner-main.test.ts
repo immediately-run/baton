@@ -13,7 +13,7 @@ import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { HARNESS_AGENTS, AGENT_PROMPT } from '../../src/runner/harness';
 import { splitWords } from '../../src/defaults/agent-words';
 import { envAuth } from '../../src/runner/api';
-import { courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
+import { advanceHome, courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
 import { declarationFrom } from '../../src/runner/runner';
 import { validateCourse } from '../../src/core/course';
 
@@ -960,5 +960,45 @@ export async function run(ctx) {
     }
     expect(alive).toBe('gone'); // the wrapper exited on its own; the group died with the leg
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('advanceHome — legs start from the claim\'s snapshot (B-228, R-BTN-34)', () => {
+  it('fast-forwards a clean home on the default branch; leaves one ahead, diverged, elsewhere or edited, saying why', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-228-'));
+    const g = (...a: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { encoding: 'utf8' }).trim();
+    try {
+      g('init', '-q', '-b', 'main');
+      writeFileSync(join(dir, 'f'), '1');
+      g('add', 'f');
+      g('commit', '-qm', 'one');
+      const one = g('rev-parse', 'HEAD');
+      writeFileSync(join(dir, 'f'), '2');
+      g('commit', '-qam', 'two');
+      const two = g('rev-parse', 'HEAD');
+      g('reset', '-q', '--hard', one);
+      // Behind, clean, on main: fast-forwarded to the snapshot.
+      expect(advanceHome(dir, two, 'main')).toBeNull();
+      expect(g('rev-parse', 'HEAD')).toBe(two);
+      // At the snapshot: nothing to do. Ahead of it: left as it is.
+      expect(advanceHome(dir, two, 'main')).toBeNull();
+      expect(advanceHome(dir, one, 'main')).toMatch(/is not behind the snapshot/);
+      expect(g('rev-parse', 'HEAD')).toBe(two);
+      // Tracked changes, or another branch: left as it is.
+      g('reset', '-q', '--hard', one);
+      writeFileSync(join(dir, 'f'), 'edited');
+      expect(advanceHome(dir, two, 'main')).toBe('the home has tracked changes');
+      g('checkout', '-q', '--', 'f');
+      g('checkout', '-q', '-b', 'claude/B-1-x');
+      expect(advanceHome(dir, two, 'main')).toBe('the home is on claude/B-1-x, not main');
+      expect(g('rev-parse', 'HEAD')).toBe(one);
+      // An untracked file does not stop it.
+      g('checkout', '-q', 'main');
+      writeFileSync(join(dir, 'scratch.txt'), 'x');
+      expect(advanceHome(dir, two, 'main')).toBeNull();
+      expect(g('rev-parse', 'HEAD')).toBe(two);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
