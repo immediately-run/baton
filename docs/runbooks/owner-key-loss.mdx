@@ -1,0 +1,131 @@
+---
+title: Runbook — a lost or leaked owner key
+description: Replacing a repository's owner key when its holder no longer has it, or it leaked — a new key made, added through whatever key Baton still trusts, checked, the old one revoked so nothing brings it back, and BATON_REPOSITORIES brought in line.
+tags: [runbook]
+order: 42
+---
+
+<Lede>How a repository gets a new owner key when the old one is gone: lost with a machine, never
+copied off it, or leaked. An owner key cannot be recovered, only replaced, and only by a key Baton
+still trusts. This page walks down the list of those keys, from the cheapest to the root.</Lede>
+
+Commands run from a checkout of this repository on the owner's machine. The CLI is
+`node cli/baton.mjs`; it talks to `https://baton.immediately.run` unless `--url` or `BATON_URL`
+says otherwise. The rules are [R-BTN-57](../../spec/BATON_SPEC/11-people.md#sec-11-2) (what an
+administrator may do, revoking an owner key included) and
+[R-BTN-58](../../spec/BATON_SPEC/11-people.md#sec-11-2) (what an owner may do). The examples
+name the repository `baton`; put the repository's id in its place.
+
+## 0. Lost or leaked?
+
+- **Leaked** (the private key was copied somewhere it should not be: a repository, a log, a
+  machine you no longer control): revoke first, replace second. Do step 4's revocation as soon as
+  you hold an administrator key, even before a new owner exists — revoking the last owner is
+  allowed, and an administrator adds the next one (R-BTN-57). Until then the leaked key can grant
+  runner keys and add owners.
+- **Lost** (nobody holds it any more): no hurry beyond your own; the steps run in order.
+
+Write down the lost key's fingerprint. It is in `wrangler.toml`'s `BATON_REPOSITORIES` entry for
+the repository, under `owner_keys`:
+
+```sh
+grep -o 'ssh-ed25519 [A-Za-z0-9+/=]*' wrangler.toml | while read -r t k; do echo "$t $k" | ssh-keygen -lf -; done
+```
+
+## 1. Make the new key
+
+On the owner's machine, with a passphrase:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/baton_repo_owner -C "owner of baton"
+ssh-keygen -lf ~/.ssh/baton_repo_owner.pub      # its fingerprint, for the checks below
+```
+
+An owner key grants runner keys and adds owners, so it stays out of every agent's reach: never in
+an ssh-agent an agent session can use (R-BTN-57). Keep a second copy somewhere offline — the cause
+of this runbook is a key that existed once.
+
+## 2. Add it, with a key Baton still trusts
+
+Take the first row you can. Each adds the new key as an owner; none needs the lost one.
+
+| You hold | Do |
+|---|---|
+| another owner key of the repository | `node cli/baton.mjs owner -i ~/.ssh/OTHER_OWNER owners baton --add ~/.ssh/baton_repo_owner.pub` |
+| an administrator key (a `BATON_ADMIN_KEYS` line) | `node cli/baton.mjs admin -i ~/.ssh/baton_admin repo set baton --add-owner-key ~/.ssh/baton_repo_owner.pub` |
+| a break-glass key (a `BATON_HUMAN_KEYS` line, R-BTN-185) | `node cli/baton.mjs owner -i ~/.ssh/BREAK_GLASS owners baton --add ~/.ssh/baton_repo_owner.pub` |
+| none of these, but control of the Cloudflare account | step 2a, then the administrator row |
+
+- An administrator's add is an `approvers.members` action (R-BTN-188). Where the repository's
+  policy made that list human-only, the administrator row is refused `forbidden`, and only the
+  break-glass row opens it.
+- `conflict` with *this owner key was revoked* means the new key is one an administrator revoked
+  before: make another (step 1). `conflict` with *already a … key* means the key holds another role
+  (R-BTN-57: one role per key): make another.
+
+### 2a. No administrator key either
+
+Whoever controls the deployment is its root of trust (R-BTN-57): an administrator is a line of the
+`BATON_ADMIN_KEYS` secret, and nothing in Baton's storage can add one. Make a new administrator key
+(its own key, never the owner key) and write the secret:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/baton_admin -C "baton administrator"
+npx wrangler secret put BATON_ADMIN_KEYS < ~/.ssh/baton_admin.pub
+```
+
+`secret put` replaces the whole list: if other administrators' keys are still good, put all their
+lines in the file you pipe, one per line. The secret is read on every request, so no deploy is
+needed. Check: `node cli/baton.mjs admin -i ~/.ssh/baton_admin repos` answers with the
+repositories, not `unauthorized`. Then take the administrator row of step 2.
+
+## 3. Check the new key
+
+```sh
+node cli/baton.mjs owner -i ~/.ssh/baton_repo_owner grants baton
+```
+
+It answers with the repository's owners, grants and settings. The new fingerprint is among the
+owners. A `forbidden` here means step 2 did not land; do not go on.
+
+## 4. Revoke the old key
+
+With an administrator key:
+
+```sh
+node cli/baton.mjs admin -i ~/.ssh/baton_admin revoke SHA256:OLD_FINGERPRINT
+```
+
+Prefer this over the owner's `owners baton --remove SHA256:OLD_FINGERPRINT`, which only removes
+the key from one repository. A revocation (R-BTN-57) removes it from every repository it owns,
+ends its sessions and MCP keys, and marks it revoked: no owner can add it back, and a rebuilt
+instance's seed skips it even while `wrangler.toml` still names it (B-91).
+
+`unsatisfiable-approvers` means a policy list or floor names the old key as `key:…` and would be
+left with no live credential (R-BTN-188). Change that list to name the new key first, with the new
+owner key (`owner policy show`, `owner policy set … --base N`), then revoke again.
+
+## 5. Bring `BATON_REPOSITORIES` in line
+
+The repository's entry in `wrangler.toml` carries `owner_keys`, the owners a rebuilt instance
+starts with (B-91). In a PR, replace the old public line with the new one, in every environment
+the entry appears in. Then compare, as
+[register-baton step 3](./register-baton.mdx) does: the deployed owners
+(`limits.owners` in `admin state`) and `ssh-keygen -lf` of each key in the entry must be the same
+set. The PR is ready when they are.
+
+## 6. Everything else the old key signed with
+
+- **Commit signing.** If the owner signed commits with the old key (owner briefs, B-127), point
+  `git config user.signingkey` at the new one, and wherever an allowed-signers list names owner
+  keys, add the new line.
+- **Scripts and environment.** `-i` paths in shell history, `BATON_KEY_FILE`, a courier's
+  `decision list --watch`: each names the key file; change them to the new one.
+- **The log.** Add a dated entry to [lessons](../lessons.mdx): how the key was lost, and what now
+  keeps the next one (the offline copy, a second owner).
+
+## Afterwards: make the next loss cheap
+
+One owner key and one administrator key, each on one machine, is how this runbook starts. A second
+owner key, held by another person or kept offline, makes step 2's first row available next time,
+and the Cloudflare account is the root under all of it.
