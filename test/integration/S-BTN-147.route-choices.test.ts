@@ -1,6 +1,6 @@
 // S-BTN-147 to S-BTN-154 and G-BTN-161 (BATON_SPEC §15, §6.10 R-BTN-176/R-BTN-177; B-105), on
 // both hosts: route choices end to end — a codegen choice over two providers with a peak rule,
-// a reviewer choice with hysteresis over an API-capacity reading, who may steer (atoms_from),
+// a reviewer choice with hysteresis over an API-capacity reading, who steers it (every writer),
 // the atom shapes, schema refinement against std:api-capacity@1, the strata and reserved names
 // a program may not cross, delivery and overrides through claim_legs and taken, and the counted
 // bound (limit) through the test bindings. The clingo half of S-BTN-154 is the conformance
@@ -115,8 +115,8 @@ beforeEach(async () => {
   owner = await makeKey('ssh-ed25519', 'docs-owner');
   await setAdminKeys(admin);
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
-  for (const [name, schema, atoms] of [['opencode-go', { type: 'object' }, undefined], ['deepinfra', { type: 'object' }, undefined], ['anthropic-capacity', CAPACITY_BASE, 'any']] as const) {
-    const res = await keyCall(admin, '/v1/admin/resources', { name, scope: 'account', detail_schema: schema, ...(atoms ? { atoms_from: atoms } : {}) });
+  for (const [name, schema] of [['opencode-go', { type: 'object' }], ['deepinfra', { type: 'object' }], ['anthropic-capacity', CAPACITY_BASE]] as const) {
+    const res = await keyCall(admin, '/v1/admin/resources', { name, scope: 'account', detail_schema: schema });
     expect(res.status, name).toBe(200);
   }
   for (const [instance, serves] of [['ocg:go-plus', ['opencode-go']], ['di:main', ['deepinfra']], ['ac:main', ['anthropic-capacity']]] as const) {
@@ -209,7 +209,10 @@ describe('S-BTN-148: a reviewer route choice with hysteresis', () => {
       t += 2 * MIN;
       await setClock(t);
       await w1.beat();
-      const res = await w1.call('/v1/runner/readings', { readings: [{ instance: 'ac:main', valid_for: 3600, ...body }] });
+      // B-168 (R-BTN-76): a reading's state is its `state` kind's, and an instance's state is the
+      // latest `state` reading in force — an administrator's one more instrument's, no precedence —
+      // so each step states its own `available` beside the detail it carries.
+      const res = await w1.call('/v1/runner/readings', { readings: [{ instance: 'ac:main', valid_for: 3600, available: true, ...body }] });
       expect(res.status, JSON.stringify(res.json)).toBe(200);
       expect(res.json.refused).toEqual([]);
       const w1Rows = async () => (await rows<{ choice: string; alternative: string; demoted: number }>('SELECT choice, alternative, demoted FROM route_last WHERE worker_id = ? ORDER BY choice, alternative', w1.id));
@@ -219,7 +222,12 @@ describe('S-BTN-148: a reviewer route choice with hysteresis', () => {
       const id = ids[n++];
       await postBoard({ implement: ['reviewer-2'] }, [id]);
       const w2out = await startLeg(w2, id);
-      expect(alternativeOf(w2out.advice, 'reviewer-2')).toBe('opus'); // no usable instance: fails open
+      // B-168 (R-BTN-76): the usable instances are the repository's — one set for every runner
+      // granted there — so W2 hears W1's reading of ac:main as it would an instrument's: at 500‰
+      // nothing is near its limit and W2 fails open to opus; under 300‰ it hears the demotion.
+      // Its `route_last` rows stay its own: the hysteresis below is W1's.
+      const near = ((body.detail as { remaining_permille: number }).remaining_permille) < 300;
+      expect(alternativeOf(w2out.advice, 'reviewer-2')).toBe(near ? 'glm' : 'opus');
       await w2.call(`/v1/runner/claims/${w2out.claimId}/end`, { end_reason: 'released:requested' });
       expect(await w1Rows()).toEqual(before);
       await postBoard({ implement: ['reviewer-2'] }, [`w1-${id}`]);
@@ -234,24 +242,23 @@ describe('S-BTN-148: a reviewer route choice with hysteresis', () => {
     const w1 = await grantedWorker(owner, 'docs', 'w148a', ALL_KEYS, ['ac:main']);
     const w2 = await grantedWorker(owner, 'docs', 'w148b', ALL_KEYS, []);
     const { resolved } = await steps('R3-9201', [
-      { available: true, detail: { window_s: 300, remaining_permille: 500 } },
-      { available: true, detail: { window_s: 300, remaining_permille: 150 } },
+      { detail: { window_s: 300, remaining_permille: 500 } },
+      { detail: { window_s: 300, remaining_permille: 150 } },
     ], w1, w2, ['R3-9301', 'R3-9302'], T0);
     expect(resolved).toEqual(['opus', 'glm']); // the demotion entered below 200
     const rowsOf = await rows<{ alternative: string; demoted: number }>('SELECT alternative, demoted FROM route_last WHERE worker_id = ? ORDER BY alternative', w1.id);
     expect(rowsOf).toEqual([{ alternative: 'glm', demoted: 0 }, { alternative: 'opus', demoted: 1 }]);
   });
 
-  it('a detail-less state keeps the fields at 250; 320 recovers opus; lapsed fails open with the demotion history gone', async () => {
+  it('the fields hold at 250; 320 recovers opus; lapsed fails open with the demotion history gone', async () => {
     const w1 = await grantedWorker(owner, 'docs', 'w148c', ALL_KEYS, ['ac:main']);
     const w2 = await grantedWorker(owner, 'docs', 'w148d', ALL_KEYS, []);
     const { t, resolved } = await steps('R3-9204', [
-      { available: true, detail: { window_s: 300, remaining_permille: 150 } }, // this worker's own demotion
-      { available: true, detail: { window_s: 300, remaining_permille: 250 } },
-      { available: true }, // no detail: the field reading stays at 250
-      { available: true, detail: { window_s: 300, remaining_permille: 320 } },
-    ], w1, w2, ['R3-9304', 'R3-9305', 'R3-9306', 'R3-9307'], T0 + 10 * MIN);
-    expect(resolved).toEqual(['glm', 'glm', 'glm', 'opus']); // entered, held at 250, held again with no detail, recovered at 320
+      { detail: { window_s: 300, remaining_permille: 150 } }, // this worker's own demotion
+      { detail: { window_s: 300, remaining_permille: 250 } },
+      { detail: { window_s: 300, remaining_permille: 320 } },
+    ], w1, w2, ['R3-9304', 'R3-9305', 'R3-9307'], T0 + 10 * MIN);
+    expect(resolved).toEqual(['glm', 'glm', 'opus']); // entered, held at 250, recovered at 320
     // Every reading lapsed: unknown, no fields — fails open, and the demotion is history.
     await setClock(t + 2 * 60 * MIN);
     await w1.beat();
@@ -289,7 +296,7 @@ describe('S-BTN-148: a reviewer route choice with hysteresis', () => {
 });
 
 describe('S-BTN-149: who steers', () => {
-  it("under atoms_from admin a runner's readings form no atoms and move neither the route-choice state nor blocked; under any they do; an administrator's over an instrument's", async () => {
+  it("a runner's readings form atoms and move the route-choice state and blocked like any writer's; an administrator's reading is one more instrument's", async () => {
     // A second capacity resource, registered admin-only.
     expect((await keyCall(admin, '/v1/admin/resources', { name: 'zai-capacity', scope: 'account', detail_schema: CAPACITY_BASE })).status).toBe(200);
     expect((await keyCall(admin, '/v1/admin/instances', { name: 'zc:main', serves: ['zai-capacity'], repositories: ['docs'] })).status).toBe(200);
@@ -309,51 +316,57 @@ describe('S-BTN-149: who steers', () => {
       state: { items: [item('R3-9401'), item('R3-9402')] },
       ready: ['R3-9401', 'R3-9402'],
     }));
+    // B-168 (S-BTN-149's retirement): there is no atoms_from to keep a runner's reading from
+    // steering — every writer's reading on a usable instance forms its atoms, so the runner's own
+    // measure (100‰, under zai_near's 500) demotes glm from the first leg on.
     const w = await grantedWorker(owner, 'docs', 'w', ALL_KEYS, ['zc:main']);
-    // The runner posts a measure and an unavailable state on zc:main — atoms_from is admin.
     expect((await w.call('/v1/runner/readings', { readings: [
       { instance: 'zc:main', kind: 'measure', valid_for: 3600, detail: { window_s: 300, remaining_permille: 100 } },
+    ] })).status).toBe(200);
+    const out = await startLeg(w, 'R3-9401');
+    expect(alternativeOf(out.advice, 'reviewer-1')).toBe('glm'); // the field atom forms — 100‰ demotes it behind nothing else
+    expect(out.advice!.route_choices[0].ranked.map((r) => [r.alternative, r.demoted])).toEqual([['glm', true]]);
+    // The fleet's resource block still hears the runner's reading (R-BTN-76 unchanged).
+    const w2 = await grantedWorker(owner, 'docs', 'w2', ALL_KEYS, ['zc:main']);
+    expect((await w2.call('/v1/runner/readings', { readings: [
       { instance: 'zc:main', available: false, valid_for: 3600 },
     ] })).status).toBe(200);
-    let out = await startLeg(w, 'R3-9401');
-    expect(alternativeOf(out.advice, 'reviewer-1')).toBe('glm'); // no field atom, state unmoved: not demoted, not blocked
-    // The fleet's resource block still hears the runner's reading (R-BTN-76 unchanged).
     expect((await rows<{ state: string }>("SELECT state FROM instance_states WHERE instance = 'zc:main'"))[0]?.state).toBe('unavailable');
-    await w.call(`/v1/runner/claims/${out.claimId}/end`, { end_reason: 'released:requested' });
-    // Re-registered any: the same readings now steer — the field atom forms (100‰ demotes) and
-    // the runner's own unavailable state blocks the alternative it meters (S-BTN-149).
-    expect((await keyCall(admin, '/v1/admin/resources', { name: 'zai-capacity', scope: 'account', detail_schema: CAPACITY_BASE, atoms_from: 'any' })).status).toBe(200);
-    await refresh();
-    out = await startLeg(w, 'R3-9402');
-    expect(alternativeOf(out.advice, 'reviewer-1')).toBeNull(); // blocked_alt: its own reading, now heard
-    // A worker-scope resource's own instance steers its owner unconditionally (R-BTN-176: a
-    // runner's reading for its own runner-scope instance is always permitted — the permission
-    // atoms_from cannot close), where an account instance needed atoms_from any above: zai-local
-    // stays atoms_from admin, the worker's own unavailable reading on it still blocks glm.
-    expect((await keyCall(admin, '/v1/admin/resources', { name: 'zai-local', scope: 'worker', detail_schema: { type: 'object' } })).status).toBe(200);
-    const progLocal = structuredClone(prog);
-    (progLocal.entries as unknown[]).push({ id: 'meters-zai-local', fact: ['meters', 'key:zai', 'zai-local'] });
+    // A worker-scope resource no longer exists (R-BTN-76): a runner's own reading is an account
+    // instance's, heard like any other's — an unavailable state blocks the alternative it meters.
+    // A runner's own limit is its own business, as a declared capability or a suspension on advice
+    // (R-BTN-40); Baton has no per-runner instance to hold it.
     const wl = await grantedWorker(owner, 'docs', 'wl', ALL_KEYS, ['zc:main']);
-    expect((await wl.call('/v1/runner/readings', { readings: [{ instance: `zai-local@worker:${wl.id}`, available: false, valid_for: 3600 }] })).status).toBe(200);
     const h1 = nextHead();
     await syncCall('/v1/sync/board', payload(h1.sha, h1.parent, board.states.A, {
-      ontology: { builtin: 'baton@1', program: progLocal },
+      ontology: { builtin: 'baton@1', program: prog },
       registry: [course(3, 3, { route_choices: { implement: ['reviewer-1'] } })],
-      state: { items: [item('R3-9404')] },
-      ready: ['R3-9404'],
+      state: { items: [item('R3-9402')] },
+      ready: ['R3-9402'],
     }));
-    const ownOut = await startLeg(wl, 'R3-9404');
-    expect(alternativeOf(ownOut.advice, 'reviewer-1')).toBeNull(); // the own instance's unavailable reading blocks glm under atoms_from admin
-    await wl.call(`/v1/runner/claims/${ownOut.claimId}/end`, { end_reason: 'released:requested' });
-    // An administrator's reading over the runner's: the administrator speaks — available, 900‰.
+    await refresh();
+    const blocked = await startLeg(wl, 'R3-9402');
+    expect(alternativeOf(blocked.advice, 'reviewer-1')).toBeNull(); // its own unavailable reading, heard, blocks glm
+    await wl.call(`/v1/runner/claims/${blocked.claimId}/end`, { end_reason: 'released:requested' });
+    // Once it is available again the alternative is back, and so is the field atom: at 250‰ glm is
+    // demoted, and it is the only one available — the state is the latest reading in force.
+    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'zc:main', available: true, valid_for: 86400, detail: { window_s: 300, remaining_permille: 250 } }] })).status).toBe(200);
+    await refresh();
+    const near = await startLeg(wl, 'R3-9402');
+    expect(alternativeOf(near.advice, 'reviewer-1')).toBe('glm');
+    expect(near.advice!.route_choices[0].ranked.map((r) => r.demoted)).toEqual([true]);
+    await wl.call(`/v1/runner/claims/${near.claimId}/end`, { end_reason: 'released:requested' });
+    // B-168: an administrator's reading is one more instrument's — its 900‰ outweighs nothing,
+    // it is simply the latest reading in force — so glm's field atom is back under 500 and opus
+    // is not demoted: the later reading sets the state (S-BTN-45's case here too).
     expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'zc:main', available: true, valid_for: 86400, detail: { window_s: 300, remaining_permille: 900 } }] })).status).toBe(200);
     await postBoard({ implement: ['reviewer-1'] }, ['R3-9403']);
     await refresh();
-    out = await startLeg(w, 'R3-9403');
-    const ranked = out.advice!.route_choices[0].ranked;
+    const again = await startLeg(w, 'R3-9403');
+    const ranked = again.advice!.route_choices[0].ranked;
     expect(ranked.map((r) => r.alternative)).toEqual(['glm']);
     expect(ranked[0].demoted).toBe(false);
-    await w.call(`/v1/runner/claims/${out.claimId}/end`, { end_reason: 'released:requested' });
+    await w.call(`/v1/runner/claims/${again.claimId}/end`, { end_reason: 'released:requested' });
   });
 });
 
@@ -428,10 +441,10 @@ describe('S-BTN-151: refinement', () => {
     expect(alternativeOf(recovered.advice, 'reviewer-2')).toBe('opus');
     await w.call(`/v1/runner/claims/${recovered.claimId}/end`, { end_reason: 'released:requested' });
     void served;
-    const stored = await rows<{ name: string; base_chain_json: string; atoms_from: string }>('SELECT name, base_chain_json, atoms_from FROM external_resources WHERE name IN (?, ?) ORDER BY name', 'anthropic-capacity', 'cap-tight');
+    const stored = await rows<{ name: string; base_chain_json: string }>('SELECT name, base_chain_json FROM external_resources WHERE name IN (?, ?) ORDER BY name', 'anthropic-capacity', 'cap-tight');
     expect(stored).toEqual([
-      { name: 'anthropic-capacity', base_chain_json: '["std:api-capacity@1"]', atoms_from: 'any' },
-      { name: 'cap-tight', base_chain_json: '["std:api-capacity@1"]', atoms_from: 'admin' },
+      { name: 'anthropic-capacity', base_chain_json: '["std:api-capacity@1"]' },
+      { name: 'cap-tight', base_chain_json: '["std:api-capacity@1"]' },
     ]);
   });
 });

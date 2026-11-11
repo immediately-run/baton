@@ -74,7 +74,7 @@ beforeEach(async () => {
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
   expect((await keyCall(admin, '/v1/admin/resources', { name: 'opencode-go', scope: 'account', detail_schema: { type: 'object' } })).status).toBe(200);
   expect((await keyCall(admin, '/v1/admin/resources', { name: 'deepinfra', scope: 'account', detail_schema: { type: 'object' } })).status).toBe(200);
-  expect((await keyCall(admin, '/v1/admin/resources', { name: 'anthropic-capacity', scope: 'account', detail_schema: CAPACITY_BASE, atoms_from: 'any' })).status).toBe(200);
+  expect((await keyCall(admin, '/v1/admin/resources', { name: 'anthropic-capacity', scope: 'account', detail_schema: CAPACITY_BASE })).status).toBe(200);
   for (const [instance, serves] of [['ocg:go-plus', ['opencode-go']], ['di:main', ['deepinfra']], ['ac:main', ['anthropic-capacity']]] as const) {
     expect((await keyCall(admin, '/v1/admin/instances', { name: instance, serves, repositories: ['docs'] })).status).toBe(200);
   }
