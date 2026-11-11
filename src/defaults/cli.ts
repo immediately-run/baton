@@ -1084,7 +1084,7 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * not the leg's outcome. The bundled `close` writes the closing marker where the course's
  * convention puts it. */
 function stubSource(b: BuiltIn, course: string, leg: string): string {
-  const { ask, position, verify } = b.legs[leg];
+  const { ask, position, verify, pushes } = b.legs[leg];
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
@@ -1141,7 +1141,9 @@ function advisedCommand(words, settings, adviceFile) {
 }${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
-import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
+import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
+import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
+import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};` : ''}
 // The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
 // repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the
 // checkout as its arguments and the leg's instructions in the file BATON_INSTRUCTIONS names. The
@@ -1207,7 +1209,18 @@ async function standard(ctx) {
   // a path the snapshot lacks means deleted: \`ls-tree\` lists nothing for it and succeeds (git
   // translates its messages, and \`cat-file -e\` exits 128 for every failure alike), so any
   // failure of the probe itself stops the leg.
-  const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
+${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must push. The ticket's PR branch
+  // heads in the home repository, by the course's patterns, are read before the agent runs and
+  // after; unchanged, the leg fails rather than report a fix of a tree the gate already tested red.
+  const redEdge = ctx.claim?.station === 'pr-open' || ctx.claim?.station === 'fixed';
+  const prHeads = () => {
+    const own = (Array.isArray(settings.courses) ? settings.courses : []).find((c) => c && c.id === ${JSON.stringify(b.id)}) ?? {};
+    const id = bareTicketId(ctx.ticket);
+    const wanted = matchPatterns([own.branch_pattern ?? DEFAULT_BRANCH_PATTERN, own.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '')).map((p) => p.replace(/\\{ticket\\}/g, id));
+    return gitRun('git', ['-C', ctx.checkout, 'ls-remote', '--heads', 'origin']).split('\\n').filter((l) => { const r = l.split('\\t')[1] ?? ''; return r.startsWith('refs/heads/') && wanted.some((p) => branchMatches(p, r.slice('refs/heads/'.length))); }).sort().join('\\n');
+  };
+  const headsBefore = redEdge ? prHeads() : '';
+` : ''}  const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
   const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() !== '';
   const text = present ? show(rel) : null;
   const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
@@ -1286,7 +1299,10 @@ async function standard(ctx) {
     child.stdin?.end();
   }).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
-  });${names ? `
+  });${pushes ? `
+  if (headsBefore !== '' && prHeads() === headsBefore) {
+    throw new Error('the ${leg} leg pushed nothing: ' + headsBefore.split('\\n').map((l) => l.split('\\t')[1].slice('refs/heads/'.length) + ' at ' + l.slice(0, 10)).join(', ') + ' is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)');
+  }` : ''}${names ? `
   // The answer (B-85): the last line that opens with the leg's value word, wherever it sits —
   // prose before or after it is the agent's, not a lost round — and, on that line, the PR its
   // line goes on. A leg with no answer names its PR by a last line that is a PR URL alone; any
@@ -1328,15 +1344,16 @@ const PR_URL = `/${PR_URL_RE.source}/`;
  * non-interactive exactly as B-94 bounds git. The run is the leg's own process, so the runner
  * beats while it waits. The script's exit is the gate's whole verdict: green advances to
  * `review`, red routes to `fix` — never back to `implement` — from the station the claim sits at
- * (`ctx.claim.station`: making the tests green is fixing, wherever the push came from); a
- * timeout or output overflow is red too, named; npm that cannot start, or a kill the bound did
- * not send, fails the leg — no verdict, no marker (finding 14). The marker is made here with
+ * (`ctx.claim.station`: making the tests green is fixing, wherever the push came from); output
+ * overflow is red too, named; npm that cannot start, a kill the bound did not send (finding 14),
+ * and a run that never reached the tests (B-230: dependencies declared and none installed, the
+ * shell's 126/127, npm's missing script, the bound itself) fail the leg — no verdict, no marker. The marker is made here with
  * `git commit-tree` — an empty-tree commit on the tested head, naming it (`Baton-Tested`) — and
  * the close (`testsClose`) pushes it to that branch. A repository replaces the run as any leg's
  * (`legs/run-tests.run.mjs`, R-BTN-131), keeping the close. */
 export function testsStubSource(b: BuiltIn, course: string, leg: string): string {
   return `import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -1394,8 +1411,17 @@ function verdictOf(cwd, script) {
     // trailer block stays the message's last.
     const tail = [String(e?.stdout ?? ''), String(e?.stderr ?? '')].join('\\n').split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n');
     const named = (why) => ({ tests: 'red', tail: 'npm run ' + script + ' ' + why + (tail ? '; its last lines:\\n' + tail : '; it printed nothing') });
-    if (e?.code === 'ETIMEDOUT') return named('timed out after ' + Math.round(RUN_TESTS_TIMEOUT_MS / 1000) + ' s');
+    // B-230: a run that never reached the tests is no verdict — red would send a fix leg after
+    // code that was never tested (B-167: five red markers, every one \`vitest: not found\`). The
+    // shell's own 126/127 (a command not executable, or not found: the test runner, a missing
+    // dependency's bin) and npm's missing script fail the leg naming that, as npm that cannot
+    // start does; so does the bound: per-test timeouts catch a hung test as a failure the script
+    // reports, so a whole run that outlives the bound says the environment or the bound is short.
+    const setup = (why) => new Error('npm run ' + script + ' ' + why + ' — the tests never ran: no verdict, no marker' + (tail ? '; its last lines:\\n' + tail : ''));
+    if (e?.code === 'ETIMEDOUT') throw setup('outlived the gate’s bound of ' + Math.round(RUN_TESTS_TIMEOUT_MS / 1000) + ' s (a suite that needs longer raises it in its own copy of this leg)');
     if (e?.code === 'ENOBUFS') return named('printed more than ' + OUTPUT_MAX + ' bytes');
+    if (e?.status === 126 || e?.status === 127) throw setup('exited ' + e.status + ', a command its script names could not be run (not found, or not executable)');
+    if (/\\bMissing script:/.test(String(e?.stderr ?? ''))) throw setup('has no such script in package.json');
     if (typeof e?.status === 'number') return named('exited ' + e.status);
     if (e?.signal) throw new Error('npm run ' + script + ' was killed by ' + e.signal + ', which the gate did not send — no verdict, no marker');
     throw new Error('npm run ' + script + ' could not run (' + (e?.code ?? e?.message ?? String(e)) + ') — no verdict, no marker');
@@ -1444,6 +1470,14 @@ async function standard(ctx) {
     gitRun(['-C', ctx.checkout, 'worktree', 'add', '-q', '--detach', tree, tested]);
     const modules = join(ctx.checkout, 'node_modules');
     if (existsSync(modules) && !existsSync(join(tree, 'node_modules'))) symlinkSync(modules, join(tree, 'node_modules'), 'dir');
+    // B-230: a package that declares dependencies and has none installed cannot run its tests —
+    // no verdict, rather than a red that names whichever bin was missing first.
+    let pkg = {};
+    try { pkg = JSON.parse(readFileSync(join(tree, 'package.json'), 'utf8')); } catch { /* no package.json: npm says so */ }
+    const declared = ['dependencies', 'devDependencies'].some((k) => pkg && typeof pkg[k] === 'object' && pkg[k] !== null && Object.keys(pkg[k]).length > 0);
+    if (declared && !existsSync(join(tree, 'node_modules'))) {
+      throw new Error('npm run ' + script + ' cannot run: ' + branch + ' declares dependencies and neither the tested tree nor the home checkout has node_modules — install them where the leg runs (npm ci); the tests never ran: no verdict, no marker');
+    }
     verdict = verdictOf(tree, script);
   } finally {
     try { unlinkSync(join(tree, 'node_modules')); } catch { /* no link made */ }

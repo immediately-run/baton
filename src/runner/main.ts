@@ -392,6 +392,8 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   runner = new Runner({
     executor,
     api: new BatonApi({ url: a.url, transport, auth }, say),
+    // B-229: the earlier sessions' claims are ended through an API of their own worker's.
+    apiFor: (secret: string) => { const other = new BatonApi({ url: a.url, transport, auth }, say); other.setSecret(secret); return other; },
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     courses,

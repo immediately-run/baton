@@ -10,8 +10,8 @@
 // next safe point first.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
@@ -21,7 +21,7 @@ import { outsideScope, pushesBetween, readRefState, type RefState } from './audi
 import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, type CourseLoad } from './home';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
-import { StateFile, leaseLostFrom } from './state';
+import { StateFile, leaseLostFrom, type RunnerState } from './state';
 import { bareTicketId } from '../defaults/ticket-state';
 import { MARKDOWN_SOURCE } from '../defaults/ticket-versions';
 
@@ -74,6 +74,10 @@ type NextLegs = { leg: string; state: string; waiting_on?: string }[];
 
 export interface RunnerOptions {
   api: BatonApi;
+  /** B-229: a separate API for another session's worker, by its secret — how a runner that
+   *  starts ends the claims its host's earlier sessions left (their state files, beside this
+   *  one). Separate, so this runner's own beats never carry the other's secret. Absent: none. */
+  apiFor?: (secret: string) => BatonApi;
   /** The home repository's checkout, whose git the course and the scripts come from. */
   home: string;
   /** The Baton repository id that checkout is (the heartbeat's courses are declared for it). */
@@ -629,6 +633,49 @@ export class Runner {
     if (!this.inflight) for (const id of this.toAck.splice(0)) await this.o.api.ack(id).catch(() => {});
   }
 
+  /** B-229 (R-BTN-26): every other state file beside this session's that still names a claim
+   *  whose lease is lost by the file's own clock — a session that can no longer act on it, the
+   *  same reading its own fence makes — has that claim ended with its own worker's secret, as
+   *  `released:lease-lost`, and the file's claim cleared. A sibling session whose lease still
+   *  holds is a live runner on this host, and is left alone; a file never answered (no
+   *  `last_ok`) holds no lease to read, and is left too. A refusal clears the file (the claim is
+   *  ended or not that worker's any more); a failure to reach Baton leaves it for the next start. */
+  private async endEarlierSessions(): Promise<void> {
+    if (!this.o.apiFor) return;
+    const dir = dirname(this.o.stateFile);
+    let names: string[];
+    try {
+      names = readdirSync(dir).filter((n) => n.endsWith('.json'));
+    } catch {
+      return;
+    }
+    const now = this.now();
+    for (const name of names) {
+      const path = join(dir, name);
+      if (resolve(path) === resolve(this.o.stateFile)) continue;
+      let s: RunnerState;
+      try {
+        s = JSON.parse(readFileSync(path, 'utf8')) as RunnerState;
+      } catch {
+        continue;
+      }
+      if (!s?.claim || typeof s.secret !== 'string' || s.secret === '' || !leaseLostFrom(s, now)) continue;
+      const claim = s.claim;
+      const session = basename(name, '.json');
+      this.log(`baton: ending claim ${claim.id} on ${claim.ticket_id}, left by the earlier session ${session} (its lease is lost)`);
+      try {
+        await this.o.apiFor(s.secret).end(claim.id, { end_reason: 'released:lease-lost', next: null });
+      } catch (e) {
+        if (!(e instanceof BatonRefusal) || e.code === 'unavailable' || e.status >= 500) {
+          this.log(`baton: claim ${claim.id} could not be ended now (${e instanceof Error ? e.message : String(e)}); the next start tries again`);
+          continue;
+        }
+        if (e.code !== 'claim-ended') this.log(`baton: claim ${claim.id} of the earlier session ${session} was refused (${e.message}); its file lets it go`);
+      }
+      new StateFile(path).set({ claim: null });
+    }
+  }
+
   /** An end whose failure is never fatal: claimed-ended is the answer we wanted anyway, and a
    * network failure parks the end for the beats to retry. */
   private async endQuietly(claimId: number, body: Record<string, unknown>): Promise<void> {
@@ -947,6 +994,9 @@ export class Runner {
       this.state.set({ claim: null });
       await this.endQuietly(orphan.id, { end_reason: 'released:lease-lost', next: null });
     }
+    // B-229: and what this host's earlier sessions still hold — each start is a new session with
+    // a new state file, so the orphan above never sees them.
+    await this.endEarlierSessions();
     // B-86: the claim goes out only on the declaration the server holds — `sent` is the list the
     // last answered beat carried, which is what `rewriteSettings` recorded. A runner whose grant
     // arrived on a beat that declared nothing must beat once more before claiming (review round

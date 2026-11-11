@@ -175,7 +175,7 @@ export class BatonCore {
     // §12.8 (B-145): every repository's version 1 — the cooperative preset on a forge,
     // plain-git where the forge is git — so every reader finds one.
     this.store.transaction(() => this.policies.seedAll());
-    if ((await this.ports.scheduler.get()) == null) await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
+    await this.keepAlarm();
     // A trailing webhook dispatch owed from before a restart keeps its time (round 1, 1-A-4);
     // so do a trailing unblocked dispatch and the next reading to lapse (R-BTN-76, R-BTN-77).
     await this.armBy(this.webhooks.nextTrailing());
@@ -315,6 +315,21 @@ export class BatonCore {
     if (repositories.length) this.ports.dispatch.defer(Promise.all(repositories.map((repository) => this.dispatcher({ repository, kind: 'sync', own: true }).catch(() => false))));
   }
 
+  /** B-229 (§2.1): the one alarm is kept by every request and every start, not only a start
+   *  that finds none. An alarm that is missing, or overdue by more than two periods (a platform
+   *  that gave up retrying a failing handler, or never fired it), is set again for the next
+   *  period — found live: no tick ran for days while requests kept arriving, so nothing reaped.
+   *  A request checks at most once a period (the read is the object's cached storage, but most
+   *  requests need not make it at all); a start always checks. */
+  private alarmCheckedAt = -Infinity;
+  private async keepAlarm(fromRequest = false) {
+    const now = this.now();
+    if (fromRequest && now - this.alarmCheckedAt < ALARM_EVERY_MS) return;
+    this.alarmCheckedAt = now;
+    const at = await this.ports.scheduler.get();
+    if (at == null || at < now - 2 * ALARM_EVERY_MS) await this.ports.scheduler.set(now + ALARM_EVERY_MS);
+  }
+
   /** The alarm fires by `at` (§3: one alarm; set earlier, never later). */
   private async armBy(at: number | null) {
     if (at == null) return;
@@ -337,9 +352,21 @@ export class BatonCore {
     await this.armBy(this.webhooks.nextTrailing());
     await this.armBy(this.webhooks.nextDue());
     let lapse: number | null = null;
+    // B-229 (R-BTN-9): the reaper's share commits on its own, before the rest of the tick — a
+    // later step that throws rolls back only itself, never the reaps (found live: twelve claims
+    // held for days past their leases). A reap that could not be written is reported after
+    // everything else has run, so the tick's own work is never lost to it.
+    let unreaped: string[] = [];
+    try {
+      unreaped = this.store.transaction(() => this.claims.alarm());
+    } catch (e) {
+      this.pendingDispatch.clear();
+      throw new Error(`the alarm's reaper failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+    }
+    this.flushDispatch();
+    let stage = 'workers';
     try {
       this.store.transaction(() => {
-        this.claims.alarm();
         this.workers.alarm();
         // R-BTN-76: readings lapse; R-BTN-75: liveness moves the counts; R-BTN-77: a pending
         // `unblocked` message dies with its worker's liveness, and a window's trailing dispatch goes.
@@ -348,35 +375,44 @@ export class BatonCore {
         // R-BTN-78: a queued leg posted waiting for 72 hours is put to the owner. The recount's rows
         // and the stall's decision row are evaluated once, after both, before the dispatch reads
         // what unblocked (B-49).
+        stage = 'resources and blocks';
         lapse = this.blocks.batch(() => {
           const next = this.resources.alarm();
           if (this.blocks.liveChanged()) this.blocks.recount();
           this.blocks.raiseStalled(this.now());
           return next;
         });
+        stage = 'blocks.expireMessages';
         this.blocks.expireMessages();
         // R-BTN-39, R-BTN-116: answers that waited out a hold are applied first — before the
         // expiries, so a person's word wins over a clock that passed while the ticket was held
         // — then a person leg's expiry, due and still unanswered and unheld, arrives at its
         // `expires.reached`: Baton's own settlement, applied at the instant.
+        stage = 'questions';
         this.questions.applyPending();
         this.questions.expireDue(this.now());
+        stage = 'unblocked';
         this.takeUnblocked();
         // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.
+        stage = 'notices';
         this.notices.alarm();
         // R-BTN-81: the history of tickets closed 90 days ago goes.
+        stage = 'history.purge';
         this.history.purge();
         // §12.8 (B-145, R-BTN-189): a protection report that lapsed past its 24 hours stops
         // feeding `no-runner-lands` — every repository with floors is re-judged, and a newly
         // broken one stops offering claims and releases its running ones.
+        stage = 'policies.enforceFloors';
         this.policies.enforceFloors();
         // R-BTN-174: a non-live worker's derived rows go 30 days after it was last live, and a
         // revoked grant's rows go with the grant.
+        stage = 'ontologies.upkeep';
         this.ontologies.upkeep();
       });
     } catch (e) {
       this.pendingDispatch.clear(); // rolled back: nothing to tell the mirror
-      throw e;
+      // B-229: the step is named, so a tick that keeps failing says where.
+      throw new Error(`the alarm's tick failed at ${stage} (its reaps committed): ${e instanceof Error ? e.message : String(e)}`, { cause: e });
     }
     this.flushDispatch();
     await this.armBy(lapse);
@@ -394,6 +430,9 @@ export class BatonCore {
     if (ontologyDue != null) await this.armBy(ontologyDue);
     // R-BTN-116: the earliest person expiry still pending, so the alarm wakes at the instant.
     await this.armBy(this.questions.nextDue());
+    // B-229: a reap that could not be written fails the tick only now, after its work: the
+    // failure reaches the host's log naming each claim, and the next tick tries it again.
+    if (unreaped.length) throw new Error(`the alarm could not reap ${unreaped.length} claim(s): ${unreaped.join('; ')}`);
   }
 
   /** R-BTN-77: each repository's unblocked dispatch due now, queued to send after the commit. */
@@ -423,6 +462,7 @@ export class BatonCore {
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     this.pendingDispatch.clear();
+    await this.keepAlarm(true);
     try {
       const res = await this.route(req, url);
       // An error answer means its transaction rolled back: nothing changed to mirror.

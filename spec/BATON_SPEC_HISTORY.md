@@ -2621,7 +2621,26 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   owner accepted collapsing it ("I accept all recommendations"): the split rested on a leg being
   able to act as its runner. `independent-review` counts labelled runs as their own domains; the
   `domains.per_run`-empty condition and the floor case are gone; S-BTN-205 follows.
+- **2026-11-11 — §2.1's one alarm is kept by every request** (B-229).
+  Rules changed: R-BTN-9.
+  After the reaper's fix was deployed the twelve claims stayed held, and a live tail showed no
+  alarm firing at all while requests kept arriving. The alarm was set only by a start that found
+  none, so one the platform had stopped firing was never set again. Every start, and a request
+  at most once a period, now sets a missing or more than two periods overdue alarm for the next
+  period.
+
+- **2026-11-11 — R-BTN-6 and §9.5's reaping** (B-229).
+  Rules changed: R-BTN-6.
+  On 2026-11-10 the board still listed twelve claims of `oc-vltava2-vm0` whose leases had ended
+  between 2026-10-30 and 2026-11-06, and claim 123 on B-150 outlived vltava2's runner until it
+  was ended by hand. The alarm ran the reaper and every other step of its tick in one
+  transaction, so any step that threw rolled back every reap, every minute; and a restarted
+  runner, a new session with a new state file, never saw the claim its predecessor left. The
+  reaps now commit on their own, each claim's apart, and a failing tick names its step; a runner
+  that starts ends what its host's earlier sessions still hold once their leases are lost.
+
 - **2026-11-10 — §8.3's immediate stop** (B-227).
+  Rules changed: R-BTN-72.
   The first leg vltava2 ran through the E2B executor did not take an immediate stop: the
   standard stubs never passed `ctx.signal` to their agent, so no release reached a safe point,
   and the hard stop killed the runner's call but left the session — the sandbox ran on, its
@@ -2639,6 +2658,31 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   GitHub app." An answer whose errors all refuse check suites now stands, and that repository's
   checks are its heads' Actions workflow runs. Retired text: "an answer with `errors` fails the
   sync."
+
+- **2026-11-11 — R-BTN-131: a fix from the gate's red must push** (B-231).
+  Rules changed: R-BTN-131.
+  B-167's fix legs on vltava2 reached `fixed` four times without a commit, and each time the
+  `run-tests` gate tested the unchanged tree again and recorded red, up to the course's 30 runs.
+  A `fix` run from `pr-open` or `fixed` now reads the ticket's PR branch heads before its agent
+  and after; unchanged, the leg fails (`cannot-finish:transient`, a counted attempt, so R-BTN-122's
+  backoff and hold reach the owner) instead of reporting a fix. From `reviewed` nothing changes:
+  a fix may answer a review's findings without a push. The other candidates were rejected: the
+  gate comparing its tested tree with its last red marker's (a station-function change for the
+  same signal), and a fix leg's own time ceiling (R-BTN-167's leg deadline already bounds a leg).
+
+- **2026-11-11 — R-BTN-131: a run-tests run that never reached the tests is no verdict** (B-230).
+  Rules changed: R-BTN-131.
+  On vltava2 every `run-tests` gate of B-167 ran in a leg checkout without `node_modules` and
+  ended `sh: 1: vitest: not found` (exit 127), which the gate recorded as `Baton-Tests: red`: five
+  red markers sent fix legs after code that was never tested, until the ninth ran into the
+  executor's leg timeout. B-168's gate then outlived the 240 s bound, red again. R-BTN-131 now says
+  what the gate's verdict is: the script's own exit. Dependencies declared and none installed, the
+  shell's 126 or 127, npm's missing script, and a run that outlives the bound fail the leg
+  (`cannot-finish:transient`, a counted attempt) with no marker. The bound is a setup failure,
+  not red, because a hung test is caught by the runner's per-test timeouts as a failure the
+  script reports; a whole run that outlives the bound says the environment or the bound is short,
+  which no fix leg can change. Retired text (the stub's): "a timeout or output overflow is red
+  too, named" — output overflow stays red.
 
 - **2026-11-09 — R-BTN-182, §12.8** (B-184).
   Rules changed: R-BTN-182.
