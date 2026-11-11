@@ -2622,6 +2622,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   able to act as its runner. `independent-review` counts labelled runs as their own domains; the
   `domains.per_run`-empty condition and the floor case are gone; S-BTN-205 follows.
 - **2026-11-10 — §8.3's immediate stop** (B-227).
+  Rules changed: R-BTN-72.
   The first leg vltava2 ran through the E2B executor did not take an immediate stop: the
   standard stubs never passed `ctx.signal` to their agent, so no release reached a safe point,
   and the hard stop killed the runner's call but left the session — the sandbox ran on, its
