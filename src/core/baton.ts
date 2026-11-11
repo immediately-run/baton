@@ -171,7 +171,7 @@ export class BatonCore {
     // §12.8 (B-145): every repository's version 1 — the cooperative preset on a forge,
     // plain-git where the forge is git — so every reader finds one.
     this.store.transaction(() => this.policies.seedAll());
-    if ((await this.ports.scheduler.get()) == null) await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
+    await this.keepAlarm();
     // A trailing webhook dispatch owed from before a restart keeps its time (round 1, 1-A-4);
     // so do a trailing unblocked dispatch and the next reading to lapse (R-BTN-76, R-BTN-77).
     await this.armBy(this.webhooks.nextTrailing());
@@ -293,6 +293,21 @@ export class BatonCore {
    *  `last_dispatch_at + SYNC_STALE_MS` (§7.1, round 4 finding 3). */
   private syncNow(repositories: string[]) {
     if (repositories.length) this.ports.dispatch.defer(Promise.all(repositories.map((repository) => this.dispatcher({ repository, kind: 'sync', own: true }).catch(() => false))));
+  }
+
+  /** B-229 (§2.1): the one alarm is kept by every request and every start, not only a start
+   *  that finds none. An alarm that is missing, or overdue by more than two periods (a platform
+   *  that gave up retrying a failing handler, or never fired it), is set again for the next
+   *  period — found live: no tick ran for days while requests kept arriving, so nothing reaped.
+   *  A request checks at most once a period (the read is the object's cached storage, but most
+   *  requests need not make it at all); a start always checks. */
+  private alarmCheckedAt = -Infinity;
+  private async keepAlarm(fromRequest = false) {
+    const now = this.now();
+    if (fromRequest && now - this.alarmCheckedAt < ALARM_EVERY_MS) return;
+    this.alarmCheckedAt = now;
+    const at = await this.ports.scheduler.get();
+    if (at == null || at < now - 2 * ALARM_EVERY_MS) await this.ports.scheduler.set(now + ALARM_EVERY_MS);
   }
 
   /** The alarm fires by `at` (§3: one alarm; set earlier, never later). */
@@ -426,6 +441,7 @@ export class BatonCore {
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     this.pendingDispatch.clear();
+    await this.keepAlarm(true);
     try {
       const res = await this.route(req, url);
       // An error answer means its transaction rolled back: nothing changed to mirror.

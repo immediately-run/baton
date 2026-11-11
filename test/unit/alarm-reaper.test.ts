@@ -72,3 +72,54 @@ describe('B-229 the alarm\'s reaper commits on its own', () => {
     expect(await claimRow(bad)).toMatchObject({ status: 'reaped', end_reason: 'reaped:silent' });
   });
 });
+
+// B-229, found live after the reaper's fix: no tick ran at all — the alarm was armed only by a
+// start that found none, so one the platform stopped firing was never set again. Must hold: any
+// request sets a missing or long-overdue alarm for the next period, and leaves a due one alone.
+describe('B-229 every request keeps the one alarm', () => {
+  /** The alarm the core holds after one request, starting from `armed`. */
+  async function afterRequest(armed: number | null, host: 'vm-a' | 'vm-b' = 'vm-a'): Promise<number | null> {
+    const seen: { at: number | null } = { at: armed };
+    const restore = await withCore((core: any) => {
+      const real = core.ports.scheduler;
+      core.alarmCheckedAt = -Infinity; // each case is a request the once-a-period check makes
+      core.ports.scheduler = { get: async () => seen.at, set: async (at: number) => { seen.at = at; } };
+      return () => { core.ports.scheduler = real; };
+    });
+    try {
+      await register(host);
+    } finally {
+      await withCore(() => restore());
+    }
+    return seen.at;
+  }
+
+  it('a missing alarm is set for the next period', async () => {
+    expect(await afterRequest(null)).toBe(T0 + 60_000);
+  });
+
+  it('an alarm more than two periods overdue is set again', async () => {
+    expect(await afterRequest(T0 - 3 * 60_000)).toBe(T0 + 60_000);
+  });
+
+  it('an alarm set for later, or only just due, is left as it is', async () => {
+    expect(await afterRequest(T0 + 30_000)).toBe(T0 + 30_000);
+    expect(await afterRequest(T0 - 60_000, 'vm-b')).toBe(T0 - 60_000);
+  });
+
+  it('a request within a period of the last check does not read the alarm again', async () => {
+    await afterRequest(T0 + 30_000);
+    let reads = 0;
+    const restore = await withCore((core: any) => {
+      const real = core.ports.scheduler;
+      core.ports.scheduler = { get: async () => { reads++; return null; }, set: async () => {} };
+      return () => { core.ports.scheduler = real; };
+    });
+    try {
+      await register('vm-b');
+    } finally {
+      await withCore(() => restore());
+    }
+    expect(reads).toBe(0);
+  });
+});
