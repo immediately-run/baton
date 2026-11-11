@@ -291,3 +291,20 @@ These are its lessons, newest understanding first.
   advisory now** (the owner, 2026-11-06): `model-report` validates what is pasted — green with
   none, red only for a pasted report that shows a failed check — and R-BTN-68 says so. *Status:
   the gate is gone; the weekly `model:full` and the hunger for a tractable replay remain.*
+
+## 2026-11-10 — the owner key and the administrator key, both lost
+
+Rotating `baton`'s owner key on `https://baton.immediately.run` found that the deployed owner
+(`SHA256:iY5p…`, the one `wrangler.toml`'s `owner_keys` named) and the only `BATON_ADMIN_KEYS`
+line (`SHA256:lck7…`) were each held on one machine, and neither machine was at hand. The CLI had
+no key that could add an owner. Recovery went through the root of trust (R-BTN-57): a new
+administrator key written with `wrangler secret put BATON_ADMIN_KEYS`, then
+`admin repo set baton --add-owner-key`, then `admin revoke` of the lost owner key. The deployment
+has no `BATON_HUMAN_KEYS`, so had `baton`'s `approvers.members` been human-only, the
+administrator's add would have been refused and nothing short of a new break-glass secret would
+have opened it.
+
+- **One owner key and one administrator key, each on one machine, means the Cloudflare account is
+  the only way back.** What changed: [the owner-key-loss runbook](runbooks/owner-key-loss.mdx)
+  writes the path down; `wrangler.toml` names the new owner key. *Still true until a second owner
+  key or an offline copy exists for each role.*
