@@ -41,7 +41,8 @@ Two things in `create-pr` run without an agent (2026-10-24):
   declared and none installed, a command the script names not found (exit 127) or not
   executable (126), a missing script, or a run longer than the gate's bound fails the leg with no
   marker, and the ticket goes back to the board as an environment failure rather than to `fix`
-  (B-230). The gate may run 30 times (and `fix` 30 with it) while the review
+  (B-230). A `fix` after a red gate must push: one that leaves the PR branch where it was fails
+  its leg instead of sending the same tree back to the gate (B-231). The gate may run 30 times (and `fix` 30 with it) while the review
   rounds stay at 3: the gate is deterministic and cheap, and spending retries there harms
   nothing the way a wasted review round does. A repository whose suite runs longer than the
   gate's bound raises it in its own copy of the leg script (`baton repo init --course create-pr

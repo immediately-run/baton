@@ -825,6 +825,47 @@ describe('baton repo init, through the built CLI', () => {
     }
   }, 120_000);
 
+  it('B-231: from the gate\'s red a fix that pushed nothing fails the leg; one that pushed reaches fixed; from reviewed nothing changes', async () => {
+    const g = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const origin = mkdtempSync(join(tmpdir(), 'baton-fix-origin-'));
+    const scratch = mkdtempSync(join(tmpdir(), 'baton-fix-legs-'));
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const scaffolded = readFileSync(settingsFile, 'utf8');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' });
+    g('remote', 'add', 'origin', origin);
+    const main = g('rev-parse', 'HEAD');
+    try {
+      // The agent: `true` pushes nothing; push.sh adds a commit to the PR branch and pushes it.
+      writeFileSync(join(root, 'push.sh'), '#!/bin/sh\ngit -C "$(dirname "$0")" commit -q --allow-empty -m fix && git -C "$(dirname "$0")" push -q origin HEAD:refs/heads/claude/A-1-fix\n');
+      chmodSync(join(root, 'push.sh'), 0o755);
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'true' }));
+      const quiet = { sha: commitAll(root) };
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: join(root, 'push.sh') }));
+      const pushing = { sha: commitAll(root) };
+      g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      g('push', '-q', 'origin', 'HEAD:refs/heads/claude/A-1-fix');
+      copyFileSync(join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs'), join(scratch, 'fix.mjs'));
+      const stub = await load(join(scratch, 'fix.mjs'));
+      const ctx = (station: string, snapshot: { sha: string }) => ({ ticket: { id: 'A-1' }, checkout: root, snapshot, claim: { station, nonce: 'n1' } });
+      const head = g('rev-parse', 'HEAD');
+      // From the gate's red, at fixed or pr-open: the agent exited 0 and pushed nothing — no fix.
+      await expect(stub.run(ctx('fixed', quiet))).rejects.toThrow(`the fix leg pushed nothing: claude/A-1-fix at ${head.slice(0, 10)} is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)`);
+      await expect(stub.run(ctx('pr-open', quiet))).rejects.toThrow('the fix leg pushed nothing');
+      // From a review's changes, a fix may answer the findings without a push: unchanged (B-110).
+      expect(await stub.run(ctx('reviewed', quiet))).toEqual({ reached: 'fixed', next: 'run-tests' });
+      // A fix that pushed reaches fixed.
+      expect(await stub.run(ctx('fixed', pushing))).toEqual({ reached: 'fixed', next: 'run-tests' });
+      expect(execFileSync('git', ['-C', origin, 'rev-parse', 'refs/heads/claude/A-1-fix'], { encoding: 'utf8' }).trim()).not.toBe(head);
+    } finally {
+      g('reset', '-q', '--hard', main);
+      g('remote', 'remove', 'origin');
+      rmSync(origin, { recursive: true, force: true });
+      rmSync(scratch, { recursive: true, force: true });
+      rmSync(join(root, 'push.sh'), { force: true });
+      writeFileSync(settingsFile, scaffolded);
+    }
+  }, 120_000);
+
   it('the stubs run the agent_command baton.json names at the claim’s snapshot, arguments and all; the review returns its verdict', async () => {
     const agent = join(root, 'agent.sh');
     writeFileSync(agent, '#!/bin/sh\necho "$1 $2 $3 $4" > "$(dirname "$0")/agent.args"\necho "reviewing"\necho "$VERDICT"\n');
