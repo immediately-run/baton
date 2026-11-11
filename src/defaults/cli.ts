@@ -1329,15 +1329,16 @@ const PR_URL = `/${PR_URL_RE.source}/`;
  * non-interactive exactly as B-94 bounds git. The run is the leg's own process, so the runner
  * beats while it waits. The script's exit is the gate's whole verdict: green advances to
  * `review`, red routes to `fix` — never back to `implement` — from the station the claim sits at
- * (`ctx.claim.station`: making the tests green is fixing, wherever the push came from); a
- * timeout or output overflow is red too, named; npm that cannot start, or a kill the bound did
- * not send, fails the leg — no verdict, no marker (finding 14). The marker is made here with
+ * (`ctx.claim.station`: making the tests green is fixing, wherever the push came from); output
+ * overflow is red too, named; npm that cannot start, a kill the bound did not send (finding 14),
+ * and a run that never reached the tests (B-230: dependencies declared and none installed, the
+ * shell's 126/127, npm's missing script, the bound itself) fail the leg — no verdict, no marker. The marker is made here with
  * `git commit-tree` — an empty-tree commit on the tested head, naming it (`Baton-Tested`) — and
  * the close (`testsClose`) pushes it to that branch. A repository replaces the run as any leg's
  * (`legs/run-tests.run.mjs`, R-BTN-131), keeping the close. */
 export function testsStubSource(b: BuiltIn, course: string, leg: string): string {
   return `import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -1395,8 +1396,17 @@ function verdictOf(cwd, script) {
     // trailer block stays the message's last.
     const tail = [String(e?.stdout ?? ''), String(e?.stderr ?? '')].join('\\n').split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n');
     const named = (why) => ({ tests: 'red', tail: 'npm run ' + script + ' ' + why + (tail ? '; its last lines:\\n' + tail : '; it printed nothing') });
-    if (e?.code === 'ETIMEDOUT') return named('timed out after ' + Math.round(RUN_TESTS_TIMEOUT_MS / 1000) + ' s');
+    // B-230: a run that never reached the tests is no verdict — red would send a fix leg after
+    // code that was never tested (B-167: five red markers, every one \`vitest: not found\`). The
+    // shell's own 126/127 (a command not executable, or not found: the test runner, a missing
+    // dependency's bin) and npm's missing script fail the leg naming that, as npm that cannot
+    // start does; so does the bound: per-test timeouts catch a hung test as a failure the script
+    // reports, so a whole run that outlives the bound says the environment or the bound is short.
+    const setup = (why) => new Error('npm run ' + script + ' ' + why + ' — the tests never ran: no verdict, no marker' + (tail ? '; its last lines:\\n' + tail : ''));
+    if (e?.code === 'ETIMEDOUT') throw setup('outlived the gate’s bound of ' + Math.round(RUN_TESTS_TIMEOUT_MS / 1000) + ' s (a suite that needs longer raises it in its own copy of this leg)');
     if (e?.code === 'ENOBUFS') return named('printed more than ' + OUTPUT_MAX + ' bytes');
+    if (e?.status === 126 || e?.status === 127) throw setup('exited ' + e.status + ', a command its script names could not be run (not found, or not executable)');
+    if (/\\bMissing script:/.test(String(e?.stderr ?? ''))) throw setup('has no such script in package.json');
     if (typeof e?.status === 'number') return named('exited ' + e.status);
     if (e?.signal) throw new Error('npm run ' + script + ' was killed by ' + e.signal + ', which the gate did not send — no verdict, no marker');
     throw new Error('npm run ' + script + ' could not run (' + (e?.code ?? e?.message ?? String(e)) + ') — no verdict, no marker');
@@ -1445,6 +1455,14 @@ async function standard(ctx) {
     gitRun(['-C', ctx.checkout, 'worktree', 'add', '-q', '--detach', tree, tested]);
     const modules = join(ctx.checkout, 'node_modules');
     if (existsSync(modules) && !existsSync(join(tree, 'node_modules'))) symlinkSync(modules, join(tree, 'node_modules'), 'dir');
+    // B-230: a package that declares dependencies and has none installed cannot run its tests —
+    // no verdict, rather than a red that names whichever bin was missing first.
+    let pkg = {};
+    try { pkg = JSON.parse(readFileSync(join(tree, 'package.json'), 'utf8')); } catch { /* no package.json: npm says so */ }
+    const declared = ['dependencies', 'devDependencies'].some((k) => pkg && typeof pkg[k] === 'object' && pkg[k] !== null && Object.keys(pkg[k]).length > 0);
+    if (declared && !existsSync(join(tree, 'node_modules'))) {
+      throw new Error('npm run ' + script + ' cannot run: ' + branch + ' declares dependencies and neither the tested tree nor the home checkout has node_modules — install them where the leg runs (npm ci); the tests never ran: no verdict, no marker');
+    }
     verdict = verdictOf(tree, script);
   } finally {
     try { unlinkSync(join(tree, 'node_modules')); } catch { /* no link made */ }
