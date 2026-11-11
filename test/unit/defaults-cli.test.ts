@@ -789,7 +789,24 @@ describe('baton repo init, through the built CLI', () => {
       expect(exited.tail).toBe('npm run test exited 2; its last lines:\ntwo failed');
       writeFileSync(join(bin, 'npm'), '#!/bin/sh\nkill -TERM $$\n');
       await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test was killed by SIGTERM, which the gate did not send');
+      // B-230: a run that never reached the tests is no verdict either — the shell's 127 and 126
+      // (B-167's every gate: `vitest: not found`) and npm's missing script fail the leg, naming it.
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho "sh: 1: vitest: not found" >&2\nexit 127\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow(/npm run test exited 127, a command its script names could not be run \(not found, or not executable\) — the tests never ran: no verdict, no marker; its last lines:\nsh: 1: vitest: not found/);
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\nexit 126\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test exited 126, a command its script names could not be run');
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho "npm error Missing script: \\"test\\"" >&2\nexit 1\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test has no such script in package.json — the tests never ran');
       process.env.PATH = path;
+      // B-230: dependencies declared and none installed — neither the tested tree nor the home
+      // checkout has node_modules — is no verdict, before npm runs at all.
+      g('checkout', '-q', 'claude/A-1-gate');
+      writeFileSync(join(root, 'package.json'), `${JSON.stringify({ name: 'scaffold-gate', scripts: { test: 'node gate.mjs' }, devDependencies: { vitest: '1.0.0' } }, null, 2)}\n`);
+      commitAll(root);
+      g('push', '-q', 'origin', 'HEAD:refs/heads/claude/A-1-gate');
+      g('checkout', '-q', 'main');
+      expect(existsSync(join(root, 'node_modules'))).toBe(false);
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test cannot run: claude/A-1-gate declares dependencies and neither the tested tree nor the home checkout has node_modules');
       // The gate runs only at its two stations, and only on a branch it can reach.
       await expect(stub.run(ctx('reviewed'))).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not "reviewed"');
       await expect(stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot: { sha: main } })).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not null');
@@ -805,6 +822,47 @@ describe('baton repo init, through the built CLI', () => {
       rmSync(origin, { recursive: true, force: true });
       rmSync(bin, { recursive: true, force: true });
       writeFileSync(courseFile, courseBefore);
+    }
+  }, 120_000);
+
+  it('B-231: from the gate\'s red a fix that pushed nothing fails the leg; one that pushed reaches fixed; from reviewed nothing changes', async () => {
+    const g = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const origin = mkdtempSync(join(tmpdir(), 'baton-fix-origin-'));
+    const scratch = mkdtempSync(join(tmpdir(), 'baton-fix-legs-'));
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const scaffolded = readFileSync(settingsFile, 'utf8');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' });
+    g('remote', 'add', 'origin', origin);
+    const main = g('rev-parse', 'HEAD');
+    try {
+      // The agent: `true` pushes nothing; push.sh adds a commit to the PR branch and pushes it.
+      writeFileSync(join(root, 'push.sh'), '#!/bin/sh\ngit -C "$(dirname "$0")" commit -q --allow-empty -m fix && git -C "$(dirname "$0")" push -q origin HEAD:refs/heads/claude/A-1-fix\n');
+      chmodSync(join(root, 'push.sh'), 0o755);
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'true' }));
+      const quiet = { sha: commitAll(root) };
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: join(root, 'push.sh') }));
+      const pushing = { sha: commitAll(root) };
+      g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      g('push', '-q', 'origin', 'HEAD:refs/heads/claude/A-1-fix');
+      copyFileSync(join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs'), join(scratch, 'fix.mjs'));
+      const stub = await load(join(scratch, 'fix.mjs'));
+      const ctx = (station: string, snapshot: { sha: string }) => ({ ticket: { id: 'A-1' }, checkout: root, snapshot, claim: { station, nonce: 'n1' } });
+      const head = g('rev-parse', 'HEAD');
+      // From the gate's red, at fixed or pr-open: the agent exited 0 and pushed nothing — no fix.
+      await expect(stub.run(ctx('fixed', quiet))).rejects.toThrow(`the fix leg pushed nothing: claude/A-1-fix at ${head.slice(0, 10)} is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)`);
+      await expect(stub.run(ctx('pr-open', quiet))).rejects.toThrow('the fix leg pushed nothing');
+      // From a review's changes, a fix may answer the findings without a push: unchanged (B-110).
+      expect(await stub.run(ctx('reviewed', quiet))).toEqual({ reached: 'fixed', next: 'run-tests' });
+      // A fix that pushed reaches fixed.
+      expect(await stub.run(ctx('fixed', pushing))).toEqual({ reached: 'fixed', next: 'run-tests' });
+      expect(execFileSync('git', ['-C', origin, 'rev-parse', 'refs/heads/claude/A-1-fix'], { encoding: 'utf8' }).trim()).not.toBe(head);
+    } finally {
+      g('reset', '-q', '--hard', main);
+      g('remote', 'remove', 'origin');
+      rmSync(origin, { recursive: true, force: true });
+      rmSync(scratch, { recursive: true, force: true });
+      rmSync(join(root, 'push.sh'), { force: true });
+      writeFileSync(settingsFile, scaffolded);
     }
   }, 120_000);
 

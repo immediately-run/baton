@@ -2651,6 +2651,31 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   checks are its heads' Actions workflow runs. Retired text: "an answer with `errors` fails the
   sync."
 
+- **2026-11-11 — R-BTN-131: a fix from the gate's red must push** (B-231).
+  Rules changed: R-BTN-131.
+  B-167's fix legs on vltava2 reached `fixed` four times without a commit, and each time the
+  `run-tests` gate tested the unchanged tree again and recorded red, up to the course's 30 runs.
+  A `fix` run from `pr-open` or `fixed` now reads the ticket's PR branch heads before its agent
+  and after; unchanged, the leg fails (`cannot-finish:transient`, a counted attempt, so R-BTN-122's
+  backoff and hold reach the owner) instead of reporting a fix. From `reviewed` nothing changes:
+  a fix may answer a review's findings without a push. The other candidates were rejected: the
+  gate comparing its tested tree with its last red marker's (a station-function change for the
+  same signal), and a fix leg's own time ceiling (R-BTN-167's leg deadline already bounds a leg).
+
+- **2026-11-11 — R-BTN-131: a run-tests run that never reached the tests is no verdict** (B-230).
+  Rules changed: R-BTN-131.
+  On vltava2 every `run-tests` gate of B-167 ran in a leg checkout without `node_modules` and
+  ended `sh: 1: vitest: not found` (exit 127), which the gate recorded as `Baton-Tests: red`: five
+  red markers sent fix legs after code that was never tested, until the ninth ran into the
+  executor's leg timeout. B-168's gate then outlived the 240 s bound, red again. R-BTN-131 now says
+  what the gate's verdict is: the script's own exit. Dependencies declared and none installed, the
+  shell's 126 or 127, npm's missing script, and a run that outlives the bound fail the leg
+  (`cannot-finish:transient`, a counted attempt) with no marker. The bound is a setup failure,
+  not red, because a hung test is caught by the runner's per-test timeouts as a failure the
+  script reports; a whole run that outlives the bound says the environment or the bound is short,
+  which no fix leg can change. Retired text (the stub's): "a timeout or output overflow is red
+  too, named" — output overflow stays red.
+
 - **2026-11-09 — R-BTN-182, §12.8** (B-184).
   Rules changed: R-BTN-182.
   The owner: "I don't want the merge leg to be different from the other legs for the plain baton

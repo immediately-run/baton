@@ -2,7 +2,7 @@
 title: "B-231 — A fix leg that pushes nothing reports fixed, and the gate runs the same tests again: a loop of up to 30 runs on an unchanged tree"
 id: B-231
 project: baton
-status: available
+status: in-review
 updated: 2026-11-11
 repos:
   - baton
@@ -31,18 +31,36 @@ starting at 00:22:01.
 
 ### What to build
 
-To be designed. Candidates:
-- the fix stub's close refuses `fixed` when HEAD has not moved;
-- the gate compares `Baton-Tested` with the last red marker's tree and stops to adjudicate;
-- a ceiling on a fix leg's time, below the executor's 4 h.
+Decided: the first candidate, in the fix stub. A `fix` run from the gate's red (`ctx.claim.station`
+`pr-open` or `fixed`) reads the ticket's PR branch heads in the home repository (`git ls-remote`,
+by the course's branch patterns, as the run-tests stub finds its branch) before the agent runs and
+after. When they are unchanged, the leg fails: no position, so the claim ends
+`cannot-finish:transient`, a counted attempt for `fix` whose backoff and hold (R-BTN-122) bring
+it to the owner. From `reviewed` the stub is unchanged, since a fix may answer a review's findings
+without a push. With no PR branch found before, there is nothing to compare and the leg reports as before.
+
+The built-in leg carries the rule as `pushes: 'after-red'` (`src/defaults/courses.ts`); the stub
+template is `src/defaults/cli.ts`. R-BTN-131 states it.
+
+Rejected:
+- **The gate comparing `Baton-Tested` with its last red marker's tree:** the same signal, but as
+  a station-function change.
+- **A fix leg's own time ceiling:** R-BTN-167's leg deadline already bounds a leg. B-167's ninth
+  leg ran into the executor's 4 h instead, because the deadline is the course's to set.
 
 ### Trust
 
-To be written with the design.
+No new input: the stub reads the PR branch heads from the home repository, as run-tests does.
+An agent can still push a meaningless commit to pass the check, which only sends the gate a new
+tree to test.
 
 ### Invariants
 
-To be written with the design.
+- **R-BTN-131, the gate's verdict is the script's.** Unchanged.
+- **B-110, red routes to `fix`, never back to `implement`.** Unchanged; a fix that cannot fix
+  now ends its claim rather than loop.
+- **§9.7, attempts are per ticket and leg.** The failed fix counts against `fix`. A completed
+  `fix` resets the count, as before.
 
 ## Status
 
