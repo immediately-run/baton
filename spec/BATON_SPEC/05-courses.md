@@ -686,7 +686,11 @@ mean (R-BTN-50).
     queuing `review` and red `fix`; a run that never reached the tests is no verdict and fails
     the leg (`released:cannot-finish:transient`) with no marker — dependencies declared and none
     installed, the shell's 126 or 127, npm's missing script, npm that cannot start, or a run that
-    outlives the gate's bound. `review-pr` reviews a PR named in `prs:`: each pusher's
+    outlives the gate's bound. A `fix` run from the gate's red (`pr-open`, `fixed`) must push:
+    when the ticket's PR branch heads are where they were before its agent ran, it fails the leg
+    the same way and reports no position, since the gate would test the same tree again; from
+    `reviewed`, where a fix may answer the findings without a push, it is unchanged.
+    `review-pr` reviews a PR named in `prs:`: each pusher's
     verdict is a round; after changes the next waits on `author` until a push; on close or when
     rounds run out `conclude` is queued, and a pusher's `<!-- baton:concluded -->` is that leg.
     A commenting leg's answer line may name its PR (`<answer> <PR URL>`; `conclude`'s the URL

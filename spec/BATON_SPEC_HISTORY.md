@@ -2641,6 +2641,17 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   checks are its heads' Actions workflow runs. Retired text: "an answer with `errors` fails the
   sync."
 
+- **2026-11-11 — R-BTN-131: a fix from the gate's red must push** (B-231).
+  Rules changed: R-BTN-131.
+  B-167's fix legs on vltava2 reached `fixed` four times without a commit, and each time the
+  `run-tests` gate tested the unchanged tree again and recorded red, up to the course's 30 runs.
+  A `fix` run from `pr-open` or `fixed` now reads the ticket's PR branch heads before its agent
+  and after; unchanged, the leg fails (`cannot-finish:transient`, a counted attempt, so R-BTN-122's
+  backoff and hold reach the owner) instead of reporting a fix. From `reviewed` nothing changes:
+  a fix may answer a review's findings without a push. The other candidates were rejected: the
+  gate comparing its tested tree with its last red marker's (a station-function change for the
+  same signal), and a fix leg's own time ceiling (R-BTN-167's leg deadline already bounds a leg).
+
 - **2026-11-11 — R-BTN-131: a run-tests run that never reached the tests is no verdict** (B-230).
   Rules changed: R-BTN-131.
   On vltava2 every `run-tests` gate of B-167 ran in a leg checkout without `node_modules` and

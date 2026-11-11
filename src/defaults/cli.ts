@@ -1085,7 +1085,7 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * not the leg's outcome. The bundled `close` writes the closing marker where the course's
  * convention puts it. */
 function stubSource(b: BuiltIn, course: string, leg: string): string {
-  const { ask, position, verify } = b.legs[leg];
+  const { ask, position, verify, pushes } = b.legs[leg];
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
@@ -1142,7 +1142,9 @@ function advisedCommand(words, settings, adviceFile) {
 }${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
-import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
+import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
+import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
+import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};` : ''}
 // The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
 // repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the
 // checkout as its arguments and the leg's instructions in the file BATON_INSTRUCTIONS names. The
@@ -1208,7 +1210,18 @@ async function standard(ctx) {
   // a path the snapshot lacks means deleted: \`ls-tree\` lists nothing for it and succeeds (git
   // translates its messages, and \`cat-file -e\` exits 128 for every failure alike), so any
   // failure of the probe itself stops the leg.
-  const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
+${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must push. The ticket's PR branch
+  // heads in the home repository, by the course's patterns, are read before the agent runs and
+  // after; unchanged, the leg fails rather than report a fix of a tree the gate already tested red.
+  const redEdge = ctx.claim?.station === 'pr-open' || ctx.claim?.station === 'fixed';
+  const prHeads = () => {
+    const own = (Array.isArray(settings.courses) ? settings.courses : []).find((c) => c && c.id === ${JSON.stringify(b.id)}) ?? {};
+    const id = bareTicketId(ctx.ticket);
+    const wanted = matchPatterns([own.branch_pattern ?? DEFAULT_BRANCH_PATTERN, own.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '')).map((p) => p.replace(/\\{ticket\\}/g, id));
+    return gitRun('git', ['-C', ctx.checkout, 'ls-remote', '--heads', 'origin']).split('\\n').filter((l) => { const r = l.split('\\t')[1] ?? ''; return r.startsWith('refs/heads/') && wanted.some((p) => branchMatches(p, r.slice('refs/heads/'.length))); }).sort().join('\\n');
+  };
+  const headsBefore = redEdge ? prHeads() : '';
+` : ''}  const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
   const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() !== '';
   const text = present ? show(rel) : null;
   const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
@@ -1287,7 +1300,10 @@ async function standard(ctx) {
     child.stdin?.end();
   }).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
-  });${names ? `
+  });${pushes ? `
+  if (headsBefore !== '' && prHeads() === headsBefore) {
+    throw new Error('the ${leg} leg pushed nothing: ' + headsBefore.split('\\n').map((l) => l.split('\\t')[1].slice('refs/heads/'.length) + ' at ' + l.slice(0, 10)).join(', ') + ' is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)');
+  }` : ''}${names ? `
   // The answer (B-85): the last line that opens with the leg's value word, wherever it sits —
   // prose before or after it is the agent's, not a lost round — and, on that line, the PR its
   // line goes on. A leg with no answer names its PR by a last line that is a PR URL alone; any
