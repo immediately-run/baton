@@ -32,9 +32,12 @@ const PUBLIC = new Set(['/', '/login', '/ui/app.css', '/ui/app.js']);
  *  no-store`): the two delivery routes, the probe, the human-key and courier routes; `/v1/ui/*`
  *  and `POST /v1/login` join them in `front`. */
 const AUTHORIZED = /^\/(v1\/(github\/webhook|forges\/[^/]+\/notify|probe\/readings|human-keys|login|courier\/))/;
-/** Every route `route` verifies a signature, an API key or a bearer for — the same path shapes
- *  it matches, so an answer never leaves without the header where one does. */
-const AUTHENTICATED = /^\/(v1\/(sync\/|runner\/|admin\/|owner\/|repositories\/[^/]+\/(stats|blocked|board|policy|attestations|tickets\/[^/]+\/(blocks|history)))|v1\/ui\/)/;
+/** Every route `route` verifies a signature, an API key or a bearer for, and every path
+ *  `dashboardPrincipal` answers — a bare `/v1/ui` and `/v1/ui/*`, and an `/ui/` path that is no
+ *  public file — the same shapes `route` matches, so an answer never leaves without the header
+ *  where one does (a bare `/v1/ui`'s `not-found` and an unknown `/ui/` page's included; the
+ *  public pages and files in `PUBLIC` are served with their own). */
+const AUTHENTICATED = /^\/(v1\/(sync\/|runner\/|admin\/|owner\/|repositories\/[^/]+\/(stats|blocked|board|policy|attestations|tickets\/[^/]+\/(blocks|history))|ui(\/|$))|ui\/)/;
 
 function cookie(req: Request, name: string): string | null {
   for (const part of (req.headers.get('Cookie') ?? '').split(';')) {
