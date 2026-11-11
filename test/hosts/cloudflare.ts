@@ -19,13 +19,9 @@ export function call(req: Request): Promise<Response> {
   return (exports as unknown as { default: { fetch: (r: Request) => Promise<Response> } }).default.fetch(req);
 }
 
-/** Run `fn` with the object's core, inside the object. The object answers its first request only
- *  after `start()` (§3), so a test that speaks to it directly starts it first. */
-export async function withCore<T>(fn: (core: BatonCore) => T | Promise<T>): Promise<T> {
-  return runInDurableObject(stub(), async (o: Baton) => {
-    await o.core.start();
-    return fn(o.core);
-  });
+/** Run `fn` with the object's core, inside the object. */
+export function withCore<T>(fn: (core: BatonCore) => T | Promise<T>): Promise<T> {
+  return runInDurableObject(stub(), (o: Baton) => fn(o.core));
 }
 
 /** One alarm tick, run directly. Not `runDurableObjectAlarm`: the fake clock sits behind the

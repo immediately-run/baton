@@ -70,24 +70,20 @@ describe('BATON_KEYS (R3-1239)', () => {
         w.c.config = config;
       }
     });
-    // vm-ed is revoked: the list naming it and vm-p256 names it back, and the report keeps it
-    // (the four the test's own start seeded, and this list's order, are the seed's report).
-    const listed = async () => ((await state()) as { revoked_listed: string[] }).revoked_listed;
     expect(await state()).toBeNull();
     await rows(`UPDATE credentials SET revoked_at = 1 WHERE id = ?`, SSH_KEYS['vm-ed'].fingerprint);
     await reseed([entry(SSH_KEYS['vm-ed'], 'vm-ed'), entry(SSH_KEYS['vm-p256'], 'vm-p256')]);
-    expect(await listed()).toContain(SSH_KEYS['vm-ed'].fingerprint);
+    expect(await state()).toEqual({ revoked_listed: [SSH_KEYS['vm-ed'].fingerprint] });
     await reseed('{not json');
-    // The refusal is reported beside what the lists before listed (round 1, 1-B-5).
-    expect(await listed()).toContain(SSH_KEYS['vm-ed'].fingerprint);
+    expect(await state()).toEqual({ revoked_listed: [SSH_KEYS['vm-ed'].fingerprint], refused: 'BATON_KEYS is not JSON' });
     // The keys in force stayed.
     await withCore((c) => expect(c.workers.publicKey(SSH_KEYS['vm-p256'].fingerprint)).not.toBeNull());
     // The list that last seeded, back: the refusal is over (round 2, 2-A-1).
     await reseed([entry(SSH_KEYS['vm-ed'], 'vm-ed'), entry(SSH_KEYS['vm-p256'], 'vm-p256')]);
     // …and what that list reported still stands (round 3, 3-A-1).
-    expect(await listed()).toContain(SSH_KEYS['vm-ed'].fingerprint);
+    expect(await state()).toEqual({ revoked_listed: [SSH_KEYS['vm-ed'].fingerprint] });
     await reseed([entry(SSH_KEYS['vm-p256'], 'vm-p256')]);
-    expect(await listed()).toContain(SSH_KEYS['vm-ed'].fingerprint);
+    expect(await state()).toBeNull();
   });
 
   it('an unset BATON_KEYS changes nothing; an empty list revokes every seeded key (round 3, 3-A-0)', async () => {

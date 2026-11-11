@@ -141,7 +141,10 @@ describe('S-BTN-45 the edges of blocks', () => {
     // and the block's own write; the answer here is the same each way.)
     const night = await blocksOf('D');
     expect(night).toMatchObject({ blocked: false, blocks: [] });
-  });
+    // B-168: the 74 one-minute beats that carry the readings past their hours cost about 4 s on
+    // the Cloudflare host beside the rest of the case, so it allows 30 s — not vitest's 5 s default
+    // (as S-BTN-21's cases do since 2026-11-11).
+  }, 30_000);
 
   it('K, needing a capability only W1 declares and an unavailable resource, stays blocked through the night and logs nothing when the fleet comes back (B-49)', async () => {
     expect((await git.add('K', { requires: ['mcp-chrome'] }, reviewNeeds([DS])).post()).status).toBe(200);
