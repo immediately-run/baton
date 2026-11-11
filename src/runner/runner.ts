@@ -355,7 +355,14 @@ export class Runner {
     this.o = { beatEvery: BEAT_MS, ...options };
     this.verbose = options.verbose ?? false;
     this.executor = options.executor ?? builtinExecutor();
-    this.log = this.verbose ? withTimestamps(options.log ?? (() => {})) : (options.log ?? (() => {}));
+    // R-BTN-144: before any byte of a leg's output leaves the runner — to a leg log or anywhere
+    // else — it is masked. One sink, wrapped here, so every line the runner writes (a leg's
+    // failure among them, quoting what the leg put in `error`) carries no class-5 or class-6
+    // token whatever path built it. `maskSecrets` returns its input when it changes nothing, so
+    // the timestamps and the caller's `log` read the same line they always did.
+    const sink = options.log ?? (() => {});
+    const masked = (line: string): void => sink(maskSecrets(line));
+    this.log = this.verbose ? withTimestamps(masked) : masked;
     this.now = options.now ?? batonNow;
     this.state = new StateFile(options.stateFile);
     if (!this.state.get().secret) this.state.set({ secret: freshSecret() });
@@ -756,9 +763,9 @@ export class Runner {
   private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number): Running {
     return this.executor.exec(h, ['node', LEG_PROCESS, call, script], {
       cwd: this.o.home, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
-      // R-BTN-144: what a leg's stderr carries leaves masked of classes 5 and 6, as its log
-      // frames are, before the runner writes it anywhere.
-      ...(this.verbose ? { onStderr: (l: string) => this.log(maskSecrets(`baton: ${call}: ${l}`)) } : {}),
+      // R-BTN-144: what a leg's stderr carries reaches the log — masked at the one sink, as
+      // every line is.
+      ...(this.verbose ? { onStderr: (l: string) => this.log(`baton: ${call}: ${l}`) } : {}),
     });
   }
 
