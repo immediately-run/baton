@@ -15,11 +15,13 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
+import { maskSecrets } from '../shared/mask.mjs';
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
 import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, type CourseLoad } from './home';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
+import { MIN_SECRET_BYTES, createLegMasker, namesASecret, secretValues } from './mask';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { StateFile, leaseLostFrom, type RunnerState } from './state';
 import { bareTicketId } from '../defaults/ticket-state';
@@ -126,6 +128,10 @@ export interface RunnerOptions {
    *  scope audit. The default reads it with the runner's bounded git; a test replaces it. A read
    *  that fails skips the audit (logged), never the leg. */
   auditRefs?: (home: string) => RefState | null;
+  /** R-BTN-144 class 7 (B-170): the names `runner.json` `mask_env` lists, which are masked
+   *  besides the names that say a secret by their ending. `baton run` reads them before the
+   *  loop; absent (a caller that is not the CLI), none are named. */
+  maskEnv?: string[];
 }
 
 /** The leg call in flight: its executor call, through which an abort line or a kill reaches it. */
@@ -797,12 +803,37 @@ export class Runner {
     if (s) await this.executor.stop(s.handle, reason).catch((e) => this.log(`baton: the executor's stop failed (${msg(e)})`));
   }
 
+  /** R-BTN-144 (B-170): one leg's class 7 masked stream sink — the leg's `run` call's stderr. The
+   *  runner holds a literal's length back across writes, so a value split by a stream is still
+   *  one literal, and the sink writes to the runner's log, which is what a leg log reads
+   *  (R-BTN-128): the masked bytes are what leaves the runner. `release` is the call's end — the
+   *  wrapper's outcome line rides the stream's last writes, so what it held goes first. */
+  private legSink(secrets: readonly string[]): { onStderr: (line: string) => void; release: () => void } {
+    const sink = createLegMasker(secrets);
+    return {
+      onStderr: (line) => {
+        const out = sink.push(line);
+        if (out !== '') this.log(out);
+      },
+      release: () => {
+        const out = sink.flush();
+        if (out !== '') this.log(out);
+      },
+    };
+  }
+
   /** One wrapper call (R-BTN-133) through the executor's `exec`: `node <wrapper> <call> <script>`,
-   *  its arguments on stdin's first line, its outcome on stdout's last. */
-  private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number): Running {
+   *  its arguments on stdin's first line, its outcome on stdout's last. `sink` is the leg's
+   *  running stream sink (R-BTN-144, B-170), which the leg's `run` passes and the runner releases
+   *  at the call's end; every other call's stderr is the verbose drain, masked of classes 5 and 6
+   *  alone. */
+  private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number, sink?: () => ReturnType<Runner['legSink']>): Running {
+    const leg = sink?.();
     return this.executor.exec(h, ['node', LEG_PROCESS, call, script], {
       cwd: this.o.home, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
-      ...(this.verbose ? { onStderr: (l: string) => this.log(`baton: ${call}: ${l}`) } : {}),
+      // R-BTN-144: what a leg's stderr carries leaves masked — class 5 and class 6 by the shared
+      // pattern, the leg's own class 7 set with them while its run streams.
+      onStderr: leg ? (l: string) => leg.onStderr(l) : this.verbose ? (l: string) => this.log(maskSecrets(`baton: ${call}: ${l}`)) : undefined,
     });
   }
 
@@ -1621,12 +1652,36 @@ export class Runner {
       return { kind: 'crashed', error: `the executor could not start the leg's session (${msg(e)})` };
     }
     this.session = { handle, checkout: this.o.home };
+    // R-BTN-144 class 7 (B-170): the leg's masked set is computed once, here, from the environment
+    // the leg is given — every variable whose name says a secret, and every name `runner.json`
+    // `mask_env` lists. The runner's own values stay in it: an environment that shadows one of
+    // them masks both. A non-secret that matches is masked too (a readable log line lost, nothing
+    // else), and a value under 8 bytes is not masked at all (said once under --verbose).
+    const maskEnv = this.o.maskEnv ?? [];
+    // `mask_env` names every other environment it reaches: a name the host keeps under no
+    // ending (a provider's key in `ANTHROPIC_API_KEY`, say) stays masked when a repository's
+    // environment spells it too.
+    const legSecrets = [...new Set([...secretValues(process.env, maskEnv), ...secretValues(env, maskEnv)])];
+    if (this.verbose) {
+      const short = Object.keys(env).filter((n) => (maskEnv.includes(n) || namesASecret(n)) && Buffer.byteLength(env[n], 'utf8') < MIN_SECRET_BYTES);
+      if (short.length) this.log(`baton: ${leg}'s ${short.join(', ')} ${short.length === 1 ? 'is' : 'are'} under ${MIN_SECRET_BYTES} bytes, so not masked (R-BTN-144)`);
+    }
+    const sink = this.legSink(legSecrets);
     if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} run ${basename(script)} (session ${sessionId}, executor ${this.executor.source})`);
-    const running = this.wrapperCall(handle, 'run', script, [ctx]);
+    const running = this.wrapperCall(handle, 'run', script, [ctx], undefined, () => sink);
     const inflight = this.inflight!;
     inflight.child = { running };
+    // The call is over: the stream's held tail may leave with the outcome the wrapper prints last.
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      sink.release();
+    };
     let done = false;
     const exited = running.result.then((r) => {
+      // R-BTN-144 (B-170): the call is over — its held tail goes, before the outcome may be read.
+      release();
       done = true;
       return r;
     });
@@ -1648,6 +1703,7 @@ export class Runner {
       // record covers it (R-BTN-24) — and stop its session.
       this.killGroup(inflight.child);
       inflight.child = null;
+      release();
       await this.stopSession('lease-lost');
       return { kind: 'lease-lost' };
     }

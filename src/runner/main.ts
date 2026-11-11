@@ -18,6 +18,7 @@ import { holdHome, legNeeds, readHead } from './home';
 import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 import { Runner, stampLine, withTimestamps } from './runner';
 import { loadExecutor } from './executor';
+import { readMaskEnv, runnerConfigPath, underBatonDirectory } from './mask';
 import { fileURLToPath } from 'node:url';
 
 /** The CLI's wrapper (R-BTN-133), which every executor runs. */
@@ -203,6 +204,21 @@ export function servedCourses(home: string, chosen?: string): { course: string; 
   return [one];
 }
 
+/** R-BTN-144 class 7 (B-170): the names `runner.json` `mask_env` lists for this runner's host,
+ *  read once at start. A path under a `.baton/` directory is refused: a home's or a course's
+ *  settings are repository files (R-BTN-69's rule that a repository cannot configure its host),
+ *  and no repository may name what its runner must mask. `BATON_CONFIG` names the file in tests
+ *  and in a deployment that keeps its configuration elsewhere; absent, `runner.json` sits at the
+ *  default §5.6 gives. A `mask_env` that is not a list of names refuses the runner at start. */
+export function hostMaskEnv(log: (line: string) => void, env: NodeJS.ProcessEnv = process.env): string[] {
+  const path = runnerConfigPath(env);
+  if (underBatonDirectory(path)) throw new Error(`${path}: runner.json is this host's configuration, never a repository's (it lies under .baton/, R-BTN-144)`);
+  const maskEnv = readMaskEnv(path);
+  if (maskEnv == null) return [];
+  if (maskEnv.length) log(`baton: masking ${maskEnv.length} more name${maskEnv.length === 1 ? '' : 's'} by runner.json's mask_env: ${maskEnv.join(', ')} (R-BTN-144)`);
+  return maskEnv;
+}
+
 /** The one place `~/.cache/immediately-run` is materialised for a cloud key (§6.4). */
 function cacheDir(): string {
   const dir = join(homedir(), '.cache', 'immediately-run', 'baton');
@@ -314,6 +330,10 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // Every course the home declares, or the one `--course` narrows to (B-103): refused at startup,
   // loudly, when the flag names one the home does not declare — not per claim.
   const courses = servedCourses(a.home, a.course);
+  // R-BTN-144 class 7 (B-170): the names this host's `runner.json` `mask_env` lists are masked
+  // with the ones that say a secret by their ending. A repository's own settings file is never
+  // read for it: only the runner host's configuration names what its legs must not print.
+  const maskEnv = hostMaskEnv(say);
   // B-86: no `--capabilities` asks for nothing — the grant speaks, and each answer's
   // `grant.capabilities` is what the runner declares. The flag narrows that.
   if (a.capabilities == null) say('baton: no --capabilities given — the runner declares what the grant allows (narrow it with --capabilities, e.g. a machine without a browser)');
@@ -409,6 +429,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     fetch: io.fetch ?? ((home) => fetchMain(home, say)),
     ...(agentCommand ? { agentCommand } : {}),
     ...(a.testHarness ? { testHarness: true } : {}),
+    ...(maskEnv ? { maskEnv } : {}),
   });
   try {
     await runner.work();
