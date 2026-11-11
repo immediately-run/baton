@@ -40,6 +40,14 @@ all of it, every minute. B-104 (merged 2026-10-29 18:42Z) added steps to that tr
 before the first stale lease. Which step throws on production is not visible without the
 Worker's logs; the change below makes the tick say so.
 
+**Correction (2026-11-11, after #221 deployed).** The claims stayed held, and `wrangler tail
+baton` showed requests but no alarm event at all: the alarm was not firing. "Every request
+re-arms it" was wrong — only a start that found no alarm set one (`start()`, `get() == null`),
+so an alarm the platform had stopped firing was never replaced, and no tick ran. Fixed by
+`keepAlarm()`: every start, and a request at most once a period, sets a missing or more than two
+periods overdue alarm for the next period (§2.1). #221's changes stand: they make a failing tick
+name its step and keep its reaps.
+
 **Server (§9.5).** The reaper (`claims.alarm()`) runs in its own transaction, committed before
 the rest of the tick. Each reap is its own savepoint: a claim whose end throws is passed over,
 and the others commit. After the tick's other work, the alarm throws `the alarm could not reap n

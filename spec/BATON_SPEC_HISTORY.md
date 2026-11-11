@@ -2621,6 +2621,14 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   owner accepted collapsing it ("I accept all recommendations"): the split rested on a leg being
   able to act as its runner. `independent-review` counts labelled runs as their own domains; the
   `domains.per_run`-empty condition and the floor case are gone; S-BTN-205 follows.
+- **2026-11-11 — §2.1's one alarm is kept by every request** (B-229).
+  Rules changed: R-BTN-9.
+  After the reaper's fix was deployed the twelve claims stayed held, and a live tail showed no
+  alarm firing at all while requests kept arriving. The alarm was set only by a start that found
+  none, so one the platform had stopped firing was never set again. Every start, and a request
+  at most once a period, now sets a missing or more than two periods overdue alarm for the next
+  period.
+
 - **2026-11-11 — R-BTN-6 and §9.5's reaping** (B-229).
   Rules changed: R-BTN-6.
   On 2026-11-10 the board still listed twelve claims of `oc-vltava2-vm0` whose leases had ended
