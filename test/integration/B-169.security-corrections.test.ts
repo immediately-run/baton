@@ -147,12 +147,10 @@ describe('B-169 the security review’s corrections', () => {
     const cookie = await adminSession(admin);
     const state = await sessionCall(cookie, '/v1/ui/state');
     expect([state.status, state.headers.get('Cache-Control')]).toEqual([200, 'no-store']);
-    // Every other path a session answers carries it too: a bare `/v1/ui` and an `/ui/` path that
-    // is no public file (both `not-found`, both authorized by the session — R-BTN-16).
-    for (const path of ['/v1/ui', '/v1/ui/', '/ui/unknown']) {
-      const answered = await sessionCall(cookie, path);
-      expect([path, answered.status, answered.headers.get('Cache-Control')]).toEqual([path, 404, 'no-store']);
-    }
+    // A bearer that is no credential is refused by the core, and that refusal is the request's
+    // answer: the header is the route's, on whatever it answers (R-BTN-16).
+    const anonymous = await hostCall(new Request(ORIGIN + '/v1/owner/ops/grants', { headers: { Authorization: 'Bearer bak_not_a_key' } }));
+    expect([anonymous.status, anonymous.headers.get('Cache-Control')]).toEqual([401, 'no-store']);
     const signedIn = await hostCall(new Request(`${ORIGIN}/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ token: (await keyCall(admin, '/v1/admin/login-links', {})).json.url.split('#')[1] }) }));
     expect([signedIn.status, signedIn.headers.get('Set-Cookie')?.startsWith('__Host-baton_session='), signedIn.headers.get('Cache-Control')]).toEqual([200, true, 'no-store']);
     // A signed owner read, its refusal, and the delivery route.
