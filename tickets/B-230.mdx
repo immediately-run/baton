@@ -1,0 +1,51 @@
+---
+title: "B-230 — run-tests calls a missing test runner red: a setup failure sends the ticket into fix legs that cannot fix it"
+id: B-230
+project: baton
+status: available
+updated: 2026-11-11
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1229
+tier: judgement
+description: "Found on vltava2, 2026-11-11. In a leg checkout with no node_modules, the run-tests gate's `npm run test` exited 127 (`sh: 1: vitest: not found`), and the gate recorded it as `Baton-Tests: red`. B-167's code was never tested; five red markers sent it to fix legs with nothing to fix. The gate should tell a failure to run the tests from tests that fail: a setup failure (the script or its runner not found, no dependencies) ends the leg as cannot-finish with its reason, not red. Whether the gate also installs dependencies when the checkout has none is part of the design. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** see the description. The leg-side cause is fixed in Fieldhouse's E2B executor
+(fieldhouse FLDH-55, immediately-run/fieldhouse#24): its sandbox checkout now gets `npm ci`. Any
+executor or host checkout without dependencies still hits this gate path.
+
+**Spec:** B-110's gate (`src/defaults/course-pr.ts`, the run-tests stub in
+`src/defaults/cli.ts`), [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md).
+
+**Depends on:** none.
+
+**Used by:** B-231.
+
+### What to build
+
+To be designed. The evidence: B-167's branch `claude/B-167-ontology-out`, commits 038410a,
+073301d, 8a9e1b3, 0bc2709 and 5f9ea8b, each `npm run test exited 127`.
+
+Options:
+- The stub classifies exit 126/127, or an npm "missing script", as a setup failure.
+- The stub checks for dependencies before running.
+
+### Trust
+
+To be written with the design.
+
+### Invariants
+
+To be written with the design.
+
+## Status
+
+_filed 2026-11-11._

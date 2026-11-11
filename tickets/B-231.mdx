@@ -1,0 +1,49 @@
+---
+title: "B-231 — A fix leg that pushes nothing reports fixed, and the gate runs the same tests again: a loop of up to 30 runs on an unchanged tree"
+id: B-231
+project: baton
+status: available
+updated: 2026-11-11
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1230
+tier: judgement
+description: "Found on vltava2, 2026-11-10/11. B-167's fix legs reached `fixed` four times without a commit (16, 17, 5 and 1 minutes), and each time run-tests ran the unchanged tree again and recorded red. The ninth run's fix leg then wrote no result for four hours, until the executor's leg timeout; the runner released the ticket as cannot-finish:transient. A fix that changes nothing should not reach `fixed`, or a red gate on a tree it has already tested red should go to the owner rather than to another fix. A leg silent for hours should also be visible before its timeout. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** see the description. Log (vltava2 journal, 2026-11-10/11): fix runs 1, 3, 5 and 7
+`reached fixed` with no push; run 9 `fix failed (the leg wrote no result)` at 04:22:06 after
+starting at 00:22:01.
+
+**Spec:** B-110's gate and the fix loop (`max_runs: 30`), `src/defaults/course-pr.ts`;
+[BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md).
+
+**Depends on:** none.
+
+**Used by:** none.
+
+### What to build
+
+To be designed. Candidates:
+- the fix stub's close refuses `fixed` when HEAD has not moved;
+- the gate compares `Baton-Tested` with the last red marker's tree and stops to adjudicate;
+- a ceiling on a fix leg's time, below the executor's 4 h.
+
+### Trust
+
+To be written with the design.
+
+### Invariants
+
+To be written with the design.
+
+## Status
+
+_filed 2026-11-11._
