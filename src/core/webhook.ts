@@ -15,8 +15,10 @@ import type { Store } from './ports';
 /** The events the App subscribes to (R-BTN-73; `check_suite` dropped after the sixth review). */
 export const WEBHOOK_EVENTS = ['push', 'pull_request', 'pull_request_review', 'issue_comment', 'workflow_run'] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
-/** GitHub caps a delivery's payload at 25 MB; nothing larger is a delivery. */
-export const MAX_DELIVERY = 25 << 20;
+/** R-BTN-73: a delivery's body is at most 26,214,400 bytes (25 MiB, above the largest GitHub
+ *  sends) on either route — `/v1/github/webhook` and `/v1/forges/{repository}/notify` — and one
+ *  larger is `too-large` before any digest is computed. */
+export const MAX_DELIVERY = 26_214_400;
 export const DISPATCH_WINDOW_MS = 30_000;
 export const DELIVERY_TTL_MS = 24 * 3_600_000;
 /** B-89: how stale a repository's last webhook-driven sync may be before the alarm sends
@@ -72,12 +74,14 @@ export async function deliverySignature(secret: string, body: Uint8Array): Promi
 }
 
 /** The delivery's body, once its signature is the App's — before a byte of it is parsed. An
- *  unconfigured secret refuses every delivery: nothing unsigned is ever accepted. */
+ *  unconfigured secret refuses every delivery: nothing unsigned is ever accepted. The size is
+ *  judged first (R-BTN-73): a body over the cap is `too-large` on its Content-Length or once
+ *  that many bytes are read, so no digest is computed over one. */
 export async function verifyDelivery(req: Request, secret: string | undefined): Promise<Uint8Array> {
+  const body = await readCapped(req, MAX_DELIVERY, 'too-large');
   if (!secret) throw new BatonError('forbidden', 'the GitHub App webhook secret is not configured');
   const presented = req.headers.get('X-Hub-Signature-256') ?? '';
   if (!/^sha256=[0-9a-f]{64}$/.test(presented)) throw new BatonError('unauthenticated', 'X-Hub-Signature-256 is required');
-  const body = await readCapped(req, MAX_DELIVERY);
   const want = await deliverySignature(secret, body);
   if (!equalBytes(enc.encode(presented), enc.encode(want))) throw new BatonError('unauthenticated', 'the delivery signature does not verify');
   return body;

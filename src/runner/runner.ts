@@ -15,6 +15,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
+import { maskSecrets } from '../shared/mask.mjs';
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
@@ -755,7 +756,9 @@ export class Runner {
   private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number): Running {
     return this.executor.exec(h, ['node', LEG_PROCESS, call, script], {
       cwd: this.o.home, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
-      ...(this.verbose ? { onStderr: (l: string) => this.log(`baton: ${call}: ${l}`) } : {}),
+      // R-BTN-144: what a leg's stderr carries leaves masked of classes 5 and 6, as its log
+      // frames are, before the runner writes it anywhere.
+      ...(this.verbose ? { onStderr: (l: string) => this.log(maskSecrets(`baton: ${call}: ${l}`)) } : {}),
     });
   }
 

@@ -37,6 +37,7 @@ import scopeEvents from './0035_scope_events.sql';
 import retireModelTables from './0036_retire_model_tables.sql';
 import ticketVersions from './0037_ticket_versions.sql';
 import runIds from './0038_run_ids.sql';
+import checkConclusions from './0039_check_conclusions.sql';
 import { isUniqueViolation, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -103,4 +104,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 36, sql: retireModelTables },
   { id: 37, sql: ticketVersions },
   { id: 38, sql: runIds, backfill: backfillRunIds },
+  { id: 39, sql: checkConclusions },
 ];

@@ -2,9 +2,9 @@
 // principal for the path, applies the R-BTN-16 rules, serves the dashboard's static files, and
 // forwards the API to the core — through the Durable Object on Cloudflare, through the request
 // queue locally (R-BTN-55). Every response leaves with the security headers.
-import { API_KEY, verifyOwner, verifyRequest, verifySyncCredential, verifyWorker, checkStateChanging, withBody } from './auth';
-import { BatonError, SESSION_COOKIE, errorResponse, withSecurityHeaders } from './http';
-import { pickDelivery, verifyDelivery } from './webhook';
+import { API_KEY, readCapped, verifyOwner, verifyRequest, verifySyncCredential, verifyWorker, checkStateChanging, withBody } from './auth';
+import { BatonError, NO_STORE, SESSION_COOKIE, errorResponse, withSecurityHeaders } from './http';
+import { MAX_DELIVERY, pickDelivery, verifyDelivery } from './webhook';
 import type { Config } from './ports';
 import page from '../ui/index.html';
 import style from '../ui/app.css';
@@ -26,6 +26,15 @@ const STATIC: Record<string, [string, string]> = {
  *  it needs (`baton admin open`) and recovers when the session cookie lands — while every
  *  data call under `/v1/ui` keeps its principal and its refusal (R-BTN-16). */
 const PUBLIC = new Set(['/', '/login', '/ui/app.css', '/ui/app.js']);
+
+/** The routes a credential or a session authorizes that are neither under `/v1/ui/` nor cover
+ *  the signed, bearer and API-key routes (R-BTN-16: their answers carry `Cache-Control:
+ *  no-store`): the two delivery routes, the probe, the human-key and courier routes; `/v1/ui/*`
+ *  and `POST /v1/login` join them in `front`. */
+const AUTHORIZED = /^\/(v1\/(github\/webhook|forges\/[^/]+\/notify|probe\/readings|human-keys|login|courier\/))/;
+/** Every route `route` verifies a signature, an API key or a bearer for — the same path shapes
+ *  it matches, so an answer never leaves without the header where one does. */
+const AUTHENTICATED = /^\/(v1\/(sync\/|runner\/|admin\/|owner\/|repositories\/[^/]+\/(stats|blocked|board|policy|attestations|tickets\/[^/]+\/(blocks|history)))|v1\/ui\/)/;
 
 function cookie(req: Request, name: string): string | null {
   for (const part of (req.headers.get('Cookie') ?? '').split(';')) {
@@ -86,6 +95,15 @@ async function route(req: Request, env: Config, to: Forward): Promise<Response> 
     // A header carries bytes only: characters from U+007F up go as \u escapes (round 3, 3-A-1).
     const ascii = JSON.stringify(claims).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
     return forward(req, to, { 'X-Baton-Sync': ascii });
+  }
+  // R-BTN-73 / R-BTN-95: a forge's notification is a trigger too, and its body is bounded as the
+  // App's is. The route's verification (a GitLab token, a Gitea or GitHub HMAC under the
+  // repository's own secret) is the core's, which B-169 does not build; until it does the route
+  // answers `not-found`, and a body over the cap is `too-large` before anything else is looked at.
+  if (/^\/v1\/forges\/[^/]+\/notify$/.test(pathname)) {
+    if (req.method !== 'POST') throw new BatonError('not-found', 'no such route');
+    await readCapped(req, MAX_DELIVERY, 'too-large');
+    throw new BatonError('not-found', 'no such route: a forge’s notification is not verified yet');
   }
   if (pathname === '/v1/github/webhook') {
     // R-BTN-73: the GitHub App's delivery — the one route whose credential is GitHub's
@@ -181,14 +199,28 @@ function forward(req: Request, to: Forward, principal: Record<string, string>): 
   return to(new Request(req, { headers }));
 }
 
+/** R-BTN-16's `Cache-Control: no-store`, set in one place: every response to a request a
+ *  credential or a dashboard session authorizes — a route that verified one before forwarding,
+ *  or answered it itself — and every response that sets a cookie or carries a sign-in code.
+ *  The dashboard's pages and files are public and are served with their own. */
+function noStore(res: Response): Response {
+  if (res.headers.get('Cache-Control') === NO_STORE) return res;
+  // The object's answers are immutable (as `withSecurityHeaders` notes): a copy carries the header.
+  const out = new Response(res.body, res);
+  out.headers.set('Cache-Control', NO_STORE);
+  return out;
+}
+
 /** A request from outside, answered: both hosts' entry point. */
 export async function front(req: Request, env: Config, to: Forward): Promise<Response> {
+  const { pathname } = new URL(req.url);
+  const privateTo = AUTHORIZED.test(pathname) || AUTHENTICATED.test(pathname);
   try {
-    return withSecurityHeaders(await route(req, env, to));
+    return withSecurityHeaders(privateTo ? noStore(await route(req, env, to)) : await route(req, env, to));
   } catch (e) {
     // A refused request's body is never read; release it so the runtime does not.
     if (req.body && !req.bodyUsed) req.body.cancel().catch(() => {});
-    if (e instanceof BatonError) return withSecurityHeaders(errorResponse(e.code, e.message, e.extra));
-    return withSecurityHeaders(errorResponse('internal', 'internal error'));
+    const refused = e instanceof BatonError ? errorResponse(e.code, e.message, e.extra) : errorResponse('internal', 'internal error');
+    return withSecurityHeaders(privateTo ? noStore(refused) : refused);
   }
 }

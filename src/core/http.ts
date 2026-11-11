@@ -9,7 +9,7 @@ export const SECURITY_HEADERS: Record<string, string> = {
 };
 
 export type ErrorCode =
-  | 'unauthenticated' | 'forbidden' | 'invalid-params' | 'not-found'
+  | 'unauthenticated' | 'forbidden' | 'invalid-params' | 'not-found' | 'too-large'
   | 'head-moved' | 'snapshot-rejected' | 'stale-observation' | 'sync-busy' | 'unavailable' | 'internal'
   | 'session-taken' | 'worker-reaped' | 'claim-ended' | 'not-holder'
   | 'not-eligible' | 'no-eligible-ticket' | 'provider-suspended' | 'stale-skills' | 'backing-off' | 'not-cut-over' | 'conflict' | 'barred-tag' | 'blocked' | 'closed' | 'invalid-prerequisite'
@@ -18,6 +18,7 @@ export type ErrorCode =
 
 const STATUS: Record<ErrorCode, number> = {
   unauthenticated: 401, forbidden: 403, 'invalid-params': 400, 'not-found': 404,
+  'too-large': 413, // §11: a body over a route's cap (R-BTN-73's delivery routes), refused before it is read past it
   'head-moved': 409, 'snapshot-rejected': 409, 'stale-observation': 409, 'sync-busy': 409, unavailable: 503, internal: 500,
   'session-taken': 409, 'worker-reaped': 409, 'claim-ended': 409, 'not-holder': 409,
   'not-eligible': 409, 'no-eligible-ticket': 404, 'provider-suspended': 409, 'stale-skills': 409, 'backing-off': 409, 'barred-tag': 409,
@@ -54,3 +55,10 @@ export function withSecurityHeaders(res: Response): Response {
 
 /** R-BTN-16: the one cookie Baton reads — its own dashboard session (R-BTN-57). */
 export const SESSION_COOKIE = '__Host-baton_session';
+/** R-BTN-16 (R-BTN-155): the pending sign-in a browser holds while a key holder types its code. */
+export const PENDING_COOKIE = '__Host-baton_pending';
+
+/** R-BTN-16: `Cache-Control: no-store` — the header every response to a request a credential or
+ *  a dashboard session authorizes, and every response that hands out a cookie, carries (the
+ *  front sets it; this is the one place its spelling lives). */
+export const NO_STORE = 'no-store';
