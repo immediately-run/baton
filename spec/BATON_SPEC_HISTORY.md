@@ -2621,6 +2621,16 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   owner accepted collapsing it ("I accept all recommendations"): the split rested on a leg being
   able to act as its runner. `independent-review` counts labelled runs as their own domains; the
   `domains.per_run`-empty condition and the floor case are gone; S-BTN-205 follows.
+- **2026-11-11 — R-BTN-6 and §9.5's reaping** (B-229).
+  Rules changed: R-BTN-6.
+  On 2026-11-10 the board still listed twelve claims of `oc-vltava2-vm0` whose leases had ended
+  between 2026-10-30 and 2026-11-06, and claim 123 on B-150 outlived vltava2's runner until it
+  was ended by hand. The alarm ran the reaper and every other step of its tick in one
+  transaction, so any step that threw rolled back every reap, every minute; and a restarted
+  runner, a new session with a new state file, never saw the claim its predecessor left. The
+  reaps now commit on their own, each claim's apart, and a failing tick names its step; a runner
+  that starts ends what its host's earlier sessions still hold once their leases are lost.
+
 - **2026-11-10 — §8.3's immediate stop** (B-227).
   Rules changed: R-BTN-72.
   The first leg vltava2 ran through the E2B executor did not take an immediate stop: the
