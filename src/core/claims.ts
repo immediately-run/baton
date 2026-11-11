@@ -1976,8 +1976,21 @@ export class Claims {
 
   // @model alarmReap sha256:9767a3813e32
   // @model fenceTimeout sha256:b982fa4ef61b
-  alarm() {
+  alarm(): string[] {
     const now = this.c.now();
+    // B-229 (R-BTN-9): each reap is its own savepoint, and one that throws is named and passed
+    // over, never the tick's end — a single claim whose end cannot be written would otherwise
+    // roll back every reap of every tick after it (found live: twelve claims whose leases ended
+    // between 2026-10-30 and 2026-11-06 were still held on 2026-11-10). The caller commits the
+    // reaps that went through and then reports the ones that did not.
+    const failed: string[] = [];
+    const each = (claimId: number, ticketId: string, fn: () => void) => {
+      try {
+        this.c.store.transaction(fn);
+      } catch (e) {
+        failed.push(`claim ${claimId} on ${ticketId}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    };
     this.releaseBarHolders(now);
     // Silent workers: reaped at exactly their clamped timeout (R-BTN-9), never by Date.now().
     const silent = this.rows<{ id: number; ticket_id: string; worker_id: number; kind: string }>(
@@ -1985,8 +1998,10 @@ export class Claims {
        WHERE c.status = 'active' AND ((w.kind != 'legacy' AND ? - w.last_seen_at >= w.lease_timeout_ms)
                                       OR (w.kind = 'legacy' AND c.reap_after IS NOT NULL AND c.reap_after <= ?))`, now, now);
     for (const c of silent) {
-      this.finish(c.id, c.ticket_id, 'reaped', c.kind === 'legacy' ? 'reaped:legacy' : 'reaped:silent', 'alarm', {});
-      this.exec('UPDATE workers SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.worker_id);
+      each(c.id, c.ticket_id, () => {
+        this.finish(c.id, c.ticket_id, 'reaped', c.kind === 'legacy' ? 'reaped:legacy' : 'reaped:silent', 'alarm', {});
+        this.exec('UPDATE workers SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.worker_id);
+      });
     }
     // §9: a release delivered 2 h ago and still unacknowledged reaps the claim, fenced: the
     // worker is alive (it took the message), so the item waits for its fence (R-BTN-19).
@@ -2000,7 +2015,7 @@ export class Claims {
       this.exec(`UPDATE messages SET status = 'expired' WHERE id = ?`, c.mid);
       if (reaped.has(c.id)) continue; // two stale releases for one claim reap it once
       reaped.add(c.id);
-      this.finish(c.id, c.ticket_id, 'reaped', 'reaped:release-unacknowledged', 'alarm', { fence: { incarnation: c.incarnation } });
+      each(c.id, c.ticket_id, () => this.finish(c.id, c.ticket_id, 'reaped', 'reaped:release-unacknowledged', 'alarm', { fence: { incarnation: c.incarnation } }));
     }
     // A fence also clears when its worker goes silent past its own timeout (R-BTN-19).
     const lapsed = this.rows<{ id: number; ticket_id: string; worker_id: number }>(
@@ -2019,6 +2034,7 @@ export class Claims {
       this.exec('UPDATE held_snapshots SET accepted_at = ? WHERE repository_id = ? AND sha = ?', now, h.repository_id, h.sha);
       this.event('snapshot-accepted', 'alarm', { sha: h.sha, held: true, by: 'auto-accept' }, null, null, h.repository_id);
     }
+    return failed;
   }
 
   /** R-BTN-67: when a bar with `release_holders` starts, every holder whose worker carries its tag

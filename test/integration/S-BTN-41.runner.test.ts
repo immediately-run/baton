@@ -737,6 +737,54 @@ describe('S-BTN-41 the runner', () => {
     ]);
   }, 30_000);
 
+  it('B-229: a start ends what its host\'s earlier sessions still hold, never a live sibling\'s', async () => {
+    home.leg('check', `return { suspend: true, reached: 'checked' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'ready']]), 'T-2': placed('built', [['build', 'built']], [['check', 'ready']]) },
+      [ticket('T-1', { course_id: 'relay' }), ticket('T-2', { course_id: 'relay' })]);
+    // Two earlier sessions in one state directory, each registered and holding a claim: one went
+    // silent past its lease (a restart's predecessor), one still beats (a live sibling runner).
+    const dir = mkdtempSync(join(tmpdir(), 'baton-b229-'));
+    const seedClaim = async (session: string, ticket: string): Promise<{ file: string; claim: number }> => {
+      const file = join(dir, `${session}.json`);
+      const r = makeRunner({ stateFile: file, session } as Record<string, unknown>);
+      await r.tick();
+      const workerId = (await rows<{ id: number }>('SELECT id FROM workers WHERE session_name = ?', session))[0].id;
+      await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, station, start_path, course_id)
+                   VALUES (?, ?, ?, 'n', '', ?, 'active', 'built', '[]', 'relay')`, `docs:${ticket}`, workerId, `seed:${session}`, clock.now);
+      const claim = (await rows<{ id: number }>('SELECT id FROM claims WHERE worker_id = ?', workerId))[0].id;
+      const state = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      state.claim = { id: claim, ticket_id: `docs:${ticket}`, nonce: 'n' };
+      writeFileSync(file, JSON.stringify(state));
+      return { file, claim };
+    };
+    const earlier = await seedClaim('earlier', 'T-1');
+    // 12 minutes on: past the earlier session's lease by its own clock (15 min − the 4-min margin),
+    // short of the server's reap; the sibling beats now, so its lease holds.
+    clock.now += 12 * 60_000;
+    await setClock(clock.now);
+    const sibling = await seedClaim('sibling', 'T-2');
+    const lines: string[] = [];
+    const apiFor = (secret: string) => {
+      const other = new BatonApi({
+        url: 'https://baton.test',
+        transport: (req) => hostCall(req),
+        auth: (_m, _u, _b, s) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(s ? { 'X-Worker-Secret': s } : {}) }),
+      });
+      other.setSecret(secret);
+      return other;
+    };
+    const runner = makeRunner({ stateFile: join(dir, 'later.json'), session: 'later', apiFor, log: (l: string) => lines.push(l) } as Record<string, unknown>);
+    await runner.runOnce();
+    expect(await rows('SELECT status, end_reason FROM claims WHERE id = ?', earlier.claim)).toEqual([{ status: 'released', end_reason: 'released:lease-lost' }]);
+    expect(JSON.parse(readFileSync(earlier.file, 'utf8')).claim).toBeNull();
+    expect(lines.some((l) => l.includes(`ending claim ${earlier.claim} on docs:T-1, left by the earlier session earlier`))).toBe(true);
+    // The live sibling's claim and file are its own.
+    expect(await rows('SELECT status FROM claims WHERE id = ?', sibling.claim)).toEqual([{ status: 'active' }]);
+    expect(JSON.parse(readFileSync(sibling.file, 'utf8')).claim).toMatchObject({ id: sibling.claim });
+    rmSync(dir, { recursive: true, force: true });
+  }, 30_000);
+
   it('a reaped worker re-keys on its next beat and carries on (R-BTN-14)', async () => {
     home.leg('check', `return { suspend: true, reached: 'checked' };`);
     home.commit();

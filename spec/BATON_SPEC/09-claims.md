@@ -50,7 +50,12 @@ is `active` until it ends
   heartbeat. When `now − last_ok ≥ lease_timeout − 4 min` it marks the lease **lost** in its
   state file. A lost lease, or a heartbeat response that no longer lists the claim, means the
   session no longer holds the ticket. On reconnecting, a sidecar whose lease was lost ends the
-  claim `released:lease-lost` itself.
+  claim `released:lease-lost` itself. A runner that starts does the same for its host's earlier
+  sessions: every other state file beside its own that still names a claim whose lease is lost
+  by that file's own reading (R-BTN-26) has the claim ended `released:lease-lost` with that
+  session's secret, and the file's claim cleared. A file whose lease still holds is a live
+  runner on the host and is left alone; a refusal clears the file, and Baton out of reach
+  leaves it for the next start.
   - A heartbeat refused `session-taken`, `runner-reaped` or `forbidden` marks the lease lost at
     once. `rate-limited` and `quota` do not: the sidecar backs off and retries, but an unaccepted
     heartbeat never renews `last_ok`.
@@ -169,7 +174,11 @@ end on an ended claim is refused `claim-ended`.
 - **Reaping** (unnumbered). The alarm reaps every active claim whose runner has `now −
   last_seen_at ≥ lease_timeout_ms`: the claim becomes `reaped`, the runner gets `reaped_at` (no
   other reap sets it, R-BTN-19), and its pending and delivered messages become `expired`. The alarm also reaps a claim whose
-  delivered `release` stays unacknowledged for 2 hours (15 minutes for `leg-timeout`). An
+  delivered `release` stays unacknowledged for 2 hours (15 minutes for `leg-timeout`). The
+  reaps commit on their own, before the rest of the alarm's tick: a later step that fails rolls
+  back only itself, and a reap whose end cannot be written is passed over — the tick then fails
+  naming that claim, after its other work, and the next tick tries it again — never the end of
+  the other reaps. An
   administrator may force-reap any active claim from the dashboard (`POST
   /v1/ui/claims/{id}/reap`, confirmed per R-BTN-155), shown the runner's last-seen and
   last-activity times, and clear any pending fence (R-BTN-19). The next claimant concludes from what git holds and the resume record.

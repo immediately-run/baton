@@ -317,9 +317,21 @@ export class BatonCore {
     await this.armBy(this.webhooks.nextTrailing());
     await this.armBy(this.webhooks.nextDue());
     let lapse: number | null = null;
+    // B-229 (R-BTN-9): the reaper's share commits on its own, before the rest of the tick — a
+    // later step that throws rolls back only itself, never the reaps (found live: twelve claims
+    // held for days past their leases). A reap that could not be written is reported after
+    // everything else has run, so the tick's own work is never lost to it.
+    let unreaped: string[] = [];
+    try {
+      unreaped = this.store.transaction(() => this.claims.alarm());
+    } catch (e) {
+      this.pendingDispatch.clear();
+      throw new Error(`the alarm's reaper failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+    }
+    this.flushDispatch();
+    let stage = 'workers';
     try {
       this.store.transaction(() => {
-        this.claims.alarm();
         this.workers.alarm();
         // R-BTN-76: readings lapse; R-BTN-75: liveness moves the counts; R-BTN-77: a pending
         // `unblocked` message dies with its worker's liveness, and a window's trailing dispatch goes.
@@ -328,35 +340,44 @@ export class BatonCore {
         // R-BTN-78: a queued leg posted waiting for 72 hours is put to the owner. The recount's rows
         // and the stall's decision row are evaluated once, after both, before the dispatch reads
         // what unblocked (B-49).
+        stage = 'resources and blocks';
         lapse = this.blocks.batch(() => {
           const next = this.resources.alarm();
           if (this.blocks.liveChanged()) this.blocks.recount();
           this.blocks.raiseStalled(this.now());
           return next;
         });
+        stage = 'blocks.expireMessages';
         this.blocks.expireMessages();
         // R-BTN-39, R-BTN-116: answers that waited out a hold are applied first — before the
         // expiries, so a person's word wins over a clock that passed while the ticket was held
         // — then a person leg's expiry, due and still unanswered and unheld, arrives at its
         // `expires.reached`: Baton's own settlement, applied at the instant.
+        stage = 'questions';
         this.questions.applyPending();
         this.questions.expireDue(this.now());
+        stage = 'unblocked';
         this.takeUnblocked();
         // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.
+        stage = 'notices';
         this.notices.alarm();
         // R-BTN-81: the history of tickets closed 90 days ago goes.
+        stage = 'history.purge';
         this.history.purge();
         // §12.8 (B-145, R-BTN-189): a protection report that lapsed past its 24 hours stops
         // feeding `no-runner-lands` — every repository with floors is re-judged, and a newly
         // broken one stops offering claims and releases its running ones.
+        stage = 'policies.enforceFloors';
         this.policies.enforceFloors();
         // R-BTN-174: a non-live worker's derived rows go 30 days after it was last live, and a
         // revoked grant's rows go with the grant.
+        stage = 'ontologies.upkeep';
         this.ontologies.upkeep();
       });
     } catch (e) {
       this.pendingDispatch.clear(); // rolled back: nothing to tell the mirror
-      throw e;
+      // B-229: the step is named, so a tick that keeps failing says where.
+      throw new Error(`the alarm's tick failed at ${stage} (its reaps committed): ${e instanceof Error ? e.message : String(e)}`, { cause: e });
     }
     this.flushDispatch();
     await this.armBy(lapse);
@@ -374,6 +395,9 @@ export class BatonCore {
     if (ontologyDue != null) await this.armBy(ontologyDue);
     // R-BTN-116: the earliest person expiry still pending, so the alarm wakes at the instant.
     await this.armBy(this.questions.nextDue());
+    // B-229: a reap that could not be written fails the tick only now, after its work: the
+    // failure reaches the host's log naming each claim, and the next tick tries it again.
+    if (unreaped.length) throw new Error(`the alarm could not reap ${unreaped.length} claim(s): ${unreaped.join('; ')}`);
   }
 
   /** R-BTN-77: each repository's unblocked dispatch due now, queued to send after the commit. */
