@@ -38,11 +38,14 @@ describe('plan: one request per command', () => {
     expect(plan('admin', ['open'], key)).toEqual({ method: 'POST', path: '/v1/admin/login-links', body: {} });
     // B-118: the dashboard's state is one signed GET, and takes nothing more.
     expect(plan('admin', ['state'], key)).toEqual({ method: 'GET', path: '/v1/admin/state' });
-    // B-105 (R-BTN-176): --atoms-from is a value flag of resource add — a true-flag spelling
-    // would leave its value as a stray positional and throw (round 3's finding).
-    expect(plan('admin', ['resource', 'add', 'anthropic-capacity', '--scope', 'account', '--schema', '{"type":"object"}', '--atoms-from', 'any'], key).body)
-      .toEqual({ name: 'anthropic-capacity', scope: 'account', detail_schema: { type: 'object' }, atoms_from: 'any' });
-    expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'account', '--schema', '{"type":"object"}', '--atoms-from', 'sometimes'], key)).toThrow('admin or any');
+    // B-168 (R-BTN-76): a resource has two scopes; `worker` and `host` are retired, and a
+    // retired flag is not quietly dropped (B-105's finding).
+    expect(plan('admin', ['resource', 'add', 'anthropic-capacity', '--scope', 'account', '--schema', '{"type":"object"}'], key).body)
+      .toEqual({ name: 'anthropic-capacity', scope: 'account', detail_schema: { type: 'object' } });
+    expect(plan('admin', ['resource', 'add', 'disk:fs-1', '--scope', 'service', '--schema', '{"type":"object"}'], key).body.scope).toBe('service');
+    expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'worker', '--schema', '{"type":"object"}'], key)).toThrow('retired');
+    expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'sometimes', '--schema', '{"type":"object"}'], key)).toThrow('account or service');
+    expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'account', '--schema', '{"type":"object"}', '--atoms-from', 'any'], key)).toThrow('not a flag');
     // R-BTN-178 (B-106): a capacity is set, cleared and listed — the set carries the read its
     // confirm prints (`preflight`) and the --yes that answers the prompt beforehand.
     expect(plan('admin', ['capacity', 'set', 'capability:rdp-lab', '1'], key)).toEqual({
@@ -102,11 +105,9 @@ describe('plan: one request per command', () => {
     expect(plan('owner', ['settings', 'docs', '--unblocked-workflow', '.github/workflows/unblocked.yml'], key).body)
       .toEqual({ unblocked_trigger: { kind: 'github-app', workflow: '.github/workflows/unblocked.yml' } });
     expect(() => plan('owner', ['settings', 'docs', '--no-required-bars', '--required-bar', '*', '--course', 'c', '--tag-prefix', 'p'], key)).toThrow('clears them');
-    // R-BTN-106: required_independence as leg=a,b;leg=c, and none to clear it.
-    expect(plan('owner', ['settings', 'docs', '--independence', 'review=implement,fix;adjudicate=implement'], key).body)
-      .toEqual({ required_independence: { review: ['implement', 'fix'], adjudicate: ['implement'] } });
-    expect(plan('owner', ['settings', 'docs', '--independence', 'none'], key).body).toEqual({ required_independence: {} });
-    expect(() => plan('owner', ['settings', 'docs', '--independence', 'review'], key)).toThrow('leg=a,b');
+    // B-168: required_independence is gone with the restructure's part 4 (the course file's
+    // `no_chain_from` is the one statement of it, R-BTN-106), so the flag is no longer one.
+    expect(() => plan('owner', ['settings', 'docs', '--independence', 'none'], key)).toThrow('not a flag');
     expect(() => plan('owner', ['settings', 'docs'], key)).toThrow('at least one setting');
     // R-BTN-80: remind_after in seconds, from a duration.
     expect(plan('owner', ['settings', 'docs', '--remind-after', '6h'], key).body).toEqual({ remind_after: 21_600 });

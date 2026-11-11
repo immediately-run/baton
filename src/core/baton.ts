@@ -34,8 +34,9 @@ import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import { Policies, canonicalJson, sha256HexSync } from './policy';
 import { Scope } from './scope';
-import { randomHex, systemRandom } from './db';
-import type { Ports, Row, SqlValue, Store, Workflow } from './ports';
+import { logEvent, randomHex, systemRandom } from './db';
+import { Deprecated } from './deprecated';
+import type { DispatchTarget, Ports, Row, SqlValue, Store, Workflow } from './ports';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
 const ALARM_EVERY_MS = 60_000; // §3: one alarm, every 60 seconds
@@ -74,6 +75,9 @@ export class BatonCore {
   readonly policies: Policies;
   /** B-134: the leg scope audit — the claim answer's scope, the findings both halves raise. */
   readonly scope: Scope;
+  /** The retired-fields window (B-168, R-BTN-132): the day's logged fields, by field and actor —
+   *  nothing else of it is held here (`deprecated.ts` writes the rows and the events). */
+  readonly deprecated: Deprecated;
   readonly store: Store;
   /** §12: workflows to dispatch once the current request or alarm has committed, one per
    *  repository and kind. */
@@ -89,6 +93,7 @@ export class BatonCore {
     this.random = ports.random ?? systemRandom;
     this.store = ports.store;
     this.dispatcher = (wf) => this.sendDispatch(wf);
+    this.deprecated = new Deprecated(ports.store);
     this.outside = ports.gate ? (work) => ports.gate!.outside(work) : (work) => work();
     const store = ports.store;
     this.registry = new Registry({ store, now: () => this.now(), ensurePolicy: (repository, forge) => this.policies.ensure(repository, forge) });
@@ -119,7 +124,7 @@ export class BatonCore {
     // R-BTN-79: each leg's queue, counted where membership changes; a leg over its bound warns.
     this.queues = new Queues({ store, now: () => this.now(), held: (ticket) => this.blocks.isHeld(ticket),
       graph: (repo, course) => this.stations.graph(repo, course), notices: this.notices });
-    this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks });
+    this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks, deprecated: this.deprecated });
     // §5.9 (B-104): the ontology store — acceptance, memoised programs, derived sets, the alarm cycle.
     this.ontologies = new Ontologies(this, store);
     this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(), origin: ports.config.BATON_ORIGIN,
@@ -136,13 +141,12 @@ export class BatonCore {
     this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course), ontologies: this.ontologies,
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
-      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope });
+      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.workers = new WorkerApi({ store, config: ports.config, now: () => this.now(), fenced: (w, inc, id) => this.claims.fenced(w, inc, id),
-      // R-BTN-76: what a heartbeat declares it uses; the fleet's counts move with the worker.
-      uses: (w, repos, names) => this.resources.applyUses(w, repos, names), fleetChanged: () => this.blocks.recount(),
+      deprecated: this.deprecated, fleetChanged: () => this.blocks.recount(),
       // R-BTN-103: what it delivers as a worker courier.
       couriers: (w, granted, entries) => this.notices.declare(w, granted, entries),
       held: (ticket) => this.blocks.held(ticket, true),
@@ -214,20 +218,36 @@ export class BatonCore {
   }
 
   /** §10.3: a repository's sync or mirror workflow, on its default branch. A repository with no
-   *  mirror has nothing to dispatch for it. */
-  private sendDispatch(wf: Workflow): Promise<unknown> {
+   *  mirror has nothing to dispatch for it. A dispatch the forge refuses is logged with its reason
+   *  (R-BTN-94): the want it answers stands until a post answers it, so a refusal costs latency,
+   *  never correctness. */
+  private async sendDispatch(wf: Workflow): Promise<unknown> {
     const repo = this.registry.get(wf.repository);
+    let target: DispatchTarget | null = null;
     if (wf.kind === 'unblocked') {
       // R-BTN-77: one input, `tickets`, JSON — every id and ref in it passed its rule (§10.4). Only
       // the GitHub App's dispatch is built here; GitLab's and Gitea's adapters are R3-1263's.
       const trigger = this.sql<{ t: string | null }>('SELECT unblocked_trigger AS t FROM repositories WHERE id = ?', wf.repository)[0]?.t;
       const t = trigger ? (JSON.parse(trigger) as { kind: string; workflow?: string }) : null;
-      if (!repo || t?.kind !== 'github-app' || !t.workflow) return Promise.resolve(false);
-      return this.ports.dispatch.send({ github: repo.github, workflow: t.workflow.slice(t.workflow.lastIndexOf('/') + 1), ref: repo.default_branch, inputs: { tickets: JSON.stringify(wf.tickets ?? []) } });
+      if (!repo || t?.kind !== 'github-app' || !t.workflow) return false;
+      // R-BTN-94 (B-168): Baton reads no workflow file — one declaring no manual dispatch, or no
+      // `tickets` input, is the forge's to refuse at dispatch, and the refusal is logged below.
+      target = { github: repo.github, workflow: t.workflow.slice(t.workflow.lastIndexOf('/') + 1), ref: repo.default_branch, inputs: { tickets: JSON.stringify(wf.tickets ?? []) } };
+    } else {
+      const path = wf.kind === 'sync' ? repo?.sync_workflow : repo?.mirror_workflow;
+      if (!repo || !path) return false;
+      target = { github: repo.github, workflow: path.slice(path.lastIndexOf('/') + 1), ref: repo.default_branch };
     }
-    const path = wf.kind === 'sync' ? repo?.sync_workflow : repo?.mirror_workflow;
-    if (!repo || !path) return Promise.resolve(false);
-    return this.ports.dispatch.send({ github: repo.github, workflow: path.slice(path.lastIndexOf('/') + 1), ref: repo.default_branch });
+    try {
+      return await this.ports.dispatch.send(target);
+    } catch (e) {
+      // R-BTN-94: the forge's refusal, with its reason — identifiers only, never a body (the
+      // refusal's message is the forge's own words, capped like a notice's).
+      this.store.transaction(() => logEvent(this.store, this.now(), 'discrepancy', 'baton',
+        { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason: (e instanceof Error ? e.message : String(e)).slice(0, 500) },
+        null, null, wf.repository));
+      return false;
+    }
   }
 
   /** R-BTN-93's one verifier: the repository a sync credential acts for in `role` — a sync key
@@ -392,8 +412,9 @@ export class BatonCore {
     for (const m of MIGRATIONS) {
       if (done.has(m.id)) continue;
       this.store.transaction(() => {
+        if (m.first) m.backfill?.(this.store, (n) => this.random(n), this.now);
         this.store.script(m.sql);
-        m.backfill?.(this.store, (n) => this.random(n));
+        if (!m.first) m.backfill?.(this.store, (n) => this.random(n), this.now);
         this.store.exec('INSERT INTO _baton_migrations (id, applied_at) VALUES (?, ?)', m.id, this.now());
       });
     }
@@ -924,7 +945,12 @@ export class BatonCore {
       // R-BTN-76: external resources, their account instances, and a reading by hand.
       if (m === 'POST' && p === '/v1/admin/resources') return json(this.resources.addResource(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/instances') return json(this.resources.addInstance(actor, await body()));
-      if (m === 'POST' && p === '/v1/admin/readings') return json(this.resources.post({ kind: 'admin', fingerprint: fp }, await body(), null));
+      if (m === 'POST' && p === '/v1/admin/readings') {
+        const b = await body();
+        // R-BTN-76, R-BTN-151: a reading, or `{instance, clear}` to end the readings in force there.
+        if (b && typeof b === 'object' && !Array.isArray(b) && (b as { clear?: unknown }).clear !== undefined) return json(this.resources.clear(actor, b));
+        return json(this.resources.post({ kind: 'admin', fingerprint: fp }, b, null));
+      }
       // R-BTN-178: a capability's capacity, and the courses whose legs require one — the read
       // `baton admin capacity set` prints before it asks to confirm.
       if (m === 'PUT' && p === '/v1/admin/capacities') return json(this.resources.setCapacity(actor, await body()));

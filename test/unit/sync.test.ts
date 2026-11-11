@@ -72,7 +72,6 @@ describe('POST /v1/sync/board', () => {
     ['a course file over 64 KiB with none in force', { ...payload(A, null, board.states.A), registry: [course(3, 3, { course: { pad: 'x'.repeat(65 * 1024) } })] }],
     ['a previous branch pattern without {ticket}', { ...payload(A, null, board.states.A), registry: [course(3, 3, { previous_branch_pattern: 'feature/*' })] }],
     ['65 step kinds', { ...payload(A, null, board.states.A), registry: [course(3, 3, { step_kinds: Array.from({ length: 65 }, (_, i) => `k${i}`) })] }],
-    ['a report horizon past 168 hours', { ...payload(A, null, board.states.A), registry: [course(3, 3, { report_horizon_h: 169 })] }],
     ['a version past the ceiling', { ...payload(A, null, board.states.A), registry: [course(1_000_000_001, 0)] }],
     ['an item naming a malformed course', { sha: A, parent_sha: null, state: { items: [{ id: 'R3-1', title: 't', status: 'available', queue: 'autonomous', node: 'blocked', course: 'Roadmap PR' }] }, ready: [] }],
     ['a reviewer with no bills', { ...payload(A, null, board.states.A), matrix: { families: {}, agents: { 'review-pr-x': { reviews_on: 'm' } } } }],

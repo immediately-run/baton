@@ -64,7 +64,6 @@ export interface RegistryEntry {
   skill: string;
   course: unknown;
   step_kinds: string[];
-  report_horizon_h: number;
   branch_pattern: string;
   previous_branch_pattern: string | null;
   /** R-BTN-108: the course's schemas, posted with its file at every sync. */
@@ -112,7 +111,6 @@ export function checkRegistry(v: unknown): RegistryEntry[] {
       || new Set(r.step_kinds).size !== r.step_kinds.length) {
       bad(`${at}.step_kinds`, `must be at most ${STEP_KINDS_MAX} distinct step kinds`);
     }
-    if (r.report_horizon_h !== undefined && !int(r.report_horizon_h, 1, 168)) bad(`${at}.report_horizon_h`, 'must be an integer from 1 to 168');
     // An oversized file is a refusal of that course, as any file failing R-BTN-69 is: the previous
     // one stays in force and the board still advances. It is never stored or walked.
     let size = Infinity;
@@ -165,7 +163,6 @@ export function checkRegistry(v: unknown): RegistryEntry[] {
       skill: r.skill as string,
       course: r.course,
       step_kinds: r.step_kinds as string[],
-      report_horizon_h: (r.report_horizon_h as number | undefined) ?? 6,
       branch_pattern: pattern(r.branch_pattern, `${at}.branch_pattern`),
       previous_branch_pattern: r.previous_branch_pattern == null ? null : pattern(r.previous_branch_pattern, `${at}.previous_branch_pattern`),
       route_choices: routeChoices,
@@ -267,12 +264,12 @@ export class Courses {
         ? this.c.store.exec<{ route_choices_json: string }>('SELECT route_choices_json FROM courses WHERE repository_id = ? AND id = ?', repo, e.id).toArray()[0]?.route_choices_json ?? '{}'
         : JSON.stringify(acceptedRoutes.get(e.id) ?? {});
       this.c.store.exec(
-        `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, person_legs_json, step_kinds, min_worker_version, report_horizon_h, branch_pattern, previous_branch_pattern, route_choices_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, person_legs_json, step_kinds, min_worker_version, branch_pattern, previous_branch_pattern, route_choices_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (repository_id, id) DO UPDATE SET version = excluded.version, skill = excluded.skill, course_json = excluded.course_json,
            leg_capabilities_json = excluded.leg_capabilities_json,
            person_legs_json = excluded.person_legs_json,
-           step_kinds = excluded.step_kinds, min_worker_version = excluded.min_worker_version, report_horizon_h = excluded.report_horizon_h,
+           step_kinds = excluded.step_kinds, min_worker_version = excluded.min_worker_version,
            branch_pattern = excluded.branch_pattern, previous_branch_pattern = excluded.previous_branch_pattern,
            route_choices_json = excluded.route_choices_json`,
         // §12.1's `courses` row holds the validated file as the repository posted it — its
@@ -287,7 +284,7 @@ export class Courses {
         // every entry keeps its previous attachments, so the value written is the one already
         // stored (a no-op); an accepted unit's map names this post's attachments whole, and an
         // entry absent from it carries none.
-        repo, e.id, e.version, e.skill, JSON.stringify(e.course), JSON.stringify(legNeedsOf(e.course)), JSON.stringify(personLegsOf(e.course)), JSON.stringify(e.step_kinds), e.min_worker_version, e.report_horizon_h,
+        repo, e.id, e.version, e.skill, JSON.stringify(e.course), JSON.stringify(legNeedsOf(e.course)), JSON.stringify(personLegsOf(e.course)), JSON.stringify(e.step_kinds), e.min_worker_version,
         e.branch_pattern, e.previous_branch_pattern, routesJson);
       this.c.store.exec('DELETE FROM course_refusals WHERE repository_id = ? AND course_id = ?', repo, e.id);
       // Immutable: a schema already held has the same digest (schemaViolations), so it is kept.

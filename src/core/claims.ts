@@ -6,6 +6,7 @@
 import { BatonError } from './http';
 import { transcriptUrl } from './links';
 import { isUniqueViolation, logEvent, mintRunId, randomHex, type Random } from './db';
+import type { Deprecated } from './deprecated';
 import { fitsTier, capabilitiesOf, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
 import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
@@ -60,6 +61,8 @@ export interface Ctx {
   /** B-134: the leg scope audit — the claim answer's scope, and the reports an advance or an
    *  end carries. */
   scope?: import('./scope').Scope;
+  /** The retired-fields window's one writer (B-168): a claim's `bills`. */
+  deprecated: Deprecated;
 }
 
 interface WorkerFacts {
@@ -426,18 +429,15 @@ export class Claims {
   }
 
   /** The leg as the head snapshot posted it for the ticket, its barred tags (R-BTN-70), and what
-   *  the course file and the owners ask of whoever takes it (R-BTN-106, R-BTN-107). */
+   *  the course file asks of whoever takes it (R-BTN-106, R-BTN-107). */
   private postedLeg(item: ItemFacts, leg: string, phase: Phase): GateLeg {
     const n = this.rows<{ state: 'ready' | 'waiting' }>('SELECT state FROM ticket_next_legs WHERE ticket_id = ? AND leg = ?', item.id, leg)[0];
     const posted = this.rows<{ tag: string }>('SELECT tag FROM ticket_bars WHERE ticket_id = ? AND leg = ? ORDER BY tag', item.id, leg).map((r) => r.tag);
     const g = this.stations.graph(item.repository, item.course);
     const def = g?.legs.get(leg);
-    // The owners' list joins the file's, as required bars join posted ones (R-BTN-67): a file
-    // that drops its list loosens nothing the owners hold.
-    // Its keys are followed through `renamed_from` too, so renaming the leg loosens nothing.
-    const owners = Object.entries(this.c.admin.requiredIndependence(item.repository))
-      .filter(([key]) => (g ? resolveLeg(g, key) ?? key : key) === leg).flatMap(([, from]) => from);
-    const noChainFrom = [...new Set([...(def?.noChainFrom ?? []), ...owners].map((l) => (g ? resolveLeg(g, l) ?? l : l)))];
+    // R-BTN-106 (B-168): the course file's `no_chain_from` alone — the owners have no second
+    // statement of it. Each name is followed through `renamed_from`, as the leg itself is.
+    const noChainFrom = [...new Set((def?.noChainFrom ?? []).map((l) => (g ? resolveLeg(g, l) ?? l : l)))];
     // R-BTN-120: the file's own `requires.capabilities`, which rule 4 reads beside the clause.
     // R-BTN-116: whether the leg is a person's, which rule `person` refuses at a claim or an advance.
     return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...this.ownerBarTags(item, leg, phase)])], noChainFrom, isolation: def?.isolation ?? null, requires: def?.requires ?? [], person: def?.person ?? false };
@@ -827,6 +827,7 @@ export class Claims {
   // @model claim sha256:2474e2bb5224
   claim(workerId: number, body: unknown, prepared?: WorkerFacts) {
     const b = checkClaim(body);
+    for (const field of b.retired) this.c.deprecated.note(this.c.now(), `worker:${workerId}`, `claim.${field}`, 'claim');
     if (!this.anyCutOver()) throw new BatonError('not-cut-over', 'claims go through git until cutover (R-BTN-28)');
     const prior = this.rows<{ id: number; worker_id: number }>('SELECT id, worker_id FROM claims WHERE request_id = ?', b.request_id)[0];
     if (prior) {

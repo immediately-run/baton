@@ -6,6 +6,7 @@ import { WorkerApi } from '../../src/core/workerApi';
 import { beat, call, hbBody, keyCall, ORIGIN, ownerCall, payload, register, rows, seedClaim, setAdminKeys, setClock, sha256, syncCall, workerCall , tick, withCore } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
+import { Deprecated } from '../../src/core/deprecated';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-13T12:00:00Z');
@@ -352,7 +353,7 @@ describe('round-one review fixes (baton#4)', () => {
     await withCore((o) => {
       const hashes = JSON.parse(env.TOKEN_HASHES!);
       delete hashes['vm-a'];
-      const api = new WorkerApi({ store: o.store, config: { ...env, TOKEN_HASHES: JSON.stringify(hashes) }, now: () => o.now() });
+      const api = new WorkerApi({ store: o.store, deprecated: new Deprecated(o.store), config: { ...env, TOKEN_HASHES: JSON.stringify(hashes) }, now: () => o.now() });
       expect(() => api.credential('vm-a')).toThrow(/revoked/);
       expect(() => api.credential('vm-b')).not.toThrow();
     });

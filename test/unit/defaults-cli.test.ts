@@ -556,7 +556,7 @@ describe('baton repo init, through the built CLI', () => {
     expect(settings.agent_command).not.toMatch(/[<>|]/);
     expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -1851,8 +1851,8 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     expect(settings.default_course).toBe('create-pr');
     expect(settings.courses.map((c: { id: string }) => c.id)).toEqual(['create-pr', 'bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets']);
-    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_worker_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('bug-report') });
-    expect(settings.courses[5]).toEqual({ id: 'spec-to-tickets', version: 1, min_worker_version: 1, skill: 'baton-spec-to-tickets', step_kinds: ['decompose', 'check', 'file'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('spec-to-tickets') });
+    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_worker_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('bug-report') });
+    expect(settings.courses[5]).toEqual({ id: 'spec-to-tickets', version: 1, min_worker_version: 1, skill: 'baton-spec-to-tickets', step_kinds: ['decompose', 'check', 'file'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('spec-to-tickets') });
     for (const [course, legs] of [['bug-report', 6], ['decision', 2], ['review-pr', 2], ['draft-ticket', 3], ['spec-to-tickets', 3]] as const) {
       expect(readdirSync(join(root, '.baton', 'courses', course, 'legs')).length, course).toBe(legs * 2);
     }

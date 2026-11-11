@@ -469,9 +469,10 @@ depth 5 back, and with it the `unblocked` event.
   logs nothing where the spec logs `blocked`, and the lift logs no `unblocked`. R3-1254's part 3
   models them (its Status names them; round 3, 3-r3-0).
 - **The rest of §2g–§2m, still R3-1254's** (part 3): open-world claims (R-BTN-104), sync wants
-  (R-BTN-94), `no_chain_from` and the owners' `required_independence` (R-BTN-106; core refuses
+  (R-BTN-94), `no_chain_from` (R-BTN-106; core refuses
 them since B-2, rule `chain` — a refusal is no model action, so the scenario traces stay
-accepted, but the model still lets a key review what it implemented), child tickets' spawned rows (R-BTN-86), `not_before`
+accepted, but the model still lets a key review what it implemented; the owners had no second
+statement of it after B-168), child tickets' spawned rows (R-BTN-86), `not_before`
   and leg deadlines (R-BTN-89, R-BTN-90; R3-1259 names the deadline's model change), the
   holder's reported `next` (R-BTN-83's provisional queued leg), and exhaustive liveness on a
   narrowed instance. Leg queues (R-BTN-79, now a warning) and notices (R-BTN-80, which no leg

@@ -134,7 +134,6 @@ interface CourseEntry {
   min_worker_version?: number;
   skill?: string;
   step_kinds?: string[];
-  report_horizon_h?: number;
   branch_pattern?: string;
   previous_branch_pattern?: string;
   protocol_files?: string[];
@@ -175,7 +174,7 @@ const defaultSkill = (course: string): string => `baton-${course}`;
 /** The `courses` entry `baton repo init` writes: every R-BTN-51 field, so a repository edits
  * them where the spec says rather than discovering them. */
 function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source'>> {
-  return { id: course, version: 1, min_worker_version: 1, skill: defaultSkill(course), step_kinds: legs, report_horizon_h: 6, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
+  return { id: course, version: 1, min_worker_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
 export interface SyncArgs {
@@ -427,7 +426,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     registry.push({
       ...courseSchemas(root, c.id),
       id: c.id, version: c.version, min_worker_version: c.min_worker_version ?? c.version, skill: c.skill ?? defaultSkill(c.id), course,
-      step_kinds: c.step_kinds ?? Object.keys(course.legs ?? {}), ...(c.report_horizon_h != null ? { report_horizon_h: c.report_horizon_h } : {}),
+      step_kinds: c.step_kinds ?? Object.keys(course.legs ?? {}),
       branch_pattern: branchPatterns[0], ...(c.previous_branch_pattern ? { previous_branch_pattern: c.previous_branch_pattern } : {}),
     });
   }

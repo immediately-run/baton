@@ -506,12 +506,12 @@ export class Ontologies {
 
   /**
    * Resolve the route choices attached to a leg an advance starts (R-BTN-177): form the atoms
-   * (R-BTN-176) for this worker and the claim's repository, evaluate the route-choice stratum
-   * under its bound, write one `route_last` row per alternative — demoted or not, available or
-   * not — and answer the advice, identifiers only. A crossed bound answers `limit` per choice,
-   * writes no rows, and raises `baton.ontology-limit` once per repository and program digest.
-   * Called inside the advance's transaction, after any `taken` the same advance reported has
-   * removed its dead holdings, so the leg it starts is advised without them.
+   * (R-BTN-176) for the claim's repository, evaluate the route-choice stratum under its bound,
+   * write one `route_last` row per alternative — demoted or not, available or not — and answer
+   * the advice, identifiers only. A crossed bound answers `limit` per choice, writes no rows, and
+   * raises `baton.ontology-limit` once per repository and program digest. Called inside the
+   * advance's transaction, after any `taken` the same advance reported has removed its dead
+   * holdings, so the leg it starts is advised without them.
    */
   resolveFor(workerId: number, repo: string, wanted: string[], at: number): { route_choices: ResolvedChoice[]; resolved_at: number } | null {
     const p = this.programOf(repo);
@@ -520,14 +520,18 @@ export class Ontologies {
     if (!wantedChoices.length) return null;
     const now = this.c.now();
     // The atoms (R-BTN-176): has from the current set; usable, state and the field reading for
-    // the worker's usable instances alone; refines from the stored chains; now from the clock;
-    // was_demoted from this worker's rows within 24 hours.
+    // the repository's usable instances — one set for every runner granted there (B-168); refines
+    // from the stored chains; now from the clock; was_demoted from this worker's rows within 24
+    // hours.
     const has = this.capabilitiesFor(workerId, repo);
-    const usable = this.c.resources.usableFor(workerId, repo);
+    const usable = this.c.resources.usableFor(repo);
     const states: [string, 'available' | 'unavailable' | 'unknown'][] = [];
     const details: [string, unknown][] = [];
     for (const [, instance] of usable) {
-      const reading = this.c.resources.routeReadingFor(workerId, instance, now);
+      // B-168 (R-BTN-76): a resource's readings carry no source precedence — the latest `state`
+      // in force is its state, and the latest either kind in force its field reading. The route
+      // choices themselves leave with B-167.
+      const reading = this.c.resources.readingFor(instance, now);
       states.push([instance, reading.state]);
       if (reading.detail != null) details.push([instance, reading.detail]);
     }

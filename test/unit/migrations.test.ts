@@ -466,7 +466,7 @@ describe('migration 0038: run ids (B-185, S-BTN-204)', () => {
       const m38 = MIGRATIONS.find((x) => x.id === 38)!;
       sql.exec(m38.sql);
       let draw = 0;
-      m38.backfill!({ exec: (q: string, ...p: unknown[]) => sql.exec(q, ...p) } as unknown as Store, (n) => new Uint8Array(n).fill(++draw));
+      m38.backfill!({ exec: (q: string, ...p: unknown[]) => sql.exec(q, ...p) } as unknown as Store, (n) => new Uint8Array(n).fill(++draw), () => T);
 
       const all = (q: string) => sql.exec(q).toArray() as Record<string, unknown>[];
       expect(all(`SELECT id, claim_id, seq, leg, from_station, to_station, bars, started_at, started_observation, finished_at, abandoned_at, evidence, route_choices_json, taken_json

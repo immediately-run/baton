@@ -32,7 +32,6 @@
         "adjudicate",
         "merge"
       ],
-      "report_horizon_h": 6,
       "branch_pattern": "claude/{ticket}-*",
       "protocol_files": [],
       "route_choices": {

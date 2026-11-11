@@ -7,6 +7,7 @@
 // and an unavailable provider is a reading (§6.3, R-BTN-76), never a table core keeps.
 import { BatonError } from './http';
 import { logEvent } from './db';
+import type { Deprecated } from './deprecated';
 import { NONCE_TTL_MS, parseSshKey } from './auth';
 import { isForgePath, isPullRequestUrl, transcriptUrl, type Forge } from './links';
 import { DEFAULT_TRANSCRIPT_REPOS, repositoryOf, transcriptReposOf } from './registry';
@@ -46,19 +47,18 @@ export interface Ctx {
   claimView?: (claimId: number) => Record<string, unknown>;
   /** R-BTN-67: the owner bars in force on the credential's repositories, for the heartbeat's `bars`. */
   bars?: (now: number, credentialId: string) => unknown[];
-  /** R-BTN-76: store the instances a heartbeat says it uses (`repos`: those its key works on, null
-   *  for every one), returning whether that changed and what was refused. */
-  uses?: (workerId: number, repos: string[] | null, names: string[]) => { changed: boolean; refused: { instance: string; code: string }[] };
   /** R-BTN-103: store the repositories and `asks` a heartbeat delivers notices for (`granted`: the
    *  repositories a machine key works on, null for any other key), returning what was refused. */
   couriers?: (workerId: number, granted: string[] | null, entries: { repository: string; asks: string[] }[]) => { repository: string; code: string }[];
   /** §12.8 (B-145): the policy store — the protection reports and pins a heartbeat carries
    *  (R-BTN-180, R-BTN-189) and the hashes the answer carries for its repositories. */
   policies?: Policies;
-  /** R-BTN-75, R-BTN-76: a worker became live or changed what it declares or uses. */
+  /** R-BTN-75: a worker became live or changed what it declares. */
   fleetChanged?: () => void;
   /** R-BTN-75: a shadow report's claim holds its ticket, or no longer does. */
   held?: (ticketId: string) => void;
+  /** The retired-fields window's one writer (B-168): a heartbeat's `uses`. */
+  deprecated?: Deprecated;
 }
 
 export class WorkerApi {
@@ -254,11 +254,18 @@ export class WorkerApi {
 
   /** `POST /v1/runner/heartbeat` (§11): registration on first contact, the secret and re-key
    *  rules (R-BTN-14), the credential's hostname and capability allow-list (R-BTN-13), settings
-   *  rewritten only when their hash changes (§3), transcripts and uses; the answer carries the
-   *  claim, the messages, the stale courses and the mode. */
+   *  rewritten only when their hash changes (§3), transcripts; the answer carries the
+   *  claim, the messages, the stale courses and the mode. A `uses` a runner still sends is its
+   *  retired declaration that it uses account instances (B-168): the heartbeat reads it as
+   *  absent, logging `deprecated-field`. */
   // @model heartbeat sha256:e9da1acd5895
   // @model declare sha256:d898c5bf9f5f
   async heartbeat(credentialId: string, secretHeader: string | null, body: unknown) {
+    // B-168 (R-BTN-76): `uses` is retired — a runner uses the repository's instances, never a set
+    // it declares — and read as absent while the history's Migrations entry lasts.
+    if (body && typeof body === 'object' && !Array.isArray(body) && (body as { uses?: unknown }).uses !== undefined) {
+      this.c.deprecated?.note(this.c.now(), `credential:${credentialId}`, 'heartbeat.uses', 'heartbeat');
+    }
     const hb = checkHeartbeat(body, this.transcriptRepos());
     // R-BTN-66: a per-repository ceiling names a tier of that registered repository's ladder.
     // One for a repository Baton does not serve (unknown or retired) is kept and reported, never
@@ -364,12 +371,9 @@ export class WorkerApi {
     const rewrote = settingsHash !== w.settings_hash || rekeyed;
     if (rewrote) this.rewriteSettings(w.id, hb, settingsHash);
     const granted = this.grantedRepos(cred);
-    // R-BTN-76: the instances it uses, each it may use; a refused one never refuses the heartbeat.
-    const uses = this.c.uses?.(w.id, granted, hb.uses.names) ?? { changed: false, refused: [] };
     // R-BTN-103: the notices it delivers as a worker courier — a machine key's, on repositories it
     // is granted on; a refused entry never refuses the heartbeat either.
     const refusedCouriers = [...hb.couriers.refused, ...(this.c.couriers?.(w.id, cred.kind === 'worker' ? granted : null, hb.couriers.entries) ?? [])];
-    const refusedUses = [...hb.uses.refused, ...uses.refused];
     // §12.8 (B-145, R-BTN-180): only the protection checker's reports feed `no-runner-lands` —
     // a report from anyone else is refused per entry; the sync's and other trusted runners'
     // readings only log a discrepancy, so a granted key's report is logged as one.
@@ -387,7 +391,7 @@ export class WorkerApi {
     // repository, a differing one holding `baton.policy-unpinned` open (a pin from a grant not
     // trusted on the repository drives nothing).
     if (this.c.policies && hb.policy_pins.length) this.c.policies.recordPins(w.id, cred.id, hb.policy_pins, new Set(granted ?? []));
-    if (!was?.live || rewrote || uses.changed) this.c.fleetChanged?.();
+    if (!was?.live || rewrote) this.c.fleetChanged?.();
     const refused = hb.transcript_refusals;
     const unlinked = this.recordTranscripts(w.id, hb, now);
 
@@ -417,7 +421,6 @@ export class WorkerApi {
       ...(this.c.policies ? { policies: this.policyFacts(granted, hb) } : {}),
       ...(protectionRefused.length ? { protection_refused: protectionRefused } : {}),
       ...(refused.length ? { transcripts_refused: refused } : {}),
-      ...(refusedUses.length ? { refused_uses: refusedUses } : {}),
       ...(refusedCouriers.length ? { refused_couriers: refusedCouriers } : {}),
       ...(unlinked.length ? { transcripts_unlinked: unlinked } : {}),
     };

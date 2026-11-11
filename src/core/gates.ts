@@ -47,8 +47,7 @@ export interface GateLeg {
   state: 'ready' | 'waiting' | null;
   /** The tags the sync posted barred from this leg of the ticket (`ticket_bars`). */
   bars: string[];
-  /** R-BTN-106: the course file's `no_chain_from` joined to the owners' `required_independence`
-   *  for this leg, as current leg names. */
+  /** R-BTN-106 (B-168): the course file's `no_chain_from` for this leg, as current leg names. */
   noChainFrom?: string[];
   /** R-BTN-107: the course file's floor, `session`, or null. */
   isolation?: 'session' | null;

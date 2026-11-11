@@ -17,7 +17,7 @@
 //   baton admin -i KEY repo retire ID
 //   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T]
 //   baton admin -i KEY probe add --key PUB --label L
-//   baton admin -i KEY resource add NAME --scope worker|account|service --schema FILE|JSON [--atoms-from admin|any]    (R-BTN-76, R-BTN-176)
+//   baton admin -i KEY resource add NAME --scope account|service --schema FILE|JSON    (R-BTN-76)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
 //   baton admin -i KEY capacity set <capability> <n> [--yes]                 (R-BTN-178)
 //   baton admin -i KEY capacity set <capability> --clear [--yes]             (R-BTN-178)
@@ -44,7 +44,6 @@
 //   baton owner -i KEY settings REPO [--required-bar LEG|'*' --course C|'*' [--except a,b] --tag-prefix P]… | --no-required-bars
 //                [--retry 1h,4h --max-failed 3 | --retry default] [--transcript-repos a,b]
 //                [--unblocked-workflow .github/workflows/F.yml | --unblocked-workflow none] [--remind-after 24h]
-//                [--independence 'review=implement,fix;adjudicate=implement' | --independence none]
 //   baton owner -i KEY courier add REPO --key PUB --asks owner[,…]      (R-BTN-80: a personal courier)
 //   baton owner -i KEY courier revoke REPO FINGERPRINT
 //   baton owner -i KEY resolve REPO TICKET baton:retries|baton:stalled retry|park   (R-BTN-78)
@@ -279,10 +278,13 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'GET', path: '/v1/admin/state' };
     }
     if (cmd === 'resource' && rest[0] === 'add') {
-      // B-105 (R-BTN-176): --atoms-from names whether runners' readings may steer route choices.
-      const { flags, positional } = parseArgs(rest.slice(1), [], ['scope', 'schema', 'atoms-from'], 1);
-      if (flags['atoms-from'] != null && !['admin', 'any'].includes(flags['atoms-from'])) throw new Error('--atoms-from must be admin or any');
-      return { method: 'POST', path: '/v1/admin/resources', body: { name: need(positional[0], 'the resource name'), scope: need(flags.scope, '--scope'), detail_schema: jsonArg(need(flags.schema, '--schema'), readJson), ...(flags['atoms-from'] != null ? { atoms_from: flags['atoms-from'] } : {}) } };
+      // R-BTN-76 (B-168): two scopes — `account` and `service`; a runner's instances are its
+      // repository's, never one it declares.
+      const { flags, positional } = parseArgs(rest.slice(1), [], ['scope', 'schema'], 1);
+      if (!flags.scope) throw new Error('baton admin resource add NAME names its --scope (account or service, R-BTN-76)');
+      if (flags.scope === 'worker' || flags.scope === 'host') throw new Error(`--scope ${flags.scope} is retired: a resource is account or service, and a runner uses its repository's instances (R-BTN-76, B-168)`);
+      if (flags.scope !== 'account' && flags.scope !== 'service') throw new Error('--scope must be account or service (R-BTN-76)');
+      return { method: 'POST', path: '/v1/admin/resources', body: { name: need(positional[0], 'the resource name'), scope: flags.scope, detail_schema: jsonArg(need(flags.schema, '--schema'), readJson) } };
     }
     if (cmd === 'resource' && rest[0] === 'set') {
       // R-BTN-76: an administrator's reading by hand, in force at most 7 days.
@@ -361,7 +363,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       } };
     }
     if (cmd === 'settings') {
-      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'independence'], 1);
+      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after'], 1);
       const body = {};
       if (flags['no-required-bars']) {
         if (groups.length) throw new Error('--no-required-bars clears them: name no --required-bar beside it');
@@ -379,16 +381,6 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       else if (flags['unblocked-workflow']) body.unblocked_trigger = { kind: 'github-app', workflow: flags['unblocked-workflow'] };
       // R-BTN-80: how long a sent notice waits for its decision before it is queued again, in seconds.
       if (flags['remind-after']) body.remind_after = Math.round(duration(flags['remind-after']) / 1000);
-      // R-BTN-106: `leg=a,b;leg=c` — the legs a key that ran any of a,b on a ticket may not take
-      // leg; `none` clears them.
-      if (flags.independence === 'none') body.required_independence = {};
-      else if (flags.independence) {
-        body.required_independence = Object.fromEntries(flags.independence.split(';').filter(Boolean).map((pair) => {
-          const [leg, from, ...extra] = pair.split('=');
-          if (!leg || from === undefined || extra.length) throw new Error(`--independence takes leg=a,b;leg=c, not ${pair}`);
-          return [leg.trim(), list(from)];
-        }));
-      }
       if (!Object.keys(body).length) throw new Error('baton owner settings REPO names at least one setting');
       return { method: 'PUT', path: `/v1/owner/${need(positional[0], 'the repository id')}/settings`, body };
     }
