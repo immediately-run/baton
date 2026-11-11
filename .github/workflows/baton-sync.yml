@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: immediately-run/baton
-          ref: 5a38a3dd32ff44863f141665c0039e763701edc6
+          ref: 835056e01335876667d765130f9fdb60406c5a97
           path: .baton-cli
       - run: npm ci --prefix .baton-cli
       # --latest main: after its observation number the run reads the newest main, so a slow

@@ -1,4 +1,4 @@
-// ../../../../../baton-bundle-jSmEti/entry.ts
+// ../../../../../baton-bundle-NT2I9p/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync as rmSync2, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -316,7 +316,67 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../../../../baton-bundle-jSmEti/entry.ts
+// ../cli/src/defaults/course-pr.ts
+var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
+var CREATE_SPEC_COURSE = {
+  start: "requested",
+  start_leg: "converse",
+  end: ["merged"],
+  // B-98: a specification is requested, not found — `baton request "<one sentence>" --course
+  // create-spec` files the ticket that starts it.
+  starts_from: "request",
+  short_waits: ["ci"],
+  stations: {
+    requested: { label: "Requested, no PR yet" },
+    "spec-open": { label: "Spec PR open" },
+    reviewed: { label: "Reviewed" },
+    adjudicated: { label: "Open findings adjudicated" },
+    merged: { label: "Merged" }
+  },
+  legs: {
+    converse: { from: ["requested"], to: "spec-open", label: "Design the specification with the owner" },
+    review: { from: ["spec-open"], to: "reviewed", max_runs: 4, label: "Adversarial review round" },
+    address: { from: ["reviewed"], to: "spec-open", max_runs: 3, label: "Address the blocking findings with the owner" },
+    adjudicate: { from: ["reviewed"], to: "adjudicated", label: "Reproduce the findings left open" },
+    merge: { from: ["reviewed", "adjudicated"], to: "merged", label: "Merge and close the ticket" }
+  }
+};
+var SPEC_BOUNDS = {
+  legs: { open: "converse", opened: "spec-open", back: "address", backTo: "spec-open" },
+  back: "address",
+  rounds: CREATE_SPEC_COURSE.legs.review.max_runs,
+  adjudicates: true,
+  gate: false
+};
+function branchMatches(pattern, branch) {
+  const p = pattern.toLowerCase();
+  const b = branch.toLowerCase();
+  let i = 0;
+  let j = 0;
+  let star = -1;
+  let mark = 0;
+  while (i < b.length) {
+    if (j < p.length && (p[j] === b[i] || p[j] === "*")) {
+      if (p[j] === "*") {
+        star = j++;
+        mark = i;
+      } else {
+        i++;
+        j++;
+      }
+    } else if (star >= 0) {
+      i = ++mark;
+      j = star + 1;
+    } else {
+      return false;
+    }
+  }
+  while (j < p.length && p[j] === "*") j++;
+  return j === p.length;
+}
+var matchPatterns = (branchPatterns) => (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, "*"));
+
+// ../../../../../baton-bundle-NT2I9p/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
@@ -369,6 +429,17 @@ async function standard(ctx) {
   if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
   const agentWords = advisedCommand(splitWords(settingsCommand), settings, process.env.BATON_ADVICE);
   const agentCommand = agentWords.join(" ");
+  const redEdge = ctx.claim?.station === "pr-open" || ctx.claim?.station === "fixed";
+  const prHeads = () => {
+    const own = (Array.isArray(settings.courses) ? settings.courses : []).find((c) => c && c.id === "create-pr") ?? {};
+    const id = bareTicketId(ctx.ticket);
+    const wanted = matchPatterns([own.branch_pattern ?? DEFAULT_BRANCH_PATTERN, own.previous_branch_pattern].filter((p) => typeof p === "string" && p !== "")).map((p) => p.replace(/\{ticket\}/g, id));
+    return gitRun("git", ["-C", ctx.checkout, "ls-remote", "--heads", "origin"]).split("\n").filter((l) => {
+      const r = l.split("	")[1] ?? "";
+      return r.startsWith("refs/heads/") && wanted.some((p) => branchMatches(p, r.slice("refs/heads/".length)));
+    }).sort().join("\n");
+  };
+  const headsBefore = redEdge ? prHeads() : "";
   const rel = ".baton/courses/create-pr/legs/fix.md";
   const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel]).trim() !== "";
   const text = present ? show(rel) : null;
@@ -442,6 +513,9 @@ async function standard(ctx) {
   }).finally(() => {
     if (dir != null) rmSync2(dir, { recursive: true, force: true });
   });
+  if (headsBefore !== "" && prHeads() === headsBefore) {
+    throw new Error("the fix leg pushed nothing: " + headsBefore.split("\n").map((l) => l.split("	")[1].slice("refs/heads/".length) + " at " + l.slice(0, 10)).join(", ") + " is the head the run-tests gate tested red, unchanged \u2014 no fix, no position (B-231)");
+  }
   void out;
   return { reached: "fixed", next: "run-tests" };
 }
