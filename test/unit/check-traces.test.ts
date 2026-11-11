@@ -47,9 +47,13 @@ async function check(name: string, steps: Step[]) {
 // R3-1254 part 2b's fleet that takes up to 85 s locally and over 120 s on a CI runner (baton#60's CI,
 // 2026-10-19), so each allows 240 s
 const QUINT_CASE_MS = 240_000;
+// The cases that reach Quint (a trace the translation accepts, so `quint test` runs): left out under
+// BATON_SKIP_QUINT=1 like test/model/replay.test.ts, so `npm test` runs no Quint at all. Found
+// 2026-11-11: these took up to 240 s each of `npm test` in a leg sandbox, under the run-tests bound.
+const itQuint = process.env.BATON_SKIP_QUINT === '1' ? it.skip : it;
 
 describe('check-traces rejects what the model forbids, naming the step', () => {
-  it('a second claim on a held ticket: the base is accepted, the claim after the hold is not', async () => {
+  itQuint('a second claim on a held ticket: the base is accepted, the claim after the hold is not', async () => {
     const claimed = (p: Projection) => ({ ...p, claims: { 1: claim() } });
     const held = (p: Projection) => ({ ...p, held: { [T]: true } });
     // accepted: the claim, then the hold
@@ -62,7 +66,7 @@ describe('check-traces rejects what the model forbids, naming the step', () => {
     expect(r.failure.actions).toContain('claim("w1", "docs:T-1")');
   }, QUINT_CASE_MS);
 
-  it('an end confirmed by an observation not above its own: rejected at the post that claims it', async () => {
+  itQuint('an end confirmed by an observation not above its own: rejected at the post that claims it', async () => {
     const steps = trace([
       [req('POST', '/v1/runner/claim'), (p) => ({ ...p, claims: { 1: claim() } })],
       [req('POST', '/v1/runner/claims/1/advance', { leg: 'implement' }), (p) => ({ ...p, claims: { 1: claim({ leg: 'implement' }) } })],
@@ -100,7 +104,7 @@ describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1
     return r;
   };
   const claimReq = req('POST', '/v1/runner/claim');
-  it('the base claim is accepted', async () => {
+  itQuint('the base claim is accepted', async () => {
     expect(await check('claim-base', trace([[claimReq, claimed()]]))).toMatchObject({ ok: true, end: null });
   });
   it('a second observation number under ten minutes after the first (R-BTN-62 sync-busy)', async () => {
