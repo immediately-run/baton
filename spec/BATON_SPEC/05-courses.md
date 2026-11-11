@@ -681,7 +681,12 @@ mean (R-BTN-50).
     is `<!-- baton:verdict approve|changes -->`, queuing `merge` or `fix`; a push after it
     reaches `fixed`; all merged is `merged`; when fixes run out and the last round asks for
     changes, `adjudicate` is queued if the file has it, and a pusher's `<!-- baton:adjudicated
-    merge|owner -->` is its answer. `review-pr` reviews a PR named in `prs:`: each pusher's
+    merge|owner -->` is its answer. Its `run-tests` gate runs no agent: the stub runs the course
+    file's `test_script` on the PR's head, and the script's own exit is the verdict, green
+    queuing `review` and red `fix`; a run that never reached the tests is no verdict and fails
+    the leg (`released:cannot-finish:transient`) with no marker — dependencies declared and none
+    installed, the shell's 126 or 127, npm's missing script, npm that cannot start, or a run that
+    outlives the gate's bound. `review-pr` reviews a PR named in `prs:`: each pusher's
     verdict is a round; after changes the next waits on `author` until a push; on close or when
     rounds run out `conclude` is queued, and a pusher's `<!-- baton:concluded -->` is that leg.
     A commenting leg's answer line may name its PR (`<answer> <PR URL>`; `conclude`'s the URL

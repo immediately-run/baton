@@ -789,7 +789,24 @@ describe('baton repo init, through the built CLI', () => {
       expect(exited.tail).toBe('npm run test exited 2; its last lines:\ntwo failed');
       writeFileSync(join(bin, 'npm'), '#!/bin/sh\nkill -TERM $$\n');
       await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test was killed by SIGTERM, which the gate did not send');
+      // B-230: a run that never reached the tests is no verdict either — the shell's 127 and 126
+      // (B-167's every gate: `vitest: not found`) and npm's missing script fail the leg, naming it.
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho "sh: 1: vitest: not found" >&2\nexit 127\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow(/npm run test exited 127, a command its script names could not be run \(not found, or not executable\) — the tests never ran: no verdict, no marker; its last lines:\nsh: 1: vitest: not found/);
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\nexit 126\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test exited 126, a command its script names could not be run');
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho "npm error Missing script: \\"test\\"" >&2\nexit 1\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test has no such script in package.json — the tests never ran');
       process.env.PATH = path;
+      // B-230: dependencies declared and none installed — neither the tested tree nor the home
+      // checkout has node_modules — is no verdict, before npm runs at all.
+      g('checkout', '-q', 'claude/A-1-gate');
+      writeFileSync(join(root, 'package.json'), `${JSON.stringify({ name: 'scaffold-gate', scripts: { test: 'node gate.mjs' }, devDependencies: { vitest: '1.0.0' } }, null, 2)}\n`);
+      commitAll(root);
+      g('push', '-q', 'origin', 'HEAD:refs/heads/claude/A-1-gate');
+      g('checkout', '-q', 'main');
+      expect(existsSync(join(root, 'node_modules'))).toBe(false);
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test cannot run: claude/A-1-gate declares dependencies and neither the tested tree nor the home checkout has node_modules');
       // The gate runs only at its two stations, and only on a branch it can reach.
       await expect(stub.run(ctx('reviewed'))).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not "reviewed"');
       await expect(stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot: { sha: main } })).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not null');

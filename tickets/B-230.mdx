@@ -2,7 +2,7 @@
 title: "B-230 — run-tests calls a missing test runner red: a setup failure sends the ticket into fix legs that cannot fix it"
 id: B-230
 project: baton
-status: available
+status: in-review
 updated: 2026-11-11
 repos:
   - baton
@@ -31,20 +31,41 @@ executor or host checkout without dependencies still hits this gate path.
 
 ### What to build
 
-To be designed. The evidence: B-167's branch `claude/B-167-ontology-out`, commits 038410a,
-073301d, 8a9e1b3, 0bc2709 and 5f9ea8b, each `npm run test exited 127`.
+Decided: a run that never reached the tests is no verdict. It throws, so the runner releases the
+claim `cannot-finish:transient` (an environment failure, a counted attempt, §9.1) and no marker is
+made. The stub's `verdictOf` and `standard` (`src/defaults/cli.ts`):
 
-Options:
-- The stub classifies exit 126/127, or an npm "missing script", as a setup failure.
-- The stub checks for dependencies before running.
+1. **Dependencies.** Before npm runs, when the tested tree's `package.json` declares
+   `dependencies` or `devDependencies` and neither the tree nor the home checkout has
+   `node_modules`, the leg fails naming the branch and `npm ci`.
+2. **The shell's 126 and 127** (a command the script names is not executable, or not found: the
+   test runner, a missing dependency's bin) fail the leg with the script's last lines.
+3. **npm's missing script** (`Missing script:` on stderr) fails the leg.
+4. **The bound.** A run that outlives `RUN_TESTS_TIMEOUT_MS` fails the leg. Red was the other
+   choice; it loses because the runner's per-test timeouts (vitest's, jest's) already catch a hung
+   test as a failure the script reports. A whole run that outlives the bound says the
+   environment or the bound is short (B-168: 240 s against a 6-to-24-minute suite), which no
+   fix leg can change.
+
+Output overflow stays red, named: the script ran.
+
+The spec: R-BTN-131 states the gate's verdict and these cases; `docs/standard-courses.mdx` says
+the same. A repository on a sourced course takes the stub when its source moves (`baton repo
+init`).
 
 ### Trust
 
-To be written with the design.
+No new input. The stub reads the tested tree's `package.json`, which the PR's pusher writes: it
+can make the gate refuse to run (no verdict), which it could already do by breaking the script.
+It cannot make a red green: every new path ends with no marker.
 
 ### Invariants
 
-To be written with the design.
+- **R-BTN-131, the verdict is the script's.** Kept: green and red still come from the script's
+  exit only; what changed is that a non-run is no longer read as one.
+- **B-110 finding 14, not every failure is the script's red.** Extended to the four cases above.
+- **§9.1's end reasons.** No new reason: the stub's throw is the existing untyped exception,
+  `cannot-finish:transient`, whose attempts are counted.
 
 ## Status
 
