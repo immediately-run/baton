@@ -86,5 +86,7 @@ describe('render: safe bundles parse under the safe renderer (R3-1340)', () => {
       }
     }
     expect(failures, `pages the safe renderer rejects (they render blank):\n${failures.join('\n')}`).toEqual([]);
-  });
+    // Every page of every bundle, a walk that grows with the repository: past vitest's 5 s default
+    // on a loaded machine (8.5 s beside a live leg on vltava2, 2026-11-11).
+  }, 120_000);
 });

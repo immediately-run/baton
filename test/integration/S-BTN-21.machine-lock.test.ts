@@ -135,13 +135,17 @@ function makeRunner(cred: keyof typeof TOKENS, over: Partial<RunnerOptions> = {}
   return runner;
 }
 
-/** Wait until `q` is true. */
+/** Wait until `q` is true, for up to UNTIL_MS of wall time — not a count of polls: a loaded
+ *  machine (CI, a host beside a live leg) starts a runner process in more than the 5 s that 500
+ *  polls of 10 ms allowed (S-BTN-21 failed so on CI, 2026-11-10). */
+const UNTIL_MS = 20_000;
 async function until(q: () => boolean | Promise<boolean>): Promise<void> {
-  for (let i = 0; i < 500; i++) {
+  const end = Date.now() + UNTIL_MS;
+  while (Date.now() < end) {
     if (await q()) return;
     await new Promise((r) => setTimeout(r, 10));
   }
-  throw new Error('condition never became true');
+  throw new Error(`condition never became true in ${UNTIL_MS / 1000} s`);
 }
 
 /** An outsider's hold on the machine's lock: `flock` kept alive; kill it to release. A day's
@@ -207,7 +211,7 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
     expect(home.evidence().filter((l) => l.startsWith('run'))).toEqual(['run rdp1', 'run rdp3', 'run plain']);
     // The claim ended: the lock is released, and B's next beat takes it and declares.
     await until(async () => (await rows(`SELECT 1 FROM worker_capabilities w JOIN workers k ON k.id = w.worker_id WHERE k.hostname = 'vm-b' AND w.capability = ?`, LOCKED)).length > 0);
-  }, 20_000);
+  }, 90_000);
 
   it('an advance into a leg whose lock an outsider holds suspends the claim rather than sending it', async () => {
     home.leg('rdp1', `ev(ctx, 'run rdp1'); return { reached: 'lab', next: 'rdp2' };`);
@@ -235,7 +239,7 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
     } finally {
       killOutsider(outsider);
     }
-  }, 20_000);
+  }, 90_000);
 
   it('a claim answered for a lock leg the runner cannot lock ends suspended at once, touching nothing (R-BTN-121)', async () => {
     home.leg('rdp1', `ev(ctx, 'run rdp1'); return { reached: 'lab', next: 'rdp2' };`);
@@ -270,7 +274,7 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
     } finally {
       killOutsider(outsider);
     }
-  }, 20_000);
+  }, 90_000);
 
   it('a lock released by an unlocked leg and re-taken for the next lock leg goes on (round 1, finding 2)', async () => {
     home.leg('rdp1', `ev(ctx, 'run rdp1'); return { reached: 'lab', next: 'rdp2' };`);
@@ -290,7 +294,7 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
     const claim = (await rows<{ end_reason: string }>(`SELECT end_reason FROM claims WHERE ticket_id = 'docs:T-1'`))[0];
     expect(claim.end_reason).toBe('done');
     expect(home.evidence().filter((l) => l.startsWith('run'))).toEqual(['run rdp1', 'run rdp2', 'run rdp3', 'run plain']);
-  }, 20_000);
+  }, 90_000);
 
   it('a lock held by a killed runner dies with it — the watcher watches the pid (round 2, finding 1)', async () => {
     // The watcher `MachineLocks` spawns, in its own process: a child node runner takes the lock

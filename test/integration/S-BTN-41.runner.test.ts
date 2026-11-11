@@ -128,12 +128,15 @@ function makeRunner(over: Record<string, unknown> = {}): Runner {
 
 /** Wait until `q` returns a non-empty list — the test's window into the runner's progress. */
 async function until(q: () => Promise<unknown[]> | unknown[]): Promise<unknown[]> {
-  for (let i = 0; i < 400; i++) {
+  // Wall time, not a count of polls: a loaded machine outruns 400 polls of 10 ms (S-BTN-21's
+  // twin failed so on CI, 2026-11-10).
+  const end = Date.now() + 20_000;
+  while (Date.now() < end) {
     const r = await q();
     if (r.length) return r;
     await new Promise((r2) => setTimeout(r2, 10));
   }
-  throw new Error('condition never became true');
+  throw new Error('condition never became true in 20 s');
 }
 
 /** Wait until `pid` is gone — a killed process group's proof. */
