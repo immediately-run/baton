@@ -75,10 +75,11 @@ export const CLOSE_TIMEOUT_MS = 120_000;
  * What blocks the runner's loop is the gate's close alone, one bounded push per attempt, which
  * CLOSE_TIMEOUT_MS's arithmetic (3 × CLOSE_TIMEOUT_MS under the margin) already covers, pinned by
  * test. A course whose suite needs longer raises this in its own copy of the leg script.
- * 15 minutes, not 4 (2026-11-11): baton's own suite outran 240 s in an E2B leg sandbox on
+ * 30 minutes, not 4 (2026-11-11): baton's own suite outran 240 s in an E2B leg sandbox on
  * vltava2 (B-168's gate, `timed out after 240 s`; its CI test job takes about 6½ minutes), and a
- * sourced course has no copy of its own to raise it in. */
-export const RUN_TESTS_TIMEOUT_MS = 900_000;
+ * sourced course has no copy of its own to raise it in. At 15 minutes B-169's first green gate
+ * took about 14½ (2 vCPUs), too close to the bound for a suite that only grows. */
+export const RUN_TESTS_TIMEOUT_MS = 1_800_000;
 
 /** B-94: git's environment for every call the close and the runner's own git make —
  * non-interactive by construction, so a credential prompt or an ssh host-key question can never
