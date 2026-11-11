@@ -4,7 +4,7 @@
 // block whole, and nothing that is not one (a prefix inside a longer word, the same letters
 // without its underscore).
 import { describe, it, expect } from 'vitest';
-import { BEARER_TOKEN, PRIVATE_KEY_BLOCK, maskSecrets } from '../../src/shared/mask.mjs';
+import { BEARER_TOKEN, KEY_HOLD, createMasker, maskSecrets } from '../../src/shared/mask.mjs';
 
 describe('B-169 the masking pattern', () => {
   it('masks every bearer prefix Baton issues, each with its own characters', () => {
@@ -15,8 +15,11 @@ describe('B-169 the masking pattern', () => {
 
   it('masks a private key block whole, closed or not', () => {
     const block = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----';
-    expect(maskSecrets(`key:\n${block}\ndone`)).toBe('key:\n***\ndone');
-    expect(maskSecrets('key: -----BEGIN RSA PRIVATE KEY-----\nMIIE')).toBe('key: ***');
+    expect(maskSecrets(`key:\n${block}\ndone`)).toBe('key:\n***\n***\n***\ndone');
+    expect(maskSecrets('key: -----BEGIN RSA PRIVATE KEY-----\nMIIE')).toBe('key: ***\n***');
+    // Every line of the body goes, and the text around the block does not — one token per line,
+    // each replaced whole.
+    expect(maskSecrets(`a\nBEGIN -----BEGIN RSA PRIVATE KEY----- x\nMIIE\n-----END RSA PRIVATE KEY-----\nafter`)).toBe('a\nBEGIN ***\n***\n***\nafter');
   });
 
   it('leaves what is not a credential alone', () => {
@@ -24,6 +27,36 @@ describe('B-169 the masking pattern', () => {
       expect(maskSecrets(text)).toBe(text);
     }
     expect(BEARER_TOKEN.source).toContain('bps|bds');
-    expect(PRIVATE_KEY_BLOCK.flags).toBe('g');
+    expect(BEARER_TOKEN.flags).toBe('g');
+  });
+
+  it('a stream masks a key printed over several lines whole, and passes the rest on', () => {
+    // The sink is handed one line at a time: the body is held until the `END` line.
+    const m = createMasker();
+    expect(m.push('before')).toBe('before');
+    expect(m.push('-----BEGIN OPENSSH PRIVATE KEY-----')).toBe('');
+    expect(m.push('b3BlbnNzaC1rZXktdjEAAAAA')).toBe('');
+    expect(m.push('-----END OPENSSH PRIVATE KEY-----')).toBe('***');
+    expect(m.push('after')).toBe('after');
+    expect(m.flush()).toBe('');
+    // A block never closed is held no longer than `KEY_HOLD` bytes, then masked whole.
+    const open = createMasker();
+    expect(open.push('-----BEGIN RSA PRIVATE KEY-----')).toBe('');
+    const chunk = 'A'.repeat(1024);
+    for (let i = 0; i < 15; i++) expect(open.push(chunk)).toBe('');
+    expect(open.push(chunk)).toBe('***');
+    expect(open.flush()).toBe('');
+    // One the stream ends inside of is masked as it ends.
+    const cut = createMasker();
+    expect(cut.push('-----BEGIN RSA PRIVATE KEY-----')).toBe('');
+    expect(cut.flush()).toBe('***');
+    expect(KEY_HOLD).toBe(16 * 1024);
+    // A token on a line the stream passes on is masked as it leaves, and a `BEGIN` line's own
+    // text before the block stays.
+    expect(createMasker().push('x bps_secret')).toBe('x ***');
+    const mid = createMasker();
+    expect(mid.push('key: -----BEGIN RSA PRIVATE KEY-----')).toBe('key:');
+    expect(mid.push('MIIE')).toBe('');
+    expect(mid.push('-----END RSA PRIVATE KEY-----')).toBe('***');
   });
 });

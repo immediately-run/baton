@@ -59,6 +59,21 @@ export const SESSION_COOKIE = '__Host-baton_session';
 export const PENDING_COOKIE = '__Host-baton_pending';
 
 /** R-BTN-16: `Cache-Control: no-store` — the header every response to a request a credential or
- *  a dashboard session authorizes, and every response that hands out a cookie, carries (the
- *  front sets it; this is the one place its spelling lives). */
+ *  a dashboard session authorizes, and every response that hands out a cookie or carries a
+ *  sign-in code, carries (the front sets it, where it decides each route; this is the one place
+ *  its spelling lives). */
 export const NO_STORE = 'no-store';
+
+/** `res` with `Cache-Control: no-store` (R-BTN-16), built anew: a copy's headers are built from
+ *  the original's without mutating either, and a status that carries no body is given none —
+ *  a response exists in the realm it was made in, and its `body` is not always one the copying
+ *  realm's `Response` accepts. */
+export function noStore(res: Response): Response {
+  if (res.headers.get('Cache-Control') === NO_STORE) return res;
+  const headers = new Headers();
+  res.headers.forEach((v, k) => headers.set(k, v));
+  headers.set('Cache-Control', NO_STORE);
+  const { status } = res;
+  const body = status === 101 || status === 204 || status === 205 || status === 304 ? null : res.body;
+  return new Response(body, { status, statusText: res.statusText, headers });
+}

@@ -68,19 +68,30 @@ async function addHumanOwner(repository: string) {
 }
 
 describe('B-169 the security review’s corrections', () => {
-  it('a 26,214,401-byte delivery is too-large before any digest on both routes; 26,214,400 is not', async () => {
+  it('a 26,214,401-byte delivery is too-large on its Content-Length or once that many bytes are read, on both routes', async () => {
     const body = (n: number) => 'x'.repeat(n);
-    // Built by hand so the Content-Length is the body's own, as Node's listener sends it.
+    const chunks = (text: string): ReadableStream<Uint8Array> => {
+      const bytes = new TextEncoder().encode(text);
+      let at = 0;
+      return new ReadableStream({
+        pull(controller) {
+          if (at >= bytes.length) return controller.close();
+          // 1 MiB at a time, so the cap is crossed while the body is being read.
+          controller.enqueue(bytes.slice(at, (at += 1 << 20)));
+        },
+      });
+    };
+    const post = (path: string, init: RequestInit) => hostCall(new Request(ORIGIN + path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': 'sha256=' + '0'.repeat(64), 'X-GitHub-Event': 'push' }, ...init }));
     for (const path of ['/v1/github/webhook', '/v1/forges/ops/notify']) {
-      const over = await hostCall(new Request(ORIGIN + path, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': 'sha256=' + '0'.repeat(64), 'X-GitHub-Event': 'push' }, body: body(MAX_DELIVERY + 1),
-      }));
-      expect([path, over.status, (await over.json() as Record<string, unknown>).code]).toEqual([path, 413, 'too-large']);
+      // The Content-Length's half: the header alone refuses it, before a byte is read.
+      const over = await post(path, { headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': 'sha256=' + '0'.repeat(64), 'X-GitHub-Event': 'push', 'Content-Length': String(MAX_DELIVERY + 1) }, body: 'x' });
+      expect([path, 'length', over.status, (await over.json() as Record<string, unknown>).code]).toEqual([path, 'length', 413, 'too-large']);
+      // The chunked half: no Content-Length, and the cap is judged as the stream is read.
+      const streamed = await post(path, { body: chunks(body(MAX_DELIVERY + 1)), duplex: 'half' } as RequestInit);
+      expect([path, 'chunked', streamed.status, (await streamed.json() as Record<string, unknown>).code]).toEqual([path, 'chunked', 413, 'too-large']);
     }
-    // A chunked body under the cap is read whole and then judged by its signature — never by size.
-    const under = await hostCall(new Request(ORIGIN + '/v1/github/webhook', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': 'sha256=' + '0'.repeat(64), 'X-GitHub-Event': 'push' }, body: body(MAX_DELIVERY),
-    }));
+    // A body under the cap is read whole and then judged by its signature — never by size.
+    const under = await post('/v1/github/webhook', { body: body(MAX_DELIVERY) });
     expect([under.status, (await under.json() as Record<string, unknown>).code]).toEqual([401, 'unauthenticated']);
   });
 
@@ -107,39 +118,49 @@ describe('B-169 the security review’s corrections', () => {
     expect(await rows("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'check_runners'")).toEqual([]);
   });
 
-  it('under a human-only approvers.policy a checks change is forbidden to the owner key and accepted by the human key, whichever way it moves', async () => {
+  it('under a human-only approvers.policy the owner key’s loosenings are forbidden and the human key’s land; a tightening is any owner key’s', async () => {
     await addHumanOwner('ops');
-    expect((await as(owner, '/v1/owner/ops/policy', { base_version: 1, preset: 'protected' }, 'PUT')).status).toBe(200);
+    // The owner key stores a map while the policy is the default `[owner]` list (a tightening —
+    // a course's first map — and any owner key's).
     const set = (checks: unknown, key: TestKey = owner) => as(key, '/v1/owner/ops/settings', { checks }, 'PUT');
     const stored = async () => JSON.parse((await rows<{ checks: string }>('SELECT checks FROM repositories WHERE id = ?', 'ops'))[0].checks);
-    // Under a human-only list every `checks` change is the approver list's: a course added (a
-    // tightening), and, from the human key's map, a swap (toward `success`) and a dropped station.
-    for (const conclusions of [PASS, { passed: 'failure', failed: 'success', hung: 'timed_out' }, { passed: 'success', failed: 'failure' }]) {
-      const out = await set({ check: { conclusions } });
-      expect([out.status, out.json.code]).toEqual([403, 'forbidden']);
-    }
-    expect(await stored()).toEqual({});
-    expect((await set({ check: { conclusions: PASS } }, human)).status).toBe(200);
+    expect((await set({ check: { conclusions: PASS } })).status).toBe(200);
     expect(await stored()).toEqual({ check: { conclusions: PASS } });
-    expect((await set({ check: { conclusions: { passed: 'failure', failed: 'success', hung: 'timed_out' } } }, human)).status).toBe(200);
-    expect(await stored()).toEqual({ check: { conclusions: { passed: 'failure', failed: 'success', hung: 'timed_out' } } });
+    expect((await as(owner, '/v1/owner/ops/policy', { base_version: 1, preset: 'protected' }, 'PUT')).status).toBe(200);
+    // A swap moves a station toward `success`: a loosening, refused to the plain owner key.
+    const swap = { passed: 'failure', failed: 'success', hung: 'timed_out' };
+    const refused = await set({ check: { conclusions: swap } });
+    expect([refused.status, refused.json.code]).toEqual([403, 'forbidden']);
+    expect(await stored()).toEqual({ check: { conclusions: PASS } });
+    // Dropping a station is a tightening: accepted by the plain owner key under the same list.
+    expect((await set({ check: { conclusions: { passed: 'success', failed: 'failure' } } })).status).toBe(200);
+    expect(await stored()).toEqual({ check: { conclusions: { passed: 'success', failed: 'failure' } } });
+    // A whole course leaving is a loosening, refused to the owner key.
+    const emptied = await set({});
+    expect([emptied.status, emptied.json.code]).toEqual([403, 'forbidden']);
+    expect(await stored()).toEqual({ check: { conclusions: { passed: 'success', failed: 'failure' } } });
+    // The human key is the approver: the swap and the empty map land.
+    expect((await set({ check: { conclusions: swap } }, human)).status).toBe(200);
+    expect(await stored()).toEqual({ check: { conclusions: swap } });
+    expect((await set({}, human)).status).toBe(200);
+    expect(await stored()).toEqual({});
   });
 
   it('a course added is a tightening any owner key makes; each way it moves from there is governed by the approver list', async () => {
     const set = (checks: unknown, key: TestKey = owner) => as(key, '/v1/owner/ops/settings', { checks }, 'PUT');
-    // A course's first map governs nothing yet: any owner key sets it.
+    const stored = async () => JSON.parse((await rows<{ checks: string }>('SELECT checks FROM repositories WHERE id = ?', 'ops'))[0].checks);
+    // Under the default `[owner]` list a course's first map is any owner key's, and a tightening
+    // — a dropped station, or one moved away from `success` — stays any owner key's.
     expect((await set({ check: { conclusions: PASS } })).status).toBe(200);
-    // A human-only approvers.policy refuses the plain owner key however the map moves — toward
-    // `success` (a swap), or away from it (a `timed_out` station dropped is a removal).
+    expect((await set({ check: { conclusions: { passed: 'failure', failed: 'success', hung: 'timed_out' } } })).status).toBe(200);
+    expect((await set({ check: { conclusions: PASS } })).status).toBe(200);
+    // A human-only approvers.policy governs both ways: the swap loosens, the dropped station
+    // tightens — and a policy that admits no plain owner entry refuses it the swap alone.
     await addHumanOwner('ops');
     expect((await as(owner, '/v1/owner/ops/policy', { base_version: 1, preset: 'protected' }, 'PUT')).status).toBe(200);
-    for (const conclusions of [
-      PASS, // a course added
-      { passed: 'failure', failed: 'success', hung: 'timed_out' }, // a swap: a station now success
-    ]) {
-      const out = await set({ check: { conclusions } });
-      expect([out.status, out.json.code]).toEqual([403, 'forbidden']);
-    }
+    expect((await set({ check: { conclusions: { passed: 'failure', failed: 'success', hung: 'timed_out' } } })).json.code).toBe('forbidden');
+    expect((await set({ check: { conclusions: { passed: 'success', failed: 'failure' } } })).status).toBe(200);
+    expect(await stored()).toEqual({ check: { conclusions: { passed: 'success', failed: 'failure' } } });
   });
 
   it('every answer a credential or a session authorizes carries Cache-Control: no-store, and a public page does not', async () => {
@@ -160,9 +181,15 @@ describe('B-169 the security review’s corrections', () => {
     expect([refused.status, refused.headers.get('Cache-Control')]).toEqual([403, 'no-store']);
     const delivery = await hostCall(new Request(ORIGIN + '/v1/github/webhook', { method: 'POST', headers: { 'X-Hub-Signature-256': 'sha256=' + '0'.repeat(64) }, body: '{}' }));
     expect([delivery.status, delivery.headers.get('Cache-Control')]).toEqual([401, 'no-store']);
-    // A public page holds no data: its own header, and no security-header side effect.
-    const page = await hostCall(new Request(ORIGIN + '/'));
-    expect(page.status).toBe(200);
-    expect(page.headers.get('Cache-Control')).toBe('no-store');
+    // A public page holds no data, and is served by the public branch, not the withheld one: the
+    // header it carries is the page's own (`serve`'), and no principal is asked for (a 200 and
+    // no cookie, where an unauthorized `/v1/ui` read is a 401).
+    const page = await hostCall(new Request(ORIGIN + '/ui/app.js'));
+    expect([page.status, page.headers.get('Cache-Control'), page.headers.get('Set-Cookie')]).toEqual([200, 'no-store', null]);
+    const anonymousUi = await sessionCall('', '/v1/ui/state');
+    expect([anonymousUi.status, anonymousUi.headers.get('Cache-Control')]).toEqual([401, 'no-store']);
+    // A path no route answers is public, and its refusal carries no header of a route's.
+    const nowhere = await hostCall(new Request(ORIGIN + '/nothing'));
+    expect([nowhere.status, nowhere.headers.get('Cache-Control')]).toEqual([404, null]);
   });
 });

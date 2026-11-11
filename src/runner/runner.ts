@@ -15,7 +15,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { maskSecrets } from '../shared/mask.mjs';
+import { createMasker } from '../shared/mask.mjs';
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
@@ -358,10 +358,17 @@ export class Runner {
     // R-BTN-144: before any byte of a leg's output leaves the runner — to a leg log or anywhere
     // else — it is masked. One sink, wrapped here, so every line the runner writes (a leg's
     // failure among them, quoting what the leg put in `error`) carries no class-5 or class-6
-    // token whatever path built it. `maskSecrets` returns its input when it changes nothing, so
-    // the timestamps and the caller's `log` read the same line they always did.
+    // token whatever path built it. Class 6 is stateful (a key prints over several lines, and
+    // the sink is handed one line at a time), so the sink holds from a `BEGIN` line until its
+    // `END` line or 16 KB and masks the run whole; class 5 is masked line by line, which a token
+    // never spans. `maskSecrets` returns its input when it changes nothing, so the timestamps
+    // and the caller's `log` read the same line they always did.
     const sink = options.log ?? (() => {});
-    const masked = (line: string): void => sink(maskSecrets(line));
+    const masker = createMasker();
+    const masked = (line: string): void => {
+      const out = masker.push(line);
+      if (out) for (const l of out.split('\n')) sink(l);
+    };
     this.log = this.verbose ? withTimestamps(masked) : masked;
     this.now = options.now ?? batonNow;
     this.state = new StateFile(options.stateFile);

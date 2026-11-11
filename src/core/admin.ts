@@ -947,21 +947,10 @@ export class Admin {
       sets.push(['worker_pushers', JSON.stringify(w)]);
     }
     if (b.checks !== undefined) sets.push(['checks', JSON.stringify(this.checkConclusions(repository, b.checks))]);
-    // R-BTN-114: an owner's `checks` change is the owners' — an owner key an
-    // `approvers.policy` entry admits (`entryMatches`: `owner` a live owner, a `human` entry a
-    // human-only key meeting `human_key`, `key:` its own), never a delegated key (above):
-    // refused under a human-only list whichever way the map moves, as a loosening is.
-    // R-BTN-188/R-BTN-186: the loosening needs the same approver on the list as it stands.
-    if (b.checks !== undefined) {
-      const policies = this.c.policies;
-      const cur = policies?.current(repository);
-      if (policies && cur) {
-        const facts = policies.facts(repository, await this.breakGlassSet());
-        if (!policies.entryMatches(cur.policy.approvers.policy, actor.slice(actor.indexOf(':') + 1), facts, cur.policy.human_key)) {
-          throw new BatonError('forbidden', 'a checks map is set by an owner key an approvers.policy entry admits (R-BTN-114)');
-        }
-      }
-    }
+    // R-BTN-114: a `checks` change that TIGHTENS — a course added, a station moved away from
+    // `success` — is any owner key's, as every owner route is (`/v1/owner/…` refuses a key that
+    // does not own the repository, and a delegated key above); a LOOSENING needs an approver on
+    // `approvers.policy` as it stands, the same gate R-BTN-188 puts on an R-BTN-66 setting.
     if (this.loosensSettings(repository, sets)) {
       const policies = this.c.policies;
       const cur = policies?.current(repository);
@@ -996,15 +985,15 @@ export class Admin {
     if (checks) {
       const was = this.checkMap(repository);
       const next = JSON.parse(checks[1]!) as Record<string, CheckConclusion>;
-      // A course's map a station moves toward `success` in, or that loses a station (removed, or
-      // renamed — the new name is a station the map did not have), loosens (R-BTN-114).
-      const loosened = Object.entries(next).find(([course, entry]) => {
+      // R-BTN-114: a station mapped to `success` that was not is a loosening, and so is a
+      // course's entry removed or renamed (the new name is a course the map did not have). Any
+      // other change — a course added, a station dropped or moved away from `success` — tightens.
+      const towardSuccess = Object.entries(next).some(([course, entry]) => {
         const before = was[course];
-        return before !== undefined && Object.keys(before.conclusions).some((station) => (conclusionAt(station, before) !== 'success' && conclusionAt(station, entry) === 'success')
-          || !(station in entry.conclusions));
+        return before !== undefined && Object.keys(before.conclusions).some((station) => conclusionAt(station, before) !== 'success' && conclusionAt(station, entry) === 'success');
       });
-      if (loosened) return true;
-      if (Object.keys(was).some((course) => !(course in next))) return true;
+      if (towardSuccess) return true;
+      if (Object.keys(was).some((course) => !Object.hasOwn(next, course))) return true;
     }
     const flat = ['retry', 'transcript_repos', 'required_independence'];
     for (const [k, v] of sets) {
@@ -1083,7 +1072,9 @@ export class Admin {
 
   /** R-BTN-130's delegated key: an owner key acting on a hosted MCP client's behalf. None is
    *  registered until B-124 builds them, so no actor is one today; the refusals above read the
-   *  one place that will say so, as `Policies.entryMatches` reads its own. */
+   *  one place that will say so, as `Policies.entryMatches` reads its own. The actor is
+   *  `<class>:<fingerprint>` (`owner:` from `/v1/owner/…`); B-124's `delegated:` actor keeps
+   *  that shape, and the fingerprint after the prefix is what an `approvers.policy` entry admits. */
   private delegated(actor: string): boolean {
     return actor.startsWith('delegated:');
   }

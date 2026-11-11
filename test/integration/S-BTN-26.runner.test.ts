@@ -276,4 +276,19 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     expect(lines.join('\n')).toContain('***');
     expect(lines.join('\n')).not.toContain(refresh);
   }, 60_000);
+
+  it('masks a private key a leg prints over several lines whole (B-169, R-BTN-144 class 6)', async () => {
+    // The verbose drain hands the sink one stderr line at a time, so a block held per line would
+    // pass its body on unmasked. R-BTN-144 class 6 holds from the `BEGIN` line until the `END`
+    // line and masks the run whole — the body never leaves the runner.
+    const body = 'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAAB';
+    home.leg('chore', 'do', `process.stderr.write('-----BEGIN OPENSSH PRIVATE KEY-----\\n${body}\\n${body}\\n-----END OPENSSH PRIVATE KEY-----\\n');`);
+    home.commit();
+    await home.post([ticket('C-1', { course_id: 'chore', path: 'content/chore/C-1.mdx' })], { 'C-1': placed('open', [], [['do', 'ready']]) });
+    const lines: string[] = [];
+    const runner = makeRunner(servedCourses(home.dir), { log: (l: string) => lines.push(l), verbose: true });
+    await runner.runOnce();
+    expect(lines.join('\n')).not.toContain(body);
+    expect(lines.join('\n')).toContain('***');
+  }, 60_000);
 });
