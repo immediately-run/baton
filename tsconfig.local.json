@@ -72,6 +72,9 @@
     "test/integration/S-BTN-157.busy-sync.test.ts",
     "test/integration/S-BTN-159.quiet-start.test.ts",
     "test/integration/S-BTN-201.short-wait-alive.test.ts",
+    "test/integration/S-BTN-214.local-home.test.ts",
+    "test/integration/S-BTN-216.ids-decide.test.ts",
+    "test/integration/S-BTN-217.cross-host-pushers.test.ts",
     "test/unit/seed-owners-fresh.test.ts",
     "test/unit/cloud-runner.test.ts"
   ]

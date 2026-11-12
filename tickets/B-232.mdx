@@ -40,3 +40,26 @@ a session that dies) may have the same shape.
 **Done when** a runner whose executor refuses every session ends at most a few claims, each as
 `cannot-finish:transient` naming the executor's error, and then waits without claiming until a
 session starts.
+
+### Trust
+
+No new input. The runner's consecutive-failure counter and its backoff are its own local state,
+written only by its own executor's outcomes; no new field, file, commit trailer or request is
+read. An executor's error arrives as today's session-start failure does, is released with the
+claim, and is never trusted as a fact about the ticket.
+
+### Invariants
+
+- **R-BTN-74 (§4.5, the version check).** A verdict that the ticket moved still comes only from
+  the ticket source's own answer; an executor that cannot start a session answered nothing, so
+  no moved-ticket reading is manufactured from a broken executor.
+- **§9.4's end reasons (the one list).** No new reason: the executor's failure ends the claim
+  `released:cannot-finish:transient`, the existing environment failure, its attempt counted —
+  never `released:stale-board`.
+- **R-BTN-34 with R-BTN-5 (§4.5, re-verification from git).** Only a failed re-verification —
+  the source's own answer — ends a claim `released:stale-board`; that path is unchanged, and a
+  runner in executor backoff claims nothing, so it holds no lease it cannot serve.
+
+## Status
+
+_filed 2026-11-11._

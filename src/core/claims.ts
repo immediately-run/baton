@@ -915,10 +915,15 @@ export class Claims {
       `SELECT id, status, end_reason, end_detail, ended_at, resume_json FROM claims WHERE ticket_id = ? AND id < ? AND status != 'active' ORDER BY id DESC`, c.ticket_id, id);
     const advice = c.advice_json ? (JSON.parse(c.advice_json) as { recommendation?: Recommendation | null }) : null;
     // §12.8 (B-145): the policy facts of the claim's repository (R-BTN-189) and where state one
-    // leg hands the next lives (R-BTN-188's `leg_state` — B-148 reads it).
+    // leg hands the next lives (R-BTN-188's `leg_state` — B-148 reads it). B-182 (R-BTN-190): a
+    // `git` home's claimed ticket on a course that reads PR facts keeps its rounds in its PR's
+    // conversation, on whichever forge holds the PR — the course's `facts` (R-BTN-134), as the
+    // registry posted it, says whether it reads any.
     const repo = repositoryOf(c.ticket_id);
     const policy = this.c.policies?.hashesFor(repo) ?? null;
-    const legState = this.c.policies?.current(repo) && this.c.forgeOf ? legStateOf(this.c.policies.current(repo)!.policy, this.c.forgeOf(repo)) : null;
+    const cur = this.c.policies?.current(repo);
+    const readsPrs = c.course_id != null && (this.rows<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', repo, c.course_id)[0]?.facts ?? '[]').includes('"prs"');
+    const legState = cur && this.c.forgeOf ? legStateOf(cur.policy, this.c.forgeOf(repo), readsPrs) : null;
     return {
       claim_id: c.id, ticket_id: c.ticket_id, course_id: c.course_id, course_version: courseVersion,
       ...(policy ? { policy_hash: policy.policy_hash, guarantees_hash: policy.guarantees_hash, floors_hash: policy.floors_hash } : {}),

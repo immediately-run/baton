@@ -19,7 +19,7 @@ import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
-import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type PrFact, type StationsResult } from './course-pr';
+import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
 import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
@@ -362,7 +362,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
       }
     }
   }
-  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()]) : [];
+  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()], { codeRepos: record?.code_repos, pushers: record?.pushers }) : [];
   // B-110: the plain-git half of the fact reading. A fact whose adapter read no commits (a facts
   // file, a forge with no adapter) gets its open branch's commits from the checkout's own git —
   // no forge, no `gh` — so the run-tests gate's markers are read the same way (`commitsOf`). Only
@@ -429,6 +429,10 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
       id: c.id, version: c.version, min_worker_version: c.min_worker_version ?? c.version, skill: c.skill ?? defaultSkill(c.id), course,
       step_kinds: c.step_kinds ?? Object.keys(course.legs ?? {}), ...(c.report_horizon_h != null ? { report_horizon_h: c.report_horizon_h } : {}),
       branch_pattern: branchPatterns[0], ...(c.previous_branch_pattern ? { previous_branch_pattern: c.previous_branch_pattern } : {}),
+      // B-182 (R-BTN-134): what the course's entry declares it reads — `prs` when this sync reads
+      // PR facts for it, nothing when it does not — so R-BTN-190 can follow the PRs without a
+      // policy knob, a `git` home's PR course among them.
+      facts: readsPrsOf(c) ? ['prs'] : [],
     });
   }
   const status = new Map(result.tickets.map((t) => [t.id, t.display?.status ?? 'live']));
@@ -638,6 +642,11 @@ export async function syncMain(args: SyncArgs): Promise<number> {
           answers: Array.isArray(got.answers) ? got.answers : [],
           legs: Array.isArray(got.legs) ? got.legs : [],
           ...(got.versions && typeof got.versions === 'object' ? { versions: got.versions as Record<string, string> } : {}),
+          // B-182 (R-BTN-140): the effective `code_repos` and `pushers` the observation hands
+          // back — what the fact adapter reads each named repository by, and whose words count
+          // there (R-BTN-139).
+          ...(Array.isArray(got.code_repos) ? { code_repos: got.code_repos as BatonRecord['code_repos'] } : {}),
+          ...(Array.isArray(got.pushers) ? { pushers: got.pushers as BatonRecord['pushers'] } : {}),
         };
         return got;
       });
@@ -777,49 +786,89 @@ const detailQuery = (numbers: number[]): string =>
   `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${numbers.map((n) => `p${n}: pullRequest(number: ${n}) { ...D }`).join(' ')} } }\n${PR_DETAIL}`;
 
 /** R-BTN-96's fact adapter, GitHub half: the repository's PRs with their head's checks, their
- * commits' dates, their reviews and their comments, mapped to PrFact. The PR lists are read over
- * REST, each to its end (GitHub's `Link: rel="next"`); the PRs a live ticket owns are read over
- * GraphQL, GRAPHQL_BATCH to a query (B-35), with any connection that overflows its first page read
- * over REST in full, so a long-lived repository or a long thread is never cut off. Live forge
- * access — the tests inject recorded facts instead. */
-export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = []): Promise<PrFact[]> {
+ *  commits' dates, their reviews and their comments, mapped to PrFact. The PR lists are read over
+ *  REST, each to its end (GitHub's `Link: rel="next"`); the PRs a live ticket owns are read over
+ *  GraphQL, GRAPHQL_BATCH to a query (B-35), with any connection that overflows its first page read
+ *  over REST in full, so a long-lived repository or a long thread is never cut off.
+ *
+ *  B-182: the adapter is chosen per repository — the home's by the home's (none on a plain-git
+ *  home), each `code_repos` entry's by its own forge, read on that host's API with the forge's
+ *  token and under a request budget counted **per host**. An entry's ids are verified at every
+ *  read (R-BTN-138's "the ids decide"): a forge reporting different ids for the repository than
+ *  the entry stores fails the sync naming the entry, so a re-created path never gains reach. A
+ *  `repos:` repository the home's list does not name is not read — it has no reach (R-BTN-140) —
+ *  and while the home lists no code repository at all, every name keeps today's reading.
+ *  Live forge access — the tests inject recorded facts instead. */
+
+/** One host's API as the adapter reads it: the REST origin REST paths append to, the GraphQL
+ *  endpoint whole (nothing is appended to it), and the budget's key. GitHub's own host is
+ *  `api.github.com`; a GitHub Enterprise host serves REST under `/api/v3` and GraphQL at
+ *  `/api/graphql`. */
+function githubConn(host: string): { host: string; rest: string; graphql: string } {
+  return host === 'github.com'
+    ? { host, rest: 'https://api.github.com', graphql: 'https://api.github.com/graphql' }
+    : { host, rest: `https://${host}/api/v3`, graphql: `https://${host}/api/graphql` };
+}
+
+export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = [], obs: { codeRepos?: CodeRepoEntry[]; pushers?: { host: string; id: string }[] } = {}): Promise<PrFact[]> {
   const slug = remoteSlug(root);
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   // B-182 (first slice): a plain-git home has no forge, so no adapter reads it (R-BTN-96) — only
   // the repositories its tickets name in `repos:` are read, and with none nothing is, token or not.
   const home = plainGitRemote(git(root, 'remote', 'get-url', 'origin')) ? null : slug;
+  const entries = obs.codeRepos ?? [];
+  // The reading set: the home (when it is on a forge), then each named repository — through its
+  // `code_repos` entry when the home lists any (R-BTN-140's reach), by name when it lists none.
+  const reads: { repository: string; tickets: string[]; entry?: CodeRepoEntry }[] = [];
+  if (home != null) reads.push({ repository: home, tickets: [] });
+  const unlisted: string[] = [];
+  for (const s of siblings) {
+    if (home != null && sameRepoName(s.repository, home)) continue;
+    if (!entries.length) {
+      reads.push(s);
+      continue;
+    }
+    const entry = entries.find((e) => sameRepoName(e.path, s.repository));
+    if (entry) reads.push({ ...s, entry });
+    else unlisted.push(s.repository);
+  }
   if (home == null) {
-    log(`baton: the home is a plain git repository, not on GitHub — reading only the repositories tickets name in repos: (${siblings.length})`);
-    if (siblings.length === 0) return [];
+    log(`baton: the home is a plain git repository, not on a forge — reading only the repositories tickets name in repos: (${reads.length}${unlisted.length ? `; ${unlisted.join(', ')} not in code_repos, not read` : ''})`);
+    if (reads.length === 0) return [];
+  } else if (unlisted.length) {
+    log(`baton: ${unlisted.join(', ')} not in code_repos — its PRs are not read (R-BTN-140)`);
   }
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error('no GITHUB_TOKEN to read GitHub — pass --facts <file> for recorded facts');
-  let requests = 0;
-  /** One request of the budget, REST or GraphQL alike: past it the sync refuses. */
-  const spend = (): void => {
-    if (++requests > MAX_REQUESTS) throw new Error(`GitHub: this sync would need more than ${MAX_REQUESTS} requests — refusing before the token's hourly budget is spent`);
+  // B-182: the request budget is per host (R-BTN-96) — a second forge's reading never spends the
+  // first's token down, and one host's overflow refuses before its budget is spent.
+  const requests = new Map<string, number>();
+  /** One request of its host's budget, REST or GraphQL alike: past it the sync refuses. */
+  const spend = (host: string): void => {
+    const n = (requests.get(host) ?? 0) + 1;
+    requests.set(host, n);
+    if (n > MAX_REQUESTS) throw new Error(`GitHub (${host}): this sync would need more than ${MAX_REQUESTS} requests — refusing before the token's hourly budget is spent`);
   };
   /** `res`, or the error a failed one is: its status, and whether it is a rate limit — GitHub's
-   * 403 or 429 with no requests left, or a secondary limit's retry-after — which `list` reads. */
+   *  403 or 429 with no requests left, or a secondary limit's retry-after — which `list` reads. */
   const checked = (res: Response, what: string): Response => {
     const limited = res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after');
     if (!res.ok) throw Object.assign(new Error(`GitHub ${what}: ${res.status}${limited ? ' (rate limited)' : ''}`), { status: res.status, limited });
     return res;
   };
-  const get = async (url: string): Promise<Response> => {
-    spend();
-    return checked(await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), url);
+  const get = async (conn: { host: string; rest: string; token: string }, url: string): Promise<Response> => {
+    spend(conn.host);
+    return checked(await fetch(url, { headers: { Authorization: `Bearer ${conn.token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), url);
   };
   /** One GraphQL query, one request of the budget (B-35). An answer carrying `errors` fails the
-   * sync, as a failed REST read does: no partial reading is posted — except, B-226, errors that
-   * are all a refusal of a head's check suites (`checksRefused`): a fine-grained token cannot
-   * hold Checks, so on a private repository GitHub answers everything else and refuses those.
-   * Such an answer is returned with `checksRefused` set, and the caller reads the checks from
-   * the head's workflow runs instead. Every error names its path, so a refusal says what. */
-  const graphql = async (query: string, variables: Record<string, unknown>): Promise<{ data: any; checksRefused: boolean }> => {
-    spend();
-    const url = `${GITHUB_API}/graphql`;
-    const res = checked(await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'baton-sync' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), `${url} (${String(variables.owner)}/${String(variables.name)})`);
+   *  sync, as a failed REST read does: no partial reading is posted — except, B-226, errors that
+   *  are all a refusal of a head's check suites (`checksRefused`): a fine-grained token cannot
+   *  hold Checks, so on a private repository GitHub answers everything else and refuses those.
+   *  Such an answer is returned with `checksRefused` set, and the caller reads the checks from
+   *  the head's workflow runs instead. Every error names its path, so a refusal says what. */
+  const graphql = async (conn: { host: string; graphql: string; token: string }, query: string, variables: Record<string, unknown>): Promise<{ data: any; checksRefused: boolean }> => {
+    spend(conn.host);
+    const res = checked(await fetch(conn.graphql, { method: 'POST', headers: { Authorization: `Bearer ${conn.token}`, 'Content-Type': 'application/json', 'User-Agent': 'baton-sync' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), `${conn.graphql} (${String(variables.owner)}/${String(variables.name)})`);
     const body = (await res.json()) as { data?: any; errors?: { message?: string; type?: string; path?: (string | number)[] }[] };
     const errors = body.errors ?? [];
     const checksRefused = errors.length > 0 && body.data != null && errors.every((e) => e.type === 'FORBIDDEN' && (e.path ?? []).includes('checkSuites'));
@@ -829,15 +878,15 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     return { data: body.data, checksRefused };
   };
   /** B-226: the repositories whose check runs this token may not read — a fine-grained token on a
-   * private repository, which GitHub offers no Checks permission. Their heads' checks are the
-   * head commit's Actions workflow runs (Actions: read), said once a repository. */
+   *  private repository, which GitHub offers no Checks permission. Their heads' checks are the
+   *  head commit's Actions workflow runs (Actions: read), said once a repository. */
   const checksFromActions = new Set<string>();
   /** The head's checks as its workflow runs give them: a run's conclusion once it has completed,
-   * null while it runs — the same "finished or not" the check runs answer. Refused too (no
-   * Actions: read), the sync fails naming both permissions. */
-  const actionChecks = async (repo: string, sha: string): Promise<(string | null)[]> => {
+   *  null while it runs — the same "finished or not" the check runs answer. Refused too (no
+   *  Actions: read), the sync fails naming both permissions. */
+  const actionChecks = async (conn: { host: string; rest: string; token: string }, repo: string, sha: string): Promise<(string | null)[]> => {
     try {
-      const runs = await all<any>(`/repos/${repo}/actions/runs?head_sha=${sha}`, (b) => b.workflow_runs);
+      const runs = await all<any>(conn, `/repos/${repo}/actions/runs?head_sha=${sha}`, (b) => b.workflow_runs);
       return runs.map((r) => (r.status === 'completed' && r.conclusion ? String(r.conclusion) : null));
     } catch (e) {
       const { status, limited } = e as { status?: number; limited?: boolean };
@@ -846,28 +895,64 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     }
   };
   /** Every item of a paged list; `pick` takes a page's items from its body. */
-  const all = async <T>(path: string, pick: (body: any) => T[] = (b) => b as T[]): Promise<T[]> => {
+  const all = async <T>(conn: { host: string; rest: string; token: string }, path: string, pick: (body: any) => T[] = (b) => b as T[]): Promise<T[]> => {
     const out: T[] = [];
-    let url: string | null = `${GITHUB_API}${path}${path.includes('?') ? '&' : '?'}per_page=100`;
+    let url: string | null = `${conn.rest}${path}${path.includes('?') ? '&' : '?'}per_page=100`;
     for (let page = 0; url != null; page++) {
       if (page === MAX_PAGES) throw new Error(`GitHub ${path}: more than ${MAX_PAGES * 100} items — the sync will not post a truncated reading`);
-      const res = await get(url);
+      const res = await get(conn, url);
       out.push(...pick(await res.json()));
       url = /<([^>]+)>;\s*rel="next"/.exec(res.headers.get('link') ?? '')?.[1] ?? null;
     }
     return out;
   };
-  /** R-BTN-139: whether `login` can push to `repo` — the forge's collaborator permission, read
-   * once per author per repository per run. A 404 is no collaborator. A 403 that is no rate limit
-   * is a token without the scope: it degrades, failing closed — no verdict of that repository
-   * counts, said once. Any other failure aborts the run, which posts nothing. */
+  /** R-BTN-139, B-182: whether `login` counts on `conn`'s host — one of two independent ways.
+   *  An immutable forge user id in the owners' `pushers` for that host counts on its own
+   *  (`idOf` below reads it), whatever `author_association` says and without a collaborator
+   *  read. The other way is someone the forge reports can push to the repository (the
+   *  collaborator permission, read once per author per repository per run); a 404 is no
+   *  collaborator, which leaves only the listed-id way. A 403 that is no rate limit is a token
+   *  without the scope: it degrades, failing closed — no verdict of that repository counts,
+   *  said once. Any other failure aborts the run, which posts nothing. */
   const pushers = new Map<string, Promise<boolean>>();
   const unreadable = new Set<string>();
-  const canPush = (repo: string, login: string): Promise<boolean> => {
-    const key = `${repo.toLowerCase()}\u0000${login}`;
+  const pusherIds = new Map<string, Set<string>>();
+  for (const p of obs.pushers ?? []) {
+    const set = pusherIds.get(p.host) ?? new Set<string>();
+    set.add(p.id);
+    pusherIds.set(p.host, set);
+  }
+  /** The author's immutable id on `conn`'s host, or null when none is at hand — the fact's own
+   *  when it carries one (REST lists do; GraphQL's `User.id` is the base64 node id, not the
+   *  numeric one `pushers` holds, so GraphQL facts take the read), else one user read
+   *  (`GET /users/{login}`), budgeted and cached per author per run, answered only while that
+   *  host lists some pusher id to match against — a host that lists none never looks an author
+   *  up, so every existing deployment reads byte for byte as before. A failed read answers
+   *  null: the listed way fails closed. */
+  const ids = new Map<string, Promise<string | null>>();
+  const idOf = async (conn: { host: string; rest: string; token: string }, login: string, carried?: unknown): Promise<string | null> => {
+    if (!(pusherIds.get(conn.host)?.size)) return null;
+    if (typeof carried === 'number' || typeof carried === 'string') return String(carried);
+    const key = `${conn.host}\u0000${login}`;
+    if (!ids.has(key)) {
+      ids.set(key, get(conn, `${conn.rest}/users/${encodeURIComponent(login)}`)
+        .then(async (res) => {
+          const b = (await res.json()) as { id?: unknown };
+          return b.id == null ? null : String(b.id);
+        })
+        .catch(() => null));
+    }
+    return ids.get(key)!;
+  };
+  const canPush = (conn: { host: string; rest: string; token: string }, repo: string, login: string): Promise<boolean> => {
+    const key = `${conn.host}\u0000${repo.toLowerCase()}\u0000${login}`;
     if (!pushers.has(key)) {
-      pushers.set(key, get(`${GITHUB_API}/repos/${repo}/collaborators/${encodeURIComponent(login)}/permission`)
-        .then(async (res) => PUSHERS.has(String(((await res.json()) as { permission?: unknown }).permission)))
+      pushers.set(key, get(conn, `${conn.rest}/repos/${repo}/collaborators/${encodeURIComponent(login)}/permission`)
+        .then(async (res) => {
+          const body = (await res.json()) as { permission?: unknown; user?: { id?: unknown } };
+          const listed = body.user?.id != null && (pusherIds.get(conn.host) ?? new Set()).has(String(body.user.id));
+          return listed || PUSHERS.has(String(body.permission));
+        })
         .catch((e) => {
           const { status, limited } = e as { status?: number; limited?: boolean };
           if (status === 404) return false;
@@ -881,26 +966,47 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     }
     return pushers.get(key)!;
   };
-  /** The facts whose author is trusted, in their order (R-BTN-139). An author GitHub no longer
-   * names (a deleted account) cannot be asked, so does not count. */
-  const trustedOnly = async <T extends { login?: string | null; association?: string }>(repo: string, facts: T[]): Promise<T[]> => {
+  /** The facts whose author is trusted, in their order (R-BTN-139) — a listed immutable id
+   *  first, one of the two ways on its own, then the forge's own report, which
+   *  `author_association` pre-filters. An author GitHub no longer names (a deleted account)
+   *  cannot be asked, so does not count. */
+  const trustedOnly = async <T extends { login?: string | null; userId?: unknown; association?: string }>(conn: { host: string; rest: string; token: string }, repo: string, facts: T[]): Promise<T[]> => {
     const out: T[] = [];
-    for (const f of facts) if (f.login != null && !CANNOT_PUSH.has(String(f.association)) && (await canPush(repo, f.login))) out.push(f);
+    for (const f of facts) {
+      if (f.login == null) continue;
+      const id = await idOf(conn, f.login, f.userId);
+      if (id != null && (pusherIds.get(conn.host) ?? new Set()).has(id)) out.push(f);
+      else if (!CANNOT_PUSH.has(String(f.association)) && (await canPush(conn, repo, f.login))) out.push(f);
+    }
     return out;
   };
   const out: PrFact[] = [];
-  // The home, then each other repository a live ticket names in `repos:` (B-29), under the one
-  // budget: a sync that would exceed it refuses rather than post a partial reading.
-  for (const { repository: repo, tickets } of [...(home != null ? [{ repository: home, tickets: [] as string[] }] : []), ...siblings.filter((s) => home == null || !sameRepoName(s.repository, home))]) {
+  // The home, then each other repository a live ticket names in `repos:` (B-29), each through
+  // its own connection: a refusal under any budget never posts a partial reading.
+  for (const { repository: repo, tickets, entry } of reads) {
+    if (entry != null && entry.forge !== 'github') {
+      throw new Error(`${entry.path}: no adapter for ${entry.forge} yet — the ${entry.forge} fact adapter is not built, and the sync will not post a partial reading (R-BTN-96)`);
+    }
+    const conn = { ...githubConn(entry?.host ?? 'github.com'), token };
     const before = out.length;
-    out.push(...(await repoFacts(repo, tickets)));
-    log(`baton: read ${out.length - before} PRs of ${repo} from GitHub`);
+    out.push(...(await repoFacts(conn, repo, tickets, entry)));
+    log(`baton: read ${out.length - before} PRs of ${repo} from GitHub${entry ? ` (${entry.host})` : ''}`);
   }
-  log(`baton: ${requests} requests in all`);
+  log(`baton: ${[...requests].map(([host, n]) => `${n} request${n === 1 ? '' : 's'} of ${host}`).join(', ')}`);
   return out;
 
-  async function repoFacts(repo: string, tickets: string[]): Promise<PrFact[]> {
-    const listed = await list(repo, tickets);
+  async function repoFacts(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, tickets: string[], entry?: CodeRepoEntry): Promise<PrFact[]> {
+    // B-182 (R-BTN-138): the ids decide at every read. The forge's own ids for the repository
+    // are compared with the entry's; a mismatch — a path re-created by someone else — fails the
+    // sync naming the entry, so the re-created path never gains reach.
+    if (entry != null) {
+      const res = (await (await get(conn, `${conn.rest}/repos/${repo}`)).json()) as { id?: unknown; owner?: { id?: unknown } };
+      const seen = `${String(res.id ?? '?')}/${String(res.owner?.id ?? '?')}`;
+      if (String(res.id ?? '') !== entry.repo_id || String(res.owner?.id ?? '') !== entry.owner_id) {
+        throw new Error(`GitHub (${entry.host}) reports ids ${seen} for ${repo}, but its code_repos entry holds ${entry.repo_id}/${entry.owner_id} — the path was re-created or moved; the sync fails rather than read the wrong repository (R-BTN-138: the ids decide)`);
+      }
+    }
+    const listed = await list(conn, repo, tickets);
     // Only a PR a live ticket owns needs its detail read; any other PR places no ticket and is
     // recorded from the list alone, so the requests a run makes grow with the live tickets, not
     // with the repository's history. A closed unmerged PR a live ticket owns is read too:
@@ -912,12 +1018,12 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     for (let i = 0; i < owned.length; i += GRAPHQL_BATCH) {
       const batch = owned.slice(i, i + GRAPHQL_BATCH);
       const [owner, name] = repo.split('/');
-      const { data, checksRefused } = await graphql(detailQuery(batch.map((pr) => pr.number)), { owner, name });
+      const { data, checksRefused } = await graphql(conn, detailQuery(batch.map((pr) => pr.number)), { owner, name });
       if (checksRefused && !checksFromActions.has(repo.toLowerCase())) {
         checksFromActions.add(repo.toLowerCase());
         log(`baton: ${repo}: this token cannot read check runs (a fine-grained token holds no Checks) — its PRs' checks are their heads' workflow runs (B-226)`);
       }
-      for (const pr of batch) detail.set(pr.number, await detailOf(repo, pr, data?.repository?.[`p${pr.number}`]));
+      for (const pr of batch) detail.set(pr.number, await detailOf(conn, repo, pr, data?.repository?.[`p${pr.number}`]));
     }
     return listed.map((pr) => {
       const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
@@ -926,16 +1032,16 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   }
 
   /** One PR's facts from its GraphQL node, mapped exactly as the REST lists are; a connection
-   * whose first page overflows, or a head the batch read at another commit, is read over REST. */
-  async function detailOf(repo: string, pr: any, node: any): Promise<Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>> {
+   *  whose first page overflows, or a head the batch read at another commit, is read over REST. */
+  async function detailOf(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, pr: any, node: any): Promise<Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>> {
     if (node == null) throw new Error(`GitHub GraphQL (${repo}): no pull request #${pr.number}, though the list has it`);
     const head = node.head?.nodes?.[0]?.commit;
     const suites = head?.checkSuites;
     const overflow = suites?.pageInfo?.hasNextPage || (suites?.nodes ?? []).some((cs: any) => cs?.checkRuns?.pageInfo?.hasNextPage);
     const checks = checksFromActions.has(repo.toLowerCase())
-      ? await actionChecks(repo, pr.head.sha)
+      ? await actionChecks(conn, repo, pr.head.sha)
       : head?.oid !== pr.head.sha || overflow
-      ? (await all<any>(`/repos/${repo}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null)
+      ? (await all<any>(conn, `/repos/${repo}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null)
       // A run not yet completed has no conclusion: null, as the REST list gives it.
       : (suites?.nodes ?? []).flatMap((cs: any) => cs?.checkRuns?.nodes ?? []).map((c: any) => (c.status === 'COMPLETED' && c.conclusion ? String(c.conclusion).toLowerCase() : null));
     // A push is read from its commits' own dates, never `updated_at`, which a comment moves.
@@ -944,7 +1050,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     // Baton recorded (a counted marker is no push; anything else is, whatever its message).
     type CommitNode = { oid: string; at: string; message: string; tree: string | null; parent: string | null; parentTree: string | null };
     const commitNodes: CommitNode[] = node.commits.pageInfo.hasNextPage
-      ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/commits`)).map((c: any) => ({
+      ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/commits`)).map((c: any) => ({
         oid: c.sha, at: c.commit.committer.date, message: c.commit.message, tree: c.commit.tree?.sha ?? null, parent: c.parents?.[0]?.sha ?? null, parentTree: null,
       }))
       : node.commits.nodes.map((c: any) => ({
@@ -958,26 +1064,28 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     });
     const pushes = commits.map((c) => c.at);
     // A verdict counts only from someone who can push to the repository (R-BTN-139) — never a
-    // drive-by comment on a public PR.
-    const reviews = (await trustedOnly(repo, node.reviews.pageInfo.hasNextPage
-      ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
+    // drive-by comment on a public PR. The REST mappings carry `user.id` too: an author's
+    // immutable id is the owners' `pushers`' other way to count, consulted before any
+    // collaborator read (the GraphQL mapping has no numeric id to carry; `idOf` reads it).
+    const reviews = (await trustedOnly(conn, repo, node.reviews.pageInfo.hasNextPage
+      ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, userId: r.user?.id, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
       : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body }))))
       .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '' }));
-    const comments = (await trustedOnly(repo, node.comments.pageInfo.hasNextPage
-      ? (await all<any>(`/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, association: c.author_association, at: c.created_at, body: c.body }))
+    const comments = (await trustedOnly(conn, repo, node.comments.pageInfo.hasNextPage
+      ? (await all<any>(conn, `/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, userId: c.user?.id, association: c.author_association, at: c.created_at, body: c.body }))
       : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body }))))
       .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
     return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments], commits };
   }
 
   /** A repository's PRs. A named repository whose list GitHub refuses (403) or does not find
-   * (404) fails the whole sync — no partial reading — naming the tickets whose `repos:` name it;
-   * any other failure, as a timeout, a 5xx, a rate limit or the budget, is passed through as it is. */
-  async function list(repo: string, tickets: string[]): Promise<any[]> {
+   *  (404) fails the whole sync — no partial reading — naming the tickets whose `repos:` name it;
+   *  any other failure, as a timeout, a 5xx, a rate limit or the budget, is passed through as it is. */
+  async function list(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, tickets: string[]): Promise<any[]> {
     try {
       const author = process.env.BATON_PR_AUTHOR;
-      if (author) return await byAuthor(repo, author);
-      return await all<any>(`/repos/${repo}/pulls?state=all`);
+      if (author) return await byAuthor(conn, repo, author);
+      return await all<any>(conn, `/repos/${repo}/pulls?state=all`);
     } catch (e) {
       const { status, limited } = e as { status?: number; limited?: boolean };
       if (!tickets.length || limited || (status !== 403 && status !== 404)) throw e;
@@ -986,9 +1094,9 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   }
 
   /** `BATON_PR_AUTHOR`: only that login's PRs, for a repository whose full PR list is longer than
-   * the sync reads (MAX_PAGES). The leg agents open PRs as the operator, so a PR a ticket owns is
-   * among them. GraphQL search, 100 a request, mapped to the REST fields `repoFacts` reads. */
-  async function byAuthor(repo: string, author: string): Promise<any[]> {
+   *  the sync reads (MAX_PAGES). The leg agents open PRs as the operator, so a PR a ticket owns is
+   *  among them. GraphQL search, 100 a request, mapped to the REST fields `repoFacts` reads. */
+  async function byAuthor(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, author: string): Promise<any[]> {
     const query = `query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 100, after: $after) {
       issueCount pageInfo { hasNextPage endCursor }
       nodes { ... on PullRequest { number headRefName headRefOid state mergedAt } } } }`;
@@ -996,7 +1104,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     const out: any[] = [];
     let after: string | null = null;
     for (;;) {
-      const s: any = (await graphql(query, { q: `repo:${repo} is:pr author:${author}`, after, owner, name })).data?.search;
+      const s: any = (await graphql(conn, query, { q: `repo:${repo} is:pr author:${author}`, after, owner, name })).data?.search;
       // Search answers at most 1000 results: past that the reading would be truncated.
       if ((s?.issueCount ?? 0) > 1000) throw new Error(`GitHub search (${repo}, author ${author}): ${s.issueCount} PRs, past search's 1000 — the sync will not post a truncated reading`);
       for (const n of s?.nodes ?? []) {

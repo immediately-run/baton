@@ -758,8 +758,9 @@ mean (R-BTN-50).
       - Where the policy admits `sync` for `std:decision@1`, a re-ask is answered by a changed
         `answer:`, since an unchanged one is the same `ref` and moves nothing.
     - **Plain git** (`forge: git`). The ticket's branch stands for the PR, and the CLI picks the
-      facts adapter by the repository's `forge` (R-BTN-96): `branches` there, `prs` elsewhere.
-      What counts as `pr-merged` on plain git is B-154's.
+      facts adapter by the forge of the repository it reads (R-BTN-96): the home's own is
+      `branches` there, and a `code_repos` entry's is its own forge, `prs` elsewhere. What
+      counts as `pr-merged` on plain git is B-154's.
   - **The PR courses' facts** below say what each course reads. Under R-BTN-39 they make legs
     `ready` or `waiting`, and settle a leg that declares `arrives` (R-BTN-192); they never place a
     ticket. A verdict a holder's leg writes is its evidence; the holder's `advance` or end moves
@@ -894,14 +895,17 @@ mean (R-BTN-50).
     3, one claim per worker).
 - **R-BTN-190 (leg state: in the forge's conversation, or on a side branch where there is no
   forge).** State one leg hands the next that must never reach the default branch — review rounds
-  and their answers (B-101) — goes where the repository's `forge` says (R-BTN-92); every claim
-  response carries which (`leg_state`), and no policy knob chooses it (B-165's review default).
-  - **`forge`**, on GitHub, GitLab and Gitea: the rounds are the PR's conversation, as
-    R-BTN-131's PR courses already read and write it, and the rules below about the leg-state
-    branch do not apply.
-  - **`branch`**, where `forge` is `git`: the rounds live on the ticket's **leg-state branch**,
-    as follows. The courses using it are the `branch` course (R-BTN-131) and any
-    course whose legs pass rounds to one another.
+  and their answers (B-101) — goes where the PRs the course reads live; every claim response
+  carries which (`leg_state`), and no policy knob chooses it (B-165's review default). It is
+  `forge` when the home is on a forge **or** the claimed ticket's course reads PR facts
+  (`facts: ["prs"]`, R-BTN-134), and `branch` otherwise.
+  - **`forge`**, on GitHub, GitLab and Gitea, and on any home whose claimed ticket's course
+    reads PR facts — a `git` home's PR course among them: the rounds are the PR's conversation,
+    on whichever forge holds the PR, as R-BTN-131's PR courses already read and write it, and
+    the rules below about the leg-state branch do not apply.
+  - **`branch`**, where `forge` is `git` and the claimed ticket's course reads no PR facts: the
+    rounds live on the ticket's **leg-state branch**, as follows. The courses using it are the
+    `branch` course (R-BTN-131) and any course whose legs pass rounds to one another.
 
   On a `git` repository:
   - **A reserved namespace, an orphan history.** A ticket's leg-state branch is
