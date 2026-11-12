@@ -217,8 +217,8 @@ describe('S-BTN-43 a repository with no course code', () => {
     await init(repo.dir, '--eject', 'tickets');
     const ejected = readFileSync(join(repo.dir, '.baton', 'tickets.mjs'), 'utf8');
     repo.write('.baton/tickets.mjs', ejected.replace(
-      'return ticketsMarkdown(files, ctx.settings);',
-      "const out = ticketsMarkdown(files, ctx.settings);\n    return { tickets: out.tickets.map((t) => (t.id === 'T-2' ? { ...t, title: 'EDITED BY HAND' } : t)), closed: out.closed };",
+      'return stampMarkdownVersions(ctx.root, ticketsMarkdown(files, ctx.settings), ctx.settings.items);',
+      "const out = stampMarkdownVersions(ctx.root, ticketsMarkdown(files, ctx.settings), ctx.settings.items);\n    return { tickets: out.tickets.map((t) => (t.id === 'T-2' ? { ...t, title: 'EDITED BY HAND' } : t)), closed: out.closed };",
     ));
     repo.commit();
     await repo.sync();

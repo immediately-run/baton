@@ -1,0 +1,176 @@
+---
+title: "B-183 — opaque ticket versions: a ticket source that is not a git file, re-verified by version, not by commit"
+id: B-183
+project: baton
+status: done
+updated: 2026-11-09
+tags:
+  - roadmap-item
+tier: judgement
+description: "The ticket source (R-BTN-74) may already say a ticket is an issue or a row, but two rules still assume a file at a commit: a refresh carries no ticket change (R-BTN-11), so a tracker edit waits for a git push; and the runner re-verifies a claim by reading the file at snapshot_sha (R-BTN-5, R-BTN-34). Give each posted ticket an opaque version string whose meaning is the source's, compared by Baton for equality only; let the source declare whether it can read a ticket at a version (pinned) or only as it is now (current); add a read export; let a refresh carry changed versions; and hand each version back in the observation so the source's own code, never Baton, judges order. The markdown source posts the file's blob id and behaves exactly as today."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/190
+depends_on: []
+---
+
+**Brief:** the owner asked how far Baton generalizes to a ticket store that is not the built-in
+git one — Linear, Jira, GitHub Issues — and proposed making the ticket version an opaque string
+whose semantics depend on the store: a hash for git, a last-changed stamp or the like elsewhere.
+The ticket source is already pluggable (`.baton/tickets.mjs`, R-BTN-74: "a file, an issue, a
+row"), and core already reads no ticket body (R-BTN-33). What still assumes a file at a commit:
+
+- **A refresh carries no ticket change.** When the fetched head equals Baton's, the post is a
+  refresh, "tickets unchanged" (§4.3, R-BTN-11). An edit in a tracker, with no push, never reaches
+  the board.
+- **The runner re-verifies by commit.** The claim names `path` and `snapshot_sha`, and the runner
+  reads `origin/<default branch>:<path>` at it, releasing `stale-board` when it is gone, closed,
+  re-tiered or no longer offers the leg (R-BTN-5, R-BTN-34). A tracker ticket has no path and no
+  sha; the only file-less tickets today (check tickets, a `cancel` claim) are re-verified against
+  Baton's own record instead.
+- **Renumbering is detected by path** (R-BTN-147).
+
+Baton already treats the commit as an opaque string: it accepts a board by **equality** of
+`parent_sha` with its head, holds no git, and orders posts by its own observation counter
+(R-BTN-11, R-BTN-62); ancestry is the sync's judgement (R-BTN-147). So a ticket version needs no
+ordering in core — equality is enough, and any ordering is repository code (values 4).
+
+**Spec:** [BATON_SPEC §4.2](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)), [§4.3](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) ([R-BTN-11](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3), [R-BTN-62](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3), [R-BTN-147](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)), [§4.4](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4) (the board post),
+[§4.5](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5) ([R-BTN-5](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5), [R-BTN-34](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5)), [§1](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-35](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [§9.8](../../spec/BATON_SPEC/09-claims.md#sec-9-8) ([R-BTN-84](../../spec/BATON_SPEC/09-claims.md#sec-9-8)), [§12.3](../../spec/BATON_SPEC/12-security.md#sec-12-3) (validation of text).
+
+**Depends on:** none.
+
+**Used by:** a tracker-backed ticket source (a later ticket, per tracker); B-182 is independent.
+
+### What to build
+
+The spec amendment first, in the section files that own each rule, with `npm run spec:index`;
+then the code.
+
+1. **Two versions, kept apart.** The board's `sha` stays the code commit: courses, schemas and
+   leg scripts still come from a verified tree at it (R-BTN-133, R-BTN-143). Each posted ticket
+   gains `version`, an opaque string of 1–128 characters of `[A-Za-z0-9._:+/=-]`, validated on
+   write (§12.3) and stored on the ticket's row. Baton compares versions for equality only.
+2. **The version contract** (R-BTN-74): a ticket's version changes **exactly when something a
+   runner reads of it changes** — its body, exit criteria, filter fields, closure. A source that
+   bumps it for anything else (a comment, a watcher) stales claims for nothing; one that misses a
+   change lets a runner work a ticket that moved. The amendment says so, and recommends a digest of
+   what `read` returns, optionally prefixed by the store's own stamp (`<updatedAt>:<digest>`), over
+   a timestamp alone, which collides within its resolution.
+3. **The source declares how it reads** (R-BTN-74). `.baton/tickets.mjs` exports `versions`,
+   `"pinned"` (it can read a ticket **at** a version) or `"current"` (only as it is now), and
+   `read(id, {version})` → `{version, ticket}`, run on the runner like the source's other exports.
+   **The markdown source** is pinned: its version is the ticket file's blob id at the posted commit
+   (`git rev-parse <sha>:<path>`), and `read` is the blob — exactly what the runner reads today.
+   A blob id, not the commit sha, so an unrelated commit never changes a ticket's version.
+4. **The claim carries the version; the runner re-verifies by it** (R-BTN-5, R-BTN-34). The claim
+   response names the ticket's `version`. Pinned: the runner reads the ticket at it (for the
+   markdown source, the file at `snapshot_sha`, as now). Current: the runner reads it now, and a
+   different version, or a closed, re-tiered or missing ticket, releases `stale-board` before any
+   leg runs. Readiness is computed as today, from the ticket as read. The two file-less cases
+   re-verified against Baton's record (check tickets, `cancel`) are unchanged.
+5. **A refresh may carry changed tickets** (R-BTN-11, §4.3). A post whose `sha` equals the head
+   is still a refresh, but it may now add, close or change any ticket whose `version` differs
+   from the row Baton holds; materialization upserts by `row_hash` as now, `version` among its
+   inputs. For the markdown source no version changes without a new commit, so its refreshes are
+   unchanged.
+6. **Baton hands versions back; the source judges order** (§4.3). `POST /v1/sync/observation`
+   returns `versions`, each live ticket's last accepted version, beside `positions`. A source whose
+   store can tell a stale read (a lagging replica) refuses to post a ticket whose version it
+   judges older, failing the run as any failing source does (R-BTN-150). Baton never orders two
+   versions.
+7. **Reads see what was written before the number** (R-BTN-62, R-BTN-10). Confirmation relies on
+   every input being read after the observation number was handed out. The amendment states it as
+   the source's obligation: `tickets(ctx)` reads its store after the number and sees every write
+   made before it.
+8. **A stable key, not a path** (R-BTN-147, §4.4). A posted ticket may carry `key`, the source's
+   stable name for the ticket (default: its `path`); `renumbered` is detected by `key`. `path`
+   becomes optional for a ticket from a `custom` source with `versions: "current"`.
+9. ~~**Replay records the version** (R-BTN-84). A run's inputs record the ticket's version and the
+   digest of what `read` returned; `baton leg replay` against a current source whose version moved
+   reports the mismatch and does not silently replay against new content.~~ Moved to B-190, which
+   builds replay (the owner, 2026-11-09).
+
+### Decision needed
+
+**Values 1 and R-BTN-35 name git as the truth about the work.** With a tracker source, ticket
+facts come from the tracker while code, courses and evidence stay in git. Values are owner
+decisions, not this ticket's to rewrite.
+
+- **Answered: (a)** (the owner, 2026-11-09), written into values 1 and R-BTN-35 on main.
+- **(a) Reword to "the ticket source"** *(recommended)*: "The ticket source is the truth about
+  tickets and git about the code and its evidence; Baton holds what no write may decide." The
+  owner edits `docs/context/values.mdx`; R-BTN-35 follows in the spec PR.
+- **(b) Keep the wording**, and call a tracker source a cache git does not hold — accurate for the
+  cooperative case only, and it leaves the spec contradicting itself for every non-git source.
+
+### What not to do
+
+- No tracker source here: a Linear, Jira or GitHub Issues `tickets.mjs` is its own ticket, built on
+  this one.
+- No ordering of versions in core, and no clock comparison of a store's stamps (values 4).
+- No ticket content through Baton (R-BTN-33): the version is a filter field; the body travels only
+  between the source and the runner.
+- No change to `protected` for non-git sources. The `tickets-approved` guarantee is defined over a
+  ticket file's approval (R-BTN-184): a post from a `custom` source with `versions: "current"` to
+  a repository whose policy's `floors` include `tickets-approved` is refused `invalid-params`,
+  naming the guarantee. What approval means for a tracker is a later ticket.
+
+### Trust
+
+- **`version` and `key`** — written by the sync, from the repository's ticket source; untrusted
+  text, validated on write. A wrong version can only release claims as `stale-board` or let a
+  runner miss a change in a store the repository already trusts as its ticket source; it never
+  places a ticket (R-BTN-39) or widens a gate.
+- **`read`** — repository code run on the runner, with whatever store credential the runner holds;
+  never Baton's (values 4, architecture: Baton holds no credential that writes git).
+- **`versions` in the observation** — Baton's own record, returned to the posting credential only,
+  as `positions` is.
+
+### Invariants
+
+- **The markdown source is unchanged in effect:** pinned, versioned by blob id, refreshes carrying
+  no ticket change; the full suite passes on both hosts (R-BTN-55).
+- **Equality only in core** (values 4): no rule compares two versions for order.
+- **Positions are Baton's** (R-BTN-39): no version, read or source places a ticket.
+- **Filter fields only** (R-BTN-33): no body, exit criterion or PR list is stored.
+- **One clock** (R-BTN-32): no version is read as a time.
+
+### Tests
+
+Each behaviour names a new `S-BTN-n` scenario (numbered at merge), run on both hosts, with a
+fixture `custom` source backed by a JSON file outside git:
+
+- a current-source ticket edited with no commit reaches the board in a refresh;
+- a claim on it whose ticket changes before the leg starts releases `stale-board`; one whose
+  ticket did not change runs;
+- a pinned markdown ticket's version is its blob id, and an unrelated commit changes no version
+  and stales no claim;
+- the observation returns each live ticket's version; a fixture source refusing an older version
+  fails the run and posts nothing;
+- a dropped-and-re-added ticket with the same `key` and a new id is `renumbered`;
+- a current source posting to a repository with a `tickets-approved` floor is refused;
+- ~~replay against a current source whose version moved reports the mismatch.~~ Waived for this
+  ticket (the owner, 2026-11-09); B-190 carries it.
+
+### Exit criteria
+
+- [ ] The spec PR amends R-BTN-5, R-BTN-11, R-BTN-34, R-BTN-35, R-BTN-62's §4.3 text, R-BTN-74,
+      R-BTN-84, R-BTN-147 and §4.4 in their section files; `npm run spec:index` is current; the
+      Decision above is recorded in `91-decisions.md`, and under (a) the owner's edit to
+      `docs/context/values.mdx` is linked.
+- [ ] A new migration adds `version` and `key` to tickets; no existing migration is edited.
+- [ ] The scenarios above exist and pass; `npm test`, `npm run typecheck`, `npm run check:wiki`
+      and `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-05._
+
+_2026-11-05 — expedited (EXPEDITE) at the owner's request: the owner needs Baton for work today._
+
+_2026-11-07 — [PR #190](https://github.com/immediately-run/baton/pull/190), review rounds 1–2: every code path the ticket names is built, tested and green — the scenarios for the first six behaviours exist and pass (S-BTN-202, S-BTN-203), the full suite and every CI check with them. The seventh, “replay against a current source whose version moved reports the mismatch”, has no substrate to test: `baton leg replay` and `leg_run_inputs` are spec'd (R-BTN-84, §9.8, and S-BTN-48's row) but built nowhere in `src/` — replay has been spec-ahead-of-code in this repository all along. Closing that letter is the owner's, as both review rounds posted: waive the scenario naming a follow-up ticket for replay, or amend the Tests list — the ask stands on the PR's R-BTN-84 thread and in its Deviations, and the values decision above is likewise recorded pending the owner in `91-decisions.md`._
+
+_2026-11-09: the owner answered the Decision needed — (a), the ticket-source wording, now in `docs/context/values.mdx` value 1 and R-BTN-35 on main — and waived the seventh scenario: replay has never been built, so item 9 and its test move to B-190, which builds replay with the version check. PR #190 merges main (its scenarios renumber past S-BTN-205) and drops its "pending the owner" Decisions line. (2026-11-09: rules re-read: R-BTN-35, R-BTN-84)_

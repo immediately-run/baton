@@ -514,10 +514,10 @@ is summarized in the principal table (§12.1).
   on them; Instances and Capacity, which are tenant-wide, are an administrator's.
   - **Runners** — by name: alive or dead, harness, tier ceiling, capabilities (declared, and granted per repository, R-BTN-174), tags, courses,
     lease timeout, last seen, last activity, the claim held, current activity, transcript link,
-    `isolation`, credential kind and registering token.
+    executor (source, digest and `provides`, R-BTN-107), credential kind and registering token.
   - **Timeline** — a swimlane per alive runner over 24 hours: claims as bars, activities nested
     under them by kind, failed ones marked; a segment shows its label, detail and transcript;
-    leg runs link their `session_url` (R-BTN-113) and show their log directory as text (R-BTN-128).
+    leg runs link their `session_url` (R-BTN-113) and show their log directory (R-BTN-128) and their executor digest, environment and instance (R-BTN-107) as text.
   - **Running** — each active claim's event timeline and reap deadline; **stalled** when the
     runner is alive but `last_activity_at` is over 2 hours old; a leg waiting on a condition
     shows `condition-wait`; session links and log directories as on the Timeline.

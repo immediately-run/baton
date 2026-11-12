@@ -106,3 +106,5 @@ written in TypeScript, or one that needs a library, cannot be expressed.
   - the rollback limit stays as stated (R3-4).
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): `runner:baton-legs` is gone with the built-in leg `baton.cancel` (R-BTN-168, R-BTN-133): the `runner` type's values are `leg-trees` and `session`.)_
+
+- 2026-11-09: B-184's spec amendment changes the wrapper's call form: `node legProcess.mjs <call> <script>`, `ctx` as JSON on stdin's first line and the result on stdout's last line, run by the executor's `start` (for `run`) or `exec` (every other call), and installs by `exec` in an `install` session (R-BTN-133, R-BTN-107). `runner:session` is retired, so B-70 adds no `session` value. Re-read R-BTN-133 before building on it.

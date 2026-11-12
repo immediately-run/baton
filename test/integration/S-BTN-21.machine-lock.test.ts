@@ -135,21 +135,35 @@ function makeRunner(cred: keyof typeof TOKENS, over: Partial<RunnerOptions> = {}
   return runner;
 }
 
-/** Wait until `q` is true. */
+/** Wait until `q` is true, for up to UNTIL_MS of wall time — not a count of polls: a loaded
+ *  machine (CI, a host beside a live leg) starts a runner process in more than the 5 s that 500
+ *  polls of 10 ms allowed (S-BTN-21 failed so on CI, 2026-11-10). */
+const UNTIL_MS = 20_000;
 async function until(q: () => boolean | Promise<boolean>): Promise<void> {
-  for (let i = 0; i < 500; i++) {
+  const end = Date.now() + UNTIL_MS;
+  while (Date.now() < end) {
     if (await q()) return;
     await new Promise((r) => setTimeout(r, 10));
   }
-  throw new Error('condition never became true');
+  throw new Error(`condition never became true in ${UNTIL_MS / 1000} s`);
 }
 
 /** An outsider's hold on the machine's lock: `flock` kept alive; kill it to release. A day's
  *  `sleep`, not `sleep infinity`, which BSD `sleep` (macOS) refuses — and a refused sleep frees
  *  the lock at once. A spawn error fails the test that waits on it, not the worker. */
-function outsiderTakes(): ReturnType<typeof spawn> {
+async function outsiderTakes(): Promise<ReturnType<typeof spawn>> {
   const child = spawn('flock', ['--exclusive', lockPath, 'sleep', '86400'], { stdio: 'ignore' });
   child.on('error', () => { /* no flock: the test's own wait says so */ });
+  // The hold is settled fact before the caller goes on, as the runner's own makes its (the
+  // watcher's line): a bare spawn is a take still in flight, and the claim's first lock can
+  // beat it — the gate's loaded run of 2026-11-12 had the runner take the lock first, run rdp1
+  // and rdp2 and end the claim suspended:mid where this file suspends it at once. A
+  // non-blocking probe of the same file, the idiom of the killed-runner test below, fails only
+  // while another process holds it; exit 0 is a free lock — the take has not landed yet.
+  await until(() => {
+    const probe = spawnSync('flock', ['--exclusive', '--nonblock', lockPath, 'true'], { stdio: 'ignore' });
+    return probe.error != null || (probe.status != null && probe.status !== 0);
+  });
   return child;
 }
 const killOutsider = (child: ReturnType<typeof spawn>) => {
@@ -207,7 +221,7 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
     expect(home.evidence().filter((l) => l.startsWith('run'))).toEqual(['run rdp1', 'run rdp3', 'run plain']);
     // The claim ended: the lock is released, and B's next beat takes it and declares.
     await until(async () => (await rows(`SELECT 1 FROM worker_capabilities w JOIN workers k ON k.id = w.worker_id WHERE k.hostname = 'vm-b' AND w.capability = ?`, LOCKED)).length > 0);
-  }, 20_000);
+  }, 90_000);
 
   it('an advance into a leg whose lock an outsider holds suspends the claim rather than sending it', async () => {
     home.leg('rdp1', `ev(ctx, 'run rdp1'); return { reached: 'lab', next: 'rdp2' };`);
@@ -223,7 +237,7 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
     void a.work();
     await until(async () => (await rows(`SELECT leg FROM claim_legs`)).some((r) => r.leg === 'rdp2'));
     // rdp2 needs no lock, so the advance into it released the machine's; an outsider takes it.
-    const outsider = outsiderTakes();
+    const outsider = await outsiderTakes();
     try {
       await until(async () => (await rows(`SELECT status FROM claims WHERE ticket_id = 'docs:T-1'`))[0]?.status !== 'active');
       const claim = (await rows<{ status: string; end_reason: string }>(`SELECT status, end_reason FROM claims WHERE ticket_id = 'docs:T-1'`))[0];
@@ -235,7 +249,7 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
     } finally {
       killOutsider(outsider);
     }
-  }, 20_000);
+  }, 90_000);
 
   it('a claim answered for a lock leg the runner cannot lock ends suspended at once, touching nothing (R-BTN-121)', async () => {
     home.leg('rdp1', `ev(ctx, 'run rdp1'); return { reached: 'lab', next: 'rdp2' };`);
@@ -253,7 +267,7 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
     };
     await home.post({ 'T-1': placed('filed', [], [['rdp1', 'ready']]) }, [ticket('T-1', { course_id: 'lockcourse' })], { ontology: { builtin: 'baton@1', program } });
 
-    const outsider = outsiderTakes();
+    const outsider = await outsiderTakes();
     try {
       const a = makeRunner('vm-a', { capabilities: ['key:zai'] });
       const aLog = logs.at(-1)!;
@@ -270,7 +284,7 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
     } finally {
       killOutsider(outsider);
     }
-  }, 20_000);
+  }, 90_000);
 
   it('a lock released by an unlocked leg and re-taken for the next lock leg goes on (round 1, finding 2)', async () => {
     home.leg('rdp1', `ev(ctx, 'run rdp1'); return { reached: 'lab', next: 'rdp2' };`);
@@ -290,7 +304,7 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
     const claim = (await rows<{ end_reason: string }>(`SELECT end_reason FROM claims WHERE ticket_id = 'docs:T-1'`))[0];
     expect(claim.end_reason).toBe('done');
     expect(home.evidence().filter((l) => l.startsWith('run'))).toEqual(['run rdp1', 'run rdp2', 'run rdp3', 'run plain']);
-  }, 20_000);
+  }, 90_000);
 
   it('a lock held by a killed runner dies with it — the watcher watches the pid (round 2, finding 1)', async () => {
     // The watcher `MachineLocks` spawns, in its own process: a child node runner takes the lock

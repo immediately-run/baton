@@ -44,6 +44,8 @@ export interface HistoryRow {
   reached?: string | null;
   next_leg?: string | null;
   run?: number | null;
+  /** R-BTN-63 (B-185): the run's id, on a leg row. */
+  run_id?: string | null;
   snapshot_sha?: string | null;
   head_sha?: string | null;
   course_version?: number | null;
@@ -67,10 +69,10 @@ export class History {
 
   /** Append one row to `ticket`'s history, in the caller's transaction. */
   record(ticket: string, r: HistoryRow) {
-    this.c.store.exec(`INSERT INTO ticket_history (repository_id, ticket_id, at, kind, claim_id, worker_id, leg, reached, next_leg, run, snapshot_sha,
-                         head_sha, course_version, leg_version, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    this.c.store.exec(`INSERT INTO ticket_history (repository_id, ticket_id, at, kind, claim_id, worker_id, leg, reached, next_leg, run, run_id, snapshot_sha,
+                         head_sha, course_version, leg_version, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       repositoryOf(ticket), ticket, this.c.now(), r.kind, r.claim_id ?? null, r.worker_id ?? null, r.leg ?? null, r.reached ?? null, r.next_leg ?? null,
-      r.run ?? null, r.snapshot_sha ?? null, r.head_sha ?? null, r.course_version ?? null, r.leg_version ?? null, detailJson(r.detail));
+      r.run ?? null, r.run_id ?? null, r.snapshot_sha ?? null, r.head_sha ?? null, r.course_version ?? null, r.leg_version ?? null, detailJson(r.detail));
   }
 
   /**
@@ -87,8 +89,8 @@ export class History {
   /** `GET …/tickets/{ticket}/history?before=&limit=` (§11): newest first, paged by id. */
   list(ticket: string, before: number | null, limit: number) {
     const rows = this.rows<{ id: number; at: number; kind: string; claim_id: number | null; worker_id: number | null; leg: string | null; reached: string | null;
-      next_leg: string | null; run: number | null; snapshot_sha: string | null; head_sha: string | null; course_version: number | null; leg_version: number | null; detail_json: string | null }>(
-      `SELECT id, at, kind, claim_id, worker_id, leg, reached, next_leg, run, snapshot_sha, head_sha, course_version, leg_version, detail_json
+      next_leg: string | null; run: number | null; run_id: string | null; snapshot_sha: string | null; head_sha: string | null; course_version: number | null; leg_version: number | null; detail_json: string | null }>(
+      `SELECT id, at, kind, claim_id, worker_id, leg, reached, next_leg, run, run_id, snapshot_sha, head_sha, course_version, leg_version, detail_json
        FROM ticket_history WHERE ticket_id = ? AND (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?`, ticket, before, before, limit + 1);
     const page = rows.slice(0, limit).map(({ detail_json, ...r }) => ({
       id: r.id, ...Object.fromEntries(Object.entries(r).filter(([, v]) => v != null)), detail: detail_json ? JSON.parse(detail_json) : null,

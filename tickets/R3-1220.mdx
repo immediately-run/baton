@@ -75,7 +75,7 @@ The owner, in one sitting:
      implement,review,adjudicate --tag-prefix family:`, and any provider suspensions in force as
      owner bars on every course (`baton owner bar docs --course '*' …`); bars are per course.
    - Check the rest are green: R3-1243's model and R3-1244's trace check (`model-report` on
-     `main`), R3-1258's load test against staging, `baton repo identify` showing docs' forge
+     `main`), R3-1258's load test on the local host, `baton repo identify` showing docs' forge
      ids (B-45), and §15's scenarios for the legs docs runs.
 2. **Drain** (§16.1 step 1): stop every fleet session; confirm the dashboard's **Runners**
    view is empty.
@@ -102,7 +102,7 @@ None to write.
 
 - [ ] the Cloudflare account shows Workers Paid
 - [ ] `baton owner settings docs` lists the two required bars
-- [ ] the model report, the staging load test, docs' stored forge ids and the legs' scenarios
+- [ ] the model report, the local-host load test, docs' stored forge ids and the legs' scenarios
       are green on the cutover day (§16.1's preconditions)
 - [ ] **live leg** (`human-operator`): the act confirmed with `baton admin confirm`; the
       dashboard shows `mode: cut-over`
@@ -116,3 +116,5 @@ None to write.
 _(filed 2026-10-13)_
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — §16.1's act (`POST /v1/ui/cutover` plus `baton admin confirm`) and full preconditions; superseded R3-1233, R3-1234 and R3-1246 dropped from depends_on, B-45 added.)_
+
+_(2026-11-09: the staging deployment is retired — B-224, the owner: a home repository binds to one Baton, and every registered one binds to production, so staging held nothing and tested nothing. The load test precondition is the local-host run; production's own `capacity` log is the envelope's measurement (R-BTN-87).)_

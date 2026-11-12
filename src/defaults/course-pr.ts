@@ -356,12 +356,32 @@ export interface BatonRecord {
    *  the third round refused, its verdict a round apart from the one before it. */
   answers?: { ticket: string; decision: string; answer: string; answered_at?: number }[];
   legs?: RecordedLeg[];
+  /** B-183 (§4.3): each live ticket's last accepted version, keyed by local id, as the
+   *  observation handed it back — Baton's own record, for the source's code to judge its store's
+   *  read against (a lagging replica refuses to post; Baton never orders two versions). */
+  versions?: Record<string, string>;
+  /** B-182 (R-BTN-140): the home's effective `code_repos` as the observation hands them to the
+   *  sync — each entry with its own forge, host, the forge's ids and `web_base`, which the fact
+   *  adapter reads it by and verifies its ids against at every read. */
+  code_repos?: CodeRepoEntry[];
+  /** B-182 (R-BTN-139): the owners' `pushers`, host-qualified — whose words count on each host. */
+  pushers?: { host: string; id: string }[];
   /** B-127: the repository's owner signing keys, as the observation serves them — what the
    *  sync verifies signed control with (null: the repository has none, so nothing is marked). */
   signing_keys?: { public_key: string; fingerprint: string }[] | null;
   /** B-127: whether the repository requires signed control — the sync drops an EXPEDITE whose
    *  last change is unsigned only while this is on (the marks and the record post either way). */
   require_signed_control?: boolean;
+}
+
+/** One `code_repos` entry as the observation hands it to the sync (R-BTN-140, B-182). */
+export interface CodeRepoEntry {
+  path: string;
+  forge: 'github' | 'gitlab' | 'gitea';
+  host: string;
+  repo_id: string;
+  owner_id: string;
+  web_base: string;
 }
 
 /** The gate's reading of one ticket's PRs (B-110): the run-tests gate's state, the counted

@@ -1,0 +1,124 @@
+---
+title: "B-196 — The runner reads: GET …/runners is the fleet granted on a repository as a session or key sees it, and GET …/runners/{runner} is one runner with its claim, its earlier attempts and a window of its claims and activities"
+id: B-196
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1195
+tier: judgement
+description: "The two reads the Runners screens of BATON-UI-V2 lack. repo.runners: every runner row Baton holds with an accepted grant on the repository — alive is last_seen_at within its lease timeout and not reaped — with its name, harness, kind, isolation, tier ceilings, declared and granted capabilities, tags, courses for this repository, lease timeout, last seen and last activity, credential kind and grant role and domain, and the claim it holds here (ticket, leg, run id, lease, deadline, attempt and backoff, session link, log directory, current activity) or busy_elsewhere; keyed by runner_id, the URL's segment. runner.show: that row plus ?since= (24 hours default, 7 days at most) of its claims on the repository with nested activities, and its earlier attempts on its live ticket. Requires: B-192, B-205."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-192
+  - B-205
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Runners** `/runners` → `/runners/{name}` — the fleet
+granted here: alive/dead, claim held, current activity; the per-runner page carries the 24h
+timeline." B-191 keys the URL by the runner's id, since a host runs several sessions and
+`/v1/ui/messages` addresses `to_runner_id`.
+
+**Spec:** [BATON_SPEC §8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) ([R-BTN-3](../spec/BATON_SPEC/08-runners.md#sec-8-1):
+a runner's fields — no model among them; [R-BTN-9](../spec/BATON_SPEC/08-runners.md#sec-8-1): the
+lease timeout), [§8.2](../spec/BATON_SPEC/08-runners.md#sec-8-2) ([R-BTN-146](../spec/BATON_SPEC/08-runners.md#sec-8-2):
+accepted grants), [§5.9](../spec/BATON_SPEC/05-courses.md#sec-5-9) ([R-BTN-174](../spec/BATON_SPEC/05-courses.md#sec-5-9):
+declared and granted capabilities), [§6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)
+([R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7): the fleet view a machine
+key reads), [§9.9](../spec/BATON_SPEC/09-claims.md#sec-9-9) (activities and transcripts),
+[§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3)),
+[§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5) ([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5)),
+[§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8):
+role and domain), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET /v1/runner/fleet`).
+
+**Depends on:** B-192 (sessions read the repository reads), B-205 (the response convention; the
+window parameter).
+
+**Used by:** B-211.
+
+### What to build
+
+The two §14 rows first, then the code, reusing `workerApi.ts`'s `workersView` and
+`claims.ts`'s `running` and `timeline` queries.
+
+1. **`GET /v1/repositories/{repository}/runners`** (`repo.runners`, read; the repository reads'
+   principals and a session): every runner row Baton holds whose grant on the repository is
+   accepted (R-BTN-146) — Baton prunes no runner row, so a dead one stays until its key is
+   revoked — each `{runner_id, hostname, session_name, alive, last_seen_at, last_activity_at,
+   reaped_at, harness, kind, isolation, tier_ceilings, capabilities, granted, tags, courses,
+   lease_timeout_s, credential: {kind, token_id?, role, domain?}, last_report, transcript_url,
+   claim, busy_elsewhere}`:
+   `alive` is `reaped_at` null and `last_seen_at` within `lease_timeout` (as `workersView`
+   computes it); `granted` the repository's grant capabilities (R-BTN-174); `courses` the
+   runner's course versions for this repository; `claim` null or this repository's claim it
+   holds — `{claim_id, ticket_id, station, leg, run_id, claimed_at, lease_ends_at,
+   deadline_at, attempt, max_runs, next_backoff_until, session_url, log_dir, activity: {kind,
+   label, started_at} | null}`; `last_report` the newest `status_report` message's `{payload,
+   sent_at}` or null (what `workersView` serves today — the reply to a Status request);
+   `transcript_url` the newest transcript's link built from validated parts as today, or null
+   (§11.4's "transcript link"); `busy_elsewhere` true when it holds a claim on another
+   repository, with no detail. Ordered by hostname then session name (R-BTN-3: the dashboard
+   groups runners by hostname). The
+   `profile` blob is not in the list (it is on `runner.show`).
+2. **`GET /v1/repositories/{repository}/runners/{runner}`** (`runner.show`, read; same callers):
+   the row above plus `profile` (the opaque blob, §12.3), `attempts` (earlier attempts on its
+   live ticket's current leg: run, started, ended, end reason, detail), and `window: {since,
+   claims: [{claim_id, ticket_id, leg, started_at, ended_at, end: released | silent | reaped |
+   done | suspended | running, session_url, log_dir, activities: [{id, parent_id, kind, label,
+   source, started_at, ended_at, outcome, detail}]}]}` for `?since=` (default 24 hours, at most
+   7 days, else `invalid-params`), from `claims.timeline`. `{runner}` is the integer `runner_id`;
+   a runner with no accepted grant on the repository is `not-found`, the same as none.
+
+### What not to do
+
+- No tenant-wide fleet: an owner's session sees the runners granted on its repository; a claim
+  elsewhere is `busy_elsewhere` and nothing more (R-BTN-155).
+- No model: R-BTN-3 names none; the mockup's "claude-opus-4.1" is not a field (B-191's drop list).
+- No capability meaning: names, matched by name (R-BTN-174).
+- No screen here: B-211.
+
+### Trust
+
+- **Both reads** — Baton's rows; hostnames, session names, labels, detail, harness and
+  capability names are a runner's own statements (R-BTN-3, §12.3), validated on the heartbeat,
+  returned as text; `profile` an opaque blob; `session_url` only where R-BTN-113 passed it.
+- **`?since=`** — validated (`invalid-params` over 7 days); the integer `runner_id` validated.
+
+### Invariants
+
+- **Capabilities are the runner's statement** (R-BTN-174).
+- **An owner's session, its repositories** (R-BTN-155); **readable with a key** (R-BTN-179).
+- **Filter fields only** (R-BTN-33); **both hosts** (R-BTN-55).
+
+### Tests
+
+Scenarios numbered at merge, on both hosts, with two granted runners (one holding a claim with
+two activities, one dead after a reap), one granted elsewhere and one busy elsewhere:
+
+- `repo.runners` lists the two granted with `alive`, `granted`, the claim's lease and activity,
+  the dead one's `reaped_at`; the third is absent; the busy one is `busy_elsewhere` with no
+  claim;
+- `runner.show` returns the window's claims with nested activities, `profile` and `attempts`;
+  `?since=` over 7 days is `invalid-params`; a runner not granted here is `not-found`.
+
+### Exit criteria
+
+- [ ] `repo.runners` and `runner.show` in §14 and the registry, with tests.
+- [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09._
+
+_2026-11-09 — revised after review: the screens split out to B-211; the URL key decided
+(`runner_id`); the retention stated (no pruning; alive by lease); the model dropped by rule._
+
+_2026-11-09 — revised after the second review: `last_report` and `transcript_url` added so the
+Status request has a visible reply; the order follows R-BTN-3's grouping by hostname._

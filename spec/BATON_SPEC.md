@@ -102,6 +102,7 @@ is stale. Never edit it by hand.
 | | 12.6 Capability roles and links | R-BTN-157 |
 | | 12.7 Baton's GitHub App | — |
 | | 12.8 The repository policy and its guarantees *(proposal — B-127, B-131, B-133, B-136, B-137, B-139, B-140, B-145, B-146, B-147)* | R-BTN-188, R-BTN-189, R-BTN-180, R-BTN-181, R-BTN-191, R-BTN-192, R-BTN-182, R-BTN-183, R-BTN-184, R-BTN-185, R-BTN-186, R-BTN-187 |
+| | 12.9 A leg's scope *(B-134)* | — |
 | [`13-data-model.md`](BATON_SPEC/13-data-model.md) | **13. Data model** | — |
 | | 13.1 Repositories, courses and tenant settings | — |
 | | 13.2 Credentials and sign-in | — |
@@ -131,7 +132,7 @@ is stale. Never edit it by hand.
 | R-BTN-2 | cutover requires Workers Paid | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
 | R-BTN-3 | a runner exists from its first heartbeat | [`08-runners.md`](BATON_SPEC/08-runners.md) |
 | R-BTN-4 | the lock | [`09-claims.md`](BATON_SPEC/09-claims.md) |
-| R-BTN-5 | the runner reads and re-verifies the ticket from git | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-5 | the runner reads and re-verifies the ticket from git, by its version | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-6 | fencing | [`09-claims.md`](BATON_SPEC/09-claims.md) |
 | R-BTN-7 | status writes are fenced against holders | [`09-claims.md`](BATON_SPEC/09-claims.md) |
 | R-BTN-8 | git first | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
@@ -158,8 +159,8 @@ is stale. Never edit it by hand.
 | R-BTN-31 | scenarios are part of drafting | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | R-BTN-32 | one clock, with a production-inert test seam | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
 | R-BTN-33 | Baton holds filter fields, never content | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
-| R-BTN-34 | the runner reads and re-verifies the ticket from git | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
-| R-BTN-35 | the home repository wins, except about what Baton owns | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
+| R-BTN-34 | the runner reads and re-verifies the ticket from git, by its version | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-35 | the ticket source and git win, except about what Baton owns | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
 | R-BTN-36 | git never records the holder | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
 | R-BTN-37 | shared modules are vendored by hash | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
 | R-BTN-38 | legs are stateless at their boundaries | [`09-claims.md`](BATON_SPEC/09-claims.md) |
@@ -220,7 +221,7 @@ is stale. Never edit it by hand.
 | R-BTN-102 | a machine key is trusted with everything a machine does | [`08-runners.md`](BATON_SPEC/08-runners.md) |
 | R-BTN-105 | a sync reads the commit it syncs; a plain server needs nothing | [`03-repositories-and-forges.md`](BATON_SPEC/03-repositories-and-forges.md) |
 | R-BTN-106 | a session reports to its runner; the runner checks every move | [`08-runners.md`](BATON_SPEC/08-runners.md) |
-| R-BTN-107 | isolation: process, attached, session | [`08-runners.md`](BATON_SPEC/08-runners.md) |
+| R-BTN-107 | the executor: how a leg runs is the runner host's choice | [`08-runners.md`](BATON_SPEC/08-runners.md) |
 | R-BTN-108 | one envelope, named schemas, one validator | [`05-courses.md`](BATON_SPEC/05-courses.md) |
 | R-BTN-109 | station entry requirements | [`05-courses.md`](BATON_SPEC/05-courses.md) |
 | R-BTN-110 | standard output formats are a shared library, not core | [`05-courses.md`](BATON_SPEC/05-courses.md) |
@@ -360,7 +361,7 @@ is stale. Never edit it by hand.
 | S-BTN-61 | shared instances | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-62 | a session reports to its runner | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-63 | no review by its author's key | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-64 | session-only legs | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-64 | executor-only legs | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-65 | refinement | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-66 | entry requirements | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-67 | a person's leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
@@ -373,7 +374,7 @@ is stale. Never edit it by hand.
 | S-BTN-75 | a bounded run | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-76 | hostile values rendered | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-77 | host allowlists | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-78 | session mode | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-78 | the `session` executor | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-79 | schemas refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-80 | signatures and spawns | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-81 | a check nobody sends | [`15-verification.md`](BATON_SPEC/15-verification.md) |
@@ -459,8 +460,24 @@ is stale. Never edit it by hand.
 | S-BTN-199 | the git-lock pickup asks Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-200 | a leg's end reaps its group | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-201 | the runner outlives its short waits | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-202 | owner-signed briefs and the control record (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-203 | require_signed_control (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-202 | a leg's scope | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-203 | the retired model tables (B-142) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-204 | run ids (B-185) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-205 | per-run domains (B-187) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-206 | opaque ticket versions, the board | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-207 | ticket versions through the sync and the runner | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-208 | the `builtin` executor | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-209 | executor sources | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-210 | repository code through `exec` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-211 | the per-leg channel | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-212 | executor data | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-213 | the executor's declaration and the run's record | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-214 | a plain-git home on a GitHub code repository | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-215 | code repository settings refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-216 | the ids decide for a code repository | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-217 | pushers across hosts | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-218 | owner-signed briefs and the control record (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-219 | require_signed_control (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
@@ -611,3 +628,4 @@ is stale. Never edit it by hand.
 | G-BTN-165 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-166 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-167 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-168 | [`15-verification.md`](BATON_SPEC/15-verification.md) |

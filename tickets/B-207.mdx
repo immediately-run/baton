@@ -1,0 +1,121 @@
+---
+title: "B-207 — Controls and dialogs: a screen's controls are built from the session's registry entries by ui.view, each entry's input schema is the form, the destructive dialog sends confirm: true, the 202 dialog shows the code the minting key confirms, and target-dependent controls follow the read's allowed word"
+id: B-207
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1206
+tier: judgement
+description: "The third shell ticket of BATON-UI-V2: the controls layer every screen uses. From GET /v1/actions (B-204) a screen asks for the entries whose ui.view names it; each is drawn as a button labelled by its summary; its form shows only the input fields the screen cannot fill from context (the path's repository, ticket, condition and runner ids and confirm come from the screen), mapped by a fixed table from schema keyword to widget, and an entry whose schema the table cannot draw is shown as its CLI line instead; a destructive entry (§12.2) opens the confirm dialog that sends confirm: true; a 202 {confirm_code} answer (R-BTN-155) opens the code dialog with the one line that completes it and polls the target read for two minutes; a control whose entry the read's allowed list does not name is not drawn. Stop is one click (Decision 3a). Requires: B-221, B-204."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-221
+  - B-204
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "its controls the registry actions placed there by
+`ui.view` — so 'what I see' and 'what I can do' come from the same definition." The mockup's
+control rows (Confirm / Release, Answer…, Release hold / Cancel…, Retry once more / Hold; Status,
+Interrupt leg…) are the shape: a short row of buttons at the right of the thing they act on,
+the destructive ones ending in an ellipsis because a dialog follows.
+
+**Spec:** [BATON_SPEC §11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3):
+`ui.view`, `input` schemas, "A caller is never shown an action it cannot take"; [R-BTN-108](../spec/BATON_SPEC/05-courses.md#sec-5-5):
+the shared validator's schema subset), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4)
+([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): confirmed actions answer `202
+{confirm_code}` and only the minting key confirms; Stop is one click; the `allowed` rule as B-191
+amends it), [§12.2](../spec/BATON_SPEC/12-security.md#sec-12-2) (destructive actions take
+`confirm: true` from the dashboard's dialog), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET
+/v1/actions`; the error codes).
+
+**Depends on:** B-221 (the router and the polling layer, which re-reads `GET /v1/actions`),
+B-204 (`GET /v1/actions` for a session, `ui.view`, `repo.list.session.role`).
+
+**Used by:** B-195, B-201, B-210, B-211, B-213, and every screen with a control; B-219, B-220, B-222 (the controls layer).
+
+### What to build
+
+1. **`useControls(screenId, context, allowed?)`** in `src/dashboard/app/controls/`: from the
+   shell's cached `GET /v1/actions`, the entries whose `ui.view` includes `screenId`; `context`
+   is the screen's known values (`repository`, `ticket_id`, `condition_id`, `to_runner_id`,
+   `runner_id`, `claim_id`, `claim`, `sha`, `fingerprint`, path parameters); `allowed`, when the read carries one (B-191: a
+   policy-dependent control), filters the entries to those it names. Each entry becomes a button
+   labelled by its `summary`, grouped as the mockup groups them (the primary act first,
+   destructive ones last, each destructive one's label ending in "…").
+2. **The form from the schema.** A control's form shows only the `input` fields the context does
+   not fill, mapped by one table in `src/dashboard/lib/schemaForm.ts` (pure, unit-tested):
+   `enum` → select, `boolean` → checkbox, `integer`/`number` → number, `string` → text (with
+   `pattern` and `maxLength` as HTML constraints), an array of strings → a comma list, a string
+   field with `enum` named `restart` or `option` → radio buttons, any other `enum` → a select;
+   `confirm` is never a field. An
+   entry with a field the table cannot draw is not a button: the control is shown as its CLI
+   line (R-BTN-127's name from the registry's command table) as text. A one-field form is
+   inline; more is a popover.
+3. **The call.** The button sends the entry's `ui` route when the entry has one, else its `http`
+   route (B-203 keeps every `/v1/ui/*` write), with the form's values plus the context, same-origin JSON (R-BTN-16); on `200` the
+   screen's reads are refetched at once; a refusal is drawn beside the control as its code and
+   message, as text, until the next change.
+4. **The confirm dialog.** An entry with `effect: destructive` (§12.2) opens a dialog naming the
+   action and its target (ids as text) with Cancel and the action's own word; confirming sends
+   the call with `confirm: true`. Stop (`leg.stop` through `POST /v1/ui/messages {kind:
+   release}`) is the one exception, by Decision 3a: one click, no dialog, no `confirm`.
+5. **The code dialog.** A `202 {confirm_code}` answer (R-BTN-155) opens a dialog showing the
+   code, the action and target, and the one line that completes it — `baton owner confirm
+   <code>` or `baton admin confirm <code>` by `repo.list.session.role` — then polls the screen's
+   reads every 5 seconds for two minutes (B-191's one exception to the 10-second rule) and closes
+   when the effect shows (or says it timed out, the code expired). The page never confirms; only the minting key does, and the dialog says so.
+6. **The DOM half of B-191's scenario**: with a fixture `GET /v1/actions`, a ticket-page stub
+   draws hold, cancel and stop for an owner's entries and force-reap too for an administrator's;
+   an `allowed` list without `ticket.unhold` hides unhold; a hostile `summary` is text.
+
+### What not to do
+
+- No permission logic: nothing is hidden by guessing a role; a control is drawn when the entry is
+  in the session's list and, where the read gives `allowed`, named there; a refusal is shown.
+- No form field the context fills; no free-text field the schema does not have.
+- No confirmation the page performs itself; no reuse of a code; no dialog on Stop.
+
+### Trust
+
+- **The entries** come from `GET /v1/actions`, Baton's own filter of the registry; they are a
+  drawing instruction — `authorize` runs again on every call.
+- **Form values** are validated on the server (`invalid-params` as text); the client's HTML
+  constraints are convenience, not a gate.
+- **The code** is Baton's, bound to the session, action and parameters (R-BTN-155); the dialog
+  shows it and nothing else can use it but the minting key.
+- **`summary`, codes and messages** are text through `Text`.
+
+### Invariants
+
+- **One check** (R-BTN-129); **R-BTN-155's confirmed list** is what answers `202` — the client
+  adds nothing to it and skips nothing.
+- **Destructive takes `confirm: true`** (§12.2), except Stop (Decision 3a, R-BTN-155).
+- **Text, never markup** (§12.3).
+
+### Tests
+
+Under `test/ui/`: the schema table maps each keyword and falls back to the CLI line; controls
+draw from a fixture by `ui.view` and `allowed`; the confirm dialog sends `confirm: true`; Stop
+sends with no dialog; the code dialog shows the role's line and closes when the fixture read
+changes; a refusal is drawn as text; B-191's scenario, DOM half.
+
+### Exit criteria
+
+- [ ] `useControls`, `schemaForm.ts`, the two dialogs and the refusal rendering exist, used by a
+      stub screen on a local Baton.
+- [ ] The tests above pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-193 after review._
+
+_2026-11-09 — revised after the second review: depends on B-221 (the split shell); the context
+keys, the `ui`-route precedence, the radio-button rule and the role's source named._

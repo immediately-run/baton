@@ -183,7 +183,8 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
       is the runner's own statement, never checked. Baton removes it from the runner's declared set
       and updates `fleet_capabilities` in the same transaction, so rule 4 refuses this runner at
       once. The runner declares it again
-      once its check passes (R-BTN-121).
+      once its check passes (R-BTN-121), or, for a name its executor `provides`, once the executor
+      states it again (R-BTN-107).
     - `ticket` (`ref` in R-BTN-75's form, same repository) — the leg writes the `depends_at`
       entry to git first and the end carries `commit`; Baton writes a provisional row.
     - `condition` and `call` — per R-BTN-162 and R-BTN-165.
@@ -431,8 +432,8 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | `floor` | Every guarantee a floor names holds on every repository the ticket reaches: its home and each `repos:` entry reaching `code_repos` (R-BTN-140, R-BTN-189); the protection checker is exempt | claim, advance | `floor-broken` |
 
   Rules `chain` (R-BTN-106), `entry` (R-BTN-109), `not-queued` (R-BTN-72), `check-runner`
-  (R-BTN-114) and `trusted` (R-BTN-182) are gates too; a leg's `session` mode is
-  rule 4's `runner:session` (R-BTN-107).
+  (R-BTN-114) and `trusted` (R-BTN-182) are gates too; a capability an executor `provides` is
+  rule 4's like any other (R-BTN-107).
   `isEligible`, in the vendored decision library (R-BTN-37), is the reference for every rule;
   the SQL is tested against it (G-BTN-40).
 

@@ -77,7 +77,7 @@ export async function refresh(extra: Record<string, unknown> = {}) {
 /** `POST /v1/sync/observation` as a repository's sync (R-BTN-62): its JSON and status. */
 export async function observe(token?: string) {
   const res = await call('/v1/sync/observation', { method: 'POST', headers: { Authorization: `Bearer ${token ?? (await syncToken())}`, 'Content-Type': 'application/json' }, body: '{}' });
-  return { status: res.status, json: (await res.json()) as { sha: string | null; observation: number; bars: unknown[]; signing_keys?: { public_key: string; fingerprint: string }[]; require_signed_control?: boolean; code?: string } };
+  return { status: res.status, json: (await res.json()) as { sha: string | null; observation: number; bars: unknown[]; versions?: Record<string, string>; code_repos?: unknown[]; pushers?: unknown[]; signing_keys?: { public_key: string; fingerprint: string }[]; require_signed_control?: boolean; code?: string } };
 }
 
 export async function ownerCall(path: string, init: RequestInit = {}) {
@@ -150,11 +150,12 @@ export async function signedCall(name: string, path: string, o: Omit<SignOptions
   return { res, replay };
 }
 
-/** A heartbeat body with sensible defaults for `cred`'s host. */
+/** A heartbeat body with sensible defaults for `cred`'s host. B-142: the model tables' fields
+ *  (`model_provider_id`, `billing`) are gone from the shape; the window test posts them. */
 export function hbBody(cred: keyof typeof TOKENS, over: Record<string, unknown> = {}) {
   return {
     hostname: HOSTS[cred], session_name: `s-${cred}`, harness: 'opencode', kind: 'vm', model_id: 'zai-coding-plan/glm-5.3',
-    model_provider_id: 'zai', billing: { 'zai-coding-plan': 'zai', 'opencode-go': 'opencode_go_plus' }, capabilities: ['agent-venue'],
+    capabilities: ['agent-venue'],
     tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }], ...over,
   };
 }
@@ -316,9 +317,10 @@ export class Git {
     }
     return { status: res.status, ...json };
   }
-  /** A refresh of the head: its tickets unchanged, its stations and closures replaced. */
+  /** A refresh of the head: its tickets unchanged, its stations and closures replaced. The body
+   *  is read at the head, as a sync whose checkout stands there posts it (B-183: `read_sha`). */
   async refresh(extra: Record<string, unknown> = {}) {
-    const res = await syncCall('/v1/sync/board', this.body(this.head!, this.head, extra), this.token);
+    const res = await syncCall('/v1/sync/board', { ...this.body(this.head!, this.head), read_sha: this.head!, ...extra }, this.token);
     const json = (await res.json()) as Record<string, any>;
     if (res.status === 200) this.closed = [];
     return { status: res.status, ...json };

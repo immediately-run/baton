@@ -46,10 +46,15 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
     // §12.8 (B-145, R-BTN-189): the policy facts of the claim's repository, and its `leg_state`
     // (R-BTN-188) — a forge repository with the knob unset hands state over in the forge's
     // conversation.
+    // B-134: the ticket's scope — its home (the fixture's `repos: ['immediately-run/docs']` is
+    // the home itself, so one path).
     expect(c.json).toEqual({ claim_id: expect.any(Number), ticket_id: 'docs:R3-9001', course_id: 'roadmap-pr', course_version: 3, default_branch: 'main',
       policy_hash: expect.stringMatching(/^[0-9a-f]{64}$/), guarantees_hash: expect.stringMatching(/^[0-9a-f]{64}$/), floors_hash: expect.stringMatching(/^[0-9a-f]{64}$/), leg_state: 'forge',
-      station: 'filed', legs: ['implement'], next: [{ leg: 'implement', state: 'ready' }],
-      path: 'content/roadmap/R3-9001.mdx', nonce: expect.stringMatching(/^[0-9a-f]{6}$/), snapshot_sha: sha.A, previous_attempts: [], advice: null });
+      station: 'filed', legs: ['implement'], next: [{ leg: 'implement', state: 'ready' }], scope: ['immediately-run/docs'],
+      path: 'content/roadmap/R3-9001.mdx', nonce: expect.stringMatching(/^[0-9a-f]{6}$/), snapshot_sha: sha.A, previous_attempts: [], advice: null,
+      // B-183 (§4.5): the ticket's version as the board holds it ('' — the interim post carries none)
+      // and no `ticket_source` (the interim post declared none).
+      version: '' });
     expect((await beat('vm-a', secret)).json.claim).toMatchObject({ id: c.json.claim_id, ticket_id: 'docs:R3-9001', nonce: c.json.nonce, station: 'filed',
       git: { station: 'filed', path: [], path_len: 0, regressed: false, next: [{ leg: 'implement', state: 'ready' }] } });
   });
@@ -130,16 +135,15 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
     expect(await rows('SELECT outcome FROM activities')).toEqual([{ outcome: 'abandoned' }]);
   });
 
-  it('§7.2 worker rules: a worker below its course’s min_worker_version gets no claim; a suspended account is no core gate (§7.3)', async () => {
+  it('§7.2 worker rules: a worker below its course’s min_worker_version gets no claim (§7.3)', async () => {
     const { secret } = await register('vm-a');
-    // A provider suspension is the course's, enforced as an owner bar's tag (R-BTN-67, R3-1240), never by core.
-    await owner('/v1/ui/suspensions', { provider_id: 'zai', mode: 'no-new-work' });
+    // B-142: the model tables are gone; nothing of a provider is a core gate.
     expect((await claimItem('vm-a', secret)).status).toBe(200);
-    const late = await register('vm-b', { model_id: 'opencode-go/kimi-k3', model_provider_id: 'opencode_go_plus', courses: [{ repository: 'docs', course: 'roadmap-pr', version: 2 }] });
+    const late = await register('vm-b', { model_id: 'opencode-go/kimi-k3', courses: [{ repository: 'docs', course: 'roadmap-pr', version: 2 }] });
     expect(await claimItem('vm-b', late.secret)).toMatchObject({ status: 409, json: { code: 'stale-skills', rule: 9 } });
     expect(await claimItem('vm-b', late.secret, { ticket_id: 'docs:R3-9002' })).toMatchObject({ status: 409, json: { code: 'stale-skills', rule: 9 } });
     // Declaring no course at all is stale too: rule 9 asks for the ticket's course.
-    const none = await register('mac', { model_id: 'opencode-go/kimi-k3', model_provider_id: 'opencode_go_plus', courses: [] });
+    const none = await register('mac', { model_id: 'opencode-go/kimi-k3', courses: [] });
     expect(await claimItem('mac', none.secret)).toMatchObject({ status: 409, json: { code: 'stale-skills', rule: 9 } });
   });
 
@@ -197,7 +201,7 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
       const key = await makeKey('ssh-ed25519', name);
       expect((await keyCall(admin, '/v1/admin/grants', { repository: 'docs', public_key: key.publicKey, hostname: name, capabilities })).status).toBe(200);
       // A granted key declares the courses of the repositories it is granted on (§10.1).
-      const body = hbBody('vm-a', { hostname: name, session_name: name, secret_hash: await sha256(name), capabilities, model_id: 'opencode-go/kimi-k3', model_provider_id: 'opencode_go_plus', courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }] });
+      const body = hbBody('vm-a', { hostname: name, session_name: name, secret_hash: await sha256(name), capabilities, model_id: 'opencode-go/kimi-k3', courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }] });
       const res = await hostCall(await signedRequest(key, `${ORIGIN}/v1/runner/heartbeat`, { created: Math.floor((await withCore((x) => x.now())) / 1000), body: JSON.stringify(body) }));
       expect([name, res.status]).toEqual([name, 200]);
       return { worker_id: (await res.json() as { worker_id: number }).worker_id, key, secret: name };

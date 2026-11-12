@@ -1,7 +1,7 @@
 // runner-bundle.test.ts — S-BTN-41's runner as it ships (BATON_SPEC §6.13 R-BTN-72): run from
 // a bundle, not from source. The runner spawns each leg through legProcess.mjs by a path beside
 // its own module (src/runner/runner.ts LEG_PROCESS), which esbuild does not follow — so each
-// bundle must carry the file, or every leg crashes writing no result. Both bundles: a checkout's
+// bundle must carry the file, or every leg crashes with no outcome. Both bundles: a checkout's
 // `.local/baton-run.mjs` (scripts/baton-run.mjs) and the published `dist/baton.mjs`
 // (scripts/build-cli.mjs). Node only: it bundles and spawns.
 import { describe, it, expect } from 'vitest';
@@ -19,13 +19,12 @@ function runLegVia(bundle: string): unknown {
   const dir = mkdtempSync(join(tmpdir(), 'baton-bundle-leg-'));
   try {
     const script = join(dir, 'leg.mjs');
-    const ctxPath = join(dir, 'ctx.json');
-    const resultPath = join(dir, 'result.json');
     writeFileSync(script, 'export async function run(ctx) { return { echoed: ctx.leg }; }\n');
-    writeFileSync(ctxPath, JSON.stringify({ leg: 'implement' }));
-    const child = spawnSync(process.execPath, [join(dirname(bundle), 'legProcess.mjs'), script, ctxPath, resultPath], { input: '', encoding: 'utf8' });
+    // R-BTN-133 (B-184): `node legProcess.mjs <call> <script>`, the arguments on stdin's first
+    // line, the outcome on stdout's last.
+    const child = spawnSync(process.execPath, [join(dirname(bundle), 'legProcess.mjs'), 'run', script], { input: `${JSON.stringify([{ leg: 'implement' }])}\n`, encoding: 'utf8' });
     expect(child.stderr).toBe('');
-    return JSON.parse(readFileSync(resultPath, 'utf8'));
+    return JSON.parse(child.stdout.trim().split('\n').at(-1)!);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

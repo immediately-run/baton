@@ -5,7 +5,7 @@
 // SQLite refuse a second holder, never check-then-insert without them (R-BTN-4).
 import { BatonError } from './http';
 import { transcriptUrl } from './links';
-import { isUniqueViolation, logEvent, randomHex } from './db';
+import { isUniqueViolation, logEvent, mintRunId, randomHex, type Random } from './db';
 import { fitsTier, capabilitiesOf, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
 import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
@@ -33,6 +33,8 @@ const GIT_ENDS = new Set(['done', 'superseded', 'deferred', 'deprioritized']);
 export interface Ctx {
   store: Store;
   now: () => number;
+  /** B-185: the core's random source, for a run id's random half; absent, the system's. */
+  random?: Random;
   /** Where each ticket is, and its course's graph (R-BTN-70). */
   stations: Stations;
   /** The owners' bars and settings (R-BTN-66, R-BTN-67). */
@@ -55,6 +57,9 @@ export interface Ctx {
   policies?: import('./policy').Policies;
   /** A repository's forge, for the knobs that a `git` repository refuses (R-BTN-188). */
   forgeOf?: (repository: string) => import('./links').Forge;
+  /** B-134: the leg scope audit — the claim answer's scope, and the reports an advance or an
+   *  end carries. */
+  scope?: import('./scope').Scope;
 }
 
 interface WorkerFacts {
@@ -934,7 +939,14 @@ export class Claims {
     const courseVersion = c.course_id
       ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(c.ticket_id), c.course_id)[0]?.version ?? null
       : null;
-    const path = this.rows<{ path: string }>('SELECT path FROM tickets WHERE id = ?', c.ticket_id)[0]?.path ?? null;
+    const ticketRow = this.rows<{ path: string; version: string; key: string | null }>('SELECT path, version, key FROM tickets WHERE id = ?', c.ticket_id)[0] ?? null;
+    const path = ticketRow?.path ?? null;
+    // B-183 (§4.5): the ticket's opaque `version` as the board holds it, and how its source
+    // reads — pinned (at a version) or current (as it is now) — so the runner re-verifies the
+    // claim by the source's own way of reading before any leg runs (R-BTN-5, R-BTN-34). A board
+    // that declared no source, or a ticket with no version, is re-verified as before.
+    const source = this.rows<{ source_kind: string | null; source_versions: string | null }>(
+      'SELECT source_kind, source_versions FROM board_head WHERE repository_id = ?', repositoryOf(c.ticket_id))[0];
     // R-BTN-34's default branch (§11's claim answer lists it): the branch a marker leg's line is
     // committed on, whatever branch the runner's checkout was left on (B-96's review round 3).
     const defaultBranch = this.rows<{ default_branch: string }>('SELECT default_branch FROM repositories WHERE id = ?', repositoryOf(c.ticket_id))[0]?.default_branch ?? null;
@@ -943,10 +955,15 @@ export class Claims {
       `SELECT id, status, end_reason, end_detail, ended_at, resume_json FROM claims WHERE ticket_id = ? AND id < ? AND status != 'active' ORDER BY id DESC`, c.ticket_id, id);
     const advice = c.advice_json ? (JSON.parse(c.advice_json) as { recommendation?: Recommendation | null }) : null;
     // §12.8 (B-145): the policy facts of the claim's repository (R-BTN-189) and where state one
-    // leg hands the next lives (R-BTN-188's `leg_state` — B-148 reads it).
+    // leg hands the next lives (R-BTN-188's `leg_state` — B-148 reads it). B-182 (R-BTN-190): a
+    // `git` home's claimed ticket on a course that reads PR facts keeps its rounds in its PR's
+    // conversation, on whichever forge holds the PR — the course's `facts` (R-BTN-134), as the
+    // registry posted it, says whether it reads any.
     const repo = repositoryOf(c.ticket_id);
     const policy = this.c.policies?.hashesFor(repo) ?? null;
-    const legState = this.c.policies?.current(repo) && this.c.forgeOf ? legStateOf(this.c.policies.current(repo)!.policy, this.c.forgeOf(repo)) : null;
+    const cur = this.c.policies?.current(repo);
+    const readsPrs = c.course_id != null && (this.rows<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', repo, c.course_id)[0]?.facts ?? '[]').includes('"prs"');
+    const legState = cur && this.c.forgeOf ? legStateOf(cur.policy, this.c.forgeOf(repo), readsPrs) : null;
     // B-127: the brief's mark (item 7 — marked whether or not signed control is required), and,
     // while the repository requires it, the signed-control record the runners load from and
     // verify. `control.required` is Baton's own setting — never the post's word — and its keys
@@ -960,7 +977,13 @@ export class Claims {
       ...(legState ? { leg_state: legState } : {}),
       ...(brief ? { brief } : {}),
       station: c.station, legs: c.offered_leg ? [c.offered_leg] : [], next: this.nextLegs(c.ticket_id, c.station),
+      // B-134: the ticket's scope — its home and its `repos:` — as lowercased forge paths. The
+      // runner audits each leg's pushes against this and reports what falls outside.
+      ...(this.c.scope ? { scope: this.c.scope.scopeOf(c.ticket_id) } : {}),
       ...(handoff ? { handoff_url: handoff } : {}), path, nonce: c.nonce, snapshot_sha: c.snapshot_sha,
+      // B-183 (§4.5): the ticket's version and the source's reading of it — `version` is `''`
+      // when the source posts none, and `ticket_source` is null when the board declared none.
+      version: ticketRow?.version ?? '', ...(source?.source_kind ? { ticket_source: { kind: source.source_kind, versions: source.source_versions } } : {}),
       ...(defaultBranch ? { default_branch: defaultBranch } : {}),
       previous_attempts: previous.map((p) => ({
         claim_id: p.id, status: p.status, end_reason: p.end_reason, detail: p.end_detail, ended_at: p.ended_at,
@@ -972,25 +995,25 @@ export class Claims {
 
   /** The legs a claim ran, in order (R-BTN-24, R-BTN-63). */
   private legsOf(claimId: number) {
-    return this.rows<{ seq: number; leg: string; from_station: string; to_station: string | null; finished_at: number | null; abandoned_at: number | null }>(
-      'SELECT seq, leg, from_station, to_station, finished_at, abandoned_at FROM claim_legs WHERE claim_id = ? ORDER BY seq', claimId)
-      .map((l) => ({ leg: l.leg, from: l.from_station, reached: l.to_station, outcome: l.finished_at != null ? 'finished' : l.abandoned_at != null ? 'abandoned' : 'running' }));
+    return this.rows<{ seq: number; leg: string; run_id: string | null; from_station: string; to_station: string | null; finished_at: number | null; abandoned_at: number | null }>(
+      'SELECT seq, leg, run_id, from_station, to_station, finished_at, abandoned_at FROM claim_legs WHERE claim_id = ? ORDER BY seq', claimId)
+      .map((l) => ({ leg: l.leg, ...(l.run_id ? { run_id: l.run_id } : {}), from: l.from_station, reached: l.to_station, outcome: l.finished_at != null ? 'finished' : l.abandoned_at != null ? 'abandoned' : 'running' }));
   }
 
   /** The claim's running leg, if any: its last started leg not yet finished or given up. */
   private runningLeg(claimId: number) {
-    return this.rows<{ seq: number; leg: string; from_station: string }>(
-      'SELECT seq, leg, from_station FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
+    return this.rows<{ seq: number; leg: string; from_station: string; run_id: string | null }>(
+      'SELECT seq, leg, from_station, run_id FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
   }
 
   /** R-BTN-81: what a leg row of the history carries — the leg's run number on the ticket (its
    *  runs under any claim, this one included), the claim's snapshot and the course's version. */
-  private legFacts(claimId: number, leg: string) {
+  private legFacts(claimId: number, leg: string, runId: string | null = null) {
     const c = this.rows<{ ticket_id: string; worker_id: number; snapshot_sha: string; course_id: string | null }>(
       'SELECT ticket_id, worker_id, snapshot_sha, course_id FROM claims WHERE id = ?', claimId)[0];
     const run = this.rows<{ n: number }>('SELECT COUNT(*) AS n FROM claim_legs l JOIN claims k ON k.id = l.claim_id WHERE k.ticket_id = ? AND l.leg = ?', c.ticket_id, leg)[0].n;
     const version = c.course_id ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(c.ticket_id), c.course_id)[0]?.version ?? null : null;
-    return { ticket: c.ticket_id, row: { claim_id: claimId, worker_id: c.worker_id, leg, run, snapshot_sha: c.snapshot_sha, course_version: version } };
+    return { ticket: c.ticket_id, row: { claim_id: claimId, worker_id: c.worker_id, leg, run, run_id: runId, snapshot_sha: c.snapshot_sha, course_version: version } };
   }
 
   /** An active claim of this worker, for `advance` and `end`. */
@@ -1079,12 +1102,18 @@ export class Claims {
     const n = this.handedOut(repo);
     if (run) {
       this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', at, now, b.evidence, claimId, run.seq);
-      const f = this.legFacts(claimId, run.leg);
+      const f = this.legFacts(claimId, run.leg, run.run_id);
       this.c.history?.record(f.ticket, { kind: 'leg-finished', ...f.row, reached: at, next_leg: leg, ...(b.evidence ? { detail: { evidence: b.evidence } } : {}) });
       // R-BTN-177 (B-105): the finished leg's reported taken, judged against the snapshot it ran
       // under — BEFORE the resolution below, so a dead holding it named is gone from `has` and
       // the leg this advance starts is advised without it.
       this.reportTaken(workerId, claimId, c.ticket_id, run.seq, b.taken);
+      // B-134: the finished leg's scope audit, reported on the advance that finishes it — the
+      // actions outside the claim's ticket scope raise their findings (and their hold) here,
+      // and the report's dropped count (entries that failed their shape, actions beyond its
+      // sixteen) is logged as `taken-invalid` logs the taken's, never a refusal.
+      this.c.scope?.exceeded(claimId, b.scope_exceeded);
+      if (b.scope_exceeded?.dropped) this.event('scope-invalid', `worker:${workerId}`, { dropped: b.scope_exceeded.dropped, claim: claimId }, c.ticket_id, claimId);
     }
     // R-BTN-177: the route choices the course attaches to the leg being started resolve here, in
     // the advance's transaction — a snapshot stored with the leg run and carried as advice,
@@ -1092,9 +1121,20 @@ export class Claims {
     const attached = this.legRouteChoices(repo, c.course_id, leg);
     const resolved = attached.length ? this.c.ontologies?.resolveFor(workerId, repo, attached, now) ?? null : null;
     const seq = (this.rows<{ s: number | null }>('SELECT MAX(seq) AS s FROM claim_legs WHERE claim_id = ?', claimId)[0].s ?? 0) + 1;
-    this.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, bars, started_at, started_observation, route_choices_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      claimId, seq, leg, at, JSON.stringify(b.bars), now, n, resolved ? JSON.stringify(resolved.route_choices) : null);
-    const started = this.legFacts(claimId, leg);
+    // R-BTN-63 (B-185): the run's id, minted here; a collision with an existing id is refused by
+    // the column's unique index and a new one minted.
+    let runId = '';
+    for (let tries = 0; ; tries++) {
+      runId = mintRunId(now, this.c.random);
+      try {
+        this.exec(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation, route_choices_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          claimId, seq, runId, leg, at, JSON.stringify(b.bars), now, n, resolved ? JSON.stringify(resolved.route_choices) : null);
+        break;
+      } catch (e) {
+        if (!isUniqueViolation(e) || !/run_id/.test(String(e)) || tries >= 8) throw e;
+      }
+    }
+    const started = this.legFacts(claimId, leg, runId);
     this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}), ...(resolved ? { route_choices: resolved.route_choices.map((r) => r.choice) } : {}) } });
     // R-BTN-62: only a reading numbered above the counter now can judge the claim stale.
     this.exec('UPDATE claims SET station = ?, leg = ?, claim_observation = ? WHERE id = ?', at, leg, n, claimId);
@@ -1103,7 +1143,7 @@ export class Claims {
     this.writeSeats(claimId, item, leg);
     this.event('advanced', `worker:${workerId}`, { from: station, reached: at, leg, ...(b.bars.length ? { bars: b.bars } : {}), ...(b.evidence ? { evidence: b.evidence } : {}) }, c.ticket_id, claimId);
     this.c.dispatch?.('sync', c.ticket_id); // R-BTN-73: after every advance
-    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), advice: resolved ?? null };
+    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), advice: resolved ?? null, run_id: runId };
   }
 
   /** The route choices a course entry attaches to a leg (R-BTN-177): the `route_choices` map the
@@ -1204,6 +1244,11 @@ export class Claims {
     // in this transaction.
     const ending = this.runningLeg(c.id);
     if (ending) this.reportTaken(workerId, c.id, c.ticket_id, ending.seq, e.taken);
+    // B-134: the ending claim's leg-end scope audit, likewise — the actions outside the claim's
+    // ticket scope raise their findings (and their hold) in this transaction, and the report's
+    // dropped count is logged `scope-invalid`, never a refusal.
+    this.c.scope?.exceeded(c.id, e.scope_exceeded);
+    if (e.scope_exceeded?.dropped) this.event('scope-invalid', `worker:${workerId}`, { dropped: e.scope_exceeded.dropped, claim: c.id }, c.ticket_id, c.id);
     // R-BTN-126's capability branch (B-104): the holding the runner says it lost leaves its
     // declared set, its derived sets re-evaluate in this transaction, and the fleet's counts
     // follow — rule 4 refuses this runner at once. A valid blocked end is not a failed attempt,
@@ -1332,7 +1377,7 @@ export class Claims {
     }
     if (run) {
       // R-BTN-81: the run's end, with the position the holder reported (B-38 makes it provisional).
-      const f = this.legFacts(claimId, run.leg);
+      const f = this.legFacts(claimId, run.leg, run.run_id);
       this.c.history?.record(f.ticket, { kind: opts.finished ? 'leg-finished' : 'leg-abandoned', ...f.row, reached, next_leg: opts.next ?? null, detail: { end_reason: reason } });
     }
     // R-BTN-62: only a reading numbered above the counter's value now can confirm this end. §2e:
@@ -1446,6 +1491,13 @@ export class Claims {
     this.upsertOverride(item, actor, { hold: 1, hold_reason: reason });
     this.event('override', actor, { hold: 1, hold_reason: reason }, item, (detail.claim_id as number) ?? null);
     this.event('held', actor, { hold_reason: reason, ...detail }, item, (detail.claim_id as number) ?? null);
+  }
+
+  /** B-134: with the owners' `scope_policy: hold`, a scope-exceeded finding parks its ticket
+   *  until an owner lifts the hold the way any hold is lifted (§8). The reason is the finding's
+   *  kind, so the dashboard names what held it; the actor is Baton, as every automatic hold's. */
+  holdForScope(item: string, claimId: number) {
+    this.hold(item, 'scope-exceeded', 'baton', { claim_id: claimId });
   }
 
   /** `POST /v1/ui/overrides/{item}` (§8, §11): `{expedite?, hold?}`. Lifting a hold clears its
@@ -1977,8 +2029,21 @@ export class Claims {
 
   // @model alarmReap sha256:9767a3813e32
   // @model fenceTimeout sha256:b982fa4ef61b
-  alarm() {
+  alarm(): string[] {
     const now = this.c.now();
+    // B-229 (R-BTN-9): each reap is its own savepoint, and one that throws is named and passed
+    // over, never the tick's end — a single claim whose end cannot be written would otherwise
+    // roll back every reap of every tick after it (found live: twelve claims whose leases ended
+    // between 2026-10-30 and 2026-11-06 were still held on 2026-11-10). The caller commits the
+    // reaps that went through and then reports the ones that did not.
+    const failed: string[] = [];
+    const each = (claimId: number, ticketId: string, fn: () => void) => {
+      try {
+        this.c.store.transaction(fn);
+      } catch (e) {
+        failed.push(`claim ${claimId} on ${ticketId}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    };
     this.releaseBarHolders(now);
     // Silent workers: reaped at exactly their clamped timeout (R-BTN-9), never by Date.now().
     const silent = this.rows<{ id: number; ticket_id: string; worker_id: number; kind: string }>(
@@ -1986,8 +2051,10 @@ export class Claims {
        WHERE c.status = 'active' AND ((w.kind != 'legacy' AND ? - w.last_seen_at >= w.lease_timeout_ms)
                                       OR (w.kind = 'legacy' AND c.reap_after IS NOT NULL AND c.reap_after <= ?))`, now, now);
     for (const c of silent) {
-      this.finish(c.id, c.ticket_id, 'reaped', c.kind === 'legacy' ? 'reaped:legacy' : 'reaped:silent', 'alarm', {});
-      this.exec('UPDATE workers SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.worker_id);
+      each(c.id, c.ticket_id, () => {
+        this.finish(c.id, c.ticket_id, 'reaped', c.kind === 'legacy' ? 'reaped:legacy' : 'reaped:silent', 'alarm', {});
+        this.exec('UPDATE workers SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.worker_id);
+      });
     }
     // §9: a release delivered 2 h ago and still unacknowledged reaps the claim, fenced: the
     // worker is alive (it took the message), so the item waits for its fence (R-BTN-19).
@@ -2001,7 +2068,7 @@ export class Claims {
       this.exec(`UPDATE messages SET status = 'expired' WHERE id = ?`, c.mid);
       if (reaped.has(c.id)) continue; // two stale releases for one claim reap it once
       reaped.add(c.id);
-      this.finish(c.id, c.ticket_id, 'reaped', 'reaped:release-unacknowledged', 'alarm', { fence: { incarnation: c.incarnation } });
+      each(c.id, c.ticket_id, () => this.finish(c.id, c.ticket_id, 'reaped', 'reaped:release-unacknowledged', 'alarm', { fence: { incarnation: c.incarnation } }));
     }
     // A fence also clears when its worker goes silent past its own timeout (R-BTN-19).
     const lapsed = this.rows<{ id: number; ticket_id: string; worker_id: number }>(
@@ -2020,6 +2087,7 @@ export class Claims {
       this.exec('UPDATE held_snapshots SET accepted_at = ? WHERE repository_id = ? AND sha = ?', now, h.repository_id, h.sha);
       this.event('snapshot-accepted', 'alarm', { sha: h.sha, held: true, by: 'auto-accept' }, null, null, h.repository_id);
     }
+    return failed;
   }
 
   /** R-BTN-67: when a bar with `release_holders` starts, every holder whose worker carries its tag

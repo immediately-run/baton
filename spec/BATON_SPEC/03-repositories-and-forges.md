@@ -99,7 +99,9 @@ repository reachable over SSH is enough (R-BTN-105).
     among the tenant's live repositories. It is for display and links; the forge's ids identify
     the repository (R-BTN-138). Every repository name a ticket carries — `repos:`, `git:` URIs
     (§12.3), the branch-holder query's `?repo=` (§9), the markdown source's `repos` map (R-BTN-74)
-    — is a forge path on the **home's forge host**.
+    — is a forge path naming the home or a `code_repos` entry (R-BTN-140); a `code_repos` path is
+     unique case-insensitively among the home's path and every entry, whatever its host, so a name
+     resolves without one.
   - **`remote`**: the URL the sync and runners clone (`https://…`, `ssh://…` or
     `git@host:path`). Baton never fetches.
   - **`web_base`** (every forge but `git`): `https://<host>[:<port>]/<forge path>`, `https`
@@ -133,7 +135,10 @@ repository reachable over SSH is enough (R-BTN-105).
     tenant's live repositories on one forge host (`conflict`). A webhook's numeric id is
     converted only when `Number.isSafeInteger` holds, else the delivery is ignored and logged.
   - **The ids decide.** A token or delivery whose ids match passes whatever path it carries;
-    one whose ids differ fails whatever path it carries. Checked on: a GitHub OIDC token's
+    one whose ids differ fails whatever path it carries. So does the fact adapter's read of a
+    `code_repos` entry's repository on its own host (R-BTN-140): the forge's ids for the
+    repository it reads are compared with the entry's, and a mismatch fails the sync naming
+    the entry — a re-created path never gains reach. Checked on: a GitHub OIDC token's
     `repository_id` and `repository_owner_id`; a GitLab `id_tokens` JWT's `project_id` and
     `namespace_id`; an App delivery's `repository.id`; a notification's GitLab `project.id`,
     Gitea `repository.id` and `repository.owner.id`, or GitHub repository webhook's
@@ -297,7 +302,13 @@ repository reachable over SSH is enough (R-BTN-105).
     `baton.mirror-late` (a mirror more than 30 minutes behind).
   - **The GitHub App** (§12.7) is GitHub's dispatch target and Baton's webhook source.
 - **R-BTN-73 / R-BTN-95 (forge notifications are only triggers).** A notification records a
-  want; it never computes or carries state.
+  want; it never computes or carries state. The one thing besides the want a delivery produces
+  is the scope cross-check (B-134, §12.9): a push by a worker pusher of the owners'
+  `worker_pushers` setting to a repository no open claim's scope covers records an
+  `unclaimed-write` finding from the delivery's own fields — no repository content is read
+  (an open claim is one still holding its ticket, as rule 3 reads it: active, or completed
+  and unconfirmed, or reaped fence-pending, so a delivery of an ordinary leg-end push that
+  lands after the claim's `end()` is still covered).
   - **Routes.** `POST /v1/github/webhook` takes the App's deliveries for every repository it is
     installed on (`X-Hub-Signature-256` under `BATON_GITHUB_WEBHOOK_SECRET`).
     `POST /v1/forges/{repository}/notify` takes a GitLab notification (`X-Gitlab-Token`
@@ -400,19 +411,25 @@ repository reachable over SSH is enough (R-BTN-105).
 ### 3.4 Reading the forge
 
 - **R-BTN-96 (course facts come from an adapter per forge).** For a course whose `entry.json`
-  declares `facts: ["prs"]` (R-BTN-134) the CLI reads PR facts through a **fact adapter**
-  chosen by `forge` — GitHub PRs and reviews, GitLab merge requests and approvals, Gitea PRs and
-  reviews — mapped to one set of facts: a PR's head branch, state, head checks and verdicts on
+  declares `facts: ["prs"]` (R-BTN-134) the CLI reads PR facts through a **fact adapter** chosen
+  by the forge of the repository it reads — the home's by the home's (none on `git`), each code
+  repository's by its own (R-BTN-140): GitHub PRs and reviews, GitLab merge requests and
+  approvals, Gitea PRs and reviews — mapped to one set of facts: a PR's head branch, state, head checks and verdicts on
   the head. Each fact carries `repository`, fork-ness and `pusher` (R-BTN-139). The verdict line
   `<!-- baton:verdict approve|changes -->` works on every forge.
   - The adapter reads the home repository and every `code_repos` repository a live ticket on a
-    PR-reading course names (deduplicated, case-insensitive), under one request budget. An
-    unreadable or missing repository fails the sync, naming the tickets; a partial reading is
-    never posted. On GitHub it lists PRs over REST and reads live tickets' PRs over GraphQL, at
+    PR-reading course names (deduplicated, case-insensitive), under one request budget **per
+    host**. A `git` home is read by no adapter; its code repositories are read on their own
+    forges. An unreadable or missing repository fails the sync, naming the tickets; a partial
+    reading is never posted. On GitHub it lists PRs over REST and reads live tickets' PRs over GraphQL, at
     most 25 PRs a query per repository (head-commit check runs through check suites, latest run
     per check; commit dates; reviews; issue comments); an overflowing first page or a head read
-    at another commit is read over REST in full; an answer with `errors` fails the sync. Built:
-    B-29, B-35.
+    at another commit is read over REST in full; an answer with `errors` fails the sync, naming
+    each error's path — except one whose errors all refuse a head's check suites, which a
+    fine-grained token on a private repository cannot read (no such token holds Checks). That
+    answer stands, and that repository's heads' checks are their Actions workflow runs (a
+    completed run's conclusion, none while it runs; a check run of no workflow is not seen
+    there); a token that cannot read those either fails the sync. Built: B-29, B-35, B-226.
   - **The `branch` course** (a course directory of the baton repository, `facts:
     ["branches"]`; `baton repo init --course branch`) reads the home repository's git alone:
     - stations `filed` → `pushed` → `reviewed` → `merged`, with `fixed` between `reviewed` and
@@ -452,12 +469,16 @@ repository reachable over SSH is enough (R-BTN-105).
     `userContentEdits`; on GitLab and Gitea the author is a pusher and `updated_by`, where
     present, is the author.
   - **A pusher**: an immutable forge user id in the owners' `pushers`, or
-    someone the forge reports can push to the PR's base — GitHub
+    someone the forge reports can push to the PR's base. A `pushers` entry is `{host?, id}`:
+    without a host it is the home's, and on a `git` home an entry without a host is refused
+    (`invalid-params`). The forge lookup reads the base repository **on that repository's forge,
+    with that host's token** — GitHub
     `GET /repos/{owner}/{repo}/collaborators/{username}/permission` is `admin` or `write`
     (`author_association` only pre-filters); GitLab `GET /projects/:id/members/all/:user_id`
     has `access_level` ≥ 30 (approvals filtered the same); Gitea collaborator permission
-    `write`, `admin` or `owner`. `baton owner settings set` warns when a shared echoing bot (such as
-    `github-actions[bot]`) is listed.
+    `write`, `admin` or `owner`. Every other rule here applies per host: the same repository by
+    id, every editor a pusher, fail closed on a missing scope. `baton owner settings` warns when
+    a shared echoing bot (such as `github-actions[bot]`) is listed.
   - **Failures.** A permission or editors read that errors aborts the sync run, which posts
     nothing and releases its number (R-BTN-150). Only a token known to lack the scope degrades: permissions to `pushers`
     (fail closed), raising `baton.pushers-degraded`; a text whose editors cannot be read does not
@@ -467,10 +488,25 @@ repository reachable over SSH is enough (R-BTN-105).
     gitlab` provisions a `read_api` token for the lookup.
 
 - **R-BTN-140 (code repositories are the owners' list).** The owner setting `code_repos` lists
-  forge repositories on the home forge host. Owners write each entry's `path` only; Baton
-  resolves it at addition to `{path, repo_id}`, keeps `former_paths` itself and matches by id
-  thereafter, and a re-written list keeps the ids of the paths it keeps.
-  - An entry whose id is a registered repository of the tenant — the live one with that id, else a retired one, whose entry then never has reach — needs that repository's
+  forge repositories, each on the forge and host its entry names: an entry is `{path, forge?,
+  host?}`, and omitted `forge` and `host` are the home's — on a `git` home both are required
+  (`invalid-params`, naming the entry). Baton stores `{path, forge, host, repo_id, owner_id,
+  web_base}`; `forge` is `github`, `gitlab` or `gitea` (a `git` code repository has no PR facts
+  to read and is refused), `host` a lowercased DNS name with optional port, and `web_base` that
+  host and path. An entry's path is unique case-insensitively among the home's path and every
+  entry, whatever its host; a list with a duplicate is refused `invalid-params`. The ids are
+  read as R-BTN-138 reads a registration's: `baton owner settings` reads them from that forge's
+  API with the operator's token for that host (`GITHUB_TOKEN`, `GITLAB_TOKEN`, `GITEA_TOKEN`)
+  or takes `--forge-ids`, and posts them; Baton never fetches. **The ids decide** at every
+  read: the fact adapter compares the forge's ids for the repository it reads with the entry's
+  and fails the sync on a mismatch, naming the entry, so a re-created path never gains reach.
+  A re-written list keeps the ids of the paths it keeps, and a home that lists no `code_repos`
+  keeps today's reading — its `repos:` entries resolve by name on its own forge host (R-BTN-92).
+  While a code repository sits on a host other than the home's, the policy may name no
+  `human_identity` and no floor may stand (R-BTN-188).
+  - An entry whose `{host, repo_id}` is a registered repository of the tenant — the live one
+    with that host and id, else a retired one, whose entry then never has reach — needs that
+    repository's
     consent, a `code_repo_consents` row judged by id at every use and never written by A's
     settings: `POST /v1/owner/{B}/code-repo-consents {repository: A, confirm: true}` signed by
     B's owner, or an administrator's `code_repo_consents_add` (`POST /v1/admin/repositories`);

@@ -23,7 +23,9 @@ live solely in Baton, and both are exportable (R-BTN-88).
                         #   protocol_files, source?, facts?}]; imports?;
                         #   conditions? (bindings,
                         #   R-BTN-161); for the CLI's defaults (R-BTN-74): items, default_course,
-                        #   repos, agent_command, agent_wrapper (B-95); check: {depends_line,
+                        #   repos, agent_command, agent_wrapper (B-95); legs: {<course>:
+                        #   {<leg>: {agent_command?, executor?}}} (R-BTN-131, R-BTN-107);
+                        #   executor_schema (R-BTN-107); check: {depends_line,
                         #   sections_since, sections_from_id, rules} (B-111; R-BTN-74 says what
                         #   each does and what CI judges with them: the ticket check and commands
                         #   alone read them; default off);
@@ -42,7 +44,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
   A sourced entry's fields default from its source's `entry.json` (R-BTN-134).
   - `course.json` is the course's whole state machine; `baton.json` names courses and
-    settings, never legs.
+    settings, and of a leg only the home's settings for how it runs (`legs`: its agent command and
+    executor data), never its stations, edges or contract.
   - `branch_pattern` (default `claude/{ticket}-*`; grammar in R-BTN-141) maps a pushed branch
     to the course's tickets for the branch-holder query (§9) and finds an earlier attempt's
     branch (R-BTN-25). Without `{repository}`, a branch may map to tickets of two repositories,
@@ -79,6 +82,30 @@ live solely in Baton, and both are exportable (R-BTN-88).
     a row — and how tickets rank. It also exports `file(ticket)`, which writes a new ticket (handler tickets,
     R-BTN-161; call children, R-BTN-165), and `withdraw(ticket, reason)`, which writes a
     withdrawal (R-BTN-168, R-BTN-171).
+  - **Each ticket's version** (B-183). `tickets(ctx)` gives each live ticket a `version`: an
+    opaque string of 1–128 characters of `[A-Za-z0-9._:+/=-]` (§12.3), validated on write, whose
+    meaning is the source's own and whose only reader-comparison is **equality** — Baton never
+    orders two versions and never reads one as a time (values 4). The **version contract**: a
+    ticket's version changes exactly when something a runner reads of it changes — its body, exit
+    criteria, filter fields, closure. A source that bumps it for anything else (a comment, a
+    watcher) stales claims for nothing; one that misses a change lets a runner work a ticket that
+    moved. A digest of what `read` returns, optionally prefixed by the store's own stamp
+    (`<updatedAt>:<digest>`), is recommended over a timestamp alone, which collides within its
+    resolution.
+  - **How the source reads** (B-183). The default export may declare `versions` — `"pinned"`
+    (it can read a ticket **at** a version) or `"current"` (only as it is now) — and a
+    declaration exports `read(id, {version?, checkout?})` → `{version, ticket}`, run on the
+    runner like the source's other exports: a pinned source is read at its version, a current
+    one as its store holds the ticket now — the read-now comparison is a current source's whole
+    staleness protection, so the CLI refuses at load a source that declares `versions` without
+    exporting `read`, rather than run its claims with no re-verification at all. A source that
+    declares neither is read as declaring nothing: its tickets keep `path` required
+    and no claim is re-verified by version. `tickets(ctx)` reads its store after the observation
+    number was handed out and sees every write made before it (§4.3, R-BTN-62); `ctx.versions`
+    carries each live ticket's last accepted version as the observation returned it, and a
+    source whose store can tell a stale read — a lagging replica — refuses to post a ticket whose
+    version it judges older, failing the run as any failing source does (R-BTN-150). The order of
+    two versions is the source's judgement, never Baton's.
   - **Each course's station function**, `sync.mjs` in its course directory (own or the
     source's, R-BTN-134), default-exporting `stations(ctx)` → `stations` (per ticket: readiness,
     fact arrivals, implied station, outputs, bars, the queued person leg's question, `not_before`)
@@ -95,7 +122,11 @@ live solely in Baton, and both are exportable (R-BTN-88).
     repository leaves a default by adding its own file. Defaults are CLI code run in the sync,
     never core: `src/core/` may not import `src/defaults/`.
   - **The markdown source.** Every `*.md` or `*.mdx` under `items` (default `tickets/`) whose
-    frontmatter has an `id` is a ticket:
+    frontmatter has an `id` is a ticket. It is **pinned** (B-183): each live ticket's `version`
+    is the ticket file's **blob id** at the posted commit (`git rev-parse <sha>:<path>`) — a
+    blob id, not the commit's sha, so an unrelated commit changes no ticket's version — its `key`
+    is its `path`, and its `read` is the blob itself, exactly what the runner reads today; a
+    ticket whose file is not at the commit is posted with no version. Its frontmatter:
 
     | field | posted as |
     |---|---|
@@ -290,27 +321,45 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
 - **The sync run.** A run checks out with full history (ancestry needs it), then:
   1. `POST /v1/sync/observation` → `{sha, observation, bars, pushers, code_repos, check_app_id,
-     provisional, positions, unconfirmed}`: Baton's head (null before the first post; the named
+     provisional, positions, versions, unconfirmed}`: Baton's head (null before the first post; the named
      commit, with an unmaterialized board, after a forced Resync, R-BTN-11), a fresh observation number (R-BTN-62), the owner bars in force or
      scheduled (R-BTN-67), the trust inputs (R-BTN-139, R-BTN-140), the commits provisional block
      rows wait for (R-BTN-126), `positions` — every live ticket's `{station, path_len, path,
      next_leg, running?}` from Baton's course history (R-BTN-39); a ticket absent from it is at its
-     course's `start` — and `unconfirmed`, every unconfirmed end's `{ticket, claim, evidence?}`
+     course's `start` — `versions`, each live ticket's last accepted version (B-183), Baton's own
+     record returned to the posting credential only, as `positions` is, for the source's code to
+     judge its store's read against — and `unconfirmed`, every unconfirmed end's `{ticket, claim, evidence?}`
      with the `ended_at_sha` it named (R-BTN-10) — before it reads anything else;
   2. fetches and sets `new` to `origin/<default branch>` (the registered branch), then reads PRs
-     and code repositories, so everything posted was read after the number was handed out;
+     and code repositories, so everything posted was read after the number was handed out — the
+     ticket source included: `tickets(ctx)` reads its store after the number and sees every write
+     made before it. That read-after is the source's obligation (B-183), and confirmation's
+     every-input rule (R-BTN-10, R-BTN-62) relies on it as on the sync's own reads;
   3. checks the head is founded (R-BTN-147), then runs every course's `sync.mjs` — always, even
      when `new` equals the head, since evidence lives in PRs, reviews, checks and code
      repositories;
   4. posts the board (§4.4) with its number: `sha: new, parent_sha: head` when the head is an
-     ancestor of `new`; a **refresh** (`sha` and `parent_sha` both the head: tickets unchanged,
-     the run's attestations replacing the previous run's) when `new` equals the head; when `new`
+     ancestor of `new`; a **refresh** (`sha` and `parent_sha` both the head) when `new` equals
+     the head — the run's attestations replacing the previous run's, and its tickets too where
+     their `version` differs from the row Baton holds (B-183): a refresh may add, close or
+     change any ticket whose version moved, since a source's store can move with no commit. A
+     refresh carries `read_sha`, the commit its tickets were read at, and materializes them only
+     when that is the head it refreshes — a `confirm-only` re-post of the head from a checkout
+     behind it (§7.1) is labelled with the head's sha while its body was read at the ancestor,
+     and writing that body would roll the ticket cache back to an older reading, so it changes
+     no ticket row; a post naming no `read_sha` (an older CLI's) changes none either. The
+     re-checks of the new-head path guard a refresh that writes rows the same way: a reading
+     overtaken while its rows were hashed is `stale-observation`/`head-moved`, never a rollback
+     over the newer post. For the markdown source no version changes without a new commit, so
+     its refreshes carry no ticket change; when `new`
      is a strict ancestor of the head (a lagging fetch), nothing — it releases its number with
      `behind: new` (R-BTN-150). Every exit that posts nothing releases its number.
 
-  A post over R-BTN-149's caps is refused `too-large`. Baton materializes each accepted
-  snapshot into `tickets`, upserting rows whose `row_hash` changed and deleting rows of tickets
-  that left the board, a ticket marked `cancelling` excepted (R-BTN-168); after a forced Resync
+  A post over R-BTN-149's caps is refused `too-large`. Baton materializes each accepted snapshot
+  into `tickets`, upserting rows whose `row_hash` changed and deleting rows of tickets
+  that left the board, a ticket marked `cancelling` excepted (R-BTN-168); `version` and `key`
+  are inputs of `row_hash` (B-183), so a ticket whose version moved rewrites its row on a
+  refresh as on a new head; after a forced Resync
   every row is written (R-BTN-11); its stations likewise write only the rows that changed (R-BTN-70), so a
   post costs rows written in proportion to what moved, not to the board's size (R-BTN-2). The
   protocol is the CLI's (`baton repo sync`); the repository supplies only its ticket source and
@@ -396,8 +445,11 @@ live solely in Baton, and both are exportable (R-BTN-88).
       ends `released:stale-board`, and its owner state is kept in a `closed_tickets` row
       `closed_as: dropped`, as a closing's is (R-BTN-12). A ticket marked `cancelling` is never dropped,
       and its `cancel` leg's claim is never staled (R-BTN-168);
-    - `baton.renumbered` — the post adds a ticket at the `path` of a ticket it drops; the new id
-      takes the old one's hold and backoff (`admin` event `renumbered`).
+    - `baton.renumbered` — the post adds a ticket at the `key` of a ticket it drops; the new id
+      takes the old one's hold and backoff (a `renumbered` event, actor `sync`, B-183). The
+      `key` is the source's stable name for the ticket, posted with it and defaulting to its
+      `path` (B-183): a tracker that renumbers its issues keeps the key, and Baton reads the
+      move; a path was the git source's key all along.
 
 ### 4.4 The board post
 
@@ -405,14 +457,17 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
 ```
 { sha, parent_sha, observation,                                   -- R-BTN-11, R-BTN-62
-  source: { kind: 'markdown' | 'custom', cli },                  -- R-BTN-74
+  read_sha?,                                                      -- B-183: the commit the tickets were read at, when not
+                                                                 -- `sha` itself; a refresh materializes only when it is the head (§4.3)
+  source: { kind: 'markdown' | 'custom', versions?, cli },        -- R-BTN-74, B-183
   contains?: [<sha>],                                            -- the provisional commits (R-BTN-126) this post contains
   bindings?: { <type prefix>: <course> | { course, replaces } },   -- the repository's scope, from `.baton/baton.json` (R-BTN-161)
   registry: [{ id, version, min_runner_version, skill?,
                course: <course.json with its schemas>,           -- R-BTN-69, R-BTN-108
                step_kinds, branch_pattern, previous_branch_pattern? }],
   tickets:  [{ id,                                               -- local id
-               course_id, path, title, tier?,                    -- tier: a name of the repository's `tiers`
+               course_id, version?, key?, path?, title, tier?,    -- version: R-BTN-74 (B-183); key: R-BTN-147; path: optional for a
+                                                                -- custom source with versions: "current" alone
                requires[], expedite, repos[], rank?,             -- requires expanded; repos are forge paths
                parent?, not_before?,                             -- R-BTN-86, R-BTN-89
                depends_at?: [{ ticket, at | reached | done, leg? }],   -- R-BTN-120
@@ -447,8 +502,21 @@ live solely in Baton, and both are exportable (R-BTN-88).
   accepted with the post (R-BTN-191): readiness whose `at` is not Baton's station is discarded,
   and an arrival Baton does not apply is recorded unapplied (R-BTN-39). Confirmations are not
   posted; Baton derives them from the run's attestations (R-BTN-10).
+- **The source declaration** (B-183): `source` names the ticket source — `markdown`, the CLI's
+  default, or `custom`, the repository's own — and, when the source declares it, how it reads
+  (`versions`: `pinned` at a version, `current` as it is now); Baton keeps the last accepted
+  post's declaration and hands it to the claim answer (§4.5). A post from a `custom` source
+  with `versions: "current"` to a repository whose policy's `floors` include `tickets-approved`
+  is refused `invalid-params`, naming the guarantee: that guarantee is defined over a ticket
+  file's approval (R-BTN-184), and what approval means for a tracker is a later ticket's.
+- **Each ticket's `version`** (B-183) is validated on write (§12.3) and stored on its row, an
+  input of its `row_hash`; Baton compares versions for equality only. `key` defaults to the
+  ticket's `path`; a ticket with neither — no path, no key — is refused, for it names nothing
+  stable. `path` is required of every source but a `custom` one with `versions: "current"`,
+  whose ticket may live in no tree at all.
 - `requires` arrives expanded to capabilities (`none` or no clause is `[]`). `repos` are forge
-  paths on the home's forge host (R-BTN-92), resolved by the sync from short names.
+  paths naming the home or a `code_repos` entry (R-BTN-92, R-BTN-140) — unique across the
+  reach, whatever the host — resolved by the sync from short names under the home's owner.
 - **B-127's marks and record.** Each ticket's `brief` — `{signed, signer?, commit}`, marked
   whether or not the repository requires signed control — is stored with the ticket and served
   with the claim answer, so a privileged session's first sight of a brief is whose words it is;
@@ -485,8 +553,11 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
 ### 4.5 Reading the ticket
 
-- **R-BTN-5 / R-BTN-34 (the runner reads and re-verifies the ticket from git).**
-  - The claim response names the ticket's `path` and the `snapshot_sha` it was decided on.
+- **R-BTN-5 / R-BTN-34 (the runner reads and re-verifies the ticket from git, by its version).**
+  - The claim response names the ticket's `path`, the `snapshot_sha` it was decided on, its
+    `version` as the board holds it, and how its source reads (`ticket_source`: `{kind,
+    versions}` — B-183; absent when the board declared no source, and `version` `''` when it
+    holds none, both re-verified as before).
     Before preparing any tree at the sha, the runner checks it is on the registered default
     branch (R-BTN-143, else `released:off-branch`). If `git cat-file -e <snapshot_sha>` fails or
     the file is absent, it fetches the default branch once, then releases `stale-board` if it is
@@ -497,12 +568,23 @@ live solely in Baton, and both are exportable (R-BTN-88).
     record on the ticket's branch (R-BTN-131) reads the body and its inputs at that branch's
     fetched head instead, once it has checked that the branch maps to the ticket; filter fields and
     closure still come from the default branch. No ticket content travels through Baton.
-  - It then checks the tier fits its ceiling and runs the course's `sync.mjs` (through the
+  - **Re-verification by version** (B-183): before any leg runs, the runner reads the ticket
+    through its source at the claim's snapshot — the repository's `.baton/tickets.mjs`, else the
+    CLI's markdown default — whose `versions` says how. **Pinned**: the ticket is read at its
+    version (`read(id, {version})`; for the markdown source, the blob the version names — the
+    file at `snapshot_sha`, as always), and one that cannot be read there releases
+    `stale-board`. **Current**: the ticket is read as the store holds it now (`read(id, {})`),
+    and a different version — the ticket moved under the claim — releases `stale-board` before
+    any leg runs. A source at the snapshot that declares `versions` but exports no `read`
+    cannot read at all — the CLI refuses one at load (§4.2) — and its claims release
+    `stale-board` too, never run on with no re-verification. It then
+    checks the tier fits its ceiling and runs the course's `sync.mjs` (through the
     wrapper, from a verified tree at the claim's commit, R-BTN-133) on the ticket and its PRs at
     the fetched head, whose readiness must show the offered leg leaving the claim's station as
     Baton holds it (the claim response's station, `path_len` and queued leg, R-BTN-39). Closed,
-    archived or re-tiered in git, or the leg not offered there, releases `stale-board`; where the
-    ticket is never comes from git. This applies to every claim with a ticket file. Two claims are
+    archived or re-tiered, or the leg not offered there, releases `stale-board`; where the
+    ticket is never comes from the source. Readiness is computed as today, from the ticket as
+    read. This applies to every claim with a ticket. Two claims are
     re-verified against Baton's record instead (the claim response's station and queued leg),
     never against git: a ticket with no file — a `changes` check ticket (R-BTN-114) — and a claim
     of the `cancel` leg Baton queued (R-BTN-168), whose ticket may already be withdrawn or closed
@@ -543,7 +625,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
 - **R-BTN-81 (the ticket's history: a running record, not a replay log).** Per ticket Baton
   appends one row per thing it saw: a leg started, finished or given up (claim, runner, course
-  version, contract version, position, run number, `snapshot_sha`, `head_sha`); a position
+  version, contract version, position, run number, `run_id` (R-BTN-63), `snapshot_sha`, `head_sha`); a position
   confirmed; a fact arrival, and an arrival not applied (R-BTN-39); an adoption; a re-route; a
   block or unblocking; a condition opened or closed; a person leg's question posted, answered or
   expired (R-BTN-116); a call settled; a supersession; an outbox entry queued, delivered or

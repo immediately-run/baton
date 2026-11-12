@@ -3,40 +3,21 @@
 // `baton request` bundle (BATON_SPEC §2f R-BTN-74; B-111; B-112; B-98 R-BTN-131): bundles
 // `src/defaults/cli.ts`, `src/defaults/tickets.ts` and `src/defaults/request.ts` with
 // esbuild the way scripts/baton-run.mjs bundles the runner, and re-exports their command
-// entrypoints. The bundle lands in `.local/` (gitignored) and is rebuilt on every start, so the
-// commands a checkout runs are always its current source.
+// entrypoints. Each bundle lands in `.local/` (gitignored), per process, and is rebuilt on every
+// start, so the commands a checkout runs are always its current source.
 import { build } from 'esbuild';
 import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
-// This run's own bundle, as `bundleCommand`'s below: parallel processes (vitest workers'
-// `baton()` children among them) each rebuild, and one shared path let one process's write
-// land inside another's import — the child then read a half-written bundle and
-// `initMain` "was not a function" (seen on CI, 2026-11-07). Deleted once loaded, like the
-// command bundles.
-const OUT = join(ROOT, '.local', `baton-cli-${process.pid}.mjs`);
 mkdirSync(join(ROOT, '.local'), { recursive: true });
 
-await build({
-  entryPoints: [join(ROOT, 'src/defaults/cli.ts')],
-  outfile: OUT,
-  bundle: true,
-  platform: 'node',
-  format: 'esm',
-  target: 'node22',
-  packages: 'external',
-  loader: { '.json': 'json', '.txt': 'text' },
-  logLevel: 'warning',
-});
-
-const cli = await import(pathToFileURL(OUT).href);
-rmSync(OUT, { force: true });
-export const { initMain, parseSyncArgs, syncMain, prebuildDefaults, remoteSlug, verifyConfigMain } = cli;
-
-/** One command module bundled the same way. Each bundle is this run's own — another process
- *  builds its own — and it is deleted once loaded, before the child's imports run. */
+/** One command module bundled with esbuild. Each bundle is this run's own (`.local/<entry>/<pid>/`)
+ *  — another process builds its own — and it is deleted once loaded, before the child's imports
+ *  run. A shared output file raced: two `baton` processes at once (vitest's parallel files, CI
+ *  2026-11-11) had one import `.local/baton-cli.mjs` while the other rewrote it, and the import
+ *  read `initMain is not a function`. */
 async function bundleCommand(entry, load) {
   const file = join(ROOT, '.local', entry.replace(/\.ts$/, ''), String(process.pid), 'command.mjs');
   try {
@@ -48,6 +29,7 @@ async function bundleCommand(entry, load) {
       format: 'esm',
       target: 'node22',
       packages: 'external',
+      loader: { '.json': 'json', '.txt': 'text' },
       logLevel: 'warning',
     });
     // The entry, when a load fails: a bundle error reads as a bare SyntaxError otherwise.
@@ -58,6 +40,9 @@ async function bundleCommand(entry, load) {
     rmSync(dirname(file), { recursive: true, force: true });
   }
 }
+
+const cli = await bundleCommand('cli.ts', (file) => import(pathToFileURL(file).href));
+export const { initMain, parseSyncArgs, syncMain, migrateMarkersMain, prebuildDefaults, remoteSlug, verifyConfigMain } = cli;
 
 // B-111's `baton tickets check` and B-112's `baton tickets new|claim|set|done`, built the same
 // way and re-exported beside the repo commands.

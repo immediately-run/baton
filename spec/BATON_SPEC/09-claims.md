@@ -28,7 +28,7 @@ is `active` until it ends
   - The response carries `claim_id`, `ticket_id`, `station`, `legs` (the queued leg, R-BTN-83),
     `next`, `handoff_url?`, `path`, `snapshot_sha`, `default_branch`
     (R-BTN-143), `nonce` (6 hex, public: written in markers and the mirror's claim note, R-BTN-17),
-    `previous_attempts` (R-BTN-24), `leg_log?` (R-BTN-128),
+    `previous_attempts` (R-BTN-24),
     `check_sha?`/`check_head_ref?` (R-BTN-153), and `resume?` (the conditions' restarts, a list,
     R-BTN-162).
   - The runner then reads the ticket from git and re-verifies it (R-BTN-34, R-BTN-5).
@@ -36,8 +36,8 @@ is `active` until it ends
   ticket in one session is the norm and the cheapest path. Each leg starts with
   `POST /v1/runner/claims/{id}/advance` naming it (R-BTN-63): Baton checks the edge and the gates
   in one transaction and moves the claim on (event `advanced`, a new `claim_legs` row with its
-  run number, `started_at` and `head_sha`) or refuses. The reply carries the leg's resolved
-  inputs (R-BTN-82) and Baton's advice flags; the course's own advice is `rank.mjs`'s (R-BTN-98).
+  run number, `run_id` (R-BTN-63), `started_at` and `head_sha`) or refuses. The reply carries the
+  run's `run_id`, its `leg_log` directory (R-BTN-128), the leg's resolved inputs (R-BTN-82) and Baton's advice flags; the course's own advice is `rank.mjs`'s (R-BTN-98).
 - **R-BTN-38 (legs are stateless at their boundaries).** Each leg reads its input from, and
   leaves its output in, the ticket's repositories and their changes. Nothing a leg needs travels
   through a session's context, so any session can run any leg whose input is in place; a
@@ -50,7 +50,12 @@ is `active` until it ends
   heartbeat. When `now − last_ok ≥ lease_timeout − 4 min` it marks the lease **lost** in its
   state file. A lost lease, or a heartbeat response that no longer lists the claim, means the
   session no longer holds the ticket. On reconnecting, a sidecar whose lease was lost ends the
-  claim `released:lease-lost` itself.
+  claim `released:lease-lost` itself. A runner that starts does the same for its host's earlier
+  sessions: every other state file beside its own that still names a claim whose lease is lost
+  by that file's own reading (R-BTN-26) has the claim ended `released:lease-lost` with that
+  session's secret, and the file's claim cleared. A file whose lease still holds is a live
+  runner on the host and is left alone; a refusal clears the file, and Baton out of reach
+  leaves it for the next start.
   - A heartbeat refused `session-taken`, `runner-reaped` or `forbidden` marks the lease lost at
     once. `rate-limited` and `quota` do not: the sidecar backs off and retries, but an unaccepted
     heartbeat never renews `last_ok`.
@@ -80,7 +85,7 @@ is `active` until it ends
   The holder queries (this one and R-BTN-7's) answer `held_by_other` relative to the runner the
   request names; asked
   by the key alone, Baton counts every active claim as another's, a claim of a runner of the
-  same key included, since every container of a cloud environment shares one key (§8.1).
+  same key included, since several runners may share one credential (§8.1).
   Baton maps a branch to tickets through every course's current or previous `branch_pattern`,
   among tickets whose home repository or `code_repos` reach that repository (R-BTN-140), naming
   only tickets of repositories granted to the key and following former paths (R-BTN-141). A
@@ -169,7 +174,11 @@ end on an ended claim is refused `claim-ended`.
 - **Reaping** (unnumbered). The alarm reaps every active claim whose runner has `now −
   last_seen_at ≥ lease_timeout_ms`: the claim becomes `reaped`, the runner gets `reaped_at` (no
   other reap sets it, R-BTN-19), and its pending and delivered messages become `expired`. The alarm also reaps a claim whose
-  delivered `release` stays unacknowledged for 2 hours (15 minutes for `leg-timeout`). An
+  delivered `release` stays unacknowledged for 2 hours (15 minutes for `leg-timeout`). The
+  reaps commit on their own, before the rest of the alarm's tick: a later step that fails rolls
+  back only itself, and a reap whose end cannot be written is passed over — the tick then fails
+  naming that claim, after its other work, and the next tick tries it again — never the end of
+  the other reaps. An
   administrator may force-reap any active claim from the dashboard (`POST
   /v1/ui/claims/{id}/reap`, confirmed per R-BTN-155), shown the runner's last-seen and
   last-activity times, and clear any pending fence (R-BTN-19). The next claimant concludes from what git holds and the resume record.
@@ -197,14 +206,15 @@ end on an ended claim is refused `claim-ended`.
     refuse it (R-BTN-88), so a seal waiting on the claim can proceed. The dialog shows the runner's last-seen
     time and says what the clear gives up: a process the old incarnation still runs can push
     until its own lease check fails (`last_ok + lease_timeout − 4 min`, R-BTN-26) — on a
-    `session`-mode leg, whose child makes no checks, until the child is interrupted — and the next
+    leg under an executor other than `builtin`, which may make no checks of its own, until the
+    executor's `stop` returns (R-BTN-107) — and the next
     claimant's re-read of git (R-BTN-25) is then the only protection. Nothing a runner does
     extends a fence, and no other person's act ends one early.
   - A silence reap is not fence-pending — every check of that runner already computes the lease
-    as lost — except on a claim running a `session`-mode leg (R-BTN-107), whose child session
-    makes no checks: every reap of such a claim is fence-pending, and the runner reports `fenced`
-    for it only once the provider confirms the child session interrupted or archived. A child the
-    runner cannot reach before `fence_deadline` is not fenced: its later pushes are not noticed
+    as lost — except on a claim running a leg under an executor other than `builtin` (R-BTN-107),
+    whose session may make no lease checks of its own: every reap of such a claim is
+    fence-pending, and the runner reports `fenced` for it only once the executor's `stop` has
+    returned. A session the runner cannot reach before `fence_deadline` is not fenced: its later pushes are not noticed
     (R-BTN-46); the next claimant re-reads git before it writes (R-BTN-25).
 
 ### 9.6 Confirming an end
@@ -251,8 +261,8 @@ end on an ended claim is refused `claim-ended`.
   (the one nested key allowed, §12), the last activity and its outcome, the legs run, the end
   reason and detail, and the transcript pointers. Core reads no particular
   activity kind. The claim response for a ticket with earlier ended claims carries
-  `previous_attempts`, the newest 10, newest first, each with its resume record, legs run and
-  hand-off URL, and `previous_attempts_total`;
+  `previous_attempts`, the newest 10, newest first, each with its resume record, legs run (each
+  with its `run_id`, R-BTN-63) and hand-off URL, and `previous_attempts_total`;
   a leg receives them only as data in `BATON_RESUME` (R-BTN-144). The ticket history read
   (R-BTN-81) serves the records pruned, as its route row's `resume` (§14), to its *reader*, so a
   claim through git continues the change (R-BTN-74). (`ctx.resume`, a condition's chosen restart, is R-BTN-162's
@@ -269,7 +279,12 @@ end on an ended claim is refused `claim-ended`.
   [--against <sha>]` re-runs one recorded run on a runner, without a claim and writing nothing to
   Baton.
   - It reads the run from the ticket's history (snapshot sha, contract version) and its inputs
-    with digests from `leg_run_inputs`; clones with a read-only credential the course's scripts
+    with digests from `leg_run_inputs`; a run's inputs record the ticket's `version` and the
+    digest of what the source's `read` returned (B-183), so a replay fetches the ticket as the
+    run read it. Against a `current` source whose version has since moved, replay reports the
+    mismatch and refuses — it does not silently replay against new content; a `pinned` source's
+    version names the bytes themselves. It
+    clones with a read-only credential the course's scripts
     at that sha (which must pass R-BTN-143) and the ticket's code at the run's `head_sha`;
     fetches the inputs and fails on a digest mismatch.
   - It runs `run(ctx)` with `ctx.replay` set, in R-BTN-144's replay environment: no write-capable

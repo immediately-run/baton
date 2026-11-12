@@ -1,0 +1,103 @@
+---
+title: "B-219 — Conditions screens: /conditions is what waits on a person, with one-click restarts and the person leg's answer where the read allows it; /conditions/{condition} is the Resolve page, returning to itself after sign-in"
+id: B-219
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1218
+tier: judgement
+description: "The screens of BATON-UI-V2's Conditions entity on B-195's reads. /conditions: the mockup's Needs-you rows from GET …/conditions?open=1&person=1 — kind mark, plain type name, ticket, detail as text, age, what it unblocks — with each restart a one-click button (POST /v1/ui/conditions/{condition}/resolve) and a person leg's options as buttons where answerable, else the baton decision answer line as text; ?type= and ?ticket= as URL query, closed ones behind a toggle. /conditions/{condition}: the Resolve page from condition.show — the condition, its detail through View where its type's schema has a view, large restart buttons, the ticket's position, what it unblocks — the shell's sign-in in place when signed out, polling until closed_at after a resolve. Both at 375 px. Requires: B-195, B-207."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-195
+  - B-207
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "the Resolve page is the detail view, one restart
+click." The mockup's Needs you list (`root.txt`: ◆ Unconfirmed, ? Decision open, ‖ Held,
+▲ Nobody can take, ✕ Retries exhausted; the ticket, one sentence, the actions at the right) is
+this screen's row; its "Answer…" is the option buttons.
+
+**Spec:** [BATON_SPEC §7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3):
+the Resolve page returns to itself; resolving is one step), [§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4)
+([R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4): where the policy admits
+no owner writer the entry names `baton decision answer`), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4)
+(the Conditions screens; R-BTN-155: resolving and answering are not confirmed; the `allowed`
+rule), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5) ([R-BTN-112](../spec/BATON_SPEC/05-courses.md#sec-5-5):
+`View`), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3) (links: the client applies
+`links.mjs` again before drawing), [§14](../spec/BATON_SPEC/14-api.md#sec-14).
+
+**Depends on:** B-195 (the reads, the redirect, the session's answer path), B-207 (controls and
+dialogs).
+
+**Used by:** B-203.
+
+### What to build
+
+1. **`/repositories/{r}/conditions`** (`src/dashboard/screens/conditions/`): the rows from
+   `GET …/conditions?open=1&person=1`, in the read's order: the kind mark and a plain name for
+   core's types (unconfirmed completion, held, nobody can take, retries exhausted, stalled,
+   contract, course refused, queue over, sign-in burst, policy; a course's own type by its
+   name), the ticket linking its page, `detail` through `Text`, since when, what it unblocks, and
+   the controls through B-207 with context `{repository, ticket_id, condition_id}`: each restart
+   a one-click button (`ticket.resolve` by `ui.view` on `repository/conditions/{condition}`,
+   drawn in the row too), only where `allowed` names it; a person leg's options as buttons
+   where `answerable` (each an `attestation.add` of a `std:decision@1` for the ticket's queued
+   leg), else `baton decision answer <ticket> <option>` as text; the question's `url` as a link
+   when `links.mjs` passes it on the client with the repository's `web_base` and `link_hosts`
+   from `repo.list`. `?type=` and `?ticket=` as URL query; closed conditions behind a toggle
+   (`?open=0`); load-more by the read's cursor.
+2. **The Resolve page**, `/repositories/{r}/conditions/{condition}`: from `condition.show` — the
+   condition's type and plain name, `detail` through `View` where its type's schema has a view
+   (B-217's schemas read), else pretty-printed text; the restarts as large one-click buttons
+   where `allowed`; the ticket's position beside it; what it unblocks; the question and its
+   options as on the list. Signed out, the shell's sign-in in place, keeping this path; after a
+   resolve or an answer, the page polls until `closed_at` is set (or the leg has moved) and says
+   so. No code dialog: nothing here is confirmed (R-BTN-155).
+3. **Phone.** The list's controls sit under each row at 375 px; the Resolve page fits without
+   horizontal scroll — it is the page a person opens from a notification.
+
+### What not to do
+
+- No second source of Needs you: this screen reads conditions only; what B-56 and B-57 have
+  not yet made a condition (B-203's ledger) is not drawn here.
+- No permission logic: options only when `answerable`, restarts only when `allowed`; the app
+  posts nothing to find out.
+- No count of its own: the sidebar's and the strip's counts are `repo.list`'s (B-208).
+
+### Trust
+
+- **Every value** is the reads' text through `Text` or `View`; `url` is a link only after the
+  client's link rule.
+- **A restart click** — `ticket.resolve` through `authorize` (B-56's route). **An answer** —
+  `attestation.add` as writer `owner` (B-195's path), bounded by the policy on the server.
+
+### Invariants
+
+- **R-BTN-163**, **R-BTN-116**, **R-BTN-155** as B-195 states them; **text, never markup**
+  (§12.3); **an owner's session, its repositories**.
+
+### Tests
+
+Under `test/ui/` with fixture reads and a fixture `GET /v1/actions`: a restart click sends the
+resolve and the page shows `closed_at` after the poll; options are buttons only when
+`answerable`, else the command line; restarts only when `allowed`; signed out, the Resolve page
+shows sign-in and keeps its path; a hostile `detail` is text; a `url` on an unlisted host is text.
+
+### Exit criteria
+
+- [ ] `/conditions` and `/conditions/{condition}` built and usable on a local Baton at desktop
+      and 375 px.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-195 after the second review._

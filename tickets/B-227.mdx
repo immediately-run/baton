@@ -1,0 +1,59 @@
+---
+title: "B-227 — The immediate stop through an executor: the stubs stop their agent on a release, and a hard stop stops the session"
+id: B-227
+project: baton
+status: in-review
+updated: 2026-11-10
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1226
+tier: judgement
+description: "Found on vltava2, 2026-11-10, on the first leg through the E2B executor (B-150 implement): SIGINT logged 'the leg did not stop; its group is killed', the claim stayed held, and the leg's sandbox ran on with its agent spending the model key. The standard stubs never passed ctx.signal to their agent, so no release could reach a safe point inside the ten-second window under any executor; and the hard stop killed the runner's call but not the session, so a remote sandbox outlived the runner. The stubs now TERM their agent on the release (KILL after a grace) and reject as stopped once it exits; the hard stop kills the call and stops the session, waited on for at most ten more seconds. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner asked for the runner to be stopped at once while B-150's implement leg
+ran in sandbox `i0cti9vch5i0tmplzbqts`. The runner logged `stopping at once …` and, ten
+seconds later, `SIGINT — the leg did not stop; its group is killed and this process exits`. The
+board still showed claim 123 held by worker 32, and the sandbox was running; both were cleaned up
+by hand.
+
+**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md) (the immediate stop, B-109),
+[R-BTN-107](../spec/BATON_SPEC/08-runners.md) (sessions; `stop`).
+
+**Depends on:** none.
+
+**Used by:** none.
+
+### What to build
+
+1. **The stubs** (`src/defaults/cli.ts`, the agent spawn): on `ctx.signal`'s abort, TERM the
+   agent, KILL it after three seconds, and reject `the agent was stopped: <reason>` when it exits
+   (not when its pipes close: a child of its own may hold them). `legProcess` reports that as
+   `aborted`, and the runner writes the hand-off and ends the claim released.
+2. **The hard stop** (`Runner.hardStop`, `main.ts`): kill the call, then stop the session,
+   waited on for at most another ten seconds before the process exits.
+3. **The spec**: §8.3's sentence says both.
+
+A repository on a sourced course takes the stub change when its course source moves to a CLI
+with it (`baton repo init`).
+
+### Trust
+
+No new input: the abort line already exists (R-BTN-133); the stub now acts on it.
+
+### Invariants
+
+- **R-BTN-24, a lost lease kills with no hand-off.** Unchanged: the lease-loss path does not
+  go through the release.
+- **B-109, the immediate stop is a safe point.** Strengthened: the release now reaches one.
+
+## Status
+
+_filed 2026-11-10._

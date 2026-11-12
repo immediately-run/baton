@@ -19,11 +19,12 @@ import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
-import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type PrFact, type StationsResult } from './course-pr';
+import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
 import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
+import { stampMarkdownVersions } from './ticket-versions';
 import { closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, RUN_TESTS_TIMEOUT_MS } from './ticket-state';
 
 /** The retired markers file's path (B-100): the sync no longer reads it — `baton repo
@@ -275,7 +276,9 @@ function stationsResult(value: unknown, from: string): StationsResult {
 interface Board {
   payload: { registry: Record<string, unknown>[]; tickets: TicketsResult['tickets']; closed: TicketsResult['closed']; stations: StationsResult['stations']; markers: StationsResult['markers']; course_data: Record<string, unknown>;
     /** §5.9 (B-104): the merged ontology, or the merge's error; absent, the repository has none. */
-    ontology?: { builtin?: string | null; program: Record<string, unknown> } | { error: string } };
+    ontology?: { builtin?: string | null; program: Record<string, unknown> } | { error: string };
+    /** B-183 (§4.4): the ticket source's declaration. */
+    source: { kind: 'markdown' | 'custom'; versions?: 'pinned' | 'current'; cli: string }; }
   /** A ticket's status at this reading for §6.7's confirmations: its file's, `live`, or null once closed. */
   statusOf: (id: string) => string | null;
 }
@@ -284,7 +287,6 @@ interface Board {
  * repository's own code or the CLI's defaults, the registry from `baton.json`'s courses. */
 async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void, record?: BatonRecord): Promise<Board> {
   const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
-  const ctx = { root, settings };
 
   // §5.9 (R-BTN-174, B-104): the default branch's head holds `.baton/ontology.json` or the
   // repository has no ontology — the file may name a built-in by version and retract, replace
@@ -301,15 +303,36 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     }
   }
 
-  // The ticket source: the repository's own, else the markdown default.
+  // The ticket source: the repository's own, else the markdown default. B-183 (R-BTN-74): a
+  // source declares how it reads a ticket (`versions`: 'pinned' at a version, 'current' as it is
+  // now) and may export `read(id, {version})`; the markdown default is pinned, each ticket's
+  // version its file's blob id at the commit being posted, so an unrelated commit changes no
+  // version. `ctx.versions` carries what the observation handed back (§4.3), for a source whose
+  // store can tell a stale read to refuse one.
   let result: TicketsResult;
+  let sourceKind: 'markdown' | 'custom' = 'markdown';
+  let sourceVersions: 'pinned' | 'current' | null = 'pinned';
   const own = join(root, '.baton', 'tickets.mjs');
+  const ctx = { root, settings, ...(record?.versions != null ? { versions: record.versions } : {}) };
   if (existsSync(own)) {
-    const mod = (await import(`${pathToFileURL(own).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default?: { tickets?: (ctx: unknown) => Promise<TicketsResult> } };
+    const mod = (await import(`${pathToFileURL(own).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default?: { tickets?: (ctx: unknown) => Promise<TicketsResult>; versions?: unknown; read?: unknown } };
     if (typeof mod.default?.tickets !== 'function') throw new Error('.baton/tickets.mjs default-exports no tickets(ctx)');
+    sourceKind = 'custom';
+    const declared = mod.default.versions;
+    if (declared !== undefined && declared !== null) {
+      if (declared !== 'pinned' && declared !== 'current') throw new Error(`.baton/tickets.mjs exports versions ${JSON.stringify(declared)} — "pinned" or "current" (R-BTN-74)`);
+      // A declaration exports `read` (round 1): a pinned source is read at its version, and a
+      // current one read now — the read-now comparison is a current source's whole staleness
+      // protection (§4.2), so a declaration without `read` is refused at load, not run with no
+      // re-verification at all.
+      if (typeof mod.default.read !== 'function') throw new Error(`.baton/tickets.mjs declares versions: ${JSON.stringify(declared)} but exports no read(id, {version}) — a declared source is read through its read (R-BTN-74)`);
+      sourceVersions = declared;
+    } else {
+      sourceVersions = null;
+    }
     result = await mod.default.tickets(ctx);
   } else {
-    result = ticketsMarkdown(readItems(root, settings.items), settings);
+    result = stampMarkdownVersions(root, ticketsMarkdown(readItems(root, settings.items), settings), settings.items);
   }
   const closedIds = new Set(result.closed.map((c) => c.id));
   const doneIds = new Set(result.closed.filter((c) => c.as === 'done').map((c) => c.id));
@@ -349,7 +372,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
       }
     }
   }
-  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()]) : [];
+  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()], { codeRepos: record?.code_repos, pushers: record?.pushers }) : [];
   // B-110: the plain-git half of the fact reading. A fact whose adapter read no commits (a facts
   // file, a forge with no adapter) gets its open branch's commits from the checkout's own git —
   // no forge, no `gh` — so the run-tests gate's markers are read the same way (`commitsOf`). Only
@@ -374,7 +397,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   // checkout git cannot answer for has no close history, and its frontmatter state stands.
   const closeCommits = closesByTicket((args) => git(root, ...args));
   for (const t of result.tickets) {
-    if (closedIds.has(t.id)) continue;
+    if (closedIds.has(t.id) || t.path == null) continue; // a pathless ticket (a tracker's) has no file to close on
     const commits = closeCommits.get(t.id) ?? [];
     const fm = existsSync(join(root, t.path)) ? parseFrontmatter(readFileSync(join(root, t.path), 'utf8')) : null;
     if (!commits.length && fm?.station === undefined) continue;
@@ -416,6 +439,10 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
       id: c.id, version: c.version, min_worker_version: c.min_worker_version ?? c.version, skill: c.skill ?? defaultSkill(c.id), course,
       step_kinds: c.step_kinds ?? Object.keys(course.legs ?? {}), ...(c.report_horizon_h != null ? { report_horizon_h: c.report_horizon_h } : {}),
       branch_pattern: branchPatterns[0], ...(c.previous_branch_pattern ? { previous_branch_pattern: c.previous_branch_pattern } : {}),
+      // B-182 (R-BTN-134): what the course's entry declares it reads — `prs` when this sync reads
+      // PR facts for it, nothing when it does not — so R-BTN-190 can follow the PRs without a
+      // policy knob, a `git` home's PR course among them.
+      facts: readsPrsOf(c) ? ['prs'] : [],
     });
   }
   const status = new Map(result.tickets.map((t) => [t.id, t.display?.status ?? 'live']));
@@ -433,8 +460,11 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     const gitOf = (...a: string[]): string => gitRaw(root, ...a);
     const head = gitOf('rev-parse', 'HEAD').trim();
     const found = signedControlOf(head, signingKeys, gitOf, nodeKeygen);
-    const marks = marksOf(head, signingKeys, result.tickets.map((t) => t.path), gitOf, nodeKeygen);
+    // A ticket a `custom` source keeps in no tree (B-183: no `path`) has no file to mark — its
+    // words and its EXPEDITE are the source's, not a commit's.
+    const marks = marksOf(head, signingKeys, result.tickets.flatMap((t) => (t.path == null ? [] : [t.path])), gitOf, nodeKeygen);
     for (const t of result.tickets) {
+      if (t.path == null) continue;
       const mark = marks.briefs.get(t.path);
       if (mark) t.brief = mark;
       // The EXPEDITE gate, both directions (round 1): the tag's last change unsigned means a
@@ -449,9 +479,20 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     if (found) controlField = { control: { keys: signingKeys.map((k) => k.fingerprint), groups: found.groups, unsigned: clampUnsignedList(found.unsigned) } };
   }
   return {
-    payload: { registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...ontologyField, ...controlField },
+    // B-183 (§4.4): the source's declaration — `kind`, how it reads (`versions`) and the CLI
+    // that posts — beside its tickets, each stamped with its `version` and `key` above.
+    payload: {
+      source: { kind: sourceKind, ...(sourceVersions ? { versions: sourceVersions } : {}), cli: cliVersion() },
+      registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...ontologyField, ...controlField,
+    },
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };
+}
+
+/** The CLI's own package version, for the board post's `source.cli` (§4.4, B-183): what the
+ *  repository's pinned CLI is, beside the ticket source's declaration. */
+function cliVersion(): string {
+  return (JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8')) as { version?: string }).version ?? '';
 }
 
 /** A sourced course (B-33, R-BTN-131) is the source's exactly, or the sync posts nothing: the
@@ -550,7 +591,7 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
   const dropped: string[] = [];
   for (const t of result.tickets) {
     const mine = byTicket.get(t.id);
-    if (mine == null) continue;
+    if (mine == null || t.path == null) continue; // a pathless ticket holds no marker state to fold
     byTicket.delete(t.id);
     const standard = builtIn(t.course_id);
     const interactive = t.course_id === 'create-spec'; // its marker legs' state is not in the forge (round 1, finding 4)
@@ -578,8 +619,9 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
   for (const id of dropped) log(`baton: ${id}'s lines dropped — ${closedIds.has(id) ? 'the ticket is closed' : 'not a live ticket on a course this fold covers'}`);
   rmSync(file);
   // Only what the migration touched (round 1, finding 10) — never `-A`.
-  gitRun(['add', '--', MARKERS_FILE_RETIRED, ...changed.map((id) => result.tickets.find((t) => t.id === id)!.path)]);
-  gitRun(['commit', '--no-gpg-sign', '-qm', 'baton: markers.jsonl folded into the tickets (B-100)', '--', MARKERS_FILE_RETIRED, ...changed.map((id) => result.tickets.find((t) => t.id === id)!.path)]);
+  const changedPaths = changed.map((id) => result.tickets.find((t) => t.id === id)!.path!);
+  gitRun(['add', '--', MARKERS_FILE_RETIRED, ...changedPaths]);
+  gitRun(['commit', '--no-gpg-sign', '-qm', 'baton: markers.jsonl folded into the tickets (B-100)', '--', MARKERS_FILE_RETIRED, ...changedPaths]);
   try {
     gitRun(['push', 'origin', `HEAD:${branch}`]);
   } catch {
@@ -647,15 +689,55 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   // run takes be used while that one is out. So the wait comes before the first `observe`, and
   // the retry is a whole second sync from a fresh number.
   const sleep = args.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const once = () => syncOnce(git(root, 'rev-parse', 'HEAD'), {
+  // R-BTN-62 (Release): a run that will not post — it ends without posting, or throws after its
+  // number, as a failing ticket source, forge read or course check does — gives its number back,
+  // so the next run is not held `sync-busy` for ten minutes. A post uses the number, accepted or
+  // refused, so only an unposted one is given back. Kept here, not in the vendored syncOnce.
+  let held: number | null = null;
+  const giveBack = async (): Promise<void> => {
+    if (held == null) return;
+    const n = held;
+    held = null;
+    await api.releaseObservation(n).catch(() => {}); // best effort: it lapses in ten minutes anyway
+  };
+  const once = async () => {
+    try {
+      const r = await syncOnceRun();
+      await giveBack();
+      return r;
+    } catch (e) {
+      await giveBack();
+      throw e;
+    }
+  };
+  const syncOnceRun = () => syncOnce(git(root, 'rev-parse', 'HEAD'), {
     // B-110: the observation also carries Baton's own record a station function judges git
     // against — the owner's answers to posted decisions and the legs claims finished with an
-    // evidence pointer — read after the number like everything else this run posts.
-    observe: () => asResult(async () => {
-      const o = await api.observation();
-      record = { answers: Array.isArray(o.answers) ? o.answers : [], legs: Array.isArray(o.legs) ? o.legs : [], signing_keys: Array.isArray(o.signing_keys) ? o.signing_keys : [], require_signed_control: o.require_signed_control === true };
+    // evidence pointer — read after the number like everything else this run posts. B-183: and
+    // each live ticket's last accepted version (§4.3), for the ticket source's own code to
+    // judge its store's read against.
+    observe: async () => {
+      const o = await asResult(async () => {
+        const got = await api.observation();
+        record = {
+          answers: Array.isArray(got.answers) ? got.answers : [],
+          legs: Array.isArray(got.legs) ? got.legs : [],
+          ...(got.versions && typeof got.versions === 'object' ? { versions: got.versions as Record<string, string> } : {}),
+          // B-182 (R-BTN-140): the effective `code_repos` and `pushers` the observation hands
+          // back — what the fact adapter reads each named repository by, and whose words count
+          // there (R-BTN-139).
+          ...(Array.isArray(got.code_repos) ? { code_repos: got.code_repos as BatonRecord['code_repos'] } : {}),
+          ...(Array.isArray(got.pushers) ? { pushers: got.pushers as BatonRecord['pushers'] } : {}),
+          // B-127: the repository's owner signing keys and whether it requires signed control —
+          // Baton's own facts, never the repository's word.
+          signing_keys: Array.isArray(got.signing_keys) ? got.signing_keys : [],
+          require_signed_control: got.require_signed_control === true,
+        };
+        return got;
+      });
+      if (o.ok !== false && Number.isSafeInteger(o.observation)) held = o.observation;
       return o;
-    }),
+    },
     // Everything posted under a number is read after it (§7.1 steps 1–2): the commit and the board.
     fetchNext: async () => {
       if (args.latest) {
@@ -667,7 +749,10 @@ export async function syncMain(args: SyncArgs): Promise<number> {
       return git(root, 'rev-parse', 'HEAD');
     },
     readHead: () => asResult(() => api.head()),
-    post: (body: Record<string, unknown>) => asResult(() => api.board(body)),
+    post: (body: Record<string, unknown>) => {
+      held = null;
+      return asResult(() => api.board(body));
+    },
     isAncestor: async (a: string, b: string) => {
       try {
         execFileSync('git', ['-C', root, 'merge-base', '--is-ancestor', a, b], { stdio: 'ignore' });
@@ -786,72 +871,173 @@ const detailQuery = (numbers: number[]): string =>
   `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${numbers.map((n) => `p${n}: pullRequest(number: ${n}) { ...D }`).join(' ')} } }\n${PR_DETAIL}`;
 
 /** R-BTN-96's fact adapter, GitHub half: the repository's PRs with their head's checks, their
- * commits' dates, their reviews and their comments, mapped to PrFact. The PR lists are read over
- * REST, each to its end (GitHub's `Link: rel="next"`); the PRs a live ticket owns are read over
- * GraphQL, GRAPHQL_BATCH to a query (B-35), with any connection that overflows its first page read
- * over REST in full, so a long-lived repository or a long thread is never cut off. Live forge
- * access — the tests inject recorded facts instead. */
-export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = []): Promise<PrFact[]> {
+ *  commits' dates, their reviews and their comments, mapped to PrFact. The PR lists are read over
+ *  REST, each to its end (GitHub's `Link: rel="next"`); the PRs a live ticket owns are read over
+ *  GraphQL, GRAPHQL_BATCH to a query (B-35), with any connection that overflows its first page read
+ *  over REST in full, so a long-lived repository or a long thread is never cut off.
+ *
+ *  B-182: the adapter is chosen per repository — the home's by the home's (none on a plain-git
+ *  home), each `code_repos` entry's by its own forge, read on that host's API with the forge's
+ *  token and under a request budget counted **per host**. An entry's ids are verified at every
+ *  read (R-BTN-138's "the ids decide"): a forge reporting different ids for the repository than
+ *  the entry stores fails the sync naming the entry, so a re-created path never gains reach. A
+ *  `repos:` repository the home's list does not name is not read — it has no reach (R-BTN-140) —
+ *  and while the home lists no code repository at all, every name keeps today's reading.
+ *  Live forge access — the tests inject recorded facts instead. */
+
+/** One host's API as the adapter reads it: the REST origin REST paths append to, the GraphQL
+ *  endpoint whole (nothing is appended to it), and the budget's key. GitHub's own host is
+ *  `api.github.com`; a GitHub Enterprise host serves REST under `/api/v3` and GraphQL at
+ *  `/api/graphql`. */
+function githubConn(host: string): { host: string; rest: string; graphql: string } {
+  return host === 'github.com'
+    ? { host, rest: 'https://api.github.com', graphql: 'https://api.github.com/graphql' }
+    : { host, rest: `https://${host}/api/v3`, graphql: `https://${host}/api/graphql` };
+}
+
+export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = [], obs: { codeRepos?: CodeRepoEntry[]; pushers?: { host: string; id: string }[] } = {}): Promise<PrFact[]> {
   const slug = remoteSlug(root);
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   // B-182 (first slice): a plain-git home has no forge, so no adapter reads it (R-BTN-96) — only
   // the repositories its tickets name in `repos:` are read, and with none nothing is, token or not.
   const home = plainGitRemote(git(root, 'remote', 'get-url', 'origin')) ? null : slug;
+  const entries = obs.codeRepos ?? [];
+  // The reading set: the home (when it is on a forge), then each named repository — through its
+  // `code_repos` entry when the home lists any (R-BTN-140's reach), by name when it lists none.
+  const reads: { repository: string; tickets: string[]; entry?: CodeRepoEntry }[] = [];
+  if (home != null) reads.push({ repository: home, tickets: [] });
+  const unlisted: string[] = [];
+  for (const s of siblings) {
+    if (home != null && sameRepoName(s.repository, home)) continue;
+    if (!entries.length) {
+      reads.push(s);
+      continue;
+    }
+    const entry = entries.find((e) => sameRepoName(e.path, s.repository));
+    if (entry) reads.push({ ...s, entry });
+    else unlisted.push(s.repository);
+  }
   if (home == null) {
-    log(`baton: the home is a plain git repository, not on GitHub — reading only the repositories tickets name in repos: (${siblings.length})`);
-    if (siblings.length === 0) return [];
+    log(`baton: the home is a plain git repository, not on a forge — reading only the repositories tickets name in repos: (${reads.length}${unlisted.length ? `; ${unlisted.join(', ')} not in code_repos, not read` : ''})`);
+    if (reads.length === 0) return [];
+  } else if (unlisted.length) {
+    log(`baton: ${unlisted.join(', ')} not in code_repos — its PRs are not read (R-BTN-140)`);
   }
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error('no GITHUB_TOKEN to read GitHub — pass --facts <file> for recorded facts');
-  let requests = 0;
-  /** One request of the budget, REST or GraphQL alike: past it the sync refuses. */
-  const spend = (): void => {
-    if (++requests > MAX_REQUESTS) throw new Error(`GitHub: this sync would need more than ${MAX_REQUESTS} requests — refusing before the token's hourly budget is spent`);
+  // B-182: the request budget is per host (R-BTN-96) — a second forge's reading never spends the
+  // first's token down, and one host's overflow refuses before its budget is spent.
+  const requests = new Map<string, number>();
+  /** One request of its host's budget, REST or GraphQL alike: past it the sync refuses. */
+  const spend = (host: string): void => {
+    const n = (requests.get(host) ?? 0) + 1;
+    requests.set(host, n);
+    if (n > MAX_REQUESTS) throw new Error(`GitHub (${host}): this sync would need more than ${MAX_REQUESTS} requests — refusing before the token's hourly budget is spent`);
   };
   /** `res`, or the error a failed one is: its status, and whether it is a rate limit — GitHub's
-   * 403 or 429 with no requests left, or a secondary limit's retry-after — which `list` reads. */
+   *  403 or 429 with no requests left, or a secondary limit's retry-after — which `list` reads. */
   const checked = (res: Response, what: string): Response => {
     const limited = res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after');
     if (!res.ok) throw Object.assign(new Error(`GitHub ${what}: ${res.status}${limited ? ' (rate limited)' : ''}`), { status: res.status, limited });
     return res;
   };
-  const get = async (url: string): Promise<Response> => {
-    spend();
-    return checked(await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), url);
+  const get = async (conn: { host: string; rest: string; token: string }, url: string): Promise<Response> => {
+    spend(conn.host);
+    return checked(await fetch(url, { headers: { Authorization: `Bearer ${conn.token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), url);
   };
   /** One GraphQL query, one request of the budget (B-35). An answer carrying `errors` fails the
-   * sync, as a failed REST read does: no partial reading is posted. */
-  const graphql = async (query: string, variables: Record<string, unknown>): Promise<any> => {
-    spend();
-    const url = `${GITHUB_API}/graphql`;
-    const res = checked(await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'baton-sync' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), `${url} (${String(variables.owner)}/${String(variables.name)})`);
-    const body = (await res.json()) as { data?: any; errors?: { message?: string }[] };
-    if (body.errors?.length) throw new Error(`GitHub GraphQL (${String(variables.owner)}/${String(variables.name)}): ${body.errors.map((e) => e.message ?? '?').join('; ')}`);
-    return body.data;
+   *  sync, as a failed REST read does: no partial reading is posted — except, B-226, errors that
+   *  are all a refusal of a head's check suites (`checksRefused`): a fine-grained token cannot
+   *  hold Checks, so on a private repository GitHub answers everything else and refuses those.
+   *  Such an answer is returned with `checksRefused` set, and the caller reads the checks from
+   *  the head's workflow runs instead. Every error names its path, so a refusal says what. */
+  const graphql = async (conn: { host: string; graphql: string; token: string }, query: string, variables: Record<string, unknown>): Promise<{ data: any; checksRefused: boolean }> => {
+    spend(conn.host);
+    const res = checked(await fetch(conn.graphql, { method: 'POST', headers: { Authorization: `Bearer ${conn.token}`, 'Content-Type': 'application/json', 'User-Agent': 'baton-sync' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), `${conn.graphql} (${String(variables.owner)}/${String(variables.name)})`);
+    const body = (await res.json()) as { data?: any; errors?: { message?: string; type?: string; path?: (string | number)[] }[] };
+    const errors = body.errors ?? [];
+    const checksRefused = errors.length > 0 && body.data != null && errors.every((e) => e.type === 'FORBIDDEN' && (e.path ?? []).includes('checkSuites'));
+    if (errors.length && !checksRefused) {
+      throw new Error(`GitHub GraphQL (${String(variables.owner)}/${String(variables.name)}): ${errors.map((e) => `${e.message ?? '?'}${e.path?.length ? ` (at ${e.path.join('.')})` : ''}`).join('; ')}`);
+    }
+    return { data: body.data, checksRefused };
+  };
+  /** B-226: the repositories whose check runs this token may not read — a fine-grained token on a
+   *  private repository, which GitHub offers no Checks permission. Their heads' checks are the
+   *  head commit's Actions workflow runs (Actions: read), said once a repository. */
+  const checksFromActions = new Set<string>();
+  /** The head's checks as its workflow runs give them: a run's conclusion once it has completed,
+   *  null while it runs — the same "finished or not" the check runs answer. Refused too (no
+   *  Actions: read), the sync fails naming both permissions. */
+  const actionChecks = async (conn: { host: string; rest: string; token: string }, repo: string, sha: string): Promise<(string | null)[]> => {
+    try {
+      const runs = await all<any>(conn, `/repos/${repo}/actions/runs?head_sha=${sha}`, (b) => b.workflow_runs);
+      return runs.map((r) => (r.status === 'completed' && r.conclusion ? String(r.conclusion) : null));
+    } catch (e) {
+      const { status, limited } = e as { status?: number; limited?: boolean };
+      if (status === 403 && !limited) throw new Error(`${(e as Error).message} — ${repo}: this token can read neither the head's check runs (Checks, which a fine-grained token cannot hold) nor its workflow runs (give it Actions: read)`);
+      throw e;
+    }
   };
   /** Every item of a paged list; `pick` takes a page's items from its body. */
-  const all = async <T>(path: string, pick: (body: any) => T[] = (b) => b as T[]): Promise<T[]> => {
+  const all = async <T>(conn: { host: string; rest: string; token: string }, path: string, pick: (body: any) => T[] = (b) => b as T[]): Promise<T[]> => {
     const out: T[] = [];
-    let url: string | null = `${GITHUB_API}${path}${path.includes('?') ? '&' : '?'}per_page=100`;
+    let url: string | null = `${conn.rest}${path}${path.includes('?') ? '&' : '?'}per_page=100`;
     for (let page = 0; url != null; page++) {
       if (page === MAX_PAGES) throw new Error(`GitHub ${path}: more than ${MAX_PAGES * 100} items — the sync will not post a truncated reading`);
-      const res = await get(url);
+      const res = await get(conn, url);
       out.push(...pick(await res.json()));
       url = /<([^>]+)>;\s*rel="next"/.exec(res.headers.get('link') ?? '')?.[1] ?? null;
     }
     return out;
   };
-  /** R-BTN-139: whether `login` can push to `repo` — the forge's collaborator permission, read
-   * once per author per repository per run. A 404 is no collaborator. A 403 that is no rate limit
-   * is a token without the scope: it degrades, failing closed — no verdict of that repository
-   * counts, said once. Any other failure aborts the run, which posts nothing. */
+  /** R-BTN-139, B-182: whether `login` counts on `conn`'s host — one of two independent ways.
+   *  An immutable forge user id in the owners' `pushers` for that host counts on its own
+   *  (`idOf` below reads it), whatever `author_association` says and without a collaborator
+   *  read. The other way is someone the forge reports can push to the repository (the
+   *  collaborator permission, read once per author per repository per run); a 404 is no
+   *  collaborator, which leaves only the listed-id way. A 403 that is no rate limit is a token
+   *  without the scope: it degrades, failing closed — no verdict of that repository counts,
+   *  said once. Any other failure aborts the run, which posts nothing. */
   const pushers = new Map<string, Promise<boolean>>();
   const unreadable = new Set<string>();
-  const canPush = (repo: string, login: string): Promise<boolean> => {
-    const key = `${repo.toLowerCase()}\u0000${login}`;
+  const pusherIds = new Map<string, Set<string>>();
+  for (const p of obs.pushers ?? []) {
+    const set = pusherIds.get(p.host) ?? new Set<string>();
+    set.add(p.id);
+    pusherIds.set(p.host, set);
+  }
+  /** The author's immutable id on `conn`'s host, or null when none is at hand — the fact's own
+   *  when it carries one (REST lists do; GraphQL's `User.id` is the base64 node id, not the
+   *  numeric one `pushers` holds, so GraphQL facts take the read), else one user read
+   *  (`GET /users/{login}`), budgeted and cached per author per run, answered only while that
+   *  host lists some pusher id to match against — a host that lists none never looks an author
+   *  up, so every existing deployment reads byte for byte as before. A failed read answers
+   *  null: the listed way fails closed. */
+  const ids = new Map<string, Promise<string | null>>();
+  const idOf = async (conn: { host: string; rest: string; token: string }, login: string, carried?: unknown): Promise<string | null> => {
+    if (!(pusherIds.get(conn.host)?.size)) return null;
+    if (typeof carried === 'number' || typeof carried === 'string') return String(carried);
+    const key = `${conn.host}\u0000${login}`;
+    if (!ids.has(key)) {
+      ids.set(key, get(conn, `${conn.rest}/users/${encodeURIComponent(login)}`)
+        .then(async (res) => {
+          const b = (await res.json()) as { id?: unknown };
+          return b.id == null ? null : String(b.id);
+        })
+        .catch(() => null));
+    }
+    return ids.get(key)!;
+  };
+  const canPush = (conn: { host: string; rest: string; token: string }, repo: string, login: string): Promise<boolean> => {
+    const key = `${conn.host}\u0000${repo.toLowerCase()}\u0000${login}`;
     if (!pushers.has(key)) {
-      pushers.set(key, get(`${GITHUB_API}/repos/${repo}/collaborators/${encodeURIComponent(login)}/permission`)
-        .then(async (res) => PUSHERS.has(String(((await res.json()) as { permission?: unknown }).permission)))
+      pushers.set(key, get(conn, `${conn.rest}/repos/${repo}/collaborators/${encodeURIComponent(login)}/permission`)
+        .then(async (res) => {
+          const body = (await res.json()) as { permission?: unknown; user?: { id?: unknown } };
+          const listed = body.user?.id != null && (pusherIds.get(conn.host) ?? new Set()).has(String(body.user.id));
+          return listed || PUSHERS.has(String(body.permission));
+        })
         .catch((e) => {
           const { status, limited } = e as { status?: number; limited?: boolean };
           if (status === 404) return false;
@@ -865,26 +1051,47 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     }
     return pushers.get(key)!;
   };
-  /** The facts whose author is trusted, in their order (R-BTN-139). An author GitHub no longer
-   * names (a deleted account) cannot be asked, so does not count. */
-  const trustedOnly = async <T extends { login?: string | null; association?: string }>(repo: string, facts: T[]): Promise<T[]> => {
+  /** The facts whose author is trusted, in their order (R-BTN-139) — a listed immutable id
+   *  first, one of the two ways on its own, then the forge's own report, which
+   *  `author_association` pre-filters. An author GitHub no longer names (a deleted account)
+   *  cannot be asked, so does not count. */
+  const trustedOnly = async <T extends { login?: string | null; userId?: unknown; association?: string }>(conn: { host: string; rest: string; token: string }, repo: string, facts: T[]): Promise<T[]> => {
     const out: T[] = [];
-    for (const f of facts) if (f.login != null && !CANNOT_PUSH.has(String(f.association)) && (await canPush(repo, f.login))) out.push(f);
+    for (const f of facts) {
+      if (f.login == null) continue;
+      const id = await idOf(conn, f.login, f.userId);
+      if (id != null && (pusherIds.get(conn.host) ?? new Set()).has(id)) out.push(f);
+      else if (!CANNOT_PUSH.has(String(f.association)) && (await canPush(conn, repo, f.login))) out.push(f);
+    }
     return out;
   };
   const out: PrFact[] = [];
-  // The home, then each other repository a live ticket names in `repos:` (B-29), under the one
-  // budget: a sync that would exceed it refuses rather than post a partial reading.
-  for (const { repository: repo, tickets } of [...(home != null ? [{ repository: home, tickets: [] as string[] }] : []), ...siblings.filter((s) => home == null || !sameRepoName(s.repository, home))]) {
+  // The home, then each other repository a live ticket names in `repos:` (B-29), each through
+  // its own connection: a refusal under any budget never posts a partial reading.
+  for (const { repository: repo, tickets, entry } of reads) {
+    if (entry != null && entry.forge !== 'github') {
+      throw new Error(`${entry.path}: no adapter for ${entry.forge} yet — the ${entry.forge} fact adapter is not built, and the sync will not post a partial reading (R-BTN-96)`);
+    }
+    const conn = { ...githubConn(entry?.host ?? 'github.com'), token };
     const before = out.length;
-    out.push(...(await repoFacts(repo, tickets)));
-    log(`baton: read ${out.length - before} PRs of ${repo} from GitHub`);
+    out.push(...(await repoFacts(conn, repo, tickets, entry)));
+    log(`baton: read ${out.length - before} PRs of ${repo} from GitHub${entry ? ` (${entry.host})` : ''}`);
   }
-  log(`baton: ${requests} requests in all`);
+  log(`baton: ${[...requests].map(([host, n]) => `${n} request${n === 1 ? '' : 's'} of ${host}`).join(', ')}`);
   return out;
 
-  async function repoFacts(repo: string, tickets: string[]): Promise<PrFact[]> {
-    const listed = await list(repo, tickets);
+  async function repoFacts(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, tickets: string[], entry?: CodeRepoEntry): Promise<PrFact[]> {
+    // B-182 (R-BTN-138): the ids decide at every read. The forge's own ids for the repository
+    // are compared with the entry's; a mismatch — a path re-created by someone else — fails the
+    // sync naming the entry, so the re-created path never gains reach.
+    if (entry != null) {
+      const res = (await (await get(conn, `${conn.rest}/repos/${repo}`)).json()) as { id?: unknown; owner?: { id?: unknown } };
+      const seen = `${String(res.id ?? '?')}/${String(res.owner?.id ?? '?')}`;
+      if (String(res.id ?? '') !== entry.repo_id || String(res.owner?.id ?? '') !== entry.owner_id) {
+        throw new Error(`GitHub (${entry.host}) reports ids ${seen} for ${repo}, but its code_repos entry holds ${entry.repo_id}/${entry.owner_id} — the path was re-created or moved; the sync fails rather than read the wrong repository (R-BTN-138: the ids decide)`);
+      }
+    }
+    const listed = await list(conn, repo, tickets);
     // Only a PR a live ticket owns needs its detail read; any other PR places no ticket and is
     // recorded from the list alone, so the requests a run makes grow with the live tickets, not
     // with the repository's history. A closed unmerged PR a live ticket owns is read too:
@@ -896,8 +1103,12 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     for (let i = 0; i < owned.length; i += GRAPHQL_BATCH) {
       const batch = owned.slice(i, i + GRAPHQL_BATCH);
       const [owner, name] = repo.split('/');
-      const data = await graphql(detailQuery(batch.map((pr) => pr.number)), { owner, name });
-      for (const pr of batch) detail.set(pr.number, await detailOf(repo, pr, data?.repository?.[`p${pr.number}`]));
+      const { data, checksRefused } = await graphql(conn, detailQuery(batch.map((pr) => pr.number)), { owner, name });
+      if (checksRefused && !checksFromActions.has(repo.toLowerCase())) {
+        checksFromActions.add(repo.toLowerCase());
+        log(`baton: ${repo}: this token cannot read check runs (a fine-grained token holds no Checks) — its PRs' checks are their heads' workflow runs (B-226)`);
+      }
+      for (const pr of batch) detail.set(pr.number, await detailOf(conn, repo, pr, data?.repository?.[`p${pr.number}`]));
     }
     return listed.map((pr) => {
       const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
@@ -906,14 +1117,16 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   }
 
   /** One PR's facts from its GraphQL node, mapped exactly as the REST lists are; a connection
-   * whose first page overflows, or a head the batch read at another commit, is read over REST. */
-  async function detailOf(repo: string, pr: any, node: any): Promise<Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>> {
+   *  whose first page overflows, or a head the batch read at another commit, is read over REST. */
+  async function detailOf(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, pr: any, node: any): Promise<Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>> {
     if (node == null) throw new Error(`GitHub GraphQL (${repo}): no pull request #${pr.number}, though the list has it`);
     const head = node.head?.nodes?.[0]?.commit;
     const suites = head?.checkSuites;
     const overflow = suites?.pageInfo?.hasNextPage || (suites?.nodes ?? []).some((cs: any) => cs?.checkRuns?.pageInfo?.hasNextPage);
-    const checks = head?.oid !== pr.head.sha || overflow
-      ? (await all<any>(`/repos/${repo}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null)
+    const checks = checksFromActions.has(repo.toLowerCase())
+      ? await actionChecks(conn, repo, pr.head.sha)
+      : head?.oid !== pr.head.sha || overflow
+      ? (await all<any>(conn, `/repos/${repo}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null)
       // A run not yet completed has no conclusion: null, as the REST list gives it.
       : (suites?.nodes ?? []).flatMap((cs: any) => cs?.checkRuns?.nodes ?? []).map((c: any) => (c.status === 'COMPLETED' && c.conclusion ? String(c.conclusion).toLowerCase() : null));
     // A push is read from its commits' own dates, never `updated_at`, which a comment moves.
@@ -922,7 +1135,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     // Baton recorded (a counted marker is no push; anything else is, whatever its message).
     type CommitNode = { oid: string; at: string; message: string; tree: string | null; parent: string | null; parentTree: string | null };
     const commitNodes: CommitNode[] = node.commits.pageInfo.hasNextPage
-      ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/commits`)).map((c: any) => ({
+      ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/commits`)).map((c: any) => ({
         oid: c.sha, at: c.commit.committer.date, message: c.commit.message, tree: c.commit.tree?.sha ?? null, parent: c.parents?.[0]?.sha ?? null, parentTree: null,
       }))
       : node.commits.nodes.map((c: any) => ({
@@ -936,28 +1149,55 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     });
     const pushes = commits.map((c) => c.at);
     // A verdict counts only from someone who can push to the repository (R-BTN-139) — never a
-    // drive-by comment on a public PR.
-    const reviews = (await trustedOnly(repo, node.reviews.pageInfo.hasNextPage
-      ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
+    // drive-by comment on a public PR. The REST mappings carry `user.id` too: an author's
+    // immutable id is the owners' `pushers`' other way to count, consulted before any
+    // collaborator read (the GraphQL mapping has no numeric id to carry; `idOf` reads it).
+    const reviews = (await trustedOnly(conn, repo, node.reviews.pageInfo.hasNextPage
+      ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, userId: r.user?.id, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
       : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body }))))
       .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '' }));
-    const comments = (await trustedOnly(repo, node.comments.pageInfo.hasNextPage
-      ? (await all<any>(`/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, association: c.author_association, at: c.created_at, body: c.body }))
+    const comments = (await trustedOnly(conn, repo, node.comments.pageInfo.hasNextPage
+      ? (await all<any>(conn, `/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, userId: c.user?.id, association: c.author_association, at: c.created_at, body: c.body }))
       : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body }))))
       .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
     return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments], commits };
   }
 
   /** A repository's PRs. A named repository whose list GitHub refuses (403) or does not find
-   * (404) fails the whole sync — no partial reading — naming the tickets whose `repos:` name it;
-   * any other failure, as a timeout, a 5xx, a rate limit or the budget, is passed through as it is. */
-  async function list(repo: string, tickets: string[]): Promise<any[]> {
+   *  (404) fails the whole sync — no partial reading — naming the tickets whose `repos:` name it;
+   *  any other failure, as a timeout, a 5xx, a rate limit or the budget, is passed through as it is. */
+  async function list(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, tickets: string[]): Promise<any[]> {
     try {
-      return await all<any>(`/repos/${repo}/pulls?state=all`);
+      const author = process.env.BATON_PR_AUTHOR;
+      if (author) return await byAuthor(conn, repo, author);
+      return await all<any>(conn, `/repos/${repo}/pulls?state=all`);
     } catch (e) {
       const { status, limited } = e as { status?: number; limited?: boolean };
       if (!tickets.length || limited || (status !== 403 && status !== 404)) throw e;
       throw new Error(`${(e as Error).message} — ${repo} is named in repos: by ${tickets.join(', ')}; the sync's token cannot read it, or it does not exist`);
+    }
+  }
+
+  /** `BATON_PR_AUTHOR`: only that login's PRs, for a repository whose full PR list is longer than
+   *  the sync reads (MAX_PAGES). The leg agents open PRs as the operator, so a PR a ticket owns is
+   *  among them. GraphQL search, 100 a request, mapped to the REST fields `repoFacts` reads. */
+  async function byAuthor(conn: { host: string; rest: string; graphql: string; token: string }, repo: string, author: string): Promise<any[]> {
+    const query = `query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 100, after: $after) {
+      issueCount pageInfo { hasNextPage endCursor }
+      nodes { ... on PullRequest { number headRefName headRefOid state mergedAt } } } }`;
+    const [owner, name] = repo.split('/');
+    const out: any[] = [];
+    let after: string | null = null;
+    for (;;) {
+      const s: any = (await graphql(conn, query, { q: `repo:${repo} is:pr author:${author}`, after, owner, name })).data?.search;
+      // Search answers at most 1000 results: past that the reading would be truncated.
+      if ((s?.issueCount ?? 0) > 1000) throw new Error(`GitHub search (${repo}, author ${author}): ${s.issueCount} PRs, past search's 1000 — the sync will not post a truncated reading`);
+      for (const n of s?.nodes ?? []) {
+        if (n?.number == null) continue;
+        out.push({ number: n.number, head: { ref: n.headRefName, sha: n.headRefOid }, state: n.state === 'OPEN' ? 'open' : 'closed', merged_at: n.mergedAt });
+      }
+      if (!s?.pageInfo?.hasNextPage) return out;
+      after = s.pageInfo.endCursor;
     }
   }
 }
@@ -982,11 +1222,22 @@ async function bundleSource(entrySource: string, outfile: string): Promise<void>
 const WRAPPERS: Record<'tickets' | 'stations', (course: string) => string> = {
   tickets: () => `import { readItems } from ${JSON.stringify(source('read-items.ts'))};
 import { ticketsMarkdown } from ${JSON.stringify(source('tickets-markdown.ts'))};
+import { stampMarkdownVersions, readTicketBlob } from ${JSON.stringify(source('ticket-versions.ts'))};
 export default {
   // The same signature the sync calls a repository's own source with: edit freely.
+  // B-183 (R-BTN-74): this source is pinned — a ticket is read at its version — and each
+  // ticket's version is its file's blob id at the commit the sync posts, so an unrelated
+  // commit changes no ticket's version. A ticket whose file is not at the commit is posted
+  // with no version.
+  versions: 'pinned',
   async tickets(ctx) {
     const files = readItems(ctx.root, ctx.settings.items);
-    return ticketsMarkdown(files, ctx.settings);
+    return stampMarkdownVersions(ctx.root, ticketsMarkdown(files, ctx.settings), ctx.settings.items);
+  },
+  // The ticket's blob at its version (§4.5): what the runner reads, exactly as it reads the
+  // file at the claim's snapshot today. \`checkout\` is the runner's home checkout.
+  async read(id, { version, checkout } = {}) {
+    return { version, ticket: readTicketBlob(checkout ?? process.cwd(), version) };
   },
 };
 `,
@@ -1027,7 +1278,7 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * not the leg's outcome. The bundled `close` writes the closing marker where the course's
  * convention puts it. */
 function stubSource(b: BuiltIn, course: string, leg: string): string {
-  const { ask, position, verify } = b.legs[leg];
+  const { ask, position, verify, pushes } = b.legs[leg];
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
@@ -1040,9 +1291,10 @@ function stubSource(b: BuiltIn, course: string, leg: string): string {
   const closeHelpers = b.reads === 'prs' ? `\nimport { ticketsBranch } from ${JSON.stringify(source('ticket-state.ts'))};` : '';
   const values = ask ? ask.values.join(' or ') : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
 // B-94: every git and gh call this stub makes — the snapshot probes, the override and
@@ -1050,6 +1302,31 @@ import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
 // and environment the close uses, so a wedged call fails the leg within the bound instead of
 // burning the claim to its lease.
 const GIT_BOUND_MS = ${CLOSE_TIMEOUT_MS}, GIT_ENV = ${JSON.stringify(GIT_NONINTERACTIVE_ENV)};
+// B-108 (the owner, 2026-10-22): two bounds end the stub's wait for its agent — its exit, or
+// its silence. AGENT_IDLE_MS is 15 minutes of quiet across EVERY activity signal the stub can
+// see (the agent's stdout, the wrapper's log, the harness's own store): a harness CLI may
+// legitimately print nothing on stdout until it exits — some buffer the whole run — so an idle
+// stream alone is never idle; idle is silence everywhere, and it concludes a finished agent
+// that will not exit (the B-86 incident, 2026-10-22: five hours on an exit that never came).
+// LEG_CEILING_MS is 5 hours of the leg, whatever the agent is doing — the one duration-based
+// conclusion, ending a chatty agent that never converges, and the only one that may catch an
+// agent still working; before it a live agent is never touched. A course whose legs need longer
+// raises either in this copy of the file.
+const AGENT_IDLE_MS = 900000, LEG_CEILING_MS = 18000000;
+// B-108: a path's newest write — itself, or the newest file under it, the walk bounded (a store
+// a live session grows without end is walked no further). A path that does not exist answers 0:
+// a signal that was never live is quiet, never a veto.
+const newestWrite = (p, depth = 0) => {
+  let st = null;
+  try { st = statSync(p, { throwIfNoEntry: false }); } catch { return 0; }
+  if (st == null) return 0;
+  let best = st.mtimeMs;
+  if (!st.isDirectory() || depth >= 5) return best;
+  let names = [];
+  try { names = readdirSync(p); } catch { return best; }
+  for (let i = 0; i < names.length && i < 512; i++) best = Math.max(best, newestWrite(join(p, names[i]), depth + 1));
+  return best;
+};
 // B-93: stderr is captured, never inherited — the stub runs in the runner's own log, where a
 // quiet 'no origin' or a failed forge probe printed as a failure. A caller that reports one
 // reads it from the error (\`e.stderr\`); nothing else of git's rides the log unasked.
@@ -1084,7 +1361,9 @@ function advisedCommand(words, settings, adviceFile) {
 }${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
-import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
+import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
+import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
+import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};` : ''}
 // The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
 // repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the
 // checkout as its arguments and the leg's instructions in the file BATON_INSTRUCTIONS names. The
@@ -1167,7 +1446,18 @@ async function standard(ctx) {
   // path the read commit lacks means deleted: \`ls-tree\` lists nothing for it and succeeds
   // (git translates its messages, and \`cat-file -e\` exits 128 for every failure alike), so
   // any failure of the probe itself stops the leg.
-  const courseSha = typeof ctx.signed_control?.course === 'string' && ctx.signed_control.course !== '' ? ctx.signed_control.course : sha;
+${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must push. The ticket's PR branch
+  // heads in the home repository, by the course's patterns, are read before the agent runs and
+  // after; unchanged, the leg fails rather than report a fix of a tree the gate already tested red.
+  const redEdge = ctx.claim?.station === 'pr-open' || ctx.claim?.station === 'fixed';
+  const prHeads = () => {
+    const own = (Array.isArray(settings.courses) ? settings.courses : []).find((c) => c && c.id === ${JSON.stringify(b.id)}) ?? {};
+    const id = bareTicketId(ctx.ticket);
+    const wanted = matchPatterns([own.branch_pattern ?? DEFAULT_BRANCH_PATTERN, own.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '')).map((p) => p.replace(/\\{ticket\\}/g, id));
+    return gitRun('git', ['-C', ctx.checkout, 'ls-remote', '--heads', 'origin']).split('\\n').filter((l) => { const r = l.split('\\t')[1] ?? ''; return r.startsWith('refs/heads/') && wanted.some((p) => branchMatches(p, r.slice('refs/heads/'.length))); }).sort().join('\\n');
+  };
+  const headsBefore = redEdge ? prHeads() : '';
+` : ''}  const courseSha = typeof ctx.signed_control?.course === 'string' && ctx.signed_control.course !== '' ? ctx.signed_control.course : sha;
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
   const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', courseSha, '--', rel]).trim() !== '';
   const text = present ? gitRun('git', ['-C', ctx.checkout, 'show', courseSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }) : null;
@@ -1201,7 +1491,34 @@ async function standard(ctx) {
   // mirrored to this stub's stderr, which the runner pipes and drains into its log: a live
   // leg is watchable line by line instead of silence until the exit. The bound execFile kept
   // is kept too: an agent whose output outgrows the cap is killed and refused.
-  const out = await new Promise((resolve, reject) => {
+  // B-108's bounds (the owner, 2026-10-22): the wait below ends at the earliest of the agent's
+  // exit, AGENT_IDLE_MS and LEG_CEILING_MS — an agent's completion is its exit or its silence,
+  // whichever comes first. The signals the idle bound reads, resolved before the spawn: the
+  // wrapper's log (B-95's example tees to .baton/logs/<ticket>-<leg>.log, whose mtime is
+  // streamed activity even when the stub cannot see the pipe) and, when the agent's command
+  // names a harness the stub knows, that harness's own store — opencode's data directory (its
+  // session db, and any directory it keys by this checkout), claude-code's projects directory
+  // keyed the same way. No session id: the store's newest write keyed by the stub's own cwd is
+  // the agent's activity.
+  const startedAt = Date.now();
+  const wrapperLog = join(ctx.checkout, '.baton', 'logs', ctx.ticket.id + '-${leg}.log');
+  const agentBin = basename(command);
+  const storePaths = [];
+  if (agentBin === 'opencode' || agentBin === 'claude') {
+    const dataHome = process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME !== '' ? process.env.XDG_DATA_HOME : join(homedir(), '.local', 'share');
+    const dashed = ctx.checkout.split('/').join('-');
+    if (agentBin === 'opencode') {
+      const root = join(dataHome, 'opencode');
+      storePaths.push(join(root, 'opencode.db'), join(root, 'opencode.db-wal'), join(root, 'opencode.db-shm'), join(root, 'project', dashed));
+      const key = createHash('sha1').update(ctx.checkout).digest('hex');
+      let instances = [];
+      try { instances = readdirSync(join(root, 'snapshot')); } catch { /* none yet */ }
+      for (const i of instances) storePaths.push(join(root, 'snapshot', i, key));
+    } else {
+      storePaths.push(join(process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== '' ? process.env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude'), 'projects', dashed));
+    }
+  }
+  const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === '1';
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout, stdio: ['ignore', 'pipe', 'pipe'],
@@ -1211,15 +1528,70 @@ async function standard(ctx) {
       },
     });
     let so = '', se = '';
+    // B-108: stdout is the one signal read off the pipe — timestamped as it drains.
+    let lastOut = startedAt;
+    let watch = null;
     child.stdout.on('data', (c) => {
+      lastOut = Date.now();
       so += c;
-      if (so.length > ${AGENT_OUTPUT_MAX}) { child.kill('SIGKILL'); reject(new Error('the agent printed more than ${AGENT_OUTPUT_MAX} bytes')); return; }
+      if (so.length > ${AGENT_OUTPUT_MAX}) { if (watch != null) clearInterval(watch); child.kill('SIGKILL'); reject(new Error('the agent printed more than ${AGENT_OUTPUT_MAX} bytes')); return; }
       if (echo) process.stderr.write(c);
     });
     child.stderr.on('data', (c) => { if (se.length < 2048) se = (se + String(c)).slice(-2048); if (echo) process.stderr.write(c); });
-    child.on('error', (e) => reject(e));
+    child.on('error', (e) => { if (watch != null) clearInterval(watch); reject(e); });
+    // B-227: a release (the runner's abort line, \`ctx.signal\`) stops the agent at once — its
+    // TERM, then KILL after a grace — so the leg reaches its safe point inside the runner's
+    // immediate-stop window and the claim is released with its hand-off, not left to the reaper.
+    let stopped = null, conclusion = null;
+    const onAbort = () => {
+      if (stopped != null) return;
+      stopped = String(ctx.signal.reason ?? 'release');
+      if (watch != null) clearInterval(watch);
+      child.kill('SIGTERM');
+      setTimeout(() => child.kill('SIGKILL'), 3000).unref();
+    };
+    if (ctx.signal) { if (ctx.signal.aborted) onAbort(); else ctx.signal.addEventListener('abort', onAbort, { once: true }); }
+    // B-108: the bounds' watch. Either bound concluding is the same act: the stub kills the
+    // agent (it is the parent; SIGKILL to the child alone), takes the received stdout as the
+    // agent's output, and the wait ends exactly as an exit would — the last-line contract, the
+    // forge verification, the checks judging the work as it stands. Idle concludes only when
+    // EVERY signal is quiet past the bound; any live one vetoes it however long the rest stay
+    // quiet, and the ceiling alone may catch an agent still working.
+    const signals = () => [
+      ['stdout', lastOut],
+      ['wrapper-log', newestWrite(wrapperLog)],
+      ...(storePaths.length > 0 ? [['harness-store', storePaths.reduce((best, p) => Math.max(best, newestWrite(p)), 0)]] : []),
+    ];
+    const finishWatch = () => {
+      if (watch != null) clearInterval(watch);
+      child.kill('SIGKILL');
+      process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the agent ' + conclusion.cause + (conclusion.cause === 'agent_concluded_idle' ? ' — quiet past ' + Math.round(AGENT_IDLE_MS / 60000) + ' minutes on ' + conclusion.quiet_signals.join(', ') : ' — the leg\\'s ceiling of ' + Math.round(LEG_CEILING_MS / 60000) + ' minutes') + '; the stdout it received is its output\\n');
+      resolve({ text: so, conclusion });
+    };
+    watch = setInterval(() => {
+      if (stopped != null || conclusion != null) return;
+      const now = Date.now();
+      if (now - startedAt >= LEG_CEILING_MS) {
+        conclusion = { cause: 'agent_concluded_absolute', ceiling_ms: LEG_CEILING_MS };
+        finishWatch();
+        return;
+      }
+      const all = signals();
+      if (all.every(([, at]) => now - at >= AGENT_IDLE_MS)) {
+        conclusion = { cause: 'agent_concluded_idle', idle_ms: AGENT_IDLE_MS, quiet_signals: all.map(([name]) => name) };
+        finishWatch();
+      }
+    }, Math.max(250, Math.round(AGENT_IDLE_MS / 5)));
+    watch.unref?.();
+    // A stopped agent is done when it exits: a child of its own may still hold its pipes open
+    // (\`close\` would wait for that), and the session's end takes whatever is left.
+    child.on('exit', () => { if (stopped != null) reject(new Error('the agent was stopped: ' + stopped)); });
     child.on('close', (code, sig) => {
-      if (code === 0) { resolve(so); return; }
+      if (watch != null) clearInterval(watch);
+      if (ctx.signal) ctx.signal.removeEventListener('abort', onAbort);
+      if (stopped != null) { reject(new Error('the agent was stopped: ' + stopped)); return; }
+      if (conclusion != null) return; // a bound concluded; the kill's own close changes nothing
+      if (code === 0) { resolve({ text: so, conclusion: null }); return; }
       // The failure names its cause with a tail, not a single line (2026-10-24): the last
       // lines of both streams, bounded, so the log alone can diagnose the death.
       const tail = (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
@@ -1231,7 +1603,13 @@ async function standard(ctx) {
     child.stdin?.end();
   }).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
-  });${names ? `
+  });
+  // B-108: an exit resolves the text with no conclusion; a bound resolves the conclusion it
+  // reached, and the received text is the agent's output either way.
+  const { text: out, conclusion } = received;${pushes ? `
+  if (headsBefore !== '' && prHeads() === headsBefore) {
+    throw new Error('the ${leg} leg pushed nothing: ' + headsBefore.split('\\n').map((l) => l.split('\\t')[1].slice('refs/heads/'.length) + ' at ' + l.slice(0, 10)).join(', ') + ' is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)');
+  }` : ''}${names ? `
   // The answer (B-85): the last line that opens with the leg's value word, wherever it sits —
   // prose before or after it is the agent's, not a lost round — and, on that line, the PR its
   // line goes on. A leg with no answer names its PR by a last line that is a PR URL alone; any
@@ -1242,14 +1620,14 @@ async function standard(ctx) {
   const on = ${PR_URL}.test(last) ? last : null;`}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
-` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}) };` : `${ask ? `
+` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}), ...(conclusion ? { conclusion } : {}) };` : `${ask ? `
   // The answer (B-85): the last line that opens with the leg's value word, backwards past any
   // prose after it; a missing or misspelled verdict still fails, naming what it read.
   const { answer } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});` : `
   void out;`}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
-` : ''}  return ${position};`}
+` : ''}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}
 }
 // The close's ctx, one line (B-96's review round 2): everything the stub hands back, plus the
 // repository's default branch — the claim answer's \`default_branch\`, which the runner puts in
@@ -1273,15 +1651,16 @@ const PR_URL = `/${PR_URL_RE.source}/`;
  * non-interactive exactly as B-94 bounds git. The run is the leg's own process, so the runner
  * beats while it waits. The script's exit is the gate's whole verdict: green advances to
  * `review`, red routes to `fix` — never back to `implement` — from the station the claim sits at
- * (`ctx.claim.station`: making the tests green is fixing, wherever the push came from); a
- * timeout or output overflow is red too, named; npm that cannot start, or a kill the bound did
- * not send, fails the leg — no verdict, no marker (finding 14). The marker is made here with
+ * (`ctx.claim.station`: making the tests green is fixing, wherever the push came from); output
+ * overflow is red too, named; npm that cannot start, a kill the bound did not send (finding 14),
+ * and a run that never reached the tests (B-230: dependencies declared and none installed, the
+ * shell's 126/127, npm's missing script, the bound itself) fail the leg — no verdict, no marker. The marker is made here with
  * `git commit-tree` — an empty-tree commit on the tested head, naming it (`Baton-Tested`) — and
  * the close (`testsClose`) pushes it to that branch. A repository replaces the run as any leg's
  * (`legs/run-tests.run.mjs`, R-BTN-131), keeping the close. */
 export function testsStubSource(b: BuiltIn, course: string, leg: string): string {
   return `import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -1339,8 +1718,17 @@ function verdictOf(cwd, script) {
     // trailer block stays the message's last.
     const tail = [String(e?.stdout ?? ''), String(e?.stderr ?? '')].join('\\n').split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n');
     const named = (why) => ({ tests: 'red', tail: 'npm run ' + script + ' ' + why + (tail ? '; its last lines:\\n' + tail : '; it printed nothing') });
-    if (e?.code === 'ETIMEDOUT') return named('timed out after ' + Math.round(RUN_TESTS_TIMEOUT_MS / 1000) + ' s');
+    // B-230: a run that never reached the tests is no verdict — red would send a fix leg after
+    // code that was never tested (B-167: five red markers, every one \`vitest: not found\`). The
+    // shell's own 126/127 (a command not executable, or not found: the test runner, a missing
+    // dependency's bin) and npm's missing script fail the leg naming that, as npm that cannot
+    // start does; so does the bound: per-test timeouts catch a hung test as a failure the script
+    // reports, so a whole run that outlives the bound says the environment or the bound is short.
+    const setup = (why) => new Error('npm run ' + script + ' ' + why + ' — the tests never ran: no verdict, no marker' + (tail ? '; its last lines:\\n' + tail : ''));
+    if (e?.code === 'ETIMEDOUT') throw setup('outlived the gate’s bound of ' + Math.round(RUN_TESTS_TIMEOUT_MS / 1000) + ' s (a suite that needs longer raises it in its own copy of this leg)');
     if (e?.code === 'ENOBUFS') return named('printed more than ' + OUTPUT_MAX + ' bytes');
+    if (e?.status === 126 || e?.status === 127) throw setup('exited ' + e.status + ', a command its script names could not be run (not found, or not executable)');
+    if (/\\bMissing script:/.test(String(e?.stderr ?? ''))) throw setup('has no such script in package.json');
     if (typeof e?.status === 'number') return named('exited ' + e.status);
     if (e?.signal) throw new Error('npm run ' + script + ' was killed by ' + e.signal + ', which the gate did not send — no verdict, no marker');
     throw new Error('npm run ' + script + ' could not run (' + (e?.code ?? e?.message ?? String(e)) + ') — no verdict, no marker');
@@ -1389,6 +1777,14 @@ async function standard(ctx) {
     gitRun(['-C', ctx.checkout, 'worktree', 'add', '-q', '--detach', tree, tested]);
     const modules = join(ctx.checkout, 'node_modules');
     if (existsSync(modules) && !existsSync(join(tree, 'node_modules'))) symlinkSync(modules, join(tree, 'node_modules'), 'dir');
+    // B-230: a package that declares dependencies and has none installed cannot run its tests —
+    // no verdict, rather than a red that names whichever bin was missing first.
+    let pkg = {};
+    try { pkg = JSON.parse(readFileSync(join(tree, 'package.json'), 'utf8')); } catch { /* no package.json: npm says so */ }
+    const declared = ['dependencies', 'devDependencies'].some((k) => pkg && typeof pkg[k] === 'object' && pkg[k] !== null && Object.keys(pkg[k]).length > 0);
+    if (declared && !existsSync(join(tree, 'node_modules'))) {
+      throw new Error('npm run ' + script + ' cannot run: ' + branch + ' declares dependencies and neither the tested tree nor the home checkout has node_modules — install them where the leg runs (npm ci); the tests never ran: no verdict, no marker');
+    }
     verdict = verdictOf(tree, script);
   } finally {
     try { unlinkSync(join(tree, 'node_modules')); } catch { /* no link made */ }

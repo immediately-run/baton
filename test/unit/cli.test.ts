@@ -110,6 +110,51 @@ describe('plan: one request per command', () => {
     expect(() => plan('owner', ['settings', 'docs'], key)).toThrow('at least one setting');
     // R-BTN-80: remind_after in seconds, from a duration.
     expect(plan('owner', ['settings', 'docs', '--remind-after', '6h'], key).body).toEqual({ remind_after: 21_600 });
+    // B-182 (R-BTN-140/R-BTN-139): the reach lists. Entries parse to `{path, forge?, host?,
+    // repo_id?, owner_id?}` — a well-known host implies its forge — and ids are resolved before
+    // the PUT goes out, so the plan carries the resolver's marker.
+    expect(plan('owner', ['settings', 'docs', '--code-repos', 'acme/monorepo@github.com,o/tool@gitlab.example.com'], key))
+      .toEqual({ method: 'PUT', path: '/v1/owner/docs/settings', body: { code_repos: [{ path: 'acme/monorepo', forge: 'github', host: 'github.com' }, { path: 'o/tool', host: 'gitlab.example.com' }] }, resolveCodeRepos: { repository: 'docs', offline: null } });
+    expect(plan('owner', ['settings', 'docs', '--code-repos', 'github:acme/monorepo@github.acme.example.com', '--forge-ids', '7,3'], key))
+      .toEqual({ method: 'PUT', path: '/v1/owner/docs/settings', body: { code_repos: [{ path: 'acme/monorepo', forge: 'github', host: 'github.acme.example.com', repo_id: '7', owner_id: '3' }] } });
+    expect(plan('owner', ['settings', 'docs', '--code-repos', 'none'], key).body).toEqual({ code_repos: [] });
+    expect(plan('owner', ['settings', 'docs', '--pushers', '1234,5678@gitlab.example.com'], key).body)
+      .toEqual({ pushers: [{ id: '1234' }, { host: 'gitlab.example.com', id: '5678' }] });
+    expect(plan('owner', ['settings', 'docs', '--pushers', 'none'], key).body).toEqual({ pushers: null });
+    expect(() => plan('owner', ['settings', 'docs', '--pushers', 'not-a-number'], key)).toThrow('forge user id');
+    expect(() => plan('owner', ['settings', 'docs', '--forge-ids', '7,3'], key)).toThrow('at least one setting');
+    expect(() => plan('owner', ['settings', 'docs', '--code-repos', 'a/b', '--forge-ids', 'seven,3'], key)).toThrow('decimal');
+  });
+
+  it('B-182: --code-repos ids are read from each entry\'s own forge with that host\'s token', async () => {
+    const { codeReposSpec, pushersSpec, resolveCodeRepos } = await import('../../cli/baton.mjs');
+    expect(pushersSpec('9')).toEqual([{ id: '9' }]);
+    // github.com answers at api.github.com; the token is GITHUB_TOKEN; the ids land on the entry.
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string, init?: { headers?: Record<string, string> }) => {
+      urls.push(url);
+      expect(init?.headers?.Authorization).toBe('Bearer gh-token');
+      return new Response(JSON.stringify({ id: 7001, owner: { id: 31 } }), { status: 200 });
+    }) as typeof fetch;
+    const entries = codeReposSpec('github:acme/monorepo@github.com').entries;
+    expect(await resolveCodeRepos('http://baton.test', 'unused.key', entries, { repository: 'docs', fetchImpl, env: { GITHUB_TOKEN: 'gh-token' } as unknown as NodeJS.ProcessEnv }))
+      .toEqual([{ path: 'acme/monorepo', forge: 'github', host: 'github.com', repo_id: '7001', owner_id: '31' }]);
+    expect(urls).toEqual(['https://api.github.com/repos/acme/monorepo']);
+    // An Enterprise host serves /api/v3; gitlab its own api and GITLAB_TOKEN, the ids where it
+    // keeps them (namespace).
+    urls.length = 0;
+    const lab = codeReposSpec('gitlab:group/tool@gitlab.example.com').entries;
+    const fetchLab = (async (url: string, init?: { headers?: Record<string, string> }) => {
+      urls.push(url);
+      expect(init?.headers?.Authorization).toBe('Bearer gl-token');
+      return new Response(JSON.stringify({ id: 42, namespace: { id: 7 } }), { status: 200 });
+    }) as typeof fetch;
+    expect(await resolveCodeRepos('http://baton.test', 'unused.key', lab, { repository: 'docs', fetchImpl: fetchLab, env: { GITLAB_TOKEN: 'gl-token' } as unknown as NodeJS.ProcessEnv }))
+      .toEqual([{ path: 'group/tool', forge: 'gitlab', host: 'gitlab.example.com', repo_id: '42', owner_id: '7' }]);
+    expect(urls).toEqual(['https://gitlab.example.com/api/v4/projects/group%2Ftool']);
+    // No token for the host's forge: the command says which variable, and fetches nothing.
+    await expect(resolveCodeRepos('http://baton.test', 'unused.key', codeReposSpec('gitea:o/r@gitea.example.com').entries, { repository: 'docs', fetchImpl, env: {} as unknown as NodeJS.ProcessEnv }))
+      .rejects.toThrow('no GITEA_TOKEN');
   });
 
   it('owner resolve and ticket history (R-BTN-78, R-BTN-81)', () => {
@@ -410,6 +455,26 @@ describe('baton decision list: the CLI courier (R-BTN-80)', () => {
     expect(await listOnce(request, (t: string) => out.push(t), { all: true })).toBe(1);
     expect(paths).toEqual(['GET /v1/courier/decisions']);
     expect(out).toEqual(['docs:E — Open\n  decision E-1 (asks owner)\n  notice: none']);
+  });
+
+  it('B-133: a posted decision’s options print their computed actions beside the packet’s question', () => {
+    // What the answer DOES — computed by Baton — is printed for each option, so the owner reads
+    // the action and the exact answer command, never only the agent’s summary.
+    expect(formatDecision({
+      ticket: 'docs:E', title: 'Three failed rounds', repository: 'docs',
+      decision: { id: 'review-rounds-3', asks: 'owner', question: 'Merge after three failed rounds?', options: [
+        { id: 'merge', action: 'records this answer, closes the decision and its notices, and unblocks the ticket' },
+        { id: 'round', action: 'records this answer, closes the decision and its notices, and unblocks the ticket, granting the leg ‘review’ 1 more run beyond the course’s max_runs' },
+      ] },
+      unblocks: ['docs:E'],
+    })).toBe([
+      'docs:E — Three failed rounds',
+      '  decision review-rounds-3 (asks owner)',
+      '  Merge after three failed rounds?',
+      '  (merge) records this answer, closes the decision and its notices, and unblocks the ticket',
+      '  (round) records this answer, closes the decision and its notices, and unblocks the ticket, granting the leg ‘review’ 1 more run beyond the course’s max_runs',
+      '  answer: baton owner resolve docs docs:E review-rounds-3 merge|round',
+    ].join('\n'));
   });
 
   it('--watch asks once a minute until stopped', async () => {

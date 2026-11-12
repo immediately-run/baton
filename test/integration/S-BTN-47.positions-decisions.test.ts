@@ -177,10 +177,16 @@ describe('S-BTN-47 positions, course changes and the dead-ticket queue', () => {
       { decision_id: 'more-fix-1', question: null, options_json: JSON.stringify(fixes('more-fix-1').options) },
       { decision_id: 'review-rounds-3', question: rounds.question, options_json: JSON.stringify(rounds.options) },
     ]);
-    // The courier's view carries the question and the options it may answer.
+    // The courier's view carries the question and the options it may answer, each with its
+    // COMPUTED action (B-133): what the answer does, beside the packet's words.
     const view = (await signed(cli, '/v1/courier/decisions', { method: 'GET' })).json;
     expect(view.decisions.find((d: { decision: { id: string } }) => d.decision.id === 'review-rounds-3').decision).toEqual({
-      id: 'review-rounds-3', asks: 'owner', url: rounds.url, question: rounds.question, options: ['merge', 'owner', 'round'],
+      id: 'review-rounds-3', asks: 'owner', url: rounds.url, question: rounds.question,
+      options: [
+        { id: 'merge', action: 'records this answer, closes the decision and its notices, and unblocks the ticket' },
+        { id: 'owner', action: 'records this answer, closes the decision and its notices, and unblocks the ticket' },
+        { id: 'round', action: 'records this answer, closes the decision and its notices, and unblocks the ticket, granting the leg ‘review’ 1 more run beyond the course’s max_runs' },
+      ],
     });
 
     const resolve = (decision: string, answer: string, as: TestKey = owner) => keyCall(as, '/v1/owner/docs/tickets/A/resolve', { decision, answer });

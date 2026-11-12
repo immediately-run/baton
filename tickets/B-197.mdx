@@ -1,0 +1,122 @@
+---
+title: "B-197 — The course read: GET …/courses/{course} joins one course's file, each leg's queue and state, its tickets by station with their paths (paged), its window's runs, off-graph transitions and stats"
+id: B-197
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1196
+tier: judgement
+description: "The read the Courses screens of BATON-UI-V2 lack. course.show: the course file as last accepted (and the refused newer version, R-BTN-69); per leg its queue depth against max_queue and the intake state (R-BTN-79), the counts of tickets ready, running, blocked by kind and when found (R-BTN-126) and backing off, and the leg's runs in the window as legs/{leg}/runs returns them; per station the resting count; the tickets on the course 100 a page by cursor, ordered by station then Baton's order, each with its path, the claim's legs since, what a suspended one waits for, its newest hand-off pointer, blocks, queued leg and its source (R-BTN-83), parent and children ids; and the window's stats and off-graph rows from stats (§5). ?since= 24 hours by default, 7 days at most. Requires: B-192, B-205, B-23."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-192
+  - B-205
+  - B-23
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Courses** `/courses` → `/courses/{c}` — station/leg
+graph with queue depths, per-ticket paths, stats."
+
+**Spec:** [BATON_SPEC §5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) (the course file;
+[R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2): a refused file keeps the previous),
+[§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) ([R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3):
+a position and the queued leg's source), [§5.4](../spec/BATON_SPEC/05-courses.md#sec-5-4)
+([R-BTN-79](../spec/BATON_SPEC/05-courses.md#sec-5-4): queues, `max_queue`, intake),
+[§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2):
+a prerequisite failing during a leg blocks its edge; [R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2)),
+[§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4) (backoff), [§9.3](../spec/BATON_SPEC/09-claims.md#sec-9-3)
+(hand-offs), [§9.8](../spec/BATON_SPEC/09-claims.md#sec-9-8) ([R-BTN-24](../spec/BATON_SPEC/09-claims.md#sec-9-8):
+the resume record), [§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5) ([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5)),
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) (`courses` — B-192 builds it; `stats` with its
+`off-graph`; `legs/{leg}/runs`).
+
+**Depends on:** B-192 (sessions on the reads), B-205 (cursor and window conventions), B-23
+(`legs/{leg}/runs`, whose rows the read embeds). `GET …/courses` itself is B-217's.
+
+**Used by:** B-212, B-223.
+
+### What to build
+
+The §14 row first, then the code, in `src/core/courseView.ts`, reading `courses.ts`,
+`stations.ts`, `queues.ts`, `blocks.ts`, `history.ts`, `attempts.ts` and `stats.ts` — aggregates
+and ids only.
+
+1. **`GET /v1/repositories/{repository}/courses/{course}`** (`course.show`, read; the repository
+   reads' principals and a session), `?since=` (24 hours default, 7 days most) and `?cursor=`
+   for the tickets:
+   - `course: {id, version, file}` — the file as last accepted, an opaque blob (stations, legs
+     with `from`, `to`, `kind`, `requires`, `max_runs`, `timeout`, `outputs`, `conditions`,
+     `max_queue`); `refused: {version, reason} | null` (R-BTN-69); `runners: {declaring, alive}`
+     — the runners whose heartbeat names this course for the repository, and how many are alive
+     (the mockup's "workers at 7");
+   - `legs: [{leg, queue: {depth, max_queue, intake: open | closed}, state: {ready, running,
+     blocked: [{kind, found: before | during, count}], backing_off}, runs: [...]}]` — `runs`
+     as `legs/{leg}/runs` returns them, within the window (R-BTN-128: `log_dir` as text);
+   - `stations: [{station, resting, arrived_today}]` — `arrived_today` the tickets that reached
+     the station in the last 24 hours (the mockup's "18 today" on the end station);
+   - `tickets: [...]`, `next_cursor` — 100 a page, ordered by station in the file's order then
+     Baton's order, each `{ticket_id, title, station, path: [{leg, reached, run_id}], claim_legs
+     (the live claim's legs since it started), waits_for (a suspended ticket's station and
+     condition or prerequisite), handoff (the newest resume pointer as text, R-BTN-24), blocks,
+     next_leg, source: course | route | decision, parent, children}`;
+   - `off_graph` and `stats` for the window, as `GET …/stats?since=` gives them (wait and run
+     times per station and leg, ends by reason and detail, suspensions, advice overridden).
+   The graph's counts (`legs[].state`, `stations[].resting`) are aggregates over every ticket,
+   not over the page. `?summary=1` answers `course`, `refused`, `runners`, `legs` without their
+   `runs`, `stations` and `stats` only — no tickets, no runs — for the list screen (B-212), which
+   polls one per course. A course not in the repository's registry is `not-found`.
+
+### What not to do
+
+- No stats recomputed: `stats` and `off_graph` come from `stats.ts`.
+- No course validation here: `refused` is what `courses.ts` recorded.
+- No body, no log bytes; no screen (B-212).
+
+### Trust
+
+- **`course.show`** — Baton's rows and the course file as an opaque blob (§12.3); titles,
+  hand-off pointers, transcripts and log directories as text; nothing written.
+- **`?since=`, `?cursor=`** — validated (`invalid-params`); the cursor by B-205's rule.
+
+### Invariants
+
+- **Positions are Baton's** (R-BTN-39); **blocks are stored** (R-BTN-75); **queue depth is advice**
+  (R-BTN-79).
+- **Filter fields only** (R-BTN-33); **an owner's session, its repositories** (R-BTN-155);
+  **both hosts** (R-BTN-55).
+
+### Tests
+
+Scenarios numbered at merge, on both hosts, with a fixture course of four stations and three
+legs, tickets at each station, one edge blocked by a prerequisite found during a run, one leg over
+`max_queue` with intake closed, one off-graph transition and a refused newer file:
+
+- `course.show` returns the file and `refused`, `runners`, each leg's queue and state counts, the
+  stations' resting and `arrived_today` counts, the first page of tickets with paths and sources
+  and a `next_cursor`, the window's runs with `log_dir`, `off_graph` and `stats`; the counts equal
+  the whole, not the page; `?since=` bounds the runs; `?summary=1` carries no tickets or runs;
+  an unknown course is `not-found`.
+
+### Exit criteria
+
+- [ ] `course.show` in §14 and the registry, built in `src/core/courseView.ts`, with tests.
+- [ ] The scenario passes; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09._
+
+_2026-11-09 — revised after review: the false "reads that exist" claim corrected — `GET …/courses`
+is B-192's and `legs/{leg}/runs` B-23's; the screens split out to B-212; the ticket list paged;
+`off_graph` taken from `stats`._
+
+_2026-11-09 — revised after the second review: `runners`, `arrived_today` and `?summary=1`
+added for the list screen; `GET …/courses` is now B-217's._

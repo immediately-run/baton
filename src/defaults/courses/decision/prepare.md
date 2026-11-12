@@ -14,7 +14,7 @@ waits for the owner's answer.
 > completion: a harness that is a client of a background service must keep its session in
 > process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
 > work ends leaves truncated output and an orphaned session posting to a claim that no longer
-> exists (B-84). A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> exists (B-84). Your completion is your exit **or your silence** (B-108): the stub stops waiting at the earliest of your exit, fifteen minutes of quiet on every activity signal it can see — your stdout, the wrapper’s log, the harness’s own store — and five hours of the leg, its ceiling; the stdout you left is judged as any exit’s is. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
 > `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
 > your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95).
 
@@ -44,8 +44,14 @@ A `## prepare` section in the ticket file, opening with the packet:
 ```
 
 - The question is one sentence and names the thing decided.
-- Two to four options, lettered in order, each a complete action someone can carry out.
-- The recommendation is yours, from what you read and reproduced.
+- Two to four options, lettered in order, each a complete action someone can carry out — and,
+  where the action is a command or an API call (B-133: the owner approves beside what each
+  option DOES, never only your description of it), spelled as the exact thing that runs, in the
+  option's own words: `(a) revoke the grant — baton admin -i KEY revoke <fingerprint>`.
+- The recommendation is yours, from what you read and reproduced, and it is marked as yours:
+  name the preparing session under the packet so the provenance shows. An option whose action
+  touches credentials, grants, CI, deploys or another repository may be recommended but is
+  never pre-selected — spell its action and let the owner choose it by hand.
 - Evidence is links, not prose.
 - Nothing is applied without the owner's letter: Baton waits on the answer, however long it
   takes. Say in the recommendation what waiting costs, when it costs something.
