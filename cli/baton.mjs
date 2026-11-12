@@ -234,13 +234,14 @@ function workingTreeRefusal(argv) {
  *  the owner and administrator commands' value-less flags (parseArgs booleans) are named here so
  *  `--yes --dev` still counts. An unknown boolean is read as value-taking, which refuses rather
  *  than bypasses — the safe direction. */
-const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'watch', 'all']);
+const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all']);
 function devFlagPositions(argv) {
   const at = [];
   for (let i = 1; i < argv.length; i++) {
+    if (argv[i] === '--') break;   // `owner sign … -- <paths>`: everything after is a path
     if (argv[i] !== '--dev') continue;
     const prev = argv[i - 1];
-    const name = prev === '-i' ? 'identity' : prev.startsWith('--') ? prev.slice(2) : null;
+    const name = prev === '-i' ? 'identity' : prev === '-m' ? 'message' : prev.startsWith('--') ? prev.slice(2) : null;
     if (name != null && !NO_VALUE_FLAGS.has(name)) continue;   // the previous flag eats this one
     at.push(i);
   }
@@ -929,8 +930,9 @@ export async function main(argv) {
   // other roles (the reads, the runner, the repository commands) run from a checkout still.
   if (argv[0] === 'admin' || argv[0] === 'owner') {
     const dev = devFlagPositions(argv);
-    if (dev.length > 0 && dev.length === argv.reduce((n, a) => n + (a === '--dev' ? 1 : 0), 0)) {
-      argv = argv.filter((a) => a !== '--dev');   // every --dev sits in flag position: the override
+    const end = argv.indexOf('--') === -1 ? argv.length : argv.indexOf('--');
+    if (dev.length > 0 && dev.length === argv.slice(0, end).reduce((n, a) => n + (a === '--dev' ? 1 : 0), 0)) {
+      argv = argv.filter((_, i) => !dev.includes(i));   // every --dev sits in flag position: the override
     } else if (workingTreeOf() != null) {
       throw new Error(workingTreeRefusal(argv));
     }

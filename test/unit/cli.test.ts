@@ -457,6 +457,9 @@ describe('an owner or administrator key never runs a working-tree CLI (B-138)', 
     await expect(main(['admin', 'open', '-i', file, '--url', ORIGIN])).rejects.toThrow(/npx --yes @immediately-run\/baton@/);
     // A value-position --dev is not the override in-process either.
     await expect(main(['owner', 'grant', 'baton', '--capabilities', '--dev', '-i', file, '--url', ORIGIN])).rejects.toThrow(/working tree/);
+    // `owner sign`'s message (-m) and its paths after `--` are values too (B-127's command).
+    await expect(main(['owner', '-i', file, 'sign', '-m', '--dev', '--', 'a'])).rejects.toThrow(/working tree/);
+    await expect(main(['owner', '-i', file, 'sign', '-m', 'msg', '--', '--dev'])).rejects.toThrow(/working tree/);
     // --dev: the guard passes and the request itself goes out.
     const was = globalThis.fetch;
     const outWrite = process.stdout.write;
@@ -682,10 +685,11 @@ describe('baton owner sign / verify-config (B-127 item 6, round 1: the command s
     g('commit', ...a);
     return head();
   };
-  /** `main` with stdout captured, as the policy test runs it. */
+  /** `main` with stdout captured, as the policy test runs it. --dev: this suite runs the CLI
+   *  from this checkout — the B-138 override a development checkout passes. */
   let outs: string[] = [];
   let outWrite: typeof process.stdout.write;
-  const run = (args: string[]) => main(['owner', '-i', keyFile, ...args]);
+  const run = (args: string[]) => main(['owner', '--dev', '-i', keyFile, ...args]);
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'baton-owner-sign-'));
