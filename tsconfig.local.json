@@ -37,6 +37,7 @@
     "test/unit/sign.test.ts",
     "test/unit/runner-main.test.ts",
     "test/unit/runner-bundle.test.ts",
+    "test/unit/runner-mask.test.ts",
     "test/integration/S-BTN-41.runner.test.ts",
     "test/integration/S-BTN-202.runner-scope.test.ts",
     "test/integration/S-BTN-26.runner.test.ts",
