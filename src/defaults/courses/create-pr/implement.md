@@ -80,8 +80,8 @@ Fix whatever the answers expose before you push.
 - Run the repository's checks yourself. Push only once they pass.
 - **Install dependencies with hygiene** (B-132): from the lockfile only — `npm ci`, never an
   `npm install` that rewrites it — unless the ticket itself asks for a dependency change; and
-  with lifecycle scripts off (`ignore-scripts=true`, which the runner's image sets; pass
-  `--ignore-scripts` where nothing does). A package whose install script the repository needs
+  with lifecycle scripts off (`npm ci --ignore-scripts`: pass the flag every time — never
+  count on an image's `ignore-scripts=true` being there). A package whose install script the repository needs
   is listed in `.baton/baton.json` (`allow_install_scripts: [<package>]`, a control input under
   B-127): run exactly those packages' scripts — `npm rebuild <package>
   --ignore-scripts=false` — never scripts for all. Where the repository sets a registry age

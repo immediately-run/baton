@@ -2,8 +2,8 @@
 // and from the lockfile only, and a package whose install script the repository needs is
 // allowed by name, its scripts run alone. The standard courses' instructions prescribe exactly
 // this procedure; the test proves it against the npm the legs run — a fixture package whose
-// `postinstall` writes a marker is installed by `npm ci` under `ignore-scripts=true` (the
-// configuration the runner image sets) and leaves no marker, and the allow procedure the
+// `postinstall` writes a marker is installed by `npm ci` with scripts off (`ignore-scripts=true`,
+// which the instructions have every leg pass) and leaves no marker, and the allow procedure the
 // instructions name for a package in `.baton/baton.json`'s `allow_install_scripts`
 // (`npm rebuild <package> --ignore-scripts=false`) writes it. Offline: the fixture is a local
 // tarball, nothing is fetched. Node only: it runs npm.
@@ -48,7 +48,7 @@ describe('dependency hygiene in legs (B-132)', () => {
     writeFileSync(join(pkg, 'index.js'), `module.exports = ${JSON.stringify(PKG)};\n`);
     npm(pkg, ['pack', '--silent']);
     // The project a leg works in: the dependency a local tarball (offline), the lockfile
-    // resolved from it, and the npm configuration the runner image sets — scripts off.
+    // resolved from it, and scripts off, as the instructions have every leg install.
     const project = join(dir, 'project');
     mkdirSync(project);
     writeFileSync(join(project, 'package.json'), `${JSON.stringify({
