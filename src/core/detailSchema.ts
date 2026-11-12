@@ -2,8 +2,8 @@
 // (BATON_SPEC §2g R-BTN-76; R3-1251). Interpreted here, never compiled: a Worker may not `eval`,
 // so no code generation. Exactly the keywords `type`, `properties`, `required`,
 // `additionalProperties` (a boolean), `items`, `enum`, `const`, `minimum`, `maximum`, `minLength`,
-// `maxLength`, `minItems`, `maxItems` and `x-baton-base` (the root alone, naming a `std:` schema:
-// R-BTN-176); a schema of at most 4 KB and 5 levels. Anything else — `$ref`, `pattern`, `format`,
+// `maxLength`, `minItems`, `maxItems` and `x-baton-base` (the root alone, naming a `std:` schema);
+// a schema of at most 4 KB and 5 levels. Anything else — `$ref`, `pattern`, `format`,
 // a keyword this list lacks — is refused at registration. Pure.
 
 /** R-BTN-76's bounds on a schema and on a `detail`. */
@@ -15,8 +15,8 @@ const KEYWORDS = new Set(['type', 'properties', 'required', 'additionalPropertie
   'minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'x-baton-base']);
 const TYPES = new Set(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null']);
 
-/** A schema id as `x-baton-base` names one (R-BTN-175's shape, checked here without importing the
- *  output-schema machinery: `<name>@<version>`). */
+/** A schema id as `x-baton-base` names one, checked here without importing the output-schema
+ *  machinery: `<name>@<version>`. */
 const SCHEMA_ID = /^[a-z][a-z0-9:._-]*@[0-9]+$/;
 
 export type Schema = Record<string, unknown>;
@@ -144,20 +144,3 @@ export function sameSchema(a: Schema, b: Schema): boolean {
   return same(a, b);
 }
 
-/**
- * R-BTN-176: the `x-baton-base` chain a schema names — the base it refines, then that base's own
- * base, outermost first, stopping at a schema that names none (or that `resolve` does not know,
- * which registration refuses first). `sameSchema` deep-compares the schema WHOLE, `x-baton-base`
- * included — re-registering with the same schema is idempotent, and a changed base is refused as
- * another schema (the chain is immutable with it, which is what keeps `base_chain_json` true).
- */
-export function baseChainOf(schema: Schema, resolve: (id: string) => Schema | null): string[] {
-  const out: string[] = [];
-  let base = typeof schema['x-baton-base'] === 'string' ? schema['x-baton-base'] as string : null;
-  while (base && !out.includes(base) && out.length < 64) {
-    out.push(base);
-    const next = resolve(base);
-    base = next && typeof next['x-baton-base'] === 'string' ? next['x-baton-base'] as string : null;
-  }
-  return out;
-}

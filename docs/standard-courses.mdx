@@ -264,7 +264,11 @@ belongs in the leg's `.md` instead.
 
 The instructions are yours once scaffolded. Edit `.baton/courses/<course>/legs/<leg>.md` to
 match how your repository works: its checks, its review rubric, where its tickets live. A
-release of the CLI never touches them. Each leg's stub runs the command `.baton/baton.json`
+release of the CLI never touches them. Which model a leg runs on is the repository's choice
+too (§6.10, R-BTN-131): the stub runs `agent_command`'s `--model` exactly as written, and Baton
+delivers no advice about a model, a key or a route. A leg that should pick its model at run
+time, from the machine's configuration or the instance views, replaces its run with a leg
+override (`baton repo init --override <leg>`) that decides it there. Each leg's stub runs the command `.baton/baton.json`
 names in `agent_command` — [the two shipped ones are above](#the-agent-that-runs-the-legs) —
 with the ticket, the leg and the checkout as its arguments. It hands
 the agent the instructions, read at the claim's snapshot, through `BATON_INSTRUCTIONS`, so a

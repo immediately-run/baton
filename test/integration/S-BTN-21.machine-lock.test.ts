@@ -251,41 +251,6 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
     }
   }, 90_000);
 
-  it('a claim answered for a lock leg the runner cannot lock ends suspended at once, touching nothing (R-BTN-121)', async () => {
-    home.leg('rdp1', `ev(ctx, 'run rdp1'); return { reached: 'lab', next: 'rdp2' };`);
-    home.leg('rdp2', `ev(ctx, 'run rdp2'); return { reached: 'mid', next: 'rdp3' };`);
-    home.leg('rdp3', `ev(ctx, 'run rdp3'); return { reached: 'review', next: 'plain' };`);
-    home.leg('plain', `ev(ctx, 'run plain'); return { reached: 'done' };`);
-    home.commit();
-    // The server can satisfy rule 4 for the lock leg while this runner holds no lock: a one-rule
-    // ontology derives the capability from a key the runner declares (R-BTN-174 — the declared
-    // list is the runner's own word; the derivation is the server's), and another process on
-    // this machine holds the lock, so the runner neither declares nor can take the capability.
-    const program = {
-      version: 1, builtin: 'baton@1', derived: ['capability'],
-      entries: [{ id: 'lab-from-key', head: ['derived', LOCKED], body: [['holds', 'key:zai']] }],
-    };
-    await home.post({ 'T-1': placed('filed', [], [['rdp1', 'ready']]) }, [ticket('T-1', { course_id: 'lockcourse' })], { ontology: { builtin: 'baton@1', program } });
-
-    const outsider = await outsiderTakes();
-    try {
-      const a = makeRunner('vm-a', { capabilities: ['key:zai'] });
-      const aLog = logs.at(-1)!;
-      void a.work();
-      await until(async () => (await rows(`SELECT status FROM claims WHERE ticket_id = 'docs:T-1'`))[0]?.status === 'completed');
-      // The claim was answered for the lock leg — the server derived the capability — and the
-      // runner, unable to take the machine's lock, ended it suspended at once: no leg started,
-      // no advance sent, nothing run.
-      const claim = (await rows<{ status: string; end_reason: string }>(`SELECT status, end_reason FROM claims WHERE ticket_id = 'docs:T-1'`))[0];
-      expect(claim).toMatchObject({ status: 'completed', end_reason: 'suspended:filed' });
-      expect(await rows(`SELECT leg FROM claim_legs`)).toEqual([]);
-      expect(home.evidence()).toEqual([]);
-      expect(aLog.some((l) => l.includes('the claim suspends rather than run it'))).toBe(true);
-    } finally {
-      killOutsider(outsider);
-    }
-  }, 90_000);
-
   it('a lock released by an unlocked leg and re-taken for the next lock leg goes on (round 1, finding 2)', async () => {
     home.leg('rdp1', `ev(ctx, 'run rdp1'); return { reached: 'lab', next: 'rdp2' };`);
     home.leg('rdp2', `ev(ctx, 'run rdp2'); return { reached: 'mid', next: 'rdp3' };`);

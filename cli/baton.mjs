@@ -17,7 +17,7 @@
 //   baton admin -i KEY repo retire ID
 //   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T]
 //   baton admin -i KEY probe add --key PUB --label L
-//   baton admin -i KEY resource add NAME --scope worker|account|service --schema FILE|JSON [--atoms-from admin|any]    (R-BTN-76, R-BTN-176)
+//   baton admin -i KEY resource add NAME --scope worker|account|service --schema FILE|JSON [--atoms-from admin|any]    (R-BTN-76)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
 //   baton admin -i KEY capacity set <capability> <n> [--yes]                 (R-BTN-178)
 //   baton admin -i KEY capacity set <capability> --clear [--yes]             (R-BTN-178)
@@ -350,7 +350,8 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'GET', path: '/v1/admin/state' };
     }
     if (cmd === 'resource' && rest[0] === 'add') {
-      // B-105 (R-BTN-176): --atoms-from names whether runners' readings may steer route choices.
+      // B-167: --atoms-from is a retired field — shape-checked, read nowhere (the CLI sends it
+      // as Baton takes it, ignored).
       const { flags, positional } = parseArgs(rest.slice(1), [], ['scope', 'schema', 'atoms-from'], 1);
       if (flags['atoms-from'] != null && !['admin', 'any'].includes(flags['atoms-from'])) throw new Error('--atoms-from must be admin or any');
       return { method: 'POST', path: '/v1/admin/resources', body: { name: need(positional[0], 'the resource name'), scope: need(flags.scope, '--scope'), detail_schema: jsonArg(need(flags.schema, '--schema'), readJson), ...(flags['atoms-from'] != null ? { atoms_from: flags['atoms-from'] } : {}) } };

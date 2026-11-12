@@ -9,7 +9,7 @@
 // `detail`, and no name here means anything.
 import { BatonError } from './http';
 import { logEvent } from './db';
-import { baseChainOf, detailProblem, sameSchema, schemaProblem, type Schema } from './detailSchema';
+import { detailProblem, sameSchema, schemaProblem, type Schema } from './detailSchema';
 import { refinementGaps } from '../shared/schema.mjs';
 import { stdSchema } from '../shared/std.mjs';
 import { checkCapacity, checkInstance, checkReadings, checkResource, VALID_FOR, WORKER_INSTANCE } from './validate';
@@ -105,53 +105,44 @@ export class Resources {
   }
 
   /** `POST /v1/admin/resources`: `{name, scope, detail_schema, atoms_from?}`. The schema is refused outside
-   *  R-BTN-76's subset; an `x-baton-base` names a `std:` schema (and only one — R-BTN-176), and a
-   *  refinement R-BTN-108's check cannot prove is refused, its chain stored for `refines` atoms.
+   *  R-BTN-76's subset; an `x-baton-base` names a `std:` schema (and only one), and a
+   *  refinement R-BTN-108's check cannot prove is refused.
    *  A `service` resource is its own one instance. Registering a name again is idempotent only
    *  with the same scope and schema: instances and readings were judged by them; the same pair may
-   *  still change `atoms_from`, logged as an `admin` event (R-BTN-176). */
+   *  still change `atoms_from` — a retired field (B-167), accepted and never read. */
   addResource(actor: string, body: unknown) {
     const r = checkResource(body);
     const problem = schemaProblem(r.detail_schema);
     if (problem) throw new BatonError('invalid-params', `detail_schema: ${problem} (R-BTN-76's subset)`);
     if (!isObj(r.detail_schema)) throw new BatonError('invalid-params', 'detail_schema: must be an object');
-    // R-BTN-176: the base is a `std:` schema — only a std: schema — and the refinement is proved
-    // (R-BTN-108's check, sound but conservative: what it cannot prove is refused). Core stores
-    // the named chain; it never resolves the schemas again.
+    // The base is a `std:` schema — only a std: schema — and the refinement is proved (R-BTN-108's
+    // check, sound but conservative: what it cannot prove is refused).
     const schema = r.detail_schema as Schema;
-    const chain = baseChainOf(schema, stdSchema);
     if (typeof schema['x-baton-base'] === 'string') {
       const base = schema['x-baton-base'];
-      if (!base.startsWith('std:')) throw new BatonError('invalid-params', `detail_schema.x-baton-base: ${base} — only a std: schema is a base (R-BTN-176)`);
+      if (!base.startsWith('std:')) throw new BatonError('invalid-params', `detail_schema.x-baton-base: ${base} — only a std: schema is a base`);
       const target = stdSchema(base);
-      if (!target) throw new BatonError('invalid-params', `detail_schema.x-baton-base: ${base} is not in the std: library (R-BTN-176)`);
-      for (const id of chain) {
-        if (!stdSchema(id)) throw new BatonError('invalid-params', `detail_schema.x-baton-base: ${id} is not in the std: library (R-BTN-176)`);
-      }
+      if (!target) throw new BatonError('invalid-params', `detail_schema.x-baton-base: ${base} is not in the std: library`);
       const gaps = refinementGaps(schema, target, stdSchema);
       if (gaps.length) throw new BatonError('invalid-params', `detail_schema: does not refine ${base} — ${gaps[0].path || '/'} ${gaps[0].keyword} ${gaps[0].message} (R-BTN-108)`);
     }
     return this.c.store.transaction(() => {
       const now = this.c.now();
-      const known = this.rows<{ scope: string; detail_schema: string; atoms_from: string }>('SELECT scope, detail_schema, atoms_from FROM external_resources WHERE name = ?', r.name)[0];
+      const known = this.rows<{ scope: string; detail_schema: string }>('SELECT scope, detail_schema FROM external_resources WHERE name = ?', r.name)[0];
       if (known) {
         if (known.scope !== r.scope || !sameSchema(JSON.parse(known.detail_schema), r.detail_schema as Schema)) {
           throw new BatonError('conflict', `${r.name} is registered with another scope or schema`);
         }
-        if (known.atoms_from !== r.atoms_from) {
-          this.exec('UPDATE external_resources SET atoms_from = ? WHERE name = ?', r.atoms_from, r.name);
-          logEvent(this.c.store, now, 'admin', actor, { act: 'resource-atoms-from', name: r.name, atoms_from: r.atoms_from }, null, null, null);
-        }
         return { ok: true };
       }
       if (this.rows('SELECT 1 FROM resource_instances WHERE name = ?', r.name).length) throw new BatonError('conflict', `${r.name} is already an instance's name`);
-      this.exec('INSERT INTO external_resources (name, scope, detail_schema, atoms_from, base_chain_json) VALUES (?, ?, ?, ?, ?)', r.name, r.scope, JSON.stringify(r.detail_schema), r.atoms_from, JSON.stringify(chain));
+      this.exec('INSERT INTO external_resources (name, scope, detail_schema) VALUES (?, ?, ?)', r.name, r.scope, JSON.stringify(r.detail_schema));
       if (r.scope === 'service') {
         this.exec(`INSERT INTO resource_instances (name, repositories) VALUES (?, '[]')`, r.name);
         this.exec('INSERT INTO instance_serves (instance, resource) VALUES (?, ?)', r.name, r.name);
         this.exec(`INSERT INTO instance_states (instance, state, changed_at) VALUES (?, 'unknown', ?) ON CONFLICT (instance) DO NOTHING`, r.name, now);
       }
-      logEvent(this.c.store, now, 'admin', actor, { act: 'resource-added', name: r.name, scope: r.scope, ...(chain.length ? { refines: chain } : {}), ...(r.atoms_from !== 'admin' ? { atoms_from: r.atoms_from } : {}) }, null, null, null);
+      logEvent(this.c.store, now, 'admin', actor, { act: 'resource-added', name: r.name, scope: r.scope }, null, null, null);
       this.c.blocks.instancesChanged([r.name]);
       return { ok: true };
     });
@@ -292,7 +283,7 @@ export class Resources {
           continue;
         }
         const lapses = r.kind === 'state' && !r.available && r.until != null ? Math.min(r.until, end) : end;
-        // R-BTN-176 (B-105): a state reading without a detail never erases the fields — the
+        // A state reading without a detail never erases the fields — the
         // detail the instrument last carried stays in force with the new envelope, until a
         // reading carries a new one or the instrument's row lapses whole.
         const priorDetail = this.rows<{ detail: string | null }>('SELECT detail FROM instance_readings WHERE instance = ? AND source = ? AND kind = ?', r.instance, source, r.kind)[0]?.detail ?? null;
@@ -381,65 +372,5 @@ export class Resources {
         ...this.stateOf(i.name, now),
       })),
     };
-  }
-
-  // ── route choices (R-BTN-176, B-105): what steers advice, never the fleet's blocks ────────
-
-  /** The runner's usable instances per resource for a repository (R-BTN-76): the `service`
-   *  instance, its own `worker`-scope instance, and the account instances in its `uses` that
-   *  serve the resource and list the repository. (`host` instances are R-BTN-178's, B-106.) */
-  usableFor(workerId: number, repo: string): [string, string][] {
-    const out: [string, string][] = [];
-    for (const r of this.rows<{ name: string; scope: string }>('SELECT name, scope FROM external_resources ORDER BY name')) {
-      if (r.scope === 'service') out.push([r.name, r.name]);
-      else if (r.scope === 'worker') out.push([r.name, `${r.name}@worker:${workerId}`]);
-    }
-    for (const u of this.rows<{ instance: string }>('SELECT instance FROM worker_instances WHERE worker_id = ? ORDER BY instance', workerId)) {
-      for (const s of this.rows<{ resource: string }>(
-        `SELECT s.resource FROM instance_serves s JOIN resource_instances i ON i.name = s.instance
-          WHERE s.instance = ? AND EXISTS (SELECT 1 FROM json_each(i.repositories) WHERE value = ?) ORDER BY s.resource`, u.instance, repo)) {
-        out.push([s.resource, u.instance]);
-      }
-    }
-    return out;
-  }
-
-  /** Whether `source` (an instance_readings row's) is a permitted source for the asking worker
-   *  (R-BTN-176): administrators and instrument keys always; a runner's reading only when every
-   *  resource the instance serves is registered `atoms_from: any` — or when it is the asking
-   *  worker's own `runner`-scope instance, which steers only advice that runner receives. */
-  private permittedSource(source: string, instance: string, workerId: number): boolean {
-    if (source === 'admin' || source.startsWith('probe:')) return true;
-    const m = /^worker:(\d+)$/.exec(source);
-    if (!m) return false;
-    const own = WORKER_INSTANCE.exec(instance);
-    if (own && Number(own[2]) === workerId) return true;
-    return !this.rows(`SELECT 1 FROM instance_serves s JOIN external_resources e ON e.name = s.resource
-        WHERE s.instance = ? AND e.atoms_from != 'any'`, instance).length;
-  }
-
-  /** One instance's route-choice reading, from permitted sources only (R-BTN-176): the
-   *  administrator's while one is in force, else the most recently observed in force — the
-   *  `state` kind for the route-choice state, either kind for the field reading, which is the
-   *  latest in force carrying a `detail`. Answers null detail when none carries one. */
-  routeReadingFor(workerId: number, instance: string, now: number): { state: InstanceState; detail: unknown } {
-    const rows = this.rows<{ source: string; kind: string; available: number | null; detail: string | null }>(
-      `SELECT source, kind, available, detail FROM instance_readings WHERE instance = ? AND lapses_at > ? ORDER BY observed_at DESC`, instance, now);
-    const inForce = rows.filter((r) => this.permittedSource(r.source, instance, workerId));
-    const state = inForce.find((r) => r.source === 'admin' && r.kind === 'state') ?? inForce.find((r) => r.kind === 'state');
-    const field = inForce.find((r) => r.source === 'admin' && r.detail != null) ?? inForce.find((r) => r.detail != null);
-    return {
-      state: !state ? 'unknown' : state.available ? 'available' : 'unavailable',
-      detail: field?.detail != null ? JSON.parse(field.detail) : null,
-    };
-  }
-
-  /** Every resource's stored `x-baton-base` chain (R-BTN-176): one row per base, for `refines`. */
-  refinesFacts(): [string, string][] {
-    const out: [string, string][] = [];
-    for (const r of this.rows<{ name: string; base_chain_json: string }>('SELECT name, base_chain_json FROM external_resources')) {
-      for (const base of JSON.parse(r.base_chain_json) as string[]) out.push([r.name, base]);
-    }
-    return out;
   }
 }

@@ -38,7 +38,8 @@ describe('plan: one request per command', () => {
     expect(plan('admin', ['open'], key)).toEqual({ method: 'POST', path: '/v1/admin/login-links', body: {} });
     // B-118: the dashboard's state is one signed GET, and takes nothing more.
     expect(plan('admin', ['state'], key)).toEqual({ method: 'GET', path: '/v1/admin/state' });
-    // B-105 (R-BTN-176): --atoms-from is a value flag of resource add — a true-flag spelling
+    // --atoms-from is a value flag of resource add (a retired field since B-167, taken and read
+    // nowhere) — a true-flag spelling
     // would leave its value as a stray positional and throw (round 3's finding).
     expect(plan('admin', ['resource', 'add', 'anthropic-capacity', '--scope', 'account', '--schema', '{"type":"object"}', '--atoms-from', 'any'], key).body)
       .toEqual({ name: 'anthropic-capacity', scope: 'account', detail_schema: { type: 'object' }, atoms_from: 'any' });

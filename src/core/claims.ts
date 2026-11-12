@@ -50,8 +50,6 @@ export interface Ctx {
   intake?: (repo: string, course: string) => 'open' | 'closed';
   /** R-BTN-108: a schema by id for a repository — the `std:` library's or the repository's. */
   schema?: (repo: string, id: string) => Schema | null;
-  /** §5.9 (B-104): the ontology store, for the reads that bring derived sets current. */
-  ontologies?: import('./ontologies').Ontologies;
   /** §12.8 (B-145): the repository policies — the `floor` rule (R-BTN-189), the policy pins and
    *  the hashes the claim response carries. */
   policies?: import('./policy').Policies;
@@ -82,13 +80,6 @@ interface WorkerFacts {
   isolation: 'attached' | 'process' | 'session';
   /** R-BTN-58: its key's grants by repository, or null for a key no owner granted (gates.ts). */
   grants: Record<string, { capabilities: string[]; max_tier: number | null }> | null;
-  /** R-BTN-174 (B-104): the repository's ontology's derived capabilities for this worker, by
-   *  repository, read only from a current set — `prepareSets` brings them up to date first. */
-  derived: Record<string, string[]>;
-  /** The repositories whose derived set is current (R-BTN-174): every one with no ontology is
-   *  current by definition; null when nothing was evaluated and none has an ontology, so the
-   *  candidate query filters nothing. */
-  fresh: Set<string> | null;
 }
 
 interface ItemFacts {
@@ -125,7 +116,6 @@ export interface Recommendation {
   score: number | null;
   reasons: string[];
   flags: string[];
-  advice: unknown;
   handoff_url: string | null;
 }
 
@@ -293,7 +283,7 @@ export class Claims {
       'SELECT repository_id AS repository, course_id AS course, version FROM worker_courses WHERE worker_id = ? ORDER BY repository_id, course_id', id);
     const tags = this.rows<{ tag: string }>('SELECT tag FROM worker_tags WHERE worker_id = ? ORDER BY tag', id).map((r) => r.tag);
     const { created_by, ...facts } = w;
-    return { ...facts, tier_ceilings: JSON.parse(w.tier_ceilings) as Record<string, string>, declared, courses, tags, grants: this.grantsOf(w.credential_id, created_by), derived: {}, fresh: null };
+    return { ...facts, tier_ceilings: JSON.parse(w.tier_ceilings) as Record<string, string>, declared, courses, tags, grants: this.grantsOf(w.credential_id, created_by) };
   }
 
   /** R-BTN-58: a granted key's grants in force by repository. A key an owner or administrator
@@ -310,8 +300,8 @@ export class Claims {
     if (!isGrantedKey(createdBy)) {
       // 3-r3-1: ONE expansion, here at the source — an allow-list entry naming `<type>:*`
       // admits the worker's declared holdings of that type, so every reader of the grant
-      // (gatesFor, holdingsOf, the candidate query, the fleet) sees the same set instead of
-      // gatesFor alone widening it.
+      // (gatesFor, the candidate query, the fleet) sees the same set instead of gatesFor alone
+      // widening it.
       const allowed = this.rows<{ allowed_capabilities: string }>('SELECT allowed_capabilities FROM credentials WHERE id = ?', credential)[0];
       const listed = allowed ? (JSON.parse(allowed.allowed_capabilities) as string[]) : [];
       const set = new Set(listed);
@@ -326,61 +316,6 @@ export class Claims {
     return Object.fromEntries(this.rows<{ repository_id: string; capabilities: string; max_tier: number | null }>(
       'SELECT repository_id, capabilities, max_tier FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', credential)
       .map((g) => [g.repository_id, { capabilities: JSON.parse(g.capabilities) as string[], max_tier: g.max_tier }]));
-  }
-
-  /**
-   * R-BTN-174 (B-104): bring this worker's derived sets up to date for the reads that need
-   * them, in transactions of their own that commit whether or not the request succeeds — the
-   * route calls this BEFORE the request's transaction, and hands the enriched facts in. A
-   * claim, an advance or a why-not evaluates the one repository it concerns; a recommendation
-   * evaluates at most two repositories' sets that are not current and leaves out the legs of
-   * any repository whose set is still not current, rather than offer them from a stale set.
-   */
-  prepareSetsFor(workerId: number, wanted: string | null): WorkerFacts {
-    const w = this.worker(workerId);
-    this.prepareSets(w, wanted ? 1 : 2, wanted ? repositoryOf(wanted) : undefined);
-    return w;
-  }
-
-  private prepareSets(w: WorkerFacts, budget: number, only?: string): void {
-    if (!this.c.ontologies) {
-      w.fresh = null;
-      return;
-    }
-    const ontologied = this.rows<{ repository_id: string }>('SELECT DISTINCT repository_id FROM ontologies')
-      .map((r) => r.repository_id)
-      .filter((repo) => only === undefined || repo === only);
-    if (!ontologied.length) {
-      w.fresh = null;
-      return;
-    }
-    const fresh = new Set<string>(this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL').map((r) => r.id)
-      .filter((repo) => !ontologied.includes(repo)));
-    let spent = 0;
-    for (const repo of ontologied) {
-      if (spent >= budget && only === undefined) continue; // left out, not offered from a stale set
-      // A5 (round 1): only an evaluation that RAN spends budget — a set already current under
-      // this program and these holdings costs nothing, so a worker current everywhere is still
-      // prepared everywhere within the two-evaluation bound.
-      const program = this.c.ontologies?.programOf(repo);
-      if (program) {
-        const { holdings } = this.c.ontologies!.holdingsOf(w.id, repo);
-        const digest = this.c.ontologies!.inputDigest(program.digest, program.placed, holdings);
-        const stored = this.rows<{ input_digest: string }>('SELECT input_digest FROM worker_derived_inputs WHERE worker_id = ? AND repository_id = ?', w.id, repo)[0];
-        const current = stored?.input_digest === digest;
-        if (current && this.c.ontologies) {
-          w.derived[repo] = [...this.c.ontologies.derivedFor(w.id, repo) ?? []];
-          fresh.add(repo);
-          continue;
-        }
-      }
-      const set = this.c.ontologies?.derivedFor(w.id, repo);
-      if (set == null) continue;
-      w.derived[repo] = [...set];
-      fresh.add(repo);
-      spent++;
-    }
-    w.fresh = fresh;
   }
 
   /** A ticket's filter fields and where the head snapshot places it (R-BTN-33, R-BTN-70). */
@@ -486,7 +421,7 @@ export class Claims {
       // own seat never counts against it, so an advance excludes the advancing claim here).
       seats: this.seatFacts(item, leg, opts.except ?? null),
     };
-    return gatesFor({ declared: w.declared, derived: w.derived, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase), phase, facts);
+    return gatesFor({ declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase), phase, facts);
   }
 
   /** R-BTN-178: the capabilities rule 4 matched for this leg — the ticket's requires clause and
@@ -590,26 +525,23 @@ export class Claims {
                 OR NOT EXISTS (SELECT 1 FROM worker_grants g2 WHERE g2.credential_id = :credential))          -- an interim credential reaches every repository (B-104, A1)
            AND NOT EXISTS (SELECT 1 FROM ticket_requires r WHERE r.ticket_id = w.id
                            AND r.name NOT IN (SELECT h.capability FROM (
-                                SELECT c.capability FROM worker_capabilities c                                 -- rule 4 (R-BTN-174, B-104): H union D(H) — holdings
-                                 WHERE c.worker_id = :worker                                                    -- (declared within grant, runner: beside them) and what
-                                   AND (c.capability LIKE 'runner:%'                                        -- the repository's ontology derives. The grant bounds
-                                        OR c.capability IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j   -- holdings only, never a derivation; a grant that
-                                                            WHERE g.credential_id = :credential AND g.repository_id = w.repository_id   -- names a derived capability admits a runner
-                                                              AND g.revoked_at IS NULL)                                          -- that declares it directly.
+                                SELECT c.capability FROM worker_capabilities c                                 -- rule 4 (R-BTN-174): the runner's declared holdings,
+                                 WHERE c.worker_id = :worker                                                    -- matched by name — its grant there admits them
+                                   AND (c.capability LIKE 'runner:%'                                        -- 'runner:' capabilities beside them (R-BTN-133)
+                                        OR c.capability IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j
+                                                            WHERE g.credential_id = :credential AND g.repository_id = w.repository_id
+                                                              AND g.revoked_at IS NULL)
                                         OR EXISTS (SELECT 1 FROM worker_grants g2, json_each(g2.capabilities) j2                -- and <type>:* admits the type's holdings (R-BTN-58)
                                                     WHERE g2.credential_id = :credential AND g2.repository_id = w.repository_id
                                                       AND g2.revoked_at IS NULL AND j2.value LIKE '%:*'
                                                       AND c.capability LIKE substr(j2.value, 1, length(j2.value) - 1) || '%')
                                         OR (NOT EXISTS (SELECT 1 FROM worker_grants g3 WHERE g3.credential_id = :credential)    -- an interim credential: the allow-list is its
                                             AND c.capability IN (SELECT j4.value FROM json_each((SELECT allowed_capabilities      -- grant (B-104, A1: nothing is unbounded)
-                                                                     FROM credentials WHERE id = :credential)) j4)))
-                                UNION
-                                SELECT d.capability FROM worker_derived d
-                                 WHERE d.worker_id = :worker AND d.repository_id = w.repository_id) h))        -- D(H), read only from a current set (prepareSets)
+                                                                     FROM credentials WHERE id = :credential)) j4)))) h))
            AND NOT EXISTS (SELECT 1 FROM courses k, json_each(k.person_legs_json) p                                -- rule person (R-BTN-116): a person's leg is
                            WHERE k.repository_id = w.repository_id AND k.id = w.course_id AND p.value = a.leg)    -- never offered, whatever else it holds
            AND NOT EXISTS (SELECT 1 FROM courses k, json_each(k.leg_capabilities_json) l                           -- rule 4's leg input (R-BTN-120, B-86), read the same
-                           WHERE k.repository_id = w.repository_id AND k.id = w.course_id AND l.key = a.leg      -- way as the ticket's clause: H ∪ D(H), the one literal
+                           WHERE k.repository_id = w.repository_id AND k.id = w.course_id AND l.key = a.leg      -- way as the ticket's clause; the one literal
                              AND EXISTS (SELECT 1 FROM json_each(l.value) q                                     -- human-operator included — rule 6 is retired (R-BTN-121
                                          WHERE q.value NOT IN (SELECT h.capability FROM (                        -- as amended): declared by that name, granted by that name.
                                               SELECT c.capability FROM worker_capabilities c
@@ -624,25 +556,20 @@ export class Claims {
                                                                             AND c.capability LIKE substr(j2.value, 1, length(j2.value) - 1) || '%')
                                                       OR (NOT EXISTS (SELECT 1 FROM worker_grants g3 WHERE g3.credential_id = :credential)
                                                           AND c.capability IN (SELECT j4.value FROM json_each((SELECT allowed_capabilities
-                                                                                                   FROM credentials WHERE id = :credential)) j4)))
-                                              UNION
-                                              SELECT d.capability FROM worker_derived d
-                                               WHERE d.worker_id = :worker AND d.repository_id = w.repository_id) h)))
+                                                                                                   FROM credentials WHERE id = :credential)) j4)))) h)))
            AND COALESCE(w.tier_position, json_array_length(p.tiers) - 1)
                <= json_extract(:ceiling, '$."' || w.repository_id || '"')                                      -- rule 5, per repository
-           AND (:fresh IS NULL OR w.repository_id IN (SELECT value FROM json_each(:fresh)))                     -- R-BTN-174: a repository whose derived set is still
-                                                                                                                -- not current is left out, never offered from a stale set
            AND (:rule9 = 0 OR EXISTS (SELECT 1 FROM worker_courses f JOIN courses k ON k.repository_id = f.repository_id AND k.id = f.course_id
                                       WHERE f.worker_id = :worker AND f.repository_id = w.repository_id AND f.course_id = w.course_id
                                         AND f.version >= k.min_worker_version)))                              -- rule 9
        WHERE n > :page * 50 AND n <= (:page + 1) * 50
        ORDER BY repository_id, course_id, n`,
-      { worker: w.id, now: this.c.now(), ceiling: JSON.stringify(this.ceilingPositions(w)), fresh: w.fresh ? JSON.stringify([...w.fresh]) : null, rule9: rule9 ? 1 : 0, page,
+      { worker: w.id, now: this.c.now(), ceiling: JSON.stringify(this.ceilingPositions(w)), rule9: rule9 ? 1 : 0, page,
         // A leg's `requires` is compared as `graphOf` expanded it: the registry writes that view to
         // `leg_capabilities_json` from `legNeedsOf` when it accepts a file (§12.5), so the query reads
-        // capabilities only. B-104: rule 4 reads H ∪ D(H) — the grant against holdings alone, the
-        // ontology's derivations beside them; rule 6 is retired, so `human-operator` is the one
-        // literal both sides compare. A grant stores capabilities only, so no role is bound.
+        // capabilities only. Rule 4 matches them by name against the declared holdings the grant
+        // admits (R-BTN-174); rule 6 is retired, so `human-operator` is the one literal both sides
+        // compare. A grant stores capabilities only, so no role is bound.
         granted: w.grants ? 1 : 0, credential: w.credential_id });
   }
 
@@ -712,7 +639,6 @@ export class Claims {
       score: null,
       reasons: [...(r.lane ? ['expedite lane'] : []), `${r.to_end} leg${r.to_end === 1 ? '' : 's'} to an end`, `rank ${r.item.rank ?? '—'} in ${r.repository_id}`],
       flags: r.waits ? ['expedite-bound'] : [],
-      advice: null,
       handoff_url: r.item.station!.handoff_url,
     }));
   }
@@ -770,11 +696,6 @@ export class Claims {
   /** The ticket a claim by `w` gets now (§6.2): the named one if it passes the gates, recommended
    *  or not, with the advice it went against; else the first recommendation. Throws the §11 refusal. */
   private decide(w: WorkerFacts, wanted: string | null): { item: ItemFacts; advice: Record<string, unknown> | null } {
-    // R-BTN-174: the reads that offer legs bring the reader's derived sets up to date first —
-    // a claim evaluates the one repository it concerns, a recommendation at most two. A route
-    // that already prepared the worker's facts (its transaction would roll the writes back)
-    // passes them in with fresh already set.
-    if (w.fresh == null) this.prepareSets(w, wanted ? 1 : 2, wanted ? repositoryOf(wanted) : undefined);
     if (wanted) {
       if (!this.cutOver(wanted)) throw new BatonError('not-cut-over', `${repositoryOf(wanted)}'s claims go through git until its cutover (R-BTN-28)`);
       // §12.8 (B-145, R-BTN-189): a ticket that reaches a repository whose floored guarantee is
@@ -846,11 +767,7 @@ export class Claims {
   /** `GET /v1/runner/recommendations` (R-BTN-45): the sorted legs this worker may take, without
    *  claiming; `?limit=` applies after the merge (R-BTN-61). */
   recommendations(workerId: number, limit = 10) {
-    const w = this.worker(workerId);
-    // R-BTN-174: a recommendation evaluates at most two repositories' sets that are not
-    // current, and leaves out the legs of any repository whose set still is not.
-    this.prepareSets(w, 2);
-    return { recommendations: this.recommend(w, limit) };
+    return { recommendations: this.recommend(this.worker(workerId), limit) };
   }
 
   /** `GET /v1/runner/next`: the first recommendation, or `no-eligible-ticket`. */
@@ -863,7 +780,7 @@ export class Claims {
   /** `POST /v1/runner/claim` (§6.2): idempotent by `request_id`; the lock is the index. The claim
    *  is at the ticket's posted station, running nothing, its path recorded (R-BTN-63). */
   // @model claim sha256:2474e2bb5224
-  claim(workerId: number, body: unknown, prepared?: WorkerFacts) {
+  claim(workerId: number, body: unknown) {
     const b = checkClaim(body);
     if (!this.anyCutOver()) throw new BatonError('not-cut-over', 'claims go through git until cutover (R-BTN-28)');
     const prior = this.rows<{ id: number; worker_id: number }>('SELECT id, worker_id FROM claims WHERE request_id = ?', b.request_id)[0];
@@ -873,7 +790,7 @@ export class Claims {
       return this.claimResponse(prior.id);
     }
     const now = this.c.now();
-    const w = prepared ?? this.worker(workerId);
+    const w = this.worker(workerId);
     const mine = this.rows<{ ticket_id: string }>(`SELECT ticket_id FROM claims WHERE worker_id = ? AND status = 'active'`, workerId)[0];
     if (mine) throw new BatonError('not-eligible', `this worker holds ${mine.ticket_id}; end it before claiming another (R-BTN-4)`, { rule: 'one-claim-per-worker' });
     const { item, advice } = this.decide(w, b.ticket_id);
@@ -932,8 +849,8 @@ export class Claims {
    *  while the repository requires signed control — the record of what counts, with the owner
    *  keys a runner verifies the named commits against itself. */
   private claimResponse(id: number) {
-    const c = this.rows<{ id: number; ticket_id: string; nonce: string; snapshot_sha: string; station: string; offered_leg: string | null; advice_json: string | null; course_id: string | null }>(
-      'SELECT id, ticket_id, nonce, snapshot_sha, station, offered_leg, advice_json, course_id FROM claims WHERE id = ?', id)[0];
+    const c = this.rows<{ id: number; ticket_id: string; nonce: string; snapshot_sha: string; station: string; offered_leg: string | null; course_id: string | null }>(
+      'SELECT id, ticket_id, nonce, snapshot_sha, station, offered_leg, course_id FROM claims WHERE id = ?', id)[0];
     // R-BTN-81's reading of the same two facts (`legFacts`): the course in force for the claim's
     // repository, at the version the registry holds for it.
     const courseVersion = c.course_id
@@ -953,7 +870,6 @@ export class Claims {
     const handoff = this.rows<{ handoff_url: string | null }>('SELECT handoff_url FROM ticket_stations WHERE ticket_id = ?', c.ticket_id)[0]?.handoff_url ?? null;
     const previous = this.rows<{ id: number; status: string; end_reason: string | null; end_detail: string | null; ended_at: number | null; resume_json: string | null }>(
       `SELECT id, status, end_reason, end_detail, ended_at, resume_json FROM claims WHERE ticket_id = ? AND id < ? AND status != 'active' ORDER BY id DESC`, c.ticket_id, id);
-    const advice = c.advice_json ? (JSON.parse(c.advice_json) as { recommendation?: Recommendation | null }) : null;
     // §12.8 (B-145): the policy facts of the claim's repository (R-BTN-189) and where state one
     // leg hands the next lives (R-BTN-188's `leg_state` — B-148 reads it). B-182 (R-BTN-190): a
     // `git` home's claimed ticket on a course that reads PR facts keeps its rounds in its PR's
@@ -989,7 +905,6 @@ export class Claims {
         claim_id: p.id, status: p.status, end_reason: p.end_reason, detail: p.end_detail, ended_at: p.ended_at,
         resume: p.resume_json ? JSON.parse(p.resume_json) : null, legs: this.legsOf(p.id),
       })),
-      ...(advice?.recommendation ? { advice: advice.recommendation.advice } : {}),
     };
   }
 
@@ -1033,11 +948,10 @@ export class Claims {
    * checks the edge (the leg leaves that station), the run limit (its runs in `start_path` and this
    * claim's legs, under current names, R-BTN-64) and the gates that bind a holder, never the leg's
    * state. The first advance starts the leg the claim was offered (R-BTN-83). A refusal changes
-   * nothing. The answer carries the latest snapshot's next legs and the course's advice (none
-   * until the course's hook, R3-1236).
+   * nothing. The answer carries the latest snapshot's next legs and the run's id.
    */
   // @model advance sha256:4d03ba461c46
-  advance(workerId: number, claimId: number, body: unknown, prepared?: WorkerFacts) {
+  advance(workerId: number, claimId: number, body: unknown) {
     const b = checkAdvance(body);
     const c = this.held(workerId, claimId);
     if (c.status !== 'active') throw new BatonError('claim-ended', `the claim already ended (${c.status}: ${c.end_reason})`);
@@ -1085,10 +999,7 @@ export class Claims {
     const posted = this.rows<{ tag: string }>('SELECT tag FROM ticket_bars WHERE ticket_id = ? AND leg = ?', c.ticket_id, leg).map((r) => r.tag);
     const unmet = this.c.admin.requiredBars(repo).find((r) => requiredBarCovers(r, item.course, leg, g) && !meetsRequiredBar(r, [...posted, ...b.bars]));
     if (unmet) throw new BatonError('not-eligible', `policy: ${leg} must bar a ${unmet.tag_prefix} tag (an owner's required bar)`, { rule: 8, rule_code: 'policy' });
-    // R-BTN-174: an advance re-checks rule 4 against the current set, so a program change can
-    // refuse a holder's next advance, as a lost declaration can — brought current first.
-    const advancing = prepared ?? this.worker(workerId);
-    if (advancing.fresh == null) this.prepareSets(advancing, 1, repo);
+    const advancing = this.worker(workerId);
     const v = this.gate(advancing, item, leg, 'advance', { except: claimId, holderBars: b.bars });
     if (!v.ok) throw this.refusal(c.ticket_id, v, 'advance', advancing, claimId);
     // R-BTN-109: the finished leg arrives at `at` with what its entry asks; inline values in full.
@@ -1104,22 +1015,13 @@ export class Claims {
       this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', at, now, b.evidence, claimId, run.seq);
       const f = this.legFacts(claimId, run.leg, run.run_id);
       this.c.history?.record(f.ticket, { kind: 'leg-finished', ...f.row, reached: at, next_leg: leg, ...(b.evidence ? { detail: { evidence: b.evidence } } : {}) });
-      // R-BTN-177 (B-105): the finished leg's reported taken, judged against the snapshot it ran
-      // under — BEFORE the resolution below, so a dead holding it named is gone from `has` and
-      // the leg this advance starts is advised without it.
-      this.reportTaken(workerId, claimId, c.ticket_id, run.seq, b.taken);
       // B-134: the finished leg's scope audit, reported on the advance that finishes it — the
       // actions outside the claim's ticket scope raise their findings (and their hold) here,
       // and the report's dropped count (entries that failed their shape, actions beyond its
-      // sixteen) is logged as `taken-invalid` logs the taken's, never a refusal.
+      // sixteen) is logged as `scope-invalid`, never a refusal.
       this.c.scope?.exceeded(claimId, b.scope_exceeded);
       if (b.scope_exceeded?.dropped) this.event('scope-invalid', `worker:${workerId}`, { dropped: b.scope_exceeded.dropped, claim: claimId }, c.ticket_id, claimId);
     }
-    // R-BTN-177: the route choices the course attaches to the leg being started resolve here, in
-    // the advance's transaction — a snapshot stored with the leg run and carried as advice,
-    // identifiers only. A claim runs nothing (R-BTN-63); nothing resolves at the claim.
-    const attached = this.legRouteChoices(repo, c.course_id, leg);
-    const resolved = attached.length ? this.c.ontologies?.resolveFor(workerId, repo, attached, now) ?? null : null;
     const seq = (this.rows<{ s: number | null }>('SELECT MAX(seq) AS s FROM claim_legs WHERE claim_id = ?', claimId)[0].s ?? 0) + 1;
     // R-BTN-63 (B-185): the run's id, minted here; a collision with an existing id is refused by
     // the column's unique index and a new one minted.
@@ -1127,15 +1029,15 @@ export class Claims {
     for (let tries = 0; ; tries++) {
       runId = mintRunId(now, this.c.random);
       try {
-        this.exec(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation, route_choices_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          claimId, seq, runId, leg, at, JSON.stringify(b.bars), now, n, resolved ? JSON.stringify(resolved.route_choices) : null);
+        this.exec(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          claimId, seq, runId, leg, at, JSON.stringify(b.bars), now, n);
         break;
       } catch (e) {
         if (!isUniqueViolation(e) || !/run_id/.test(String(e)) || tries >= 8) throw e;
       }
     }
     const started = this.legFacts(claimId, leg, runId);
-    this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}), ...(resolved ? { route_choices: resolved.route_choices.map((r) => r.choice) } : {}) } });
+    this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}) } });
     // R-BTN-62: only a reading numbered above the counter now can judge the claim stale.
     this.exec('UPDATE claims SET station = ?, leg = ?, claim_observation = ? WHERE id = ?', at, leg, n, claimId);
     // R-BTN-178: the seats of the leg this advance starts, rewritten in its transaction — an
@@ -1143,67 +1045,7 @@ export class Claims {
     this.writeSeats(claimId, item, leg);
     this.event('advanced', `worker:${workerId}`, { from: station, reached: at, leg, ...(b.bars.length ? { bars: b.bars } : {}), ...(b.evidence ? { evidence: b.evidence } : {}) }, c.ticket_id, claimId);
     this.c.dispatch?.('sync', c.ticket_id); // R-BTN-73: after every advance
-    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), advice: resolved ?? null, run_id: runId };
-  }
-
-  /** The route choices a course entry attaches to a leg (R-BTN-177): the `route_choices` map the
-   *  unit accepted, in force for the claim's course. */
-  private legRouteChoices(repo: string, courseId: string | null, leg: string): string[] {
-    if (!courseId) return [];
-    const row = this.rows<{ route_choices_json: string }>('SELECT route_choices_json FROM courses WHERE repository_id = ? AND id = ?', repo, courseId)[0];
-    if (!row) return [];
-    try {
-      const ids = (JSON.parse(row.route_choices_json) as Record<string, string[]>)[leg];
-      return Array.isArray(ids) ? ids : [];
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * R-BTN-177 (B-105): what a finishing leg reported in `BATON_TAKEN`. Kept: one entry per route
-   * choice the leg's snapshot resolved, naming an alternative THAT CHOICE has — whether or not
-   * the resolution offered it (an excluded or unavailable alternative is still accepted: an
-   * exclusion filters advice, never a report, and such a taken is recorded advice-overridden).
-   * Dropped and logged `taken-invalid`: the rest, never refusing the advance or end that carries
-   * it. Each kept entry's `dead` holdings leave the declared set in this transaction
-   * (R-BTN-126's shape), and an alternative other than the advised one records
-   * `advice-overridden`; a choice that resolved `null` stores whatever it is given, no override.
-   */
-  private reportTaken(workerId: number, claimId: number, ticketId: string, seq: number, taken: { kept: { choice: string; alternative: string; dead: string[] }[]; dropped: number } | null): void {
-    if (!taken || !taken.kept.length) { if (taken?.dropped) this.event('taken-invalid', `worker:${workerId}`, { dropped: taken.dropped, claim: claimId }, ticketId, claimId); return; }
-    const row = this.rows<{ route_choices_json: string }>('SELECT route_choices_json FROM claim_legs WHERE claim_id = ? AND seq = ?', claimId, seq)[0];
-    const snapshot = row?.route_choices_json ? (JSON.parse(row.route_choices_json) as { choice: string; alternative: string | null }[]) : [];
-    const repo = repositoryOf(ticketId);
-    const kept: { choice: string; alternative: string; dead: string[] }[] = [];
-    const seen = new Set<string>();
-    let invalid = 0;
-    for (const entry of taken.kept) {
-      if (seen.has(entry.choice)) continue; // at most one entry per route choice; the rest drop
-      const resolved = snapshot.find((r) => r.choice === entry.choice);
-      // A leg without route choices, a choice its snapshot lacks, or an alternative the choice
-      // itself lacks (R-BTN-177: "an alternative that route choice lacks") — dropped, logged,
-      // never refusing the advance or end. Membership is the choice's own alternatives, read
-      // from the program in force, so an excluded or unavailable one is accepted.
-      const alternatives = this.c.ontologies?.alternativesOf(repo, entry.choice) ?? null;
-      if (resolved == null || alternatives == null || !alternatives.includes(entry.alternative)) {
-        invalid++;
-        continue;
-      }
-      seen.add(entry.choice);
-      kept.push(entry);
-    }
-    if (invalid + taken.dropped) this.event('taken-invalid', `worker:${workerId}`, { dropped: invalid + taken.dropped, claim: claimId }, ticketId, claimId);
-    if (!kept.length) return;
-    this.exec('UPDATE claim_legs SET taken_json = ? WHERE claim_id = ? AND seq = ?',
-      JSON.stringify(kept.map(({ choice, alternative, dead }) => ({ choice, alternative, ...(dead.length ? { dead } : {}) }))), claimId, seq);
-    for (const entry of kept) {
-      const resolved = snapshot.find((r) => r.choice === entry.choice)!;
-      if (resolved.alternative != null && resolved.alternative !== entry.alternative) {
-        this.event('advice-overridden', `worker:${workerId}`, { choice: entry.choice, advised: resolved.alternative, taken: entry.alternative }, ticketId, claimId);
-      }
-      for (const capability of entry.dead) this.c.ontologies?.dropHolding(workerId, capability);
-    }
+    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId };
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
@@ -1239,28 +1081,16 @@ export class Claims {
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
     if (e.status === 'completed' && finished && g) this.checkEntry(repositoryOf(c.ticket_id), g, reached, e.outputs);
     else if (e.status === 'completed') this.checkOutputValues(repositoryOf(c.ticket_id), e.outputs);
-    // R-BTN-177 (B-105): the ending claim's running leg reports its taken here when no advance
-    // finished it — judged against its own snapshot, its dead holdings leaving the declared set
-    // in this transaction.
-    const ending = this.runningLeg(c.id);
-    if (ending) this.reportTaken(workerId, c.id, c.ticket_id, ending.seq, e.taken);
     // B-134: the ending claim's leg-end scope audit, likewise — the actions outside the claim's
     // ticket scope raise their findings (and their hold) in this transaction, and the report's
     // dropped count is logged `scope-invalid`, never a refusal.
     this.c.scope?.exceeded(c.id, e.scope_exceeded);
     if (e.scope_exceeded?.dropped) this.event('scope-invalid', `worker:${workerId}`, { dropped: e.scope_exceeded.dropped, claim: c.id }, c.ticket_id, c.id);
-    // R-BTN-126's capability branch (B-104): the holding the runner says it lost leaves its
-    // declared set, its derived sets re-evaluate in this transaction, and the fleet's counts
-    // follow — rule 4 refuses this runner at once. A valid blocked end is not a failed attempt,
-    // not a run for max_runs, and starts no backoff (the blocked-end work's rules).
-    if (e.prerequisite?.kind === 'capability') {
-      this.exec('DELETE FROM worker_capabilities WHERE worker_id = ? AND capability = ?', workerId, e.prerequisite.ref);
-      this.c.ontologies?.forget(workerId, null);
-      for (const repo of this.rows<{ repository_id: string }>('SELECT DISTINCT repository_id FROM ontologies')) {
-        this.c.ontologies?.derivedFor(workerId, repo.repository_id);
-      }
-      // (No extra write: the transaction is the end's own; the rows above are its shape.)
-    }
+    // R-BTN-126's capability branch: the holding the runner says it lost leaves its declared
+    // set, and the fleet's counts follow (R-BTN-75) — rule 4 refuses this runner at once. A
+    // valid blocked end is not a failed attempt, not a run for max_runs, and starts no backoff
+    // (the blocked-end work's rules). The transaction is the end's own; the delete is its shape.
+    if (e.prerequisite?.kind === 'capability') this.exec('DELETE FROM worker_capabilities WHERE worker_id = ? AND capability = ?', workerId, e.prerequisite.ref);
     this.finish(c.id, c.ticket_id, e.status, e.end_reason, `worker:${workerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next });
     return { ok: true };
   }

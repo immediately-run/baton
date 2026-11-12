@@ -31,42 +31,6 @@ import { MARKDOWN_SOURCE } from '../defaults/ticket-versions';
 
 const LEG_PROCESS = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
-/** One entry of a leg's reported taken (R-BTN-177), as BATON_TAKEN holds it. */
-interface Taken {
-  choice: string;
-  alternative: string;
-  dead: string[];
-}
-
-/** The leg's taken, read from BATON_TAKEN after it exits (R-BTN-177): dropped whole when the
- *  file is unparseable or over 4 KB — reporting never fails the leg's end. Shape-checked only;
- *  Baton judges each entry against the leg's route choices, dropping what fails. */
-function readTaken(path: string): Taken[] | null {
-  let text: string;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch {
-    return null;
-  }
-  if (text.trim() === '' || Buffer.byteLength(text, 'utf8') > 4096) return null;
-  try {
-    const v = JSON.parse(text);
-    if (!Array.isArray(v) || v.length > 16) return null;
-    const out: Taken[] = [];
-    for (const e of v as unknown[]) {
-      if (!e || typeof e !== 'object' || Array.isArray(e)) return null;
-      const { choice, alternative, dead } = e as Record<string, unknown>;
-      if (typeof choice !== 'string' || typeof alternative !== 'string') return null;
-      const d = dead === undefined ? [] : dead;
-      if (!Array.isArray(d) || !d.every((x) => typeof x === 'string')) return null;
-      out.push({ choice, alternative, dead: [...new Set(d as string[])] });
-    }
-    return out;
-  } catch {
-    return null;
-  }
-}
-
 /** §6.3: the sidecar's cadence — every beat 2 minutes. */
 export const BEAT_MS = 2 * 60_000;
 /** B-86: how many beats one claim attempt spends making the server's record of the declaration
@@ -342,13 +306,6 @@ export class Runner {
   /** B-86: the `forbidden` line has been said for this stretch of refusals (reset by the next
    *  answered beat), so asking again is not narrated on every beat. */
   private saidForbidden = false;
-  /** R-BTN-177 (B-105): holdings a leg reported dead in its taken — the runner stops declaring
-   *  them for the rest of its session; Baton removed them from its declared set in the
-   *  reporting advance's or end's transaction. */
-  private dead = new Set<string>();
-  /** R-BTN-177 (B-105): the taken the leg that just exited wrote, reported on the advance or end
-   *  that finishes it and cleared when it is. */
-  private pendingTaken: Taken[] | null = null;
   /** B-134: the actions the finished leg's audit found outside the claim's ticket scope —
    *  reported on the advance or end that finishes it, like the taken, and cleared when it is. */
   private pendingScope: ScopeAction[] | null = null;
@@ -458,11 +415,10 @@ export class Runner {
   }
 
   /** The declaration as it goes out on a beat or is compared before a claim (B-86, B-106): the
-   *  settled list less what a leg reported dead, and less every lock capability whose file this
-   *  process does not hold — of the runners on one machine only the one holding the lock declares
-   *  it (R-BTN-178). */
+   *  settled list less every lock capability whose file this process does not hold — of the
+   *  runners on one machine only the one holding the lock declares it (R-BTN-178). */
   private declaringList(): string[] {
-    const base = (this.declared ?? this.o.capabilities ?? []).filter((c) => !this.dead.has(c));
+    const base = this.declared ?? this.o.capabilities ?? [];
     const locks = this.locks;
     return locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
   }
@@ -474,7 +430,6 @@ export class Runner {
     // B-86: `--capabilities` narrows; without it the declaration is the grant's, which the first
     // answer carries (`grant.capabilities`), so the first beat asks and declares nothing — the
     // registration has no declaration to widen, and the beat after it serves the grant.
-    // R-BTN-177: a holding a leg reported dead is never declared again this session.
     // B-106 (R-BTN-178): a lock free again is taken and declared; one another process on this
     // machine holds is not declared, so no leg requiring it is offered here. Mid-claim the set
     // is the claim's own — `ensureLegLocks` holds the legs' locks and releases the rest — so the
@@ -1267,8 +1222,8 @@ export class Runner {
     // `missing-capability` a machine that holds the thing cannot be refused (review round 1,
     // finding 2). At most two beats: the first may join the timer's in-flight one, which built
     // its declaration before the take (round 2, finding 2) — the second is fresh. A capability
-    // the runner's own list never names (one only the server derives, R-BTN-174) cannot be
-    // declared at all, so it asks for no beat (round 2, finding 4).
+    // the runner's own list never names cannot be declared at all, so it asks for no beat
+    // (round 2, finding 4).
     const sendable = needed.filter((c) => (this.declared ?? this.o.capabilities ?? []).includes(c));
     for (let beats = 0; beats < 2 && sendable.some((c) => this.sent != null && !this.sent.includes(c)); beats++) await this.tick();
     return true;
@@ -1481,11 +1436,8 @@ export class Runner {
       (a.legs ?? []).map((l) => ({ leg: l.leg, reached: l.reached ?? '' })));
     let handoffUrl = (claim.handoff_url ?? null) as string | null;
     let resume = (claim.previous_attempts?.[0]?.resume ?? null) as Record<string, any> | null;
+    // R3-1236's course slot: the claim answer's advice, handed to the stub as `ctx.advice`.
     let advice = (claim.advice ?? null) as unknown;
-    // R-BTN-177 (B-105): the STARTING ADVANCE's advice — exactly what it answered, null included
-    // — is what BATON_ADVICE holds for the leg it starts (R-BTN-144). The claim answer's advice
-    // (the recommendation's, R3-1236) is the course slot above and never reaches the file.
-    let advanceAdvice: unknown = null;
     let session: string | null = null;
     const own: string[] = [];
     let ranScript: string | null = null;
@@ -1514,7 +1466,6 @@ export class Runner {
       at = firstAnswer.station ?? at;
       nextLegs = (firstAnswer.next ?? nextLegs) as NextLegs;
       advice = firstAnswer.advice ?? advice;
-      advanceAdvice = firstAnswer.advice ?? null;
       // R-BTN-63 (B-185): the run's id, minted by Baton at the advance that started it.
       let runId = typeof firstAnswer.run_id === 'string' ? firstAnswer.run_id : null;
       for (;;) {
@@ -1576,7 +1527,7 @@ export class Runner {
           // legs, B-96's review round 2): the stub hands it to the close, so a marker line goes
           // to the branch the sync reads whatever branch this checkout is on.
           ...(typeof claim.default_branch === 'string' && claim.default_branch !== '' ? { default_branch: claim.default_branch } : {}),
-          handoff: handoffUrl, resume, advice, route_advice: advanceAdvice,
+          handoff: handoffUrl, resume, advice,
           checkout: this.o.home, session,
           state: this.o.stateFile, worker: this.state.get().worker_id,
         };
@@ -1660,9 +1611,8 @@ export class Runner {
         // The go-on decision: the advance carries the result's bars on the edge (R-BTN-63) and
         // the evidence `close` wrote; it finishes this leg and starts the next. The finished leg
         // joins the evidenced path only now — the next leg's run number counts what ran. Its
-        // taken (R-BTN-177) reports here, on the advance that finishes it, and so does its
-        // scope audit (B-134) — read after the close, above, so the evidence push is in the
-        // window too.
+        // scope audit (B-134) reports here, on the advance that finishes it — read after the
+        // close, above, so the evidence push is in the window too.
         // B-106 (R-BTN-178): the lock of a leg the next one requires is taken before the advance
         // is sent; one this runner cannot take suspends the claim rather than sending it, the
         // finished leg's evidence already in git (R-BTN-121, R-BTN-71).
@@ -1670,13 +1620,12 @@ export class Runner {
           return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg }, await this.callHandoff(script, ctx) ?? handoffUrl);
         }
         this.auditLeg();
-        const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}), ...(this.pendingTaken ? { taken: this.pendingTaken } : {}), ...(this.pendingScope ? { scope_exceeded: { actions: this.pendingScope, dropped: this.scopeOverflow } } : {}) }, verdict.reached);
-        // The parked taken and report are cleared only when the advance DELIVERED them: a
-        // refused advance (§6.13, settled below) never reached the core's report handling, and
-        // the end that settles the claim carries them instead — the report rides "the advance
-        // or end that finishes the leg", whichever one it turns out to be.
+        const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}), ...(this.pendingScope ? { scope_exceeded: { actions: this.pendingScope, dropped: this.scopeOverflow } } : {}) }, verdict.reached);
+        // The parked report is cleared only when the advance DELIVERED it: a refused advance
+        // (§6.13, settled below) never reached the core's report handling, and the end that
+        // settles the claim carries it instead — the report rides "the advance or end that
+        // finishes the leg", whichever one it turns out to be.
         if (!('settle' in answer)) {
-          this.pendingTaken = null;
           this.pendingScope = null;
           this.scopeOverflow = 0;
         }
@@ -1690,7 +1639,6 @@ export class Runner {
         at = answer.station ?? verdict.reached;
         nextLegs = (answer.next ?? nextLegs) as NextLegs;
         advice = answer.advice ?? advice;
-        advanceAdvice = answer.advice ?? null;
         runId = typeof answer.run_id === 'string' ? answer.run_id : null;
         legName = verdict.leg;
         handoffUrl = null;
@@ -1758,15 +1706,6 @@ export class Runner {
     const script = course.scripts.get(leg);
     if (script == null) return { kind: 'missing' };
     const tag = randomBytes(4).toString('hex');
-    // R-BTN-177 (B-105): BATON_ADVICE holds the starting advance's advice — identifiers only,
-    // data for the leg — and BATON_TAKEN names a file the leg may write `[{choice, alternative,
-    // dead?}]` to. Both are created before each leg and removed after; a taken that is
-    // unparseable or over 4 KB is dropped here, never failing the leg's end.
-    const advicePath = join(scratch, `advice-${leg}-${tag}.json`);
-    const takenPath = join(scratch, `taken-${leg}-${tag}.json`);
-    writeFileSync(advicePath, JSON.stringify(ctx.route_advice ?? null));
-    writeFileSync(takenPath, '');
-    this.pendingTaken = null;
     // Detached: its own process group, so a lost lease kills the leg and everything it started
     // (§6.13) without touching the runner. The env names the parent every leg session checks
     // (BATON_PARENT — such a session never claims; BATON_STATE — the fence and the spool). B-97
@@ -1774,9 +1713,6 @@ export class Runner {
     const parent = String(this.state.get().worker_id ?? '');
     const childEnv: Record<string, string | undefined> = {
       ...process.env, BATON_PARENT: parent, BATON_STATE: this.o.stateFile,
-      // R-BTN-144 (B-105): the advice the starting advance answered, and the file the leg's
-      // taken goes in — both paths, the data in the files, never on the command line.
-      BATON_ADVICE: advicePath, BATON_TAKEN: takenPath,
       // R-BTN-144 (B-185): the run's id, and its session — `<run_id>.r0`, the first session;
       // a refresh (R-BTN-123, B-12) counts on from there. Absent when the advance named none.
       ...(typeof ctx.run_id === 'string' ? { BATON_RUN_ID: ctx.run_id, BATON_SESSION_ID: `${ctx.run_id}.r0` } : {}),
@@ -1821,8 +1757,6 @@ export class Runner {
         snapshot_sha: String((ctx.snapshot as { sha?: string })?.sha ?? ''), paths: [scratch, course.scratch], env,
       });
     } catch (e) {
-      rmSync(advicePath, { force: true });
-      rmSync(takenPath, { force: true });
       // The leg's own failure text leaves masked, whatever of it the executor quoted.
       return { kind: 'crashed', error: maskLegOutput(`the executor could not start the leg's session (${msg(e)})`, legSecrets) };
     }
@@ -1871,21 +1805,6 @@ export class Runner {
     // executor's call kills what it left behind; the session lives on for close and hand-off.
     const exit = await exited;
     inflight.child = null;
-    // R-BTN-177: collect the leg's taken before the files go — reported on the advance or end
-    // that finishes this leg. Read through the session (the leg wrote it where it ran). A file
-    // that is unparseable or over 4 KB is dropped whole; each entry's `dead` holdings join the
-    // session's dead set, never declared on a beat again.
-    let takenText = '';
-    try {
-      takenText = (await this.executor.exec(handle, ['cat', takenPath], { cwd: this.o.home, timeout_s: 30 }).result).stdout;
-    } catch {
-      // The session went (a lost lease's stop): no taken to report.
-    }
-    writeFileSync(takenPath, takenText);
-    this.pendingTaken = readTaken(takenPath);
-    for (const entry of this.pendingTaken ?? []) for (const d of entry.dead) this.dead.add(d);
-    rmSync(advicePath, { force: true });
-    rmSync(takenPath, { force: true });
     const out = wrapperOutcome(exit.stdout);
     if (out == null) return { kind: 'crashed', error: 'the leg wrote no result' };
     // A crashed leg's error is its own text (the thrown message the wrapper printed), masked
@@ -1937,10 +1856,6 @@ export class Runner {
     // window, not after it.
     this.auditLeg();
     const ticket = this.state.get().claim?.ticket_id ?? this.inflight?.ticket ?? '';
-    // R-BTN-177: the end that finishes the running leg reports its taken, when no advance
-    // delivered it first (the go-on advance clears `pendingTaken` once it has).
-    if (this.pendingTaken != null && body.taken === undefined) body = { ...body, taken: this.pendingTaken };
-    this.pendingTaken = null;
     // B-134: the end carries the leg's scope audit the same way — the advance that finished the
     // leg clears it once it has delivered it — with the count of the actions beyond its
     // sixteen, parked beside them.

@@ -115,7 +115,6 @@ interface FleetWorker {
   repos: Map<string, Set<string> | null>;
   caps: Set<string>;
   uses: Set<string>;
-  derived: Map<string, Set<string>>;
 }
 
 /** A registered resource as the counts need it: its scope and who serves it, with each account
@@ -666,13 +665,6 @@ export class Blocks {
           id: w.id,
           repos,
           caps: new Set(this.rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ?', w.id).map((r) => r.capability)),
-          // R-BTN-174 (B-104): what the repository's ontology derives from the worker's granted
-          // holdings — D(H), read from a current set, beside the declared capabilities.
-          derived: new Map(this.rows<{ repository_id: string; capability: string }>('SELECT repository_id, capability FROM worker_derived WHERE worker_id = ?', w.id)
-            .reduce((acc, r) => {
-              (acc.get(r.repository_id) ?? acc.set(r.repository_id, new Set<string>()).get(r.repository_id)!).add(r.capability);
-              return acc;
-            }, new Map<string, Set<string>>())),
           uses: new Set(this.rows<{ instance: string }>('SELECT instance FROM worker_instances WHERE worker_id = ?', w.id).map((r) => r.instance)),
         };
       });
@@ -720,11 +712,10 @@ export class Blocks {
     const capsOf = (w: FleetWorker, repo: string) => {
       const g = w.repos.get(repo);
       if (g === undefined) return null;
-      // H ∪ D(H) (R-BTN-174): the grant bounds holdings — wildcards served expanded by
-      // fleet(), an interim credential bounded by its allow-list — and the ontology's
-      // derivations count beside them.
-      const h = g ? new Set([...w.caps].filter((c) => c.startsWith('runner:') || g.has(c))) : w.caps;
-      return new Set([...h, ...(w.derived.get(repo) ?? [])]);
+      // R-BTN-174: declarations alone — the grant bounds holdings (wildcards served expanded by
+      // fleet(), an interim credential bounded by its allow-list), its `runner:` capabilities
+      // beside them (R-BTN-133), and nothing derived.
+      return g ? new Set([...w.caps].filter((c) => c.startsWith('runner:') || g.has(c))) : w.caps;
     };
     // Capabilities.
     const needCaps = this.rows<{ repository_id: string; name: string }>(
@@ -835,20 +826,17 @@ export class Blocks {
    *  comparison against what it declares and is granted, and its own usable instances. */
   forWorker(workerId: number, ticketId: string): WorkerAnswer {
     const w = this.fleet(workerId)[0] ?? {
-      id: workerId, repos: new Map<string, Set<string> | null>(), caps: new Set<string>(), derived: new Map<string, Set<string>>(),
+      id: workerId, repos: new Map<string, Set<string> | null>(), caps: new Set<string>(),
       uses: new Set(this.rows<{ instance: string }>('SELECT instance FROM worker_instances WHERE worker_id = ?', workerId).map((r) => r.instance)),
     };
     const repo = repositoryOf(ticketId);
     const now = this.c.now();
     const g = w.repos.get(repo);
-    // B-104 (round 1 B8, round 2 r2-3): the asking runner's own answer is rule 4's — H ∪ D(H)
-    // with the grant's wildcards (fleet() serves them expanded) and `runner:` beside; an
-    // interim credential's map entry is its allow-list, never null.
+    // B-104 (round 1 B8, round 2 r2-3): the asking runner's own answer is rule 4's — its
+    // declarations with the grant's wildcards (fleet() serves them expanded) and `runner:`
+    // beside; an interim credential's map entry is its allow-list, never null.
     const grantAdmits = (c: string) => (g ? g.has(c) : true);
-    const caps = new Set([
-      ...[...w.caps].filter((c) => c.startsWith('runner:') || grantAdmits(c)),
-      ...(w.derived.get(repo) ?? []),
-    ]);
+    const caps = new Set([...w.caps].filter((c) => c.startsWith('runner:') || grantAdmits(c)));
     const blocks: Block[] = this.rows<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ? ORDER BY name', ticketId)
       .filter((r) => !caps.has(r.name)).map((r) => ({ kind: 'capability' as const, ref: r.name, since: now }));
     const info = this.resources();

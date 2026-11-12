@@ -72,7 +72,6 @@ describe('POST /v1/sync/board', () => {
     ['a course file over 64 KiB with none in force', { ...payload(A, null, board.states.A), registry: [course(3, 3, { course: { pad: 'x'.repeat(65 * 1024) } })] }],
     ['a previous branch pattern without {ticket}', { ...payload(A, null, board.states.A), registry: [course(3, 3, { previous_branch_pattern: 'feature/*' })] }],
     ['65 step kinds', { ...payload(A, null, board.states.A), registry: [course(3, 3, { step_kinds: Array.from({ length: 65 }, (_, i) => `k${i}`) })] }],
-    ['a report horizon past 168 hours', { ...payload(A, null, board.states.A), registry: [course(3, 3, { report_horizon_h: 169 })] }],
     ['a version past the ceiling', { ...payload(A, null, board.states.A), registry: [course(1_000_000_001, 0)] }],
     ['an item naming a malformed course', { sha: A, parent_sha: null, state: { items: [{ id: 'R3-1', title: 't', status: 'available', queue: 'autonomous', node: 'blocked', course: 'Roadmap PR' }] }, ready: [] }],
     ['a reviewer with no bills', { ...payload(A, null, board.states.A), matrix: { families: {}, agents: { 'review-pr-x': { reviews_on: 'm' } } } }],
@@ -94,6 +93,17 @@ describe('POST /v1/sync/board', () => {
     expect((await syncCall('/v1/sync/board', payload(board.shas.B, A, board.states.B, residue))).status).toBe(200);
     expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('model_providers', 'provider_models', 'peak_schedules')`)).toEqual([]);
     expect(await head()).toBe(board.shas.B);
+  });
+
+  it('B-167: a post still carrying an ontology, or an entry its route choices, is accepted and stores nothing', async () => {
+    // §5.9's restructure took the ontology and route choices out of core: a sync older than
+    // B-167 keeps posting both, and the window takes the fields ignored — nothing is validated
+    // in them, nothing is stored, and the registry entry's own route_choices go the same way.
+    const retired = { ontology: { builtin: 'baton@1', program: { not: 'a program' } }, registry: [course(3, 3, { route_choices: { go: ['codegen'] } })] };
+    expect((await syncCall('/v1/sync/board', payload(A, null, board.states.A, retired))).status).toBe(200);
+    expect(await head()).toBe(A);
+    expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('ontologies', 'worker_derived', 'worker_derived_inputs', 'ontology_refusals', 'route_last')`)).toEqual([]);
+    expect(await rows(`SELECT name FROM pragma_table_info('courses') WHERE name IN ('route_choices_json', 'report_horizon_h')`)).toEqual([]);
   });
 
   it.skipIf(!inject('liveBoard'))("accepts what the docs sync builds for today's board, reference data included", async () => {
