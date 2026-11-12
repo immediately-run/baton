@@ -1,0 +1,87 @@
+---
+title: "B-233 — The hook spike's spec deltas: what §8.1 and §9.2 promise must be qualified by harness build — the opencode deny gap is closed only on v2.2.5+, Claude Code's call layout changed in 2.1.319, and neither harness has a failure or idle event"
+id: B-233
+project: baton
+status: available
+updated: 2026-11-12
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1232
+tier: judgement
+description: "R3-1210's re-measurement (2026-11-12, docs PR #224) found four deltas between BATON_SPEC and the harnesses as built: (1) opencode v2.1.2-neumark.2 could not deny a tool call from a plugin in headless runs — v2.2.5-neumark.1 can; (2) Claude Code 2.1.316 ran simple Bash commands in the harness's own process group, so a group kill could kill the harness — 2.1.319 wraps every call in its own session; (3) Claude Code fires no post or failure hook for a failed (nonzero-exit) call, and a PostToolUse carrying backgroundTaskId is a hand-off, not a completion; (4) opencode emits no session.idle headless and session.created is not observable for the run's own standalone session. Amend the spec wording and gate R3-1213/R3-1214 on the builds measured. Requires: none."
+topics:
+  - baton
+  - harness
+owns: {}
+prs: []
+depends_on:
+  - R3-1210
+---
+
+**Brief:** see the description.
+
+**Where.** The findings note is
+[`content/plans/baton/hook-spike.mdx`](https://github.com/immediately-run/docs/blob/main/content/plans/baton/hook-spike.mdx)
+in immediately-run/docs (R3-1210's deliverable, PR #224): the 2026-10-31/11-01 measurement on
+fc-opencode (Claude Code 2.1.316, opencode v2.1.2-neumark.2) and the 2026-11-12 re-measurement on an
+e2b `baton-leg` VM (Claude Code 2.1.319, opencode v2.2.5-neumark.1 — the build the fleet pins).
+
+**Spec:** §8.1 (the harness table: the opencode deny cell, "session-start, session-end"), §9.2 (the
+fence's layer 1), §9.9 (activity pairing).
+
+### What to build
+
+1. **§8.1's opencode row:** "Deny fenced commands: `tool.execute.before`" is correct on
+   v2.2.5-neumark.1 and later (a throw in `ctx.tool.hook("execute.before")` denies the call,
+   measured) and wrong on v2.1.2-neumark.2 (the hook surfaces never fired headless; configured
+   `deny` rules were not consulted either — the note's first round). Qualify the cell with the
+   minimum build, and name the standing fallback for older hosts: the wrapper scripts early on
+   `PATH` plus the git `pre-push` hook (§9.2 layers 2 and 3), which §9.2 already allows. R3-1214
+   requires the build rather than implementing the fallback twice.
+2. **§9.2 layer 1:** keep "terminates every process group the harness started for a tool call", and
+   add the two measured qualifications. On Claude Code 2.1.319 every Bash call — compound or simple —
+   runs inside its own session (a setsid'd wrapper), and stages of a compound command may hold
+   *different* groups, so the fence enumerates the call's session and terminates each group (a
+   single `kill -TERM -<pgid>` measurably leaves the rest of a compound command running); and the
+   fence never signals a group it has not verified is not the harness's own (2.1.316 ran simple
+   commands in claude's own group — a blind group kill killed the harness, measured twice). The
+   verification is cheap and version-proof; 2.1.319 only removes the hazard, not the check.
+3. **§9.9 pairing:** the clause "the post-tool or failure event closes it" is Claude-Code-empty:
+   there is no failure hook event, and PostToolUse does not fire for a nonzero-exit call (measured
+   on 2.1.316 and 2.1.319). A failed call's activity stays open until the claim ends — the rule the
+   next sentence already states — so the amendment is wording only: "the post-tool event closes it;
+   a call whose post event never comes (failed, interrupted, denied) stays open until the claim
+   ends". A PostToolUse whose `tool_response` carries `backgroundTaskId` is a hand-off to the
+   harness's background tasks, not a completion: the activity closes but the command may still be
+   running, and the harness's death measurably takes its backgrounded calls with it.
+4. **§8.1's opencode session column:** "session-start, session-end" should read what was measured:
+   `session.created` starts (observed on a shared service), nothing ends — no `session.idle` in
+   headless runs, no `session.deleted` at run exit, and `session.created` itself is not observable
+   for the run's own session under `opencode run --standalone` (how legs launch). The sidecar starts
+   from the plugin's own setup and stops on harness-pid loss (§8.1's existing 10 s poll) or
+   `location.shutdown`.
+
+**Done when** the four cells/bullets above say what the harnesses do on the measured builds, with
+the fallbacks named, and R3-1213/R3-1214's texts point at the note instead of restating it.
+
+### Trust
+
+No new input. The findings note is evidence (commands and outputs) read by people; no rule reads it.
+The spec wording changes bind only what Baton itself promises about harness behaviour.
+
+### Invariants
+
+- **§9.2's three layers are unchanged in kind.** Layer 1 still terminates running tool calls; the
+  amendment only names how groups are found (the call's session) and the one check (never the
+  harness's own group) that makes it safe on every build.
+- **§9.9's pairing keys stay the harness's own tool-call id.** On opencode v2.2.5 the id rides in
+  the hook event's `id` field (`call_…`; the V1 name `callID` is gone) — an adapter detail for
+  R3-1214, not a spec change.
+- **No new event is invented.** Where a harness emits nothing (failure, idle), Baton keys on what
+  exists: PostToolUse, the claim's end, the pid poll.
+
+## Status
+
+_filed 2026-11-12, with R3-1210's re-measurement (docs PR #224)._
