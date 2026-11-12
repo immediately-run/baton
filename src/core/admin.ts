@@ -12,6 +12,7 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId, HOLDING_TYPE } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
+import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
 import { checkRegistration, seedEntries, tierPosition, type Registration, type Registry } from './registry';
 import { graphOf, resolveLeg, type Graph } from './graph';
 import { humanOnlyList, type ApproverEntry, type ApproverFacts, type Policies } from './policy';
@@ -77,6 +78,16 @@ const only = (b: Record<string, unknown>, keys: string[], at: string) => {
 };
 /** A key's stored line: its type and base64 only — a comment is for people, never stored. */
 const lineOf = (key: SshKey, text: string) => `${key.type} ${text.trim().split(/\s+/)[1]}`;
+
+/** A setting's value as the settings event carries it: the JSON settings parse back to their
+ *  value; `scope_policy`'s bare word (B-134) is its own value, not JSON. */
+function settingValue(v: string): unknown {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return v;
+  }
+}
 
 /** R-BTN-67: an owner bar's reason becomes `released:<reason>`; never one of §6.5's closed
  *  reasons, so an owner bar's release is never counted as a failed attempt (§6.10). */
@@ -215,6 +226,23 @@ export class Admin {
   /** BATON_HUMAN_KEYS' fingerprints alone — the break-glass set (R-BTN-185). */
   private async breakGlassSet(): Promise<Set<string>> {
     return new Set(this.c.humanBreakGlass ? (await this.c.humanBreakGlass()).keys() : []);
+  }
+
+  /** B-127: the repository's owner signing keys — its owners' keys the human-only register
+   *  marks (`human_keys`, or a break-glass line; R-BTN-185), which is what an owner-signed
+   *  control input accepts, and nothing else: a key an agent session holds would let an injected
+   *  session sign (finding 3), and an API key cannot sign a commit at all. Public keys only —
+   *  the sync and the runners verify signatures against them; the private halves never leave
+   *  their owners. */
+  async signingKeys(repository: string): Promise<{ public_key: string; fingerprint: string }[]> {
+    const marks = await this.humanMarks();
+    // The register is the truth, not the column's cached mark: a key registered with the tenant
+    // after it became an owner counts the day it registers (R-BTN-185's `human_only` column
+    // records only what held at the addition).
+    return this.rows<{ public_key: string; fingerprint: string }>(
+      'SELECT public_key, fingerprint FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL ORDER BY fingerprint', repository)
+      .filter((k) => marks.has(k.fingerprint))
+      .map((k) => ({ public_key: k.public_key, fingerprint: k.fingerprint }));
   }
 
   /** B-145 item 12: membership through `approvers.members` — the one authorisation hook for
@@ -872,18 +900,54 @@ export class Admin {
 
   /** `PUT /v1/owner/{repository}/settings`: `required_bars`, `retry`, `transcript_repos`,
    *  `unblocked_trigger`, `remind_after` (seconds, R-BTN-80), `required_independence`
-   *  (R-BTN-106) — each given replaces that setting whole. R-BTN-188's knob table: every
-   *  LOOSENING of an R-BTN-66 setting needs an approver on `approvers.policy` (R-BTN-186 names
-   *  `retry`, `transcript_repos` and `required_independence` flatly, and the removing or
-   *  narrowing of a bar; tightening — adding a bar — stays open to any owner). */
+   *  (R-BTN-106), `scope_policy` and `worker_pushers` (B-134), `code_repos` (R-BTN-140, B-182)
+   *  and `pushers` (R-BTN-139, B-182) — each given replaces that setting whole. R-BTN-188's
+   *  knob table: every LOOSENING of an R-BTN-66 setting needs an approver on `approvers.policy`
+   *  (R-BTN-186 names `retry`, `transcript_repos` and `required_independence` flatly, and the
+   *  removing or narrowing of a bar; tightening — adding a bar — stays open to any owner);
+   *  B-182 adds the two reach lists: a `code_repos` entry or a pusher added is reach gained, so
+   *  it is governed the same way. */
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'required_independence'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'required_independence', 'scope_policy', 'worker_pushers', 'code_repos', 'pushers', 'require_signed_control'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     const sets: [string, string | null][] = [];
+    // B-182 (R-BTN-140): the home's code repositories, each naming its own forge and host. The
+    // list is stored in its own table; `codeRepos` holds it validated, `web_base` derived.
+    let codeRepos: CodeRepo[] | null = null;
+    if (b.code_repos !== undefined) {
+      const home = homeForgeOf(this.c.store, repository);
+      if (!home) throw new BatonError('not-found', `${repository} is not registered`);
+      codeRepos = checkCodeRepos(b.code_repos, home);
+      // B-182 point 7 (R-BTN-188): no human identity or floor while a code repository sits on
+      // another host — here, an entry being added while one stands is the refused order.
+      const homeHost = home.forge === 'git' ? null : home.host;
+      const cross = codeRepos.find((e) => homeHost == null || e.host !== homeHost);
+      if (cross) {
+        const cur = this.c.policies?.current(repository);
+        const floors = this.c.policies?.floors(repository) ?? [];
+        if (cur?.policy.human_identity != null || floors.length) {
+          const which = cur?.policy.human_identity != null ? `a human_identity (${cur.policy.human_identity})` : `${floors.length} floor(s)`;
+          throw new BatonError('invalid-params', `code_repos: the entry ${cross.path} is on ${cross.host}, another host than the home's, while ${repository}'s policy names ${which} — no human identity across hosts yet (B-182); per-host identities are a later ticket`);
+        }
+      }
+    }
+    // B-182 (R-BTN-139): the owners' pushers, host-qualified — an entry without a host is the
+    // home's, and on a `git` home one is refused (there is no host to default to).
+    if (b.pushers !== undefined) {
+      const home = homeForgeOf(this.c.store, repository);
+      if (!home) throw new BatonError('not-found', `${repository} is not registered`);
+      sets.push(['pushers', JSON.stringify(checkPushers(b.pushers, home))]);
+    }
     if (b.required_bars !== undefined) sets.push(['required_bars', JSON.stringify(this.checkRequiredBars(repository, b.required_bars))]);
     if (b.retry !== undefined) sets.push(['retry', b.retry === null ? null : JSON.stringify(checkRetry(b.retry))]);
+    // B-127 (R-BTN-66 as amended): whether the repository's control inputs count only at
+    // owner-signed commits. Turning it on tightens (any owner may); off is a loosening below.
+    if (b.require_signed_control !== undefined) {
+      if (typeof b.require_signed_control !== 'boolean') bad('require_signed_control', 'must be a boolean (R-BTN-66, B-127)');
+      sets.push(['require_signed_control', b.require_signed_control ? '1' : '0']);
+    }
     if (b.transcript_repos !== undefined) {
       const t = Array.isArray(b.transcript_repos) && b.transcript_repos.length <= 20 && b.transcript_repos.every((x) => typeof x === 'string' && parseTranscriptRepo(x) !== null)
         ? b.transcript_repos : bad('transcript_repos', 'must be at most 20 repositories, each a GitHub owner/name or <forge>:<web_base>');
@@ -896,8 +960,25 @@ export class Admin {
       sets.push(['remind_after_s', JSON.stringify(r)]);
     }
     if (b.required_independence !== undefined) sets.push(['required_independence', JSON.stringify(checkIndependence(b.required_independence))]);
+    // B-134: what a scope-exceeded finding does (`report`, Needs you alone — the default — or
+    // `hold`, the ticket parked until an owner lifts it), and the forge logins the fleet's VM
+    // runners push as, whose pushes are cross-checked against open claims. Null or an empty
+    // list names none: the cross-check is off until the owners name one. `scope_policy` is a
+    // bare word (its column's CHECK admits two), not JSON like the list settings.
+    if (b.scope_policy !== undefined) {
+      if (b.scope_policy !== 'report' && b.scope_policy !== 'hold') bad('scope_policy', "must be 'report' or 'hold'");
+      sets.push(['scope_policy', b.scope_policy as string]);
+    }
+    if (b.worker_pushers !== undefined) {
+      // A forge login, or an app bot's `<app>[bot]` — the very identity per-claim push tokens
+      // (B-131) push as and the webhook side bounds the same way (its `MAX_PUSHER`).
+      const w = b.worker_pushers === null ? [] : Array.isArray(b.worker_pushers) && b.worker_pushers.length <= 50
+        && b.worker_pushers.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 100 && /^[A-Za-z0-9-]+(\[bot\])?$/.test(x))
+          ? [...new Set(b.worker_pushers as string[])] : bad('worker_pushers', 'must be null or a list of at most 50 forge logins');
+      sets.push(['worker_pushers', JSON.stringify(w)]);
+    }
     // R-BTN-188/R-BTN-186: the loosening needs an approver on `approvers.policy` as it stands.
-    if (this.loosensSettings(repository, sets)) {
+    if (this.loosensSettings(repository, sets, codeRepos)) {
       const policies = this.c.policies;
       const cur = policies?.current(repository);
       if (policies && cur) {
@@ -909,7 +990,8 @@ export class Admin {
     }
     return this.c.store.transaction(() => {
       for (const [k, v] of sets) this.exec(`UPDATE repositories SET ${k} = ? WHERE id = ?`, v, repository);
-      this.event(actor, { act: 'settings', repository, ...Object.fromEntries(sets.map(([k, v]) => [k === 'remind_after_s' ? 'remind_after' : k, v == null ? null : JSON.parse(v)])) }, repository);
+      if (codeRepos != null) writeCodeRepos(this.c.store, repository, codeRepos, actor, this.c.now());
+      this.event(actor, { act: 'settings', repository, ...Object.fromEntries(sets.map(([k, v]) => [k === 'remind_after_s' ? 'remind_after' : k, v == null ? null : settingValue(v)])), ...(codeRepos != null ? { code_repos: codeRepos } : {}) }, repository);
       // Required bars are applied as a snapshot's legs are stored: the next sync re-stores them
       // now rather than at the schedule (round 1, 1-A-8).
       if (b.required_bars !== undefined) this.c.dispatchSync(repository);
@@ -920,8 +1002,10 @@ export class Admin {
   /** Whether the settings this change writes loosen what stands: R-BTN-186 names `retry`,
    *  `transcript_repos` and `required_independence` flatly — any change to one is governed —
    *  while a bar's removal or narrowing loosens and its addition tightens. `remind_after` and
-   *  `unblocked_trigger` tune operation, not trust, and are never governed. */
-  private loosensSettings(repository: string, sets: [string, string | null][]): boolean {
+   *  `unblocked_trigger` tune operation, not trust, and are never governed. B-134's two scope
+   *  settings are governed one way each: a hold that stops holding, and a cross-check that
+   *  names fewer pushers, loosen. */
+  private loosensSettings(repository: string, sets: [string, string | null][], codeRepos: CodeRepo[] | null = null): boolean {
     const flat = ['retry', 'transcript_repos', 'required_independence'];
     for (const [k, v] of sets) {
       if (flat.includes(k)) {
@@ -929,18 +1013,49 @@ export class Admin {
         const before = k === 'transcript_repos' ? JSON.parse(this.rows<{ v: string | null }>('SELECT transcript_repos AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? 'null') : old;
         if (JSON.stringify(before ?? null) !== (v ?? 'null')) return true;
       }
+      // B-127: requiring signed control tightens (any owner may turn it on); turning it off
+      // loosens — a push alone could then change what every runner executes.
+      if (k === 'require_signed_control' && v === '0') {
+        const was = this.rows<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repository)[0]?.flag ?? 0;
+        if (was) return true;
+      }
+    }
+    // B-134: both scope settings only loosen one way — a hold that stops holding, and a
+    // cross-check that names fewer pushers. Naming more, or holding, tightens.
+    const policy = sets.find(([k]) => k === 'scope_policy');
+    if (policy && policy[1] === 'report' && this.rows<{ v: string }>('SELECT scope_policy AS v FROM repositories WHERE id = ?', repository)[0]?.v === 'hold') return true;
+    const pushers = sets.find(([k]) => k === 'worker_pushers');
+    if (pushers) {
+      const was = JSON.parse(this.rows<{ v: string | null }>('SELECT worker_pushers AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? '[]') as string[];
+      const next = JSON.parse(pushers[1]!) as string[];
+      // The cross-check matches logins case-blind, so a case-only rewrite names the same
+      // pushers and loosens nothing; only a login leaving the list does.
+      if (was.some((p) => !next.some((q) => q.toLowerCase() === p.toLowerCase()))) return true;
     }
     const bars = sets.find(([k]) => k === 'required_bars');
-    if (!bars) return false;
-    const next = JSON.parse(bars[1] ?? '[]') as RequiredBar[];
-    const was = this.requiredBars(repository);
-    // A bar removed, or narrowed (a course or leg it covered no longer covered, an `except`
-    // grown), loosens; a new bar or a widened one tightens.
-    return was.some((oldBar) => {
-      const cover = (bar: RequiredBar) => `${bar.course}|${bar.leg}|${(bar.except ?? []).slice().sort().join(',')}`;
-      const twin = next.find((n) => cover(n) === cover(oldBar) && n.tag_prefix === oldBar.tag_prefix);
-      return !twin;
-    });
+    if (bars) {
+      const next = JSON.parse(bars[1] ?? '[]') as RequiredBar[];
+      const was = this.requiredBars(repository);
+      // A bar removed, or narrowed (a course or leg it covered no longer covered, an `except`
+      // grown), loosens; a new bar or a widened one tightens.
+      if (was.some((oldBar) => {
+        const cover = (bar: RequiredBar) => `${bar.course}|${bar.leg}|${(bar.except ?? []).slice().sort().join(',')}`;
+        const twin = next.find((n) => cover(n) === cover(oldBar) && n.tag_prefix === oldBar.tag_prefix);
+        return !twin;
+      })) return true;
+    }
+    // B-182: a `code_repos` entry or a `pushers` entry the list did not hold is reach gained.
+    if (codeRepos != null) {
+      const was = new Set(codeReposOf(this.c.store, repository).map((e) => e.path.toLowerCase()));
+      if (codeRepos.some((e) => !was.has(e.path.toLowerCase()))) return true;
+    }
+    const owners = sets.find(([k]) => k === 'pushers');
+    if (owners) {
+      const was = new Set(pushersOf(this.c.store, repository).map((p) => `${p.host}\u0000${p.id}`));
+      const next = (JSON.parse(owners[1]!) as { host: string; id: string }[] | null) ?? [];
+      if (next.some((p) => !was.has(`${p.host}\u0000${p.id}`))) return true;
+    }
+    return false;
   }
 
   /** R-BTN-67's required bars: `{course | *, leg | *, except?, tag_prefix}`, a named `leg` only
@@ -1019,7 +1134,12 @@ export class Admin {
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
-      settings: this.rows('SELECT id AS repository_id, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, required_independence FROM repositories WHERE retired_at IS NULL ORDER BY id'),
+      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, required_independence, scope_policy, worker_pushers, pushers, require_signed_control FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
+        ...s,
+        // B-182: the home's code repositories beside the column settings — its own table's rows,
+        // as the observation hands them to the sync, so the CLI and the dashboard read one shape.
+        code_repos: codeReposOf(this.c.store, String(s.repository_id)),
+      })) as (Record<string, unknown> & { code_repos: CodeRepo[] })[],
       // R-BTN-80: the personal channels, by repository.
       couriers: this.c.notices?.couriers() ?? [],
     };

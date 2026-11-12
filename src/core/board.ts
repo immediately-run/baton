@@ -45,7 +45,16 @@ export const DEFAULT_COURSE = 'roadmap-pr';
 export interface PostedTicket {
   id: string;
   course_id: string;
-  path: string;
+  /** The ticket's file, when it has one: a `custom` source with `versions: "current"` may post a
+   *  ticket with no path at all (§4.4, B-183) — its `key` then names it. */
+  path?: string;
+  /** B-183 (R-BTN-74): the ticket source's opaque version for this ticket — the markdown
+   *  source's is the ticket file's blob id at the posted commit. Absent (`''` stored): no
+   *  version held, compared with nothing. Baton compares versions for equality only (values 4). */
+  version?: string;
+  /** B-183 (R-BTN-147): the source's stable name for the ticket, by which a dropped and
+   *  re-added ticket is detected as `renumbered`. Absent: the ticket's `path`. */
+  key?: string;
   title: string;
   tier?: string | null;
   requires: string[];
@@ -60,6 +69,9 @@ export interface PostedTicket {
   /** R-BTN-116: the queued person leg's question (§4.4) — stored only while the ticket's queued
    *  leg is a person's; any other is dropped and logged `question-dropped`. */
   question?: PostedQuestion | null;
+  /** B-127 item 7: the brief's mark — `{signed, signer?, commit}`. Marked whether or not the
+   *  repository requires signed control; `signer` is the signing key's fingerprint. */
+  brief?: { signed: boolean; signer?: string; commit: string };
 }
 
 /** R-BTN-116: the question a ticket source posts for its queued person leg — an id for the
@@ -107,6 +119,17 @@ export interface BoardPayload {
   /** The number `POST /v1/sync/observation` handed out before the sync read anything (R-BTN-62). */
   observation: number;
   force?: boolean;
+  /** B-183 (§4.3): the commit the post's tickets were read at, when that is not `sha` itself —
+   *  a confirm-only re-post of the head from a checkout behind it (§7.1) carries the head's
+   *  `sha` with a body read at the checkout. A refresh materializes tickets only when this is
+   *  the head (`read_sha === sha`); absent, a refresh changes no ticket row (an older CLI's
+   *  post). The new-head path never reads it: its body is read at its `sha` by construction. */
+  read_sha?: string;
+  /** B-183 (R-BTN-74, §4.4): the ticket source's declaration — `kind` (`markdown`, the CLI's
+   *  default, or `custom`, the repository's own `.baton/tickets.mjs`), how it reads a ticket
+   *  (`versions`: `pinned` at a version, `current` as it is now) and the CLI that posted. Absent:
+   *  an older CLI's post, read as none of it. */
+  source?: { kind: 'markdown' | 'custom'; versions?: 'pinned' | 'current'; cli?: string } | null;
   /** The interim post (docs until R3-1233): factory-state's items and the `rankReady` order. */
   state?: { items: StateItem[] };
   /** The ready items in `rankReady` order (lib/factoryState.mjs), computed by the sync. */
@@ -116,8 +139,10 @@ export interface BoardPayload {
   closed?: { id: string; as: 'done' | 'withdrawn' }[];
   stations?: Record<string, PostedStation>;
   confirmations?: unknown[];
-  prices?: { models: { match: string; input?: number; output?: number; cacheRead?: number; cacheWrite5m?: number }[] };
-  providers?: ProvidersData;
+  /** B-142: `prices` and `providers` are gone with the model tables the route choice stratum
+   *  never read (§6.3's readings are an unavailable provider's replacement, R-BTN-76). A sync
+   *  that still posts either is not refused for it — accepted with the field ignored, as
+   *  `min_skills_version` above — until no registered repository posts it. */
   reviewers?: Record<string, { reviews_on: string; bills: string[]; models?: Record<string, string> }>;
   matrix?: { families: Record<string, string[]>; agents: Record<string, { reviews_on: string; bills: string[]; models?: Record<string, string> }> };
   /** The course registry (R-BTN-48, §7.1); absent, the courses in force stay. */
@@ -130,6 +155,41 @@ export interface BoardPayload {
    *  a person leg's answer read from the ticket's `answer:` — is acted on (R-BTN-116); an
    *  arrival Baton does not apply is recorded `arrival-unapplied` (R-BTN-39). */
   attestations?: PostedAttestation[];
+  /** B-127 (R-BTN-66 as amended): what the sync found about owner-signed control inputs at this
+   *  commit — the groups a runner loads `agent_command`, overrides and `rank.mjs` from, and the
+   *  control inputs whose last change no owner key signed (the `unsigned-control` notice's list,
+   *  raised where the repository requires signed control). The sync computes this where the git
+   *  objects are; every runner verifies the named commits again before loading them, and B-137
+   *  moves the check server-side over the raw commits. */
+  control?: PostedControl;
+}
+
+/** One runner-loaded control group as the post names it (B-127 item 4): `read` the commit to
+ *  load from — the newest commit that changed the group and an owner key signed, so every later
+ *  change is unsigned and left behind — or null when no signed version exists (nothing counts;
+ *  the runners stand down), `key` the signing key's fingerprint (null when `read` is only the
+ *  pre-adoption baseline beyond the walk's memory), `unsigned` the commits that changed the
+ *  group without counting. */
+export interface PostedGroup {
+  read: string | null;
+  key: string | null;
+  unsigned: string[];
+}
+
+/** The post's signed-control record (B-127). */
+export interface PostedControl {
+  /** The owner keys' fingerprints the sync verified with — what named `key` below means. */
+  keys: string[];
+  /** The runner-loaded groups (B-127 item 4): `agent_command` (`.baton/baton.json`), the
+   *  overrides (`legs/<leg>.run.mjs`), `rank.mjs`, and the courses' leg scripts
+   *  (`legs/*.mjs` — the code a runner executes; the graph stays with the snapshot, B-33
+   *  pinning a sourced course's file). A sync from before the course group posts three; while
+   *  the repository requires signed control, the claim is refused until a post names all four
+   *  (fail closed on a missing group). */
+  groups: { agent_command: PostedGroup; overrides: PostedGroup; rank: PostedGroup; course?: PostedGroup };
+  /** Every control input whose last change (first parents) is unsigned: one entry per path,
+   *  with its commits; a ticket file's entry names the watched fields (`EXPEDITE`) in `fields`. */
+  unsigned: { path: string; commits: string[]; fields?: string[] }[];
 }
 
 /** R-BTN-191's envelope as the sync posts it (§4.4): a typed fact about one ticket, its `value`
@@ -142,16 +202,15 @@ export interface PostedAttestation {
   value: unknown;
 }
 
-export interface ProvidersData {
-  accounts: { id: string; name: string; billing: 'subscription' | 'api'; window_limits: Record<string, number> | null }[];
-  peak_schedules: { id: string; rules: { days: number[]; hoursUtc: [number, number][] }; factor: number }[];
-  models: { provider: string; model: string; monthly_limit_usd: number | null; peak_schedule?: string }[];
-}
-
 /** A `tickets` row (§4) plus its expanded requirements (`ticket_requires`). */
 export interface TicketRow {
   id: string;
   path: string;
+  /** B-183: the ticket's opaque version ('' when the source posts none) and stable key (its
+   *  `path` when the source posts none) — inputs of `row_hash`, so a changed version rewrites
+   *  the row (§4.3, R-BTN-11). */
+  version: string;
+  key: string | null;
   title: string;
   project: string | null;
   status: string;
@@ -176,11 +235,21 @@ export interface TicketRow {
   expedite: 0 | 1;
   /** Shown, never read (§2b): JSON, or null. */
   display: string | null;
+  /** B-127 item 7: the brief's mark — `{signed, signer?, commit}` as the sync computed it, JSON,
+   *  or null when unmarked (no owner signing keys, or the brief's last change is beyond the
+   *  walk's memory). Read, not just shown: a privileged reader's first sight of whose words a
+   *  brief is. */
+  brief?: string | null;
 }
 
 const SHA = /^[0-9a-f]{40}$/;
+/** A public key's fingerprint, as `ssh-keygen -l` prints it (B-127's signing keys). */
+const FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
 const ID = LOCAL_ID; // a local id (R-BTN-47)
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// B-183 (§12.3): a ticket's opaque version, the source's own string — a git blob id, a store's
+// stamp, a digest — compared for equality only, never ordered or read as a time (values 4).
+const VERSION = /^[A-Za-z0-9._:+/=-]{1,128}$/;
 // A title comes from git, not from a worker, and the dashboard renders it with textContent
 // (§10.4), so it is only bounded and free of control characters.
 const TEXT = /^[^\u0000-\u001f\u007f]{1,500}$/;
@@ -199,7 +268,19 @@ export function checkPayload(body: unknown): BoardPayload {
   if (!p || typeof p !== 'object') throw new BatonError('invalid-params', 'a JSON object is required');
   if (typeof p.sha !== 'string' || !SHA.test(p.sha)) throw new BatonError('invalid-params', 'sha must be a 40-hex commit');
   if (p.parent_sha !== null && (typeof p.parent_sha !== 'string' || !SHA.test(p.parent_sha))) throw new BatonError('invalid-params', 'parent_sha must be a 40-hex commit or null');
+  if (p.read_sha !== undefined && p.read_sha !== null && (typeof p.read_sha !== 'string' || !SHA.test(p.read_sha))) throw new BatonError('invalid-params', 'read_sha must be a 40-hex commit or null (the commit the tickets were read at, B-183)');
   if (!Number.isSafeInteger(p.observation) || p.observation < 1) throw new BatonError('invalid-params', 'observation must be the number POST /v1/sync/observation handed out (R-BTN-62)');
+  // B-183 (§4.4): the ticket source's declaration. Its shape here; the `tickets-approved` floor
+  // reads it where the repository's policy is known, when the post is judged.
+  if (p.source !== undefined && p.source !== null) {
+    const s = p.source;
+    if (!isObj(s) || (s.kind !== 'markdown' && s.kind !== 'custom')) throw new BatonError('invalid-params', "source must be {kind: 'markdown' | 'custom', versions?, cli?}");
+    if (s.versions !== undefined && s.versions !== null && s.versions !== 'pinned' && s.versions !== 'current') {
+      throw new BatonError('invalid-params', "source.versions must be 'pinned' or 'current' (R-BTN-74)");
+    }
+    if (s.cli !== undefined && s.cli !== null && (typeof s.cli !== 'string' || s.cli.length > 200)) throw new BatonError('invalid-params', 'source.cli must be a short string naming the posting CLI');
+    for (const k of Object.keys(s)) if (!['kind', 'versions', 'cli'].includes(k)) throw new BatonError('invalid-params', `source.${k} is not a source field`);
+  }
   if (p.tickets !== undefined) {
     if (p.state !== undefined || p.ready !== undefined) throw new BatonError('invalid-params', 'a post is either the normative tickets or the interim state.items, not both');
     checkNormative(p);
@@ -235,6 +316,40 @@ export function checkPayload(body: unknown): BoardPayload {
         throw new BatonError('invalid-params', `${at}.ref must be a short string or null`);
       }
       if (!isObj((a as PostedAttestation).value)) throw new BatonError('invalid-params', `${at}.value must be an object`);
+    }
+  }
+  // B-127 (R-BTN-66 as amended): the post's signed-control record. The shape and bounds here;
+  //  whose keys may sign is Baton's own fact (the repository's human-only owner keys), which the
+  //  sync reads from Baton and every runner re-checks against the commit objects themselves.
+  if (p.control !== undefined) {
+    const c = p.control;
+    if (!isObj(c)) throw new BatonError('invalid-params', 'control must be {keys, groups, unsigned}');
+    const badControl = (field: string, why: string): never => {
+      throw new BatonError('invalid-params', `control.${field}: ${why}`);
+    };
+    for (const [k, v] of Object.entries(c)) if (!['keys', 'groups', 'unsigned'].includes(k)) badControl(k, 'is not a control field');
+    if (!Array.isArray(c.keys) || !c.keys.every((x) => typeof x === 'string' && FINGERPRINT.test(x))) badControl('keys', 'must be the signing keys’ fingerprints');
+    if (new Set(c.keys).size !== c.keys.length) badControl('keys', 'names a key twice');
+    if (!isObj(c.groups) || !(['agent_command', 'overrides', 'rank'] as const).every((g) => isObj(c.groups![g]))) {
+      badControl('groups', 'must hold agent_command, overrides and rank');
+    }
+    for (const k of Object.keys(c.groups)) if (!(['agent_command', 'overrides', 'rank', 'course'] as readonly string[]).includes(k)) badControl(`groups.${k}`, 'is not a group');
+    for (const g of ['agent_command', 'overrides', 'rank', 'course'] as const) {
+      const grp = c.groups[g];
+      if (grp === undefined) continue; // course: a sync from before the group; while the setting is on, a claim fails closed on it
+      const at = `groups.${g}`;
+      for (const [k, v] of Object.entries(grp)) if (!['read', 'key', 'unsigned'].includes(k)) badControl(`${at}.${k}`, 'is not a group field');
+      if (grp.read !== null && (typeof grp.read !== 'string' || !SHA.test(grp.read))) badControl(`${at}.read`, 'must be a 40-hex commit or null (no signed version)');
+      if (grp.key !== null && (typeof grp.key !== 'string' || !FINGERPRINT.test(grp.key))) badControl(`${at}.key`, 'must be a key fingerprint or null');
+      if (grp.key != null && !c.keys.includes(grp.key)) badControl(`${at}.key`, 'names a key control.keys does not');
+      if (!Array.isArray(grp.unsigned) || grp.unsigned.length > 40 || !grp.unsigned.every((x) => typeof x === 'string' && SHA.test(x))) badControl(`${at}.unsigned`, 'must be at most 40 commits');
+    }
+    if (!Array.isArray(c.unsigned) || c.unsigned.length > 200) badControl('unsigned', 'must be a list of at most 200 changes');
+    for (const [i, u] of c.unsigned.entries()) {
+      const at = `unsigned[${i}]`;
+      if (!isObj(u) || typeof u.path !== 'string' || !u.path.length || u.path.length > 300 || u.path.startsWith('/')) badControl(`${at}.path`, 'must be a relative path');
+      if (!Array.isArray(u.commits) || !u.commits.length || u.commits.length > 40 || !u.commits.every((x) => typeof x === 'string' && SHA.test(x))) badControl(`${at}.commits`, 'must be 1 to 40 commits');
+      if (u.fields !== undefined && (!Array.isArray(u.fields) || !u.fields.every((x) => x === 'EXPEDITE'))) badControl(`${at}.fields`, 'may name only EXPEDITE');
     }
   }
   return p.registry === undefined ? p : { ...p, registry: checkRegistry(p.registry) };
@@ -298,13 +413,39 @@ function checkNormative(p: BoardPayload) {
   };
   if (!isObjArr(p.tickets, TICKETS_MAX)) fail('tickets', `must be a list of at most ${TICKETS_MAX}`);
   const seen = new Set<string>();
+  const seenKeys = new Set<string>();
   for (const [i, t] of p.tickets!.entries()) {
     const at = `tickets[${i}]`;
     if (!isObj(t) || typeof t.id !== 'string' || !ID.test(t.id)) fail(`${at}.id`, 'must be a local id');
     if (seen.has(t.id)) fail(`${at}.id`, `${t.id} appears twice`);
     seen.add(t.id);
     if (typeof t.course_id !== 'string' || !COURSE_ID.test(t.course_id)) fail(`${t.id}.course_id`, 'must be a course id');
-    if (!isTicketPath(t.path)) fail(`${t.id}.path`, 'must be a relative path, no segment empty, . or ..');
+    // B-183 (§4.4): `path` is the ticket's file — required of every source but a `custom` one
+    // that reads only as it is now (`versions: "current"`), whose ticket may live in no tree at
+    // all. A ticket with neither path nor `key` names nothing stable, so it is refused.
+    const pathOptional = p.source?.kind === 'custom' && p.source?.versions === 'current';
+    if (t.path !== undefined && t.path !== null) {
+      if (!isTicketPath(t.path)) fail(`${t.id}.path`, 'must be a relative path, no segment empty, . or ..');
+    } else if (!pathOptional || t.key == null) {
+      fail(`${t.id}.path`, pathOptional ? 'a ticket with no path must carry key' : 'must be a relative path, no segment empty, . or ..');
+    }
+    // B-183 (§12.3): the version is the source's opaque string, the key its stable name; both
+    // untrusted text, validated on write, compared for equality only.
+    if (t.version !== undefined && t.version !== null && (typeof t.version !== 'string' || !VERSION.test(t.version))) {
+      fail(`${t.id}.version`, `must be 1–128 characters of ${VERSION.source} (R-BTN-74)`);
+    }
+    if (t.key !== undefined && t.key !== null && (typeof t.key !== 'string' || t.key.length < 1 || t.key.length > 256 || !/^[A-Za-z0-9][A-Za-z0-9._:+/=-]*$/.test(t.key))) {
+      fail(`${t.id}.key`, 'must be a short stable name of the source\'s own');
+    }
+    // B-183 (R-BTN-147, round 1): two live tickets of one post never share a stable key (`key`,
+    // or the `path` that stands for it) — materialization's renumbering read would keep whichever
+    // row built last, and a later drop at that key would move hold and backoff to an arbitrary
+    // survivor of the collision.
+    const stableKey = t.key ?? t.path;
+    if (stableKey != null) {
+      if (seenKeys.has(stableKey)) fail(`${t.id}.key`, `${stableKey} is already the key of another ticket in this post`);
+      seenKeys.add(stableKey);
+    }
     if (typeof t.title !== 'string' || !TEXT.test(t.title)) fail(`${t.id}.title`, 'must be short plain text');
     if (t.tier != null && !NAME.test(t.tier)) fail(`${t.id}.tier`, 'must be a tier name');
     if (!Array.isArray(t.requires)) fail(`${t.id}.requires`, 'must be a list (`none` and no clause are [])');
@@ -352,6 +493,19 @@ function checkNormative(p: BoardPayload) {
       if (!isObj(t.display)) fail(`${t.id}.display`, 'must be an object');
       for (const [k, v] of Object.entries(t.display)) {
         if (!['status', 'group', 'project'].includes(k) || (v != null && (typeof v !== 'string' || !TEXT.test(v) || v.length > 64))) fail(`${t.id}.display.${k}`, 'must be status, group or project, short plain text');
+      }
+    }
+    // B-127 item 7: the brief's mark. The shape here; whose keys may sign is the sync's fact,
+    // re-verified by every runner that loads what the post names (item 4).
+    if (t.brief !== undefined && t.brief !== null) {
+      const b = t.brief;
+      const at = `${t.id}.brief`;
+      if (!isObj(b) || typeof b.commit !== 'string' || !SHA.test(b.commit)) fail(at, 'must be {signed, signer?, commit}');
+      else {
+        if (typeof b.signed !== 'boolean') fail(`${at}.signed`, 'must be a boolean');
+        if (b.signer !== undefined && b.signer !== null && (typeof b.signer !== 'string' || !FINGERPRINT.test(b.signer))) fail(`${at}.signer`, 'must be a key fingerprint');
+        if (typeof b.signed === 'boolean' && b.signed && (b.signer === undefined || b.signer === null)) fail(at, 'a signed brief names its signing key');
+        if (b.signed === false && b.signer != null) fail(at, 'an unsigned brief names no signing key');
       }
     }
   }
@@ -530,9 +684,7 @@ export function stationOf(st: PostedStation): PostedStation {
   };
 }
 
-const ACCOUNT = /^[a-z0-9_]{1,64}$/;
 const MODEL = /^[A-Za-z0-9._/:-]{1,200}$/;
-const isNum = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const bad = (field: string, why: string): never => {
   throw new BatonError('invalid-params', `${field}: ${why}`);
@@ -559,47 +711,9 @@ function catalog(field: string, agents: unknown) {
 }
 
 /** The reference blocks (§7.3, §7.4) are docs data files: a malformed one is refused, named,
- *  before anything is written, never left to fail a constraint mid-transaction. */
+ *  before anything is written, never left to fail a constraint mid-transaction. The model
+ *  tables' blocks (B-142) validate nowhere: `providers` and `prices` are accepted unread. */
 function checkReference(p: BoardPayload) {
-  if (p.prices !== undefined) {
-    if (!isObj(p.prices) || !Array.isArray(p.prices.models)) bad('prices.models', 'must be a list');
-    p.prices.models.forEach((m, i) => {
-      if (!isObj(m)) bad(`prices.models[${i}]`, 'must be an object');
-      regex(`prices.models[${i}].match`, m.match);
-      for (const k of ['input', 'output', 'cacheRead', 'cacheWrite5m'] as const) if (m[k] !== undefined && !isNum(m[k])) bad(`prices.models[${i}].${k}`, 'must be a number');
-    });
-  }
-  if (p.providers !== undefined) {
-    const pr = p.providers;
-    if (!isObj(pr) || !Array.isArray(pr.accounts) || !Array.isArray(pr.peak_schedules) || !Array.isArray(pr.models)) bad('providers', 'needs accounts, peak_schedules and models lists');
-    const accounts = new Set<string>();
-    pr.accounts.forEach((a, i) => {
-      if (!isObj(a) || typeof a.id !== 'string' || !ACCOUNT.test(a.id)) bad(`providers.accounts[${i}].id`, 'is malformed');
-      if (accounts.has(a.id)) bad(`providers.accounts[${i}].id`, `repeats ${a.id}`);
-      if (typeof a.name !== 'string' || !TEXT.test(a.name)) bad(`providers.accounts[${i}].name`, 'must be short text');
-      if (a.billing !== 'subscription' && a.billing !== 'api') bad(`providers.accounts[${i}].billing`, "must be 'subscription' or 'api'");
-      if (a.window_limits !== null && !(isObj(a.window_limits) && Object.values(a.window_limits).every(isNum))) bad(`providers.accounts[${i}].window_limits`, 'must be null or numbers by window');
-      accounts.add(a.id);
-    });
-    const schedules = new Set<string>();
-    pr.peak_schedules.forEach((sc, i) => {
-      const ok = isObj(sc) && typeof sc.id === 'string' && NAME.test(sc.id) && isNum(sc.factor) && isObj(sc.rules) &&
-        Array.isArray(sc.rules.days) && sc.rules.days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6) &&
-        Array.isArray(sc.rules.hoursUtc) && sc.rules.hoursUtc.every((h) => Array.isArray(h) && h.length === 2 && Number.isInteger(h[0]) && Number.isInteger(h[1]) && 0 <= h[0] && h[0] < h[1] && h[1] <= 24);
-      if (!ok) bad(`providers.peak_schedules[${i}]`, 'needs an id, days 0–6, [start, end) hour pairs and a numeric factor');
-      if (schedules.has(sc.id)) bad(`providers.peak_schedules[${i}].id`, `repeats ${sc.id}`);
-      schedules.add(sc.id);
-    });
-    const pairs = new Set<string>();
-    pr.models.forEach((m, i) => {
-      if (!isObj(m) || !accounts.has(m.provider)) bad(`providers.models[${i}].provider`, 'must name an account in providers.accounts');
-      if (typeof m.model !== 'string' || !MODEL.test(m.model)) bad(`providers.models[${i}].model`, 'must be a model id');
-      if (m.monthly_limit_usd !== null && !isNum(m.monthly_limit_usd)) bad(`providers.models[${i}].monthly_limit_usd`, 'must be a number or null');
-      if (m.peak_schedule !== undefined && !schedules.has(m.peak_schedule)) bad(`providers.models[${i}].peak_schedule`, 'must name a schedule in providers.peak_schedules');
-      if (pairs.has(`${m.provider} ${m.model}`)) bad(`providers.models[${i}]`, `repeats ${m.provider} ${m.model}`);
-      pairs.add(`${m.provider} ${m.model}`);
-    });
-  }
   if (p.matrix !== undefined) {
     if (!isObj(p.matrix) || !isObj(p.matrix.families)) bad('matrix.families', 'must be an object');
     for (const [fam, pats] of Object.entries(p.matrix.families)) {
@@ -621,9 +735,13 @@ export function rowFor(it: StateItem, rankOf: Map<string, number>): TicketRow {
   const tags = it.tags ?? [];
   const names = it.requires ?? null;
   const clause = names == null ? 'absent' : names.every((n) => n === 'none') ? 'none' : 'listed';
+  const path = `content/roadmap/${it.id}.mdx`;
   return {
     id: it.id,
-    path: `content/roadmap/${it.id}.mdx`,
+    path,
+    // The interim post carries no versions (B-183): no version held, the path the key.
+    version: '',
+    key: path,
     title: it.title,
     project: it.project ?? null,
     status: it.status,
@@ -654,7 +772,11 @@ export function rowForTicket(t: PostedTicket): TicketRow {
   const names = [...new Set(t.requires)];
   return {
     id: t.id,
-    path: t.path,
+    path: t.path ?? '',
+    // B-183: the source's opaque version and stable key; `version` is an input of `row_hash`, so
+    // a ticket whose version changed rewrites its row on a refresh too (§4.3, R-BTN-11).
+    version: t.version ?? '',
+    key: t.key ?? t.path ?? null,
     title: t.title,
     project: t.display?.project ?? null,
     status: '',
@@ -675,6 +797,7 @@ export function rowForTicket(t: PostedTicket): TicketRow {
     holder: null,
     expedite: t.expedite ? 1 : 0,
     display: t.display ? JSON.stringify(t.display) : null,
+    brief: t.brief === undefined || t.brief === null ? null : JSON.stringify(t.brief),
   };
 }
 
@@ -694,21 +817,3 @@ export async function rowHash(row: TicketRow): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// ── peaks (§7.3, the Providers view) ────────────────────────────────────────────────────
-
-const HOUR = 3_600_000;
-
-/** Whether `ms` falls in a schedule's peak (UTC weekday in `days`, hour in a [start, end) pair). */
-export function inPeak(rules: { days: number[]; hoursUtc: [number, number][] }, ms: number): boolean {
-  const d = new Date(ms);
-  const h = d.getUTCHours();
-  return rules.days.includes(d.getUTCDay()) && rules.hoursUtc.some(([a, b]) => a <= h && h < b);
-}
-
-/** The next hour boundary at which `inPeak` flips, within 8 days, or null. */
-export function nextPeakChange(rules: { days: number[]; hoursUtc: [number, number][] }, ms: number): number | null {
-  const now = inPeak(rules, ms);
-  let t = Math.floor(ms / HOUR) * HOUR + HOUR;
-  for (let i = 0; i < 24 * 8; i++, t += HOUR) if (inPeak(rules, t) !== now) return t;
-  return null;
-}

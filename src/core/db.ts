@@ -17,6 +17,33 @@ export function randomHex(bytes: number): string {
   return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** The core's random source: `n` random bytes. Tests replace it as they replace the clock
+ *  (R-BTN-32's seam; B-185), through `Ports.random`. */
+export type Random = (n: number) => Uint8Array;
+export const systemRandom: Random = (n) => crypto.getRandomValues(new Uint8Array(n));
+
+const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/** R-BTN-63 (B-185): a run id — `r_` and a ULID: 26 characters of Crockford base32 encoding 48
+ *  bits of `at` (epoch milliseconds) then 80 random bits. Opaque: no reader parses it. */
+export function mintRunId(at: number, random: Random = systemRandom): string {
+  let time = '';
+  let t = Math.max(0, Math.floor(at)) % 2 ** 48;
+  for (let i = 0; i < 10; i++) {
+    time = CROCKFORD[t % 32] + time;
+    t = Math.floor(t / 32);
+  }
+  const bytes = random(10);
+  let bits = 0n;
+  for (const b of bytes) bits = (bits << 8n) | BigInt(b);
+  let rand = '';
+  for (let i = 0; i < 16; i++) {
+    rand = CROCKFORD[Number(bits & 31n)] + rand;
+    bits >>= 5n;
+  }
+  return `r_${time}${rand}`;
+}
+
 /** Whether `e` is SQLite refusing a write on a unique index — the lock's refusal (R-BTN-4). */
 export function isUniqueViolation(e: unknown): boolean {
   return /UNIQUE constraint failed/.test(String(e));

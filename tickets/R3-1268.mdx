@@ -77,7 +77,7 @@ done there still point at docs:
 ### Tests
 
 - A fresh clone of immediately-run/baton alone: `npm ci && npm test && npm run typecheck` pass,
-  and an agent session following `AGENTS.md` claims and finishes a ticket on staging.
+  and an agent session following `AGENTS.md` claims and finishes a ticket on a local Baton, then on production.
 - The CI reference check fails on a planted `../docs` path.
 - In docs: `npm run verify` and the Baton sync stay green on the baton-sourced modules.
 
@@ -92,3 +92,5 @@ done there still point at docs:
 _(filed 2026-10-16)_
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — the leg instructions are `create-pr` overrides under `.baton/courses/create-pr/legs/`, not a `pr` course's legs; R-BTN-37's amendment is still needed.)_
+
+_(2026-11-09: the staging deployment is retired — B-224, the owner: a home repository binds to one Baton, and every registered one binds to production, so staging held nothing and tested nothing. The drill runs on a local host and then production.)_

@@ -110,6 +110,26 @@ describe('R-BTN-116: the question a snapshot posts', () => {
     expect(await history('question-posted')).toHaveLength(1);
   });
 
+  it('B-133: Needs you shows each option’s computed action, and the dashboard state carries the questions', async () => {
+    // The action is computed from the course graph — where the answer lands and what leaves
+    // there, person or runner — beside the packet’s own words; nothing is pre-selected.
+    const q = (await withCore((core) => core.questions.needsYou())).find((x) => x.ticket_id === 'docs:Q')!;
+    expect(q.title).toBeTruthy();
+    expect(q.options).toEqual([
+      expect.objectContaining({ id: 'a', reached: 'adjudicated', action: expect.stringMatching(/^moves the ticket to ‘adjudicated’, which queues (merge \(a runner leg\)|adjudicate \(a runner leg\))/) }),
+      expect.objectContaining({ id: 'b', reached: 'parked', action: expect.stringContaining('moves the ticket to ‘parked’') }),
+    ]);
+    // The dashboard’s state read serves the same rows under needs_you (B-133).
+    const state = (await keyCall(admin, '/v1/admin/state')).json;
+    expect(state.needs_you.questions.find((x: { ticket_id: string }) => x.ticket_id === 'docs:Q')).toMatchObject({
+      leg: 'decide', asks: 'owner',
+      options: [
+        expect.objectContaining({ id: 'a', action: expect.stringContaining('moves the ticket to') }),
+        expect.objectContaining({ id: 'b', action: expect.stringContaining('moves the ticket to') }),
+      ],
+    });
+  });
+
   it('a question whose queued leg is an agent\'s is dropped and logged question-dropped', async () => {
     git.add('R', { question: QUESTION }, placed('reviewed', REVIEWED, [['fix', 'ready']]));
     expect((await git.post()).status).toBe(200);
@@ -261,6 +281,20 @@ describe('R-BTN-116: a second person leg (one answer queues another ask)', () =>
     expect((await git.post({ attestations: [DECISION('a')] })).status).toBe(200);
     expect(await events('arrival-unapplied')).toEqual([]);
     expect(await station('Q')).toEqual([expect.objectContaining({ station: 'merged' })]);
+  });
+
+  it('B-133: an option that ends the course names the end as its computed action', async () => {
+    // `merged` is the course's one end: no legs leave it (and its toEnd is 0), so the action
+    // must SAY the choice ends the course — the old `toEnd ?` branch could never fire and the
+    // most consequential option printed only the station name.
+    expect((await git.post({ attestations: [DECISION('a')] })).status).toBe(200);
+    git.tickets.get('Q')!.question = CONFIRM;
+    git.place('Q', placed('adjudicated', [...REVIEWED, ['decide', 'adjudicated']], [['confirm', 'ready']]));
+    expect((await git.post()).status).toBe(200);
+    const q = (await withCore((core) => core.questions.needsYou())).find((x) => x.ticket_id === 'docs:Q')!;
+    expect(q.options).toEqual([
+      expect.objectContaining({ id: 'yes', reached: 'merged', action: 'moves the ticket to ‘merged’ — the course’s end' }),
+    ]);
   });
 
   it('a Baton move that queues a person leg with expires arms its clock itself (§6.4)', async () => {

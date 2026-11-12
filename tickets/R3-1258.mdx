@@ -39,7 +39,7 @@ against the plan's limits), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3
 
 ### Requires
 
-- `human-operator` — the staging load test needs the driver's keys registered by an
+- `human-operator` — reading production's `capacity` log and live figures against the envelope after the local load test needs an administrator; formerly the staging load test needed the driver's keys registered by an
   administrator, whose key is kept out of every agent's reach (§12.1), and one real
   repository's sync workflow. Every other case runs in the integration harness.
 
@@ -88,9 +88,11 @@ Tier: critical — the load test is a cutover precondition.
    configuration the spec does not yet name: this ticket adds one setting for it (a Worker var,
    default Workers Free's limits) and names it in the spec in the same PR. Nothing is refused
    at a limit. `npm run test:load` (§15): local in CI
-   (20 repositories, 1,000,000 seeded history rows); against `baton-staging` before cutover,
+   (20 repositories, 1,000,000 seeded history rows); the Cloudflare budgets are read from
+   production's own alarm `capacity` log and the dashboard's live figures against the envelope
+   (R-BTN-87, B-224), not from a staging run — formerly against `baton-staging` before cutover,
    seeded by a synthetic `--with-history` export, with driver-generated keys an administrator
-   registers and one real staging repository's sync posting a generated 5,000-ticket board.
+   registers and one real repository's sync posting a generated 5,000-ticket board.
 4. **Owner state** (R-BTN-88, §4.8), in `src/core/admin.ts` behind `/v1/admin/*` and
    `baton admin`:
    - `freeze` / `unfreeze` (refusing new claims and owner writes `frozen`); `seal` once no claim
@@ -137,7 +139,7 @@ Tier: critical — the load test is a cutover precondition.
 - [ ] S-BTN-49's non-call cases and S-BTN-50 pass on both hosts; G-BTN-76 (but its call clause,
       B-62's) and G-BTN-78 hold
 - [ ] the **Capacity** view shows the day's usage against the plan's limits (R-BTN-2)
-- [ ] the load test passes on the local host in CI and once against staging (G-BTN-77)
+- [ ] the load test passes on the local host in CI, and production's `capacity` log and live figures are read against the envelope (G-BTN-77)
 - [ ] no code path writes a `ticket` block from `spawned`
 - [ ] `npm test` and `npm run typecheck` green
 
@@ -148,3 +150,5 @@ _(filed 2026-10-15)_
 _(2026-10-20: rescoped to the current-state spec, PR #71 — `spawned` is recorded for `spawned-unposted` and calls with no provisional blocks or fan-in, capacity raises `baton.capacity`, and the export reads one section list later tickets extend.)_
 
 _(2026-10-20: extended for the coverage audit — R-BTN-2's day's usage against the plan's limits on the **Capacity** view.)_
+
+_(2026-11-09: the staging deployment is retired — B-224, the owner: a home repository binds to one Baton, and every registered one binds to production, so staging held nothing and tested nothing. B-224's Decision, default (a): the load test runs locally; the budgets are read on production. The §15 text now says so.)_

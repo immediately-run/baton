@@ -45,7 +45,7 @@ repository can be one of them once it has a ticket source (R3-1249).
      default source taught `.mdx` and the folder's name.
 2. **Register cut over.**
    - Run `baton admin repo add --id baton --github immediately-run/baton --cut-over` (R-BTN-127;
-     it reads the forge ids, R-BTN-138) against staging, then production.
+     it reads the forge ids, R-BTN-138) against production (the one instance, B-224).
    - Add the entry to `BATON_REPOSITORIES` in `wrangler.toml`, so a fresh deployment seeds it.
    - A new repository has no git-claim history to reconcile, so it skips the shadow week.
 3. **Ids.**
@@ -59,8 +59,8 @@ repository can be one of them once it has a ticket source (R3-1249).
    - a person (never an agent) may push a fix to `main` without a claim;
    - `npx wrangler rollback` is allowed only to a version at the same migration number (§2.1:
      migrations are append-only and the object refuses to serve until all are applied);
-   - the deploy workflow deploys staging first and runs the smoke checks there, and production
-     deploys only when staging is healthy.
+   - the deploy workflow's test job gates the production deploy; the smoke checks run against
+     production after the deploy, read-only (there is no staging instance, B-224).
 5. **First ticket.** File one real ticket at the next free `B-n` (`npm run ticket -- new`), claim
    it through Baton with an SSH-key runner (R3-1239), and take it to merged under `create-pr`.
    That run is the acceptance test.
@@ -75,14 +75,14 @@ repository can be one of them once it has a ticket source (R3-1249).
 
 - `baton repo sync` in CI posts the baton board, and `/v1/sync/head` for `baton` answers its
   commit.
-- The deploy workflow fails without deploying production when staging's smoke check fails.
+- The deploy workflow fails without deploying production when the test job fails; a smoke check that fails after the deploy is a condition for a person, not a rollback the workflow performs.
 
 ### Exit criteria
 
-- [ ] immediately-run/baton is registered and cut over in staging and production; its sync
+- [ ] immediately-run/baton is registered and cut over in production; its sync
       workflow is green
 - [ ] the acceptance `B-n` claimed through Baton and merged under `create-pr`
-- [ ] the break-glass section is in baton's README; the deploy is gated on staging
+- [ ] the break-glass section is in baton's README; the deploy is gated on the test job
 
 ## Status
 
@@ -91,3 +91,5 @@ _(filed 2026-10-16)_
 _(2026-10-20: rescoped to the current-state spec, PR #71 — `create-pr` read from its source instead of the `pr` course (R-BTN-134), and the acceptance ticket is the next free B-n, since B-1 exists.)_
 
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton board` and `baton tickets …` are `baton repo board` and `baton ticket …` (R-BTN-127); the built names rename under B-157.)_
+
+_(2026-11-09: the staging deployment is retired — B-224, the owner: a home repository binds to one Baton, and every registered one binds to production, so staging held nothing and tested nothing. Registration, the smoke checks and the deploy gate name production and the test job; nothing names staging.)_

@@ -72,6 +72,10 @@ export interface RegistryEntry {
   /** R-BTN-177 (B-104): the route choices this repository attaches to the course's legs, ids
    *  the program in force defines; judged with the ontology unit at each post. */
   route_choices?: Record<string, string[]>;
+  /** R-BTN-134: what the course's entry declares it reads — `prs` (the forge's PRs through the
+   *  fact adapter, R-BTN-96) or `branches` (the home repository's git). R-BTN-190 (B-182) reads
+   *  it to follow the PRs: a `git` home's PR course keeps its rounds in its PR's conversation. */
+  facts: string[];
 }
 
 const bad = (field: string, why: string): never => {
@@ -156,6 +160,15 @@ export function checkRegistry(v: unknown): RegistryEntry[] {
         routeChoices[leg] = [...new Set(ids as string[])];
       }
     }
+    // R-BTN-134: what the course's entry declares it reads. `prs` and `branches` are the names
+    // built so far; a course declaring none reads as none (R-BTN-190's rule treats it so).
+    let facts: string[] = [];
+    if (r.facts !== undefined) {
+      if (!Array.isArray(r.facts) || r.facts.length > 2 || !r.facts.every((x) => x === 'prs' || x === 'branches')) {
+        bad(`${at}.facts`, "must be a list from 'prs', 'branches'");
+      }
+      facts = [...new Set(r.facts as string[])];
+    }
     return {
       schemas,
       oversized: size > COURSE_FILE_MAX_BYTES,
@@ -169,6 +182,7 @@ export function checkRegistry(v: unknown): RegistryEntry[] {
       branch_pattern: pattern(r.branch_pattern, `${at}.branch_pattern`),
       previous_branch_pattern: r.previous_branch_pattern == null ? null : pattern(r.previous_branch_pattern, `${at}.previous_branch_pattern`),
       route_choices: routeChoices,
+      facts,
     };
   });
 }
@@ -267,14 +281,14 @@ export class Courses {
         ? this.c.store.exec<{ route_choices_json: string }>('SELECT route_choices_json FROM courses WHERE repository_id = ? AND id = ?', repo, e.id).toArray()[0]?.route_choices_json ?? '{}'
         : JSON.stringify(acceptedRoutes.get(e.id) ?? {});
       this.c.store.exec(
-        `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, person_legs_json, step_kinds, min_worker_version, report_horizon_h, branch_pattern, previous_branch_pattern, route_choices_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, person_legs_json, step_kinds, min_worker_version, report_horizon_h, branch_pattern, previous_branch_pattern, route_choices_json, facts)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (repository_id, id) DO UPDATE SET version = excluded.version, skill = excluded.skill, course_json = excluded.course_json,
            leg_capabilities_json = excluded.leg_capabilities_json,
            person_legs_json = excluded.person_legs_json,
            step_kinds = excluded.step_kinds, min_worker_version = excluded.min_worker_version, report_horizon_h = excluded.report_horizon_h,
            branch_pattern = excluded.branch_pattern, previous_branch_pattern = excluded.previous_branch_pattern,
-           route_choices_json = excluded.route_choices_json`,
+           route_choices_json = excluded.route_choices_json, facts = excluded.facts`,
         // §12.1's `courses` row holds the validated file as the repository posted it — its
         // `capability_roles` and its own lists (§12: "each course as the repository's last accepted
         // snapshot posted it"; `GET …/courses` returns the roles, and the CLI expands a grant's
@@ -288,7 +302,7 @@ export class Courses {
         // stored (a no-op); an accepted unit's map names this post's attachments whole, and an
         // entry absent from it carries none.
         repo, e.id, e.version, e.skill, JSON.stringify(e.course), JSON.stringify(legNeedsOf(e.course)), JSON.stringify(personLegsOf(e.course)), JSON.stringify(e.step_kinds), e.min_worker_version, e.report_horizon_h,
-        e.branch_pattern, e.previous_branch_pattern, routesJson);
+        e.branch_pattern, e.previous_branch_pattern, routesJson, JSON.stringify(e.facts));
       this.c.store.exec('DELETE FROM course_refusals WHERE repository_id = ? AND course_id = ?', repo, e.id);
       // Immutable: a schema already held has the same digest (schemaViolations), so it is kept.
       for (const x of e.schemas) {

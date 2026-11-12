@@ -150,3 +150,5 @@ review's fixes to §8, §9 and §16.1; it replaces B-60's fence clearing "until 
 silent past its lease" with `fence_deadline`)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): `foreign-write` is retired (R-BTN-46): a child session the runner cannot fence before `fence_deadline` has its later pushes unnoticed, and the next claimant re-reads git (R-BTN-19, R-BTN-25).)_
+
+- 2026-11-09: B-184's spec amendment restates item 3's `session`-mode reaps as reaps of a claim whose leg runs under any executor but `builtin`: fence-pending, the runner reporting `fenced` once the executor's `stop` has returned (R-BTN-19, R-BTN-107; G-BTN-14, S-BTN-4).

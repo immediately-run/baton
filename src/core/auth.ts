@@ -20,8 +20,8 @@ function remote(url: string): JWTVerifyGetKey {
   return set;
 }
 
-/** The test key set, honoured ONLY under the test bindings (§13a): a deployed Worker, staging
- *  included, has no BATON_TEST_BINDINGS, so no test key can ever verify there. */
+/** The test key set, honoured ONLY under the test bindings (§15): the deployed Worker has no
+ *  BATON_TEST_BINDINGS, so no test key can ever verify there. */
 function testKeys(env: Config, jwks: string | undefined): JWTVerifyGetKey | null {
   if (env.BATON_TEST_BINDINGS !== 'true' || !jwks) return null;
   return createLocalJWKSet(JSON.parse(jwks));

@@ -1,0 +1,161 @@
+---
+title: BATON-UI-V2 — the dashboard as a walk down the entity tree, in React and TypeScript
+id: baton-ui-v2
+status: active
+tags:
+  - project
+description: Replace the dashboard with a React and TypeScript app whose screens are the entities the REST API, the CLI and MCP already name — sign in, pick a repository, then one entity per screen, each drawn from that entity's REST reads with the registry actions ui.view places there — built from the owner's Claude Design mockup of 2026-11-09, in thirty-three half-day tickets.
+kind: project
+nav: Project
+order: 6
+---
+
+_Project entity, filed 2026-11-09 from the owner's design session (B-17: the dashboard design
+iterated with Claude Design) and the owner's organizing rule for it, quoted below. Revised the
+same day after two independent reviews (102 findings on the first thirteen tickets; a second
+round on the twenty-six that followed): the set is now thirty-three tickets of about half a day
+each, every route a screen reads or writes built by a ticket in its dependency closure, and the
+cross-cutting decisions made once in B-191 and B-193._
+
+**Design:** [`docs/design/baton-dashboard-v2.html`](../../docs/design/baton-dashboard-v2.html)
+(the Claude Design mockup, self-contained; its overview at
+[`baton-dashboard-v2-overview.png`](../../docs/design/baton-dashboard-v2-overview.png)) and
+[`docs/context/design-brief.mdx`](../../docs/context/design-brief.mdx), updated with what the
+design settled. **Spec:** [BATON_SPEC §11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4) (the
+dashboard), [§11.3](../../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-129](../../spec/BATON_SPEC/11-people.md#sec-11-3):
+one registry, every surface derived from it), [§14](../../spec/BATON_SPEC/14-api.md#sec-14) (the
+API), [§12.3](../../spec/BATON_SPEC/12-security.md#sec-12-3) (text, never markup).
+
+**Status:** `active` — author-set.
+
+## The organizing rule
+
+**Brief:** the owner, 2026-11-09: "I want the V2 API to be organized along the same concepts as
+the REST API, CLI and MCP. Under that assumption the dashboard becomes a walk down the same tree
+the URLs already draw — sign in, pick a repository, and every screen after that is one entity.
+Every screen = one entity's REST reads, with its controls the registry actions placed there by
+`ui.view` — so 'what I see' and 'what I can do' come from the same definition." The owner chose
+React and TypeScript, which replaces the brief's dependency-free rule; noted that this flips the
+earlier task-view decision — Running and Ready collapse into Board and Tickets, Needs you into
+Conditions, with one overview strip per repository ("running now · ready · needs you") so the
+task answers stay one glance away; and ruled on the transition: "Nobody is using the V1 Baton
+UI, so the transition doesn't need to be smooth" — V2 replaces V1 at `/` as soon as its shell
+lands.
+
+The tree, as the owner drew it:
+
+- **Root `/`** — the caller's repositories (an administrator's all, an owner's theirs): head,
+  mode, ready count, open conditions. Sign-in at `/login`; nothing else is tenant-scoped for an
+  owner.
+- **One repository, `/repositories/{r}/…`**: **Board** `/board`; **Tickets** `/tickets`,
+  `/tickets/{t}`; **Goals** `/goals`; **Courses** `/courses`, `/courses/{c}`; **Conditions**
+  `/conditions`, `/conditions/{id}` (the Resolve page); **Runners** `/runners`,
+  `/runners/{runner}` (keyed by the runner's id); **Credentials** `/grants`, `/owners`,
+  `/tokens`, `/mcp-keys`, `/sync-keys`, `/check-runners`; **Governance** `/policy`,
+  `/settings`, `/bars`, `/consents`, `/attestations`; **Sync** `/sync`.
+- **Tenant screens, an administrator's** — `/repositories` (the registry), `/instances`,
+  `/resources`, `/capacities`, `/settings`, `/state`, `/sessions`.
+
+The mockup draws the *content* of these screens — the Needs-you list, the timeline, the ticket
+table with its state column and reasons, the runner cards with lease bars and attempts, the course
+graph with queue depths, discrepancies, capacity — and its visual language (calm, dense, status by
+shape and label before colour, exceptions first). Its navigation (Overview, Tickets, Workers,
+Courses, Schemas) is *not* the design: the tree above is, and the mockup's sections are placed on
+the entity screens the tickets name. What the mockup draws and the tickets do not build, each
+with its reason, is recorded once in B-191's Decisions: Schemas (no page; B-217's schemas read
+serves the renderer only), Providers and Suspensions (B-142 retired their tables; a provider's
+availability is a reading on `/instances`), Accept history (R-BTN-85 adopts git's value at once),
+Stream stdout/stderr (R-BTN-128: a log is its directory), the runner's model (R-BTN-3 names
+none), the fleet-wide timeline (the owner's tree puts it on the runner page), runners grouped by
+state (R-BTN-3 groups them by hostname), "Workers" (B-68: runners); its Limits block is split
+across the credential screens (B-199), Governance (B-200) and `/resources` (B-214, where probe
+keys are listed).
+
+## The owner's answers
+
+B-191's Decision needed packet was answered on 2026-11-09 ("I take your recommendations"), (a)
+in each of its first six: (1) the tenant screens are read-only, (2) route and adopt stay the
+CLI's, (3) Stop is one click, (4) `GET /v1/admin/state` keeps its shape as `stateView()`, (5)
+the held post's Accept stays on Sync, (6) no ESLint — a source test over `src/dashboard/**` is
+the gate. Three more, found by the second review, were answered the same day: (7) "we don't
+need staging at all" — B-216 checks production, read-only, no workflow changes beyond B-193's
+build step, and the staging instance itself is retired by B-224 and B-225 in the `baton`
+project; (8) a per-tenant request counter is built so R-BTN-87's rates can be shown;
+(9) runners are grouped by hostname as R-BTN-3 says. Each remains a two-way door for a later
+spec ticket.
+
+## Items
+
+Filed 2026-11-09, in build order. Every ticket names its `S-BTN-n` scenarios at merge (R-BTN-31)
+and keeps §12.3: every value from a ticket, a runner or a reading is drawn as a text node or
+through R-BTN-112's renderer. **A screen ticket depends on the ticket that builds every route it
+reads or writes**; a route no ticket builds is built by the ticket that first needs it, named in
+its What to build (B-192's front rule, B-195's session attestation path, B-201's `/v1/ui/resync`,
+B-206's `ui.logout`, B-217's three reads, B-222's confirm and release).
+
+- **Spec and API** — **B-191** the spec amendment (§11.4 as the tree with its rules, R-BTN-129's
+  `ui.view`, §12.3 for a component framework, the redirect, R-BTN-16, the decisions and the
+  packet); **B-192** sessions read the repository reads (the front's cookie rule, session
+  callers, one refusal); **B-217** `children`, `courses` and `schemas`; **B-204** `GET
+  /v1/repositories` with the counts and the session's role, `GET /v1/actions` for a session,
+  `ui.view`; **B-205** ETag and cursors.
+- **The shell** — **B-193** toolchain and serving (`src/dashboard/`, esbuild, text delivery to
+  both hosts and the CLI bundle, `screens.ts`, the `ui` vitest project, the source gate, V1
+  removed); **B-206** the frame, `Text` and `View`, sign-in per role, `ui.logout`; **B-221** the
+  router, polling, refusals, theme, drawer; **B-207** controls from the registry, the schema
+  form, the two dialogs; **B-208** the root screen and the strip.
+- **Tickets** — **B-194** `repo.tickets`; **B-218** `ticket.show` with `allowed`; **B-209** Board
+  and Tickets screens; **B-210** the ticket page's sections; **B-222** its controls and the
+  completion's confirm and release routes.
+- **Conditions** — **B-195** `condition.show`, the list read's order and `answerable`, the
+  redirect, the session's attestation path; **B-219** the Conditions list and the Resolve page.
+- **Runners** — **B-196** `repo.runners` and `runner.show`; **B-211** the runner screens with
+  the timeline.
+- **Courses** — **B-197** `course.show` with `?summary=1`; **B-212** the layout function,
+  `CourseGraph` and `/courses`; **B-223** the course page.
+- **Goals** — **B-198** `/goals` on B-122's read.
+- **Credentials and governance** — **B-199** the grants read extended (MCP keys, tokens, sync
+  keys, check-runners, consents) and six credential screens; **B-200** policy, settings, bars
+  and consents screens; **B-213** `attestation.list` and `/attestations` (after B-146).
+- **Sync** — **B-201** `repo.sync`, `/v1/ui/resync` built, the Accept row; **B-220** the Sync
+  screen.
+- **Tenant** — **B-202** the tenant reads, the request counter, the registry read extended;
+  **B-214** registry, instances, resources, capacities; **B-215** settings, state, sessions.
+- **Cutover** — **B-203** the listing ledger, `ui.state` retired, docs; **B-216** `stateView()`,
+  S-BTN-170 per repository, the renderer scenarios, the production check.
+
+```
+outside the project, none started: B-23 → B-24 → B-25 → B-76; B-10; B-55 → B-56 → B-57; B-146; B-171; B-122
+
+B-191 ─┬─ B-193 ─────────────────────────────────────────┐
+       ├─ B-192 (also B-25, B-10, B-23, B-55) ─┬─ B-217   │
+       │                                       └─ B-205   │
+       └─ B-204 (also B-193, B-25, B-55)                  │
+B-193 + B-192 + B-204 + B-217 + B-76 ── B-206 ── B-221 (+B-205) ─┬─ B-207 (+B-204)
+                                                                  └─ B-208 (+B-204)
+B-192 + B-205 ── B-194 ── B-218
+B-194 + B-208 ── B-209            B-218 + B-221 + B-217 + B-23 + B-10 ── B-210 ── B-222 (+B-207, B-218, B-171)
+B-192 + B-205 + B-55 + B-56 ── B-195 ── B-219 (+B-207)
+B-192 + B-205 ── B-196 ── B-211 (+B-207)
+B-192 + B-205 + B-23 ── B-197 ── B-212 (+B-217, B-221) ── B-223
+B-208 + B-122 ── B-198           B-208 ── B-199 ── B-200
+B-207 + B-195 + B-146 + B-205 ── B-213
+B-192 + B-205 ── B-201 ── B-220 (+B-207)
+B-192 + B-205 ── B-202 ─┬─ B-214 (+B-208)
+                        └─ B-215 (+B-208)
+every screen + B-57 ── B-203 ── B-216
+```
+
+The critical path starts outside the project — B-23, B-24, B-25 and B-76 for the registry and
+owner sessions; B-55, B-56 and B-57 for conditions — then runs B-191 → B-192 → B-206 → B-221 →
+B-207 → a screen → B-203 → B-216. The screen tickets are independent of each other once the
+shell lands. Shared write targets are kept to one writer: the grants read is B-199's, the
+sidebar and the strip are B-206's and B-208's (screens only fill `repo.list` fields), `front.ts`
+is edited by B-192, B-193 and B-195 in dependency order, and the deploy workflow by B-193 alone.
+
+## Done when
+
+Every item above is done; the dashboard at the instance's origin is the V2 app; `GET
+/v1/ui/state` is gone and `GET /v1/admin/state` is `stateView()`; every listing V1 drew has a
+home; and every screen in the tree is drawn from reads and controls a signed key could make the
+same way.

@@ -1,0 +1,92 @@
+---
+title: "B-225 — [OP] Delete the staging Cloudflare resources: the baton-staging Worker and its Durable Object storage, the route, the DNS record, the Access application and the secrets"
+id: B-225
+project: baton
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - OP
+  - roadmap-item
+order: 1224
+tier: judgement
+description: "The operator leg of retiring staging (the owner, 2026-11-09). Once B-224 has merged and the deploy no longer recreates it, the owner deletes the baton-staging Worker (with its Durable Object namespace and stored data), the baton-staging.immediately.run route and DNS record, the Cloudflare Access application that covered that hostname, and the Worker's secrets. Nothing of production is touched. Requires: B-224."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-224
+---
+
+**Brief:** the owner, 2026-11-09: the staging instance has "no connected repos, no data, and no
+reasonable way to test anything — might as well get rid of it entirely."
+
+**Spec:** [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) (the service, as B-224
+amends it), [§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4):
+the Access application in front of the dashboard). Context: R3-1208 provisioned these
+resources; this ticket is its inverse for the staging half.
+
+**Depends on:** B-224 (the deploy workflow no longer deploys staging, so a deletion is not undone
+by the next push to `main`).
+
+**Used by:** none.
+
+### Requires
+
+`human-operator`: the Cloudflare account's owner, in the dashboard or with `wrangler` and a
+token holding Workers Scripts: Edit, Workers Routes: Edit, Zone DNS: Edit and Access: Edit. No
+agent holds these, and the repository's rules keep an agent from acting on deploys and
+credentials.
+
+### What to do
+
+In this order, each step checked before the next:
+
+1. **Confirm B-224 is on `main` and deployed**: the latest `baton-deploy` run has no "Deploy
+   staging" step.
+2. **Delete the Worker** `baton-staging` (`npx wrangler delete --name baton-staging`, or the
+   dashboard). Confirm the deletion of its Durable Object namespace and stored data when asked:
+   the instance registered no repository and holds nothing to keep (the owner, 2026-11-09).
+3. **Remove the route** `baton-staging.immediately.run/*` if the deletion left it, and the
+   **DNS record** for `baton-staging.immediately.run` in the `immediately.run` zone.
+4. **Delete the Access application** that covered `baton-staging.immediately.run` (R3-1208
+   created one per hostname); leave production's untouched.
+5. **Secrets**: the Worker's secrets go with it; if any staging-only token exists outside
+   Cloudflare (a GitHub token minted for staging's dispatch, R3-1208's runbook step), revoke it.
+6. **Record**: a dated line in `docs/lessons.mdx` or `CHANGELOG.md` naming what was deleted and
+   when, and this ticket closed with that line in its Status.
+
+### Do not
+
+- Touch the production Worker `baton`, its route, DNS, Access application, secrets or Durable
+  Object.
+- Delete anything before B-224 has merged: the deploy would recreate the Worker on the next
+  push.
+
+### Trust
+
+An operator's act with the owner's credentials, performed by the owner; nothing in this ticket
+is an agent's to run. The record it leaves is text in this repository.
+
+### Invariants
+
+- **Production is untouched**: `https://baton.immediately.run/` answers after every step.
+- **One Baton per home repository** (architecture).
+
+### Tests
+
+After the deletion: `curl -sI https://baton-staging.immediately.run/` does not reach a Worker
+(a DNS failure or a Cloudflare error page), `https://baton.immediately.run/` still answers,
+and `npx wrangler deployments list` shows no `baton-staging`.
+
+### Exit criteria
+
+- [ ] The staging Worker, its storage, route, DNS record, Access application and secrets are
+      gone; production answers.
+- [ ] The deletion recorded with its date; this ticket's Status says what was removed.
+
+## Status
+
+_filed 2026-11-09._

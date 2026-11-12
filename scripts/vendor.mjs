@@ -2,7 +2,7 @@
 // vendor.mjs — copy Baton's decision library from a sibling `docs` checkout (BATON_SPEC §3,
 // R-BTN-37).
 //
-//   npm run vendor                   copy docs/scripts/lib/{baton,vocabulary,sessionUsage,batonSync}.mjs into
+//   npm run vendor                   copy docs/scripts/lib/{baton,vocabulary,sessionUsage,batonSync,ticketPr}.mjs into
 //                                    src/shared/, and docs files the tests read (FIXTURES) into
 //                                    test/fixtures/, and rewrite src/shared/manifest.json
 //   npm run vendor -- --check        exit 1 when a copy differs from the sibling checkout
@@ -19,7 +19,7 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-export const SHARED = ['baton.mjs', 'vocabulary.mjs', 'sessionUsage.mjs', 'batonSync.mjs'];
+export const SHARED = ['baton.mjs', 'vocabulary.mjs', 'sessionUsage.mjs', 'batonSync.mjs', 'ticketPr.mjs'];
 /** docs files the tests read, copied byte for byte: {path here: path in docs}. */
 export const FIXTURES = {
   'test/fixtures/courses/roadmap-pr/course.json': '.baton/courses/roadmap-pr/course.json',

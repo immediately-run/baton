@@ -1,0 +1,51 @@
+---
+title: "B-228 — Legs start from the claim's snapshot: the runner fast-forwards a clean home on the default branch to it"
+id: B-228
+project: baton
+status: in-review
+updated: 2026-11-10
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1227
+tier: judgement
+description: "Found on vltava2, 2026-11-10: the home checkout sat at 30f959c (two days and 30-odd commits behind main) because nothing moves it, and the E2B executor copies the home's HEAD into each leg's sandbox, so B-150's agent began on old code with the old npm test (the Quint suite, 30 minutes in). R-BTN-34 already says the runner prepares the tree at the claim's sha; the runner only checked that the sha exists. After that check it now fast-forwards the home to the snapshot when the home is on the claim's default branch with no tracked change and behind it; otherwise the home stays as it is and the log says why. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the runner's log at the claim of B-150 named the home `@ 30f959c`; the board's head
+was `6ee04a5`. The agent's sandbox, cloned at the home's HEAD, ran the old `npm test`.
+
+**Spec:** [BATON_SPEC §4 R-BTN-34](../spec/BATON_SPEC/04-tickets-syncs-board.md) ("before
+preparing any tree at the sha"), [R-BTN-107](../spec/BATON_SPEC/08-runners.md) (an executor's
+checkout is the home's).
+
+**Depends on:** none.
+
+**Used by:** none.
+
+### What to build
+
+`advanceHome(home, sha, defaultBranch)` (`src/runner/home.ts`), called by the runner right after
+`ensureSha` and the course load: at the snapshot, nothing; on the default branch, no tracked
+change, HEAD an ancestor of the snapshot: `git merge --ff-only`; anything else — another branch,
+a detached HEAD, tracked edits, a HEAD ahead or diverged — is left exactly as it is and logged.
+A failure of the fast-forward is logged, never a release.
+
+### Trust
+
+No new input: the sha is the claim's, already checked to be on the default branch (R-BTN-143).
+
+### Invariants
+
+- **The home is the runner's alone** (one runner per checkout): only a fast-forward, never a
+  reset; a home someone left edited or on a branch is not touched.
+
+## Status
+
+_filed 2026-11-10._

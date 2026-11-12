@@ -1,0 +1,121 @@
+---
+title: "B-194 — The ticket list read: GET …/tickets gives every live ticket one state word by precedence, its reasons and detail, its position, eligible runners, counts per state, filters and a cursor"
+id: B-194
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1193
+tier: judgement
+description: "The list read the Board and Tickets screens of BATON-UI-V2 lack. repo.tickets: every live ticket's filter fields with its position (R-BTN-83); one state word by §11.4's precedence with reasons listing the others that apply; the state's detail — a running ticket's runner (id, hostname, session name), leg, since, lease end, last activity, stalled and condition_wait; a hold's set_by and reason; the first block; attempts against max_runs; the queued person leg; the completion's report; a suspended ticket's station; a closed ticket's end and time — closed tickets only within 24 hours; for a ready ticket the eligible alive runners by id and name, or an empty list with the failed gate's rule word; ?state= (a word or a tab), ?q=, ?tier=, ?cursor=; counts per state over the whole repository. Requires: B-192, B-205."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-192
+  - B-205
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Tickets** `/tickets` → `/tickets/{t}` — the work
+itself." The mockup's Tickets table (`tickets.txt`: one state per row with a reason band, the
+course position with holder and duration, requires as chips, the tabs All 16 = Ready 5 +
+Running 2 + Blocked 7 + Unconfirmed 1 + Merged today 1 — so a held ticket counts under Blocked)
+is what this read serves.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the state words,
+precedence and tab mapping as B-191 amends them; stalled is `last_activity_at` over 2 hours old;
+`condition-wait`), [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) ([R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3):
+a position), [§6.8](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8) ([R-BTN-12](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8)),
+[§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2)),
+[§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (matching: the gates and the
+rule word a refusal names), [§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4) (retries),
+[§9.6](../spec/BATON_SPEC/09-claims.md#sec-9-6) ([R-BTN-10](../spec/BATON_SPEC/09-claims.md#sec-9-6)),
+[§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) ([R-BTN-61](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1):
+the order), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3), [§14](../spec/BATON_SPEC/14-api.md#sec-14).
+
+**Depends on:** B-192 (sessions read the repository reads), B-205 (the cursor and response
+convention).
+
+**Used by:** B-209, B-218, B-222.
+
+### What to build
+
+The §14 row first, then the code in `src/core/tickets.ts` (new; the state function pure and
+exported, since B-218 reuses it), reading the rows `readyRows`, `claims.running`, `blocks.view`,
+`claims.needsYou`, `attempts.ts`, `stations.ts` and `questions.ts` already produce.
+
+1. **`GET /v1/repositories/{repository}/tickets`** (`repo.tickets`, read; the repository reads'
+   principals and a session). Each live ticket: `ticket_id`, `title`, `course`, `tier`,
+   `requires`, `tags`, `order`, `parent`, `position: {station, path_len, next_leg}` (R-BTN-83),
+   `state` and `reasons` — `unconfirmed` > `running` > `waiting-person` > `held` > `blocked` >
+   `backing-off` > `suspended` > `ready` > `closed`; `state` the first that applies, `reasons`
+   the rest — and `detail` for the state:
+   - `running: {runner_id, hostname, session_name, leg, since, lease_ends_at, last_activity_at,
+     stalled, condition_wait: <condition_id> | null}` (stalled: alive and `last_activity_at`
+     over 2 hours old);
+   - `held: {set_by, reason, since}`; `blocked: {kind, ref, since}` (the first block);
+   - `backing-off: {attempt, max_runs, until}`; `waiting-person: {leg, question_id}`;
+   - `unconfirmed: {reported_at, runner_id, hostname}`; `suspended: {station, waits_for}`;
+   - `closed: {at, end}` — listed only when `at` is within the last 24 hours;
+   and, for a `ready` ticket, `eligible_runners: [{runner_id, hostname, session_name}]` (alive
+   runners whose grant passes the gates) with `failed_rule: <rule word> | null` — the matching
+   gate's `rule` word (§6.6) when the list is empty, null otherwise.
+2. **Query.** `?state=` one word, or a tab name: `blocked` as a tab means `held`, `blocked`,
+   `waiting-person`, `backing-off` and `suspended` (the mockup's count); `closed-today` means
+   `closed`; `?q=` a case-insensitive substring of id or title, matched never interpreted;
+   `?tier=` a ceiling (`fitsTier` as `ready_by_tier` uses it); `?cursor=` by B-205. Order:
+   Baton's matching order for ready tickets (R-BTN-61), then the others by state precedence and
+   id; no order parameter. `counts: {<state>: n, total}` over the whole repository, unaffected
+   by the filters.
+
+### What not to do
+
+- No body (R-BTN-33); no state computed in a client; no client sort.
+- No per-ticket detail beyond the state's: `ticket.show` (B-218) carries the claim, attempts,
+  overrides and the rest.
+
+### Trust
+
+- **The read** — Baton's rows, answered to the repository reads' principals and a session of
+  the repository; titles, hostnames, reasons, rule words and refs are untrusted text validated
+  on write (§12.3), returned as text.
+- **Query parameters** — validated (`invalid-params`); `q` is matched; a cursor by B-205's rule.
+
+### Invariants
+
+- **Positions are Baton's** (R-BTN-39); **blocks are stored** (R-BTN-75); **filter fields only**
+  (R-BTN-33); **the order is Baton's** (R-BTN-61).
+- **One state word by one precedence** (§11.4), the vocabulary page's words.
+- **An owner's session, its repositories** (R-BTN-155); **both hosts** (R-BTN-55).
+
+### Tests
+
+A scenario numbered at merge, on both hosts, with a fixture repository holding a ready, a
+running (one stalled, one in `condition-wait`), a held-and-blocked, a backing-off, an
+unconfirmed, a suspended, a person-waiting and a closed-today ticket: each gets its state by
+precedence (the held-and-blocked one is `held` with `reasons: ["blocked"]`) and its detail;
+`?state=blocked` returns the tab's five states; `?q=` and `?tier=` filter; `counts` ignore the
+filters; pages chain; the ready ticket names its eligible runners by name and a ticket nobody
+can take has an empty list with the gate's rule word.
+
+### Exit criteria
+
+- [ ] `repo.tickets` in §14 and the registry, built in `src/core/tickets.ts` with an exported
+      state function.
+- [ ] The scenario passes; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09._
+
+_2026-11-09 — revised after review: the screens split out to B-209 and B-210; the state
+precedence, tab mapping, counts and no-client-sort decisions recorded._
+
+_2026-11-09 — revised after the second review: `ticket.show` split out to B-218; held tickets
+counted under the Blocked tab as the mockup does; the running detail carries the runner's names,
+`stalled` and `condition_wait`; eligible runners by name; `failed_rule` typed; one `at` field._

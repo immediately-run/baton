@@ -199,7 +199,11 @@ describe('S-BTN-148: a reviewer route choice with hysteresis', () => {
   }
 
   /** The reading-and-resolve loop, split so each trace stays quint-sized (the one long test
-   *  made the model's replay run for hours — a trace is a trace, not a marathon). */
+   *  made the model's replay run for hours — a trace is a trace, not a marathon). Its two tests
+   *  carry their own timeout: each step is a dozen awaited round-trips on the core (a beat, a
+   *  reading, two board posts, four claims and ends), ~1 s unloaded for the four-step one — and
+   *  vitest's 5 s default did not survive a loaded gate sandbox (B-182's run, 2026-11-12), the
+   *  same load class S-BTN-21's and S-BTN-41's timeouts answer (692a54a). */
   async function steps(from: string, bodies: Record<string, unknown>[], w1: FleetWorker, w2: FleetWorker, ids: string[], t0: number) {
     void from;
     let t = t0;
@@ -240,7 +244,7 @@ describe('S-BTN-148: a reviewer route choice with hysteresis', () => {
     expect(resolved).toEqual(['opus', 'glm']); // the demotion entered below 200
     const rowsOf = await rows<{ alternative: string; demoted: number }>('SELECT alternative, demoted FROM route_last WHERE worker_id = ? ORDER BY alternative', w1.id);
     expect(rowsOf).toEqual([{ alternative: 'glm', demoted: 0 }, { alternative: 'opus', demoted: 1 }]);
-  });
+  }, 20_000);
 
   it('a detail-less state keeps the fields at 250; 320 recovers opus; lapsed fails open with the demotion history gone', async () => {
     const w1 = await grantedWorker(owner, 'docs', 'w148c', ALL_KEYS, ['ac:main']);
@@ -268,7 +272,7 @@ describe('S-BTN-148: a reviewer route choice with hysteresis', () => {
     const blocked = await startLeg(w1, 'R3-9207');
     expect(alternativeOf(blocked.advice, 'reviewer-2')).toBe('glm');
     await w1.call(`/v1/runner/claims/${blocked.claimId}/end`, { end_reason: 'released:requested' });
-  });
+  }, 20_000);
 
   it('a fail-closed rule over state(I, "unknown") demotes when nothing is known', async () => {
     const failClosed = structuredClone(program);

@@ -32,8 +32,42 @@ import capacitySeats from './0030_capacity_seats.sql';
 import personLegs from './0031_person_legs.sql';
 import answerDeferred from './0032_answer_deferred.sql';
 import ownerRuns from './0033_owner_runs.sql';
+import scopeAudit from './0034_scope_audit.sql';
+import scopeEvents from './0035_scope_events.sql';
+import retireModelTables from './0036_retire_model_tables.sql';
+import ticketVersions from './0037_ticket_versions.sql';
+import runIds from './0038_run_ids.sql';
+import crossHostCodeRepos from './0039_cross_host_code_repos.sql';
+import signedControl from './0040_signed_control.sql';
+import claimControl from './0041_claim_control.sql';
+import { isUniqueViolation, mintRunId, type Random } from '../core/db';
+import type { Store } from '../core/ports';
 
-export const MIGRATIONS: { id: number; sql: string }[] = [
+/** A migration: its SQL, and — when a step needs what SQL lacks, as a ULID needs the core's
+ *  random source — a `backfill` run after the SQL in the same transaction. */
+export interface Migration {
+  id: number;
+  sql: string;
+  backfill?: (store: Store, random: Random) => void;
+}
+
+/** 0038 (B-185, R-BTN-63): runs recorded before run ids get one, minted from each run's
+ *  `started_at` as an advance mints one; a collision is refused by the unique index and retried. */
+function backfillRunIds(store: Store, random: Random) {
+  const rows = store.exec<{ id: number; started_at: number }>('SELECT id, started_at FROM claim_legs WHERE run_id IS NULL ORDER BY id').toArray();
+  for (const r of rows) {
+    for (let tries = 0; ; tries++) {
+      try {
+        store.exec('UPDATE claim_legs SET run_id = ? WHERE id = ?', mintRunId(r.started_at, random), r.id);
+        break;
+      } catch (e) {
+        if (!isUniqueViolation(e) || tries >= 8) throw e;
+      }
+    }
+  }
+}
+
+export const MIGRATIONS: Migration[] = [
   { id: 1, sql: init },
   { id: 2, sql: workers },
   { id: 3, sql: claims },
@@ -67,4 +101,15 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 32, sql: answerDeferred },
   // 0033 is B-110's (owner runs), renumbered at the merge behind B-7's 0031/0032; 0028 stays reserved for B-107 (#149).
   { id: 33, sql: ownerRuns },
+  { id: 34, sql: scopeAudit },
+  { id: 35, sql: scopeEvents },
+  { id: 36, sql: retireModelTables },
+  { id: 37, sql: ticketVersions },
+  { id: 38, sql: runIds, backfill: backfillRunIds },
+  // 0039 (B-182): code repositories name their own forge and host, and pushers are host-qualified.
+  { id: 39, sql: crossHostCodeRepos },
+  // 0040 is B-127's (owner-signed control inputs), renumbered at the merge behind main's 0034–0039.
+  { id: 40, sql: signedControl },
+  // 0041 is B-127's review round 2 (the claim's own control record).
+  { id: 41, sql: claimControl },
 ];

@@ -1,0 +1,67 @@
+---
+title: "B-231 — A fix leg that pushes nothing reports fixed, and the gate runs the same tests again: a loop of up to 30 runs on an unchanged tree"
+id: B-231
+project: baton
+status: in-review
+updated: 2026-11-11
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1230
+tier: judgement
+description: "Found on vltava2, 2026-11-10/11. B-167's fix legs reached `fixed` four times without a commit (16, 17, 5 and 1 minutes), and each time run-tests ran the unchanged tree again and recorded red. The ninth run's fix leg then wrote no result for four hours, until the executor's leg timeout; the runner released the ticket as cannot-finish:transient. A fix that changes nothing should not reach `fixed`, or a red gate on a tree it has already tested red should go to the owner rather than to another fix. A leg silent for hours should also be visible before its timeout. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** see the description. Log (vltava2 journal, 2026-11-10/11): fix runs 1, 3, 5 and 7
+`reached fixed` with no push; run 9 `fix failed (the leg wrote no result)` at 04:22:06 after
+starting at 00:22:01.
+
+**Spec:** B-110's gate and the fix loop (`max_runs: 30`), `src/defaults/course-pr.ts`;
+[BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md).
+
+**Depends on:** none.
+
+**Used by:** none.
+
+### What to build
+
+Decided: the first candidate, in the fix stub. A `fix` run from the gate's red (`ctx.claim.station`
+`pr-open` or `fixed`) reads the ticket's PR branch heads in the home repository (`git ls-remote`,
+by the course's branch patterns, as the run-tests stub finds its branch) before the agent runs and
+after. When they are unchanged, the leg fails: no position, so the claim ends
+`cannot-finish:transient`, a counted attempt for `fix` whose backoff and hold (R-BTN-122) bring
+it to the owner. From `reviewed` the stub is unchanged, since a fix may answer a review's findings
+without a push. With no PR branch found before, there is nothing to compare and the leg reports as before.
+
+The built-in leg carries the rule as `pushes: 'after-red'` (`src/defaults/courses.ts`); the stub
+template is `src/defaults/cli.ts`. R-BTN-131 states it.
+
+Rejected:
+- **The gate comparing `Baton-Tested` with its last red marker's tree:** the same signal, but as
+  a station-function change.
+- **A fix leg's own time ceiling:** R-BTN-167's leg deadline already bounds a leg. B-167's ninth
+  leg ran into the executor's 4 h instead, because the deadline is the course's to set.
+
+### Trust
+
+No new input: the stub reads the PR branch heads from the home repository, as run-tests does.
+An agent can still push a meaningless commit to pass the check, which only sends the gate a new
+tree to test.
+
+### Invariants
+
+- **R-BTN-131, the gate's verdict is the script's.** Unchanged.
+- **B-110, red routes to `fix`, never back to `implement`.** Unchanged; a fix that cannot fix
+  now ends its claim rather than loop.
+- **§9.7, attempts are per ticket and leg.** The failed fix counts against `fix`. A completed
+  `fix` resets the count, as before.
+
+## Status
+
+_filed 2026-11-11._

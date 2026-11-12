@@ -27,6 +27,7 @@ sessions": "Sounds useful."
 (`admin.key.revoke`: an owner key from every repository, never an administrator's); [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (one
 role per key: `baton admin keys set` and `baton.admin-key-conflict`).
 **Depends on:** B-25 (the registry, which scopes a session's actions).
+**Used by:** B-206 (the V2 shell signs in per role).
 
 ### Requires
 
@@ -50,12 +51,13 @@ None: a checkout, a terminal and a browser.
 3. The `owner-session` principal in `authorize` (R-BTN-129): only entries whose `callers` list
    it, on its repositories; never an administrator's action. `GET /v1/ui/state` filtered to its
    repositories; `/v1/ui/messages` (only `release` and `status_request`, holder checked) and
-   `/v1/ui/resync`, `/v1/ui/overrides/{ticket}` and `POST /v1/ui/conditions/{condition}/resolve`
+   `/v1/ui/resync` (built by B-201, scoped by this rule), `/v1/ui/overrides/{ticket}` and `POST /v1/ui/conditions/{condition}/resolve`
    on its repositories; the administrator-only `/v1/ui/*` routes refuse it.
 4. Confirmation by the minting key only: `baton owner confirm` and `POST /v1/owner/confirm`
    (`baton admin confirm` likewise restricted to the administrator key that minted the
    session); R-BTN-155's one confirmed-action list.
-5. The dashboard hides what the session may not see, and draws no administrator control for it.
+5. The V2 dashboard's shell does this (BATON-UI-V2: B-206 draws by the session's role, B-207
+   draws only the session's registry entries); no V1 change — B-193 removes V1.
 6. **Revoking keys** (R-BTN-57, adv-4 M1): `admin.key.revoke` (`revokeKey` in
    `src/core/admin.ts`) removes an owner key from every repository it owns, the last owner
    included, and ends its dashboard sessions and MCP keys in the same transaction; naming a key

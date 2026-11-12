@@ -1,0 +1,152 @@
+---
+title: "B-193 — The V2 toolchain and serving: src/dashboard/ in React and TypeScript, one esbuild bundle delivered as text to both hosts, the vitest ui project, the markup-API source gate, and the front serving the shell at / and every screen path in place of V1"
+id: B-193
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1192
+tier: judgement
+description: "The first shell ticket of BATON-UI-V2, with no screen in it: src/dashboard/ (React 19, TypeScript, no other runtime dependency) built by esbuild into src/dashboard/dist/ (gitignored) and reaching both hosts the way V1 does — as text imports (wrangler's Text rule and scripts/bundle.mjs gain the path), never Workers assets; pre-scripts build it before test, typecheck, dev and start:local so a clean checkout works; a third vitest project ui (jsdom, @testing-library/react) and tsconfig.dashboard.json; one unit test over the source tree refusing every markup-parsing API (Decision 6a: no ESLint); the front serves the shell at /, /login and every path in src/core/screens.ts, answers 404 outside the tree, and removes V1's files and paths — the owner ruled the transition needs no smoothing. The one deploy change (build before wrangler deploy) is named for owner approval. Requires: B-191."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-191
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): React and TypeScript; "Nobody is using the V1 Baton
+UI, so the transition doesn't need to be smooth."
+
+**Spec:** [BATON_SPEC §12.3](../spec/BATON_SPEC/12-security.md#sec-12-3) (Rendering: the source
+never parses markup; one bundle, nothing from another origin), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4)
+(the screen paths; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): `/login`),
+[§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4):
+the headers the front sets on every answer), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1)
+(the public row: the shell's assets), [§2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1)
+([R-BTN-55](../spec/BATON_SPEC/02-deployments.md#sec-2-1): one core, both hosts),
+[§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([G-BTN-13](../spec/BATON_SPEC/15-verification.md#gates)).
+Context: `docs/context/design-brief.mdx` (React and TypeScript, one built bundle).
+
+**Depends on:** B-191 (the screen paths and the rendering rule are specified).
+
+**Used by:** B-206, and through it every screen ticket; B-204 (`screens.ts`).
+
+### What to build
+
+1. **The directory.** `src/dashboard/` — `main.tsx` (mounts the app), `app/` (the shell: layout,
+   router, polling, controls — filled by B-206 to B-208), `screens/<entity>/` (one directory per
+   entity, filled by the screen tickets), `lib/` (pure helpers, unit-tested), `styles/app.css`,
+   `index.html`, and `dist/` (gitignored). Tests under `test/ui/`. The name is final: no `v2`.
+2. **The build.** `npm run build:ui` runs esbuild (the existing devDependency) with `jsx:
+   automatic`, `format: iife`, minified, target the current Chrome, Firefox and Safari, to
+   `src/dashboard/dist/app.js` and `dist/app.css`, and copies `index.html` there; the HTML
+   references `/dashboard/app.js` and `/dashboard/app.css` with no inline script. `react`,
+   `react-dom`, `@types/react`, `@types/react-dom`, `jsdom` and `@testing-library/react` are
+   devDependencies pinned exactly: the bundle is text the Worker and the local host embed, and
+   the published CLI embeds it too — `scripts/build-cli.mjs` bundles `cli/baton.mjs`, which
+   reaches `src/local/host.ts` and so `front.ts` — exactly as V1's files are embedded today.
+   `pretest`, `pretest:baton`, `pretest:no-quint`, `pretypecheck`, `predev`, `prestart:local`
+   and `prebuild:cli` run `build:ui`, and `build-cli.mjs` gets the same text plugin as
+   `bundle.mjs`, so `npm ci && npm test`, `npm run typecheck` and `npm run check:package` each
+   work from a clean checkout and `ci.yml`'s test and release jobs need no edit.
+3. **Delivery to both hosts as text** (R-BTN-55): `wrangler.toml`'s Text rule replaces
+   `**/ui/*.js` with `**/dashboard/dist/*.js` (its `**/*.html` and `**/*.css` already match),
+   and `scripts/bundle.mjs`'s text plugin replaces its `ui/app.js` filter with the same path, so
+   `front.ts` imports the three files as V1's are imported today. Not Workers assets: that would change the Worker's deploy shape and break
+   the local host's parity.
+4. **`src/core/screens.ts` and the front.** `screens.ts` is the one table of screens B-191
+   specifies — `[{id, path, role}]` with `id` in the grammar (`root`, `tenant/state`,
+   `repository/tickets/{ticket}`), `path` the URL pattern, `role` `any` or `administrator` —
+   built here, since the front serves from it now and B-221's router and B-204's
+   `check:actions` read it later; Baton's own, so not under the vendored `src/shared/`. The
+   front (`src/core/front.ts`): `GET /`, `/login`, and every `path` in `screens.ts` with its
+   parameters filled by any id-shaped segment, answer `index.html`
+   (one set of bytes, no data); `/dashboard/app.js` and `/dashboard/app.css` answer the assets;
+   `GET /conditions/{id}` is B-195's redirect (served as the shell here until then); any other
+   path outside `/v1` is `404`. The R-BTN-16 headers stay on every answer. V1's `src/ui/`
+   directory, its `STATIC` entries and `/ui/*` paths are removed in this ticket: until B-206
+   lands, `/` shows the shell's placeholder ("Baton dashboard — sign in", the sign-in page comes
+   with B-206), which the owner accepted.
+5. **`tsconfig.dashboard.json`** (`jsx: react-jsx`, `lib: [es2023, dom, dom.iterable]`, no
+   Workers types, `strict`), added to `npm run typecheck`; `vitest.config.ts` gains a third
+   project `ui` (environment `jsdom`, include `test/ui/**`), which `npm test` runs beside
+   `cloudflare` and `local`.
+6. **The source gate** (Decision 6a): a unit test in `test/ui/` reads every file under
+   `src/dashboard/` and fails on `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`,
+   `insertAdjacentHTML`, `document.write`, `DOMParser`, `createContextualFragment`, `eval`, `new
+   Function`, and on any `http://` or `https://` in a `src`, `href`, `url(` or `import` position
+   (the bundle loads nothing from another origin); a second test over `dist/app.js` checks only
+   the origin rule, since `react-dom` itself contains `innerHTML`.
+7. **The deploy.** `baton-deploy.yml` needs `npm run build:ui` before `wrangler deploy` (the
+   `pre*` scripts do not run there). This is the project's one workflow change, made in this
+   ticket's PR and named in its body for the owner's approval; B-203 and B-216 edit no workflow.
+   The `wrangler.toml` rule change is named with it.
+8. **Docs.** The README's layout table gains `src/dashboard/` and drops `src/ui/`; Commands gains
+   `build:ui`; the brief's "Where to look" names `src/dashboard/`.
+
+### What not to do
+
+- No screen, no sign-in flow, no router, no polling: B-206 to B-208.
+- No framework beyond React, no router or state library, no CSS framework, no remote asset;
+  nothing in `src/dashboard/` imports from `src/core/` (the client speaks HTTP only) — it may
+  import `src/shared/links.mjs` and `src/shared/view.mjs`, which are built for both sides.
+- No ESLint (Decision 6a); no `lint` script in any exit criterion of this project.
+- No Workers assets, no CDN, no second copy of V1 kept "just in case".
+
+### Trust
+
+- **The bundle** is the dashboard's whole code, built from this repository; the source gate and
+  the origin test are the trust statement — nothing parses markup, nothing loads from elsewhere.
+- **The shell's HTML** holds no data: an unauthenticated browser gets the same bytes, and every
+  data call keeps its principal and refusal (R-BTN-16, as V1's comment in `front.ts` says).
+- **The deploy change** — a CI workflow edit, which this repository's rules reserve to the
+  owner: made only in this PR, named for approval.
+
+### Invariants
+
+- **Text, never markup** (§12.3, G-BTN-13): the gate runs on every `npm test`.
+- **Both hosts** (R-BTN-55): the same three files reach the Worker and the local host.
+- **Same-origin headers** (R-BTN-16) on every static answer.
+- **Course-agnostic**: nothing in `src/dashboard/` names a station, leg or tag.
+
+### Tests
+
+- `npm ci && npm test && npm run typecheck` from a clean checkout builds the bundle and passes;
+  the `ui` project runs a trivial render test;
+- the source gate fails on a fixture file containing `dangerouslySetInnerHTML` and passes on
+  the tree; the bundle test fails on a fixture with a remote `src`;
+- the front answers `index.html` for `/`, `/login`, `/repositories/x/tickets/B-1`,
+  `/instances`; `404` for `/nope` and `/ui/app.js`; the assets with their content types; the
+  R-BTN-16 headers on each — on both hosts;
+- `npm run check:package` from a clean checkout builds and installs the CLI with the dashboard
+  embedded.
+
+### Exit criteria
+
+- [ ] `src/dashboard/` builds to `dist/`; both hosts and the CLI bundle embed it; V1 is gone;
+      `screens.ts` exists; the `ui` vitest project and `tsconfig.dashboard.json` run under
+      `npm test` and `npm run typecheck`; `check:package` passes from a clean checkout.
+- [ ] The source gate and the origin test exist and pass.
+- [ ] The deploy workflow and `wrangler.toml` changes are in the PR and named for owner
+      approval; README and brief current.
+- [ ] `npm test`, `npm run typecheck`, `npm run check:wiki` and `npm run check:tickets` green.
+
+## Status
+
+_filed 2026-11-09._
+
+_2026-11-09 — revised after review: split into B-193 (this), B-206 (sign-in, router, polling),
+B-207 (controls and dialogs) and B-208 (root and strip); the directory named `src/dashboard/`;
+delivery as text to both hosts decided; the vitest and tsconfig additions decided; the source gate
+replaces a bundle test and ESLint (Decision 6a); V1 removed here, since the owner needs no
+transition._
+
+_2026-11-09 — revised after the second review: `screens.ts` built here (its users come before
+B-204); the CLI bundle and the release job covered by `prebuild:cli` and the text plugin in
+`build-cli.mjs`; the Text rule and the bundler filter replace V1's paths rather than add to
+them._

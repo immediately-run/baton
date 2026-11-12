@@ -1,0 +1,109 @@
+---
+title: "B-205 — ETag and cursors for polled reads: every session-readable GET answers a strong ETag that ignores server_time and honours If-None-Match; new list reads page by an HMAC-bound cursor; existing reads keep their paging"
+id: B-205
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1204
+tier: judgement
+description: "The dashboard polls each screen's reads every 10 seconds, so an unchanged screen must move no body. Give every GET a session may call an ETag — a strong hash of the JSON with server_time removed, so a read whose only change is the clock is unchanged — and a 304 on a matching If-None-Match, as GET /v1/runner/fleet does today (R-BTN-99); define the cursor convention for the new list reads (repo.tickets, attestation.list, condition lists): ?cursor= in, next_cursor out, HMAC-bound under CursorKey to the caller, action and input as R-BTN-130's list tools are, 100 a page; existing reads (history's before/limit, board unpaged) keep their shape, since the CLI and runners read them. Requires: B-192."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-192
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): polling every 10 seconds per screen, freshness shown.
+
+**Spec:** [BATON_SPEC §6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)
+([R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7): `ETag` and `304` on the
+fleet and instance views), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3):
+cursors HMAC-bound under `CursorKey`), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3)
+(Admission: the per-credential rate limit),
+[§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) ([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1):
+the board's shape is fixed for keys), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`history`'s
+`?before=&limit=`; the Requests paragraph).
+
+**Depends on:** B-192 (the reads a session may call).
+
+**Used by:** B-194, B-195, B-196, B-197, B-201, B-202, B-213 (every new list read follows the
+convention), B-221 (the polling layer sends `If-None-Match`).
+
+### What to build
+
+The §14 Requests paragraph first, then the code.
+
+1. **ETag on every session-readable GET.** One function in the front wraps the JSON answer of a
+   read whose entry lists `session`: the ETag is a strong SHA-256 of the body with the top-level
+   `server_time` key removed (the body itself keeps `server_time`, so the CLI's and runners'
+   contracts are unchanged); `If-None-Match` matching answers `304` with the ETag and no body.
+   `GET /v1/runner/fleet` and `…/instances` keep their own (R-BTN-99). The ETag is per response,
+   never cached across callers.
+2. **The cursor convention**, stated once in §14's Requests paragraph and used by every new list
+   read: `?cursor=` in, `next_cursor` out (absent on the last page), 100 items a page unless the
+   row says otherwise; the cursor is opaque, HMAC-bound under `CursorKey` (R-BTN-55) to the
+   caller's credential or session, the action id and the other query parameters, as R-BTN-130's
+   list tools bind theirs; a cursor from another caller, action or filter is `invalid-params`.
+   A pure helper in `src/core/cursor.ts` mints and checks them; the list reads B-194, B-195,
+   B-196, B-197, B-201, B-202 and B-213 add use it.
+3. **Existing reads keep their paging**: `history` stays `?before=<id>&limit=`; `board`,
+   `grants`, `blocked` (which already has its own `?cursor=`), `conditions` (its own `?cursor=`)
+   stay as §14 states them. No existing row changes shape.
+4. **Response convention for new reads**, stated in the same paragraph: `{<items>: [...],
+   next_cursor?, counts?}`, timestamps as epoch milliseconds as today, filters as query
+   parameters with `invalid-params` for an unknown one.
+
+### What not to do
+
+- No change to any existing read's body or paging (R-BTN-179 fixes the board's shape for keys;
+  `baton ticket history` reads `before`).
+- No shared cache: an ETag compares one caller's last answer with its next; nothing is served
+  from a cache to another caller.
+- No `Cache-Control` beyond `no-store`, which the front sets today.
+
+### Trust
+
+- **ETag** — a hash of the caller's own answer; it reveals nothing the body did not and is
+  compared per request.
+- **Cursors** — opaque and HMAC-bound; a forged, foreign or re-filtered cursor is
+  `invalid-params`, so a cursor cannot widen a read beyond what the first page authorized.
+
+### Invariants
+
+- **Existing contracts unchanged** (R-BTN-179, the CLI's reads).
+- **One check** (R-BTN-129): `authorize` runs before the ETag is compared; a `304` is never
+  answered to a caller the read would refuse.
+- **Both hosts** (R-BTN-55): `CursorKey` and the hash are available on both.
+
+### Tests
+
+Scenarios numbered at merge, on both hosts:
+
+- two reads of an unchanged board one second apart differ only in `server_time` and carry the
+  same ETag; the second with `If-None-Match` is `304`; a changed row changes the ETag;
+- a `304` is never answered to a session the read refuses (a revoked owner's session with the
+  old ETag is `forbidden`);
+- a cursor minted for one session, action and filter is `invalid-params` for another session,
+  another action, or the same action with a different `?state=`; a tampered cursor is
+  `invalid-params`;
+- `history` with `?before=` and `board` answer exactly as before this ticket.
+
+### Exit criteria
+
+- [ ] §14's Requests paragraph states the ETag, cursor and response conventions.
+- [ ] Every session-readable GET answers an ETag and `304`; `src/core/cursor.ts` exists with
+      tests.
+- [ ] The scenarios pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-192 after review._
+
+_2026-11-09 — revised after the second review: the per-credential limit cited to §2.3's Admission paragraph, not R-BTN-135._
