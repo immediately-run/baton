@@ -2769,6 +2769,29 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   S-BTN-208–S-BTN-213 and G-BTN-168 are new; S-BTN-4, -64, -78, -88, -123 and G-BTN-14, -90
   follow.
 
+- **2026-11-12 — R-BTN-131: the stub concludes for an agent that will not exit or never ends** (B-108).
+  Rules changed: R-BTN-131, R-BTN-72.
+  The B-86 incident (2026-10-22): an implement agent finished its work, pushed, opened its PR,
+  wrote its ticket record — and never exited, so the stub waited five hours on an exit that never
+  came while every health signal stayed green. The owner, the same day: "the runner is responsible
+  for detecting that the agent has completed its work and wont exit. The baton server has no role
+  in this," and the numbers: "leg timeout: 5 hours, idle timeout: 15 minutes." An agent's
+  completion is now its exit **or its silence**, whichever comes first: the stub's wait ends at the
+  earliest of the agent's exit, fifteen minutes of quiet across every activity signal the stub can
+  see (its stdout, streamed and timestamped; the wrapper's log's mtime; the harness's own store,
+  keyed by the working directory, no session id) and five hours of the leg — the one
+  duration-based conclusion, a chatty agent that never converges cannot idle past it. Idle is
+  silence on all the signals: a live one anywhere vetoes the conclusion (a harness CLI may
+  legitimately print nothing on stdout until it exits — the stdout-silence trap, the db the true
+  signal that night), and before the ceiling a working agent is never touched. Either bound
+  concluding is the same act — SIGKILL to the child, the received stdout as the agent's output,
+  the checks judging the work as it stands — recorded in the leg's result as
+  `agent_concluded_idle` (with the quiet signals) or `agent_concluded_absolute`; Baton is told
+  none of it. R-BTN-72 gains the runner's liveness line: while a leg runs, each beat logs its
+  duration and the age of its newest activity signal, so a wedge forms in the log instead of
+  silence. The briefing's exit sentence (2026-10-22) and B-84's exit contract stand beside it —
+  prevention and detection.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

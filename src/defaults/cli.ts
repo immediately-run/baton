@@ -1206,9 +1206,10 @@ function stubSource(b: BuiltIn, course: string, leg: string): string {
   const closeHelpers = b.reads === 'prs' ? `\nimport { ticketsBranch } from ${JSON.stringify(source('ticket-state.ts'))};` : '';
   const values = ask ? ask.values.join(' or ') : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
 // B-94: every git and gh call this stub makes — the snapshot probes, the override and
@@ -1216,6 +1217,31 @@ import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
 // and environment the close uses, so a wedged call fails the leg within the bound instead of
 // burning the claim to its lease.
 const GIT_BOUND_MS = ${CLOSE_TIMEOUT_MS}, GIT_ENV = ${JSON.stringify(GIT_NONINTERACTIVE_ENV)};
+// B-108 (the owner, 2026-10-22): two bounds end the stub's wait for its agent — its exit, or
+// its silence. AGENT_IDLE_MS is 15 minutes of quiet across EVERY activity signal the stub can
+// see (the agent's stdout, the wrapper's log, the harness's own store): a harness CLI may
+// legitimately print nothing on stdout until it exits — some buffer the whole run — so an idle
+// stream alone is never idle; idle is silence everywhere, and it concludes a finished agent
+// that will not exit (the B-86 incident, 2026-10-22: five hours on an exit that never came).
+// LEG_CEILING_MS is 5 hours of the leg, whatever the agent is doing — the one duration-based
+// conclusion, ending a chatty agent that never converges, and the only one that may catch an
+// agent still working; before it a live agent is never touched. A course whose legs need longer
+// raises either in this copy of the file.
+const AGENT_IDLE_MS = 900000, LEG_CEILING_MS = 18000000;
+// B-108: a path's newest write — itself, or the newest file under it, the walk bounded (a store
+// a live session grows without end is walked no further). A path that does not exist answers 0:
+// a signal that was never live is quiet, never a veto.
+const newestWrite = (p, depth = 0) => {
+  let st = null;
+  try { st = statSync(p, { throwIfNoEntry: false }); } catch { return 0; }
+  if (st == null) return 0;
+  let best = st.mtimeMs;
+  if (!st.isDirectory() || depth >= 5) return best;
+  let names = [];
+  try { names = readdirSync(p); } catch { return best; }
+  for (let i = 0; i < names.length && i < 512; i++) best = Math.max(best, newestWrite(join(p, names[i]), depth + 1));
+  return best;
+};
 // B-93: stderr is captured, never inherited — the stub runs in the runner's own log, where a
 // quiet 'no origin' or a failed forge probe printed as a failure. A caller that reports one
 // reads it from the error (\`e.stderr\`); nothing else of git's rides the log unasked.
@@ -1362,7 +1388,34 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // mirrored to this stub's stderr, which the runner pipes and drains into its log: a live
   // leg is watchable line by line instead of silence until the exit. The bound execFile kept
   // is kept too: an agent whose output outgrows the cap is killed and refused.
-  const out = await new Promise((resolve, reject) => {
+  // B-108's bounds (the owner, 2026-10-22): the wait below ends at the earliest of the agent's
+  // exit, AGENT_IDLE_MS and LEG_CEILING_MS — an agent's completion is its exit or its silence,
+  // whichever comes first. The signals the idle bound reads, resolved before the spawn: the
+  // wrapper's log (B-95's example tees to .baton/logs/<ticket>-<leg>.log, whose mtime is
+  // streamed activity even when the stub cannot see the pipe) and, when the agent's command
+  // names a harness the stub knows, that harness's own store — opencode's data directory (its
+  // session db, and any directory it keys by this checkout), claude-code's projects directory
+  // keyed the same way. No session id: the store's newest write keyed by the stub's own cwd is
+  // the agent's activity.
+  const startedAt = Date.now();
+  const wrapperLog = join(ctx.checkout, '.baton', 'logs', ctx.ticket.id + '-${leg}.log');
+  const agentBin = basename(command);
+  const storePaths = [];
+  if (agentBin === 'opencode' || agentBin === 'claude') {
+    const dataHome = process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME !== '' ? process.env.XDG_DATA_HOME : join(homedir(), '.local', 'share');
+    const dashed = ctx.checkout.split('/').join('-');
+    if (agentBin === 'opencode') {
+      const root = join(dataHome, 'opencode');
+      storePaths.push(join(root, 'opencode.db'), join(root, 'opencode.db-wal'), join(root, 'opencode.db-shm'), join(root, 'project', dashed));
+      const key = createHash('sha1').update(ctx.checkout).digest('hex');
+      let instances = [];
+      try { instances = readdirSync(join(root, 'snapshot')); } catch { /* none yet */ }
+      for (const i of instances) storePaths.push(join(root, 'snapshot', i, key));
+    } else {
+      storePaths.push(join(process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== '' ? process.env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude'), 'projects', dashed));
+    }
+  }
+  const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === '1';
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout, stdio: ['ignore', 'pipe', 'pipe'],
@@ -1372,31 +1425,70 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
       },
     });
     let so = '', se = '';
+    // B-108: stdout is the one signal read off the pipe — timestamped as it drains.
+    let lastOut = startedAt;
+    let watch = null;
     child.stdout.on('data', (c) => {
+      lastOut = Date.now();
       so += c;
-      if (so.length > ${AGENT_OUTPUT_MAX}) { child.kill('SIGKILL'); reject(new Error('the agent printed more than ${AGENT_OUTPUT_MAX} bytes')); return; }
+      if (so.length > ${AGENT_OUTPUT_MAX}) { if (watch != null) clearInterval(watch); child.kill('SIGKILL'); reject(new Error('the agent printed more than ${AGENT_OUTPUT_MAX} bytes')); return; }
       if (echo) process.stderr.write(c);
     });
     child.stderr.on('data', (c) => { if (se.length < 2048) se = (se + String(c)).slice(-2048); if (echo) process.stderr.write(c); });
-    child.on('error', (e) => reject(e));
+    child.on('error', (e) => { if (watch != null) clearInterval(watch); reject(e); });
     // B-227: a release (the runner's abort line, \`ctx.signal\`) stops the agent at once — its
     // TERM, then KILL after a grace — so the leg reaches its safe point inside the runner's
     // immediate-stop window and the claim is released with its hand-off, not left to the reaper.
-    let stopped = null;
+    let stopped = null, conclusion = null;
     const onAbort = () => {
       if (stopped != null) return;
       stopped = String(ctx.signal.reason ?? 'release');
+      if (watch != null) clearInterval(watch);
       child.kill('SIGTERM');
       setTimeout(() => child.kill('SIGKILL'), 3000).unref();
     };
     if (ctx.signal) { if (ctx.signal.aborted) onAbort(); else ctx.signal.addEventListener('abort', onAbort, { once: true }); }
+    // B-108: the bounds' watch. Either bound concluding is the same act: the stub kills the
+    // agent (it is the parent; SIGKILL to the child alone), takes the received stdout as the
+    // agent's output, and the wait ends exactly as an exit would — the last-line contract, the
+    // forge verification, the checks judging the work as it stands. Idle concludes only when
+    // EVERY signal is quiet past the bound; any live one vetoes it however long the rest stay
+    // quiet, and the ceiling alone may catch an agent still working.
+    const signals = () => [
+      ['stdout', lastOut],
+      ['wrapper-log', newestWrite(wrapperLog)],
+      ...(storePaths.length > 0 ? [['harness-store', storePaths.reduce((best, p) => Math.max(best, newestWrite(p)), 0)]] : []),
+    ];
+    const finishWatch = () => {
+      if (watch != null) clearInterval(watch);
+      child.kill('SIGKILL');
+      process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the agent ' + conclusion.cause + (conclusion.cause === 'agent_concluded_idle' ? ' — quiet past ' + Math.round(AGENT_IDLE_MS / 60000) + ' minutes on ' + conclusion.quiet_signals.join(', ') : ' — the leg\\'s ceiling of ' + Math.round(LEG_CEILING_MS / 60000) + ' minutes') + '; the stdout it received is its output\\n');
+      resolve({ text: so, conclusion });
+    };
+    watch = setInterval(() => {
+      if (stopped != null || conclusion != null) return;
+      const now = Date.now();
+      if (now - startedAt >= LEG_CEILING_MS) {
+        conclusion = { cause: 'agent_concluded_absolute', ceiling_ms: LEG_CEILING_MS };
+        finishWatch();
+        return;
+      }
+      const all = signals();
+      if (all.every(([, at]) => now - at >= AGENT_IDLE_MS)) {
+        conclusion = { cause: 'agent_concluded_idle', idle_ms: AGENT_IDLE_MS, quiet_signals: all.map(([name]) => name) };
+        finishWatch();
+      }
+    }, Math.max(250, Math.round(AGENT_IDLE_MS / 5)));
+    watch.unref?.();
     // A stopped agent is done when it exits: a child of its own may still hold its pipes open
     // (\`close\` would wait for that), and the session's end takes whatever is left.
     child.on('exit', () => { if (stopped != null) reject(new Error('the agent was stopped: ' + stopped)); });
     child.on('close', (code, sig) => {
+      if (watch != null) clearInterval(watch);
       if (ctx.signal) ctx.signal.removeEventListener('abort', onAbort);
       if (stopped != null) { reject(new Error('the agent was stopped: ' + stopped)); return; }
-      if (code === 0) { resolve(so); return; }
+      if (conclusion != null) return; // a bound concluded; the kill's own close changes nothing
+      if (code === 0) { resolve({ text: so, conclusion: null }); return; }
       // The failure names its cause with a tail, not a single line (2026-10-24): the last
       // lines of both streams, bounded, so the log alone can diagnose the death.
       const tail = (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
@@ -1408,7 +1500,10 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
     child.stdin?.end();
   }).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
-  });${pushes ? `
+  });
+  // B-108: an exit resolves the text with no conclusion; a bound resolves the conclusion it
+  // reached, and the received text is the agent's output either way.
+  const { text: out, conclusion } = received;${pushes ? `
   if (headsBefore !== '' && prHeads() === headsBefore) {
     throw new Error('the ${leg} leg pushed nothing: ' + headsBefore.split('\\n').map((l) => l.split('\\t')[1].slice('refs/heads/'.length) + ' at ' + l.slice(0, 10)).join(', ') + ' is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)');
   }` : ''}${names ? `
@@ -1422,14 +1517,14 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   const on = ${PR_URL}.test(last) ? last : null;`}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
-` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}) };` : `${ask ? `
+` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}), ...(conclusion ? { conclusion } : {}) };` : `${ask ? `
   // The answer (B-85): the last line that opens with the leg's value word, backwards past any
   // prose after it; a missing or misspelled verdict still fails, naming what it read.
   const { answer } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});` : `
   void out;`}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
-` : ''}  return ${position};`}
+` : ''}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}
 }
 // The close's ctx, one line (B-96's review round 2): everything the stub hands back, plus the
 // repository's default branch — the claim answer's \`default_branch\`, which the runner puts in

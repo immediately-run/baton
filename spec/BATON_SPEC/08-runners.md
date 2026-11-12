@@ -179,7 +179,11 @@ the runner's credentials under any other executor is that executor's, never Bato
   claim's `snapshot_sha`, one leg at a time (B-103; the bullet after this one). It owns the legs
   themselves —
   starting them through its executor (R-BTN-107), stopping them when necessary, and realizing
-  they are stuck (§1's division of labor; B-108) — and nothing else does. A leg's end is the end
+  they are stuck (§1's division of labor; B-108) — and nothing else does. While a leg runs, each
+  of its beats logs the leg's duration and the age of its newest activity signal — the same
+  signals the stub's idle bound reads (B-108, R-BTN-131) — so an operator watches a wedge form
+  and the leg's ceiling approach instead of silence; an operator's outside watch of the runner's
+  own kit is the backstop, never the detector. A leg's end is the end
   of every process it started, whatever ended the leg: under `builtin` the runner kills the
   wrapper's process group at the wrapper's exit — the lost lease's no-hand-off kill (R-BTN-24)
   and the wrapper's own return alike — so a process a leg started (a held lock, a background
