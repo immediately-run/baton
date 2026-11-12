@@ -1313,8 +1313,10 @@ describe('S-BTN-41 the runner', () => {
       expect(newestWrite(join(dir, 'no-such-path'))).toBe(0); // never live, never a veto
       const signals = legActivity(dir, 'T-9', 'build');
       expect(signals.map((s) => s.name)).toEqual(['wrapper-log', 'harness-store']);
-      // The stale log is read at its age; the absent store at 0 — quiet, not live.
-      expect(signals[0].at).toBe(old.getTime());
+      // The stale log is read at its age; the absent store at 0 — quiet, not live. (ext4 keeps
+      // nanoseconds: a millisecond Date set can read back a hair under itself on some hosts.)
+      expect(signals[0].at).toBeGreaterThanOrEqual(old.getTime() - 1);
+      expect(signals[0].at).toBeLessThan(old.getTime() + 1_000);
       expect(signals[1].at).toBe(0);
     } finally {
       if (wasHome == null) delete process.env.XDG_DATA_HOME;
