@@ -3,6 +3,7 @@
 // shapes at type-check time. Baton's own file, not vendored: the masking happens in Baton.
 export declare const BEARER_TOKEN: RegExp;
 export declare const KEY_BEGIN: RegExp;
+export declare const KEY_END: RegExp;
 export declare const KEY_HOLD: number;
 
 /** `text` with every class-6 key block masked whole, then every class-5 token. */

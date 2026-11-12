@@ -288,7 +288,7 @@ export const syncLogStamped = (verbose: boolean, l: string): void => syncLog(ver
  * permanent listener. One slot: the previous hook comes off before the next goes on. */
 let exitHookFn: ((code: number | undefined) => void) | null = null;
 
-export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void; transport?: (req: Request) => Promise<Response> } = {}): Promise<number> {
+export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void; transport?: (req: Request) => Promise<Response>; env?: NodeJS.ProcessEnv } = {}): Promise<number> {
   // §6.13: a leg session never claims — the runner that started it does. A nested `baton run`
   // is exactly that session trying, so it is refused before anything else. BATON_PARENT is the
   // runner's name for it (B-97: the transition's IR_BATON_PARENT is gone).
@@ -332,8 +332,9 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   const courses = servedCourses(a.home, a.course);
   // R-BTN-144 class 7 (B-170): the names this host's `runner.json` `mask_env` lists are masked
   // with the ones that say a secret by their ending. A repository's own settings file is never
-  // read for it: only the runner host's configuration names what its legs must not print.
-  const maskEnv = hostMaskEnv(say);
+  // read for it: only the runner host's configuration names what its legs must not print. The
+  // env comes from `io` so a test's runMain reads a configuration it chose, not the machine's.
+  const maskEnv = hostMaskEnv(say, io.env ?? process.env);
   // B-86: no `--capabilities` asks for nothing — the grant speaks, and each answer's
   // `grant.capabilities` is what the runner declares. The flag narrows that.
   if (a.capabilities == null) say('baton: no --capabilities given — the runner declares what the grant allows (narrow it with --capabilities, e.g. a machine without a browser)');

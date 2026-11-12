@@ -15,13 +15,12 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { maskSecrets } from '../shared/mask.mjs';
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
 import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, type CourseLoad } from './home';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
-import { MIN_SECRET_BYTES, createLegMasker, namesASecret, secretValues } from './mask';
+import { MIN_SECRET_BYTES, createLegMasker, maskLegOutput, namesASecret, secretValues } from './mask';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { StateFile, leaseLostFrom, type RunnerState } from './state';
 import { bareTicketId } from '../defaults/ticket-state';
@@ -773,6 +772,11 @@ export class Runner {
    *  it, and it is stopped when the next leg starts or the claim ends. */
   private session: { handle: Handle; checkout: string } | null = null;
 
+  /** R-BTN-144 class 7 (B-170): the last leg's masked set, from the environment it was given. It
+   *  outlives the leg's call: the close and handoff that follow run in its session with the same
+   *  environment, and a leg's own failure text reaches this log after its stream closed. */
+  private legSecrets: readonly string[] = [];
+
   /** Start a session of `kind` on the executor the host chose. */
   private async startSession(kind: SessionKind, o: { session_id: string; run_id?: string; ticket?: string; leg?: string; snapshot_sha?: string; paths: string[]; env: Record<string, string> }): Promise<Handle> {
     return await this.executor.start({
@@ -825,15 +829,16 @@ export class Runner {
   /** One wrapper call (R-BTN-133) through the executor's `exec`: `node <wrapper> <call> <script>`,
    *  its arguments on stdin's first line, its outcome on stdout's last. `sink` is the leg's
    *  running stream sink (R-BTN-144, B-170), which the leg's `run` passes and the runner releases
-   *  at the call's end; every other call's stderr is the verbose drain, masked of classes 5 and 6
-   *  alone. */
+   *  at the call's end; every other call's stderr is the verbose drain, masked of classes 5 and
+   *  6 and of the leg's class 7 set — those calls run in the leg's session, with the same
+   *  environment its literals came from. */
   private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number, sink?: () => ReturnType<Runner['legSink']>): Running {
     const leg = sink?.();
     return this.executor.exec(h, ['node', LEG_PROCESS, call, script], {
       cwd: this.o.home, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
       // R-BTN-144: what a leg's stderr carries leaves masked — class 5 and class 6 by the shared
-      // pattern, the leg's own class 7 set with them while its run streams.
-      onStderr: leg ? (l: string) => leg.onStderr(l) : this.verbose ? (l: string) => this.log(maskSecrets(`baton: ${call}: ${l}`)) : undefined,
+      // pattern, the leg's own class 7 set with it while its run streams, and by the drain after.
+      onStderr: leg ? (l: string) => leg.onStderr(l) : this.verbose ? (l: string) => this.log(maskLegOutput(`baton: ${call}: ${l}`, this.legSecrets)) : undefined,
     });
   }
 
@@ -1470,7 +1475,9 @@ export class Runner {
           return await this.finish(claimId, { end_reason: reason, reached, ...(next != null ? { next } : {}) }, await this.callHandoff(script, ctx));
         }
         if (outcome.kind === 'crashed') {
-          this.log(`baton: ${ticket}'s ${legName} failed (${outcome.error})`);
+          // R-BTN-144 (B-170): the leg's own error text leaves masked — a provider-auth message
+          // is the one that quotes the key. It was masked at its source too; this is the log.
+          this.log(`baton: ${ticket}'s ${legName} failed (${maskLegOutput(outcome.error, this.legSecrets)})`);
           return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: at, next: legName }, await this.callHandoff(script, ctx));
         }
         const result = outcome.result;
@@ -1478,7 +1485,7 @@ export class Runner {
           ? (result as { session: string }).session : session;
         const verdict = decide(result, course.graph, legName, at);
         if ('bug' in verdict) {
-          this.log(`baton: ${ticket}'s ${legName} script bug: ${verdict.why}`);
+          this.log(`baton: ${ticket}'s ${legName} script bug: ${maskLegOutput(verdict.why, this.legSecrets)}`);
           return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.next }, await this.callHandoff(script, ctx, verdict.why));
         }
         // R-BTN-83: `close` writes the closing marker from the validated result before anything
@@ -1640,6 +1647,23 @@ export class Runner {
     await this.stopSession('next-leg');
     const sessionId = typeof ctx.run_id === 'string' ? `${ctx.run_id}.r0` : `leg-${tag}`;
     const env = Object.fromEntries(Object.entries(childEnv).filter((e): e is [string, string] => typeof e[1] === 'string'));
+    // R-BTN-144 class 7 (B-170): the leg's masked set is computed once, here, from the environment
+    // the leg is given — every variable whose name says a secret, and every name `runner.json`
+    // `mask_env` lists. The environment spreads the runner's own, so the host's values are in it;
+    // a non-secret that matches is masked too (a readable log line lost, nothing else), and a
+    // value under 8 bytes is not masked at all (said once under --verbose). The set is the
+    // Runner's, not the call's: the close and handoff that follow run in the leg's session, and
+    // what a leg's own failure says reaches this log after its stream closed.
+    const maskEnv = this.o.maskEnv ?? [];
+    // `mask_env` names every other environment it reaches: a name the host keeps under no
+    // ending (a provider's key in `ANTHROPIC_API_KEY`, say) stays masked when a repository's
+    // environment spells it too.
+    const legSecrets = this.legSecrets = secretValues(env, maskEnv);
+    if (this.verbose) {
+      const short = Object.keys(env).filter((n) => (maskEnv.includes(n) || namesASecret(n)) && Buffer.byteLength(env[n], 'utf8') < MIN_SECRET_BYTES);
+      if (short.length) this.log(`baton: ${leg}'s ${short.join(', ')} ${short.length === 1 ? 'is' : 'are'} under ${MIN_SECRET_BYTES} bytes, so not masked (R-BTN-144)`);
+    }
+    const sink = this.legSink(legSecrets);
     let handle: Handle;
     try {
       handle = await this.startSession('leg', {
@@ -1649,24 +1673,10 @@ export class Runner {
     } catch (e) {
       rmSync(advicePath, { force: true });
       rmSync(takenPath, { force: true });
-      return { kind: 'crashed', error: `the executor could not start the leg's session (${msg(e)})` };
+      // The leg's own failure text leaves masked, whatever of it the executor quoted.
+      return { kind: 'crashed', error: maskLegOutput(`the executor could not start the leg's session (${msg(e)})`, legSecrets) };
     }
     this.session = { handle, checkout: this.o.home };
-    // R-BTN-144 class 7 (B-170): the leg's masked set is computed once, here, from the environment
-    // the leg is given — every variable whose name says a secret, and every name `runner.json`
-    // `mask_env` lists. The runner's own values stay in it: an environment that shadows one of
-    // them masks both. A non-secret that matches is masked too (a readable log line lost, nothing
-    // else), and a value under 8 bytes is not masked at all (said once under --verbose).
-    const maskEnv = this.o.maskEnv ?? [];
-    // `mask_env` names every other environment it reaches: a name the host keeps under no
-    // ending (a provider's key in `ANTHROPIC_API_KEY`, say) stays masked when a repository's
-    // environment spells it too.
-    const legSecrets = [...new Set([...secretValues(process.env, maskEnv), ...secretValues(env, maskEnv)])];
-    if (this.verbose) {
-      const short = Object.keys(env).filter((n) => (maskEnv.includes(n) || namesASecret(n)) && Buffer.byteLength(env[n], 'utf8') < MIN_SECRET_BYTES);
-      if (short.length) this.log(`baton: ${leg}'s ${short.join(', ')} ${short.length === 1 ? 'is' : 'are'} under ${MIN_SECRET_BYTES} bytes, so not masked (R-BTN-144)`);
-    }
-    const sink = this.legSink(legSecrets);
     if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} run ${basename(script)} (session ${sessionId}, executor ${this.executor.source})`);
     const running = this.wrapperCall(handle, 'run', script, [ctx], undefined, () => sink);
     const inflight = this.inflight!;
@@ -1728,7 +1738,9 @@ export class Runner {
     rmSync(takenPath, { force: true });
     const out = wrapperOutcome(exit.stdout);
     if (out == null) return { kind: 'crashed', error: 'the leg wrote no result' };
-    return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: out.error ?? 'the leg script failed' };
+    // A crashed leg's error is its own text (the thrown message the wrapper printed), masked
+    // here — where the set lives — so the log it reaches carries no literal of the leg's env.
+    return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: maskLegOutput(out.error ?? 'the leg script failed', legSecrets) };
   }
 
   /** `close(ctx, result)`: the closing marker from the validated result (R-BTN-83), retried
@@ -1744,7 +1756,7 @@ export class Runner {
         if (!out.ok) throw new Error(out.error ?? 'the close failed');
         return typeof out.result === 'string' ? out.result : null;
       } catch (e) {
-        this.log(`baton: the leg's close failed (${msg(e)}), attempt ${attempt + 1} of 3`);
+        this.log(`baton: the leg's close failed (${maskLegOutput(msg(e), this.legSecrets)}), attempt ${attempt + 1} of 3`);
       }
     }
     return undefined;
@@ -1761,7 +1773,7 @@ export class Runner {
       if (!out.ok) throw new Error(out.error ?? 'the hand-off failed');
       return typeof out.result === 'string' ? out.result : null;
     } catch (e) {
-      this.log(`baton: the leg's handoff failed (${msg(e)}) — the resume record covers it (R-BTN-24)`);
+      this.log(`baton: the leg's handoff failed (${maskLegOutput(msg(e), this.legSecrets)}) — the resume record covers it (R-BTN-24)`);
       return null;
     }
   }
