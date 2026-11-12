@@ -80,6 +80,7 @@
     "test/unit/cloud-runner.test.ts",
     "test/unit/signed-control.test.ts",
     "test/integration/S-BTN-219.require-signed-control.test.ts",
-    "test/unit/dependency-hygiene.test.ts"
+    "test/unit/dependency-hygiene.test.ts",
+    "test/unit/start-runner.test.ts"
   ]
 }

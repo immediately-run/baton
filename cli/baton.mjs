@@ -133,11 +133,13 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requestCredential, signHeaders, signingKey } from './sign.mjs';
 
 export const DEFAULT_URL = 'https://baton.immediately.run';
+/** The package the pinned release command names (B-138): `npx --yes @immediately-run/baton@<version>`. */
+export const PINNED_PACKAGE = '@immediately-run/baton';
 const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 
 /** argv after the command: flags (each `--name value`, or a bare boolean) and positionals. The
@@ -189,6 +191,61 @@ export function duration(v) {
   const m = /^(\d+)([mhd])$/.exec(v);
   if (!m) throw new Error(`a duration is like 30m, 1h or 2d, not ${v}`);
   return Number(m[1]) * UNITS[m[2]];
+}
+
+/** The version of the package this CLI ships in — the pin the B-138 refusal names. `cli/` reads
+ *  the checkout's package.json, the bundled `dist/` the package's own; null when neither reads. */
+function packageVersion() {
+  try {
+    return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** B-138: the git working tree that owns the CLI's code — the directory holding the `.git` the
+ *  CLI sits below — or null when no tree owns it (an npm install, npx's cache: a released copy,
+ *  whose code no push changes). A checkout's `cli/` and a `dist/` built inside one are working
+ *  trees: their code is what a push (a branch a leg checks out) leaves there. A `.git` above a
+ *  `node_modules` boundary does not own the code below it — npm laid that down, no branch of
+ *  the outer tree does (round 1, the dotfiles `$HOME`: a released copy installed under a `$HOME`
+ *  that is itself a git repository is still a released copy). */
+export function workingTreeOf(cliFile = fileURLToPath(import.meta.url)) {
+  for (let dir = dirname(cliFile), parent = dirname(dir), base = basename(dir);; dir = parent, parent = dirname(dir), base = basename(dir)) {
+    if (base === 'node_modules') return null;   // npm's boundary: no tree above it owns this code
+    if (existsSync(join(dir, '.git'))) return dir;
+    if (parent === dir) return null;
+  }
+}
+
+/** A word that keeps the shell it is copied into reading one argument (round 1): the refusal's
+ *  suggested command must survive a key path with a space in it. */
+const sh = (v) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(v) ? v : `'${v.replaceAll("'", `'\\''`)}'`);
+
+/** The B-138 refusal: the pinned command for the same argv, so the operator copies it. */
+function workingTreeRefusal(argv) {
+  const version = packageVersion();
+  return `an owner or administrator key runs a released CLI only — this one runs from the git working tree at ${workingTreeOf()}, whose code a push changes (B-138). Run the pinned release instead: npx --yes ${PINNED_PACKAGE}@${version ?? '<version>'} ${argv.map(sh).join(' ')} — or pass --dev to override, for this checkout's own development`;
+}
+
+/** Where `--dev` sits as this guard's flag, not as a flag *value* (round 1): `--capabilities
+ *  --dev` is the capability string "--dev", not the override — stripping it would bypass this
+ *  guard and mangle the command. A `--dev` right after a flag that takes a value is that value;
+ *  the owner and administrator commands' value-less flags (parseArgs booleans) are named here so
+ *  `--yes --dev` still counts. An unknown boolean is read as value-taking, which refuses rather
+ *  than bypasses — the safe direction. */
+const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all']);
+function devFlagPositions(argv) {
+  const at = [];
+  for (let i = 1; i < argv.length; i++) {
+    if (argv[i] === '--') break;   // `owner sign … -- <paths>`: everything after is a path
+    if (argv[i] !== '--dev') continue;
+    const prev = argv[i - 1];
+    const name = prev === '-i' ? 'identity' : prev === '-m' ? 'message' : prev.startsWith('--') ? prev.slice(2) : null;
+    if (name != null && !NO_VALUE_FLAGS.has(name)) continue;   // the previous flag eats this one
+    at.push(i);
+  }
+  return at;
 }
 
 /**
@@ -867,6 +924,19 @@ const arrived = (text) => (text.length > 300 ? `${text.slice(0, 300)}…` : text
  *  Baton's — a refusal, or a 2xx body that is not JSON (B-80) — and any error thrown up to the
  *  caller (the CLI prints `baton: …` and exits 2). Exported for the tests of that contract. */
 export async function main(argv) {
+  // B-138: an owner or administrator key signs with the code that reads it, so the CLI that
+  // takes one is a pinned release — never a git working tree, whose code a push (a branch a leg
+  // checks out) changes. `--dev` is the override for this repository's own development; the
+  // other roles (the reads, the runner, the repository commands) run from a checkout still.
+  if (argv[0] === 'admin' || argv[0] === 'owner') {
+    const dev = devFlagPositions(argv);
+    const end = argv.indexOf('--') === -1 ? argv.length : argv.indexOf('--');
+    if (dev.length > 0 && dev.length === argv.slice(0, end).reduce((n, a) => n + (a === '--dev' ? 1 : 0), 0)) {
+      argv = argv.filter((_, i) => !dev.includes(i));   // every --dev sits in flag position: the override
+    } else if (workingTreeOf() != null) {
+      throw new Error(workingTreeRefusal(argv));
+    }
+  }
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
   if (argv[0] === 'key') {
     if (argv[1] !== 'create' || !argv[2]) throw new Error('baton key create FILE [--comment TEXT]');

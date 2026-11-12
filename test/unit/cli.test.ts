@@ -4,10 +4,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import * as http from 'node:http';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { answerPlan, confirmCapacity, createApiKey, duration, main, parseArgs, plan, policyDiff, send } from '../../cli/baton.mjs';
+import { dirname, join } from 'node:path';
+import { answerPlan, confirmCapacity, createApiKey, duration, main, parseArgs, plan, policyDiff, send, workingTreeOf } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
 import { ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
@@ -301,11 +301,13 @@ describe('a redirect or a non-JSON answer is a refusal, never success (B-80)', (
     // send: the 3xx is an error naming the redirect — one request made, none to the login page.
     await expect(send(ORIGIN, plan('admin', ['open']), file, fetchImpl as typeof fetch)).rejects.toThrow(/a redirect answered .*\/v1\/admin\/login-links/);
     expect(calls).toEqual([`POST ${ORIGIN}/v1/admin/login-links redirect=error`]);
-    // The command: main() refuses the same way, so the CLI never exits 0 on it.
+    // The command: main() refuses the same way, so the CLI never exits 0 on it. --dev: this
+    // suite runs the CLI from this checkout, so it takes the B-138 override like any
+    // development use (the guard's own test below runs it without).
     const was = globalThis.fetch;
     globalThis.fetch = fetchImpl as typeof fetch;
     try {
-      await expect(main(['admin', 'open', '-i', file, '--url', ORIGIN])).rejects.toThrow('a redirect answered');
+      await expect(main(['admin', 'open', '--dev', '-i', file, '--url', ORIGIN])).rejects.toThrow('a redirect answered');
     } finally {
       globalThis.fetch = was;
     }
@@ -324,17 +326,17 @@ describe('a redirect or a non-JSON answer is a refusal, never success (B-80)', (
     try {
       // A login page's 200: non-zero, and what arrived is printed.
       globalThis.fetch = (async () => new Response('<!DOCTYPE html><html><body>sign in</body></html>', { status: 200, headers: { 'content-type': 'text/html' } })) as typeof fetch;
-      await expect(main(['admin', 'open', '-i', file, '--url', ORIGIN])).resolves.toBe(1);
+      await expect(main(['admin', 'open', '--dev', '-i', file, '--url', ORIGIN])).resolves.toBe(1);
       expect(errs.join('')).toContain('answered no JSON');
       expect(errs.join('')).toContain('sign in');
       // An empty 2xx body fails the same way, named as empty.
       globalThis.fetch = (async () => new Response(null)) as typeof fetch;
-      await expect(main(['admin', 'open', '-i', file, '--url', ORIGIN])).resolves.toBe(1);
+      await expect(main(['admin', 'open', '--dev', '-i', file, '--url', ORIGIN])).resolves.toBe(1);
       expect(errs.join('')).toContain('(an empty body)');
       // A JSON 2xx keeps today's behaviour: printed, exit 0, nothing on stderr.
       errs.length = 0;
       globalThis.fetch = (async () => new Response(JSON.stringify({ url: 'https://baton.example.com/login#feedface' }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch;
-      await expect(main(['admin', 'open', '-i', file, '--url', ORIGIN])).resolves.toBe(0);
+      await expect(main(['admin', 'open', '--dev', '-i', file, '--url', ORIGIN])).resolves.toBe(0);
       expect(outs).toEqual(['https://baton.example.com/login#feedface\n']);
       expect(errs).toEqual([]);
     } finally {
@@ -351,9 +353,10 @@ describe('a redirect or a non-JSON answer is a refusal, never success (B-80)', (
     const server = http.createServer((_req, res) => answer(res));
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-    // spawn, not spawnSync: the server answers from this same event loop (B-80).
+    // spawn, not spawnSync: the server answers from this same event loop (B-80). --dev: the
+    // spawned CLI runs from this checkout, so it passes the B-138 guard like any development use.
     const run = () => new Promise<{ status: number | null; stderr: string }>((resolve) => {
-      const p = spawn('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'admin', 'open', '-i', file, '--url', url]);
+      const p = spawn('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'admin', 'open', '--dev', '-i', file, '--url', url]);
       let stderr = '';
       p.stdout.on('data', () => {});   // drained: the child must never block on a full pipe
       p.stderr.on('data', (d) => { stderr += d; });
@@ -375,6 +378,100 @@ describe('a redirect or a non-JSON answer is a refusal, never success (B-80)', (
       server.close();
     }
   }, 30_000);
+});
+
+// B-138: an owner or administrator key never signs with a working-tree CLI. The docs name
+// `npx --yes @immediately-run/baton@<version>` only, and the CLI enforces it: from a git
+// checkout (this suite's own) an owner or administrator command with `-i` exits 2, naming the
+// pinned command for the same argv, unless `--dev` overrides — the development this checkout
+// itself is. The other roles (the reads, `run`, the repository commands) still run from a
+// checkout: they are the leg's own path, signed with a worker's key.
+describe('an owner or administrator key never runs a working-tree CLI (B-138)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'baton-cli-b138-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('workingTreeOf: this checkout for cli/ and a dist/ inside it, null for a released copy', () => {
+    // This suite runs from the checkout: cli/baton.mjs sits in the working tree at its root.
+    const root = workingTreeOf(join(import.meta.dirname, '..', '..', 'cli', 'baton.mjs'));
+    expect(root).toBe(realpathSync(join(import.meta.dirname, '..', '..')));
+    // A dist/ built inside the checkout is as pushable as its cli/: the same working tree.
+    expect(workingTreeOf(join(root!, 'dist', 'baton.mjs'))).toBe(root);
+    // A released copy — an npm-style install — has no .git at or above it.
+    const released = join(dir, 'node_modules', '@immediately-run', 'baton', 'dist', 'baton.mjs');
+    mkdirSync(dirname(released), { recursive: true });
+    writeFileSync(released, '');
+    expect(workingTreeOf(released)).toBeNull();
+    // Round 1, the dotfiles pattern: a $HOME that is itself a git repository does not make a
+    // released copy under it working-tree code — npm's node_modules boundary sits between the
+    // .git and the file, and no branch of the outer tree owns what npm laid down.
+    spawnSync('git', ['init', '-q', dir]);
+    expect(workingTreeOf(released)).toBeNull();
+  });
+
+  it('the CLI run from this checkout with -i exits 2, naming the pinned command; --dev overrides', () => {
+    const file = join(dir, 'owner.key');
+    createApiKey(file);
+    const cli = join(import.meta.dirname, '..', '..', 'cli', 'baton.mjs');
+    const version = JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', 'package.json'), 'utf8')).version;
+    // The owner path: refused before anything else, with the pinned command for the same argv.
+    const refused = spawnSync('node', [cli, 'owner', 'grants', 'baton', '-i', file, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
+    expect(refused.status).toBe(2);
+    expect(refused.stderr).toContain(`npx --yes @immediately-run/baton@${version} owner grants baton -i ${file}`);
+    expect(refused.stderr).toContain('working tree');
+    // Round 1: the suggested command survives a copy-paste — a key path with a space in it
+    // arrives shell-quoted, not as two arguments.
+    const spaced = join(dir, 'my keys');
+    mkdirSync(spaced);
+    const spacedKey = join(spaced, 'owner.key');
+    createApiKey(spacedKey);
+    const quoted = spawnSync('node', [cli, 'owner', 'grants', 'baton', '-i', spacedKey, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
+    expect(quoted.status).toBe(2);
+    expect(quoted.stderr).toContain(`-i '${spacedKey}'`);
+    // The administrator path refuses the same way.
+    const admin = spawnSync('node', [cli, 'admin', 'state', '-i', file, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
+    expect(admin.status).toBe(2);
+    expect(admin.stderr).toContain('B-138');
+    // --dev overrides: the failure past the guard is the request's own (nothing listens there).
+    const dev = spawnSync('node', [cli, 'owner', 'grants', 'baton', '--dev', '-i', file, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
+    expect(dev.status).toBe(2);
+    expect(dev.stderr).not.toContain('working tree');
+    // Round 1: a --dev that sits in a *value* position is that value, not the override —
+    // `--capabilities --dev` names the capability string "--dev", and the guard still refuses.
+    const asValue = spawnSync('node', [cli, 'owner', 'grant', 'baton', '--capabilities', '--dev', '-i', file, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
+    expect(asValue.status).toBe(2);
+    expect(asValue.stderr).toContain('working tree');
+    // The other roles still run from a checkout: a read signed with any granted key is the
+    // leg's own path, so it passes the guard (and fails on its request, as here).
+    const board = spawnSync('node', [cli, 'board', 'baton', '-i', file, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
+    expect(board.status).not.toBe(0);
+    expect(board.stderr).not.toContain('working tree');
+  }, 30_000);
+
+  it('main() refuses in-process the same way; --dev reaches the request', async () => {
+    const file = join(dir, 'owner.key');
+    createApiKey(file);
+    await expect(main(['owner', 'grants', 'baton', '-i', file, '--url', ORIGIN])).rejects.toThrow(/working tree/);
+    await expect(main(['admin', 'open', '-i', file, '--url', ORIGIN])).rejects.toThrow(/npx --yes @immediately-run\/baton@/);
+    // A value-position --dev is not the override in-process either.
+    await expect(main(['owner', 'grant', 'baton', '--capabilities', '--dev', '-i', file, '--url', ORIGIN])).rejects.toThrow(/working tree/);
+    // `owner sign`'s message (-m) and its paths after `--` are values too (B-127's command).
+    await expect(main(['owner', '-i', file, 'sign', '-m', '--dev', '--', 'a'])).rejects.toThrow(/working tree/);
+    await expect(main(['owner', '-i', file, 'sign', '-m', 'msg', '--', '--dev'])).rejects.toThrow(/working tree/);
+    // --dev: the guard passes and the request itself goes out.
+    const was = globalThis.fetch;
+    const outWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => true) as typeof process.stdout.write;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ ok: true }), { status: 200 })) as typeof fetch;
+    try {
+      await expect(main(['owner', 'grants', 'baton', '--dev', '-i', file, '--url', ORIGIN])).resolves.toBe(0);
+    } finally {
+      globalThis.fetch = was;
+      process.stdout.write = outWrite;
+    }
+  });
 });
 
 describe('baton test-course: the command (R3-1248)', () => {
@@ -537,7 +634,9 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     }) as typeof fetch;
     try {
-      const run = (args: string[]) => main(['owner', 'policy', ...args, '-i', file, '--url', ORIGIN]);
+      // --dev: this suite runs the CLI from this checkout — the B-138 override a development
+      // use takes (the guard's own test below runs the same command without it).
+      const run = (args: string[]) => main(['owner', 'policy', ...args, '-i', file, '--dev', '--url', ORIGIN]);
       await expect(run(['show', 'ops'])).resolves.toBe(0);
       await expect(run(['diff', 'ops', policyFile])).resolves.toBe(0);
       await expect(run(['log', 'ops', '--after', '2'])).resolves.toBe(0);
@@ -549,7 +648,7 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       // (the compare-and-set builds on the version the operator read), and `baton owner -i KEY
       // policy show REPO` — the documented form — reaches the policy commands.
       await expect(run(['set', 'ops', policyFile])).rejects.toThrow(/--base/);
-      await expect(main(['owner', '-i', file, 'policy', 'show', 'ops', '--url', ORIGIN])).resolves.toBe(0);
+      await expect(main(['owner', '-i', file, 'policy', 'show', 'ops', '--dev', '--url', ORIGIN])).resolves.toBe(0);
     } finally {
       globalThis.fetch = was;
       process.stdout.write = outWrite;
@@ -586,10 +685,11 @@ describe('baton owner sign / verify-config (B-127 item 6, round 1: the command s
     g('commit', ...a);
     return head();
   };
-  /** `main` with stdout captured, as the policy test runs it. */
+  /** `main` with stdout captured, as the policy test runs it. --dev: this suite runs the CLI
+   *  from this checkout — the B-138 override a development checkout passes. */
   let outs: string[] = [];
   let outWrite: typeof process.stdout.write;
-  const run = (args: string[]) => main(['owner', '-i', keyFile, ...args]);
+  const run = (args: string[]) => main(['owner', '--dev', '-i', keyFile, ...args]);
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'baton-owner-sign-'));
