@@ -9,8 +9,8 @@
 #                                [--harness opencode|claude-code] [--capabilities a,b]
 #                                (capabilities default to the runbook's grant:
 #                                 create-pr,llm-call,agent-venue plus the key: labels this
-#                                 repository's route choices advise on — B-105 — which the
-#                                 grant must also name, or the choices see nothing to advise)
+#                                 machine holds — matched by name, nothing derived from them
+#                                 (B-167) — which the grant must also name)
 #                                [--url <https://…>] [--check] [--log <file>]
 #                                [--cli <dist/baton.mjs>] [--cli-version <version>]
 #
@@ -52,9 +52,9 @@ HARNESS="opencode"
 # exactly these (step 5), so the default keeps the intersection non-empty; --capabilities
 # overrides — and the grant must name what you name, or every leg refuses rule 4
 # (missing-capability), which is the 2026-10-24 starvation the banner now shows beside them.
-# B-105: the key: labels are what this repository's codegen and reviewer route choices advise
-# on — declare the ones this machine holds (its checks, R-BTN-121, when they land) and narrow
-# the rest away with --capabilities.
+# The key: labels are plain names since B-167 (no ontology derives from them, no route choice
+# advises on them) — declare the ones this machine holds (its checks, R-BTN-121, when they land)
+# and narrow the rest away with --capabilities.
 CAPABILITIES="create-pr,llm-call,agent-venue,key:opencode-go,key:deepinfra,key:claude-subscription,key:zai"
 URL="${BATON_URL:-}"         # empty: the CLI's default (production)
 CHECK_ONLY=0
