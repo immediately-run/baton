@@ -6,7 +6,8 @@
 -- hop away, for the owner keys), and any post accepted in between paired the claim's snapshot
 -- H1 with the newer record H2 — which the runner's own checks (a keyless read must be the
 -- snapshot itself; a signed read must be its ancestor) rejected, burning an honest claim as
--- `cannot-finish:spec`, a counted, non-retryable attempt. NULL is a claim from before the
--- column, or one whose repository requires nothing; '' is a required repository with no
--- standing record (the pre-ceremony window — Baton hands out no claim there anyway).
+-- `cannot-finish:spec`, a counted, non-retryable attempt. It is stored on every claim, whatever
+-- the setting (round 4: a claim made with it off and replayed after it was turned on must still
+-- serve its own pairing). NULL is a claim from before the column; '' is a repository with no
+-- standing record (with the setting on, the pre-ceremony window — Baton hands out no claim there).
 ALTER TABLE claims ADD COLUMN control_json TEXT;

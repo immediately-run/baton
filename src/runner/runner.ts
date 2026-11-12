@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { verifySignedCommit, nodeKeygen } from '../shared/commitSign.mjs';
-import { controlGroupsOf } from '../defaults/signed-control';
+import { controlGroupsOf, groupUnchangedAt } from '../defaults/signed-control';
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
@@ -1288,8 +1288,9 @@ export class Runner {
    *  the legs load `agent_command`, the overrides and `rank.mjs` from, and what the course
    *  group's commit — the course's graph, its leg scripts and their instruction `.md` files,
    *  one coherent tree — loads at; a group naming no key is the pre-adoption baseline, honest
-   *  only as the claim's own snapshot (the record and the head move together, post by post —
-   *  round 2's pairing reads them in one transaction), and gates nothing; a group with no
+   *  only as the claim's own snapshot and only while the walk there finds no change to the
+   *  group (round 4: the keyless shape is held to the walk like the keyed one), and gates
+   *  nothing; a group with no
    *  signed version at all fails closed: Baton hands out no claim in that state (round 1,
    *  unpenalised), and this check remains the last line; the runbook
    *  (docs/runbooks/owner-signed-control.mdx) walks the owner through signing once. */
@@ -1313,6 +1314,21 @@ export class Runner {
       if (key == null) {
         if (read !== claim.snapshot_sha) {
           return { error: `the ${group} group names commit ${read.slice(0, 10)} with no signing key — only the snapshot itself (${String(claim.snapshot_sha).slice(0, 10)}) may stand as the unsigned baseline (B-127)` };
+        }
+        // Round 4 (the keyless lie): the keyless shape is held to the walk too — honest only
+        // when no commit in the walk's window changed the group at the snapshot (the group
+        // predates the walk's memory). A group with changes is either signed (a keyed read) or
+        // the fail-closed no-signed-version state, so a record naming the snapshot with no key
+        // over a nonempty log — `{read: <head>, key: null}` written over an unsigned push —
+        // refuses here, before the stub would read the group at the snapshot's pushed bytes.
+        let unchanged: boolean;
+        try {
+          unchanged = groupUnchangedAt(group, String(claim.snapshot_sha), (...args) => git(this.o.home, args));
+        } catch (e) {
+          return { error: `the ${group} group's history at the snapshot would not read (${msg(e).slice(0, 80)}) — refusing the keyless baseline (B-127)` };
+        }
+        if (!unchanged) {
+          return { error: `the ${group} record names the snapshot with no signing key, but the walk there finds changes to the group — not the unsigned baseline; refusing to load it (B-127)` };
         }
         continue;
       }
@@ -1412,6 +1428,14 @@ export class Runner {
       signedControl = await this.verifyControl(claim);
       if ('error' in signedControl) {
         this.log(`baton: ${signedControl.error}`);
+        // Round 4: while the owner key register has moved since the record was computed (Baton
+        // says so, comparing the record's keys with today's), a refusal is the record's age —
+        // released as a stale board, unpenalised, until the next post re-computes it. Either
+        // way nothing loads.
+        if (claim.control?.register_moved === true) {
+          this.log(`baton: the owner key register changed since the board post computed this record — released as a stale board until the next post (B-127)`);
+          return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+        }
         return await this.finish(claimId, { end_reason: 'released:cannot-finish:spec', reached: claim.station, detail: signedControl.error, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
       }
       // B-127 (round 1, the course group): the course's graph and its leg scripts load — one

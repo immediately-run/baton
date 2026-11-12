@@ -829,10 +829,14 @@ export class BatonCore {
         const answer = tx(() => {
           const a = this.claims.claim(workerId, body, prepared);
           const ticket = String(a.ticket_id ?? '');
-          if (ticket.includes(':') && Number(this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repositoryOf(ticket))[0]?.flag ?? 0)) {
+          if (ticket.includes(':')) {
             const standing = this.sql<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', repositoryOf(ticket))[0];
             // Set once: a replay keeps the pairing the claim was made with, never the moved
-            // board's (an empty string is the required-but-no-record shape, never NULL).
+            // board's (an empty string is the no-record shape, never NULL). Round 4: stored on
+            // every claim, whatever the setting — stored only while it was on, a claim made
+            // with it off and replayed after the owner turned it on backfilled the moved
+            // board's record beside the old snapshot, and the runner refused the honest claim.
+            // `claimControl` still answers `{}` unless the repository requires signed control.
             this.store.exec('UPDATE claims SET control_json = ? WHERE id = ? AND control_json IS NULL', standing?.control_json ?? '', Number(a.claim_id));
           }
           return a;
@@ -1531,16 +1535,28 @@ export class BatonCore {
     if (!ticket.includes(':')) return {};
     const repo = repositoryOf(ticket);
     if (!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag) return {};
-    const keys = (await this.admin.signingKeys(repo)).map((k) => k.public_key);
-    // The claim's own record, stored at the claim (0035): immutable from the answer's side.
+    const register = await this.admin.signingKeys(repo);
+    const keys = register.map((k) => k.public_key);
+    // The claim's own record, stored at the claim (0041): immutable from the answer's side.
     const stored = this.sql<{ control_json: string | null }>('SELECT control_json FROM claims WHERE id = ?', claimId)[0]?.control_json ?? null;
     let groups: Record<string, { read: string | null; key: string | null; unsigned: string[] }> = {};
+    let recordKeys: string[] | null = null;
     try {
-      groups = stored ? (JSON.parse(stored) as { groups: Record<string, { read: string | null; key: string | null; unsigned: string[] }> }).groups : {};
+      const parsed = stored ? (JSON.parse(stored) as { keys?: unknown; groups: Record<string, { read: string | null; key: string | null; unsigned: string[] }> }) : null;
+      groups = parsed?.groups ?? {};
+      recordKeys = Array.isArray(parsed?.keys) ? parsed.keys.filter((k): k is string => typeof k === 'string') : null;
     } catch {
       groups = {};
     }
-    return { control: { required: true, keys, ...groups } };
+    // Round 4 (the register moved): the record was computed under the keys it names, and the
+    // runner verifies under today's register. When the two differ — an owner key registered or
+    // removed between the post and the claim — a disagreement is the record's age, not a lie
+    // the claim should pay for: `register_moved` tells the runner to release such a claim as
+    // a stale board (unpenalised) instead of `cannot-finish:spec`. It never changes what loads:
+    // every check still runs against today's register, and the next post re-computes under it.
+    const now = new Set(register.map((k) => k.fingerprint));
+    const moved = recordKeys != null && (recordKeys.length !== now.size || recordKeys.some((k) => !now.has(k)));
+    return { control: { required: true, keys, ...(moved ? { register_moved: true } : {}), ...groups } };
   }
 
   /** B-129 (R-BTN-85, "every disagreement with git is logged", both values): the accepted post's

@@ -338,6 +338,15 @@ export function controlGroupsOf(head: string, keys: SigningKey[], git: Git, keyg
   return groups;
 }
 
+/** Whether no commit in the walk's window changed `group` at `head` (B-127, round 4): the one
+ *  state in which a keyless `{read: head, key: null}` is honest — the group predates the walk's
+ *  memory, so nothing is gated and the snapshot itself loads. A nonempty log is either signed
+ *  (a keyed read) or the fail-closed no-signed-version state; it never reads as keyless. No keys
+ *  are needed: the log is git's, not a signature's. */
+export function groupUnchangedAt(group: ControlGroup, head: string, git: Git): boolean {
+  return new Walk(git, [], () => ({ status: 1 })).groupLog(group, head).length === 0;
+}
+
 /**
  * The signed-control state of `head` (B-127): the runner-loaded groups, and the control
  * inputs whose last change is unsigned — the notice's list. With no owner signing keys (the

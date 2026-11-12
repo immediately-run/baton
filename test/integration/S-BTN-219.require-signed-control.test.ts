@@ -360,6 +360,86 @@ describe('S-BTN-219 require_signed_control', () => {
     }
   }, 120_000);
 
+  it('a record naming the snapshot with no key over an unsigned push is refused: the keyless shape is held to the walk (round 4, blocking)', async () => {
+    await scaffold();
+    await tick();
+    expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
+    expect((await sync()).code).toBe(0);
+    // The adjudicated reproduction: an unsigned push of a new agent_command, then the stored
+    // record rewritten to `{read: <head>, key: null, unsigned: []}` for every group — the one
+    // keyless read the round-1 check let through (it is the snapshot itself). Claims are
+    // handed out (Baton takes the record's `read`), so the runner is the last line: the walk
+    // at the snapshot sees the groups' changes, and a group with changes is never keyless.
+    const settings = JSON.parse(readFileSync(join(dir, '.baton', 'baton.json'), 'utf8')) as Record<string, unknown>;
+    settings.agent_command = 'node ./evil-agent.mjs';
+    write('.baton/baton.json', `${JSON.stringify(settings, null, 2)}\n`);
+    const pushed = commit(null, 'the pushed settings the record will lie about');
+    await tick();
+    expect((await sync()).code).toBe(0);
+    const record = (await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0];
+    const lying = JSON.parse(record.control_json);
+    for (const g of ['agent_command', 'overrides', 'rank', 'course']) lying.groups[g] = { read: pushed, key: null, unsigned: [] };
+    await rows('UPDATE signed_control SET control_json = ? WHERE repository_id = ?', JSON.stringify(lying), 'docs');
+    const log: string[] = [];
+    const runner = makeRunner(log);
+    try {
+      const out = await runner.runOnce();
+      expect(out).not.toBeNull();
+      expect(log.join('\n')).toContain('the walk there finds changes to the group');
+      const end = (await rows<{ status: string; end_reason: string; snapshot_sha: string }>('SELECT status, end_reason, snapshot_sha FROM claims ORDER BY id DESC LIMIT 1'))[0];
+      expect(end.snapshot_sha).toBe(pushed);
+      expect([end.status, end.end_reason]).toEqual(['released', 'released:cannot-finish:spec']);
+      expect(await rows(`SELECT COUNT(*) AS n FROM claim_legs`)).toEqual([{ n: 0 }]);
+      expect(existsSync(join(dir, 'ran-agent.txt')) ? readFileSync(join(dir, 'ran-agent.txt'), 'utf8') : '').not.toContain('THE PUSHED AGENT');
+    } finally {
+      runner.stop();
+    }
+  }, 120_000);
+
+  it('an owner key registered between the post and the claim releases the claim unpenalised, never cannot-finish (round 4)', async () => {
+    const { baseline } = await scaffold();
+    await tick();
+    expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
+    expect((await sync()).code).toBe(0);
+    // A second person — not yet an owner — signs a settings change: the post reads it unsigned
+    // (the record keeps the baseline and lists the commit), and the notice is raised.
+    const settings = JSON.parse(readFileSync(join(dir, '.baton', 'baton.json'), 'utf8')) as Record<string, unknown>;
+    settings.control_note = 'v2';
+    write('.baton/baton.json', `${JSON.stringify(settings, null, 2)}\n`);
+    const second = commit('other', 'signed by the second owner-to-be');
+    await tick();
+    expect((await sync()).code).toBe(0);
+    const control = JSON.parse((await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0].control_json);
+    expect(control.groups.agent_command).toMatchObject({ read: baseline, key: ownerFp });
+    expect(control.groups.agent_command.unsigned).toContain(second);
+    // The owner's natural next move: register the second key. No post runs before the claim,
+    // so the record was computed under one key and the runner's walk runs under two.
+    const otherPub = readFileSync(`${otherFile}.pub`, 'utf8').trim();
+    const otherFp = /(\bSHA256:[A-Za-z0-9+/]{43}\b)/.exec(execFileSync('ssh-keygen', ['-lf', `${otherFile}.pub`], { encoding: 'utf8' }))![1];
+    await rows('INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES (?, ?, ?, ?, ?)', 'docs', otherPub, otherFp, 'admin:test', clock);
+    await rows('INSERT INTO human_keys (fingerprint, public_key, added_by, added_at) VALUES (?, ?, ?, ?)', otherFp, otherPub, 'admin:test', clock);
+    const log: string[] = [];
+    const runner = makeRunner(log);
+    try {
+      const out = await runner.runOnce();
+      expect(out).not.toBeNull();
+      const said = log.join('\n');
+      expect(said).toContain('does not match its own history');
+      expect(said).toContain('owner key register changed');
+      const end = (await rows<{ status: string; end_reason: string }>('SELECT status, end_reason FROM claims ORDER BY id DESC LIMIT 1'))[0];
+      expect([end.status, end.end_reason]).toEqual(['released', 'released:stale-board']);
+      expect(await rows(`SELECT COUNT(*) AS n FROM claim_legs`)).toEqual([{ n: 0 }]);
+    } finally {
+      runner.stop();
+    }
+    // The next post computes under the register as it now stands: the second owner's change
+    // is the version in force.
+    await tick();
+    expect((await sync()).code).toBe(0);
+    const after = JSON.parse((await rows<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', 'docs'))[0].control_json);
+    expect(after.groups.agent_command).toMatchObject({ read: second, key: otherFp });
+  }, 120_000);
+
   it('a named commit off the branch — or older than the snapshot\'s line — never loads (round 1)', async () => {
     await scaffold();
     await tick();

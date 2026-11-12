@@ -494,10 +494,15 @@ the runner's credentials under any other executor is that executor's, never Bato
     to prevent — never loads on a record's word. All of this happens before loading anything,
     and each failure refuses the claim (`released:cannot-finish:spec`, fail closed): a named
     commit that does not verify, is no ancestor of the snapshot, or names no signing key
-    without being the snapshot itself (the pre-adoption baseline, the one keyless shape that is
-    honest, the record and the head moving together post by post); a post that lied about a
-    signature — or about which ancestor counts — changes what a runner refuses, not what it
-    runs. While a group names no signed version, no claim is handed out at all. An unsigned
+    without being the pre-adoption baseline — the one keyless shape that is honest: the
+    snapshot itself, and only while the walk there finds no change to the group (a group with
+    changes is either signed or names no signed version, so a keyless record over one is a lie
+    the runner refuses); a post that lied about a signature — or about which ancestor counts,
+    or whether a group is gated at all — changes what a runner refuses, not what it runs. While
+    the owner key register has moved since the record was computed (Baton compares the record's
+    keys with its own), a refusal releases the claim as a stale board, unpenalised, until the
+    next post recomputes under the register as it stands; nothing loads either way. While a
+    group names no signed version, no claim is handed out at all. An unsigned
     change to a group keeps the last owner-signed version in force: the legs read that group
     at the named commit, never the snapshot's newer bytes — and the course group's commit is
     where the runner loads the course's graph, its leg scripts and their instruction files as

@@ -214,6 +214,47 @@ describe(`S-BTN-218 owner-signed briefs and the signed-control record`, () => {
     expect(await rows('SELECT status, failed_attempt FROM claims WHERE id = ?', firstJson.claim_id)).toEqual([{ status: 'active', failed_attempt: 0 }]);
   });
 
+  it('a claim made with the setting off and replayed after it is on re-serves its own pairing; a moved register is said (round 4)', async () => {
+    const git = new Git();
+    git.add('T-1');
+    // The record as an honest sync computes it: under the register as it stands (the owner's
+    // own fingerprint), every group signed.
+    const own = (read: string) => control({ keys: [owner.fingerprint], groups: {
+      agent_command: { read, key: owner.fingerprint, unsigned: [] },
+      overrides: { read: SHA, key: owner.fingerprint, unsigned: [] },
+      rank: { read: SHA, key: owner.fingerprint, unsigned: [] },
+      course: { read: SHA, key: owner.fingerprint, unsigned: [] },
+    } });
+    expect((await git.post({ control: own(SHA) })).status).toBe(200);
+    await cutover();
+    const worker = await register('vm-a');
+    const rid = `s218-off-${Math.random().toString(16).slice(2)}`;
+    const claim = () => workerCall('/v1/runner/claim', { cred: 'vm-a', secret: worker.secret, body: { request_id: rid, ticket_id: 'docs:T-1' } });
+    // The setting is off: the answer gates nothing — but the pairing is stored all the same.
+    const first = await claim();
+    expect(first.status).toBe(200);
+    const firstJson = (await first.json()) as { claim_id: number; snapshot_sha: string; control?: { required: boolean; register_moved?: boolean; agent_command: { read: string } } };
+    expect(firstJson.control).toBeUndefined();
+    // The owner turns the setting on, the board moves, and the first response was lost.
+    expect((await keyCall(owner, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
+    const MOVED = 'd'.repeat(40);
+    expect((await git.post({ control: own(MOVED) })).status).toBe(200);
+    // Stored only while the setting was on, the replay used to backfill the moved board's
+    // record beside the old snapshot — which the runner then refused, burning the claim.
+    const again = (await (await claim()).json()) as typeof firstJson;
+    expect(again.claim_id).toBe(firstJson.claim_id);
+    expect(again.snapshot_sha).toBe(firstJson.snapshot_sha);
+    expect(again.control).toMatchObject({ required: true, agent_command: { read: SHA } });
+    // The record was computed under the register as it stands: nothing moved.
+    expect(again.control!.register_moved).toBeUndefined();
+    // A record computed under another register (here, another key's fingerprint) is said to
+    // be: the runner releases on a refusal unpenalised rather than charge the claim's attempt.
+    await rows('UPDATE claims SET control_json = ? WHERE id = ?', JSON.stringify(control()), firstJson.claim_id);
+    const moved = (await (await claim()).json()) as typeof firstJson;
+    expect(moved.control).toMatchObject({ required: true, register_moved: true });
+    expect(await rows('SELECT status, failed_attempt FROM claims WHERE id = ?', firstJson.claim_id)).toEqual([{ status: 'active', failed_attempt: 0 }]);
+  });
+
   it('the observation serves the owner signing keys and the setting; the read answers an owner too', async () => {
     const o = await observe();
     expect(o.json.signing_keys).toEqual([{ public_key: ownerLine, fingerprint: owner.fingerprint }]);

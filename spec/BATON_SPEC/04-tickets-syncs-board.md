@@ -486,7 +486,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
                                                                  --   commit a runner loads from (null: no
                                                                  --   signed version; key null: the
                                                                  --   pre-adoption baseline, honest only as
-                                                                 --   the post's own head), its signing
+                                                                 --   the post's own head where the walk
+                                                                 --   finds no change to the group), its signing
                                                                  --   key, the unsigned changes left behind;
                                                                  --   course (a course's legs/*.mjs and
                                                                  --   legs/*.md) may be absent from a sync
@@ -526,8 +527,9 @@ live solely in Baton, and both are exportable (R-BTN-88).
   for the changes no raised event in the 7-day window already named — the paths and the commits
   — so one standing unsigned change does not re-notice on every later head move, and two
   notices that named different sets do not re-notify each other's names; the claim answers
-  carry the record read in the claim's own transaction and stored with the claim (round 2's
-  pairing: a lost-response replay re-serves the same pairing, never a newer post's record),
+  carry the record read in the claim's own transaction and stored with the claim, whatever the
+  setting at the claim (round 2's pairing: a lost-response replay re-serves the same pairing,
+  never a newer post's record, even after the owner turned the setting on),
   with the repository's own setting and owner keys, and every runner verifies the named
   commits' signatures — and the walk's own answer — before loading them (R-BTN-133). A group is read atomically:
   the record's `read` is the newest owner-signed commit that changed any of the group's paths

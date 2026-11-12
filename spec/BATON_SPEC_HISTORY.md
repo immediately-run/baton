@@ -2792,6 +2792,24 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   silence. The briefing's exit sentence (2026-10-22) and B-84's exit contract stand beside it —
   prevention and detection.
 
+- **2026-11-12 — R-BTN-133, §4.4: the keyless control record is held to the walk** (B-127).
+  Rules changed: R-BTN-133.
+  B-127's review round 3, reproduced by its adjudication: a stored signed-control record
+  rewritten to `{read: <the claim's snapshot>, key: null, unsigned: []}` passed the runner's
+  check — a keyless read equal to the snapshot was taken as the pre-adoption baseline before the
+  walk comparison ran — and the leg ran the pushed `agent_command`. The keyless shape is now
+  held to the walk like the keyed one: honest only as the snapshot itself while the walk there
+  finds no change to the group, since a group with changes is either signed or names no signed
+  version. Two smaller amendments from the same round: the claim's record pairing is stored on
+  every claim whatever the setting (a claim made with it off and replayed after it was turned
+  on used to pair the old snapshot with the moved board's record, and the runner refused the
+  honest claim), and while the owner key register has moved since the record was computed — the
+  record's `keys` against Baton's own — a refusal releases the claim as a stale board,
+  unpenalised, instead of a counted `cannot-finish:spec`; every check still runs against the
+  register as it stands, so nothing more loads. The reviewer's other remedy, walking under the
+  record's own keys, was not taken: the post names those keys, and a post naming fewer could
+  roll a group back to an older owner-signed commit.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
