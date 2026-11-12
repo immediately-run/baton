@@ -9,8 +9,9 @@
 // release message, a releasing owner bar, a regressed path or a course change stop the leg at its
 // next safe point first.
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
@@ -295,10 +296,15 @@ export class Runner {
     course: CourseLoad;
     /** B-94: the leg this claim is running, so a death leaves a line naming it. */
     leg: string | null;
+    /** B-108: when that leg started — the beat's liveness line reads its duration. */
+    legAt: number;
     child: LegChild | null;
     /** Resolved by the next tick's view of the snapshot's next legs (the short-wait re-read). */
     waiters: ((next: NextLegs) => void)[];
   } | null = null;
+  /** B-108: the time of the last line drained from the leg child's stderr (—verbose, where the
+   *  stub mirrors the agent's streams): a live signal the beat's liveness line counts. */
+  private legLineAt: number | null = null;
   private pendingAbort: PendingAbort | null = null;
   private lostLease = false;
   private closedDone = false;
@@ -611,6 +617,16 @@ export class Runner {
         const next = (view.next ?? null) as NextLegs | null;
         for (const w of this.inflight.waiters.splice(0)) w(next ?? []);
       }
+      // B-108: the liveness line — while a leg call is in flight, each beat says how long it has
+      // run and how old its newest activity signal is, so an operator watches a wedge form (and
+      // the leg's ceiling approach) instead of silence. Advice for the operator's eye, never a
+      // detector: the stub concludes its agent; this line only makes the wait visible.
+      if (this.inflight.child != null && this.inflight.leg != null) {
+        const leg = this.inflight.leg;
+        const signals = [...legActivity(this.o.home, this.inflight.ticket, leg), ...(this.legLineAt != null ? [{ name: 'drained-line', at: this.legLineAt }] : [])];
+        const newest = signals.reduce((a, b) => (b.at > a.at ? b : a));
+        this.log(`baton: ${this.inflight.ticket}'s ${leg} has run ${ageWords(this.now() - this.inflight.legAt)}; newest activity ${newest.at > 0 ? `${ageWords(this.now() - newest.at)} ago (${newest.name})` : 'not seen'}`);
+      }
     }
     for (const m of (answer.messages ?? []) as { id: number; kind: string; payload?: { reason?: string } }[]) {
       // 2026-10-24: every message is logged on receipt — a release or cue the runner acts on
@@ -838,7 +854,8 @@ export class Runner {
       cwd: this.o.home, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
       // R-BTN-144: what a leg's stderr carries leaves masked — class 5 and class 6 by the shared
       // pattern, the leg's own class 7 set with it while its run streams, and by the drain after.
-      onStderr: leg ? (l: string) => leg.onStderr(l) : this.verbose ? (l: string) => this.log(maskLegOutput(`baton: ${call}: ${l}`, this.legSecrets)) : undefined,
+      // B-108: a drained line is leg activity either way — the beat's liveness line counts it.
+      onStderr: leg ? (l: string) => { this.legLineAt = Date.now(); leg.onStderr(l); } : this.verbose ? (l: string) => { this.legLineAt = Date.now(); this.log(maskLegOutput(`baton: ${call}: ${l}`, this.legSecrets)); } : undefined,
     });
   }
 
@@ -1333,7 +1350,7 @@ export class Runner {
       rmSync(scratch, { recursive: true, force: true });
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
-    this.inflight = { claimId, ticket, course, leg: null, child: null, waiters: [] };
+    this.inflight = { claimId, ticket, course, leg: null, legAt: this.now(), child: null, waiters: [] };
     this.closedDone = false;
     // §2e/R-BTN-63: the legs git evidences are every earlier attempt's, flattened; the claim's
     // own legs are counted beside them when a leg's run number is taken.
@@ -1416,7 +1433,9 @@ export class Runner {
           return await this.finish(claimId, { end_reason: `suspended:${at}`, reached: at, next: legName }, url);
         }
         if (this.closedDone) return await this.finish(claimId, { end_reason: 'done', reached: at }, handoffUrl);
-        if (this.inflight) this.inflight.leg = legName;
+        // B-108: the leg's own start — its clock (the beat's liveness line) and a fresh drain.
+        if (this.inflight) { this.inflight.leg = legName; this.inflight.legAt = this.now(); }
+        this.legLineAt = null;
         const run = runNumber(course.graph, gitPath, legName, own);
         own.push(legName);
         const ctx = {
@@ -1533,8 +1552,10 @@ export class Runner {
           this.scopeOverflow = 0;
         }
         // 2026-10-24: the advance trail — every finished leg names where it landed and what it
-        // queued, so a suspension or an odd end position reads as a trail, not a riddle.
-        this.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : (answer.next?.[0]?.leg ?? verdict.leg)} (run ${run} of ${course.graph.legs.get(legName)?.maxRuns ?? 1})`);
+        // queued, so a suspension or an odd end position reads as a trail, not a riddle. B-108:
+        // a leg whose agent a bound concluded says so — the how-ended of the wait is the log's.
+        const howEnded = typeof (result as { conclusion?: { cause?: unknown } } | null)?.conclusion?.cause === 'string' ? ` — the agent ${(result as { conclusion: { cause: string } }).conclusion.cause}` : '';
+        this.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : (answer.next?.[0]?.leg ?? verdict.leg)} (run ${run} of ${course.graph.legs.get(legName)?.maxRuns ?? 1})${howEnded}`);
         if ('settle' in answer) return await this.finish(claimId, answer.settle, await this.callHandoff(script, ctx) ?? handoffUrl);
         gitPath = [...gitPath, { leg: legName, reached: verdict.reached }];
         at = answer.station ?? verdict.reached;
@@ -1840,6 +1861,63 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /** B-23's slice (the owner, 2026-10-23): every log line carries the time it was written —
  * an ISO 8601 instant, one timezone-free spelling on every machine. */
 export const stampLine = (line: string): string => `${new Date().toISOString()} ${line}`;
+
+/** B-108: a path's newest write — itself, or the newest file under it, the walk bounded (a
+ *  store a live session grows without end is walked no further). A path that does not exist
+ *  answers 0: a signal that was never live. */
+export function newestWrite(path: string, depth = 0): number {
+  let st: { mtimeMs: number; isDirectory(): boolean } | null = null;
+  try {
+    st = statSync(path);
+  } catch {
+    return 0;
+  }
+  let best = st.mtimeMs;
+  if (!st.isDirectory() || depth >= 5) return best;
+  let names: string[] = [];
+  try {
+    names = readdirSync(path);
+  } catch {
+    return best;
+  }
+  for (let i = 0; i < names.length && i < 512; i++) best = Math.max(best, newestWrite(join(path, names[i]), depth + 1));
+  return best;
+}
+
+/** B-108: the leg in flight's disk activity signals — the wrapper's log (B-95's example path
+ *  under the home checkout) and the harness stores keyed by the home checkout, the same paths
+ *  the stub's idle bound reads. Which harnesses' stores are looked at is not narrowed by the
+ *  agent command here (the runner does not resolve it — the stub does, at its snapshot): every
+ *  path that does not exist answers 0 and never reads as live, so watching all of them is only
+ *  ever the safe direction for the line that reads them. */
+export function legActivity(home: string, ticket: string, leg: string): { name: string; at: number }[] {
+  const dashed = home.split('/').join('-');
+  const dataHome = process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME !== '' ? process.env.XDG_DATA_HOME : join(homedir(), '.local', 'share');
+  const opencode = join(dataHome, 'opencode');
+  const store = [join(opencode, 'opencode.db'), join(opencode, 'opencode.db-wal'), join(opencode, 'opencode.db-shm'), join(opencode, 'project', dashed)];
+  const key = createHash('sha1').update(home).digest('hex');
+  const snapshots = join(opencode, 'snapshot');
+  let instances: string[] = [];
+  try {
+    instances = readdirSync(snapshots);
+  } catch {
+    // No snapshots directory: no instances to walk.
+  }
+  for (const i of instances) store.push(join(snapshots, i, key));
+  const claude = process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== '' ? process.env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude');
+  store.push(join(claude, 'projects', dashed));
+  return [
+    { name: 'wrapper-log', at: newestWrite(join(home, '.baton', 'logs', `${ticket}-${leg}.log`)) },
+    { name: 'harness-store', at: store.reduce((best, p) => Math.max(best, newestWrite(p)), 0) },
+  ];
+}
+
+/** B-108: an age in the beat's liveness line — seconds under 90, minutes above; a negative age
+ *  (a clock the runner does not own) reads as zero. */
+export const ageWords = (ms: number): string => {
+  const age = Math.max(0, ms);
+  return age < 90_000 ? `${Math.round(age / 1000)}s` : `${Math.round(age / 60_000)}m`;
+};
 
 /** B-108's streaming half (2026-10-24): drain a leg child's stream line by line into the log —
  * chunks are not line-aligned and a stamp per chunk would land mid-prose, so a buffer holds the

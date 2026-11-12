@@ -163,6 +163,14 @@ Three details carry weight:
   arguments after the message.
 - **The prompt spells the last-line contract.** A result-dependent leg's answer is read from the
   agent's last line; the prompt says so in the words the machine enforces.
+- **The stub stops waiting at the agent's exit or its silence (B-108).** A finished agent that
+  will not exit once cost its claim five hours. The stub's wait now ends at the earliest of the
+  agent's exit, fifteen minutes of quiet on every activity signal it can see — the agent's
+  stdout, the wrapper's log, the harness's own store — and five hours of the leg, its ceiling.
+  Silence past the bound reads as a finished agent: the stub kills it and the stdout it received
+  is judged as any exit's is. A live signal anywhere keeps the wait going, however long. Both
+  bounds are constants of the leg scripts `repo init` writes; a course whose legs need longer
+  raises them in its copy.
 
 A runner refuses to start for a settings file whose `agent_command` is exactly `echo` — the
 no-op stub whose every leg "succeeds" while nothing happens. It is for tests, and tests pass

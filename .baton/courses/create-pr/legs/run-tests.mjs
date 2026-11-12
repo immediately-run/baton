@@ -1,11 +1,11 @@
-// ../../../../../baton-bundle-qaoJjG/entry.ts
+// ../../../../tmp/baton-bundle-z143Om/entry.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-// ../cli/src/defaults/ticket-state.ts
+// src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
 var CLOSE_TIMEOUT_MS = 12e4;
 var GIT_NONINTERACTIVE_ENV = {
@@ -26,7 +26,7 @@ function bareTicketId(ticket) {
   return colon < 0 ? ticket.id : ticket.id.slice(colon + 1);
 }
 
-// ../cli/src/defaults/pr-close.ts
+// src/defaults/pr-close.ts
 function testsClose(ctx, result, run2 = exec) {
   if (result?.tests !== "green" && result?.tests !== "red") {
     throw new Error(`the run-tests gate returned neither green nor red, got ${JSON.stringify(result?.tests)}`);
@@ -40,7 +40,7 @@ function testsClose(ctx, result, run2 = exec) {
   return result.marker;
 }
 
-// ../cli/src/defaults/course-pr.ts
+// src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
 var CREATE_SPEC_COURSE = {
   start: "requested",
@@ -100,7 +100,7 @@ function branchMatches(pattern, branch) {
 }
 var matchPatterns = (branchPatterns) => (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, "*"));
 
-// ../../../../../baton-bundle-qaoJjG/entry.ts
+// ../../../../tmp/baton-bundle-z143Om/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (args, opts = {}) => execFileSync2("git", args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
