@@ -77,6 +77,8 @@
     "test/integration/S-BTN-216.ids-decide.test.ts",
     "test/integration/S-BTN-217.cross-host-pushers.test.ts",
     "test/unit/seed-owners-fresh.test.ts",
-    "test/unit/cloud-runner.test.ts"
+    "test/unit/cloud-runner.test.ts",
+    "test/unit/signed-control.test.ts",
+    "test/integration/S-BTN-219.require-signed-control.test.ts"
   ]
 }

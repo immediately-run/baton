@@ -228,6 +228,23 @@ export class Admin {
     return new Set(this.c.humanBreakGlass ? (await this.c.humanBreakGlass()).keys() : []);
   }
 
+  /** B-127: the repository's owner signing keys — its owners' keys the human-only register
+   *  marks (`human_keys`, or a break-glass line; R-BTN-185), which is what an owner-signed
+   *  control input accepts, and nothing else: a key an agent session holds would let an injected
+   *  session sign (finding 3), and an API key cannot sign a commit at all. Public keys only —
+   *  the sync and the runners verify signatures against them; the private halves never leave
+   *  their owners. */
+  async signingKeys(repository: string): Promise<{ public_key: string; fingerprint: string }[]> {
+    const marks = await this.humanMarks();
+    // The register is the truth, not the column's cached mark: a key registered with the tenant
+    // after it became an owner counts the day it registers (R-BTN-185's `human_only` column
+    // records only what held at the addition).
+    return this.rows<{ public_key: string; fingerprint: string }>(
+      'SELECT public_key, fingerprint FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL ORDER BY fingerprint', repository)
+      .filter((k) => marks.has(k.fingerprint))
+      .map((k) => ({ public_key: k.public_key, fingerprint: k.fingerprint }));
+  }
+
   /** B-145 item 12: membership through `approvers.members` — the one authorisation hook for
    *  adding and removing owners, granting and revoking runner keys, and registering couriers,
    *  none of them a plain owner action any more. An owner key matches the list in force; an
@@ -893,7 +910,7 @@ export class Admin {
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'required_independence', 'scope_policy', 'worker_pushers', 'code_repos', 'pushers'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'required_independence', 'scope_policy', 'worker_pushers', 'code_repos', 'pushers', 'require_signed_control'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     const sets: [string, string | null][] = [];
     // B-182 (R-BTN-140): the home's code repositories, each naming its own forge and host. The
@@ -925,6 +942,12 @@ export class Admin {
     }
     if (b.required_bars !== undefined) sets.push(['required_bars', JSON.stringify(this.checkRequiredBars(repository, b.required_bars))]);
     if (b.retry !== undefined) sets.push(['retry', b.retry === null ? null : JSON.stringify(checkRetry(b.retry))]);
+    // B-127 (R-BTN-66 as amended): whether the repository's control inputs count only at
+    // owner-signed commits. Turning it on tightens (any owner may); off is a loosening below.
+    if (b.require_signed_control !== undefined) {
+      if (typeof b.require_signed_control !== 'boolean') bad('require_signed_control', 'must be a boolean (R-BTN-66, B-127)');
+      sets.push(['require_signed_control', b.require_signed_control ? '1' : '0']);
+    }
     if (b.transcript_repos !== undefined) {
       const t = Array.isArray(b.transcript_repos) && b.transcript_repos.length <= 20 && b.transcript_repos.every((x) => typeof x === 'string' && parseTranscriptRepo(x) !== null)
         ? b.transcript_repos : bad('transcript_repos', 'must be at most 20 repositories, each a GitHub owner/name or <forge>:<web_base>');
@@ -989,6 +1012,12 @@ export class Admin {
         const old = k === 'retry' ? this.retry(repository) : k === 'required_independence' ? this.requiredIndependence(repository) : null;
         const before = k === 'transcript_repos' ? JSON.parse(this.rows<{ v: string | null }>('SELECT transcript_repos AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? 'null') : old;
         if (JSON.stringify(before ?? null) !== (v ?? 'null')) return true;
+      }
+      // B-127: requiring signed control tightens (any owner may turn it on); turning it off
+      // loosens — a push alone could then change what every runner executes.
+      if (k === 'require_signed_control' && v === '0') {
+        const was = this.rows<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repository)[0]?.flag ?? 0;
+        if (was) return true;
       }
     }
     // B-134: both scope settings only loosen one way — a hold that stops holding, and a
@@ -1105,7 +1134,7 @@ export class Admin {
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
-      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, required_independence, scope_policy, worker_pushers, pushers FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
+      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, required_independence, scope_policy, worker_pushers, pushers, require_signed_control FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
         ...s,
         // B-182: the home's code repositories beside the column settings — its own table's rows,
         // as the observation hands them to the sync, so the CLI and the dashboard read one shape.

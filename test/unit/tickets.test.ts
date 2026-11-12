@@ -72,7 +72,9 @@ describe('the tickets cache', () => {
     expect(cols).toEqual(['id', 'repository_id', 'local_id', 'path', 'title', 'project', 'status', 'node', 'queue', 'tags', 'tier', 'requires_clause', 'operator_only',
       'depends_on', 'blocked_by', 'repos', 'ord', 'rank', 'snapshot_sha', 'row_hash', 'since', 'holder', 'course_id', 'tier_position', 'expedite', 'display', 'blocked_since', 'answer_lost',
       // B-183: the ticket's opaque version ('' when the source posts none) and stable key.
-      'version', 'key']);
+      'version', 'key',
+      // B-127: the brief's mark (0040).
+      'brief']);
   });
 });
 

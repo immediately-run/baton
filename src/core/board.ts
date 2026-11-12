@@ -69,6 +69,9 @@ export interface PostedTicket {
   /** R-BTN-116: the queued person leg's question (§4.4) — stored only while the ticket's queued
    *  leg is a person's; any other is dropped and logged `question-dropped`. */
   question?: PostedQuestion | null;
+  /** B-127 item 7: the brief's mark — `{signed, signer?, commit}`. Marked whether or not the
+   *  repository requires signed control; `signer` is the signing key's fingerprint. */
+  brief?: { signed: boolean; signer?: string; commit: string };
 }
 
 /** R-BTN-116: the question a ticket source posts for its queued person leg — an id for the
@@ -152,6 +155,41 @@ export interface BoardPayload {
    *  a person leg's answer read from the ticket's `answer:` — is acted on (R-BTN-116); an
    *  arrival Baton does not apply is recorded `arrival-unapplied` (R-BTN-39). */
   attestations?: PostedAttestation[];
+  /** B-127 (R-BTN-66 as amended): what the sync found about owner-signed control inputs at this
+   *  commit — the groups a runner loads `agent_command`, overrides and `rank.mjs` from, and the
+   *  control inputs whose last change no owner key signed (the `unsigned-control` notice's list,
+   *  raised where the repository requires signed control). The sync computes this where the git
+   *  objects are; every runner verifies the named commits again before loading them, and B-137
+   *  moves the check server-side over the raw commits. */
+  control?: PostedControl;
+}
+
+/** One runner-loaded control group as the post names it (B-127 item 4): `read` the commit to
+ *  load from — the newest commit that changed the group and an owner key signed, so every later
+ *  change is unsigned and left behind — or null when no signed version exists (nothing counts;
+ *  the runners stand down), `key` the signing key's fingerprint (null when `read` is only the
+ *  pre-adoption baseline beyond the walk's memory), `unsigned` the commits that changed the
+ *  group without counting. */
+export interface PostedGroup {
+  read: string | null;
+  key: string | null;
+  unsigned: string[];
+}
+
+/** The post's signed-control record (B-127). */
+export interface PostedControl {
+  /** The owner keys' fingerprints the sync verified with — what named `key` below means. */
+  keys: string[];
+  /** The runner-loaded groups (B-127 item 4): `agent_command` (`.baton/baton.json`), the
+   *  overrides (`legs/<leg>.run.mjs`), `rank.mjs`, and the courses' leg scripts
+   *  (`legs/*.mjs` — the code a runner executes; the graph stays with the snapshot, B-33
+   *  pinning a sourced course's file). A sync from before the course group posts three; while
+   *  the repository requires signed control, the claim is refused until a post names all four
+   *  (fail closed on a missing group). */
+  groups: { agent_command: PostedGroup; overrides: PostedGroup; rank: PostedGroup; course?: PostedGroup };
+  /** Every control input whose last change (first parents) is unsigned: one entry per path,
+   *  with its commits; a ticket file's entry names the watched fields (`EXPEDITE`) in `fields`. */
+  unsigned: { path: string; commits: string[]; fields?: string[] }[];
 }
 
 /** R-BTN-191's envelope as the sync posts it (§4.4): a typed fact about one ticket, its `value`
@@ -197,9 +235,16 @@ export interface TicketRow {
   expedite: 0 | 1;
   /** Shown, never read (§2b): JSON, or null. */
   display: string | null;
+  /** B-127 item 7: the brief's mark — `{signed, signer?, commit}` as the sync computed it, JSON,
+   *  or null when unmarked (no owner signing keys, or the brief's last change is beyond the
+   *  walk's memory). Read, not just shown: a privileged reader's first sight of whose words a
+   *  brief is. */
+  brief?: string | null;
 }
 
 const SHA = /^[0-9a-f]{40}$/;
+/** A public key's fingerprint, as `ssh-keygen -l` prints it (B-127's signing keys). */
+const FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
 const ID = LOCAL_ID; // a local id (R-BTN-47)
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 // B-183 (§12.3): a ticket's opaque version, the source's own string — a git blob id, a store's
@@ -271,6 +316,40 @@ export function checkPayload(body: unknown): BoardPayload {
         throw new BatonError('invalid-params', `${at}.ref must be a short string or null`);
       }
       if (!isObj((a as PostedAttestation).value)) throw new BatonError('invalid-params', `${at}.value must be an object`);
+    }
+  }
+  // B-127 (R-BTN-66 as amended): the post's signed-control record. The shape and bounds here;
+  //  whose keys may sign is Baton's own fact (the repository's human-only owner keys), which the
+  //  sync reads from Baton and every runner re-checks against the commit objects themselves.
+  if (p.control !== undefined) {
+    const c = p.control;
+    if (!isObj(c)) throw new BatonError('invalid-params', 'control must be {keys, groups, unsigned}');
+    const badControl = (field: string, why: string): never => {
+      throw new BatonError('invalid-params', `control.${field}: ${why}`);
+    };
+    for (const [k, v] of Object.entries(c)) if (!['keys', 'groups', 'unsigned'].includes(k)) badControl(k, 'is not a control field');
+    if (!Array.isArray(c.keys) || !c.keys.every((x) => typeof x === 'string' && FINGERPRINT.test(x))) badControl('keys', 'must be the signing keys’ fingerprints');
+    if (new Set(c.keys).size !== c.keys.length) badControl('keys', 'names a key twice');
+    if (!isObj(c.groups) || !(['agent_command', 'overrides', 'rank'] as const).every((g) => isObj(c.groups![g]))) {
+      badControl('groups', 'must hold agent_command, overrides and rank');
+    }
+    for (const k of Object.keys(c.groups)) if (!(['agent_command', 'overrides', 'rank', 'course'] as readonly string[]).includes(k)) badControl(`groups.${k}`, 'is not a group');
+    for (const g of ['agent_command', 'overrides', 'rank', 'course'] as const) {
+      const grp = c.groups[g];
+      if (grp === undefined) continue; // course: a sync from before the group; while the setting is on, a claim fails closed on it
+      const at = `groups.${g}`;
+      for (const [k, v] of Object.entries(grp)) if (!['read', 'key', 'unsigned'].includes(k)) badControl(`${at}.${k}`, 'is not a group field');
+      if (grp.read !== null && (typeof grp.read !== 'string' || !SHA.test(grp.read))) badControl(`${at}.read`, 'must be a 40-hex commit or null (no signed version)');
+      if (grp.key !== null && (typeof grp.key !== 'string' || !FINGERPRINT.test(grp.key))) badControl(`${at}.key`, 'must be a key fingerprint or null');
+      if (grp.key != null && !c.keys.includes(grp.key)) badControl(`${at}.key`, 'names a key control.keys does not');
+      if (!Array.isArray(grp.unsigned) || grp.unsigned.length > 40 || !grp.unsigned.every((x) => typeof x === 'string' && SHA.test(x))) badControl(`${at}.unsigned`, 'must be at most 40 commits');
+    }
+    if (!Array.isArray(c.unsigned) || c.unsigned.length > 200) badControl('unsigned', 'must be a list of at most 200 changes');
+    for (const [i, u] of c.unsigned.entries()) {
+      const at = `unsigned[${i}]`;
+      if (!isObj(u) || typeof u.path !== 'string' || !u.path.length || u.path.length > 300 || u.path.startsWith('/')) badControl(`${at}.path`, 'must be a relative path');
+      if (!Array.isArray(u.commits) || !u.commits.length || u.commits.length > 40 || !u.commits.every((x) => typeof x === 'string' && SHA.test(x))) badControl(`${at}.commits`, 'must be 1 to 40 commits');
+      if (u.fields !== undefined && (!Array.isArray(u.fields) || !u.fields.every((x) => x === 'EXPEDITE'))) badControl(`${at}.fields`, 'may name only EXPEDITE');
     }
   }
   return p.registry === undefined ? p : { ...p, registry: checkRegistry(p.registry) };
@@ -414,6 +493,19 @@ function checkNormative(p: BoardPayload) {
       if (!isObj(t.display)) fail(`${t.id}.display`, 'must be an object');
       for (const [k, v] of Object.entries(t.display)) {
         if (!['status', 'group', 'project'].includes(k) || (v != null && (typeof v !== 'string' || !TEXT.test(v) || v.length > 64))) fail(`${t.id}.display.${k}`, 'must be status, group or project, short plain text');
+      }
+    }
+    // B-127 item 7: the brief's mark. The shape here; whose keys may sign is the sync's fact,
+    // re-verified by every runner that loads what the post names (item 4).
+    if (t.brief !== undefined && t.brief !== null) {
+      const b = t.brief;
+      const at = `${t.id}.brief`;
+      if (!isObj(b) || typeof b.commit !== 'string' || !SHA.test(b.commit)) fail(at, 'must be {signed, signer?, commit}');
+      else {
+        if (typeof b.signed !== 'boolean') fail(`${at}.signed`, 'must be a boolean');
+        if (b.signer !== undefined && b.signer !== null && (typeof b.signer !== 'string' || !FINGERPRINT.test(b.signer))) fail(`${at}.signer`, 'must be a key fingerprint');
+        if (typeof b.signed === 'boolean' && b.signed && (b.signer === undefined || b.signer === null)) fail(at, 'a signed brief names its signing key');
+        if (b.signed === false && b.signer != null) fail(at, 'an unsigned brief names no signing key');
       }
     }
   }
@@ -705,6 +797,7 @@ export function rowForTicket(t: PostedTicket): TicketRow {
     holder: null,
     expedite: t.expedite ? 1 : 0,
     display: t.display ? JSON.stringify(t.display) : null,
+    brief: t.brief === undefined || t.brief === null ? null : JSON.stringify(t.brief),
   };
 }
 

@@ -38,6 +38,8 @@ import retireModelTables from './0036_retire_model_tables.sql';
 import ticketVersions from './0037_ticket_versions.sql';
 import runIds from './0038_run_ids.sql';
 import crossHostCodeRepos from './0039_cross_host_code_repos.sql';
+import signedControl from './0040_signed_control.sql';
+import claimControl from './0041_claim_control.sql';
 import { isUniqueViolation, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -106,4 +108,8 @@ export const MIGRATIONS: Migration[] = [
   { id: 38, sql: runIds, backfill: backfillRunIds },
   // 0039 (B-182): code repositories name their own forge and host, and pushers are host-qualified.
   { id: 39, sql: crossHostCodeRepos },
+  // 0040 is B-127's (owner-signed control inputs), renumbered at the merge behind main's 0034–0039.
+  { id: 40, sql: signedControl },
+  // 0041 is B-127's review round 2 (the claim's own control record).
+  { id: 41, sql: claimControl },
 ];

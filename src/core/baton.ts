@@ -35,7 +35,7 @@ import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Reposito
 import { codeReposOf, pushersOf } from './codeRepos';
 import { Policies, canonicalJson, sha256HexSync } from './policy';
 import { Scope } from './scope';
-import { randomHex, systemRandom } from './db';
+import { logEvent, randomHex, systemRandom } from './db';
 import type { Ports, Row, SqlValue, Store, Workflow } from './ports';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
@@ -482,13 +482,17 @@ export class BatonCore {
           // answers to the sync's decisions, and the legs claims finished with an evidence
           // pointer (the claim's nonce beside it) — so a marker in git counts only as the
           // evidence Baton recorded, and an answer only as the owner gave it here.
+          // B-127: the repository's owner signing keys — the public keys of its human-only
+          // owners (B-136's register as far as it is built; an API key cannot sign) — beside
+          // Baton's own record, so the sync that just took this number reads what counts from
+          // Baton, never from the repository it is judging.
           // B-183 (§4.3): and each live ticket's last accepted `version`, handed back so the
           // source's own code — never Baton — judges whether its store read is older than what
           // the board holds, and refuses to post a ticket it judges behind (R-BTN-150).
           // B-182 (R-BTN-140): and the effective `code_repos`, each entry with its forge, host,
           // ids and web_base, and the owners' `pushers` host-qualified — what the fact adapter
           // reads each repository by, and whose words count there.
-          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(this.store, repo), pushers: pushersOf(this.store, repo), ...this.claims.syncRecord(repo), versions: this.ticketVersions(repo) });
+          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(this.store, repo), pushers: pushersOf(this.store, repo), ...this.claims.syncRecord(repo), versions: this.ticketVersions(repo), signing_keys: await this.admin.signingKeys(repo), require_signed_control: !!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
         }
         if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
           const { repo, req: signed } = await this.verifySync(req, 'sync');
@@ -812,7 +816,32 @@ export class BatonCore {
         // must not roll the evaluation back with it.
         const wanted = typeof (body as { ticket_id?: unknown }).ticket_id === 'string' ? (body as { ticket_id: string }).ticket_id : null;
         const prepared = this.claims.prepareSetsFor(workerId, wanted != null && wanted.includes(':') ? wanted : null);
-        return json(tx(() => this.claims.claim(workerId, body, prepared)));
+        // B-127 (round 2, the pairing): the claim and the standing signed-control record are
+        // read in ONE transaction, and the record it paired with is stored on the claim — the
+        // answer serves the claim's own record, and a lost-response replay of the same
+        // request_id serves the same pairing again, whatever the board has moved to since.
+        // The old code read the record after the claim's transaction (an async hop away, for
+        // the owner keys), so a post accepted in between paired the claim's snapshot with the
+        // newer post's record, and the runner's own checks (a keyless read must be the
+        // snapshot itself; a signed read must be its ancestor) burned the honest claim as
+        // `cannot-finish:spec`, a counted, non-retryable attempt, where the stale board's
+        // release is unpenalised.
+        const answer = tx(() => {
+          const a = this.claims.claim(workerId, body, prepared);
+          const ticket = String(a.ticket_id ?? '');
+          if (ticket.includes(':')) {
+            const standing = this.sql<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', repositoryOf(ticket))[0];
+            // Set once: a replay keeps the pairing the claim was made with, never the moved
+            // board's (an empty string is the no-record shape, never NULL). Round 4: stored on
+            // every claim, whatever the setting — stored only while it was on, a claim made
+            // with it off and replayed after the owner turned it on backfilled the moved
+            // board's record beside the old snapshot, and the runner refused the honest claim.
+            // `claimControl` still answers `{}` unless the repository requires signed control.
+            this.store.exec('UPDATE claims SET control_json = ? WHERE id = ? AND control_json IS NULL', standing?.control_json ?? '', Number(a.claim_id));
+          }
+          return a;
+        });
+        return json({ ...answer, ...await this.claimControl(String(answer.ticket_id ?? ''), Number(answer.claim_id ?? 0)) });
       }
       if (m === 'GET' && p === '/v1/runner/next') return json(this.claims.next(workerId));
       if (m === 'GET' && p === '/v1/runner/recommendations') {
@@ -994,6 +1023,10 @@ export class BatonCore {
     const rest = o[2];
     // B-90: the repository's grants and settings, read before any write below.
     if (m === 'GET' && rest === 'grants') return json(this.grantsView(repo));
+    // B-127: the repository's owner signing keys — public keys of its human-only owners — the
+    // read `baton owner verify-config` carries into a checkout (the same list the sync's
+    // observation serves its own credential).
+    if (m === 'GET' && rest === 'signing-keys') return json({ keys: await this.admin.signingKeys(repo) });
     if (m === 'POST' && rest === 'grants') return json(await this.admin.grant(actor, repo, await body(), 'owner'));
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
     if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1])));
@@ -1318,6 +1351,9 @@ export class BatonCore {
         if (this.headOf(r) !== head) throw new BatonError('head-moved', `the head moved to ${this.headOf(r) ?? 'unset'} while this post was judged; re-read it and retry`);
         this.observations.accept(r, n);
         if (readAtHead) this.rememberSource(r, p);
+        // B-127: the record rides a refresh too (the latest post's word stands); the head has not
+        // moved, so no `unsigned-control` event is raised for it again.
+        this.applyControl(r, p, at, head);
         let wrote: { upserted: string[]; deleted: number; renumbered: { from: string; to: string; key: string }[] } | null = null;
         if (refreshed) {
           // Every ticket a refresh writes must name a course in force (R-BTN-48, R-BTN-69, round
@@ -1401,6 +1437,12 @@ export class BatonCore {
       if (this.reference(r, p)) changed.fleet_ignored = true;
       this.store.exec('INSERT INTO board_snapshots (repository_id, sha, parent_sha, received_at, ticket_count) VALUES (?, ?, ?, ?, ?) ON CONFLICT (repository_id, sha) DO NOTHING', r, p.sha, p.parent_sha, at, ticketCount);
       this.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, ?) ON CONFLICT (repository_id) DO UPDATE SET sha = excluded.sha', r, p.sha);
+      // B-127: the post's signed-control record stands for the repository (the latest post's
+      // word on what counts), and a post that moved the head onto unsigned control inputs —
+      // while the repository requires them signed — raises one `unsigned-control` event under
+      // Needs you, naming the paths and the commits. A refresh carries the record again and
+      // raises nothing new: the head it would name has not moved.
+      this.applyControl(r, p, at, head);
       this.rememberSource(r, p);
       // A hold is against one head (R3-1223): when the head moves — an accepted rewrite or a
       // plain fast-forward — every row held against the head it leaves is retired, answered or
@@ -1418,6 +1460,103 @@ export class BatonCore {
       changed.stale_released = judged.stale_released;
     });
     return { ok: true, ...changed };
+  }
+
+  /** B-127 (R-BTN-66 as amended, §7.1): the post's signed-control record — what the sync found
+   *  about owner-signed control inputs at this commit — stands for the repository, and a post
+   *  that moved the head (`from` is the head it left) onto unsigned control inputs raises one
+   *  `unsigned-control` event under Needs you while the repository requires them signed, naming
+   *  the paths and the commits. Round 1 (re-firing): only entries the owner has not already
+   *  been told raise it — a newly listed path, or the same path under a new unsigned commit —
+   *  so one standing unsigned change does not re-notice on every later head move, and opting
+   *  the setting on still notices what stands. Round 2: the witness is every notice the
+   *  window holds, not the last one — the last event names only what was fresh at its own
+   *  head, and once two notices have named different sets (event k naming A, event k+1 naming
+   *  B) a last-only dedupe alternated A, B, A, B on every later head move, forever; the union
+   *  also carries entries a single event's 50-line display slice left out, so they do not
+   *  rotate back in as news. The record is the sync's computation: the paths and signatures
+   *  are B-137's to move server-side over the raw commits; the groups a runner loads from are
+   *  verified by each runner before it loads them, never only by the sync that posts
+   *  them. */
+  private applyControl(r: string, p: BoardPayload, at: number, from: string | null): void {
+    if (p.control !== undefined) {
+      this.store.exec(`INSERT INTO signed_control (repository_id, sha, control_json, updated_at) VALUES (?, ?, ?, ?)
+                       ON CONFLICT (repository_id) DO UPDATE SET sha = excluded.sha, control_json = excluded.control_json, updated_at = excluded.updated_at`,
+        r, p.sha, JSON.stringify(p.control), at);
+    }
+    if (from == null || from === p.sha || p.control === undefined) return;
+    if (!p.control.unsigned.length) return;
+    const required = !!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', r)[0]?.flag;
+    if (!required) return;
+    // Round 2: every prior notice in the view's window (7 days, the same 100 the Needs-you
+    // view reads) is the witness — see the comment above. The previous control record is NOT
+    // the witness: while the setting was off nothing was raised, and opting in must still
+    // notice what stands; an unreadable event says nothing — the event fires.
+    const seen = new Set<string>();
+    for (const prior of this.sql<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'unsigned-control' AND repository_id = ? AND at > ? ORDER BY seq DESC LIMIT 100`, r, at - 7 * 86_400_000)) {
+      try {
+        for (const u of (JSON.parse(prior.detail_json) as { changes?: { path: string; commits: string[] }[] }).changes ?? []) seen.add(`${u.path}\u0000${u.commits.join(',')}`);
+      } catch {
+        // Unreadable: nothing from this event is known to have been noticed.
+      }
+    }
+    const fresh = p.control.unsigned.filter((u) => !seen.has(`${u.path}\u0000${u.commits.join(',')}`));
+    const changes = fresh.slice(0, 50);
+    if (!changes.length) return;
+    logEvent(this.store, at, 'unsigned-control', 'sync', { sha: p.sha, parent_sha: from, keys: p.control.keys, changes, ...(fresh.length > changes.length ? { omitted: fresh.length - changes.length } : {}) }, null, null, r);
+  }
+
+  /** §14 Needs you, B-127: the unsigned control changes of the last 7 days, newest first, of
+   *  repositories that require their control inputs signed. */
+  unsignedControlView(now: number) {
+    return this.sql<{ repository_id: string; at: number; detail_json: string }>(
+      `SELECT repository_id, at, detail_json FROM events WHERE kind = 'unsigned-control' AND at > ? ORDER BY seq DESC LIMIT 100`, now - 7 * 86_400_000)
+      .map((row) => {
+        let detail: Record<string, unknown> = {};
+        try {
+          detail = JSON.parse(row.detail_json) as Record<string, unknown>;
+        } catch {
+          detail = {};
+        }
+        return { repository_id: row.repository_id, at: row.at, ...detail };
+      });
+  }
+
+  /** B-127: the signed-control record a claim answer carries while its repository requires
+   *  signed control — the setting and the owner keys from Baton itself, the groups from the
+   *  record stored on the claim by its own transaction (round 2's pairing: the answer and a
+   *  lost-response replay serve the claim's own record, never a newer post's). `required` and
+   *  `keys` are never the post's word; the groups' commits are the post's, and each runner
+   *  verifies them against `keys` before loading, so a post that lied about a signature
+   *  changes what a runner refuses, not what it runs. With the setting off, `{}`: nothing is
+   *  gated, and the ticket's brief mark rides its row as ever. A group missing (`read` null or
+   *  absent) is the fail-closed case — no signed version — and the runner treats it so. */
+  private async claimControl(ticket: string, claimId: number): Promise<{ control?: unknown }> {
+    if (!ticket.includes(':')) return {};
+    const repo = repositoryOf(ticket);
+    if (!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag) return {};
+    const register = await this.admin.signingKeys(repo);
+    const keys = register.map((k) => k.public_key);
+    // The claim's own record, stored at the claim (0041): immutable from the answer's side.
+    const stored = this.sql<{ control_json: string | null }>('SELECT control_json FROM claims WHERE id = ?', claimId)[0]?.control_json ?? null;
+    let groups: Record<string, { read: string | null; key: string | null; unsigned: string[] }> = {};
+    let recordKeys: string[] | null = null;
+    try {
+      const parsed = stored ? (JSON.parse(stored) as { keys?: unknown; groups: Record<string, { read: string | null; key: string | null; unsigned: string[] }> }) : null;
+      groups = parsed?.groups ?? {};
+      recordKeys = Array.isArray(parsed?.keys) ? parsed.keys.filter((k): k is string => typeof k === 'string') : null;
+    } catch {
+      groups = {};
+    }
+    // Round 4 (the register moved): the record was computed under the keys it names, and the
+    // runner verifies under today's register. When the two differ — an owner key registered or
+    // removed between the post and the claim — a disagreement is the record's age, not a lie
+    // the claim should pay for: `register_moved` tells the runner to release such a claim as
+    // a stale board (unpenalised) instead of `cannot-finish:spec`. It never changes what loads:
+    // every check still runs against today's register, and the next post re-computes under it.
+    const now = new Set(register.map((k) => k.fingerprint));
+    const moved = recordKeys != null && (recordKeys.length !== now.size || recordKeys.some((k) => !now.has(k)));
+    return { control: { required: true, keys, ...(moved ? { register_moved: true } : {}), ...groups } };
   }
 
   /** B-129 (R-BTN-85, "every disagreement with git is logged", both values): the accepted post's
@@ -1486,18 +1625,18 @@ export class BatonCore {
       const id = qualify(r, row.id);
       this.store.exec(
         `INSERT INTO tickets (id, repository_id, local_id, path, title, project, status, node, queue, tags, tier, requires_clause, operator_only,
-           depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, tier_position, expedite, display, version, key)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, tier_position, expedite, display, version, key, brief)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET path = excluded.path, title = excluded.title, project = excluded.project,
            status = excluded.status, node = excluded.node, queue = excluded.queue, tags = excluded.tags,
            tier = excluded.tier, requires_clause = excluded.requires_clause, operator_only = excluded.operator_only,
            depends_on = excluded.depends_on, blocked_by = excluded.blocked_by, repos = excluded.repos,
            ord = excluded.ord, rank = excluded.rank, snapshot_sha = excluded.snapshot_sha, row_hash = excluded.row_hash,
            since = excluded.since, holder = excluded.holder, course_id = excluded.course_id, tier_position = excluded.tier_position,
-           expedite = excluded.expedite, display = excluded.display, version = excluded.version, key = excluded.key`,
+           expedite = excluded.expedite, display = excluded.display, version = excluded.version, key = excluded.key, brief = excluded.brief`,
         id, r, row.id, row.path, row.title, row.project, row.status, row.node, row.queue, row.tags, row.tier,
         row.requires_clause, row.operator_only, row.depends_on, row.blocked_by, row.repos, row.ord, row.rank, sha, hash, row.since, row.holder, row.course_id,
-        row.tier_position, row.expedite, row.display, row.version, row.key);
+        row.tier_position, row.expedite, row.display, row.version, row.key, row.brief ?? null);
       this.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
       for (const name of row.requires) this.store.exec('INSERT INTO ticket_requires (ticket_id, name) VALUES (?, ?)', id, name);
       upserted.push(id);
@@ -1838,7 +1977,9 @@ export class BatonCore {
         // push no open claim covers — until an owner resolves each.
         scope: this.scope.needsYou(),
         // B-133: the person legs' questions with each option's computed action (R-BTN-116).
-        questions: this.questions.needsYou() },
+        questions: this.questions.needsYou(),
+        // B-127: the unsigned control changes a post moved the head onto while signed control is required.
+        unsigned_control: this.unsignedControlView(now) },
       // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.
       blocked: this.blocks.view(),
       // R-BTN-85: the disagreements with git of the last 7 days, by kind.
