@@ -936,10 +936,28 @@ export async function main(argv) {
   return status >= 200 && status < 300 ? 0 : 1;
 }
 
+// A pipe's write is asynchronous and `process.exit()` flushes nothing, so the command's final
+// line could be dropped with its exit already decided — under a loaded consumer (vitest's
+// parallel workers) `baton tickets check`'s count line, an answer protocol's last line (B-84's
+// class). Wait for stdout and stderr to accept everything, then exit: an empty-string write's
+// callback fires once the writes before it are through; the bound keeps a consumer that stopped
+// reading from hanging the exit, and stdout's own EPIPE handling keeps a vanished one quiet.
+function exitDrained(code) {
+  const streams = [process.stdout, process.stderr].filter((s) => !s.destroyed);
+  const finish = () => process.exit(code);
+  if (!streams.length) return finish();
+  let left = streams.length;
+  const done = () => { if (--left === 0) finish(); };
+  for (const s of streams) {
+    try { s.write('', done); } catch { done(); }
+  }
+  setTimeout(finish, 10_000).unref?.();
+}
+
 // argv[1] may be npx's link to this file: compare real paths.
 if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
-  main(process.argv.slice(2)).then((code) => process.exit(code), (e) => {
+  main(process.argv.slice(2)).then(exitDrained, (e) => {
     process.stderr.write(`baton: ${e.message}\n`);
-    process.exit(2);
+    exitDrained(2);
   });
 }
