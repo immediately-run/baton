@@ -1,12 +1,11 @@
-# create-pr · adjudicate — reproduce what three rounds left open
+# create-pr · adjudicate — the owner answers three failed reviews
 
-You are running the `adjudicate` leg of the `create-pr` course. Three review rounds have run on
-the ticket's PR, and the last still asked for changes. The ticket's file is `$BATON_TICKET_FILE`.
-You decide whether the open blocking findings are real. **Print your adjudication as your last
-line, alone:** a machine reads that line — exactly the one word (`merge` or `owner`), or the
-word followed by one PR URL; no other word before or after, nothing after it in your whole
-output, or the leg fails.
+No agent runs this leg. Three review rounds have run on the ticket's PRs, each asking for
+changes, and the third pair of eyes is **yours** — the owner's — not another model's: nothing
+is reproduced by an agent, and no claim runs while you have not answered. The ticket waits at
+`reviewed`, listed under **Needs you**, asking:
 
+> **3 failed reviews — manual review or start a 4th round?**
 > **How the stub runs you** — Baton's contract for the `agent_command` author: your command
 > line splits into words as `sh` would (quotes honoured, no substitutions) and executes
 > **without a shell**, with the ticket id, the leg and the checkout appended as arguments.
@@ -15,45 +14,36 @@ output, or the leg fails.
 > completion: a harness that is a client of a background service must keep its session in
 > process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
 > work ends leaves truncated output and an orphaned session posting to a claim that no longer
-> exists (B-84). Never end with work in flight: the process is the session, and nothing resumes
-> it — wait, in the foreground, on every job you started before printing your final line.
+> exists (B-84). A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
+> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end
+> with work in flight: the process is the session, and nothing resumes it — wait, in the
+> foreground, on every job you started before printing your final line.
 
-- **`merge`**: none of the open blocking findings reproduces at the PR's head;
-- **`owner`**: at least one does, and the owner decides.
-
-Baton writes the adjudication line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on the same line: `merge https://github.com/<owner>/<name>/pull/<n>`.
-
-## Work from a fresh context
-
-You have no stake in the answer: you did not write the PR or review it. Keep it that way. Do not
-argue for the author or the reviewers; reproduce.
-
-## For each blocking finding still open
-
-1. Check out the PR's head.
-2. Reproduce the claim: run the probe, the test or the grep it implies.
-3. **Not reproduced:** reply on its thread with the probe you ran and what it showed. The finding
-   is closed.
-4. **Reproduced:** keep it open, and include it in the packet below.
-
-## When one reproduces: a decision packet
-
-Write a comment on the PR that the owner can answer with one letter, from a phone, without
-reading the history:
+Read the rounds' findings on the ticket's PRs (one per repository its `repos:` names, besides
+this one — the Needs-you entry links the PR whose last round holds them), then answer through
+Baton, with your owner key — the way Baton's own decisions are answered:
 
 ```
-## Decision needed
-
-- **Question:** <one sentence naming the thing decided>
-- **Options:** (a) <option> · (b) <option> [· (c) …]
-- **Recommendation:** (<letter>) — <why, in one or two sentences>
-- **Evidence:** <links: the thread, the commit, the file and line>
-- **Reversible:** yes — <why> | no — <what cannot be undone>
+baton owner -i <your owner key> resolve <repository> <ticket> review-rounds-3 merge|owner|round
 ```
 
-The usual question is "merge as is, run one more round, or narrow the ticket". The
-recommendation is never "merge" while a reproduced blocking finding stands.
+(`baton decision list` prints the line for you, with the decision's id.)
+
+- **`merge`** — you reviewed it yourself and it merges: the ticket moves to `adjudicated` with
+  `merge` ready.
+- **`owner`** — you take the change over by hand: the ticket parks, `merge` waiting on you,
+  until you say otherwise.
+- **`round`** — start a 4th review round. The answer itself grants exactly one more `review`
+  run beyond the course's three — there is no second step — and the round runs on the same
+  head. If that round still asks for changes, you are asked again (`review-rounds-4`), and may
+  answer again.
+
+The answer counts only because your key gave it to Baton. A commit trailer, or a comment line
+such as `<!-- baton:adjudicated merge -->`, answers nothing: anyone who can push could write it.
 
 ## Do not
 
-- Fix anything, push, or merge.
+- Answer from the review summaries alone: read the findings the rounds left open.
+- Grant a round without reading why the third refused — the gate's tests are green; the
+  findings are the question.

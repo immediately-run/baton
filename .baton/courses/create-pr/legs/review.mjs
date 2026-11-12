@@ -1,11 +1,12 @@
-// ../../../../../baton-bundle-vlzH72/entry.ts
+// ../../../../tmp/baton-bundle-rh44yp/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync as rmSync2, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join as join2 } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, readdirSync, rmSync as rmSync2, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, join as join2 } from "node:path";
 import { pathToFileURL } from "node:url";
 
-// ../cli/src/defaults/agent-words.ts
+// src/defaults/agent-words.ts
 function splitWords(command) {
   const words = [];
   const SHELL_SYNTAX = /* @__PURE__ */ new Set(["<", ">", ">>", "<<", "|", "||", "&&", ";", "&", "(", ")"]);
@@ -57,7 +58,7 @@ function splitWords(command) {
   return words;
 }
 
-// ../cli/src/defaults/answer.ts
+// src/defaults/answer.ts
 var PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 var WRAPPED = /^([`'"*_]+)(.+)\1$/;
 function answerOn(line, values) {
@@ -97,12 +98,12 @@ function requireAnswer(out, ask, leg, opts = {}) {
   throw new Error(`the ${leg} agent printed no ${ask.name} (${values}) as its last line${last === "" ? " \u2014 its output was empty" : ` \u2014 its last line was ${JSON.stringify(last)}`}`);
 }
 
-// ../cli/src/defaults/ticket-state.ts
+// src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 
-// ../cli/src/defaults/tickets-markdown.ts
+// src/defaults/tickets-markdown.ts
 function parseFrontmatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!m) return null;
@@ -133,7 +134,7 @@ var unquote = (v) => {
   return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
 };
 
-// ../cli/src/defaults/ticket-state.ts
+// src/defaults/ticket-state.ts
 var MACHINE_KEYS = ["station", "next_leg", "claim"];
 var CLOSE_TIMEOUT_MS = 12e4;
 var GIT_NONINTERACTIVE_ENV = {
@@ -323,7 +324,7 @@ async function closeTicket(ctx, result, run2 = exec) {
   }
 }
 
-// ../cli/src/defaults/pr-close.ts
+// src/defaults/pr-close.ts
 var PR_URL2 = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 var verdictLine = (verdict) => `<!-- baton:verdict ${verdict} -->`;
 function commentLine(leg, result) {
@@ -356,9 +357,30 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../../../../baton-bundle-vlzH72/entry.ts
+// ../../../../tmp/baton-bundle-rh44yp/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
+var AGENT_IDLE_MS = 9e5;
+var LEG_CEILING_MS = 18e6;
+var newestWrite = (p, depth = 0) => {
+  let st = null;
+  try {
+    st = statSync(p, { throwIfNoEntry: false });
+  } catch {
+    return 0;
+  }
+  if (st == null) return 0;
+  let best = st.mtimeMs;
+  if (!st.isDirectory() || depth >= 5) return best;
+  let names = [];
+  try {
+    names = readdirSync(p);
+  } catch {
+    return best;
+  }
+  for (let i = 0; i < names.length && i < 512; i++) best = Math.max(best, newestWrite(join2(p, names[i]), depth + 1));
+  return best;
+};
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
 function advisedCommand(words, settings, adviceFile) {
   if (!adviceFile) return words;
@@ -423,7 +445,28 @@ async function standard(ctx) {
   const [wrapped, ...wrapping] = wrapper == null ? [] : splitWords(wrapper);
   const argv = wrapped === void 0 ? [command, ...words, ctx.ticket.id, "review", ctx.checkout] : [wrapped, ...wrapping, command, ...words, ctx.ticket.id, "review", ctx.checkout];
   if (process.env.BATON_VERBOSE) process.stderr.write("baton: create-pr/review ticket " + ctx.ticket.id + ": agent_command: " + agentCommand + (wrapper != null ? "; wrapper: " + wrapper : "") + "; argv: " + argv.join(" ") + "\n");
-  const out = await new Promise((resolve, reject) => {
+  const startedAt = Date.now();
+  const wrapperLog = join2(ctx.checkout, ".baton", "logs", ctx.ticket.id + "-review.log");
+  const agentBin = basename(command);
+  const storePaths = [];
+  if (agentBin === "opencode" || agentBin === "claude") {
+    const dataHome = process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME !== "" ? process.env.XDG_DATA_HOME : join2(homedir(), ".local", "share");
+    const dashed = ctx.checkout.split("/").join("-");
+    if (agentBin === "opencode") {
+      const root = join2(dataHome, "opencode");
+      storePaths.push(join2(root, "opencode.db"), join2(root, "opencode.db-wal"), join2(root, "opencode.db-shm"), join2(root, "project", dashed));
+      const key = createHash("sha1").update(ctx.checkout).digest("hex");
+      let instances = [];
+      try {
+        instances = readdirSync(join2(root, "snapshot"));
+      } catch {
+      }
+      for (const i of instances) storePaths.push(join2(root, "snapshot", i, key));
+    } else {
+      storePaths.push(join2(process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== "" ? process.env.CLAUDE_CONFIG_DIR : join2(homedir(), ".claude"), "projects", dashed));
+    }
+  }
+  const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === "1";
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout,
@@ -439,9 +482,13 @@ async function standard(ctx) {
       }
     });
     let so = "", se = "";
+    let lastOut = startedAt;
+    let watch = null;
     child.stdout.on("data", (c) => {
+      lastOut = Date.now();
       so += c;
       if (so.length > 67108864) {
+        if (watch != null) clearInterval(watch);
         child.kill("SIGKILL");
         reject(new Error("the agent printed more than 67108864 bytes"));
         return;
@@ -452,11 +499,15 @@ async function standard(ctx) {
       if (se.length < 2048) se = (se + String(c)).slice(-2048);
       if (echo) process.stderr.write(c);
     });
-    child.on("error", (e) => reject(e));
-    let stopped = null;
+    child.on("error", (e) => {
+      if (watch != null) clearInterval(watch);
+      reject(e);
+    });
+    let stopped = null, conclusion2 = null;
     const onAbort = () => {
       if (stopped != null) return;
       stopped = String(ctx.signal.reason ?? "release");
+      if (watch != null) clearInterval(watch);
       child.kill("SIGTERM");
       setTimeout(() => child.kill("SIGKILL"), 3e3).unref();
     };
@@ -464,17 +515,45 @@ async function standard(ctx) {
       if (ctx.signal.aborted) onAbort();
       else ctx.signal.addEventListener("abort", onAbort, { once: true });
     }
+    const signals = () => [
+      ["stdout", lastOut],
+      ["wrapper-log", newestWrite(wrapperLog)],
+      ...storePaths.length > 0 ? [["harness-store", storePaths.reduce((best, p) => Math.max(best, newestWrite(p)), 0)]] : []
+    ];
+    const finishWatch = () => {
+      if (watch != null) clearInterval(watch);
+      child.kill("SIGKILL");
+      process.stderr.write("baton: create-pr/review ticket " + ctx.ticket.id + ": the agent " + conclusion2.cause + (conclusion2.cause === "agent_concluded_idle" ? " \u2014 quiet past " + Math.round(AGENT_IDLE_MS / 6e4) + " minutes on " + conclusion2.quiet_signals.join(", ") : " \u2014 the leg's ceiling of " + Math.round(LEG_CEILING_MS / 6e4) + " minutes") + "; the stdout it received is its output\n");
+      resolve({ text: so, conclusion: conclusion2 });
+    };
+    watch = setInterval(() => {
+      if (stopped != null || conclusion2 != null) return;
+      const now = Date.now();
+      if (now - startedAt >= LEG_CEILING_MS) {
+        conclusion2 = { cause: "agent_concluded_absolute", ceiling_ms: LEG_CEILING_MS };
+        finishWatch();
+        return;
+      }
+      const all = signals();
+      if (all.every(([, at]) => now - at >= AGENT_IDLE_MS)) {
+        conclusion2 = { cause: "agent_concluded_idle", idle_ms: AGENT_IDLE_MS, quiet_signals: all.map(([name]) => name) };
+        finishWatch();
+      }
+    }, Math.max(250, Math.round(AGENT_IDLE_MS / 5)));
+    watch.unref?.();
     child.on("exit", () => {
       if (stopped != null) reject(new Error("the agent was stopped: " + stopped));
     });
     child.on("close", (code, sig) => {
+      if (watch != null) clearInterval(watch);
       if (ctx.signal) ctx.signal.removeEventListener("abort", onAbort);
       if (stopped != null) {
         reject(new Error("the agent was stopped: " + stopped));
         return;
       }
+      if (conclusion2 != null) return;
       if (code === 0) {
-        resolve(so);
+        resolve({ text: so, conclusion: null });
         return;
       }
       const tail = (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
@@ -484,9 +563,10 @@ async function standard(ctx) {
   }).finally(() => {
     if (dir != null) rmSync2(dir, { recursive: true, force: true });
   });
+  const { text: out, conclusion } = received;
   const { answer, pr } = requireAnswer(out, { "name": "verdict", "values": ["approve", "changes"] }, "review");
   const on = pr;
-  return { ...{ ...answer !== "approve" && (ctx.run ?? 1) >= 3 ? { suspend: true } : {}, reached: "reviewed", next: answer === "approve" ? "merge" : (ctx.run ?? 1) >= 3 ? "adjudicate" : "fix", verdict: answer }, ...on ? { pr: on } : {} };
+  return { ...{ ...answer !== "approve" && (ctx.run ?? 1) >= 3 ? { suspend: true } : {}, reached: "reviewed", next: answer === "approve" ? "merge" : (ctx.run ?? 1) >= 3 ? "adjudicate" : "fix", verdict: answer }, ...on ? { pr: on } : {}, ...conclusion ? { conclusion } : {} };
 }
 var closeCtx2 = (ctx) => ({ ...ctx, ...ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === "string" && process.env.BATON_DEFAULT_BRANCH !== "" ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {} });
 var close = (ctx, result) => prClose(closeCtx2(ctx), result);

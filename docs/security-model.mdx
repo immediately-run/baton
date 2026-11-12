@@ -188,9 +188,20 @@ session on docs, and runners push docs' main (6 commits by "OpenCode Agent" betw
 
 **And the repository's ordinary code runs too** (review findings 5 and 6). Agents and owners
 execute far more than `.baton/` and `.claude/`:
-- the Baton CLI itself: owners and administrators are told to run `node cli/baton.mjs owner|admin
-  -i KEY` from a `baton` checkout the worker pushes, and runners run the CLI from the leg
-  checkout. Pushed code then reads the owner's and administrator's keys (B-138);
+- the Baton CLI itself: finding 5 had owners and administrators running `node cli/baton.mjs
+  owner|admin -i KEY` from a `baton` checkout the worker pushes, and runners running the CLI
+  from the leg checkout — pushed code reading the owner's and administrator's keys. B-138
+  closed that: the docs name the pinned release only (`npx --yes @immediately-run/baton@<version>`),
+  the CLI refuses an owner or administrator key when it runs from a git working tree (a `.git`
+  at or above it, above npm's `node_modules` boundary — so a released copy stays released even
+  under a `$HOME` that is itself a repository) without `--dev`, and `start-runner.sh` installs
+  the pinned release outside every checkout, verifies the install's version and hash at every
+  start, and refuses a checkout's CLI. The residual is the `--dev` override and every command
+  that is not an owner's or an administrator's (the reads, `run`, the repository commands):
+  they still run a working tree's code — with worker keys the VM level already holds, and with
+  any key handed them, an owner's or administrator's included, for the CLI cannot tell a key's
+  role from its file: the refusal keys off the owner and administrator commands, where such a
+  key is the point of the command;
 - tests, `package.json` scripts, `.husky/`, `.envrc`, `.vscode/tasks.json`, `.mcp.json` servers,
   nested `CLAUDE.md`, `.claude/agents` and `.claude/commands`, in any checkout a leg or an owner
   session works in.
@@ -354,6 +365,13 @@ last signed version and raises a notice under Needs you.
 - **Cost:** a Baton ticket; owners sign their commits; agents can no longer improve courses
   unreviewed (R-BTN-66 says they may today), so an agent's course change becomes a proposal
   an owner signs.
+
+**Built** (B-127, 2026-11-06): `require_signed_control` per repository (default off), the
+SSHSIG-`git` verification in the sync and in every runner (never only the sync), the
+first-parent walks with the merge-rollback fix, the `unsigned-control` notice, brief marks, the
+`baton owner sign` / `verify-config` tooling and the runbook
+(`docs/runbooks/owner-signed-control.mdx`). Server-side verification over the raw commits and
+the memory-free walk remain B-137's.
 
 ### D. Control as Baton state
 

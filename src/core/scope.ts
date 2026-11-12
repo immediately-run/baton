@@ -18,6 +18,7 @@
 // own scope by reporting into it.
 import { logEvent } from './db';
 import { isForgePath, type Forge } from './links';
+import { codeReposOf } from './codeRepos';
 import type { Store } from './ports';
 import type { ScopeAction, ScopeReport } from './validate';
 import type { Delivery } from './webhook';
@@ -28,12 +29,15 @@ import type { Delivery } from './webhook';
  *  kinds are the shape later sources (a forge reader, a VM egress log) fill. */
 export type { ScopeAction } from './validate';
 
-/** What a ticket's leg may touch (B-134): its home and its `repos:` entries — a forge path on
- *  the home's forge host, a short name read under the home's owner as R-BTN-92 reads it — as
- *  lowercased forge paths. `code_repos` (R-BTN-140) is not built yet; once it is, an entry that
- *  does not resolve into it leaves the scope. */
-export function scopePaths(home: { forge: Forge; github: string; repos: string }): Set<string> {
+/** What a ticket's leg may touch (B-134): its home and its `repos:` entries — a forge path
+ *  naming the home or a `code_repos` entry (R-BTN-92, R-BTN-140), a short name read under the
+ *  home's owner as R-BTN-92 reads it — as lowercased forge paths. `codeRepoPaths` is the home's
+ *  listed entries' paths: once the owners list any, an entry that does not resolve into it
+ *  leaves the scope (R-BTN-140's reach); `null` — no list written — keeps every forge-valid
+ *  name, as before the list existed. */
+export function scopePaths(home: { forge: Forge; github: string; repos: string }, codeRepoPaths: string[] | null = null): Set<string> {
   const owner = home.github.slice(0, home.github.indexOf('/'));
+  const listed = codeRepoPaths != null ? new Set(codeRepoPaths.map((p) => p.toLowerCase())) : null;
   const out = new Set([home.github.toLowerCase()]);
   let repos: string[] = [];
   try {
@@ -43,8 +47,9 @@ export function scopePaths(home: { forge: Forge; github: string; repos: string }
   }
   for (const r of repos) {
     if (typeof r !== 'string') continue;
-    const path = r.includes('/') ? r : `${owner}/${r}`;
-    if (isForgePath(home.forge, path)) out.add(path.toLowerCase());
+    const path = (r.includes('/') ? r : `${owner}/${r}`).toLowerCase();
+    if (listed != null && !listed.has(path)) continue;
+    if (isForgePath(home.forge, path) || (listed != null && listed.has(path))) out.add(path);
   }
   return out;
 }
@@ -59,13 +64,20 @@ export function scopePaths(home: { forge: Forge; github: string; repos: string }
  *  fence-unconfirmed one — once a completion is confirmed or a fence cleared, the claim no
  *  longer covers. */
 export function openScopes(store: Store): { ticket: string; paths: Set<string> }[] {
-  return store.exec<{ ticket_id: string; forge: Forge; github: string; repos: string }>(
-    `SELECT c.ticket_id, p.forge, p.github, t.repos FROM claims c
+  return store.exec<{ ticket_id: string; repository_id: string; forge: Forge; github: string; repos: string }>(
+    `SELECT c.ticket_id, p.id AS repository_id, p.forge, p.github, t.repos FROM claims c
      JOIN tickets t ON t.id = c.ticket_id JOIN repositories p ON p.id = t.repository_id
      WHERE (c.status = 'active'
             OR (c.status = 'completed' AND c.confirmed_at IS NULL)
             OR (c.status = 'reaped' AND c.fence_pending = 1)) ORDER BY c.id`).toArray()
-    .map((r) => ({ ticket: r.ticket_id, paths: scopePaths(r) }));
+    .map((r) => ({ ticket: r.ticket_id, paths: scopePaths(r, listedPaths(store, r.repository_id)) }));
+}
+
+/** The home's listed code-repository paths, or null while it lists none (the gate is off until
+ *  the owners write a list, so every deployment reads as before B-182). */
+function listedPaths(store: Store, repository: string): string[] | null {
+  const entries = codeReposOf(store, repository);
+  return entries.length ? entries.map((e) => e.path) : null;
 }
 
 /** A finding as Needs you lists it (§14). */
@@ -95,9 +107,9 @@ export class Scope {
 
   /** A claim's ticket scope, as the claim answer carries it (sorted, so a test reads one list). */
   scopeOf(ticket: string): string[] {
-    const home = this.rows<{ forge: Forge; github: string; repos: string }>(
-      `SELECT p.forge, p.github, t.repos FROM tickets t JOIN repositories p ON p.id = t.repository_id WHERE t.id = ?`, ticket)[0];
-    return home ? [...scopePaths(home)].sort() : [];
+    const home = this.rows<{ repository_id: string; forge: Forge; github: string; repos: string }>(
+      `SELECT p.id AS repository_id, p.forge, p.github, t.repos FROM tickets t JOIN repositories p ON p.id = t.repository_id WHERE t.id = ?`, ticket)[0];
+    return home ? [...scopePaths(home, listedPaths(this.c.store, home.repository_id))].sort() : [];
   }
 
   /** Record the actions a claim reported outside its leg's scope, in the caller's transaction.

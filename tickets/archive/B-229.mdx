@@ -1,0 +1,92 @@
+---
+title: "B-229 — A claim outlives its runner: a restart's new session never ends the last one's claim, and expired leases stay on the board for weeks"
+id: B-229
+project: baton
+status: done
+updated: 2026-11-11
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1228
+tier: judgement
+description: "Found on vltava2, 2026-11-10. (1) The runner's orphan check reads the claim from its own session's state file, and each start is a new session with a new file, so a restart after a hard stop never ends the previous session's claim: claim 123 on B-150 stayed held by worker 32 until it was ended by hand. (2) The board's holders still list twelve claims of oc-vltava2-vm0 whose leases ended between 2026-10-30 and 2026-11-06 (B-112, B-101, B-106, B-108, R3-1210, B-110, B-115, B-4, B-52, B-16, B-7, B-182); their tickets cannot be claimed. Find why they are not reaped — status active past its lease, or reaped with a fence pending from a worker that will never beat again — and end them; and have a restarted runner end what its host's earlier sessions still hold. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/224
+depends_on: []
+---
+
+**Brief:** see the description. The runner's state files live in
+`~/.cache/immediately-run/baton/run-<session>.json`; a host's earlier sessions are the other
+files there with a `claim`.
+
+**Spec:** [BATON_SPEC §9](../../spec/BATON_SPEC/09-claims.md) (leases, reaping,
+fences), R-BTN-19, R-BTN-24.
+
+**Depends on:** none.
+
+**Used by:** none.
+
+### What to build
+
+**Diagnosis.** The board's `holders` (2026-11-10) lists the twelve claims `active`, each
+`lease_ends_at` (`last_seen_at + lease_timeout_ms`, the reaper's own condition) days in the
+past, the first 2026-10-30 18:11Z. The alarm fires: every request re-arms it (`baton.ts`, `get()
+== null`). Its reaper selects exactly these claims. So the reaps never commit. The tick ran the
+reaper and every later step in one transaction (`baton.ts` `alarm()`), and any throw rolled back
+all of it, every minute. B-104 (merged 2026-10-29 18:42Z) added steps to that transaction the day
+before the first stale lease. Which step throws on production is not visible without the
+Worker's logs; the change below makes the tick say so.
+
+**Correction (2026-11-11, after #221 deployed).** The claims stayed held, and `wrangler tail
+baton` showed requests but no alarm event at all: the alarm was not firing. "Every request
+re-arms it" was wrong — only a start that found no alarm set one (`start()`, `get() == null`),
+so an alarm the platform had stopped firing was never replaced, and no tick ran. Fixed by
+`keepAlarm()`: every start, and a request at most once a period, sets a missing or more than two
+periods overdue alarm for the next period (§2.1). #221's changes stand: they make a failing tick
+name its step and keep its reaps.
+
+**Server (§9.5).** The reaper (`claims.alarm()`) runs in its own transaction, committed before
+the rest of the tick. Each reap is its own savepoint: a claim whose end throws is passed over,
+and the others commit. After the tick's other work, the alarm throws `the alarm could not reap n
+claim(s): claim <id> on <ticket>: <error>`, so the host's log names it and the next tick retries
+it. The rest of the tick names its failing step: `the alarm's tick failed at <step> (its reaps
+committed): …`.
+
+**Runner (R-BTN-6).** At start, after its own orphan, `runOnce` ends the claim of every other
+state file in its state directory whose lease is lost by `leaseLostFrom` (R-BTN-26). It uses an
+API of that file's own worker secret (`apiFor`, so its own beats never carry it), ends the claim
+`released:lease-lost` and clears the file's claim. A live sibling (lease holding) and a file never
+answered (no `last_ok`) are left alone. A refusal clears the file; Baton out of reach leaves it
+for the next start.
+
+Tests: `test/unit/alarm-reaper.test.ts` (a throwing later step leaves reaps committed and is
+named; one claim whose end throws is named and passed over, the other reaped, and reaped on the
+next tick), and S-BTN-41's new case (an earlier session's lost claim ended, a live sibling's left).
+
+### Invariants
+
+- **R-BTN-9 / §9.5:** reaps still happen at exactly the clamped timeout, by the same query; only
+  their commit is separated from the rest of the tick.
+- **R-BTN-19:** an unacknowledged-release reap is still fenced; its savepoint commits the fence
+  with the end. The fence-lapse clearing is unchanged.
+- **R-BTN-26:** the runner ends another session's claim only when that session's own fence check
+  already reads its lease as lost. That session can no longer act on the claim by its own
+  rule, so ending it takes nothing from a live holder.
+- **Rule 3 (one claim per worker):** unchanged. The other session's worker ends its own claim,
+  under its own secret.
+
+### Trust
+
+The runner uses secrets only from state files on its own host, in its own state directory (mode
+0600, written by sessions of the same user), and only to end the claims those sessions hold. It
+never claims, advances or beats under them. Baton still checks the worker's secret and holder,
+so a forged file can end only a claim whose secret it holds. The alarm change alters only what
+commits together; it adds no path and no authority.
+
+## Status
+
+_filed 2026-11-10._

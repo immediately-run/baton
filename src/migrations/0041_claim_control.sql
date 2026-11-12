@@ -1,0 +1,13 @@
+-- 0041_claim_control.sql — B-127 (round 2, the pairing): the signed-control record a claim
+-- answer serves is read in the claim's own transaction and stored on the claim, so the answer
+-- pairs the claim's snapshot with the record that stood at it — and a lost-response replay of
+-- the same request_id serves the same pairing again, never the record a newer post has moved
+-- to. Without it, the answer read the standing record after the claim's transaction (an async
+-- hop away, for the owner keys), and any post accepted in between paired the claim's snapshot
+-- H1 with the newer record H2 — which the runner's own checks (a keyless read must be the
+-- snapshot itself; a signed read must be its ancestor) rejected, burning an honest claim as
+-- `cannot-finish:spec`, a counted, non-retryable attempt. It is stored on every claim, whatever
+-- the setting (round 4: a claim made with it off and replayed after it was turned on must still
+-- serve its own pairing). NULL is a claim from before the column; '' is a repository with no
+-- standing record (with the setting on, the pre-ceremony window — Baton hands out no claim there).
+ALTER TABLE claims ADD COLUMN control_json TEXT;

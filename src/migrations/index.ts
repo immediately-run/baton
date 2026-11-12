@@ -37,8 +37,12 @@ import scopeEvents from './0035_scope_events.sql';
 import retireModelTables from './0036_retire_model_tables.sql';
 import ticketVersions from './0037_ticket_versions.sql';
 import runIds from './0038_run_ids.sql';
-import part4Resources from './0039_part4_resources.sql';
-import part4Settings from './0040_part4_settings.sql';
+import crossHostCodeRepos from './0039_cross_host_code_repos.sql';
+import signedControl from './0040_signed_control.sql';
+import claimControl from './0041_claim_control.sql';
+import retireOntology from './0042_retire_ontology.sql';
+import part4Resources from './0043_part4_resources.sql';
+import part4Settings from './0044_part4_settings.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -68,7 +72,7 @@ function backfillRunIds(store: Store, random: Random) {
   }
 }
 
-/** 0039 (B-168, R-BTN-76): each `worker`-scope resource and each implicit instance the migration
+/** 0043 (B-168, R-BTN-76): each `worker`-scope resource and each implicit instance the migration
  *  drops is logged as an `admin` event naming what it was — the same act an administrator's own
  *  registration logs — read before its SQL drops them (`first`). */
 function backfillPart4Resources(store: Store, _random: Random, now: () => number) {
@@ -81,7 +85,7 @@ function backfillPart4Resources(store: Store, _random: Random, now: () => number
      UNION
      SELECT DISTINCT instance, 'instance' FROM instance_states WHERE instance LIKE '%@worker:%'
      ORDER BY kind, name`).toArray();
-  for (const r of rows) logEvent(store, now(), 'admin', 'migration:0039', { act: 'resource-dropped', kind: r.kind, name: r.name }, null, null, null);
+  for (const r of rows) logEvent(store, now(), 'admin', 'migration:0043', { act: 'resource-dropped', kind: r.kind, name: r.name }, null, null, null);
 }
 
 export const MIGRATIONS: Migration[] = [
@@ -123,6 +127,16 @@ export const MIGRATIONS: Migration[] = [
   { id: 36, sql: retireModelTables },
   { id: 37, sql: ticketVersions },
   { id: 38, sql: runIds, backfill: backfillRunIds },
-  { id: 39, sql: part4Resources, backfill: backfillPart4Resources, first: true },
-  { id: 40, sql: part4Settings },
+  // 0039 (B-182): code repositories name their own forge and host, and pushers are host-qualified.
+  { id: 39, sql: crossHostCodeRepos },
+  // 0040 is B-127's (owner-signed control inputs), renumbered at the merge behind main's 0034–0039.
+  { id: 40, sql: signedControl },
+  // 0041 is B-127's review round 2 (the claim's own control record).
+  { id: 41, sql: claimControl },
+  // 0042 is B-167's (the ontology and route choices leave core), renumbered at the merge behind main's 0039–0041.
+  { id: 42, sql: retireOntology },
+  // 0043 and 0044 are B-168's (the restructure's part 4: resources, readings, owner settings),
+  // renumbered at the merge behind main's 0039–0042.
+  { id: 43, sql: part4Resources, backfill: backfillPart4Resources, first: true },
+  { id: 44, sql: part4Settings },
 ];

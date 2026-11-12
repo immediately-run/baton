@@ -82,12 +82,12 @@ export const STD = Object.freeze({
     }, ['id', 'leg', 'option', 'reached']),
     'x-baton-view': { title: '{/option}', summary: 'decision {/id}', fields: [{ label: 'answered by', pointer: '/answered_by', as: 'text' }, { label: 'reached', pointer: '/reached', as: 'text' }, { label: 'leg', pointer: '/leg', as: 'text' }] },
   },
-  // B-105 (R-BTN-176): the base an API-capacity resource's schema refines. Not an output schema:
-  // a DETAIL schema in R-BTN-76's subset, which an external resource's readings carry — so it
-  // uses only that subset's keywords (no `pattern`, no `format`) and a fraction in fixed point
-  // (`remaining_permille`), as R-BTN-176 asks. The library's one OPEN schema: a provider's
-  // resource schema refines it by adding fields, so `additionalProperties` is not false and a
-  // refinement must restate the base's own bounds (R-BTN-108).
+  // B-105: the base an API-capacity resource's schema refines. Not an output schema: a DETAIL
+  // schema in R-BTN-76's subset, which an external resource's readings carry — so it uses only
+  // that subset's keywords (no `pattern`, no `format`) and a fraction in fixed point
+  // (`remaining_permille`). The library's one OPEN schema: a provider's resource schema refines
+  // it by adding fields, so `additionalProperties` is not false and a refinement must restate
+  // the base's own bounds (R-BTN-108).
   'std:api-capacity@1': {
     type: 'object',
     properties: {

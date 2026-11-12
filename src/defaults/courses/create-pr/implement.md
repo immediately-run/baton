@@ -5,12 +5,12 @@ is `$BATON_TICKET_FILE`; you are in a checkout of the repository. When you finis
 ticket is open and its checks are running. Baton's closing marker is written for you after you
 return; do not write it.
 
-The model you run on may have been chosen by advice (B-105, R-BTN-177): when the repository
-attaches a route choice to this leg, the stub reads `$BATON_ADVICE` and runs the
-`agent_command` under the advised alternative's `agent_models` entry; with no advice you run
-the command's own fixed model. Either way the work is the same. If you find a capability your
-advised alternative depends on is unusable, write `[{choice, alternative, dead}]` — the next
-ranked alternative and the holdings you found dead — to the file `$BATON_TAKEN` names.
+The model you run on is the repository's own choice (§6.10, R-BTN-131): the stub runs this
+repository's `agent_command` exactly as `.baton/baton.json` writes it, and Baton delivers no
+advice about a model, a key or a route. A repository whose leg picks its model at run time
+writes a leg override that reads its own configuration. If the model or a provider key the
+command needs is unusable, say so in your final output and carry on with what works — not by
+declaring a capability you no longer hold.
 
 > **How the stub runs you** — Baton's contract for the `agent_command` author: your command
 > line splits into words as `sh` would (quotes honoured, no substitutions) and executes
@@ -20,7 +20,7 @@ ranked alternative and the holdings you found dead — to the file `$BATON_TAKEN
 > completion: a harness that is a client of a background service must keep its session in
 > process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
 > work ends leaves truncated output and an orphaned session posting to a claim that no longer
-> exists (B-84). A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> exists (B-84). Your completion is your exit **or your silence** (B-108): the stub stops waiting at the earliest of your exit, fifteen minutes of quiet on every activity signal it can see — your stdout, the wrapper’s log, the harness’s own store — and five hours of the leg, its ceiling; the stdout you left is judged as any exit’s is. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
 > `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
 > your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end
 > with work in flight: the process is the session, and nothing resumes it — wait, in the
@@ -78,6 +78,14 @@ Fix whatever the answers expose before you push.
 - Implement what the ticket says, with its tests. A behaviour change without a test that would
   fail without it is not finished.
 - Run the repository's checks yourself. Push only once they pass.
+- **Install dependencies with hygiene** (B-132): from the lockfile only — `npm ci`, never an
+  `npm install` that rewrites it — unless the ticket itself asks for a dependency change; and
+  with lifecycle scripts off (`npm ci --ignore-scripts`: pass the flag every time — never
+  count on an image's `ignore-scripts=true` being there). A package whose install script the repository needs
+  is listed in `.baton/baton.json` (`allow_install_scripts: [<package>]`, a control input under
+  B-127): run exactly those packages' scripts — `npm rebuild <package>
+  --ignore-scripts=false` — never scripts for all. Where the repository sets a registry age
+  floor (npm's `before` setting, or a proxy at the fence), install inside it, never around it.
 - Commit with explicit paths (`git commit -- <paths>`), never `git add -A`: the checkout may hold
   other work.
 

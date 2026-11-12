@@ -31,6 +31,15 @@
 //   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T]
 //   baton owner -i KEY revoke REPO FINGERPRINT
 //   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
+//   baton owner -i KEY sign [--message TEXT] [--repo DIR] -- <paths>…   (B-127: a commit signed
+//                the way require_signed_control counts — git's gpg.format ssh, the SSHSIG
+//                namespace `git`, the key -i names; plain `git commit -S` with git configured
+//                for the key is exactly as good)
+//   baton owner -i KEY verify-config REPOSITORY [--checkout DIR]   (B-127: the agent-configuration
+//                verifier — refuses (exit 1, naming paths and commits) when the checkout's agent
+//                configuration (.claude/**, every CLAUDE.md and AGENTS.md, .mcp.json, plugin
+//                manifests) was last changed in a commit no owner key signed; the owner installs
+//                it outside the repository, in user-level settings or the environment's setup)
 //   baton owner -i KEY policy show REPO                     — the signed read (R-BTN-189), as JSON
 //   baton owner -i KEY policy diff REPO FILE                — the knobs FILE's document would change
 //   baton owner -i KEY policy log REPO [--after N]          — the append-only change log
@@ -42,8 +51,13 @@
 //                [--starts-at ISO] [--ends-at ISO] [--release-holders] --reason R
 //   baton owner -i KEY bar lift REPO ID
 //   baton owner -i KEY settings REPO [--required-bar LEG|'*' --course C|'*' [--except a,b] --tag-prefix P]… | --no-required-bars
+//                             [--code-repos [<forge>:]<owner>/<name>[@<host>],… | none] [--forge-ids <repo id>,<owner id>]   (B-182, R-BTN-140)
+//                             [--pushers <forge user id>[@<host>],… | none]                                                          (B-182, R-BTN-139)
 //                [--retry 1h,4h --max-failed 3 | --retry default] [--transcript-repos a,b]
 //                [--unblocked-workflow .github/workflows/F.yml | --unblocked-workflow none] [--remind-after 24h]
+//                [--require-signed-control | --no-require-signed-control]   (B-127: control inputs
+//                count only at commits an owner's human-only key signed; on tightens, off needs
+//                an approvers.policy approver)
 //   baton owner -i KEY courier add REPO --key PUB --asks owner[,…]      (R-BTN-80: a personal courier)
 //   baton owner -i KEY courier revoke REPO FINGERPRINT
 //   baton owner -i KEY resolve REPO TICKET baton:retries|baton:stalled retry|park   (R-BTN-78)
@@ -118,11 +132,13 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { requestCredential, signHeaders } from './sign.mjs';
+import { requestCredential, signHeaders, signingKey } from './sign.mjs';
 
 export const DEFAULT_URL = 'https://baton.immediately.run';
+/** The package the pinned release command names (B-138): `npx --yes @immediately-run/baton@<version>`. */
+export const PINNED_PACKAGE = '@immediately-run/baton';
 const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 
 /** argv after the command: flags (each `--name value`, or a bare boolean) and positionals. The
@@ -174,6 +190,61 @@ export function duration(v) {
   const m = /^(\d+)([mhd])$/.exec(v);
   if (!m) throw new Error(`a duration is like 30m, 1h or 2d, not ${v}`);
   return Number(m[1]) * UNITS[m[2]];
+}
+
+/** The version of the package this CLI ships in — the pin the B-138 refusal names. `cli/` reads
+ *  the checkout's package.json, the bundled `dist/` the package's own; null when neither reads. */
+function packageVersion() {
+  try {
+    return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** B-138: the git working tree that owns the CLI's code — the directory holding the `.git` the
+ *  CLI sits below — or null when no tree owns it (an npm install, npx's cache: a released copy,
+ *  whose code no push changes). A checkout's `cli/` and a `dist/` built inside one are working
+ *  trees: their code is what a push (a branch a leg checks out) leaves there. A `.git` above a
+ *  `node_modules` boundary does not own the code below it — npm laid that down, no branch of
+ *  the outer tree does (round 1, the dotfiles `$HOME`: a released copy installed under a `$HOME`
+ *  that is itself a git repository is still a released copy). */
+export function workingTreeOf(cliFile = fileURLToPath(import.meta.url)) {
+  for (let dir = dirname(cliFile), parent = dirname(dir), base = basename(dir);; dir = parent, parent = dirname(dir), base = basename(dir)) {
+    if (base === 'node_modules') return null;   // npm's boundary: no tree above it owns this code
+    if (existsSync(join(dir, '.git'))) return dir;
+    if (parent === dir) return null;
+  }
+}
+
+/** A word that keeps the shell it is copied into reading one argument (round 1): the refusal's
+ *  suggested command must survive a key path with a space in it. */
+const sh = (v) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(v) ? v : `'${v.replaceAll("'", `'\\''`)}'`);
+
+/** The B-138 refusal: the pinned command for the same argv, so the operator copies it. */
+function workingTreeRefusal(argv) {
+  const version = packageVersion();
+  return `an owner or administrator key runs a released CLI only — this one runs from the git working tree at ${workingTreeOf()}, whose code a push changes (B-138). Run the pinned release instead: npx --yes ${PINNED_PACKAGE}@${version ?? '<version>'} ${argv.map(sh).join(' ')} — or pass --dev to override, for this checkout's own development`;
+}
+
+/** Where `--dev` sits as this guard's flag, not as a flag *value* (round 1): `--capabilities
+ *  --dev` is the capability string "--dev", not the override — stripping it would bypass this
+ *  guard and mangle the command. A `--dev` right after a flag that takes a value is that value;
+ *  the owner and administrator commands' value-less flags (parseArgs booleans) are named here so
+ *  `--yes --dev` still counts. An unknown boolean is read as value-taking, which refuses rather
+ *  than bypasses — the safe direction. */
+const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all']);
+function devFlagPositions(argv) {
+  const at = [];
+  for (let i = 1; i < argv.length; i++) {
+    if (argv[i] === '--') break;   // `owner sign … -- <paths>`: everything after is a path
+    if (argv[i] !== '--dev') continue;
+    const prev = argv[i - 1];
+    const name = prev === '-i' ? 'identity' : prev === '-m' ? 'message' : prev.startsWith('--') ? prev.slice(2) : null;
+    if (name != null && !NO_VALUE_FLAGS.has(name)) continue;   // the previous flag eats this one
+    at.push(i);
+  }
+  return at;
 }
 
 /**
@@ -287,7 +358,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'POST', path: '/v1/admin/resources', body: { name: need(positional[0], 'the resource name'), scope: flags.scope, detail_schema: jsonArg(need(flags.schema, '--schema'), readJson) } };
     }
     if (cmd === 'resource' && rest[0] === 'set') {
-      // R-BTN-76: an administrator's reading by hand, in force at most 7 days.
+      // R-BTN-76: an administrator's reading by hand — one more instrument's, in force at most 24 hours.
       const { flags, positional } = parseArgs(rest.slice(1), ['available', 'unavailable'], ['until', 'valid-for', 'detail'], 1);
       if (!!flags.available === !!flags.unavailable) throw new Error('baton admin resource set INSTANCE names one of --available or --unavailable');
       if (flags.until && !flags.unavailable) throw new Error('--until is for an --unavailable instance');
@@ -363,7 +434,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       } };
     }
     if (cmd === 'settings') {
-      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after'], 1);
+      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars', 'require-signed-control', 'no-require-signed-control'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'code-repos', 'forge-ids', 'pushers'], 1);
       const body = {};
       if (flags['no-required-bars']) {
         if (groups.length) throw new Error('--no-required-bars clears them: name no --required-bar beside it');
@@ -381,8 +452,29 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       else if (flags['unblocked-workflow']) body.unblocked_trigger = { kind: 'github-app', workflow: flags['unblocked-workflow'] };
       // R-BTN-80: how long a sent notice waits for its decision before it is queued again, in seconds.
       if (flags['remind-after']) body.remind_after = Math.round(duration(flags['remind-after']) / 1000);
+      // B-127 (R-BTN-66 as amended): control inputs count only at owner-signed commits. On
+      // tightens — any owner may; off is a loosening an `approvers.policy` approver signs for.
+      if (flags['require-signed-control'] && flags['no-require-signed-control']) throw new Error('--require-signed-control and --no-require-signed-control name one state, not both');
+      if (flags['require-signed-control']) body.require_signed_control = true;
+      if (flags['no-require-signed-control']) body.require_signed_control = false;
+      // B-182 (R-BTN-140): the home's code repositories — each `[<forge>:]<path>[@<host>]`, or
+      // `none` to clear the list. The ids are read from each entry's forge with the operator's
+      // token (GITHUB_TOKEN, GITLAB_TOKEN, GITEA_TOKEN) or taken from --forge-ids, and posted;
+      // `main` resolves them before the PUT goes out.
+      let resolveCodeRepos = null;
+      if (flags['code-repos'] !== undefined) {
+        if (flags['code-repos'] === 'none') body.code_repos = [];
+        else {
+          const { entries, offline } = codeReposSpec(flags['code-repos'], flags['forge-ids']);
+          body.code_repos = entries;
+          if (entries.some((e) => e.repo_id == null)) resolveCodeRepos = { repository: need(positional[0], 'the repository id'), offline };
+        }
+      }
+      // B-182 (R-BTN-139): the owners' pushers, host-qualified — `id[@host]`, a comma list, or
+      // `none` to clear; a host-less entry is the home's host.
+      if (flags.pushers !== undefined) body.pushers = flags.pushers === 'none' ? null : pushersSpec(flags.pushers);
       if (!Object.keys(body).length) throw new Error('baton owner settings REPO names at least one setting');
-      return { method: 'PUT', path: `/v1/owner/${need(positional[0], 'the repository id')}/settings`, body };
+      return { method: 'PUT', path: `/v1/owner/${need(positional[0], 'the repository id')}/settings`, body, ...(resolveCodeRepos ? { resolveCodeRepos } : {}) };
     }
     if (cmd === 'courier' && rest[0] === 'add') {
       const { flags, positional } = parseArgs(rest.slice(1), [], ['key', 'asks'], 1);
@@ -443,6 +535,114 @@ function jsonArg(v, readJson) {
   } catch {
     throw new Error(`${v.slice(0, 40)}: not JSON`);
   }
+}
+
+/** B-182 (R-BTN-140): one `--code-repos` entry as the operator writes it —
+ *  `[<forge>:]<path>[@<host>]`, a comma list. Omitted forge and host are the home's (the
+ *  resolver fills them from the home's registration); a well-known host implies its forge.
+ *  `--forge-ids <repo>,<owner>` supplies the ids offline for one entry; otherwise `main`
+ *  reads them from the entry's forge before the PUT goes out. Pure, beside `plan`. */
+export function codeReposSpec(value, forgeIds = null) {
+  const known = { 'github.com': 'github', 'gitlab.com': 'gitlab', 'gitea.com': 'gitea' };
+  let offline = null;
+  if (forgeIds != null) {
+    const [repo, owner, ...extra] = String(forgeIds).split(',');
+    if (!/^\d+$/.test(repo ?? '') || !/^\d+$/.test(owner ?? '') || extra.length) {
+      throw new Error(`--forge-ids takes <repo id>,<owner id> as decimal numbers, not ${forgeIds}`);
+    }
+    offline = { repo_id: repo, owner_id: owner };
+  }
+  const entries = list(value).map((raw) => {
+    const m = /^(?:([a-z]+):)?([^@]+)(?:@([^@]+))?$/.exec(raw);
+    if (!m) throw new Error(`--code-repos takes [<forge>:]<owner>/<name>[@<host>] entries, not ${raw}`);
+    const [, forge, path, host] = m;
+    const byHost = host != null && forge == null ? known[host.toLowerCase()] : undefined;
+    return {
+      path,
+      ...(forge != null || byHost != null ? { forge: forge ?? byHost } : {}),
+      ...(host != null ? { host: host.toLowerCase() } : {}),
+      ...(offline ?? {}),
+    };
+  });
+  if (offline != null && entries.length !== 1) throw new Error('--forge-ids supplies the ids of one --code-repos entry');
+  return { entries, offline };
+}
+
+/** B-182 (R-BTN-139): `--pushers` — `id[@host]`, a comma list; a host-less entry is the home's. */
+export function pushersSpec(value) {
+  return list(value).map((raw) => {
+    const at = raw.lastIndexOf('@');
+    const [id, host] = at < 0 ? [raw, null] : [raw.slice(0, at), raw.slice(at + 1)];
+    if (!/^\d+$/.test(id) || (host != null && !/^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?$/.test(host))) {
+      throw new Error(`--pushers takes <forge user id>[@<host>] entries, not ${raw}`);
+    }
+    return host == null ? { id } : { host, id };
+  });
+}
+
+/** Fill the ids and defaults a `--code-repos` list still lacks, before the settings PUT goes out
+ *  (R-BTN-138's way: the CLI reads the forge, Baton never fetches). Host-less entries take the
+ *  home's forge and host — read from its registration, one signed GET — and each entry's ids are
+ *  read from its forge with the operator's token for that host (GITHUB_TOKEN, GITLAB_TOKEN,
+ *  GITEA_TOKEN), or taken from the `--forge-ids` the spec already folded in. */
+export async function resolveCodeRepos(url, keyFile, entries, { repository, fetchImpl = fetch, env = process.env } = {}) {
+  let home = null;
+  if (entries.some((e) => e.forge == null || e.host == null)) {
+    const read = await send(url, { method: 'GET', path: `/v1/owner/${encodeURIComponent(repository)}/grants` }, keyFile, fetchImpl);
+    if (!(read.status >= 200 && read.status < 300)) throw new Error(`reading ${repository}'s registration for --code-repos defaults: ${read.json?.code ?? read.status}: ${read.json?.message ?? 'refused'}`);
+    home = homeOf(read.json.settings);
+  }
+  const out = [];
+  for (const e of entries) {
+    const forge = e.forge ?? home?.forge;
+    const host = e.host ?? home?.host;
+    if (forge == null || host == null) {
+      throw new Error(`${e.path}: its forge and host cannot be defaulted (the home is a plain git repository) — write --code-repos ${e.path}@<host> with the forge named, e.g. github:${e.path}@github.com`);
+    }
+    if (e.repo_id != null && e.owner_id != null) {
+      out.push({ path: e.path, forge, host, repo_id: e.repo_id, owner_id: e.owner_id });
+      continue;
+    }
+    const token = env[`${forge.toUpperCase()}_TOKEN`];
+    if (!token) throw new Error(`${e.path}: no ${forge.toUpperCase()}_TOKEN to read its ids from ${host} — set it, or pass --forge-ids <repo id>,<owner id>`);
+    const base = forgeApi(forge, host);
+    const res = await fetchImpl(`${base}${repoPath(forge, e.path)}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'User-Agent': 'baton-cli' } });
+    if (!res.ok) throw new Error(`${forge} (${host}) answered ${res.status} for ${e.path}: the token cannot read it, or it does not exist`);
+    const ids = forgeIdsOf(forge, await res.json());
+    if (ids == null) throw new Error(`${forge} (${host}) answered no repository and owner ids for ${e.path}`);
+    out.push({ path: e.path, forge, host, repo_id: ids.repo_id, owner_id: ids.owner_id });
+  }
+  return out;
+}
+
+/** A forge's REST origin for `host`: GitHub's own is api.github.com; an Enterprise host serves
+ *  `/api/v3`; GitLab `/api/v4`; Gitea `/api/v1`. */
+function forgeApi(forge, host) {
+  if (forge === 'github') return host === 'github.com' ? 'https://api.github.com' : `https://${host}/api/v3`;
+  if (forge === 'gitlab') return `https://${host}/api/v4`;
+  return `https://${host}/api/v1`;
+}
+
+/** The REST path that reads a repository's ids on each forge. */
+function repoPath(forge, path) {
+  if (forge === 'github') return `/repos/${path}`;
+  if (forge === 'gitlab') return `/projects/${encodeURIComponent(path)}`;
+  return `/repos/${path}`;
+}
+
+/** The ids each forge's repository answer carries: GitHub and Gitea `{id, owner: {id}}`, GitLab
+ *  `{id, namespace: {id}}`. */
+function forgeIdsOf(forge, body) {
+  const repo = body?.id, owner = forge === 'gitlab' ? body?.namespace?.id : body?.owner?.id;
+  return repo != null && owner != null ? { repo_id: String(repo), owner_id: String(owner) } : null;
+}
+
+/** The home's forge and host from an owner settings row (B-182): its forge, and its `web_base`'s
+ *  authority — null on a plain git home, which names neither. */
+function homeOf(settings) {
+  if (!settings) return null;
+  const host = settings.web_base != null ? new URL(settings.web_base).host.toLowerCase() : null;
+  return { forge: settings.forge ?? 'github', host };
 }
 
 /** `--ci-identity` (R-BTN-93): none, github-actions, or a GitLab issuer (`gitlab-mirror:` when its
@@ -716,6 +916,19 @@ const arrived = (text) => (text.length > 300 ? `${text.slice(0, 300)}…` : text
  *  Baton's — a refusal, or a 2xx body that is not JSON (B-80) — and any error thrown up to the
  *  caller (the CLI prints `baton: …` and exits 2). Exported for the tests of that contract. */
 export async function main(argv) {
+  // B-138: an owner or administrator key signs with the code that reads it, so the CLI that
+  // takes one is a pinned release — never a git working tree, whose code a push (a branch a leg
+  // checks out) changes. `--dev` is the override for this repository's own development; the
+  // other roles (the reads, the runner, the repository commands) run from a checkout still.
+  if (argv[0] === 'admin' || argv[0] === 'owner') {
+    const dev = devFlagPositions(argv);
+    const end = argv.indexOf('--') === -1 ? argv.length : argv.indexOf('--');
+    if (dev.length > 0 && dev.length === argv.slice(0, end).reduce((n, a) => n + (a === '--dev' ? 1 : 0), 0)) {
+      argv = argv.filter((_, i) => !dev.includes(i));   // every --dev sits in flag position: the override
+    } else if (workingTreeOf() != null) {
+      throw new Error(workingTreeRefusal(argv));
+    }
+  }
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
   if (argv[0] === 'key') {
     if (argv[1] !== 'create' || !argv[2]) throw new Error('baton key create FILE [--comment TEXT]');
@@ -735,6 +948,72 @@ export async function main(argv) {
     // policy show REPO` is the documented form (round 1, finding 10). The flags stay in what
     // policyMain receives; only the `policy` word is taken out.
     const rest = argv.slice(1);
+    // B-127 round 1: a `-m`/`--repo` value that is itself the `-i`/`--url` flag shape is refused
+    // by name, BEFORE the token filter below eats it and the command misparses
+    // (`owner sign -m --url -- p` used to lose the value token and end in a confusing refusal).
+    for (let i = 0; i < rest.length; i++) {
+      if ((rest[i] === '-m' || rest[i] === '--message' || rest[i] === '--repo') && (rest[i + 1] === '-i' || rest[i + 1] === '--url')) {
+        throw new Error(`${rest[i]} needs a plain value — ${rest[i + 1]} is a flag of its own (quote a value that starts with a dash)`);
+      }
+    }
+    const clean = rest.filter((_, i, a) => !(a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
+    const flagsOf = () => parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'), [], ['identity', 'url'], 0).flags;
+    // B-127 item 6: `baton owner -i KEY sign` — a commit signed the way `require_signed_control`
+    // counts (git's `gpg.format ssh`, the SSHSIG namespace `git`), made with the key `-i` names.
+    // Plain `git commit -S` with the same configuration is exactly as good (the runbook says so);
+    // this wraps it so the ceremony is one command. It is a local git command, never a request.
+    if (clean[0] === 'sign') {
+      const flags = flagsOf();
+      const keyFile = need(flags.identity, '-i KEY (the owner key that signs the commit)');
+      signingKey(keyFile); // refuses a file ssh-keygen cannot sign with, before git is run
+      const args = clean.slice(1);
+      let message = 'owner-signed control change';
+      const paths = [];
+      let repo = '.';
+      // A flag-shaped token is never a value: `-m --url -- p` would otherwise lose `--url`'s
+      // place to the `-i`/`--url` filter above and misparse into a confusing refusal (round 1).
+      const flagShaped = (v) => v === '-i' || v === '--url' || v === '-m' || v === '--message' || v === '--repo' || v === '--';
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === '-m' || args[i] === '--message') {
+          const v = args[++i];
+          if (v === undefined) throw new Error(`${args[i - 1]} needs a value`);
+          if (flagShaped(v)) throw new Error(`${args[i - 1]} needs a plain value (quote a message that starts with a dash)`);
+          message = v;
+        } else if (args[i] === '--repo') {
+          const v = args[++i];
+          if (v === undefined) throw new Error('--repo needs a value');
+          if (flagShaped(v)) throw new Error(`--repo needs a plain value, not ${v}`);
+          repo = v;
+        } else if (args[i] === '--') { paths.push(...args.slice(i + 1)); break; }
+        else throw new Error(`${args[i]}: not a flag of \`baton owner sign\` (-m TEXT, --repo DIR, -- <paths>)`);
+      }
+      if (!paths.length) throw new Error('baton owner sign names no path: commit paths explicitly (`-- .baton/baton.json`), the way a leg does — never the whole tree');
+      const out = execFileSync('git', ['-C', repo, '-c', 'gpg.format=ssh', `-c`, `user.signingkey=${realpathSync(keyFile)}`, 'commit', '-S', '--no-verify', '-m', message, '--', ...paths], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      process.stdout.write(out);
+      process.stderr.write(`baton: signed with ${keyFile} — a commit \`require_signed_control\` counts (B-127)\n`);
+      return 0;
+    }
+    // B-127 item 1's verifier: the agent-configuration check a privileged session's opener runs.
+    // The keys come from Baton with the owner's key; the walk runs in the checkout.
+    if (clean[0] === 'verify-config') {
+      const flags = flagsOf();
+      const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+      const keyFile = need(flags.identity, '-i KEY (an owner key of the repository)');
+      const args = clean.slice(1);
+      const checkoutAt = args.indexOf('--checkout');
+      // `--checkout DIR` takes DIR with it (round 1: the old filter also dropped index 0 when
+      // there was no --checkout, eating the REPOSITORY positional of the documented
+      // no---checkout form, which then always hit the usage error).
+      const positional = args.filter((_, i) => i !== checkoutAt && (checkoutAt < 0 || i !== checkoutAt + 1));
+      if (positional.length !== 1) throw new Error('baton owner -i KEY verify-config REPOSITORY [--checkout DIR]');
+      const read = await send(url, { method: 'GET', path: `/v1/owner/${encodeURIComponent(positional[0])}/signing-keys` }, keyFile);
+      if (!(read.status >= 200 && read.status < 300)) {
+        process.stdout.write(`${JSON.stringify(read.json)}\n`);
+        return 1;
+      }
+      const { verifyConfigMain } = await import('../scripts/baton-cli.mjs');
+      return await verifyConfigMain(args, { keys: read.json?.keys ?? [] });
+    }
     let cut = -1;
     for (let i = 0; i < rest.length; i++) {
       if (rest[i] === '-i' || rest[i] === '--url') { i += 1; continue; }
@@ -774,6 +1053,12 @@ export async function main(argv) {
   const p = plan(role, args);
   const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
   const keyFile = need(flags.identity, '-i KEY (an administrator, owner or worker key file)');
+  // B-182 (R-BTN-140): `--code-repos` entries whose ids the operator did not supply offline are
+  // read from their forge here, before the settings PUT goes out — Baton never fetches.
+  if (p.resolveCodeRepos) {
+    p.body.code_repos = await resolveCodeRepos(url, keyFile, p.body.code_repos, p.resolveCodeRepos);
+    delete p.resolveCodeRepos;
+  }
   // R-BTN-178: `capacity set` reads what the courses' legs require and asks to confirm before
   // the PUT goes out — one name, one thing (R-BTN-137) is the administrator's own statement.
   if (p.preflight) {
@@ -796,10 +1081,28 @@ export async function main(argv) {
   return status >= 200 && status < 300 ? 0 : 1;
 }
 
+// A pipe's write is asynchronous and `process.exit()` flushes nothing, so the command's final
+// line could be dropped with its exit already decided — under a loaded consumer (vitest's
+// parallel workers) `baton tickets check`'s count line, an answer protocol's last line (B-84's
+// class). Wait for stdout and stderr to accept everything, then exit: an empty-string write's
+// callback fires once the writes before it are through; the bound keeps a consumer that stopped
+// reading from hanging the exit, and stdout's own EPIPE handling keeps a vanished one quiet.
+function exitDrained(code) {
+  const streams = [process.stdout, process.stderr].filter((s) => !s.destroyed);
+  const finish = () => process.exit(code);
+  if (!streams.length) return finish();
+  let left = streams.length;
+  const done = () => { if (--left === 0) finish(); };
+  for (const s of streams) {
+    try { s.write('', done); } catch { done(); }
+  }
+  setTimeout(finish, 10_000).unref?.();
+}
+
 // argv[1] may be npx's link to this file: compare real paths.
 if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
-  main(process.argv.slice(2)).then((code) => process.exit(code), (e) => {
+  main(process.argv.slice(2)).then(exitDrained, (e) => {
     process.stderr.write(`baton: ${e.message}\n`);
-    process.exit(2);
+    exitDrained(2);
   });
 }

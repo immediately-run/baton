@@ -9,7 +9,8 @@ import { BatonError } from './http';
 import { logEvent } from './db';
 import type { Deprecated } from './deprecated';
 import { NONCE_TTL_MS, parseSshKey } from './auth';
-import { isForgePath, isPullRequestUrl, transcriptUrl, type Forge } from './links';
+import { isPullRequestUrl, transcriptUrl } from './links';
+import { ticketRepositories } from './codeRepos';
 import { DEFAULT_TRANSCRIPT_REPOS, repositoryOf, transcriptReposOf } from './registry';
 
 export { DEFAULT_TRANSCRIPT_REPOS };
@@ -606,23 +607,21 @@ export class WorkerApi {
     return { ok: true, refused };
   }
 
-  /** §10.4 as amended (R-BTN-92): an activity's pull-request URL belongs to the claim's ticket's
-   *  home repository or one of its `repos:` — a forge path on the home's forge host — by the link
-   *  rule over the home's `web_base`; with no claim, to any registered repository. */
+  /** §10.4 as amended (R-BTN-92, B-182): an activity's pull-request URL belongs to the claim's
+   *  ticket's repositories — its home, or one of its `repos:` resolving to a `code_repos` entry
+   *  (R-BTN-140) — each by the link rule over its own `web_base`, whatever its forge; with no
+   *  claim, to any registered repository. */
   private checkPullRequest(url: string, claimId: number | null, field: string) {
-    type Home = { forge: string; web_base: string | null; github: string; repos: string };
+    type Home = { id: string; repos: string };
     const ofClaim = claimId === null ? [] : this.rows<Home>(
-      `SELECT p.forge, p.web_base, p.github, t.repos FROM claims c JOIN tickets t ON t.id = c.ticket_id JOIN repositories p ON p.id = t.repository_id WHERE c.id = ?`, claimId);
+      `SELECT p.id, t.repos FROM claims c JOIN tickets t ON t.id = c.ticket_id JOIN repositories p ON p.id = t.repository_id WHERE c.id = ?`, claimId);
     // A claim whose ticket the board no longer carries, or no claim: any registered repository.
-    const homes = ofClaim.length ? ofClaim : this.rows<Home>(`SELECT forge, web_base, github, '[]' AS repos FROM repositories WHERE retired_at IS NULL`);
+    const homes = ofClaim.length ? ofClaim : this.rows<Home>(`SELECT id, '[]' AS repos FROM repositories WHERE retired_at IS NULL`);
     for (const h of homes) {
-      if (!h.web_base) continue;
-      const host = h.web_base.slice(0, h.web_base.length - h.github.length);
-      // docs' interim post sends short names; one is that name under the home's owner (R-BTN-92).
-      const owner = h.github.slice(0, h.github.indexOf('/'));
-      const repos = (JSON.parse(h.repos) as string[]).map((r) => (r.includes('/') ? r : `${owner}/${r}`));
-      const paths = [h.github, ...repos.filter((r) => isForgePath(h.forge as Forge, r))];
-      if (paths.some((path) => isPullRequestUrl(h.forge as Forge, url, host + path))) return;
+      const repos = JSON.parse(h.repos) as string[];
+      for (const base of ticketRepositories(this.c.store, h.id, repos)) {
+        if (isPullRequestUrl(base.forge, url, base.webBase)) return;
+      }
     }
     bad(field, 'must be a pull request of the ticket’s repositories, under its forge');
   }

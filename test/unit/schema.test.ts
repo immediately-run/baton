@@ -218,7 +218,7 @@ describe('round 3: the budget before the work; a $ref two hops deep (3-r3-0, 3-r
 
 describe('the inline bound (R-BTN-108)', () => {
   it('stores a value only when its whole chain closes every object and caps every string at 256', () => {
-    // R-BTN-176's std:api-capacity@1 is a DETAIL-schema base, not an output schema: it is open
+    // std:api-capacity@1 is a DETAIL-schema base, not an output schema: it is open
     // by design (a provider's resource schema refines it by adding fields) and never bounds an
     // inline value, so the inline bound does not read it.
     for (const id of Object.keys(STD).filter((id) => id !== 'std:api-capacity@1')) expect([id, unboundedAt(id, stdSchema)]).toEqual([id, null]);

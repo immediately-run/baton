@@ -1,20 +1,21 @@
--- 0027_route_choices.sql — route choices (BATON_SPEC §6.10, R-BTN-176/R-BTN-177, B-105): what a
--- resource's readings may steer (atoms_from), the x-baton-base chain a registration proved, the
--- hysteresis rows each resolution writes, and the two columns a leg run carries its route-choice
--- snapshot and its reported taken in.
+-- 0027_route_choices.sql — route choices (BATON_SPEC §6.10, B-105; its rules are retired —
+-- BATON_SPEC_HISTORY.md — and 0042 drops what this file builds): what a resource's readings may
+-- steer (atoms_from), the x-baton-base chain a registration proved, the hysteresis rows each
+-- resolution writes, and the two columns a leg run carries its route-choice snapshot and its
+-- reported taken in.
 
--- R-BTN-76 as R-BTN-176 amends it: whether runners' readings, besides administrators' and
+-- R-BTN-76 as the retired route-choice rules amended it: whether runners' readings, besides administrators' and
 -- instrument keys', may steer route choices for a resource. 'admin' (the default) hears only
 -- administrators and instrument keys; 'any' admits every runner's readings for the resource's
 -- instances — the tenant telling Baton it trusts its runners' reports to steer advice.
 ALTER TABLE external_resources ADD COLUMN atoms_from TEXT NOT NULL DEFAULT 'admin'
   CHECK (atoms_from IN ('admin','any'));
 
--- R-BTN-176: the schema's named `x-baton-base` chain (one `std:` id per row, outermost first),
+-- The retired route-choice rules: the schema's named `x-baton-base` chain (one `std:` id per row, outermost first),
 -- proved at registration; core forms `refines(R, S)` from it and never resolves the schemas again.
 ALTER TABLE external_resources ADD COLUMN base_chain_json TEXT NOT NULL DEFAULT '[]';
 
--- R-BTN-177's hysteresis: one row per alternative at each resolution, written whether or not the
+-- The retired route choices' hysteresis: one row per alternative at each resolution, written whether or not the
 -- alternative was available, read as `was_demoted` while younger than 24 hours and deleted by the
 -- alarm after. Keyed by worker: what a runner can use differs between runners.
 CREATE TABLE route_last (
@@ -27,12 +28,12 @@ CREATE TABLE route_last (
   PRIMARY KEY (worker_id, repository_id, choice, alternative)
 );
 
--- The resolved route choices a leg run started under (R-BTN-177: a snapshot, not refreshed while
+-- The resolved route choices a leg run started under (the retired route choices: a snapshot, not refreshed while
 -- the leg runs), and the taken its finishing advance or end reported against them.
 ALTER TABLE claim_legs ADD COLUMN route_choices_json TEXT;
 ALTER TABLE claim_legs ADD COLUMN taken_json TEXT;
 
--- R-BTN-177's `taken-invalid` joins the event log's kinds (a dropped entry is logged, never
+-- The retired route choices' `taken-invalid` joins the event log's kinds (a dropped entry is logged, never
 -- refusing the advance or end that carried it). Nothing references `events`, so it is rebuilt
 -- with the wider check, as 0014, 0016, 0018 and 0021 did.
 CREATE TABLE events_0026 (

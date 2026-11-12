@@ -9,10 +9,17 @@ order: 40
 `https://baton.immediately.run` serves: its tickets on the dashboard, claimed by `baton run`
 instead of `npm run ticket`.</Lede>
 
-Commands run from a checkout of this repository on the owner's machine. The CLI is
-`node cli/baton.mjs`; it talks to `https://baton.immediately.run` unless `--url` or `BATON_URL`
-says otherwise. Every step runs on production, the one deployment there is (B-224 retired the
-staging instance: a home repository binds to one Baton, and all of them bind to production).
+Commands run from the owner's machine, against `https://baton.immediately.run` unless `--url`
+or `BATON_URL` says otherwise. The CLI is the pinned release — `npx --yes
+@immediately-run/baton@0.1.3` below, the first release that carries these commands and B-138's
+guard; pin one you verified (`npm view @immediately-run/baton versions`), never a checkout's
+`cli/baton.mjs`, whose code a push changes and whose owner and administrator commands refuse a
+key outright without `--dev` (B-138). Do not fall back to 0.1.2, the registry's newest at
+writing: it predates these commands (its `admin state`, `board`, `repo sync --sync-key` and
+`repo init --agent` do not exist, and its `run` reads the transition's `IR_BATON_*` credential
+names) — until 0.1.3 publishes, the pinned commands refuse loudly rather than run stale code.
+Every step runs on production, the one deployment there is (B-224 retired the staging instance:
+a home repository binds to one Baton, and all of them bind to production).
 
 ## What can be done today, and what waits
 
@@ -49,7 +56,7 @@ Production has no administrator yet: `npx wrangler secret list` is empty.
 
 ```sh
 npx wrangler secret put BATON_ADMIN_KEYS < ~/.ssh/baton_admin.pub
-node cli/baton.mjs admin -i ~/.ssh/baton_admin open     # prints a one-time login link (5 minutes)
+npx --yes @immediately-run/baton@0.1.3 admin -i ~/.ssh/baton_admin open     # prints a one-time login link (5 minutes)
 ```
 
 Check: the link opens the dashboard (a session for 12 hours). From now on the dashboard needs a
@@ -59,7 +66,7 @@ while `BATON_ADMIN_KEYS` lists no key.
 ## 3. Register the repository
 
 ```sh
-node cli/baton.mjs admin -i ~/.ssh/baton_admin repo add immediately-run/baton --id baton \
+npx --yes @immediately-run/baton@0.1.3 admin -i ~/.ssh/baton_admin repo add immediately-run/baton --id baton \
   --owner-key ~/.ssh/baton_repo_owner.pub --default-branch main \
   --sync-workflow .github/workflows/baton-sync.yml --ci-identity github-actions
 ```
@@ -80,7 +87,7 @@ dashboard's own state (`limits.owners`; `admin repos` lists repositories, not ow
 from `ssh-keygen -lf`:
 
 ```sh
-node cli/baton.mjs admin -i ~/.ssh/baton_admin state > /tmp/state.json
+npx --yes @immediately-run/baton@0.1.3 admin -i ~/.ssh/baton_admin state > /tmp/state.json
 node -e 'const s = JSON.parse(require("fs").readFileSync("/tmp/state.json")); for (const id of process.argv.slice(1))
   console.log(id, s.limits.owners.filter((o) => o.repository_id === id).map((o) => o.fingerprint).join(" ") || "NO OWNER")' baton
 ssh-keygen -lf ~/.ssh/baton_repo_owner.pub   # once per key in the entry's owner_keys
@@ -88,7 +95,8 @@ ssh-keygen -lf ~/.ssh/baton_repo_owner.pub   # once per key in the entry's owner
 
 The two sets must be equal. A deployed owner the entry lacks is an owner a rebuild loses; an entry
 key that is not deployed is one the rebuild would add. `NO OWNER` means the owner CLI is refused
-on that repository now. On a rebuilt instance, `node cli/baton.mjs admin -i ~/.ssh/baton_admin repos`
+on that repository now. On a rebuilt instance, the command
+`npx --yes @immediately-run/baton@0.1.3 admin -i ~/.ssh/baton_admin repos`
 names under `seed_owners` every repository whose owners all came from the seed, or that has
 none — so a rebuilt `baton` is listed there by design. The PR is not ready until every repository
 this step registered passes.
@@ -135,10 +143,10 @@ neither a worker's nor an administrator's.
 
 ```sh
 ssh-keygen -t ed25519 -f ~/.ssh/baton_sync -C "sync of baton"
-node cli/baton.mjs admin -i ~/.ssh/baton_admin repo add immediately-run/baton --id baton \
+npx --yes @immediately-run/baton@0.1.3 admin -i ~/.ssh/baton_admin repo add immediately-run/baton --id baton \
   --owner-key ~/.ssh/baton_repo_owner.pub --sync-key ~/.ssh/baton_sync.pub   # or, on a registered repository:
-node cli/baton.mjs admin -i ~/.ssh/baton_admin repo set baton --add-sync-key ~/.ssh/baton_sync.pub
-BATON_SYNC_KEY=~/.ssh/baton_sync node cli/baton.mjs repo sync --root <a checkout of immediately-run/baton>
+npx --yes @immediately-run/baton@0.1.3 admin -i ~/.ssh/baton_admin repo set baton --add-sync-key ~/.ssh/baton_sync.pub
+BATON_SYNC_KEY=~/.ssh/baton_sync npx --yes @immediately-run/baton@0.1.3 repo sync --root <a checkout of immediately-run/baton>
 ```
 
 `--sync-key FILE` (or `BATON_SYNC_KEY`) signs the sync's observation, head and board calls with
@@ -250,17 +258,19 @@ ssh-keygen -t ed25519 -f ~/.ssh/baton_worker -C "$(hostname)"   # on the worker
 Then, as the repository's owner, grant that key (copy its `.pub` over first):
 
 ```sh
-node cli/baton.mjs owner -i ~/.ssh/baton_repo_owner grant baton --key worker.pub \
+npx --yes @immediately-run/baton@0.1.3 owner -i ~/.ssh/baton_repo_owner grant baton --key worker.pub \
   --hostname <the worker's hostname> --capabilities create-pr,llm-call,agent-venue,key:opencode-go,key:deepinfra,key:claude-subscription,key:zai --max-tier judgement
 ```
 
 The hostname must be what the machine reports (`hostname`, or `BATON_HOSTNAME`), or its heartbeats
 are refused. Capabilities are from `src/shared/vocabulary.mjs` (`authentication`, `llm-call`,
 `create-pr`, `drivable-browser`, `agent-venue`); only an administrator grants `human-operator`.
-The `key:` labels in the grant above are this repository's route-choice holdings (B-105,
-R-BTN-176): a runner declares the provider keys it holds, the ontology derives what models they
-amount to, and the `codegen` and `reviewer` route choices advise on them — grant the ones the
-machine actually holds and let `--capabilities` narrow the rest away.
+The `key:` labels in the grant above are ordinary capabilities a runner declares (§5.9,
+R-BTN-174): a machine that holds a provider key says so, and a leg that requires the name is
+offered only to runners that declared it and are granted it. Baton derives nothing — there is
+no ontology and no route choice in core (B-167) — so grant the `key:` names the machine holds,
+and let `--capabilities` narrow the rest away. Which provider and model a leg runs on is the
+repository's `agent_command` or a leg override, never a Baton decision (§6.10).
 
 The grant *is* the machine's capability declaration (B-86): `baton run` with no `--capabilities`
 declares what the grant allows on the repositories it serves, so the runner and the grant cannot
@@ -269,11 +279,13 @@ disagree. `--capabilities` exists to **narrow** — a machine without a browser 
 allow is refused at the heartbeat (`forbidden`). A runner whose declaration misses a capability a
 leg requires says so in one line at startup (`missing-capability`) rather than idling.
 
-Once the `pr` course's legs exist (R3-1249), the worker runs:
+Once the `pr` course's legs exist (R3-1249), the worker runs (B-138: the runner's CLI is the
+pinned release, never the checkout's — `scripts/start-runner.sh` installs it and watches the
+runner; `baton run` alone starts it too):
 
 ```sh
 BATON_KEY_FILE=~/.ssh/baton_worker BATON_REPOSITORY=baton \
-  node cli/baton.mjs run --harness claude-code --home <a checkout of immediately-run/baton>
+  npx --yes @immediately-run/baton@0.1.3 run --harness claude-code --home <a checkout of immediately-run/baton>
 ```
 
 Check: the dashboard's Workers view shows the machine heartbeating, and the log's first lines say

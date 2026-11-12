@@ -42,7 +42,7 @@ async function bundleCommand(entry, load) {
 }
 
 const cli = await bundleCommand('cli.ts', (file) => import(pathToFileURL(file).href));
-export const { initMain, parseSyncArgs, syncMain, migrateMarkersMain, prebuildDefaults, remoteSlug } = cli;
+export const { initMain, parseSyncArgs, syncMain, migrateMarkersMain, prebuildDefaults, remoteSlug, verifyConfigMain } = cli;
 
 // B-111's `baton tickets check` and B-112's `baton tickets new|claim|set|done`, built the same
 // way and re-exported beside the repo commands.

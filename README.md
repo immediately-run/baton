@@ -17,15 +17,24 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 `@immediately-run/baton` is the `baton` command, published from this repository:
 
 ```sh
-npx --yes @immediately-run/baton@0.1.1 run   # a runner (§6.13), with BATON_KEY_FILE set
+npx --yes @immediately-run/baton@0.1.3 run   # a runner (§6.13), with BATON_KEY_FILE set
 ```
 
 From the package, `baton run`, `baton repo init`, `baton decision list` and the
 `baton admin|owner|worker …` API client work. Init names the commit the package was built from
 (`dist/build.json`) as its courses' source and its workflow's pin, and copies the leg stubs and
 instructions `build:cli` prebuilt into `dist/defaults/`, so it needs no checkout and no esbuild.
-`--eject` copies prebuilt defaults the same way. In a
-checkout, run the CLI as `node cli/baton.mjs`.
+`--eject` copies prebuilt defaults the same way.
+
+Owners, administrators and runners run a pinned release only — `npx --yes
+@immediately-run/baton@<version>` (or an installed copy), never a checkout's CLI, whose code a
+push changes (B-138): a working tree's CLI refuses an owner or administrator key unless `--dev`
+is given, and `scripts/start-runner.sh` installs the pinned release outside every checkout it
+works, probing that the release speaks the runner's interface before it starts. Pin a release
+that carries these commands — 0.1.3 is the first (older ones, like 0.1.2, predate B-138's guard
+and read the transition's `IR_BATON_*` credential names). In a checkout, `node cli/baton.mjs`
+remains the development path — the repository commands (`tickets`, `repo`, `test-course`,
+`request`) and the reads run from it, and the management commands with `--dev`.
 
 `baton run --lock` (R-BTN-178) and its tests (`npm test`, `npm run model:pr`) need util-linux
 `flock` on `PATH`; macOS has none — `brew install flock` gives one with the same flags.
@@ -52,7 +61,7 @@ checkout, run the CLI as `node cli/baton.mjs`.
 | `src/core/validate.ts` | Pure: every worker- and owner-supplied field checked before any write (§10.4) |
 | `src/core/webhook.ts` | GitHub App deliveries (R-BTN-73): `X-Hub-Signature-256` before anything is read, the one parser of R-BTN-73's fields, repeat and own-work drops, the repository map, one sync dispatch per repository per 30 seconds plus a trailing one |
 | `src/core/observations.ts` | The per-repository observation counter (R-BTN-62): `POST /v1/sync/observation` hands out the next number (`sync-busy` while one is outstanding, void after 10 minutes); a board post's number is used once and must be above the last accepted reading's |
-| `src/core/courses.ts` | The course registry each sync posts (R-BTN-48): its shape check, each course file judged by `validateCourse` (a failing one keeps the previous and is listed under Needs you, R-BTN-69), the `min_worker_version` rule 9 reads |
+| `src/core/courses.ts` | The course registry each sync posts (R-BTN-48): its shape check, each course file judged by `validateCourse` (a failing one keeps the previous and is listed under Needs you, R-BTN-69), the `min_worker_version` rule 9 reads and each leg's expanded `requires` rule 4 and rule 11 read |
 | `src/core/course.ts` | Pure: `validateCourse`, every way a course file breaks R-BTN-69's rules (stations reachable, an end from everywhere, cycles bounded, `start_leg`, inputs) |
 | `src/core/queues.ts` | Legs are queues (R-BTN-79): the one writer of `leg_queues` — each ticket counted in its queued leg's queue while no claim holds it, moved in the transaction that changes it; a depth over `max_queue` logs `queue-over` and raises `baton.queue-over` (R-BTN-163; the code still queues the retired notice), and closes the course's intake (advice, never a gate) |
 | `src/core/stats.ts` | A course's own record (§2d, R3-1248): `GET /v1/repositories/{repository}/stats` — per station and leg wait and run times, ends by reason and detail, suspensions, advice overridden, `off-graph` and foreign writes; aggregates and ids only |

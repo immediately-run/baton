@@ -9,6 +9,11 @@ import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 /** §5: the harness's own session id, the rule `claim.sh --session` already applies. */
 export const SESSION_NAME = /^[A-Za-z0-9_.:-]{1,128}$/;
 export const HOSTNAME = /^[A-Za-z0-9.-]{1,253}$/;
+/** A forge host as B-182's `code_repos` names it: a lowercased DNS name with an optional port,
+ *  validated as a `web_base`'s authority is (R-BTN-92) — no userinfo, no path, no dot-run. */
+export const FORGE_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[1-9][0-9]{0,4})?$/;
+/** R-BTN-138's id kind, as a `code_repos` entry stores it: a decimal string. */
+export const FORGE_ID = /^[1-9][0-9]{0,19}$/;
 export const SHA256_HEX = /^[0-9a-f]{64}$/;
 // The id forms of R-BTN-47, each spelled once.
 const REPOSITORY_SRC = '[a-z][a-z0-9-]{0,39}';
@@ -46,7 +51,7 @@ export function checkRepositoryId(v: unknown, field = 'repository'): string {
 const MODEL = /^[A-Za-z0-9._/:-]{1,200}$/;
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** A typed holding (R-BTN-174, B-104): `<type>:<value>` — the type a course type such as `key`,
- * the value R-BTN-175's constant alphabet, the whole at most the constant's 128. The ONE home
+ * the value a name's constant alphabet, the whole at most the constant's 128. The ONE home
  * of the pattern (round 1, B11): every reader of a holding's shape imports it, and the grant
  * site composes its `<type>:*` wildcard from the same pieces.
  */
@@ -480,11 +485,6 @@ export interface End {
   prerequisite: { kind: 'capability'; ref: string } | null;
   /** R-BTN-108: what the finished leg produced. */
   outputs: Output[];
-  /** R-BTN-177 (B-105): what the leg wrote to BATON_TAKEN, as the runner read it — the kept
-   *  entries and how many were dropped here for their shape, judged against the leg's route
-   *  choices by the claims (a file that is unparseable or over 4 KB was dropped by the runner
-   *  and never arrives). */
-  taken: { kept: TakenEntry[]; dropped: number } | null;
   /** B-134: the leg-end scope audit — actions the runner's own evidence (the refs the leg's
    *  window moved, named as pushes by their reflog) shows outside the claim's ticket scope,
    *  judged against that scope by the core, never trusted as the verdict. Entries dropped for
@@ -509,50 +509,14 @@ export interface ScopeAction {
  *  no report at all. */
 export type ScopeReport = { actions: ScopeAction[]; dropped: number } | null;
 
-/** One entry of a leg's `taken` (R-BTN-177): the alternative it ran for a route choice, and the
- *  holdings it found dead. Shape-checked only; attachment and membership are the claims' to
- *  judge, dropping what fails with `taken-invalid`. */
-export interface TakenEntry {
-  choice: string;
-  alternative: string;
-  dead: string[];
-}
-
-/** A route choice's or an alternative's id, as the ontology admits it (R-BTN-175: up to 63
- *  characters — the course-id pattern this file's other checks use is shorter, and would drop a
- *  legal id's whole report). */
-const CHOICE_ID = /^[a-z][a-z0-9-]{0,63}$/;
-
 /**
- * The `taken` a finishing advance or end reports (R-BTN-177): a list of at most 16 entries —
- * the runner keeps one per route choice the leg listed — each naming its dead holdings. A file
- * that is unparseable or over 4 KB is dropped whole (the runner drops it first; the same bound
- * holds here); a malformed ENTRY is dropped alone, never the report — dropping the rest is the
- * claims' judgement with `taken-invalid`, and never refuses the advance or end.
+ * §5.9's restructure (B-167) took `taken` out of the wire, with `BATON_TAKEN` and the route
+ * choices it reported on: an advance or an end that still carries it is taken with the field
+ * ignored, its value unread (the history's Migrations entry "part 4's retired fields").
  */
-export function checkTaken(v: unknown): { kept: TakenEntry[]; dropped: number } | null {
-  if (v === undefined || v === null) return null;
-  const raw = JSON.stringify(v);
-  if (raw.length > 4096) return null; // the file the leg wrote is over 4 KB: dropped (R-BTN-177)
-  if (!Array.isArray(v) || v.length < 1) return null;
-  const kept: TakenEntry[] = [];
-  let dropped = 0;
-  const entryProblem = (e: unknown): TakenEntry | null => {
-    if (!isObj(e) || typeof e.choice !== 'string' || typeof e.alternative !== 'string') return null;
-    for (const k of Object.keys(e)) if (!['choice', 'alternative', 'dead'].includes(k)) return null;
-    if (!CHOICE_ID.test(e.choice) || !CHOICE_ID.test(e.alternative)) return null;
-    const dead = e.dead === undefined ? [] : e.dead;
-    if (!Array.isArray(dead) || !dead.every((d) => typeof d === 'string' && CAPABILITY_NAME.test(d))) return null;
-    return { choice: e.choice, alternative: e.alternative, dead: [...new Set(dead as string[])] };
-  };
-  for (const e of (v as unknown[]).slice(0, 16)) {
-    const entry = entryProblem(e);
-    if (entry) kept.push(entry);
-    else dropped++;
-  }
-  dropped += Math.max(0, (v as unknown[]).length - 16);
-  return { kept, dropped };
-}
+const retiredFields = (b: Record<string, unknown>) => {
+  if (b.taken !== undefined) delete b.taken;
+};
 
 /** B-134: a forge path as a scope report names its target — two to four segments of a
  *  repository's spelling (a GitLab subgroup's `group/sub/repo` names its repository by all
@@ -564,9 +528,9 @@ const FORGE_PATH = /^[A-Za-z0-9-]{1,39}(?:\/[A-Za-z0-9-]{1,39}){0,2}\/[A-Za-z0-9
 /** B-134: a leg-end scope report, `{actions, dropped}` — at most 16 actions, each a push, a
  *  PR or an egress reach naming the repository (a forge path) or the host it touched, and the
  *  count of actions beyond them: what the runner truncated from its report and what this check
- *  drops for a shape failure, logged `scope-invalid` by the claims. Like `checkTaken`, a
- *  malformed ENTRY is dropped and counted, never refused: the report rides the advance or end
- *  that finishes the leg and must not fail it. */
+ *  drops for a shape failure, logged `scope-invalid` by the claims. A malformed ENTRY is
+ *  dropped and counted, never refused: the report rides the advance or end that finishes the
+ *  leg and must not fail it. */
 export function checkScopeReport(v: unknown): ScopeReport {
   if (v === undefined || v === null) return null;
   if (!isObj(v) || !Array.isArray(v.actions)) return null;
@@ -648,7 +612,8 @@ export function checkEnd(body: unknown): End {
     }
     prerequisite = { kind: 'capability', ref: (p as { ref: string }).ref };
   }
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), taken: checkTaken(b.taken), scope_exceeded: checkScopeReport(b.scope_exceeded) };
+  retiredFields(b);
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded) };
 }
 
 export interface Advance {
@@ -658,9 +623,6 @@ export interface Advance {
   bars: string[];
   /** R-BTN-108: what the finished leg produced, checked against `reached`'s entry (R-BTN-109). */
   outputs: Output[];
-  /** R-BTN-177 (B-105): what the finished leg wrote to BATON_TAKEN, reported on the advance or
-   *  end that finishes it. */
-  taken: { kept: TakenEntry[]; dropped: number } | null;
   /** B-134: the finished leg's scope audit, reported on the advance or end that finishes it. */
   scope_exceeded: ScopeReport;
 }
@@ -677,7 +639,8 @@ export function checkAdvance(body: unknown): Advance {
   const raw = b.bars ?? [];
   if (!Array.isArray(raw) || raw.length > TAGS_MAX || !raw.every((t) => typeof t === 'string' && TAG.test(t))) bad('bars', `must be a list of at most ${TAGS_MAX} tags`);
   if (b.course !== undefined && JSON.stringify(b.course).length > 4096) bad('course', 'must be at most 4 KB');
-  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), taken: checkTaken(b.taken), scope_exceeded: checkScopeReport(b.scope_exceeded) };
+  retiredFields(b);
+  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded) };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */
