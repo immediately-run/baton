@@ -1,0 +1,258 @@
+---
+title: "B-191 — BATON-UI-V2 spec: the dashboard is a walk down the entity tree; R-BTN-129's ui names the screen; the rendering, redirect, refusal and state rules stated once for a component framework"
+id: B-191
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1190
+tier: judgement
+description: "Amend BATON_SPEC for the V2 dashboard the owner designed on 2026-11-09: §11.4's view list becomes the entity tree (sign in, pick a repository, one entity per screen, each drawn from that entity's REST reads with the registry actions ui.view places there) with the screen-id grammar, the overview strip, the refusal wording, the ticket state vocabulary and the Stop rule; R-BTN-129's ui gains view, set only on session-callable entries and checked by check:actions; §12.3's rendering rule is stated for a built React bundle (text nodes; the dashboard's source never parses markup; R-BTN-112's ui renderer for viewed values); R-BTN-163's Resolve page moves under its repository with a server-side redirect; R-BTN-16 and §12.1 name the new page paths; G-BTN-13 and S-BTN-76 follow; the mockup elements dropped and the owner's decisions are recorded. Spec only. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-09, handing over the Claude Design mockup
+([`docs/design/baton-dashboard-v2.html`](../docs/design/baton-dashboard-v2.html)): "I want the V2
+API to be organized along the same concepts as the REST API, CLI and MCP. Under that assumption
+the dashboard becomes a walk down the same tree the URLs already draw — sign in, pick a
+repository, and every screen after that is one entity. Every screen = one entity's REST reads,
+with its controls the registry actions placed there by `ui.view` — so 'what I see' and 'what I
+can do' come from the same definition." The owner chose React and TypeScript, which replaces the
+brief's dependency-free rule; noted the flip of the task-view decision (Running and Ready collapse
+into Board and Tickets, Needs you into Conditions, with one overview strip per repository); and,
+on the transition, "Nobody is using the V1 Baton UI, so the transition doesn't need to be smooth"
+(2026-11-09): V2 replaces V1 at `/` as soon as its shell lands. The tree is on the project page,
+`tickets/projects/baton-ui-v2.mdx`.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4)
+and "The views", "The actions"), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3)
+([R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3): the `ui` field, `GET /v1/actions`),
+[§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3) (Rendering), [§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4)
+([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4): the pages Access covers),
+[§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (the session's and the public rows),
+[§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5) ([R-BTN-112](../spec/BATON_SPEC/05-courses.md#sec-5-5):
+the `ui` renderer), [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3):
+the Resolve page), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-76](../spec/BATON_SPEC/15-verification.md#scenarios),
+[G-BTN-13](../spec/BATON_SPEC/15-verification.md#gates), [G-BTN-100](../spec/BATON_SPEC/15-verification.md#gates)),
+[§91](../spec/BATON_SPEC/91-decisions.md). Context: `docs/context/vocabulary.mdx` (the ticket
+state words land there too).
+
+**Depends on:** none.
+
+**Used by:** B-192, B-193, B-204, and through them every BATON-UI-V2 ticket.
+
+### Decision needed
+
+Six choices were the owner's; each had a recommended default the other tickets are written
+against. **Answered: every default, (a) in each** (the owner, 2026-11-09: "I take your
+recommendations"). The options stay recorded so the reasoning is not lost. Three more were
+found by the second review (7 to 9); **answered** too (the owner, 2026-11-09): 7 with an answer
+of the owner's own, 8 and 9 on their defaults.
+
+- **(1) Tenant screens: read-only, or the brief's controls?** The brief listed register, retire
+  and force-resync on `/repositories` and freeze, seal and export on `/state`. §14 gives every one
+  of those to an administrator's *key*; §11.4 says the dashboard is "no standalone console" and
+  R-BTN-155's confirmed list "is the whole list". **(a) read-only** *(default)*: the tenant screens
+  name the CLI command, as the credential screens do; nothing changes authority from a cookie
+  (R-BTN-155: a session "is the browser profile's"). **(b) the brief's controls**, each added to
+  R-BTN-155's confirmed list and to `callers` as an administrator's session — a separate spec
+  ticket, then B-214 and B-215 gain the controls. Export stays CLI-only under either: the whole
+  tenant's state behind a cookie is the one thing a confirmation code does not bound.
+- **(2) Route and adopt from the ticket page?** `ticket.route` is an owner key's, `ticket.adopt`
+  an approver's with `confirm: true`; neither admits a session. **(a) CLI only** *(default)*: the
+  page names `baton ticket route` and `baton ticket adopt` as text. **(b)** route as an owner
+  session's unconfirmed action and adopt as an approver session's confirmed one: a spec ticket,
+  then B-210 gains them.
+- **(3) Stop: one click or a dialog?** R-BTN-155 says "Stop must stay one click"; §11.4's "a
+  destructive one with `confirm: true` from its dialog" and §12.2's list of `leg.stop` say a
+  dialog. **(a) one click** *(default)*: the session's Stop is `POST /v1/ui/messages {kind:
+  release}` with no dialog; `confirm` is the CLI's and the owner route's. §11.4's sentence is
+  amended to say so. **(b)** a confirm dialog, no code.
+- **(4) `GET /v1/admin/state` after cutover?** **(a) keep today's shape** *(default)*, built by
+  one named core function (`stateView()`, what `uiState()` is today), with S-BTN-170 asserting each
+  section equals the matching entity read's first page at the same instant; a terminal keeps one
+  request. **(b)** retire it with `ui.state` if no terminal reads it. B-216 builds the answer.
+- **(5) Held board posts: keep the dashboard Accept?** V1 has `POST /v1/ui/board/accept`
+  (built, no §14 row). **(a) keep it** *(default)*: a §14 row and `ui.view` on Sync (B-201),
+  unconfirmed (it accepts a post the sync already made). **(b)** auto-accept only; the route goes.
+- **(6) ESLint, or a source test?** **(a) no ESLint** *(default)*: one unit test over
+  `src/dashboard/**` refuses the markup-parsing APIs; no `lint` script is added. **(b)** ESLint 9
+  with `eslint-plugin-react`, scoped to the dashboard — B-193 adds it.
+
+- **(7) The deploy order.** `baton-deploy.yml` deploys production, then staging, on every
+  push to `main`, so B-193's merge puts a sign-in-less placeholder on production. **(a)** accept
+  the order and check the result on staging; **(b)** staging first — a workflow change the
+  owner makes; **(c) no staging at all** *(the owner's answer, 2026-11-09: "we don't need
+  staging at all")*: this project checks nothing on staging — B-216's post-merge check runs
+  against production, which is the only deployment anyone uses — and no workflow changes beyond
+  B-193's build step. The owner then ruled on the instance itself (2026-11-09: a home
+  repository binds to one Baton, and all three bind to production, so staging holds nothing and
+  tests nothing): its retirement is B-224 (the workflow, `wrangler.toml`, spec and docs) and
+  B-225 (the Cloudflare resources, an operator's), in the `baton` project.
+- **(8) The tenant's request figures.** R-BTN-87 says the dashboard shows each envelope figure,
+  "rates as 5-minute means" among them, and Baton counts no requests today. **(a) build a
+  per-tenant request counter** with a 5-minute mean in B-202 *(answered (a), the owner,
+  2026-11-09; the spec stays)*. **(b)** amend R-BTN-87 to live counts only.
+- **(9) Runner grouping.** R-BTN-3 says the dashboard groups runners by hostname; the mockup
+  groups them by state. **(a) by hostname, the state as each card's mark** *(answered (a), the
+  owner, 2026-11-09; no spec change)*. **(b)** by state, amending R-BTN-3's sentence.
+
+Each is a two-way door: a later spec ticket can flip one without undoing code. The tickets
+proceed on the nine answers.
+
+### What to build
+
+A spec PR, in the section files that own each rule, then `npm run spec:index`; no code. Follow
+`docs/context/spec-writing.mdx`: amend in place, one home per statement, cite elsewhere.
+
+1. **§11.4 "The views" becomes "The screens".** Replace the view list with the tree, stated
+   once: `/` (the caller's repositories: every registered one for an administrator's session,
+   the key's own for an owner's — each with head, mode, ready count, open conditions; nothing
+   else is tenant-scoped for an owner), `/login` (R-BTN-155, unchanged), under
+   `/repositories/{repository}`: `/board`, `/tickets`, `/tickets/{ticket}`, `/goals`, `/courses`,
+   `/courses/{course}`, `/conditions`, `/conditions/{condition}`, `/runners`,
+   `/runners/{runner}` (the runner's id, not its name — a host runs several sessions),
+   `/grants`, `/owners`, `/tokens`, `/mcp-keys`, `/sync-keys`, `/check-runners`, `/policy`,
+   `/settings`, `/bars`, `/consents`, `/attestations`, `/sync`; and the tenant screens
+   `/repositories`, `/instances`, `/resources`, `/capacities`, `/settings`, `/state`,
+   `/sessions`, an administrator's session only. Each screen gets one sentence carrying over the
+   retired view's content (Running and Ready to Board and Tickets, Needs you to Conditions,
+   Timeline to the runner page, Discrepancies to Sync, the Courses view to the course screens).
+   Then the rules, each one sentence:
+   - **the rule**: a screen is drawn from one entity's REST reads (§14 rows whose callers admit
+     `session`) and its controls are the registry actions whose `ui.view` names it;
+   - **the strip**: every repository screen carries running now · ready · needs you, linking to
+     `/board`, `/tickets` and `/conditions`, and the repository's mode where it is not cut over;
+   - **polling**: every 10 seconds per screen, `If-None-Match`, paused while the page is hidden;
+     freshness shown; the one exception is the confirmation-code dialog, which polls its
+     screen's reads every 5 seconds for the code's two minutes;
+   - **refusals**: on the repository and owner reads, a repository the caller cannot read — or
+     none — answers `forbidden` for every principal (B-192 changes the reads that answer
+     `not-found` today), and the screen says "This repository is not yours or does not exist"
+     with a link to `/`; an entity id not found in a readable repository answers `not-found` and
+     the screen says "No such ticket" (condition, runner, course) — one component, one wording;
+   - **target-dependent controls**: an action whose answer depends on the target's policy
+     (`ticket.unhold`, a person leg's answer, `attestation.add`) is drawn only where the read
+     says the caller may take it (`allowed: [<action id>]`, or `answerable`, `writable_types`,
+     computed by `authorize` with the session as principal); the app never reads the policy to
+     decide;
+   - **ticket state**: one word per ticket from `unconfirmed`, `running`, `waiting-person`,
+     `held`, `blocked`, `backing-off`, `suspended`, `ready`, `closed`, in that precedence, with
+     `reasons` listing every other that applies; the Tickets tabs are Ready, Running, Blocked
+     (`held`, `blocked`, `waiting-person`, `backing-off`, `suspended` — the mockup counts a held
+     ticket under Blocked), Unconfirmed and Closed today (`closed` in the last 24 hours) — the same words in `docs/context/vocabulary.mdx`;
+   - **Stop** is one click (Decision 3a), and the confirmed-action list is R-BTN-155's, unchanged.
+   Keep "The actions", re-pointing "from Needs you" to the Conditions screen.
+2. **R-BTN-129's `ui`.** `ui` becomes `{view: [<screen id>…], route?}`. A screen id is `root`,
+   `tenant/<segment>` or `repository/<segment>[/{param}]`, exactly §11.4's list, held in one data
+   file (`src/core/screens.ts`) the front, the client router and `check:actions` read. `view` is
+   set only on an entry whose `callers` include `session`; `check:actions` fails a `view` naming
+   no screen or on an entry no session can call, and lists (never fails) a screen with no
+   control. `GET /v1/actions` is answered to a session (its own entries as the registry holds
+   them, minus `delegated`, with `ui`); a delegated key stays `unauthenticated` there (R-BTN-130).
+3. **§12.3 Rendering.** One statement: the dashboard renders every value as a text node (a React
+   text child or `textContent`); a value whose schema carries a view is drawn by R-BTN-112's
+   `ui` renderer — its node tree mapped to elements with text children, the schema fetched from
+   `GET …/schemas` (B-217) — any other blob only as pretty-printed JSON; the dashboard's own source
+   (`src/dashboard/**`) never uses `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`,
+   `insertAdjacentHTML`, `document.write`, `DOMParser` or `createContextualFragment` — React is
+   the only code that touches the DOM; the page is one bundle built from this repository and
+   loads no script, style, font or data from another origin. §5.5's "through `textContent`" and
+   §11.4 cite this sentence. Links on the client pass the same `src/shared/links.mjs` rule the
+   server applies, with `web_base`, `link_hosts` and `session_hosts` from the read.
+4. **R-BTN-163.** The Resolve page is `/repositories/{repository}/conditions/{condition}` and the
+   `resolve_url` in `GET …/conditions` is that path. `GET /conditions/{condition}` is answered by
+   the front with `302` to the tree path when the core finds the id among the session's
+   repositories; otherwise it serves the shell, which shows sign-in (signed out) or `not-found`
+   — the same answer for none and for another repository's.
+5. **R-BTN-16 and §12.1.** R-BTN-16's Access paragraph lists the tree's page paths in place of
+   `/` and `/login`, and says a session's reads outside `/v1/ui/*` are authenticated by Baton alone
+   (B-192 builds it); §12.1's dashboard-session row reads "`/`, every §11.4 screen path,
+   `/v1/ui/*`, and the repository and owner reads §14 lists `session` on"; the public row names
+   the shell's three assets.
+6. **§15.** S-BTN-76's `ui` column reads "text node"; G-BTN-13 reads "the dashboard's source
+   never uses a markup-parsing API (§12.3)"; one new scenario, numbered at merge, *the screen
+   draws only its caller's actions*: an owner's session's `GET /v1/actions` names `ticket.hold`
+   and not `claim.force-reap`, an administrator's names both, a delegated key is
+   `unauthenticated`; and, with a fixture answer, the ticket page draws hold, cancel and stop and
+   not force-reap for the owner, force-reap for the administrator (its DOM half runs in B-193's
+   `ui` project).
+7. **Decisions** (`91-decisions.md`, one line each, the owner, 2026-11-09; reasoning in the
+   history): the dashboard follows the entity tree, one entity per screen, controls from
+   `ui.view`; React and TypeScript with a build step replace the dependency-free rule; Running,
+   Ready and Needs you are not screens — Board, Tickets, Conditions and the strip are; V2
+   replaces V1 outright, no transition; the timeline is per runner, not fleet-wide; runners are
+   grouped by hostname as R-BTN-3 says, not by state as the mockup draws them; and the
+   mockup elements not built, with their reason — Schemas (no read exists; B-54's renderers),
+   Providers and Suspensions (B-142 retired their tables; availability is a reading on
+   `/instances`), Accept history (R-BTN-85 adopts git's value at once), Stream stdout/stderr
+   (R-BTN-128: a log is its directory), the runner's model (R-BTN-3 names none), "Workers" (B-68:
+   runners). The six answers of the Decision needed above are recorded as the owner's
+   (2026-11-09), one line each, items 7 to 9 among them (7: no staging check in this project).
+8. **The brief.** Check `docs/context/design-brief.mdx` against the amended §11.4 and fix drift.
+
+### What not to do
+
+- No API rows beyond `ui`, `GET /v1/actions`, the redirect and `resolve_url`'s path: each read
+  is filed with its code (B-192, B-204, B-217 and the screen tickets).
+- No change to R-BTN-155's sign-in, sessions or confirmed list beyond Decision 3's sentence.
+- No old view name kept as an alias: the retired names go to the history's Migrations.
+
+### Trust
+
+No new input: this ticket writes spec text. It adds one trust statement — every value from a
+ticket, a runner, a reading or a course is untrusted text (§12.3) and reaches the screen as a text
+node or through R-BTN-112's renderer — and one rule that keeps permission logic out of the
+client: a target-dependent control is drawn only on the server's `allowed` word, computed by
+`authorize`. `ui.view` is registry data, written by PR; it grants nothing.
+
+### Invariants
+
+- **One check** (R-BTN-129): the tree places controls; `authorize` decides them; the client
+  evaluates no policy.
+- **Text, never markup** (§12.3, G-BTN-13): the amended sentence is at least as strict as today's
+  and does not forbid what R-BTN-112 requires.
+- **One home per statement**: the tree, the state words, the refusal wording and the Stop rule
+  each live in §11.4 once; `npm run check:spec` passes with no new patch note.
+- **R-BTN-155's confirmed list unchanged.**
+
+### Tests
+
+Spec only: `npm run spec:index`, `npm run check:spec`, `npm run check:wiki`, and `npm run
+spec:impact -- R-BTN-16 R-BTN-129 R-BTN-163` with every citation updated or named in the PR body.
+The new scenario is built by B-204 (API half) and B-207 (DOM half).
+
+### Exit criteria
+
+- [ ] §11.4's screens and rules, R-BTN-129's `ui.view` and grammar, §12.3's rendering sentence,
+      R-BTN-163's path and redirect, R-BTN-16's and §12.1's paths, §15's rows and the vocabulary
+      page amended; `spec/BATON_SPEC.md` regenerated.
+- [ ] The decisions recorded, the six Decision needed answers among them, the mockup's drops
+      listed with reasons, the mockup linked from the history.
+- [ ] `check:spec`, `check:wiki` and the `spec:impact` checklist green in the PR body.
+
+## Status
+
+_filed 2026-11-09._
+
+_2026-11-09 — revised after the Opus review of the first draft (102 findings; the report is in
+the PR): the Decision needed packet added; the screen-id grammar, refusal wording, state
+precedence, Stop rule, `allowed` hint, redirect, R-BTN-16 and §12.1 paths and the renderer clause
+moved here so no screen ticket decides them; the transition settled by the owner (V2 replaces V1
+outright)._
+
+_2026-11-09 — the owner answered the Decision needed: (a) on all six ("I take your
+recommendations"). The tenant screens are read-only, route and adopt stay the CLI's, Stop is one
+click, `GET /v1/admin/state` keeps its shape as `stateView()`, the held post's Accept stays on
+Sync, and the markup-API source test stands in for ESLint._
+
+_2026-11-09 — the owner answered items 7 to 9: "7) Deploy order: we don't need staging at all.
+8 and 9: your recommendations." B-216 checks production, not staging; B-202 builds the request
+counter; B-211 groups runners by hostname._

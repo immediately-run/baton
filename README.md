@@ -47,7 +47,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/core/ports.ts` | The platform services core takes: `Store`, `Scheduler`, `Clock`, `AdminKeys`, `HookRunner`, `Dispatch`, `Gate`, and the instance's `Config` |
 | `src/core/front.ts` | What stands in front of the core: verifies the principal (OIDC for the sync, Access for the owner, a signed request's shape for a worker, the App's signature for a webhook), sets the R-BTN-16 headers, serves the dashboard, forwards the API |
 | `src/core/baton.ts` | The core: migrations, board sync (§7.1), routing, the alarm, the dashboard state |
-| `src/core/workerApi.ts` | The worker API (§11): heartbeat and registration, activities, messages, suspensions, mode and shadow reports, the Workers view |
+| `src/core/workerApi.ts` | The worker API (§11): heartbeat and registration, activities, messages, mode and shadow reports, the Workers view |
 | `src/core/claims.ts` | The lease (§6, R3-1212): claim and end, matching (§7.2 rules 1–9 via `isEligible`), the alarm's reaps, the fence before re-issue, confirmations, git winning over a stale claim, the Running / Timeline / Needs you data |
 | `src/core/attempts.ts` | Pure: the retry policy (§6.10 R-BTN-23) — which ends count, backoff, holds, the review-capacity run, the resume record (R-BTN-24) |
 | `src/core/admin.ts` | Administrators and owners (R-BTN-57/-58, R-BTN-66/-67): repositories, probes, grants, owners, owner bars, required bars, `retry`, `transcript_repos`, login links and dashboard sessions — the one set of validated functions the signed `/v1/admin/*` and `/v1/owner/*` routes and the `baton` CLI share |
@@ -85,11 +85,13 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 
 ## Commands
 
-- `npm test` (alias `npm run test:baton`) — the suite on both hosts, with a fake clock; `npx vitest --project local`
-  (or `cloudflare`) runs one.
-- `npm run test:no-quint` — the suite and `model:links` without quint: no model-drawn replay, no
-  `traces`, no `model:quick`. It is all hosted CI and the deploy run (R-BTN-68): Quint runs only on
-  the author's machine: in `npm test`, in `npm run model:pr` (about half an hour), whose report a PR
+- `npm test` (the same as `npm run test:no-quint`) — the suite on both hosts, with a fake clock,
+  and `model:links`, without Quint: no model-drawn replay, no `traces`, no `model:quick`. It is
+  all hosted CI, the deploy run and `create-pr`'s `run-tests` gate run (R-BTN-68).
+  `npx vitest --project local` (or `cloudflare`) runs one host; `npm run test:baton` is vitest alone.
+- `npm run test:full` — the suite with Quint: the model-drawn replay, `traces` and `model:quick`
+  (hours on a small machine). Quint runs only on the author's machine, when asked for: in
+  `npm run test:full`, in `npm run model:pr` (about half an hour), whose report a PR
   that changes what the model checks read (the model, the core, the scenarios, …) carries in its
   body, and in the weekly `npm run model:full` on `main` (about three hours).
 - `npm run start:local -- --db <path> --port <n>` — Baton as a local process (below).
@@ -101,7 +103,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   `close`, and a ticket runs the shortest route to a confirmed done. Exit 1 names each violation.
 - `npm run typecheck` — the Worker, the local host and the Node scripts.
 - `npm run model:links`, `npm run traces` — the code against the formal model (R3-1244; `model/README.md`).
-  `npm test` runs both after the suite, and the model's own checks; `npm run model:pr` and
+  `npm run test:full` runs both after the suite, and the model's own checks; `npm run model:pr` and
   `model:full` run `traces` too, on a fresh set.
 - `node cli/baton.mjs tickets new|claim|set|done` — file, claim and move tickets with git as the
   lock, each one commit pushed straight to the default branch from a throwaway worktree (B-112;
@@ -332,10 +334,10 @@ whose writers you trust.
 ## Deploying
 
 `.github/workflows/baton-deploy.yml` runs the suite and then `wrangler deploy` (production,
-`baton.immediately.run`) and `wrangler deploy --env staging`
-(`baton-staging.immediately.run`) on every push to `main`. It needs the
-`CLOUDFLARE_API_TOKEN` secret in the `production` environment (R3-1208): Workers Scripts: Edit
-on the account, plus Zone: Read and Workers Routes: Edit on the `immediately.run` zone.
+`baton.immediately.run`) on every push to `main`. There is no staging instance: a home
+repository binds to one Baton, and every registered one binds to production (B-224). It needs
+the `CLOUDFLARE_API_TOKEN` secret in the `production` environment (R3-1208): Workers Scripts:
+Edit on the account, plus Zone: Read and Workers Routes: Edit on the `immediately.run` zone.
 
 With a sibling docs checkout present, the suite also fails when `src/shared/` or the board
 fixtures have drifted from docs.

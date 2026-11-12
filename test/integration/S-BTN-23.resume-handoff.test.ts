@@ -39,7 +39,9 @@ describe('S-BTN-23 resume from a hand-off document', () => {
       next: [{ leg: 'fix', state: 'ready' }, { leg: 'merge', state: 'waiting', waiting_on: 'findings' }] });
     expect(r.previous_attempts).toEqual([{
       claim_id: c.claim_id, status: 'completed', end_reason: 'suspended:reviewed', detail: 'context-spent', ended_at: T0,
-      legs: [{ leg: 'implement', from: 'filed', reached: 'pr-open', outcome: 'finished' }, { leg: 'review', from: 'pr-open', reached: 'reviewed', outcome: 'finished' }],
+      // Each leg run carries its run id (B-185, R-BTN-63).
+      legs: [{ leg: 'implement', run_id: expect.stringMatching(/^r_[0-9A-HJKMNP-TV-Z]{26}$/), from: 'filed', reached: 'pr-open', outcome: 'finished' },
+        { leg: 'review', run_id: expect.stringMatching(/^r_[0-9A-HJKMNP-TV-Z]{26}$/), from: 'pr-open', reached: 'reviewed', outcome: 'finished' }],
       resume: expect.objectContaining({ end_reason: 'suspended:reviewed', reached: 'reviewed', detail: 'context-spent', branches: ['claude/t-1-fixture'], prs: [PR] }),
     }]);
     // W2 starts the queued leg from git's position, never from before W1's last push.

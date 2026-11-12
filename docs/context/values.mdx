@@ -9,12 +9,15 @@ tags: [context]
 <Lede>When two good designs conflict, these decide. Each is an owner decision; none is reopened
 by a review.</Lede>
 
-1. **Git is the truth about the work; Baton holds what no push may decide.** Every ticket, its
-   body and its evidence lives in git. Baton owns the live leases, each ticket's course history,
-   attestations, and the limits agents must not be able to change (owner bars, required bars,
-   grants, settings), some duplicated in git for reading and some nowhere else. When Baton and
-   git disagree about what Baton owns, Baton wins and says so; about anything else, git wins.
-   Lost Baton state fails closed (the owner, 2026-10-28).
+1. **The ticket source is the truth about tickets and git about the code and its evidence; Baton
+   holds what no write may decide.** Every ticket lives in its ticket source — files in git by
+   default, or a tracker the repository names (R-BTN-74) — and the code, the courses and the
+   evidence live in git. Baton owns the live leases, each ticket's course history, attestations,
+   and the limits agents must not be able to change (owner bars, required bars, grants,
+   settings), some duplicated in git for reading and some nowhere else. When Baton and the ticket
+   source or git disagree about what Baton owns, Baton wins and says so; about anything else, the
+   ticket source wins about tickets and git about the rest. Lost Baton state fails closed (the
+   owner, 2026-10-28; reworded for ticket sources, the owner, 2026-11-09).
 2. **Advice never refuses.** Baton gates only safety. Ordering, scoring and recommendations
    are advice a worker may override, and overriding is logged, never blocked.
 3. **The core is small and knows no course.** Core code names only its own vocabulary

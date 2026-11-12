@@ -1,0 +1,88 @@
+---
+title: "B-190 — Replay: record each run's inputs, the ticket's version among them, and replay a run on a runner without a claim"
+id: B-190
+project: baton
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1189
+tier: judgement
+description: "R-BTN-84 specifies baton leg replay and leg_run_inputs, and S-BTN-48 tests them, but neither has ever been built, so B-183's version check on replay had nothing to stand on and the owner waived it there. Build replay as the spec states it: record each run's inputs with their digests and the ticket's version and read digest (B-183's item 9); re-run a recorded run on a runner without a claim, through the executor (B-184), with no write credential; report a ticket version that moved since the run instead of replaying against new content; and make S-BTN-48's replay half pass. Requires: B-183."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-183
+---
+
+**Brief:** the owner, 2026-11-09, on B-183's seventh scenario (replay against a current source
+whose version moved reports the mismatch), which had nothing to test because replay was never
+built: "(a) Waive the seventh scenario for B-183, and file a follow-up ticket that builds replay,
+including recording each run's ticket version and checking it on replay."
+
+**Spec:** [BATON_SPEC §9.8](../spec/BATON_SPEC/09-claims.md#sec-9-8) ([R-BTN-84](../spec/BATON_SPEC/09-claims.md#sec-9-8)),
+[§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-143](../spec/BATON_SPEC/08-runners.md#sec-8-4),
+[R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4): the replay environment),
+[§4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2): the
+ticket source's `read` and versions, from B-183), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5)
+([R-BTN-82](../spec/BATON_SPEC/05-courses.md#sec-5-5): inputs), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-48](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-74](../spec/BATON_SPEC/15-verification.md#gates)).
+**Depends on:** B-183 (a ticket's opaque version and the source's `read`). Works with B-185's run
+ids (a run to replay can be named by `run_id`) and B-184's executor (replay runs repository code
+through it like any leg), whichever lands first.
+
+### What to build
+
+1. **Record each run's inputs.** At every run's start the runner reports, and Baton stores in
+   `leg_run_inputs`, each resolved input's URI and digest (R-BTN-82), the ticket's version as the
+   source posted it, and the digest of what the source's `read` returned for the run (B-183's item
+   9). Filter fields only (R-BTN-33): pointers and digests, never content.
+2. **`baton leg replay <ticket> <leg> [--run <n> | --run-id <id>] [--against <sha>]`** as R-BTN-84
+   states it: no claim; nothing written to Baton; the course's scripts at the run's snapshot
+   (R-BTN-143) and the ticket's code at its `head_sha`; inputs fetched and checked by digest; no
+   write-capable credential (R-BTN-144's replay environment); a `replay_safe: false` leg refused;
+   a masked local report; `--against <sha>` comparing with the scripts at that sha.
+3. **The version check.** Before running, replay reads the ticket from its source: a pinned
+   source (B-183) at the recorded version; a current source as it is now, and when its version or
+   `read` digest differs from the recorded one, replay stops and reports the mismatch, with
+   `--accept-moved` to replay against the new content deliberately (the report says so).
+4. **Through the executor.** Where B-184 has landed, replay runs repository code by the executor's
+   `exec` in a `leg` session, like any leg; before it, as a child process with R-BTN-144's replay
+   environment.
+
+### What not to do
+
+- **No replay that writes:** no Baton write, no forge write, no `close` (R-BTN-84).
+- **No content stored:** inputs are pointers and digests; a ticket's body is never stored.
+
+### Trust
+
+- **Recorded inputs** — reported by the runner at a run's start, validated before SQL; the digests
+  make a later substitution detectable, not impossible.
+- **The replayed code** — the course's scripts at a snapshot that passes R-BTN-143; repository code,
+  run as any leg's.
+
+### Invariants
+
+- **Replay writes nothing** (R-BTN-84, G-BTN-74).
+- **One clock** (R-BTN-32); **migrations append-only** for `leg_run_inputs`.
+
+### Tests
+
+- S-BTN-48's replay half passes: `baton leg replay`, `--against`, `replay_safe: false`.
+- A current source whose version moved since the run: replay reports the mismatch and runs nothing;
+  with `--accept-moved` it runs and the report says the content moved.
+- A pinned source replays at the recorded version.
+- A tampered input fails its digest.
+
+### Exit criteria
+
+- [ ] replay and input recording built as R-BTN-84 says, with the version check; the tests pass;
+  `npm test` and `npm run typecheck` are green
+
+## Status
+
+_filed 2026-11-09._

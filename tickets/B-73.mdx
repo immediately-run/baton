@@ -38,7 +38,7 @@ through `POST /v1/owner/confirm`, which `leg.stop` approvals need).
 ### Requires
 
 A checkout and a terminal for everything but one check: connecting a real Claude client (a
-claude.ai custom connector against `baton-staging`, and Claude Code against a local host) needs
+claude.ai custom connector against production, and Claude Code against a local host) needs
 a Claude account and a person at the browser. An agent without one does the rest and leaves that
 check to a human, saying so in the Status note.
 
@@ -146,7 +146,7 @@ device-code phishing kit, so consent is now the standard OAuth shape: spec Decis
   under an owner's session (B-76), the approval, the exchange and `POST /v1/mcp`, with a stub
   client-document server.
 - `check:actions` passes with the new entries; `check-spec` finds R-BTN-172 defined.
-- Manual, by a person with a Claude account: add `https://<staging origin>/v1/mcp` as a claude.ai
+- Manual, by a person with a Claude account: add `https://baton.immediately.run/v1/mcp` as a claude.ai
   custom connector and as `claude mcp add --transport http` in Claude Code; approve each in the
   browser that opens, once signed in and once signing in mid-flow; list the tools; hold a test
   ticket; revoke the grant and see the next call fail. Record: that the Worker's `fetch` reads
@@ -158,7 +158,7 @@ device-code phishing kit, so consent is now the standard OAuth shape: spec Decis
 
 - [ ] S-BTN-137's four parts pass on both hosts; G-BTN-157 holds
 - [ ] R-BTN-172 and the companion's rows are in `spec/BATON_SPEC.md`
-- [ ] a claude.ai custom connector and Claude Code each connect to `baton-staging` and are
+- [ ] a claude.ai custom connector and Claude Code each connect to production and are
       refused after revocation (the manual check), its findings recorded in the Status note
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
 - [ ] merged under the review gate
@@ -177,3 +177,5 @@ _(2026-11-02, part 3's review round one: the consent route admits only a session
 _(2026-11-02, part 3's review rounds two and three: the consent test is on the session itself, as R-BTN-188 reads one — an `owner` entry, or a `key:` entry naming its minting key when that key is not `human_only`, never `human`; a `human_only` key's session is `owner` (R-BTN-185). An approval naming no destructive action, a request, its status and a denial need no confirmation code (R-BTN-155). `mcp_keys` is keyed by its immutable `id`, folded in from this spec's §12 (§13.2).)_
 
 _(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — OAuth: retirement revokes the repository's grants with their tokens and its pending requests and unredeemed codes, and the token exchange refuses a code for a retired repository `invalid_grant` (`BATON_MCP_OAUTH_SPEC` §5, §7, §9). Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_
+
+_(2026-11-09: the staging deployment is retired — B-224, the owner: a home repository binds to one Baton, and every registered one binds to production, so staging held nothing and tested nothing. The connector test runs against a local host and then production.)_

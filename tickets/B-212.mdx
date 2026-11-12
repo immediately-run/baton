@@ -1,0 +1,107 @@
+---
+title: "B-212 — The course layout and the Courses list: a pure column layout for a course file, and /courses drawing each course as the mockup's card from course.show's summary"
+id: B-212
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1211
+tier: judgement
+description: "The first half of BATON-UI-V2's Courses screens. A pure, unit-tested layout function in src/dashboard/lib/courseLayout.ts — stations in columns by longest path from the entry station, back-edges as arcs, legs as straight edges with midpoint labels — and the CourseGraph SVG component that draws its output with every node and edge a focusable group with an accessible name, a blocked leg a marked edge and never a station (R-BTN-126). /courses: one card per course from repo.courses and course.show?summary=1 — id and version, the mockup's header line (runners declaring the course and alive, the window), the small graph with resting counts and legs' depth and state, the per-leg table with p50 wait and run and fail rates from stats, a refused newer file as a notice. Read-only. Requires: B-197, B-217, B-221."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-197
+  - B-217
+  - B-221
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Courses** `/courses` → `/courses/{c}` — station/leg
+graph with queue depths, per-ticket paths, stats." The mockup's Courses page (`courses.png`:
+"course roadmap-pr v7 · workers at 7 · p50 over 7 days"; stations as circles with "235
+resting"; legs with "1 on leg" and a ▲ on the blocked one; the per-leg table) is the list's
+card; its "Output implement.result v2" links to the dropped Schemas view are text.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the Courses screens),
+[§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2):
+a blocked leg is a marked edge, never a station), [§5.4](../spec/BATON_SPEC/05-courses.md#sec-5-4)
+([R-BTN-79](../spec/BATON_SPEC/05-courses.md#sec-5-4): depth against `max_queue`),
+[§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2)),
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) (`repo.courses`, `course.show`, `stats`). Context: the
+brief — course-agnostic; an interactive SVG group carries its accessible name.
+
+**Depends on:** B-197 (`course.show` with `?summary=1`, `runners` and `arrived_today`), B-217
+(`repo.courses`), B-221 (the router and polling layer).
+
+**Used by:** B-223; B-203.
+
+### What to build
+
+1. **The layout function**, `src/dashboard/lib/courseLayout.ts`, pure and unit-tested: from a
+   course file, stations in columns by longest path from the course's entry station (cycles
+   broken at back-edges, drawn as arcs under the row), within a column in the file's order;
+   each leg a straight edge from its `from` to its `to` column with its label at the midpoint;
+   returns coordinates for stations, edges and labels in a unit box the SVG scales.
+2. **`CourseGraph`** (`src/dashboard/screens/courses/CourseGraph.tsx`): inline SVG from the
+   layout and `course.show`'s `stations` and `legs` — stations as nodes with their resting
+   count; each leg an edge with its state as shape and word first (▲ blocked, ● running, ○
+   ready, ↻ backing off) and colour second, its depth against `max_queue` (over as a marked edge
+   with "intake closed" as text), never a station for a blocked leg (R-BTN-126); every node and
+   edge a focusable `<g>` with `role="button"` and an accessible name, firing a callback the
+   course page (B-223) uses for its panels; sized `small` for the list and `large` for the page.
+3. **`/repositories/{r}/courses`** (`src/dashboard/screens/courses/`): one card per course from
+   `repo.courses` and `course.show?summary=1` (no tickets, no runs): id and version, the
+   mockup's header line — "runners n declaring, m alive" from `runners`, the window — the small
+   graph, and the per-leg `<table>`: from → to, output names as text, requires as chips,
+   timeout, retries (`max_runs`), p50 wait and run and the fail rate from `stats`, a wait over
+   the course's p50 marked (both from the read; nothing computed in the browser); the terminal
+   station's `arrived_today`; a `refused` file as a notice naming the version kept (R-BTN-69).
+   A card opens the course page.
+4. **Course-agnostic.** Every station, leg, tag and output name is data from the read; a test
+   greps the fixture's names against the screen's source.
+5. **Phone.** Cards stack at 375 px; the small graph scrolls in its box.
+
+### What not to do
+
+- No control (a course changes by a commit, §5.7); no stats computed in the browser; no layout
+  library.
+- No per-course ticket page or run list on the list screen: the summary read only.
+
+### Trust
+
+- **Every value** is the reads' text through `Text` (course-file names as node and edge labels,
+  titles). Nothing is written.
+
+### Invariants
+
+- **A blocked leg is a marked edge, never a station** (R-BTN-126); **queue depth is advice**
+  (R-BTN-79); **course-agnostic**; **text, never markup** (§12.3); **an owner's session, its
+  repositories**.
+
+### Tests
+
+Under `test/ui/`: the layout places a four-station course in four columns and draws a back-edge
+as an arc; `CourseGraph` marks the blocked edge and draws no blocked station, marks the
+over-`max_queue` edge with its intake text, and gives every `<g>` an accessible name; the list
+card draws the header line, the table's p50 figures from the fixture and the refused notice; the
+fixture's station names appear nowhere in the source; a hostile title is text.
+
+### Exit criteria
+
+- [ ] `courseLayout.ts`, `CourseGraph` and `/courses` built, read-only, usable on a local Baton at
+      desktop and 375 px.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-197 after review._
+
+_2026-11-09 — revised after the second review: the course page split out to B-223; the list
+reads `course.show?summary=1`; p50 and the header's runner counts from the read, nothing computed
+in the browser._

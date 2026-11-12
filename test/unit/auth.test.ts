@@ -47,7 +47,7 @@ describe('the sync principal (R-BTN-15, G-BTN-11)', () => {
     const ok = await syncCall('/v1/sync/head', undefined, await syncToken({}, { audience: 'https://baton.immediately.run' }));
     expect(ok.status).toBe(200);
     expect(await ok.json()).toEqual({ sha: null, unconfirmed: [] });
-    for (const audience of [retired, 'baton.immediately.run', 'https://baton-staging.immediately.run']) {
+    for (const audience of [retired, 'baton.immediately.run', 'https://another-baton.example']) {
       const res = await syncCall('/v1/sync/head', undefined, await syncToken({}, { audience }));
       expect(res.status).toBe(401);
       expect(await code(res)).toBe('unauthenticated');
@@ -187,8 +187,8 @@ describe('signed requests (R-BTN-13, R3-1239)', () => {
   it('a request signed for one Baton does not verify at another (@authority)', async () => {
     // The same signed bytes, judged by a Baton whose origin is another: the base names its own.
     const req = fixture('ed25519-get');
-    const staging = new Request(req.url.replace('baton.immediately.run', 'baton-staging.immediately.run'), req);
-    expect(await reason(verifyRequest(staging, await keyOf('ed25519-get'), { origin: 'https://baton-staging.immediately.run', now: NOW }))).toBe('unauthenticated: the signature does not verify');
+    const other = new Request(req.url.replace('baton.immediately.run', 'another-baton.example'), req);
+    expect(await reason(verifyRequest(other, await keyOf('ed25519-get'), { origin: 'https://another-baton.example', now: NOW }))).toBe('unauthenticated: the signature does not verify');
     // Sent to this Baton's address while it is another's, it is refused before any key is read.
     expect(await reason(verifyRequest(fixture('ed25519-get'), null, { origin: 'http://127.0.0.1:8787' }))).toMatch(/@authority must be 127.0.0.1:8787/);
     expect(authorityOf('https://baton.immediately.run:443')).toBe('baton.immediately.run');
@@ -326,7 +326,7 @@ describe('the front stops a bad signature before the object (R3-1239)', () => {
 
   it('for another host', async () => {
     seen.length = 0;
-    const req = await signedRequest(await makeKey('ssh-ed25519', 'x'), 'https://baton-staging.immediately.run/v1/runner/mode', { created: T });
+    const req = await signedRequest(await makeKey('ssh-ed25519', 'x'), 'https://another-baton.example/v1/runner/mode', { created: T });
     expect((await front(req, env, to)).status).toBe(401);
     expect(seen).toEqual([]);
   });

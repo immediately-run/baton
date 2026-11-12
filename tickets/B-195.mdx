@@ -1,0 +1,127 @@
+---
+title: "B-195 — The condition reads and the session's answer: GET …/conditions/{condition} with its restarts, unblocks, allowed and answerable; the list read ordered by severity with answerable rows; the front's redirect for /conditions/{id}; and a session writing an owner attestation"
+id: B-195
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1194
+tier: judgement
+description: "The API half of the Conditions screens of BATON-UI-V2. condition.show: one condition with its restarts, what it would unblock, allowed (ticket.resolve where the caller may), and for a person leg its question with answerable, computed by authorize for the caller. The list read (B-55's) answers ?open=1 in severity-then-age order, each questions row carrying answerable, and resolve_url as the tree path. The front answers GET /conditions/{id} with a 302 to the tree path when the core finds the id among the session's repositories, else the shell. POST …/attestations accepts a dashboard session as writer owner (§14 lists it; today the route demands a signature), so a person leg's answer and B-213's Add attestation have a path. Requires: B-192, B-205, B-55, B-56."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-192
+  - B-205
+  - B-55
+  - B-56
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Conditions** `/conditions` → `/conditions/{id}` —
+what waits on a person (the old 'Needs you' as an entity screen); the Resolve page is the detail
+view, one restart click."
+
+**Spec:** [BATON_SPEC §7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3):
+the debugger's order, resolving in one step, the Resolve page and its redirect as B-191 amends
+it), [§7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1) ([R-BTN-160](../spec/BATON_SPEC/07-conditions.md#sec-7-1):
+a condition's fields), [§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4)
+([R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4): a person's leg and
+its question), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8):
+`attestation.add`; an owner session is a writer `owner`; the policy's writer list),
+[§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4):
+the session's `Origin` checks), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the `allowed`
+rule), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET …/conditions`, `POST …/attestations` — "an
+owner key or an owner session (writer `owner`)").
+
+**Depends on:** B-192 (sessions on the repository reads; the registry), B-205 (cursor and
+response conventions), B-55 (the `conditions` row and `GET …/conditions`), B-56 (`POST
+/v1/ui/conditions/{condition}/resolve`, the session's one-step resolve).
+
+**Used by:** B-213, B-219.
+
+### What to build
+
+The §14 rows first, then the code.
+
+1. **`GET /v1/repositories/{repository}/conditions/{condition}`** (`condition.show`, read; the
+   repository reads' principals and a session): the condition as the list returns it
+   (`condition_id`, `ticket`, `leg`, `type`, `disposition`, `handler`, `restarts` each with the
+   station it resumes at, `default`, `severity`, `url` where it passed §12.3's link rule on
+   write, `detail`, `raised_at`, `closed_at`, `outcome`), plus `unblocks` (ticket ids its
+   closing would make ready, from `ticket_blocks`), `allowed` (`["ticket.resolve"]` where the
+   caller may resolve it), and for a `hitl` type on a person leg `question: {asks, options:
+   [{id, reached}], url?, answerable}` — `answerable` true when `authorize` says this caller
+   may write the `std:decision@1` under the policy in force (R-BTN-181, R-BTN-116). `not-found`
+   for another repository's id, the same as for none.
+2. **The list read** (`GET …/conditions`, B-55's): `?open=1` answers in severity then age order
+   (R-BTN-163); each `questions` row carries `answerable`; `resolve_url` is the tree path
+   `/repositories/{r}/conditions/{id}` (B-191) — three §14 row changes.
+3. **The redirect** (`src/core/front.ts` and one core lookup): `GET /conditions/{id}` with a
+   session whose repositories hold the id answers `302` to
+   `/repositories/{r}/conditions/{id}`; otherwise the shell is served, which shows sign-in or
+   `not-found` (B-191, R-BTN-163). The lookup runs within the session's repositories only.
+4. **A session writes an owner attestation.** `POST /v1/repositories/{repository}/attestations`
+   accepts a dashboard session — the front resolves the cookie on it under R-BTN-16's checks,
+   as B-192 does for GETs — with the writer recorded as `owner` (the session's minting key's
+   owner role, R-BTN-181); an administrator's session is refused here (it is no owner, and
+   R-BTN-185 keeps `human` from a session). The route's existing key path is unchanged. A
+   session's `std:decision@1` for a queued person leg is the person leg's answer (R-BTN-116).
+   Not a confirmed action (R-BTN-155).
+
+### What not to do
+
+- No screen (B-219); no permission in a client.
+- No answer the policy does not admit: `answerable` is `authorize`'s word and the POST is
+  judged again.
+- No confirm code on a resolve or an answer (R-BTN-155).
+
+### Trust
+
+- **`condition.show` and the list** — Baton's rows; `detail`, `type`, `asks`, options and `url`
+  are untrusted text validated on the raise (R-BTN-160, §12.3).
+- **`answerable` and `allowed`** — computed by `authorize` with the session as principal; hints
+  for drawing, decided again on the call.
+- **The session's attestation** — the cookie under R-BTN-16's checks; writer `owner`, bounded by
+  the policy's writer list; `type`, `subject` and `value` validated as any attestation.
+- **The redirect** — a lookup within the session's repositories; a miss serves the shell, and
+  nothing outside them is revealed.
+
+### Invariants
+
+- **R-BTN-163**: severity then age; one-step resolving. **R-BTN-116**: an answer is a
+  `std:decision@1`. **R-BTN-185**: a session writes as `owner`, never `human`.
+- **R-BTN-155**: nothing here is confirmed. **An owner's session, its repositories**.
+  **Both hosts** (R-BTN-55).
+
+### Tests
+
+Scenarios numbered at merge, on both hosts, with a fixture `hitl` condition with two restarts, a
+core `baton.retries`, and a person leg under two policies (owner writer admitted, not):
+`condition.show` returns `unblocks`, `allowed` and the question with `answerable` true under one
+policy and false under the other; another repository's id is `not-found`; `?open=1` orders by
+severity then age and `resolve_url` is the tree path; `GET /conditions/{id}` is `302` for a
+session holding the repository and the shell otherwise; an owner's session posts a
+`std:decision@1` that answers the leg under the admitting policy and is `forbidden` under the
+other; an administrator's session is refused.
+
+### Exit criteria
+
+- [ ] `condition.show`, the list read's three changes, the redirect and the session's
+      attestation path in §14 and the code, with tests.
+- [ ] `npm test`, `npm run typecheck`, `npm run check:wiki` and `npm run check:tickets` green.
+
+## Status
+
+_filed 2026-11-09._
+
+_2026-11-09 — revised after review: `answerable` and `allowed` added; the redirect moved to the
+front; B-56 added as the owner of the session's resolve route._
+
+_2026-11-09 — revised after the second review: the screens split out to B-219; the session's
+path onto `POST …/attestations` built here (nothing built it); the sidebar count item dropped
+(B-208's `repo.list` is the one source)._

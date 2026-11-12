@@ -18,8 +18,8 @@ key outright without `--dev` (B-138). Do not fall back to 0.1.2, the registry's 
 writing: it predates these commands (its `admin state`, `board`, `repo sync --sync-key` and
 `repo init --agent` do not exist, and its `run` reads the transition's `IR_BATON_*` credential
 names) — until 0.1.3 publishes, the pinned commands refuse loudly rather than run stale code.
-Do each step on staging first (`--url https://baton-staging.immediately.run`, and
-`--env staging` for wrangler), then on production.
+Every step runs on production, the one deployment there is (B-224 retired the staging instance:
+a home repository binds to one Baton, and all of them bind to production).
 
 ## What can be done today, and what waits
 
@@ -56,7 +56,6 @@ Production has no administrator yet: `npx wrangler secret list` is empty.
 
 ```sh
 npx wrangler secret put BATON_ADMIN_KEYS < ~/.ssh/baton_admin.pub
-npx wrangler secret put BATON_ADMIN_KEYS --env staging < ~/.ssh/baton_admin.pub
 npx --yes @immediately-run/baton@0.1.3 admin -i ~/.ssh/baton_admin open     # prints a one-time login link (5 minutes)
 ```
 
@@ -178,19 +177,17 @@ per 30 seconds plus one trailing (R-BTN-73). Configure it once, then check it wi
    ```sh
    (umask 077; openssl rand -hex 32 > ~/baton_github_webhook_secret)   # mode 600; the same file both commands below read
    npx wrangler secret put BATON_GITHUB_WEBHOOK_SECRET < ~/baton_github_webhook_secret
-   npx wrangler secret put BATON_GITHUB_WEBHOOK_SECRET --env staging < ~/baton_github_webhook_secret
    ```
 
-1b. **`GITHUB_DISPATCH_TOKEN`**, in both environments — every dispatch the webhook path makes is
+1b. **`GITHUB_DISPATCH_TOKEN`** — every dispatch the webhook path makes is
    sent with it (`src/cloudflare/baton.ts`; without it the dispatch fails and the ten-minute
    backstop retries into the same missing token). A delivery dispatches not only its own
    repository but every registered repository whose tickets name it, and this one token sends
    them all — so its **Actions: write** must cover every registered repository the delivery may
-   dispatch: `baton` and `docs` in production, `docs` on staging:
+   dispatch: `baton` and `docs`:
 
    ```sh
-   npx wrangler secret put GITHUB_DISPATCH_TOKEN        # Actions: write on baton AND docs (production); docs alone on staging
-   npx wrangler secret put GITHUB_DISPATCH_TOKEN --env staging
+   npx wrangler secret put GITHUB_DISPATCH_TOKEN        # Actions: write on baton AND docs
    ```
 
 2. The secret must also be the App's *current* webhook secret: GitHub signs every delivery with
@@ -238,7 +235,7 @@ is required* is step 1 done and the route reachable. Read either as done only wh
      one trailing. Read it where it ran:
 
      ```sh
-     gh run list --repo immediately-run/baton --workflow baton-sync.yml --limit 10 --json event,createdAt,headBranch -q '.[] | select(.event == "workflow_dispatch") | .createdAt'   # the dispatch's runs; staging reads the registered repository's (docs)
+     gh run list --repo immediately-run/baton --workflow baton-sync.yml --limit 10 --json event,createdAt,headBranch -q '.[] | select(.event == "workflow_dispatch") | .createdAt'   # the dispatch's runs
      ```
 
      A claim's own syncs read in its ticket history (`baton ticket … history`).

@@ -1,0 +1,134 @@
+---
+title: "B-224 — Retire the staging deployment: the deploy workflow, wrangler.toml, the spec's baton-staging tenant, the runbook, the README and the live tickets that named staging"
+id: B-224
+project: baton
+status: in-review
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1223
+tier: judgement
+description: "A home repository binds to one Baton, and baton, fieldhouse and immediately-run/hq all bind to production at baton.immediately.run, so the staging instance holds no repositories, no data and no way to test anything (the owner, 2026-11-09). Remove it from the code and the record: the Deploy staging step in baton-deploy.yml, the env.staging block in wrangler.toml, the baton-staging tenant from BATON_SPEC §2.1 and §15 (scenarios run on the local host in CI; the envelope is measured on production's own capacity log), the staging-first steps of the register-baton runbook, the README's Deploying section, the architecture and lessons lines, and the staging steps of the seven live tickets that named it. The Cloudflare resources themselves are B-225's, an operator's. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/200
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-09, on BATON-UI-V2's Decision 7 ("we don't need staging at all"):
+"A home repo can be associated with one baton server. In the case of the baton, fieldhouse and
+immediately-run/hq home repos that is the production baton instance at baton.immediately.run.
+This leaves the staging instance with no connected repos, no data, and no reasonable way to
+test anything — might as well get rid of it entirely." The architecture page already says it:
+"One Baton serves a repository. Two boards for one repository drift and contradict (the owner's
+decision, 2026-10-21); staging deploys the Worker but registers no repository."
+
+**Spec:** [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) (the service: the
+`baton-staging` tenant with its own Worker and hostname), [§2.2](../spec/BATON_SPEC/02-deployments.md#sec-2-2)
+([R-BTN-135](../spec/BATON_SPEC/02-deployments.md#sec-2-2): a tenant is a Baton named by its
+origin; [R-BTN-56](../spec/BATON_SPEC/02-deployments.md#sec-2-2)), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3)
+([R-BTN-87](../spec/BATON_SPEC/02-deployments.md#sec-2-3): the envelope and the alarm's
+`capacity` log), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) (where the scenarios run:
+"a deployed Worker, `baton-staging` included"; the load test "against `baton-staging` before
+cutover"; [R-BTN-68](../spec/BATON_SPEC/15-verification.md#sec-15)), [§16.2](../spec/BATON_SPEC/16-adoption.md#sec-16-2)
+(the reference deployment's rollout). Context: `docs/context/architecture.mdx` ("One Baton
+serves a repository"), `docs/lessons.mdx` (the single-Baton lesson).
+
+**Depends on:** none.
+
+**Used by:** B-225 (deletes the Cloudflare resources once nothing deploys them).
+
+### Decision needed
+
+- **Where the envelope is measured without staging.** §15 had the load test run "against
+  `baton-staging` before cutover, seeded by a synthetic `--with-history` import". **(a)** the
+  load test runs on the local host in CI only, and the Cloudflare budgets are read from
+  production's own alarm `capacity` log and the live counts on `/state` (R-BTN-87) *(default;
+  recommended — nothing else exists to load)*; **(b)** a throwaway tenant is provisioned for one
+  load run when R3-1258 is picked up, by an operator ticket filed then. R3-1258 is re-pointed
+  to the answer.
+
+### What to build
+
+A spec PR with the code and docs in it, since every edit says the same thing. Follow
+`docs/context/spec-writing.mdx`: amend in place, retire the tenant from the sections that name
+it, record the decision.
+
+1. **The deploy** (`.github/workflows/baton-deploy.yml`): remove the "Deploy staging" step and
+   the header's "and the staging Worker beside it"; the token comment reads "writes the route".
+   A CI workflow change: made in this PR and named in its body for the owner's approval (the
+   owner asked for it, 2026-11-09).
+2. **`wrangler.toml`**: remove the `[env.staging]` block (name, route, Durable Object binding,
+   `vars`) and the comments that describe it, including B-91's note that staging seeds the
+   same owner. Nothing else in the file changes; the production `[vars]` stay.
+3. **The spec.** §2.1: the service is one production Worker at `baton.immediately.run`; the
+   `baton-staging` tenant sentence goes. §15: the scenarios run on the local host in CI and in
+   the Workers runtime project; the "deployed Worker, `baton-staging` included" clause and the
+   load test's staging run go, replaced by the Decision's answer. R-BTN-135's text names no
+   staging (check with `spec:impact -- R-BTN-135`). `91-decisions.md` gains one line: the
+   staging deployment is retired (the owner, 2026-11-09: one Baton per home repository, and all
+   three bind to production). `npm run spec:index`; the history's Decisions in full carries the
+   owner's reasoning.
+4. **Docs.** `README.md` Deploying: production only, and the token's scope (Workers Routes:
+   Edit for one route). `docs/context/architecture.mdx`: the "staging deploys the Worker but
+   registers no repository" clause becomes "there is no staging instance (B-224)".
+   `docs/lessons.mdx` line on staging: amended to the same. `docs/runbooks/register-baton.mdx`:
+   every "on staging first" step and `--env staging` command removed; the runbook runs on
+   production. `docs/plans/self-hosting.mdx`: "staging's health gates the production deploy"
+   removed. `src/core/auth.ts` and `vitest.config.ts` comments that name `baton-staging`
+   reworded; the tests that use `https://baton-staging.immediately.run` as *another origin* in a
+   refusal case keep it as an arbitrary foreign origin (rename the constant so it does not read
+   as a live host).
+5. **Live tickets that named staging**, each amended in place with a dated Status line:
+   R3-1208 (the staging Worker and its Access application are no longer provisioned), R3-1209
+   (S-BTN-13 runs in CI, the exit criterion "staging S-BTN-13 green" goes), R3-1220 (the
+   staging load test leaves its preconditions), R3-1258 (per the Decision), R3-1266 (the
+   deploy is not gated on staging; the smoke checks run against production after the deploy,
+   read-only), R3-1268 (the agent session's drill runs against production or a local host),
+   B-73 (the connector test runs against a local host and then production), B-135 (its premise
+   "`main` deploys staging only" changes: the production deploy stays on `main` and the ticket's
+   token-scoping finding is re-stated for one Worker). BATON-UI-V2's B-216 already checks
+   production (B-191's Decision 7c).
+
+### What not to do
+
+- Do not delete the Cloudflare Worker, route, DNS record, Access application or secrets here:
+  B-225, an operator's.
+- Do not touch the production `[vars]`, the production route or the deploy token.
+- Do not rename the production Worker or the Durable Object class (R3-1229's rule).
+
+### Trust
+
+No new input. The one change of authority surface is the deploy workflow losing a step; the
+token's scope is unchanged until the owner narrows it (B-135). Every edit is in this
+repository, by PR.
+
+### Invariants
+
+- **One Baton per home repository** (architecture; the owner, 2026-10-21 and 2026-11-09).
+- **One codebase, two hosts** (R-BTN-55): the local host remains the second host; nothing in
+  core changes.
+- **The deploy gate stays**: the test job still runs before the production deploy.
+- **One home per statement**: the retired tenant leaves §2.1 and §15; nothing else restates it.
+
+### Tests
+
+`npm test`, `npm run typecheck`, `npm run check:spec`, `npm run check:wiki`, `npm run
+check:tickets`; `wrangler deploy --dry-run` succeeds for production with the edited
+`wrangler.toml`; `grep -rn baton-staging` over the repository returns only the history and the
+archive.
+
+### Exit criteria
+
+- [ ] The workflow step, the `[env.staging]` block and every doc and spec mention of the
+      staging deployment are gone or amended; the decision recorded; `spec:index` current.
+- [ ] The seven live tickets carry their amendments.
+- [ ] The checks above are green; the PR body names the workflow change for owner approval.
+
+## Status
+
+_filed 2026-11-09._

@@ -149,4 +149,7 @@ export interface Ports {
   /** Absent on Cloudflare, where the input gate needs nothing. */
   gate?: Gate;
   clock?: Clock;
+  /** The core's random source (B-185: a run id's random half); tests replace it as they
+   *  replace the clock. Absent, the system's. */
+  random?: (n: number) => Uint8Array;
 }

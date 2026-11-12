@@ -26,7 +26,8 @@
     "baton": "dist/baton.mjs"
   },
   "scripts": {
-    "test": "rm -rf test/.traces && vitest run && npm run model:links && npm run traces && npm run model:quick",
+    "test": "BATON_SKIP_QUINT=1 vitest run && npm run model:links",
+    "test:full": "rm -rf test/.traces && vitest run && npm run model:links && npm run traces && npm run model:quick",
     "test:baton": "vitest run",
     "test:no-quint": "BATON_SKIP_QUINT=1 vitest run && npm run model:links",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.local.json",

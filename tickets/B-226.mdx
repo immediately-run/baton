@@ -1,0 +1,76 @@
+---
+title: "B-226 — The sync reads a private repository's PR checks with a fine-grained token: check suites refused, the head's Actions workflow runs stand in"
+id: B-226
+project: baton
+status: in-review
+updated: 2026-11-10
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1225
+tier: judgement
+description: "GitHub offers fine-grained personal access tokens no Checks permission, so on a private repository the sync's GraphQL read of a PR's head check suites is refused (FORBIDDEN, 'Resource not accessible by personal access token') and, because any GraphQL error failed the sync, no board has posted since a baton ticket first owned a PR in the private fieldhouse (2026-11-07). The owner, 2026-11-10: Baton's users set up fine-grained tokens, not a GitHub App. When every error of an answer is a refusal of check suites, the sync keeps the rest of the answer and reads the head's checks from its Actions workflow runs (Actions: read, which a fine-grained token can hold); any other error still fails the sync, now naming its path. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** every `baton sync` run on baton since 2026-11-07 has posted nothing; the last board
+is at `ac367e1` (2026-11-06), so every ticket a claim ended on since is `awaiting-sync` and no
+runner is offered work. The run's log: `GitHub GraphQL (immediately-run/fieldhouse): Resource not
+accessible by personal access token` — once for each of fieldhouse#16 and #17, the PRs on
+`claude/B-132-…` and `claude/B-133-…`. `BATON_GITHUB_READ_TOKEN` is a fine-grained token over
+every repository the `repos` map names; fine-grained tokens cannot be given Checks (GitHub offers
+that permission to Apps and the workflow's own token only), and on public baton the check suites
+read without it, so only a private repository shows the gap. The owner, 2026-11-10: "I would very
+much prefer to use fine-grained personal access tokens instead of creating a GitHub app. Because
+anybody using Baton would then need to create a GitHub app."
+
+**Spec:** [BATON_SPEC §3 R-BTN-96](../spec/BATON_SPEC/03-repositories-and-forges.md) (the GitHub
+adapter: "an answer with `errors` fails the sync").
+
+**Depends on:** none.
+
+**Used by:** none.
+
+### What to build
+
+1. **The adapter** (`src/defaults/cli.ts`, `githubFacts`): an answer whose errors are all
+   `FORBIDDEN` at a path through `checkSuites` is kept; the repository is marked once, logged
+   once, and each of its owned PRs' checks are the head sha's workflow runs
+   (`/repos/{repo}/actions/runs?head_sha=`): a completed run's conclusion, null while it runs —
+   the "finished or not" `checksDone` reads. A 403 there fails the sync naming both permissions.
+   Any other error fails as before, its message naming the error's path.
+2. **The spec**: R-BTN-96's GitHub sentence says so.
+3. **The token docs** (`docs/standard-courses.mdx`, the sync workflow's comment): the fine-grained
+   token's permissions are Pull requests, Contents, Actions and Metadata, all read — no Checks,
+   which such a token cannot hold.
+
+### Bars
+
+- On public repositories nothing changes: no extra request, the same facts.
+- A check run that is no Actions workflow (a third-party App's) is not seen on a repository read
+  this way; `ci` ends when the workflow runs do. Said in the spec.
+
+### Trust
+
+One new input: the head commit's Actions workflow runs, read with the sync's own read-only token
+from the repository the ticket names. They are the forge's record of runs of workflow files in
+that repository, the same writers the check runs they stand in for had; they decide only whether
+the `ci` wait has ended (`checksDone`), never a verdict or a merge (`merge.checks` reads the
+forge's check runs at the trusted merge, R-BTN-183, which this does not touch).
+
+### Invariants
+
+- **R-BTN-96, no partial reading.** Only errors that are all `FORBIDDEN` through `checkSuites`
+  are kept; the PR, its commits, reviews and comments are all present, and its checks are read
+  in full from Actions or the sync fails. Every other error fails it as before.
+- **R-BTN-139, verdicts from pushers.** Untouched: reviews and comments go through the same
+  permission read.
+
+## Status
+
+_filed 2026-11-10._

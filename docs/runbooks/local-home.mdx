@@ -1,6 +1,6 @@
 ---
 title: Runbook — a plain-git home on one machine, working on a GitHub repository
-description: One operator's Baton on a laptop — a local Baton, a home repository that is plain git, and tickets whose PRs open on a GitHub repository the home does not own. The first slice of B-182.
+description: One operator's Baton on a laptop — a local Baton, a home repository that is plain git, and tickets whose PRs open on a GitHub repository the home does not own (B-182).
 tags: [runbook]
 order: 41
 ---
@@ -15,12 +15,10 @@ your own agents from colliding and shows you what they are doing. It is no bound
 anyone, and it coordinates nobody else — a colleague with their own Baton never sees your claims.
 `protected` and its guarantees are not available here (B-182, point 7).
 
-**What it rests on.** The sync skips a plain-git home's own PR read — it has no forge to read
-(R-BTN-96) — and reads only the repositories the tickets name in `repos:` (B-182's first slice).
-Everything else is Baton as built. The rest of B-182 (code repositories with their own forge and
-host in `code_repos`, pushers per host) is not built: the spec still says a code repository is on
-the home's forge host, and this runbook works because the built sync reads `repos:` without
-consulting `code_repos`.
+**What it rests on.** B-182: a code repository names its own forge and host. The sync skips a
+plain-git home's own PR read — it has no forge to read (R-BTN-96) — and reads the repositories
+the tickets name in `repos:` that the home's `code_repos` lists, each on its own forge with its
+ids verified at every read (R-BTN-138: the ids decide). Everything else is Baton as built.
 
 Every command below was run end to end on 2026-11-05 — registration, a sync with no GitHub token,
 a runner's claim, its leg and its release — except the parts marked **untested**, which need a
@@ -119,6 +117,26 @@ npx --yes @immediately-run/baton@0.1.3 owner -i ~/baton/keys/baton_owner grant h
 
 Check: both commands answer `{"ok":true, …}`.
 
+Then name the GitHub repository in the home's `code_repos` (R-BTN-140), with the operators'
+pushers for that host (R-BTN-139) — the ids are read from GitHub by the command itself, with
+your `GITHUB_TOKEN`, and Baton never fetches:
+
+```sh
+GITHUB_TOKEN=<a token that can read the repository>   npx --yes @immediately-run/baton@0.1.3 owner -i ~/baton/keys/baton_owner settings home     --code-repos github:<owner>/<repository>@github.com     --pushers <your GitHub user id>@github.com
+```
+
+`--forge-ids <repo id>,<owner id>` supplies the ids offline instead. The pushers entry is what
+lets your own verdicts on the PRs count when the token reports you as a read-only collaborator
+on a repository you may push to through `gh`.
+
+Re-running the command cannot change what a listed path reaches (R-BTN-140): a path the list
+keeps keeps its stored ids, host and `web_base` whole, however the command re-reads them. If
+GitHub really did move or re-create the repository — the sync then fails naming the entry,
+because the forge's ids no longer match — accept the new ids deliberately: re-run with
+`--code-repos none` (the path leaves the list), then with the path again. Both writes are
+yours to make as the owner; the second is reach gained, so it is governed like the first one
+was.
+
 ## 6. A ticket
 
 `tickets/LIN-1.md` in the home:
@@ -148,10 +166,11 @@ GITHUB_TOKEN=<the sync's token> BATON_URL=http://127.0.0.1:8787 \
   npx --yes @immediately-run/baton@0.1.3 repo sync --root ~/baton/home --sync-key ~/baton/keys/baton_sync
 ```
 
-Check: it prints `the home is a plain git repository, not on GitHub — reading only the
+Check: it prints `the home is a plain git repository, not on a forge — reading only the
 repositories tickets name in repos: (1)`, then `advanced at <sha> … accepted`; `npx --yes
 @immediately-run/baton@0.1.3 board -i ~/baton/keys/baton_owner home` lists `home:LIN-1` ready at
-`filed`. With no ticket naming a repository, no token is needed at all.
+`filed`. With no ticket naming a listed repository, no token is needed at all; a `repos:` name the
+list does not hold is shown and filtered on only (R-BTN-140) — its PRs are not read.
 
 No webhook reaches a loopback Baton, so run the sync on a loop in its own terminal — once a
 minute is R-BTN-105's pace:
@@ -189,7 +208,11 @@ say where in the ticket body. Two runners must never share one.
 - **Tickets from Linear.** Write ticket files by hand or from a script of your own; a tracker
   source is B-183 and the ticket after it.
 - **Webhooks.** None reach a loopback Baton; the sync loop is the trigger.
-- **The rest of B-182.** `code_repos` with a forge and host per entry, and pushers per host: until
-  then a `repos:` repository is read without `code_repos`' reach check (R-BTN-140).
+- **A human identity or a floor.** Both are refused while a code repository sits on another host
+  than the home's (B-182 point 7): this deployment runs under `cooperative`, where Baton's state
+  is a coordination record. Per-host human identities are a later ticket.
+- **Code repositories on GitLab or Gitea.** The mechanism carries them (an entry names its own
+  forge and host), but only GitHub's fact adapter is built, so a sync that must read one fails
+  rather than post a partial reading.
 - **A second person.** Two operators on one codebase share one Baton, or neither sees the
   other's claims.

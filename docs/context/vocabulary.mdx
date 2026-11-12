@@ -40,6 +40,15 @@ a leg requires; Baton matches the two by name and derives nothing. What the keys
 worker holds amount to is the worker's own statement, and which model and key a leg uses is the
 course's choice, in its ranking code and instructions (R-BTN-174, §6.10).
 
+**Executor, provides.** The module a CLI runner starts every leg and runs every call into
+repository code through — `builtin` (child processes, the default), the home's own, or one pinned
+on the host — chosen by the runner's host, never by a repository; it names the capabilities it
+**provides**, which Baton matches by name like any declared capability and never judges
+(R-BTN-107).
+
+**Executor data.** The JSON object a course or home may give a leg for its executor, which Baton
+passes through and never reads or stores (R-BTN-107).
+
 **Capacity, seat.** A capability with a capacity has that many seats: a claim holds one, fixed when
 its leg starts, for each such capability rule 4 matched for that leg (the ticket's requirements and
 the leg's), and a claim past capacity is refused (R-BTN-178). Not the tenant's capacity envelope
@@ -112,9 +121,14 @@ change break (§12.8). Baton's own server is trusted: a compromised Baton is rec
 resisted, so nothing is signed for a verifier outside it.
 
 **Role, domain.** What a grant says about its runner's trust: its role (`runner`, or
-`trusted-runner` for the legs marked `trusted`) and its domain, a label for the host or VM it runs
-in, both set by the policy's `approvers.roles` approver. Two reviews count as independent when
-their domains differ; Baton compares the labels and verifies nothing about them (R-BTN-180).
+`trusted-runner` for the legs marked `trusted`) and its domain, a label whose meaning is the
+deployment's, both set by the policy's `approvers.roles` approver. Two reviews count as independent when
+their domains differ — or, for a credential the policy lists in `domains.per_run`, when their
+**run labels** differ on one domain (a label the runner reports per run, used once). Baton
+compares the labels and verifies nothing about them (R-BTN-180).
+
+**Run id.** The opaque id Baton mints for every leg run at its start (`r_` and a ULID), carried
+by the history, the resume record and leg logs (R-BTN-63).
 
 **Pusher.** A forge author whose words count — a verdict, a marker, an approval — because the
 forge reports they can push the PR's base, or the owners list them in `pushers`. The one sense in

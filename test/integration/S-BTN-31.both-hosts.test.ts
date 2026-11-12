@@ -14,7 +14,7 @@ beforeEach(async () => {
 
 describe(`S-BTN-31 both hosts (${HOST})`, () => {
   it('a sync token minted for another Baton is refused; one for this Baton is accepted', async () => {
-    for (const audience of ['https://baton-staging.immediately.run', 'http://127.0.0.1:8787', `${ORIGIN}/`]) {
+    for (const audience of ['https://another-baton.example', 'http://127.0.0.1:8787', `${ORIGIN}/`]) {
       const res = await syncCall('/v1/sync/head', undefined, await syncToken({}, { audience }));
       expect([audience, res.status]).toEqual([audience, 401]);
       expect(await res.json()).toMatchObject({ code: 'unauthenticated' });

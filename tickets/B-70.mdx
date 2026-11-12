@@ -111,3 +111,5 @@ and a reason in `baton leg why`.
 ## Status
 
 _(filed 2026-10-20 with the current-state spec, PR #71)_
+
+- 2026-11-09: B-184's spec amendment retires what this ticket builds. `runner:session` is no longer a built-in capability (R-BTN-133) and R-BTN-107 is now the executor rule, with no isolation modes; core's per-leg `isolation` gate (`src/core/gates.ts`, `graph.ts`, `course.ts`) and `runners.isolation` go in B-184's implementing PR, the course file's `isolation` field staying refused (R-BTN-69). A leg that needs what only some executors offer requires a name their `provides` states (R-BTN-107, R-BTN-121); check legs require `checks:withheld-credentials` (R-BTN-114). Re-read R-BTN-107, R-BTN-121 and R-BTN-133 before building on this ticket.

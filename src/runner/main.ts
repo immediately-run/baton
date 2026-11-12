@@ -17,6 +17,12 @@ import { HARNESS_AGENTS, type Harness } from './harness';
 import { holdHome, legNeeds, readHead } from './home';
 import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 import { Runner, stampLine, withTimestamps } from './runner';
+import { loadExecutor } from './executor';
+import { readMaskEnv, runnerConfigPath, underBatonDirectory } from './mask';
+import { fileURLToPath } from 'node:url';
+
+/** The CLI's wrapper (R-BTN-133), which every executor runs. */
+const LEG_WRAPPER = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
 export interface RunArgs {
   harness: Harness;
@@ -45,6 +51,9 @@ export interface RunArgs {
    * nonce beside the ticket, the leg's local command, and the leg child's stderr drained
    * into the log — where the stub reports the agent_command it resolved. */
   verbose: boolean;
+  /** R-BTN-107 (B-184): the executor source the runner's host chose — `--executor`, else the
+   *  host's `BATON_EXECUTOR`, else `builtin`. Never read from a checkout. */
+  executor: string;
 }
 
 /** `baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]
@@ -58,6 +67,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     session: env.BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
     repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? hostname(),
     tier: 'critical', capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false, locks: {},
+    executor: env.BATON_EXECUTOR ?? 'builtin',
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -79,6 +89,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     else if (a === '--hostname') out.hostname = value();
     else if (a === '--tier') out.tier = value();
     else if (a === '--course') out.course = value();
+    else if (a === '--executor') out.executor = value();
     else if (a === '--capabilities') out.capabilities = value().split(',').map((s) => s.trim()).filter(Boolean);
     else if (a === '--lock') {
       // R-BTN-178: `--lock <capability>=<path>`, repeatable — the capability is declared only
@@ -107,7 +118,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
 export const RUN_USAGE = [
   'usage: baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]',
   '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
-  '                 [--beat-every <ms>] [--course <id>] [--test-harness] [--verbose]',
+  '                 [--beat-every <ms>] [--course <id>] [--executor <source>] [--test-harness] [--verbose]',
   '',
   'Runs this machine\'s worker: it heartbeats, claims a ticket of a course its home checkout',
   'declares and runs each leg — one leg at a time.',
@@ -117,6 +128,9 @@ export const RUN_USAGE = [
   '                      serve the grant. A machine without a browser narrows, e.g. llm-call,create-pr.',
   '  --course <id>       narrows the courses served to this one, of those the home declares.',
   '                      Absent, the runner serves and declares every course the home declares.',
+  '  --executor <source> how legs run (R-BTN-107): builtin (the default — child processes) or',
+  '                      pinned:<dir>@sha256:<digest>, a host bundle loaded only when its digest',
+  '                      matches. Also BATON_EXECUTOR; never read from the repository.',
   '  --lock cap=path     one machine\'s singleton (R-BTN-178), repeatable: the capability is declared',
   '                      only while this runner holds an exclusive lock on the file, and it takes',
   '                      the lock before a claim for, or the advance into, a leg requiring it.',
@@ -190,6 +204,21 @@ export function servedCourses(home: string, chosen?: string): { course: string; 
   return [one];
 }
 
+/** R-BTN-144 class 7 (B-170): the names `runner.json` `mask_env` lists for this runner's host,
+ *  read once at start. A path under a `.baton/` directory is refused: a home's or a course's
+ *  settings are repository files (R-BTN-69's rule that a repository cannot configure its host),
+ *  and no repository may name what its runner must mask. `BATON_CONFIG` names the file in tests
+ *  and in a deployment that keeps its configuration elsewhere; absent, `runner.json` sits at the
+ *  default §5.6 gives. A `mask_env` that is not a list of names refuses the runner at start. */
+export function hostMaskEnv(log: (line: string) => void, env: NodeJS.ProcessEnv = process.env): string[] {
+  const path = runnerConfigPath(env);
+  if (underBatonDirectory(path)) throw new Error(`${path}: runner.json is this host's configuration, never a repository's (it lies under .baton/, R-BTN-144)`);
+  const maskEnv = readMaskEnv(path);
+  if (maskEnv == null) return [];
+  if (maskEnv.length) log(`baton: masking ${maskEnv.length} more name${maskEnv.length === 1 ? '' : 's'} by runner.json's mask_env: ${maskEnv.join(', ')} (R-BTN-144)`);
+  return maskEnv;
+}
+
 /** The one place `~/.cache/immediately-run` is materialised for a cloud key (§6.4). */
 function cacheDir(): string {
   const dir = join(homedir(), '.cache', 'immediately-run', 'baton');
@@ -259,7 +288,7 @@ export const syncLogStamped = (verbose: boolean, l: string): void => syncLog(ver
  * permanent listener. One slot: the previous hook comes off before the next goes on. */
 let exitHookFn: ((code: number | undefined) => void) | null = null;
 
-export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void; transport?: (req: Request) => Promise<Response> } = {}): Promise<number> {
+export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void; transport?: (req: Request) => Promise<Response>; env?: NodeJS.ProcessEnv } = {}): Promise<number> {
   // §6.13: a leg session never claims — the runner that started it does. A nested `baton run`
   // is exactly that session trying, so it is refused before anything else. BATON_PARENT is the
   // runner's name for it (B-97: the transition's IR_BATON_PARENT is gone).
@@ -301,6 +330,11 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // Every course the home declares, or the one `--course` narrows to (B-103): refused at startup,
   // loudly, when the flag names one the home does not declare — not per claim.
   const courses = servedCourses(a.home, a.course);
+  // R-BTN-144 class 7 (B-170): the names this host's `runner.json` `mask_env` lists are masked
+  // with the ones that say a secret by their ending. A repository's own settings file is never
+  // read for it: only the runner host's configuration names what its legs must not print. The
+  // env comes from `io` so a test's runMain reads a configuration it chose, not the machine's.
+  const maskEnv = hostMaskEnv(say, io.env ?? process.env);
   // B-86: no `--capabilities` asks for nothing — the grant speaks, and each answer's
   // `grant.capabilities` is what the runner declares. The flag narrows that.
   if (a.capabilities == null) say('baton: no --capabilities given — the runner declares what the grant allows (narrow it with --capabilities, e.g. a machine without a browser)');
@@ -348,11 +382,13 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
       // A leg child that will not take the release: after ten seconds its whole group is
       // killed (the lease-loss mechanism, `killInflight`) and this process leaves — the claim
       // ends by the reaper, the resume record covers the leg (R-BTN-24).
+      // B-227: its session is stopped too — an executor's sandbox does not outlive the runner —
+      // waited on for at most another HARD_STOP_MS.
       hardStop = setTimeout(() => {
-        runner!.killInflight();
-        syncLogStamped(a.verbose, `baton: ${signal} — the leg did not stop; its group is killed and this process exits`);
-        release();
-        process.exit(exitCode);
+        syncLogStamped(a.verbose, `baton: ${signal} — the leg did not stop; its call is killed, its session stopped, and this process exits`);
+        const leave = () => { release(); process.exit(exitCode); };
+        setTimeout(leave, HARD_STOP_MS);
+        void runner!.hardStop().finally(leave);
       }, HARD_STOP_MS);
       hardStop.unref?.();
       return;
@@ -370,8 +406,15 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // `fetch` (the Worker, or the local host); a test hands one in and sees the bodies the
   // heartbeat path composed without a Baton behind it.
   const transport = io.transport ?? ((req: Request) => fetch(req));
+  // R-BTN-107 (B-184): the executor the host chose, loaded before any claim — a pinned bundle
+  // whose digest does not match, or a source not built, refuses to start.
+  const executor = await loadExecutor(a.executor, { log: say, wrapper: LEG_WRAPPER, node: process.execPath });
+  if (a.executor !== 'builtin') say(`baton: executor ${executor.source}${executor.digest ? ` sha256:${executor.digest}` : ''}${executor.provides.length ? `, provides ${executor.provides.join(', ')}` : ''}`);
   runner = new Runner({
+    executor,
     api: new BatonApi({ url: a.url, transport, auth }, say),
+    // B-229: the earlier sessions' claims are ended through an API of their own worker's.
+    apiFor: (secret: string) => { const other = new BatonApi({ url: a.url, transport, auth }, say); other.setSecret(secret); return other; },
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     courses,
@@ -387,6 +430,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     fetch: io.fetch ?? ((home) => fetchMain(home, say)),
     ...(agentCommand ? { agentCommand } : {}),
     ...(a.testHarness ? { testHarness: true } : {}),
+    ...(maskEnv ? { maskEnv } : {}),
   });
   try {
     await runner.work();

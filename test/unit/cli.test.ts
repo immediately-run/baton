@@ -110,6 +110,51 @@ describe('plan: one request per command', () => {
     expect(() => plan('owner', ['settings', 'docs'], key)).toThrow('at least one setting');
     // R-BTN-80: remind_after in seconds, from a duration.
     expect(plan('owner', ['settings', 'docs', '--remind-after', '6h'], key).body).toEqual({ remind_after: 21_600 });
+    // B-182 (R-BTN-140/R-BTN-139): the reach lists. Entries parse to `{path, forge?, host?,
+    // repo_id?, owner_id?}` — a well-known host implies its forge — and ids are resolved before
+    // the PUT goes out, so the plan carries the resolver's marker.
+    expect(plan('owner', ['settings', 'docs', '--code-repos', 'acme/monorepo@github.com,o/tool@gitlab.example.com'], key))
+      .toEqual({ method: 'PUT', path: '/v1/owner/docs/settings', body: { code_repos: [{ path: 'acme/monorepo', forge: 'github', host: 'github.com' }, { path: 'o/tool', host: 'gitlab.example.com' }] }, resolveCodeRepos: { repository: 'docs', offline: null } });
+    expect(plan('owner', ['settings', 'docs', '--code-repos', 'github:acme/monorepo@github.acme.example.com', '--forge-ids', '7,3'], key))
+      .toEqual({ method: 'PUT', path: '/v1/owner/docs/settings', body: { code_repos: [{ path: 'acme/monorepo', forge: 'github', host: 'github.acme.example.com', repo_id: '7', owner_id: '3' }] } });
+    expect(plan('owner', ['settings', 'docs', '--code-repos', 'none'], key).body).toEqual({ code_repos: [] });
+    expect(plan('owner', ['settings', 'docs', '--pushers', '1234,5678@gitlab.example.com'], key).body)
+      .toEqual({ pushers: [{ id: '1234' }, { host: 'gitlab.example.com', id: '5678' }] });
+    expect(plan('owner', ['settings', 'docs', '--pushers', 'none'], key).body).toEqual({ pushers: null });
+    expect(() => plan('owner', ['settings', 'docs', '--pushers', 'not-a-number'], key)).toThrow('forge user id');
+    expect(() => plan('owner', ['settings', 'docs', '--forge-ids', '7,3'], key)).toThrow('at least one setting');
+    expect(() => plan('owner', ['settings', 'docs', '--code-repos', 'a/b', '--forge-ids', 'seven,3'], key)).toThrow('decimal');
+  });
+
+  it('B-182: --code-repos ids are read from each entry\'s own forge with that host\'s token', async () => {
+    const { codeReposSpec, pushersSpec, resolveCodeRepos } = await import('../../cli/baton.mjs');
+    expect(pushersSpec('9')).toEqual([{ id: '9' }]);
+    // github.com answers at api.github.com; the token is GITHUB_TOKEN; the ids land on the entry.
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string, init?: { headers?: Record<string, string> }) => {
+      urls.push(url);
+      expect(init?.headers?.Authorization).toBe('Bearer gh-token');
+      return new Response(JSON.stringify({ id: 7001, owner: { id: 31 } }), { status: 200 });
+    }) as typeof fetch;
+    const entries = codeReposSpec('github:acme/monorepo@github.com').entries;
+    expect(await resolveCodeRepos('http://baton.test', 'unused.key', entries, { repository: 'docs', fetchImpl, env: { GITHUB_TOKEN: 'gh-token' } as unknown as NodeJS.ProcessEnv }))
+      .toEqual([{ path: 'acme/monorepo', forge: 'github', host: 'github.com', repo_id: '7001', owner_id: '31' }]);
+    expect(urls).toEqual(['https://api.github.com/repos/acme/monorepo']);
+    // An Enterprise host serves /api/v3; gitlab its own api and GITLAB_TOKEN, the ids where it
+    // keeps them (namespace).
+    urls.length = 0;
+    const lab = codeReposSpec('gitlab:group/tool@gitlab.example.com').entries;
+    const fetchLab = (async (url: string, init?: { headers?: Record<string, string> }) => {
+      urls.push(url);
+      expect(init?.headers?.Authorization).toBe('Bearer gl-token');
+      return new Response(JSON.stringify({ id: 42, namespace: { id: 7 } }), { status: 200 });
+    }) as typeof fetch;
+    expect(await resolveCodeRepos('http://baton.test', 'unused.key', lab, { repository: 'docs', fetchImpl: fetchLab, env: { GITLAB_TOKEN: 'gl-token' } as unknown as NodeJS.ProcessEnv }))
+      .toEqual([{ path: 'group/tool', forge: 'gitlab', host: 'gitlab.example.com', repo_id: '42', owner_id: '7' }]);
+    expect(urls).toEqual(['https://gitlab.example.com/api/v4/projects/group%2Ftool']);
+    // No token for the host's forge: the command says which variable, and fetches nothing.
+    await expect(resolveCodeRepos('http://baton.test', 'unused.key', codeReposSpec('gitea:o/r@gitea.example.com').entries, { repository: 'docs', fetchImpl, env: {} as unknown as NodeJS.ProcessEnv }))
+      .rejects.toThrow('no GITEA_TOKEN');
   });
 
   it('owner resolve and ticket history (R-BTN-78, R-BTN-81)', () => {
@@ -623,6 +668,102 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
     // diff printed the one knob; show printed the read it verified the fields of.
     expect(outs.join('')).toContain('human_key');
   });
+});
+
+describe('baton owner sign / verify-config (B-127 item 6, round 1: the command shipped untested)', () => {
+  let dir: string;
+  let keyFile: string;
+  let ownerPub: string;
+  let ownerFp: string;
+  const g = (...a: string[]) => spawnSync('git', ['-C', dir, ...a], { encoding: 'utf8' });
+  const add = (path: string) => g('add', path);
+  const head = (): string => String(g('rev-parse', 'HEAD').stdout).trim();
+  const commit = (...a: string[]): string => {
+    g('commit', ...a);
+    return head();
+  };
+  /** `main` with stdout captured, as the policy test runs it. */
+  let outs: string[] = [];
+  let outWrite: typeof process.stdout.write;
+  const run = (args: string[]) => main(['owner', '-i', keyFile, ...args]);
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'baton-owner-sign-'));
+    keyFile = join(dir, 'owner');
+    spawnSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', keyFile, '-C', 'owner@test'], { stdio: 'ignore' });
+    ownerPub = readFileSync(`${keyFile}.pub`, 'utf8').trim();
+    ownerFp = /(\bSHA256:[A-Za-z0-9+/]{43}\b)/.exec(spawnSync('ssh-keygen', ['-lf', `${keyFile}.pub`], { encoding: 'utf8' }).stdout)![1];
+    g('init', '-q', '-b', 'main');
+    g('config', 'user.email', 'owner@test');
+    g('config', 'user.name', 'owner test');
+    mkdirSync(join(dir, '.baton'), { recursive: true });
+    writeFileSync(join(dir, '.baton', 'baton.json'), '{}\n');
+    outs = [];
+    outWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => { outs.push(String(chunk)); return true; }) as typeof process.stdout.write;
+  });
+  afterEach(() => {
+    process.stdout.write = outWrite;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('signs the named paths with the key, and the walk counts the commit it made', async () => {
+    add('.baton/baton.json');
+    const sha = commit('-m', 'the settings, unsigned');
+    // The ceremony's shape: the state changes, and the owner signs that change.
+    writeFileSync(join(dir, '.baton', 'baton.json'), '{"agent_command":"node ./agent.mjs"}\n');
+    add('.baton/baton.json');
+    await expect(run(['sign', '-m', 'the agent the fleet runs', '--repo', dir, '--', '.baton/baton.json'])).resolves.toBe(0);
+    const signed = head();
+    expect(signed).not.toBe(sha);
+    // The commit the command made is exactly what require_signed_control counts (the unit
+    // walk's verifier, the same one the sync and the runners run).
+    const { signedControlOf } = await import('../../src/defaults/signed-control');
+    const { nodeKeygen } = await import('../../src/shared/commitSign.mjs');
+    const gitOf = (...a: string[]) => spawnSync('git', ['-C', dir, ...a], { encoding: 'utf8' }).stdout;
+    expect(signedControlOf(signed, [{ public_key: ownerPub, fingerprint: ownerFp }], gitOf, nodeKeygen)!.groups.agent_command)
+      .toMatchObject({ read: signed, key: ownerFp });
+  }, 60_000);
+
+  it('refuses: no path, an unknown flag, a missing value, and a flag-shaped -m/--repo value', async () => {
+    await expect(run(['sign', '-m', 'x', '--repo', dir])).rejects.toThrow(/names no path/);
+    await expect(run(['sign', '--nope', '--repo', dir, '--', '.baton/baton.json'])).rejects.toThrow(/not a flag of `baton owner sign`/);
+    await expect(run(['sign', '-m', '--repo', dir, '--', '.baton/baton.json'])).rejects.toThrow(/-m needs a plain value/);
+    // Round 1's token filter: `-m --url` used to lose the value token to the `-i`/`--url`
+    // filter and misparse into a confusing refusal; the flag-shaped value is now refused
+    // by name, before the filter runs.
+    await expect(run(['sign', '-m', '--url', '--repo', dir, '--', '.baton/baton.json'])).rejects.toThrow(/-m needs a plain value/);
+    await expect(run(['sign', '-m', 'x', '--repo', '-i', '--', '.baton/baton.json'])).rejects.toThrow(/--repo needs a plain value/);
+  });
+
+  it('verify-config reads the keys with the owner key and walks the checkout it names — and the checkout it stands in', async () => {
+    mkdirSync(join(dir, '.claude'), { recursive: true });
+    writeFileSync(join(dir, '.claude', 'settings.json'), '{"hooks":{}}\n');
+    add('.claude/settings.json');
+    commit('-m', 'an unsigned agent config');
+    const was = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const u = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+      calls.push(new URL(u).pathname);
+      return new Response(JSON.stringify({ keys: [{ public_key: ownerPub, fingerprint: ownerFp }] }), { status: 200 });
+    }) as typeof fetch;
+    const cwd = process.cwd();
+    try {
+      // The --checkout form…
+      await expect(run(['--url', ORIGIN, 'verify-config', 'docs', '--checkout', dir])).resolves.toBe(1);
+      expect(calls).toEqual(['/v1/owner/docs/signing-keys']);
+      expect(outs.join('')).toContain('.claude/settings.json was last changed by unsigned commit');
+      // …and the no---checkout form the usage line itself documents (round 1: it always hit
+      // the usage error), which walks the directory it stands in.
+      process.chdir(dir);
+      await expect(run(['--url', ORIGIN, 'verify-config', 'docs'])).resolves.toBe(1);
+      expect(outs.join('').match(/refusing to open a privileged session/g)).toHaveLength(2);
+    } finally {
+      globalThis.fetch = was;
+      process.chdir(cwd);
+    }
+  }, 60_000);
 });
 
 // B-7 (R-BTN-116, R-BTN-127): `baton decision answer` — a person's answer to the ticket's queued

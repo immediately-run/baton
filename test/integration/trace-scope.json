@@ -1,12 +1,4 @@
 {
-  "S-BTN-11.scheduled-suspension › S-BTN-8 / S-BTN-9 server halves > no-new-work: the heartbeat returns the suspension; the holder keeps its claim and gets no release": {
-    "at": 3,
-    "reason": "the harness wrote a claim (a state Baton did not reach)"
-  },
-  "S-BTN-11.scheduled-suspension › S-BTN-8 / S-BTN-9 server halves > stop: each holder on the account is sent a release with reason provider-suspended; another account’s is not": {
-    "at": 4,
-    "reason": "the harness wrote a claim (a state Baton did not reach)"
-  },
   "S-BTN-12.completion-confirmation › S-BTN-12 completion confirmation > completed before the sync: unclaimable until a sync sees it landed, then claimable": {
     "at": 7,
     "reason": "claim 1 confirmed by the interim post's confirmations (docs' interim shape, not modelled)"

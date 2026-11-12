@@ -14,11 +14,11 @@
 // child processes and runs git.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
-import { Runner } from '../../src/runner/runner';
+import { Runner, legActivity, newestWrite } from '../../src/runner/runner';
 import { legNeeds, readHead } from '../../src/runner/home';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
@@ -128,12 +128,15 @@ function makeRunner(over: Record<string, unknown> = {}): Runner {
 
 /** Wait until `q` returns a non-empty list — the test's window into the runner's progress. */
 async function until(q: () => Promise<unknown[]> | unknown[]): Promise<unknown[]> {
-  for (let i = 0; i < 400; i++) {
+  // Wall time, not a count of polls: a loaded machine outruns 400 polls of 10 ms (S-BTN-21's
+  // twin failed so on CI, 2026-11-10).
+  const end = Date.now() + 20_000;
+  while (Date.now() < end) {
     const r = await q();
     if (r.length) return r;
     await new Promise((r2) => setTimeout(r2, 10));
   }
-  throw new Error('condition never became true');
+  throw new Error('condition never became true in 20 s');
 }
 
 /** Wait until `pid` is gone — a killed process group's proof. */
@@ -734,6 +737,54 @@ describe('S-BTN-41 the runner', () => {
     ]);
   }, 30_000);
 
+  it('B-229: a start ends what its host\'s earlier sessions still hold, never a live sibling\'s', async () => {
+    home.leg('check', `return { suspend: true, reached: 'checked' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'ready']]), 'T-2': placed('built', [['build', 'built']], [['check', 'ready']]) },
+      [ticket('T-1', { course_id: 'relay' }), ticket('T-2', { course_id: 'relay' })]);
+    // Two earlier sessions in one state directory, each registered and holding a claim: one went
+    // silent past its lease (a restart's predecessor), one still beats (a live sibling runner).
+    const dir = mkdtempSync(join(tmpdir(), 'baton-b229-'));
+    const seedClaim = async (session: string, ticket: string): Promise<{ file: string; claim: number }> => {
+      const file = join(dir, `${session}.json`);
+      const r = makeRunner({ stateFile: file, session } as Record<string, unknown>);
+      await r.tick();
+      const workerId = (await rows<{ id: number }>('SELECT id FROM workers WHERE session_name = ?', session))[0].id;
+      await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, station, start_path, course_id)
+                   VALUES (?, ?, ?, 'n', '', ?, 'active', 'built', '[]', 'relay')`, `docs:${ticket}`, workerId, `seed:${session}`, clock.now);
+      const claim = (await rows<{ id: number }>('SELECT id FROM claims WHERE worker_id = ?', workerId))[0].id;
+      const state = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      state.claim = { id: claim, ticket_id: `docs:${ticket}`, nonce: 'n' };
+      writeFileSync(file, JSON.stringify(state));
+      return { file, claim };
+    };
+    const earlier = await seedClaim('earlier', 'T-1');
+    // 12 minutes on: past the earlier session's lease by its own clock (15 min − the 4-min margin),
+    // short of the server's reap; the sibling beats now, so its lease holds.
+    clock.now += 12 * 60_000;
+    await setClock(clock.now);
+    const sibling = await seedClaim('sibling', 'T-2');
+    const lines: string[] = [];
+    const apiFor = (secret: string) => {
+      const other = new BatonApi({
+        url: 'https://baton.test',
+        transport: (req) => hostCall(req),
+        auth: (_m, _u, _b, s) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(s ? { 'X-Worker-Secret': s } : {}) }),
+      });
+      other.setSecret(secret);
+      return other;
+    };
+    const runner = makeRunner({ stateFile: join(dir, 'later.json'), session: 'later', apiFor, log: (l: string) => lines.push(l) } as Record<string, unknown>);
+    await runner.runOnce();
+    expect(await rows('SELECT status, end_reason FROM claims WHERE id = ?', earlier.claim)).toEqual([{ status: 'released', end_reason: 'released:lease-lost' }]);
+    expect(JSON.parse(readFileSync(earlier.file, 'utf8')).claim).toBeNull();
+    expect(lines.some((l) => l.includes(`ending claim ${earlier.claim} on docs:T-1, left by the earlier session earlier`))).toBe(true);
+    // The live sibling's claim and file are its own.
+    expect(await rows('SELECT status FROM claims WHERE id = ?', sibling.claim)).toEqual([{ status: 'active' }]);
+    expect(JSON.parse(readFileSync(sibling.file, 'utf8')).claim).toMatchObject({ id: sibling.claim });
+    rmSync(dir, { recursive: true, force: true });
+  }, 30_000);
+
   it('a reaped worker re-keys on its next beat and carries on (R-BTN-14)', async () => {
     home.leg('check', `return { suspend: true, reached: 'checked' };`);
     home.commit();
@@ -1186,4 +1237,92 @@ describe('S-BTN-41 the runner', () => {
     await runner.tick(); // delivered, and acknowledged at once: the runner holds no claim
     expect(await rows(`SELECT status FROM messages WHERE kind = 'unblocked'`)).toEqual([{ status: 'acknowledged' }]);
   }, 30_000);
+
+  // B-108 — the runner's liveness line: while a leg runs, each beat says how long and how live,
+  // so a wedge forms in the log instead of silence. The stub concludes the agent; this line
+  // only makes the wait visible.
+  it('while a leg runs each beat logs its duration and the age of its newest activity signal (B-108)', async () => {
+    // A real clock (the ages are wall time) and a quiet XDG data home, so the harness-store
+    // signal is exactly what the test writes there.
+    const data = mkdtempSync(join(tmpdir(), 'baton-b108-xdg-'));
+    const wasHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = data;
+    const lines: string[] = [];
+    try {
+      home.leg('build', `await new Promise((resolve) => setTimeout(resolve, 2000));
+  out(ctx, 'build ran');
+  return { reached: 'built', next: 'check' };`);
+      home.leg('check', `out(ctx, 'check ran');
+  return { reached: 'checked', next: 'merge' };`);
+      home.leg('merge', `out(ctx, 'merge ran');
+  return { reached: 'merged' };`, true);
+      const runner = makeRunner({ log: (l: string) => lines.push(l), now: () => Date.now() });
+      home.commit();
+      await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+      // work() runs the heartbeat interval, so beats land while the leg runs — as `baton run`
+      // does; runOnce alone beats only between claims.
+      const done = runner.work();
+      await until(async () => home.evidence().filter((l) => l.includes('merge ran')));
+      runner.stop();
+      await done;
+      const outcome = lines.join('\n');
+      expect(outcome).toContain('docs:T-1 done at merged');
+      const live = lines.filter((l) => l.includes("docs:T-1's build has run"));
+      expect(live.length, 'a beat landed while the leg ran, and said how the leg was doing').toBeGreaterThan(0);
+      for (const l of live) expect(l).toMatch(/has run \d+s; newest activity (not seen|\d+s ago \((wrapper-log|harness-store)\))$/);
+    } finally {
+      if (wasHome == null) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = wasHome;
+      rmSync(data, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("a leg whose agent a bound concluded names it where the leg's end is logged (B-108)", async () => {
+    // The conclusion the stub's result carries (an agent_concluded_* shape) reaches the log's
+    // advance trail; Baton is told none of it — the claim ends as every claim does.
+    const lines: string[] = [];
+    home.leg('build', `out(ctx, 'build ran');
+  return { reached: 'built', next: 'check', conclusion: { cause: 'agent_concluded_idle', idle_ms: 900000, quiet_signals: ['stdout', 'wrapper-log'] } };`);
+    home.leg('check', `out(ctx, 'check ran');
+  return { reached: 'checked', next: 'merge' };`);
+    home.leg('merge', `out(ctx, 'merge ran');
+  return { reached: 'merged' };`, true);
+    const runner = makeRunner({ log: (l: string) => lines.push(l) });
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1', end_reason: 'done', reached: 'merged' });
+    expect(lines).toContain("baton: docs:T-1's build finished: reached built, next check (run 1 of 1) — the agent agent_concluded_idle");
+  }, 30_000);
+
+  it('the liveness line’s readers: a bounded newest-write walk, the two disk signals keyed by the home and the ticket (B-108)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-b108-home-'));
+    const data = mkdtempSync(join(tmpdir(), 'baton-b108-xdg-'));
+    const wasHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = data;
+    try {
+      const old = new Date(Date.now() - 3_600_000);
+      mkdirSync(join(dir, '.baton', 'logs'), { recursive: true });
+      writeFileSync(join(dir, '.baton', 'logs', 'T-9-build.log'), 'tick\n');
+      utimesSync(join(dir, '.baton', 'logs', 'T-9-build.log'), old, old);
+      // A directory's newest write is the newest file under it, however deep — bounded.
+      mkdirSync(join(dir, 'deep', 'a', 'b'), { recursive: true });
+      writeFileSync(join(dir, 'deep', 'old'), '');
+      utimesSync(join(dir, 'deep', 'old'), old, old);
+      writeFileSync(join(dir, 'deep', 'a', 'b', 'new'), '');
+      expect(newestWrite(join(dir, 'deep'))).toBeGreaterThan(Date.now() - 10_000);
+      expect(newestWrite(join(dir, 'no-such-path'))).toBe(0); // never live, never a veto
+      const signals = legActivity(dir, 'T-9', 'build');
+      expect(signals.map((s) => s.name)).toEqual(['wrapper-log', 'harness-store']);
+      // The stale log is read at its age; the absent store at 0 — quiet, not live. (ext4 keeps
+      // nanoseconds: a millisecond Date set can read back a hair under itself on some hosts.)
+      expect(signals[0].at).toBeGreaterThanOrEqual(old.getTime() - 1);
+      expect(signals[0].at).toBeLessThan(old.getTime() + 1_000);
+      expect(signals[1].at).toBe(0);
+    } finally {
+      if (wasHome == null) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = wasHome;
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(data, { recursive: true, force: true });
+    }
+  });
 });

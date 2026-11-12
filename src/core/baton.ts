@@ -7,11 +7,10 @@
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
 import { MIGRATIONS } from '../migrations';
 import { BatonError, errorResponse, json } from './http';
-import { checkPayload, DEFAULT_COURSE, inPeak, nextPeakChange, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation } from './board';
+import { checkPayload, DEFAULT_COURSE, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
-import { priceFor } from '../shared/sessionUsage.mjs';
 import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { WorkerApi } from './workerApi';
@@ -33,9 +32,10 @@ import { Queues } from './queues';
 import { History, HISTORY_PAGE_MAX } from './history';
 import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
+import { codeReposOf, pushersOf } from './codeRepos';
 import { Policies, canonicalJson, sha256HexSync } from './policy';
 import { Scope } from './scope';
-import { randomHex } from './db';
+import { logEvent, randomHex, systemRandom } from './db';
 import type { Ports, Row, SqlValue, Store, Workflow } from './ports';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
@@ -48,6 +48,8 @@ const POLICY_SIGNATURE_NAMESPACE = 'baton-policy@1';
 export class BatonCore {
   /** The clock (R-BTN-32). Tests replace it; nothing else here reads the time. */
   now: () => number;
+  /** The random source (B-185: a run id's random half). Tests replace it, as the clock. */
+  random: (n: number) => Uint8Array;
 
   readonly workers: WorkerApi;
   readonly claims: Claims;
@@ -85,6 +87,7 @@ export class BatonCore {
 
   constructor(private readonly ports: Ports) {
     this.now = ports.clock ?? (() => Date.now());
+    this.random = ports.random ?? systemRandom;
     this.store = ports.store;
     this.dispatcher = (wf) => this.sendDispatch(wf);
     this.outside = ports.gate ? (work) => ports.gate!.outside(work) : (work) => work();
@@ -131,7 +134,7 @@ export class BatonCore {
       queued: (ticket) => this.queues.touch(ticket), reevaluate: (ticket) => this.blocks.write([ticket]), isHeld: (ticket) => this.blocks.isHeld(ticket),
       linkBases: (ticket) => this.blocks.linkBases(ticket), answersFrom: (repo) => this.policies.current(repo)?.policy.inputs.answers ?? 'git',
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
-    this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
+    this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course), ontologies: this.ontologies,
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
       policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope });
@@ -169,7 +172,7 @@ export class BatonCore {
     // §12.8 (B-145): every repository's version 1 — the cooperative preset on a forge,
     // plain-git where the forge is git — so every reader finds one.
     this.store.transaction(() => this.policies.seedAll());
-    if ((await this.ports.scheduler.get()) == null) await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
+    await this.keepAlarm();
     // A trailing webhook dispatch owed from before a restart keeps its time (round 1, 1-A-4);
     // so do a trailing unblocked dispatch and the next reading to lapse (R-BTN-76, R-BTN-77).
     await this.armBy(this.webhooks.nextTrailing());
@@ -293,6 +296,21 @@ export class BatonCore {
     if (repositories.length) this.ports.dispatch.defer(Promise.all(repositories.map((repository) => this.dispatcher({ repository, kind: 'sync', own: true }).catch(() => false))));
   }
 
+  /** B-229 (§2.1): the one alarm is kept by every request and every start, not only a start
+   *  that finds none. An alarm that is missing, or overdue by more than two periods (a platform
+   *  that gave up retrying a failing handler, or never fired it), is set again for the next
+   *  period — found live: no tick ran for days while requests kept arriving, so nothing reaped.
+   *  A request checks at most once a period (the read is the object's cached storage, but most
+   *  requests need not make it at all); a start always checks. */
+  private alarmCheckedAt = -Infinity;
+  private async keepAlarm(fromRequest = false) {
+    const now = this.now();
+    if (fromRequest && now - this.alarmCheckedAt < ALARM_EVERY_MS) return;
+    this.alarmCheckedAt = now;
+    const at = await this.ports.scheduler.get();
+    if (at == null || at < now - 2 * ALARM_EVERY_MS) await this.ports.scheduler.set(now + ALARM_EVERY_MS);
+  }
+
   /** The alarm fires by `at` (§3: one alarm; set earlier, never later). */
   private async armBy(at: number | null) {
     if (at == null) return;
@@ -315,9 +333,21 @@ export class BatonCore {
     await this.armBy(this.webhooks.nextTrailing());
     await this.armBy(this.webhooks.nextDue());
     let lapse: number | null = null;
+    // B-229 (R-BTN-9): the reaper's share commits on its own, before the rest of the tick — a
+    // later step that throws rolls back only itself, never the reaps (found live: twelve claims
+    // held for days past their leases). A reap that could not be written is reported after
+    // everything else has run, so the tick's own work is never lost to it.
+    let unreaped: string[] = [];
+    try {
+      unreaped = this.store.transaction(() => this.claims.alarm());
+    } catch (e) {
+      this.pendingDispatch.clear();
+      throw new Error(`the alarm's reaper failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+    }
+    this.flushDispatch();
+    let stage = 'workers';
     try {
       this.store.transaction(() => {
-        this.claims.alarm();
         this.workers.alarm();
         // R-BTN-76: readings lapse; R-BTN-75: liveness moves the counts; R-BTN-77: a pending
         // `unblocked` message dies with its worker's liveness, and a window's trailing dispatch goes.
@@ -326,35 +356,44 @@ export class BatonCore {
         // R-BTN-78: a queued leg posted waiting for 72 hours is put to the owner. The recount's rows
         // and the stall's decision row are evaluated once, after both, before the dispatch reads
         // what unblocked (B-49).
+        stage = 'resources and blocks';
         lapse = this.blocks.batch(() => {
           const next = this.resources.alarm();
           if (this.blocks.liveChanged()) this.blocks.recount();
           this.blocks.raiseStalled(this.now());
           return next;
         });
+        stage = 'blocks.expireMessages';
         this.blocks.expireMessages();
         // R-BTN-39, R-BTN-116: answers that waited out a hold are applied first — before the
         // expiries, so a person's word wins over a clock that passed while the ticket was held
         // — then a person leg's expiry, due and still unanswered and unheld, arrives at its
         // `expires.reached`: Baton's own settlement, applied at the instant.
+        stage = 'questions';
         this.questions.applyPending();
         this.questions.expireDue(this.now());
+        stage = 'unblocked';
         this.takeUnblocked();
         // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.
+        stage = 'notices';
         this.notices.alarm();
         // R-BTN-81: the history of tickets closed 90 days ago goes.
+        stage = 'history.purge';
         this.history.purge();
         // §12.8 (B-145, R-BTN-189): a protection report that lapsed past its 24 hours stops
         // feeding `no-runner-lands` — every repository with floors is re-judged, and a newly
         // broken one stops offering claims and releases its running ones.
+        stage = 'policies.enforceFloors';
         this.policies.enforceFloors();
         // R-BTN-174: a non-live worker's derived rows go 30 days after it was last live, and a
         // revoked grant's rows go with the grant.
+        stage = 'ontologies.upkeep';
         this.ontologies.upkeep();
       });
     } catch (e) {
       this.pendingDispatch.clear(); // rolled back: nothing to tell the mirror
-      throw e;
+      // B-229: the step is named, so a tick that keeps failing says where.
+      throw new Error(`the alarm's tick failed at ${stage} (its reaps committed): ${e instanceof Error ? e.message : String(e)}`, { cause: e });
     }
     this.flushDispatch();
     await this.armBy(lapse);
@@ -372,6 +411,9 @@ export class BatonCore {
     if (ontologyDue != null) await this.armBy(ontologyDue);
     // R-BTN-116: the earliest person expiry still pending, so the alarm wakes at the instant.
     await this.armBy(this.questions.nextDue());
+    // B-229: a reap that could not be written fails the tick only now, after its work: the
+    // failure reaches the host's log naming each claim, and the next tick tries it again.
+    if (unreaped.length) throw new Error(`the alarm could not reap ${unreaped.length} claim(s): ${unreaped.join('; ')}`);
   }
 
   /** R-BTN-77: each repository's unblocked dispatch due now, queued to send after the commit. */
@@ -391,6 +433,7 @@ export class BatonCore {
       if (done.has(m.id)) continue;
       this.store.transaction(() => {
         this.store.script(m.sql);
+        m.backfill?.(this.store, (n) => this.random(n));
         this.store.exec('INSERT INTO _baton_migrations (id, applied_at) VALUES (?, ?)', m.id, this.now());
       });
     }
@@ -399,6 +442,7 @@ export class BatonCore {
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     this.pendingDispatch.clear();
+    await this.keepAlarm(true);
     try {
       const res = await this.route(req, url);
       // An error answer means its transaction rolled back: nothing changed to mirror.
@@ -438,7 +482,17 @@ export class BatonCore {
           // answers to the sync's decisions, and the legs claims finished with an evidence
           // pointer (the claim's nonce beside it) — so a marker in git counts only as the
           // evidence Baton recorded, and an answer only as the owner gave it here.
-          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), ...this.claims.syncRecord(repo) });
+          // B-127: the repository's owner signing keys — the public keys of its human-only
+          // owners (B-136's register as far as it is built; an API key cannot sign) — beside
+          // Baton's own record, so the sync that just took this number reads what counts from
+          // Baton, never from the repository it is judging.
+          // B-183 (§4.3): and each live ticket's last accepted `version`, handed back so the
+          // source's own code — never Baton — judges whether its store read is older than what
+          // the board holds, and refuses to post a ticket it judges behind (R-BTN-150).
+          // B-182 (R-BTN-140): and the effective `code_repos`, each entry with its forge, host,
+          // ids and web_base, and the owners' `pushers` host-qualified — what the fact adapter
+          // reads each repository by, and whose words count there.
+          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(this.store, repo), pushers: pushersOf(this.store, repo), ...this.claims.syncRecord(repo), versions: this.ticketVersions(repo), signing_keys: await this.admin.signingKeys(repo), require_signed_control: !!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag });
         }
         if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
           const { repo, req: signed } = await this.verifySync(req, 'sync');
@@ -762,7 +816,32 @@ export class BatonCore {
         // must not roll the evaluation back with it.
         const wanted = typeof (body as { ticket_id?: unknown }).ticket_id === 'string' ? (body as { ticket_id: string }).ticket_id : null;
         const prepared = this.claims.prepareSetsFor(workerId, wanted != null && wanted.includes(':') ? wanted : null);
-        return json(tx(() => this.claims.claim(workerId, body, prepared)));
+        // B-127 (round 2, the pairing): the claim and the standing signed-control record are
+        // read in ONE transaction, and the record it paired with is stored on the claim — the
+        // answer serves the claim's own record, and a lost-response replay of the same
+        // request_id serves the same pairing again, whatever the board has moved to since.
+        // The old code read the record after the claim's transaction (an async hop away, for
+        // the owner keys), so a post accepted in between paired the claim's snapshot with the
+        // newer post's record, and the runner's own checks (a keyless read must be the
+        // snapshot itself; a signed read must be its ancestor) burned the honest claim as
+        // `cannot-finish:spec`, a counted, non-retryable attempt, where the stale board's
+        // release is unpenalised.
+        const answer = tx(() => {
+          const a = this.claims.claim(workerId, body, prepared);
+          const ticket = String(a.ticket_id ?? '');
+          if (ticket.includes(':')) {
+            const standing = this.sql<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', repositoryOf(ticket))[0];
+            // Set once: a replay keeps the pairing the claim was made with, never the moved
+            // board's (an empty string is the no-record shape, never NULL). Round 4: stored on
+            // every claim, whatever the setting — stored only while it was on, a claim made
+            // with it off and replayed after the owner turned it on backfilled the moved
+            // board's record beside the old snapshot, and the runner refused the honest claim.
+            // `claimControl` still answers `{}` unless the repository requires signed control.
+            this.store.exec('UPDATE claims SET control_json = ? WHERE id = ? AND control_json IS NULL', standing?.control_json ?? '', Number(a.claim_id));
+          }
+          return a;
+        });
+        return json({ ...answer, ...await this.claimControl(String(answer.ticket_id ?? ''), Number(answer.claim_id ?? 0)) });
       }
       if (m === 'GET' && p === '/v1/runner/next') return json(this.claims.next(workerId));
       if (m === 'GET' && p === '/v1/runner/recommendations') {
@@ -832,12 +911,6 @@ export class BatonCore {
         const body = await readJson(req);
         return json(tx(() => this.workers.sendMessage(owner, body)));
       }
-      if (p === '/v1/ui/suspensions') {
-        const body = await readJson(req);
-        return json(tx(() => this.workers.setSuspension(owner, body)));
-      }
-      const lift = /^\/v1\/ui\/suspensions\/(\d+)\/lift$/.exec(p);
-      if (lift) return json(tx(() => this.workers.liftSuspension(owner, Number(lift[1]))));
       const reap = /^\/v1\/ui\/claims\/(\d+)\/reap$/.exec(p);
       if (reap) {
         const body = await readJson(req);
@@ -950,6 +1023,10 @@ export class BatonCore {
     const rest = o[2];
     // B-90: the repository's grants and settings, read before any write below.
     if (m === 'GET' && rest === 'grants') return json(this.grantsView(repo));
+    // B-127: the repository's owner signing keys — public keys of its human-only owners — the
+    // read `baton owner verify-config` carries into a checkout (the same list the sync's
+    // observation serves its own credential).
+    if (m === 'GET' && rest === 'signing-keys') return json({ keys: await this.admin.signingKeys(repo) });
     if (m === 'POST' && rest === 'grants') return json(await this.admin.grant(actor, repo, await body(), 'owner'));
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
     if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1])));
@@ -1204,6 +1281,11 @@ export class BatonCore {
     // than the last accepted one, or a void or used number, is refused whole here.
     const n = p.observation;
     this.observations.use(r, n);
+    // B-183 (§4.4, R-BTN-184): the `tickets-approved` guarantee is defined over a ticket file's
+    // approval — a source that reads only as it is now has no file to approve, so its post to a
+    // repository whose policy's floors include the guarantee is refused, naming it. What approval
+    // means for a tracker source is a later ticket's.
+    this.refuseCurrentUnderApprovalFloor(repo, p);
     const head = this.headOf(r);
     const at = this.now();
     const normative = p.tickets !== undefined;
@@ -1219,7 +1301,7 @@ export class BatonCore {
       // staleness do not stall for the hold's 24 hours. Its interim confirmations likewise.
       this.store.transaction(() => {
         this.observations.accept(r, n);
-        const seen = normative ? this.refreshStations(r, p, n, at, true) : new Map<string, Seen>();
+        const seen = normative ? this.refreshStations(r, p, n, at, null, true) : new Map<string, Seen>();
         this.claims.confirm(confirmations, n);
         this.claims.judge(r, n, seen);
         this.store.exec('UPDATE held_snapshots SET observation = ? WHERE repository_id = ? AND sha = ?', n, r, p.sha);
@@ -1241,30 +1323,64 @@ export class BatonCore {
       throw new BatonError('snapshot-rejected', `a rewritten history is held for the owner until ${new Date(deadline).toISOString()}; claims continue on the current head`);
     }
     if (p.sha === head) {
-      // §7.1 step 4: a refresh — the board's tickets unchanged, its stations, paths, next legs and
-      // closures replaced. Its registry is not applied: the sync builds that body at the commit it
-      // fetched, which may be an ancestor of the head, and an older registry would roll a course
-      // back. A refresh is a reading like any other: it confirms ends and judges claims made
-      // before its number (R-BTN-62, R-BTN-35), not only the post that moved the head.
+      // §4.3 step 4 (R-BTN-11): a refresh — the head's own reading again under a newer number,
+      // its stations, paths, next legs and closures replaced; its registry is not applied: the
+      // sync builds that body at the commit it fetched, which may be an ancestor of the head, and
+      // an older registry would roll a course back. A refresh is a reading like any other: it
+      // confirms ends and judges claims made before its number (R-BTN-62, R-BTN-35), not only the
+      // post that moved the head.
+      // B-183: a source may change a ticket with no commit, so a refresh may now add, close or
+      // change any ticket whose `version` differs from the row Baton holds — materialization
+      // upserts by `row_hash`, `version` among its inputs. But only a body read at the head it
+      // refreshes (`read_sha`, §4.4): a confirm-only re-post from a checkout behind the head
+      // (§7.1) is labelled with the head's sha while its tickets were read at the ancestor, and
+      // writing them would roll the cache back — so a refresh naming another commit's read, or
+      // none (an older CLI's), changes no ticket row, exactly as before B-183. The markdown
+      // source's versions are blob ids, so no version changes without a new commit and its
+      // refreshes still write no ticket row.
+      const readAtHead = normative && p.read_sha === p.sha;
+      const refreshed = readAtHead ? await this.rowsFor(repo, p) : null;
       return this.store.transaction(() => {
+        // The row hashes were awaited after the number was used, so another run may have posted
+        // meanwhile (round 1, finding 2): this reading must still be the newest, over the head it
+        // was judged against — the same two re-checks the new-head path performs after its
+        // identical await. `accept` would no-op on a newer accepted number, but `rememberSource`
+        // would regress the stored declaration and `materialize` would overwrite the newer post's
+        // rows with this older reading's and drop every ticket it added.
+        if (!this.observations.newest(r, n)) throw new BatonError('stale-observation', `a newer reading than ${n} was accepted while this post was judged; take a new number and retry (R-BTN-62)`);
+        if (this.headOf(r) !== head) throw new BatonError('head-moved', `the head moved to ${this.headOf(r) ?? 'unset'} while this post was judged; re-read it and retry`);
         this.observations.accept(r, n);
-        const seen = normative ? this.refreshStations(r, p, n, at) : new Map<string, Seen>();
+        if (readAtHead) this.rememberSource(r, p);
+        // B-127: the record rides a refresh too (the latest post's word stands); the head has not
+        // moved, so no `unsigned-control` event is raised for it again.
+        this.applyControl(r, p, at, head);
+        let wrote: { upserted: string[]; deleted: number; renumbered: { from: string; to: string; key: string }[] } | null = null;
+        if (refreshed) {
+          // Every ticket a refresh writes must name a course in force (R-BTN-48, R-BTN-69, round
+          // 1 finding 3) — the same per-ticket check the new-head path runs, without applying the
+          // registry the body carries (an older one would roll a course back, above).
+          this.requireCoursesInForce(r, refreshed.map(({ row }) => row.course_id));
+          wrote = this.materialize(r, refreshed, p.sha, at);
+          // A live ticket is not closed (stations.ts, R-BTN-12): a refresh that re-adds a
+          // withdrawn ticket clears its closure row, as a new head does (round 1, finding 4) —
+          // withdraw-and-reopen with no commit is the tracker flow this ticket builds for.
+          this.stations.reopened(r, refreshed.map(({ row }) => row.id));
+        }
+        const seen = normative ? this.refreshStations(r, p, n, at, wrote) : new Map<string, Seen>();
         const confirmed = this.claims.confirm(confirmations, n);
         const judged = this.claims.judge(r, n, seen);
-        return { ok: true, unchanged: true, confirmed: confirmed + judged.confirmed, stale_released: judged.stale_released };
+        return {
+          ok: true, unchanged: true,
+          ...(wrote ? { tickets_upserted: wrote.upserted.length, tickets_deleted: wrote.deleted, ...(wrote.renumbered.length ? { renumbered: wrote.renumbered } : {}) } : {}),
+          confirmed: confirmed + judged.confirmed, stale_released: judged.stale_released,
+        };
       });
     }
     if (!accepted && p.parent_sha !== head) throw new BatonError('head-moved', `the head is ${head ?? 'unset'}; re-read it and retry`);
 
     // Hash every row before the transaction: the digest is async, the transaction is not.
-    const rankOf = new Map((p.ready ?? []).map((id, i) => [id, i]));
-    const posted = normative ? p.tickets!.map(rowForTicket) : p.state!.items.map((it) => rowFor(it, rankOf));
-    const rows = await Promise.all(posted.map(async (base) => {
-      // R-BTN-66: tiers arrive by name and are matched as positions in this repository's ladder.
-      const row = { ...base, tier_position: tierPosition(repo.tiers, base.tier ?? null) };
-      return { row, hash: await rowHash(row) };
-    }));
-    const changed: { upserted: number; deleted: number; confirmed?: number; stale_released?: number; courses_refused?: string[]; fleet_ignored?: boolean; dropped?: string[] } = { upserted: 0, deleted: 0 };
+    const rows = await this.rowsFor(repo, p);
+    const changed: { upserted: number; deleted: number; renumbered?: { from: string; to: string; key: string }[]; confirmed?: number; stale_released?: number; courses_refused?: string[]; fleet_ignored?: boolean; dropped?: string[] } = { upserted: 0, deleted: 0 };
     this.store.transaction(() => {
       // The row hashes were awaited after the number was used, so another run may have posted
       // meanwhile: this reading must still be the newest, over the head it was judged against.
@@ -1286,43 +1402,13 @@ export class BatonCore {
       const refused = this.applyRegistry(r, p, rows.map(({ row }) => row.course_id), at, acceptedRoutes);
       if (refused.length) changed.courses_refused = refused;
       const legsBefore = this.queuedLegs(r);
-      const upserted: string[] = [];
-      // The repository's own tickets only, keyed by their local ids (R-BTN-47).
-      const have = new Map(this.sql<{ local_id: string; row_hash: string }>('SELECT local_id, row_hash FROM tickets WHERE repository_id = ?', r).map((x) => [x.local_id, x.row_hash]));
-      for (const { row, hash } of rows) {
-        const before = have.get(row.id);
-        have.delete(row.id);
-        if (before === hash) continue;
-        const id = qualify(r, row.id);
-        this.store.exec(
-          `INSERT INTO tickets (id, repository_id, local_id, path, title, project, status, node, queue, tags, tier, requires_clause, operator_only,
-             depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, tier_position, expedite, display)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (id) DO UPDATE SET path = excluded.path, title = excluded.title, project = excluded.project,
-             status = excluded.status, node = excluded.node, queue = excluded.queue, tags = excluded.tags,
-             tier = excluded.tier, requires_clause = excluded.requires_clause, operator_only = excluded.operator_only,
-             depends_on = excluded.depends_on, blocked_by = excluded.blocked_by, repos = excluded.repos,
-             ord = excluded.ord, rank = excluded.rank, snapshot_sha = excluded.snapshot_sha, row_hash = excluded.row_hash,
-             since = excluded.since, holder = excluded.holder, course_id = excluded.course_id, tier_position = excluded.tier_position,
-             expedite = excluded.expedite, display = excluded.display`,
-          id, r, row.id, row.path, row.title, row.project, row.status, row.node, row.queue, row.tags, row.tier,
-          row.requires_clause, row.operator_only, row.depends_on, row.blocked_by, row.repos, row.ord, row.rank, p.sha, hash, row.since, row.holder, row.course_id,
-          row.tier_position, row.expedite, row.display);
-        this.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
-        for (const name of row.requires) this.store.exec('INSERT INTO ticket_requires (ticket_id, name) VALUES (?, ?)', id, name);
-        changed.upserted++;
-        upserted.push(id);
-      }
-      // Tickets no longer live leave the cache (R-BTN-35); their claims and events stay.
-      for (const gone of have.keys()) {
-        const id = qualify(r, gone);
-        this.stations.clear(id);
-        this.blocks.forget(id);
-        this.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
-        this.store.exec('DELETE FROM tickets WHERE id = ?', id);
-        this.queues.touch(id);
-        changed.deleted++;
-      }
+      // The repository's own tickets, keyed by their local ids (R-BTN-47) — upserts by
+      // `row_hash`, drops by what the post no longer names, renumberings by `key` (B-183).
+      const wrote = this.materialize(r, rows, p.sha, at);
+      changed.upserted = wrote.upserted.length;
+      changed.deleted = wrote.deleted;
+      if (wrote.renumbered.length) changed.renumbered = wrote.renumbered;
+      const upserted = wrote.upserted;
       // Where each ticket is (R-BTN-70): the normative post's stations, or the interim post's
       // placement at each course's start; and the closures it reports (R-BTN-10).
       const stations = normative
@@ -1351,6 +1437,13 @@ export class BatonCore {
       if (this.reference(r, p)) changed.fleet_ignored = true;
       this.store.exec('INSERT INTO board_snapshots (repository_id, sha, parent_sha, received_at, ticket_count) VALUES (?, ?, ?, ?, ?) ON CONFLICT (repository_id, sha) DO NOTHING', r, p.sha, p.parent_sha, at, ticketCount);
       this.store.exec('INSERT INTO board_head (repository_id, sha) VALUES (?, ?) ON CONFLICT (repository_id) DO UPDATE SET sha = excluded.sha', r, p.sha);
+      // B-127: the post's signed-control record stands for the repository (the latest post's
+      // word on what counts), and a post that moved the head onto unsigned control inputs —
+      // while the repository requires them signed — raises one `unsigned-control` event under
+      // Needs you, naming the paths and the commits. A refresh carries the record again and
+      // raises nothing new: the head it would name has not moved.
+      this.applyControl(r, p, at, head);
+      this.rememberSource(r, p);
       // A hold is against one head (R3-1223): when the head moves — an accepted rewrite or a
       // plain fast-forward — every row held against the head it leaves is retired, answered or
       // not. Left in place, an accepted row would accept a NEW rewrite silently whenever the
@@ -1367,6 +1460,103 @@ export class BatonCore {
       changed.stale_released = judged.stale_released;
     });
     return { ok: true, ...changed };
+  }
+
+  /** B-127 (R-BTN-66 as amended, §7.1): the post's signed-control record — what the sync found
+   *  about owner-signed control inputs at this commit — stands for the repository, and a post
+   *  that moved the head (`from` is the head it left) onto unsigned control inputs raises one
+   *  `unsigned-control` event under Needs you while the repository requires them signed, naming
+   *  the paths and the commits. Round 1 (re-firing): only entries the owner has not already
+   *  been told raise it — a newly listed path, or the same path under a new unsigned commit —
+   *  so one standing unsigned change does not re-notice on every later head move, and opting
+   *  the setting on still notices what stands. Round 2: the witness is every notice the
+   *  window holds, not the last one — the last event names only what was fresh at its own
+   *  head, and once two notices have named different sets (event k naming A, event k+1 naming
+   *  B) a last-only dedupe alternated A, B, A, B on every later head move, forever; the union
+   *  also carries entries a single event's 50-line display slice left out, so they do not
+   *  rotate back in as news. The record is the sync's computation: the paths and signatures
+   *  are B-137's to move server-side over the raw commits; the groups a runner loads from are
+   *  verified by each runner before it loads them, never only by the sync that posts
+   *  them. */
+  private applyControl(r: string, p: BoardPayload, at: number, from: string | null): void {
+    if (p.control !== undefined) {
+      this.store.exec(`INSERT INTO signed_control (repository_id, sha, control_json, updated_at) VALUES (?, ?, ?, ?)
+                       ON CONFLICT (repository_id) DO UPDATE SET sha = excluded.sha, control_json = excluded.control_json, updated_at = excluded.updated_at`,
+        r, p.sha, JSON.stringify(p.control), at);
+    }
+    if (from == null || from === p.sha || p.control === undefined) return;
+    if (!p.control.unsigned.length) return;
+    const required = !!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', r)[0]?.flag;
+    if (!required) return;
+    // Round 2: every prior notice in the view's window (7 days, the same 100 the Needs-you
+    // view reads) is the witness — see the comment above. The previous control record is NOT
+    // the witness: while the setting was off nothing was raised, and opting in must still
+    // notice what stands; an unreadable event says nothing — the event fires.
+    const seen = new Set<string>();
+    for (const prior of this.sql<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'unsigned-control' AND repository_id = ? AND at > ? ORDER BY seq DESC LIMIT 100`, r, at - 7 * 86_400_000)) {
+      try {
+        for (const u of (JSON.parse(prior.detail_json) as { changes?: { path: string; commits: string[] }[] }).changes ?? []) seen.add(`${u.path}\u0000${u.commits.join(',')}`);
+      } catch {
+        // Unreadable: nothing from this event is known to have been noticed.
+      }
+    }
+    const fresh = p.control.unsigned.filter((u) => !seen.has(`${u.path}\u0000${u.commits.join(',')}`));
+    const changes = fresh.slice(0, 50);
+    if (!changes.length) return;
+    logEvent(this.store, at, 'unsigned-control', 'sync', { sha: p.sha, parent_sha: from, keys: p.control.keys, changes, ...(fresh.length > changes.length ? { omitted: fresh.length - changes.length } : {}) }, null, null, r);
+  }
+
+  /** §14 Needs you, B-127: the unsigned control changes of the last 7 days, newest first, of
+   *  repositories that require their control inputs signed. */
+  unsignedControlView(now: number) {
+    return this.sql<{ repository_id: string; at: number; detail_json: string }>(
+      `SELECT repository_id, at, detail_json FROM events WHERE kind = 'unsigned-control' AND at > ? ORDER BY seq DESC LIMIT 100`, now - 7 * 86_400_000)
+      .map((row) => {
+        let detail: Record<string, unknown> = {};
+        try {
+          detail = JSON.parse(row.detail_json) as Record<string, unknown>;
+        } catch {
+          detail = {};
+        }
+        return { repository_id: row.repository_id, at: row.at, ...detail };
+      });
+  }
+
+  /** B-127: the signed-control record a claim answer carries while its repository requires
+   *  signed control — the setting and the owner keys from Baton itself, the groups from the
+   *  record stored on the claim by its own transaction (round 2's pairing: the answer and a
+   *  lost-response replay serve the claim's own record, never a newer post's). `required` and
+   *  `keys` are never the post's word; the groups' commits are the post's, and each runner
+   *  verifies them against `keys` before loading, so a post that lied about a signature
+   *  changes what a runner refuses, not what it runs. With the setting off, `{}`: nothing is
+   *  gated, and the ticket's brief mark rides its row as ever. A group missing (`read` null or
+   *  absent) is the fail-closed case — no signed version — and the runner treats it so. */
+  private async claimControl(ticket: string, claimId: number): Promise<{ control?: unknown }> {
+    if (!ticket.includes(':')) return {};
+    const repo = repositoryOf(ticket);
+    if (!this.sql<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repo)[0]?.flag) return {};
+    const register = await this.admin.signingKeys(repo);
+    const keys = register.map((k) => k.public_key);
+    // The claim's own record, stored at the claim (0041): immutable from the answer's side.
+    const stored = this.sql<{ control_json: string | null }>('SELECT control_json FROM claims WHERE id = ?', claimId)[0]?.control_json ?? null;
+    let groups: Record<string, { read: string | null; key: string | null; unsigned: string[] }> = {};
+    let recordKeys: string[] | null = null;
+    try {
+      const parsed = stored ? (JSON.parse(stored) as { keys?: unknown; groups: Record<string, { read: string | null; key: string | null; unsigned: string[] }> }) : null;
+      groups = parsed?.groups ?? {};
+      recordKeys = Array.isArray(parsed?.keys) ? parsed.keys.filter((k): k is string => typeof k === 'string') : null;
+    } catch {
+      groups = {};
+    }
+    // Round 4 (the register moved): the record was computed under the keys it names, and the
+    // runner verifies under today's register. When the two differ — an owner key registered or
+    // removed between the post and the claim — a disagreement is the record's age, not a lie
+    // the claim should pay for: `register_moved` tells the runner to release such a claim as
+    // a stale board (unpenalised) instead of `cannot-finish:spec`. It never changes what loads:
+    // every check still runs against today's register, and the next post re-computes under it.
+    const now = new Set(register.map((k) => k.fingerprint));
+    const moved = recordKeys != null && (recordKeys.length !== now.size || recordKeys.some((k) => !now.has(k)));
+    return { control: { required: true, keys, ...(moved ? { register_moved: true } : {}), ...groups } };
   }
 
   /** B-129 (R-BTN-85, "every disagreement with git is logged", both values): the accepted post's
@@ -1395,8 +1585,122 @@ export class BatonCore {
     }
   }
 
-  /** A refresh's stations (§7.1, R-BTN-62): the head's tickets unchanged, where each is replaced. */
-  private refreshStations(r: string, p: BoardPayload, n: number, at: number, held = false): Map<string, Seen> {
+  /** A post's tickets as hashed rows (§4, R-BTN-33): hashed before any transaction, the digest
+   *  being async. `version` and `key` are inputs of the hash, so a ticket whose version changed
+   *  rewrites its row (B-183). The interim post's items (docs until R3-1233) become rows the
+   *  same way; only a refresh skips materialization for them (§4.3: the interim post carries no
+   *  versions, and its refreshes change no ticket). */
+  private async rowsFor(repo: Repository, p: BoardPayload): Promise<{ row: TicketRow; hash: string }[]> {
+    const rankOf = new Map((p.ready ?? []).map((id, i) => [id, i]));
+    const posted = p.tickets !== undefined
+      ? p.tickets.map(rowForTicket)
+      : p.state!.items.map((it) => rowFor(it, rankOf));
+    return await Promise.all(posted.map(async (base) => {
+      // R-BTN-66: tiers arrive by name and are matched as positions in this repository's ladder.
+      const row = { ...base, tier_position: tierPosition(repo.tiers, base.tier ?? null) };
+      return { row, hash: await rowHash(row) };
+    }));
+  }
+
+  /** Write a post's ticket rows (§4.3, R-BTN-11, R-BTN-35): the repository's own tickets, keyed
+   *  by their local ids (R-BTN-47) — rows whose `row_hash` changed are upserted, tickets the post
+   *  no longer names leave the cache (their claims and events stay), and — B-183 (R-BTN-147) — a
+   *  dropped ticket replaced by a **new** id at the same `key` is `renumbered`: the new id takes
+   *  the old one's hold and backoff, and an event says the move. Returns what it wrote. */
+  private materialize(r: string, rows: { row: TicketRow; hash: string }[], sha: string, at: number): { upserted: string[]; deleted: number; renumbered: { from: string; to: string; key: string }[] } {
+    const upserted: string[] = [];
+    const renumbered: { from: string; to: string; key: string }[] = [];
+    const have = new Map(this.sql<{ local_id: string; row_hash: string; key: string | null; path: string }>(
+      'SELECT local_id, row_hash, key, path FROM tickets WHERE repository_id = ?', r).map((x) => [x.local_id, x]));
+    // A new ticket's key → its id, for the renumbering read of the dropped rows. Only ids the
+    // board did not already hold (review round 1): the post ADDS a ticket at the key of one it
+    // drops (R-BTN-147) — an existing ticket that moves onto a dropped key keeps its own hold
+    // and backoff, it is not "renumbered onto".
+    const held = new Set(have.keys());
+    const byKey = new Map(rows.filter(({ row }) => !held.has(row.id)).map(({ row }) => [row.key ?? row.path ?? row.id, row.id]));
+    for (const { row, hash } of rows) {
+      const before = have.get(row.id);
+      have.delete(row.id);
+      if (before?.row_hash === hash) continue;
+      const id = qualify(r, row.id);
+      this.store.exec(
+        `INSERT INTO tickets (id, repository_id, local_id, path, title, project, status, node, queue, tags, tier, requires_clause, operator_only,
+           depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, tier_position, expedite, display, version, key, brief)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET path = excluded.path, title = excluded.title, project = excluded.project,
+           status = excluded.status, node = excluded.node, queue = excluded.queue, tags = excluded.tags,
+           tier = excluded.tier, requires_clause = excluded.requires_clause, operator_only = excluded.operator_only,
+           depends_on = excluded.depends_on, blocked_by = excluded.blocked_by, repos = excluded.repos,
+           ord = excluded.ord, rank = excluded.rank, snapshot_sha = excluded.snapshot_sha, row_hash = excluded.row_hash,
+           since = excluded.since, holder = excluded.holder, course_id = excluded.course_id, tier_position = excluded.tier_position,
+           expedite = excluded.expedite, display = excluded.display, version = excluded.version, key = excluded.key, brief = excluded.brief`,
+        id, r, row.id, row.path, row.title, row.project, row.status, row.node, row.queue, row.tags, row.tier,
+        row.requires_clause, row.operator_only, row.depends_on, row.blocked_by, row.repos, row.ord, row.rank, sha, hash, row.since, row.holder, row.course_id,
+        row.tier_position, row.expedite, row.display, row.version, row.key, row.brief ?? null);
+      this.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
+      for (const name of row.requires) this.store.exec('INSERT INTO ticket_requires (ticket_id, name) VALUES (?, ?)', id, name);
+      upserted.push(id);
+    }
+    let deleted = 0;
+    // Tickets no longer live leave the cache (R-BTN-35); their claims and events stay.
+    for (const [gone, had] of have) {
+      const id = qualify(r, gone);
+      this.stations.clear(id);
+      this.blocks.forget(id);
+      this.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
+      this.store.exec('DELETE FROM tickets WHERE id = ?', id);
+      this.queues.touch(id);
+      deleted++;
+      // B-183 (R-BTN-147): the post drops one id and adds another at the same `key` — the source
+      // renumbered its ticket. The new id takes the old one's hold and backoff (`ticket_overrides`),
+      // and the move is logged as an event `renumbered`.
+      const key = had.key ?? had.path;
+      const to = key != null ? byKey.get(key) : undefined;
+      if (key != null && to != null && to !== gone) {
+        this.store.exec(
+          `INSERT INTO ticket_overrides (ticket_id, expedite, hold, hold_reason, retry_after, set_by, set_at, runs_json)
+           SELECT ?, expedite, hold, hold_reason, retry_after, set_by, set_at, runs_json FROM ticket_overrides WHERE ticket_id = ?
+           ON CONFLICT (ticket_id) DO UPDATE SET hold = excluded.hold, hold_reason = excluded.hold_reason,
+             retry_after = excluded.retry_after, runs_json = excluded.runs_json`,
+          qualify(r, to), id);
+        this.store.exec('DELETE FROM ticket_overrides WHERE ticket_id = ?', id);
+        this.event(r, 'renumbered', { from: gone, to, key }, at);
+        renumbered.push({ from: gone, to, key });
+      }
+    }
+    return { upserted, deleted, renumbered };
+  }
+
+  /** B-183 (§4.4, R-BTN-184): a `custom` source that reads only as it is now has no ticket file
+   *  to approve, so its post to a repository whose policy's floors include the `tickets-approved`
+   *  guarantee is refused, naming the guarantee. */
+  private refuseCurrentUnderApprovalFloor(repo: Repository, p: BoardPayload): void {
+    if (p.source?.kind !== 'custom' || p.source.versions !== 'current') return;
+    const floored = (this.policies?.floors(repo.id) ?? []).filter((f) => f.guarantees.includes('tickets-approved'));
+    if (!floored.length) return;
+    throw new BatonError('invalid-params',
+      `this repository's policy floors include the tickets-approved guarantee, which is defined over a ticket file's approval (R-BTN-184) — a custom ticket source with versions: "current" cannot post it (B-183)`);
+  }
+
+  /** B-183: the last accepted post's ticket-source declaration, kept on the head for the claim
+   *  answer (§4.5: the runner re-verifies by the source's own way of reading). A post that
+   *  declares none keeps what stood — an older CLI's post undeclares nothing. */
+  private rememberSource(r: string, p: BoardPayload): void {
+    if (!p.source) return;
+    this.store.exec('UPDATE board_head SET source_kind = ?, source_versions = ? WHERE repository_id = ?', p.source.kind, p.source.versions ?? null, r);
+  }
+
+  /** B-183 (§4.3): each live ticket's last accepted version, keyed by local id, for the
+   *  observation's answer — Baton's own record, returned to the posting credential only, as
+   *  `positions` is. A ticket posted with no version holds `''`. */
+  ticketVersions(r: string): Record<string, string> {
+    return Object.fromEntries(this.sql<{ local_id: string; version: string }>('SELECT local_id, version FROM tickets WHERE repository_id = ?', r).map((t) => [t.local_id, t.version]));
+  }
+
+  /** A refresh's stations (§4.3, R-BTN-62): the head's tickets as the refresh materialized them,
+   *  where each is replaced. `wrote` is the refresh's own materialization (B-183) — null on a
+   *  held history's refresh, which changes no ticket. */
+  private refreshStations(r: string, p: BoardPayload, n: number, at: number, wrote: { upserted: string[]; deleted: number } | null, held = false): Map<string, Seen> {
     const live = new Set(this.sql<{ local_id: string }>('SELECT local_id FROM tickets WHERE repository_id = ?', r).map((t) => t.local_id));
     const stations = new Map(Object.entries(p.stations ?? {}).filter(([id]) => live.has(id)).map(([id, st]) => [id, stationOf(st)] as [string, PostedStation]));
     // As on a new head: a live ticket the refresh does not place is placed nowhere, never offered
@@ -1405,14 +1709,17 @@ export class BatonCore {
     for (const id of live) if (!stations.has(id)) this.stations.clear(qualify(r, id));
     // A held history's closures stand even for tickets the current head still has: the holder's
     // archive may be in the rewritten history alone, and its done end must not wait the hold's
-    // 24 hours (R-BTN-62; round 2, 2-A-0). A plain refresh of the head cannot close what it has.
+    // 24 hours (R-BTN-62; round 2, 2-A-0). A plain refresh's own closures are applied as they
+    // arrive (B-183): validation already refuses a post closing a ticket it also posts, and its
+    // materialization dropped what it no longer names.
     const seen = this.stations.apply(r, p.sha, n, stations, (p.closed ?? []).filter((c) => held || !live.has(c.id)), at);
     // R-BTN-116: a refresh carries the tickets' questions and the run's attestations like a new
     // head (§4.4) — each is idempotent, so a re-post of the same question or answer moves nothing.
     this.questions.posted(r, (p.tickets ?? []).filter((t) => live.has(t.id)), new Set(stations.keys()));
     this.questions.attestations(r, p.attestations ?? []);
-    // A refresh's stations carry `needs` and `decisions` too (R-BTN-76, R-BTN-78).
-    this.applyBlocks(r, stations, [], legsBefore);
+    // A refresh's stations carry `needs` and `decisions` too (R-BTN-76, R-BTN-78); a refresh that
+    // materialized (B-183) recounts for what its rows moved, as a new head does.
+    this.applyBlocks(r, stations, wrote?.upserted ?? [], legsBefore, !!wrote && wrote.deleted > 0);
     return seen;
   }
 
@@ -1446,15 +1753,23 @@ export class BatonCore {
     return dropped;
   }
 
+  /** Every course a post's tickets name must be in force (R-BTN-48, R-BTN-69) — checked wherever
+   *  rows are materialized: on a new head (inside `applyRegistry`, after the registry applies)
+   *  and on a refresh that writes rows (round 1, finding 3), so no course-less ticket can sit in
+   *  the cache that no course resolves. */
+  private requireCoursesInForce(r: string, ticketCourses: string[]): void {
+    for (const c of new Set(ticketCourses)) {
+      if (!this.courses.get(r, c)) throw new BatonError('invalid-params', `a ticket's course ${c} is not in ${r}'s registry`);
+    }
+  }
+
   /** The registry of a post (R-BTN-48, R-BTN-69), inside its transaction: applied whole, then
    *  every course the post's tickets name must be in force — a refused file with none to keep,
    *  or a course the registry dropped while a ticket still names it, refuses the post. */
   private applyRegistry(r: string, p: BoardPayload, ticketCourses: string[], at: number, acceptedRoutes?: Map<string, Record<string, string[]>>): string[] {
     const refused = p.registry ? this.courses.apply(r, p.registry, p.sha, at, acceptedRoutes) : [];
     this.stations.reset();
-    for (const c of new Set(ticketCourses)) {
-      if (!this.courses.get(r, c)) throw new BatonError('invalid-params', `a ticket's course ${c} is not in ${r}'s registry`);
-    }
+    this.requireCoursesInForce(r, ticketCourses);
     // R-BTN-64: a course file accepted with renames carries its active claims over.
     for (const e of p.registry ?? []) {
       if (refused.includes(e.id)) continue;
@@ -1472,37 +1787,19 @@ export class BatonCore {
     return refused;
   }
 
-  /** The reference data the sync posts with every snapshot (§7.3, §7.4): providers, peak
-   *  schedules, per-model prices and limits, the reviewer catalog. Each
-   *  table is a copy of a docs file, never edited here, so it is rewritten whole: an account
-   *  the file no longer lists is deleted. (Nothing references `model_providers` yet; when
-   *  workers and suspensions do, R3-1211 decides what retiring a referenced account means.)
+  /** The reference data the sync posts with every snapshot (§7.3, §7.4): the reviewer catalog
+   *  and matrix. Each table is a copy of a docs file, never edited here, so it is rewritten
+   *  whole. The model tables' blocks — `providers`, `prices` — are gone (B-142): what they
+   *  carried is a reading or a course rule (§6.3, R-BTN-76), and a sync that still posts them
+   *  is accepted with the fields ignored.
    *  Returns whether the payload carried fleet data this repository may not write. */
   private reference(repo: string, p: BoardPayload): boolean {
     const exec = (q: string, ...a: unknown[]) => this.store.exec(q, ...a);
     // §6.8, R-BTN-66: a repository's transcript repositories are its owners' setting, never read
     // from a board post (R3-1240); a sync that still sends them is not refused for it.
     // The rest is the instance's: only the fleet repository writes it (interim, R3-1231 2b).
-    const carries = p.providers != null || p.matrix != null || p.reviewers != null;
+    const carries = p.matrix != null || p.reviewers != null;
     if (this.registry.fleetRepository() !== repo) return carries;
-    if (p.providers) {
-      exec('DELETE FROM provider_models');
-      const ids = p.providers.accounts.map((a) => a.id);
-      exec(`DELETE FROM model_providers WHERE id NOT IN (${ids.map(() => '?').join(', ') || "''"})`, ...ids);
-      for (const a of p.providers.accounts) {
-        exec(`INSERT INTO model_providers (id, name, billing, window_limits_json) VALUES (?, ?, ?, ?)
-              ON CONFLICT (id) DO UPDATE SET name = excluded.name, billing = excluded.billing, window_limits_json = excluded.window_limits_json`,
-          a.id, a.name, a.billing, a.window_limits ? JSON.stringify(a.window_limits) : null);
-      }
-      exec('DELETE FROM peak_schedules');
-      for (const s of p.providers.peak_schedules) exec('INSERT INTO peak_schedules (id, rules_json, factor) VALUES (?, ?, ?)', s.id, JSON.stringify(s.rules), s.factor);
-      for (const m of p.providers.models) {
-        const price = priceFor(m.model, p.prices);
-        exec(`INSERT INTO provider_models (provider_id, model_id, input_per_m, output_per_m, cache_read_per_m, cache_write_per_m, monthly_limit_usd, peak_schedule_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          m.provider, m.model, price?.input ?? null, price?.output ?? null, price?.cacheRead ?? null, price?.cacheWrite5m ?? null, m.monthly_limit_usd, m.peak_schedule ?? null);
-      }
-    }
     const catalog = p.reviewers ?? p.matrix?.agents;
     if (catalog && p.matrix) {
       exec('DELETE FROM reviewer_agents');
@@ -1663,26 +1960,14 @@ export class BatonCore {
     const ready = this.readyRows(repositories);
     const byTier = this.readyByTier(ready);
 
-    const schedules = new Map(this.sql<{ id: string; rules_json: string; factor: number }>('SELECT id, rules_json, factor FROM peak_schedules').map((s) => [s.id, s]));
-    const providers = this.sql<{ id: string; name: string; billing: string; window_limits_json: string | null }>('SELECT id, name, billing, window_limits_json FROM model_providers ORDER BY id').map((a) => {
-      const models = this.sql<{ model_id: string; monthly_limit_usd: number | null; peak_schedule_id: string | null }>(
-        'SELECT model_id, monthly_limit_usd, peak_schedule_id FROM provider_models WHERE provider_id = ? ORDER BY model_id', a.id);
-      const peaks = [...new Set(models.map((m) => m.peak_schedule_id).filter((x): x is string => !!x))].map((id) => {
-        const s = schedules.get(id);
-        if (!s) return { schedule: id, in_peak: null, next_change: null, factor: null };
-        const rules = JSON.parse(s.rules_json);
-        return { schedule: id, in_peak: inPeak(rules, now), next_change: nextPeakChange(rules, now), factor: s.factor, models: models.filter((m) => m.peak_schedule_id === id).map((m) => m.model_id) };
-      });
-      return { id: a.id, name: a.name, billing: a.billing, window_limits: a.window_limits_json ? JSON.parse(a.window_limits_json) : null, models, peaks };
-    });
-
     const held = this.sql(
       `SELECT repository_id, sha, parent_sha, head_sha, ticket_count, received_at, auto_accept_at FROM held_snapshots
        WHERE accepted_at IS NULL ORDER BY received_at`);
-    const suspensions = this.sql(`SELECT id, provider_id, model_id, mode, starts_at, ends_at, reason, set_by, lifted_at FROM provider_suspensions
-                                  WHERE lifted_at IS NULL AND (ends_at IS NULL OR ends_at > ?) ORDER BY starts_at`, now);
+    // B-142: `providers` and `suspensions` served here no more — the model tables they read are
+    // gone; an unavailable provider is a reading (§6.3, R-BTN-76) and a peak preference a rule
+    // in the course (§6.10), never a dashboard row.
     return {
-      server_time: now, repositories, ready, ready_by_tier: byTier, providers, held, workers: this.workers.workersView(now), suspensions,
+      server_time: now, repositories, ready, ready_by_tier: byTier, held, workers: this.workers.workersView(now),
       running: this.claims.running(now), timeline: this.claims.timeline(now),
       // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
       limits: this.admin.view(now),
@@ -1692,7 +1977,9 @@ export class BatonCore {
         // push no open claim covers — until an owner resolves each.
         scope: this.scope.needsYou(),
         // B-133: the person legs' questions with each option's computed action (R-BTN-116).
-        questions: this.questions.needsYou() },
+        questions: this.questions.needsYou(),
+        // B-127: the unsigned control changes a post moved the head onto while signed control is required.
+        unsigned_control: this.unsignedControlView(now) },
       // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.
       blocked: this.blocks.view(),
       // R-BTN-85: the disagreements with git of the last 7 days, by kind.

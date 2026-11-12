@@ -232,11 +232,11 @@ describe('a seed-only registration is named in a read (B-90, B-91)', () => {
 });
 
 describe('this repository’s seed (wrangler.toml)', () => {
-  it('both environments carry baton’s owner_keys, and every entry is a registration and a seed the start accepts', async () => {
-    // Production's [vars] and staging's: a malformed entry stops the Worker at its first request
-    // (src/core/registry.ts), so each is taken through both checks here.
+  it('the production seed carries baton’s owner_keys, and every entry is a registration and a seed the start accepts', async () => {
+    // Production's [vars] — the one environment since B-224: a malformed entry stops the Worker at
+    // its first request (src/core/registry.ts), so each entry is taken through both checks here.
     const lists = [...inject('wranglerToml').matchAll(/BATON_REPOSITORIES = '(.*)'/g)].map((m) => JSON.parse(m[1]) as Record<string, unknown>[]);
-    expect(lists.length).toBe(2);
+    expect(lists.length).toBe(1);
     for (const list of lists) {
       for (const entry of list) {
         expect(() => checkRegistration(entry, 'BATON_REPOSITORIES[0]')).not.toThrow();

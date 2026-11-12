@@ -34,6 +34,11 @@ is summarized in the principal table (§12.1).
       namespace `baton-request`, hash `sha256` or `sha512`, whose embedded public key is the one
       `keyid` names. The namespace keeps it from passing as any other signature by the same key,
       such as a signed commit.
+    - **Owner-signed commits** (B-127, R-BTN-66 as amended) use the same SSHSIG format in the
+      namespace `git`, over the commit object without its `gpgsig` header — git's own
+      `gpg.format ssh` writes them. The sync verifies them to mark what counts (§7.1) and each
+      runner verifies them again before loading what a post named (R-BTN-133); the two
+      namespaces keep one from passing as the other.
     - Both hosts verify with WebCrypto (Ed25519, P-256). An `sk-` signature must carry the
       user-presence flag; its counter is not checked.
   - **Refused `unauthenticated`:** `created` more than 5 minutes from Baton's clock; an
@@ -509,10 +514,10 @@ is summarized in the principal table (§12.1).
   on them; Instances and Capacity, which are tenant-wide, are an administrator's.
   - **Runners** — by name: alive or dead, harness, tier ceiling, capabilities (declared, and granted per repository, R-BTN-174), tags, courses,
     lease timeout, last seen, last activity, the claim held, current activity, transcript link,
-    `isolation`, credential kind and registering token.
+    executor (source, digest and `provides`, R-BTN-107), credential kind and registering token.
   - **Timeline** — a swimlane per alive runner over 24 hours: claims as bars, activities nested
     under them by kind, failed ones marked; a segment shows its label, detail and transcript;
-    leg runs link their `session_url` (R-BTN-113) and show their log directory as text (R-BTN-128).
+    leg runs link their `session_url` (R-BTN-113) and show their log directory (R-BTN-128) and their executor digest, environment and instance (R-BTN-107) as text.
   - **Running** — each active claim's event timeline and reap deadline; **stalled** when the
     runner is alive but `last_activity_at` is over 2 hours old; a leg waiting on a condition
     shows `condition-wait`; session links and log directories as on the Timeline.

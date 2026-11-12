@@ -1,0 +1,119 @@
+---
+title: "B-211 — Runner screens: /runners draws the mockup's runner cards with their claim block and controls, /runners/{runner} adds the 24-hour timeline — claims as bars, activities nested — with a table beside the drawing"
+id: B-211
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1210
+tier: judgement
+description: "The Runners screens of BATON-UI-V2 on B-196's reads. /runners: the mockup's cards — name, state mark (working, silent, idle, dead), harness and kind, last report, capability chips with the granted ones marked, the claim block (ticket, leg, running for, lease bar, attempt and backoff, log directory as text) and the dead runner's reap sentence — with the controls ui.view places: Status, Wind down, Stop (one click), Open session where the link passed session_hosts. /runners/{runner}: the card, the earlier attempts, and the window's timeline as inline SVG with a lane of claim bars by end and nested activities, every segment's label, detail, session link and log directory on focus, ?since= in the URL, and the same claims and activities as a table. Requires: B-196, B-207."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-196
+  - B-207
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "the per-runner page carries the 24h timeline." The
+mockup's Workers page (`workers.png`: cards with ● Working, ◆ Silent 18 min, ○ Idle, ✕ Dead; the
+claim block; Open harness session ↗, Stream stdout / stderr, Status, Interrupt leg…) is the list;
+its Overview Timeline (one lane per runner, claims as bars, activities inside, a legend of
+released, silent, reaped, activity) is the runner page's lane. "Interrupt leg…" is Stop
+(R-BTN-119); "Stream stdout / stderr" is not built (R-BTN-128); the model line is not drawn
+(R-BTN-3) — all in B-191's drop list.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the Runners screens,
+carrying the retired Runners and Timeline views; stalled is 2 hours; Stop one click),
+[§6.9](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-9) (messages: status request,
+wind-down), [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-119](../spec/BATON_SPEC/08-runners.md#sec-8-4):
+Stop), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3)),
+[§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5) ([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5)),
+[§5.9](../spec/BATON_SPEC/05-courses.md#sec-5-9) ([R-BTN-174](../spec/BATON_SPEC/05-courses.md#sec-5-9)),
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) (`POST /v1/ui/messages`: `status_request`,
+`wind-down`, `release`). Context: the brief — Temporal's UI as the reference for the timeline;
+an interactive SVG group carries its own accessible name.
+
+**Depends on:** B-196 (the reads), B-207 (controls and dialogs).
+
+**Used by:** B-203.
+
+### What to build
+
+1. **`/repositories/{r}/runners`** (`src/dashboard/screens/runners/`): one card per row of
+   `repo.runners`, grouped by hostname as R-BTN-3 says (Decision 9a; the mockup's grouping by
+   state is not followed), each host's cards in state order — working, silent (alive and
+   `last_activity_at` over 2 hours old), idle, dead — with the state as each card's mark: the
+   name line (hostname and session name, the state mark and word, harness and kind, tier
+   ceiling, "last report n ago"), capability
+   chips (granted ones marked), then the claim block from `claim` — ticket linking its page,
+   leg, running for, the lease bar from `claimed_at` to `lease_ends_at` with now marked and
+   minutes left, attempt n of `max_runs` with `next_backoff_until`, `log_dir` as text with the
+   `baton leg log` line, the current activity's kind and label — or "idle since", or for a dead
+   runner "lost its heartbeat at …; its claim on … was reaped" from `reaped_at` and the
+   history, as text; `busy_elsewhere` as "working on another repository"; the newest
+   `last_report` payload as text with its age under the card (the reply a Status request
+   produces), and `transcript_url` as a link where set. Controls by `ui.view` on
+   `repository/runners/{runner}` through B-207 with context `{repository, to_runner_id,
+   ticket_id}`: **Status** (`runner.status-request`), **Wind down** (`runner.wind-down`), **Stop**
+   on the claim (`leg.stop`, one click, Decision 3a), and **Open session** as a plain link only
+   where `session_url` is set (host shown).
+2. **`/repositories/{r}/runners/{runner}`**: the card; `profile` through `View` where its
+   schema has a view, else pretty-printed; the earlier `attempts`; then the **timeline** from
+   `runner.show.window`: inline SVG, one lane, time left to right over `since` to now with hour
+   ticks, each claim a bar coloured and labelled by `end` (running, released, silent, reaped,
+   done, suspended — label first, colour second; the mockup's legend), activities nested under
+   their claim by kind with failed outcomes marked by shape; each bar and segment a focusable
+   `<g>` with `role="button"` and an accessible name, opening a panel with its label, detail
+   (text), session link under R-BTN-113 and `log_dir` as text; `?since=` as URL query (24 h
+   default, 7 d max). Under the drawing, the same claims and activities as a `<table>` for
+   screen readers and phones. A pure layout helper in `src/dashboard/lib/timeline.ts`
+   (time to x, nesting) is unit-tested.
+3. **Phone.** Cards stack at 375 px with the controls under the claim; the timeline is the table.
+
+### What not to do
+
+- No log streaming; no runner channel; no message kind the registry does not list.
+- No dialog on Stop (Decision 3a); no code dialog here (nothing on this screen is confirmed).
+- No capability meaning; no model.
+
+### Trust
+
+- **Every value** is the reads' text through `Text` (hostnames, labels, detail), `profile`
+  through `View`; `session_url` only as passed.
+- **Status, Wind down, Stop** — registry actions through `authorize`; Stop on a ticket the
+  runner does not hold is `forbidden`, drawn as text.
+
+### Invariants
+
+- **Capabilities are the runner's statement** (R-BTN-174); **log directories as text**
+  (R-BTN-128); **session links only from `session_hosts`** (R-BTN-113).
+- **Stop is one click** (R-BTN-155, Decision 3a); **text, never markup** (§12.3).
+- **An owner's session, its repositories** (R-BTN-155).
+
+### Tests
+
+Under `test/ui/` with fixture reads: the cards group by hostname, order by state within a host
+and draw the lease bar; `last_report` is drawn as text under the card; Stop sends `release` with
+no dialog and draws a `forbidden` as text; an unlisted `session_url` is
+text; the timeline's bars and nested segments match the fixture and the table lists the same
+rows; a segment's `<g>` has an accessible name; a hostile label is text; `?since=` round-trips.
+
+### Exit criteria
+
+- [ ] `/runners` and `/runners/{runner}` built and usable on a local Baton at desktop and 375 px.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-196 after review._
+
+_2026-11-09 — revised after the second review: grouped by hostname per R-BTN-3 (Decision 9a);
+the Status reply drawn from `last_report`; the sidebar count line dropped (`repo.list` is the
+one source)._

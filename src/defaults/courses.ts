@@ -56,6 +56,10 @@ export interface LegStub {
   /** B-110: the deterministic test gate — no agent runs; the stub itself executes the course's
    *  `test_script` on the PR's head and the close pushes the branch's `Baton-Tests` marker. */
   tests?: true;
+  /** B-231: a leg that answers the gate's red — run from `pr-open` or `fixed` — must push. The
+   *  stub reads the ticket's PR branch heads before and after the agent; unchanged, it fails the
+   *  leg rather than report a fix of a tree the gate already tested red. */
+  pushes?: 'after-red';
 }
 
 export interface BuiltIn {
@@ -234,7 +238,9 @@ const CREATE_PR: BuiltIn = {
     review: { ask: VERDICT, position: `{ ...(answer !== 'approve' && (ctx.run ?? 1) >= ${CREATE_PR_COURSE.legs.review.max_runs} ? { suspend: true } : {}), reached: 'reviewed', next: answer === 'approve' ? 'merge' : (ctx.run ?? 1) >= ${CREATE_PR_COURSE.legs.review.max_runs} ? 'adjudicate' : 'fix', verdict: answer }` },
     // B-110: a fix's push re-opens the gate, so what follows fix is run-tests again — the next
     // round waits on a green head, never on the fix's own word for it.
-    fix: { position: "{ reached: 'fixed', next: 'run-tests' }" },
+    // B-231: from the gate's red (pr-open, fixed) a fix that pushed nothing is no fix — the stub
+    // fails the leg rather than send the unchanged tree back to the gate, up to 30 times.
+    fix: { position: "{ reached: 'fixed', next: 'run-tests' }", pushes: 'after-red' },
     // B-110: the third round's blockers are the owner's — the leg waits on them (the sync posts
     // the `review-rounds-<n>` decision carrying their question) until they answer through Baton
     // (`baton owner resolve … merge|owner|round`). No agent reproduces anything, so no runner is
