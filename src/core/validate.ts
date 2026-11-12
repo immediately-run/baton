@@ -9,6 +9,11 @@ import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 /** §5: the harness's own session id, the rule `claim.sh --session` already applies. */
 export const SESSION_NAME = /^[A-Za-z0-9_.:-]{1,128}$/;
 export const HOSTNAME = /^[A-Za-z0-9.-]{1,253}$/;
+/** A forge host as B-182's `code_repos` names it: a lowercased DNS name with an optional port,
+ *  validated as a `web_base`'s authority is (R-BTN-92) — no userinfo, no path, no dot-run. */
+export const FORGE_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[1-9][0-9]{0,4})?$/;
+/** R-BTN-138's id kind, as a `code_repos` entry stores it: a decimal string. */
+export const FORGE_ID = /^[1-9][0-9]{0,19}$/;
 export const SHA256_HEX = /^[0-9a-f]{64}$/;
 // The id forms of R-BTN-47, each spelled once.
 const REPOSITORY_SRC = '[a-z][a-z0-9-]{0,39}';

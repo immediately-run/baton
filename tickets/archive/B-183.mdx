@@ -2,11 +2,10 @@
 title: "B-183 — opaque ticket versions: a ticket source that is not a git file, re-verified by version, not by commit"
 id: B-183
 project: baton
-status: available
-updated: 2026-11-05
+status: done
+updated: 2026-11-09
 tags:
   - roadmap-item
-  - EXPEDITE
 tier: judgement
 description: "The ticket source (R-BTN-74) may already say a ticket is an issue or a row, but two rules still assume a file at a commit: a refresh carries no ticket change (R-BTN-11), so a tracker edit waits for a git push; and the runner re-verifies a claim by reading the file at snapshot_sha (R-BTN-5, R-BTN-34). Give each posted ticket an opaque version string whose meaning is the source's, compared by Baton for equality only; let the source declare whether it can read a ticket at a version (pinned) or only as it is now (current); add a read export; let a refresh carry changed versions; and hand each version back in the observation so the source's own code, never Baton, judges order. The markdown source posts the file's blob id and behaves exactly as today."
 topics:
@@ -38,8 +37,8 @@ Baton already treats the commit as an opaque string: it accepts a board by **equ
 (R-BTN-11, R-BTN-62); ancestry is the sync's judgement (R-BTN-147). So a ticket version needs no
 ordering in core — equality is enough, and any ordering is repository code (values 4).
 
-**Spec:** [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)), [§4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) ([R-BTN-11](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3), [R-BTN-62](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3), [R-BTN-147](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)), [§4.4](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4) (the board post),
-[§4.5](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5) ([R-BTN-5](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5), [R-BTN-34](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5)), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-35](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [§9.8](../spec/BATON_SPEC/09-claims.md#sec-9-8) ([R-BTN-84](../spec/BATON_SPEC/09-claims.md#sec-9-8)), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3) (validation of text).
+**Spec:** [BATON_SPEC §4.2](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)), [§4.3](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) ([R-BTN-11](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3), [R-BTN-62](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3), [R-BTN-147](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)), [§4.4](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4) (the board post),
+[§4.5](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5) ([R-BTN-5](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5), [R-BTN-34](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5)), [§1](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-35](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [§9.8](../../spec/BATON_SPEC/09-claims.md#sec-9-8) ([R-BTN-84](../../spec/BATON_SPEC/09-claims.md#sec-9-8)), [§12.3](../../spec/BATON_SPEC/12-security.md#sec-12-3) (validation of text).
 
 **Depends on:** none.
 

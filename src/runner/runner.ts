@@ -9,19 +9,23 @@
 // release message, a releasing owner bar, a regressed path or a course change stop the leg at its
 // next safe point first.
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { createHash, randomBytes } from 'node:crypto';
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
+import { verifySignedCommit, nodeKeygen } from '../shared/commitSign.mjs';
+import { controlGroupsOf, groupUnchangedAt } from '../defaults/signed-control';
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
 import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, type CourseLoad } from './home';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
+import { MIN_SECRET_BYTES, createLegMasker, maskLegOutput, namesASecret, secretValues } from './mask';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
-import { StateFile, leaseLostFrom } from './state';
+import { StateFile, leaseLostFrom, type RunnerState } from './state';
 import { bareTicketId } from '../defaults/ticket-state';
 import { MARKDOWN_SOURCE } from '../defaults/ticket-versions';
 
@@ -38,6 +42,10 @@ type NextLegs = { leg: string; state: string; waiting_on?: string }[];
 
 export interface RunnerOptions {
   api: BatonApi;
+  /** B-229: a separate API for another session's worker, by its secret — how a runner that
+   *  starts ends the claims its host's earlier sessions left (their state files, beside this
+   *  one). Separate, so this runner's own beats never carry the other's secret. Absent: none. */
+  apiFor?: (secret: string) => BatonApi;
   /** The home repository's checkout, whose git the course and the scripts come from. */
   home: string;
   /** The Baton repository id that checkout is (the heartbeat's courses are declared for it). */
@@ -86,6 +94,10 @@ export interface RunnerOptions {
    *  scope audit. The default reads it with the runner's bounded git; a test replaces it. A read
    *  that fails skips the audit (logged), never the leg. */
   auditRefs?: (home: string) => RefState | null;
+  /** R-BTN-144 class 7 (B-170): the names `runner.json` `mask_env` lists, which are masked
+   *  besides the names that say a secret by their ending. `baton run` reads them before the
+   *  loop; absent (a caller that is not the CLI), none are named. */
+  maskEnv?: string[];
 }
 
 /** The leg call in flight: its executor call, through which an abort line or a kill reaches it. */
@@ -250,10 +262,15 @@ export class Runner {
     course: CourseLoad;
     /** B-94: the leg this claim is running, so a death leaves a line naming it. */
     leg: string | null;
+    /** B-108: when that leg started — the beat's liveness line reads its duration. */
+    legAt: number;
     child: LegChild | null;
     /** Resolved by the next tick's view of the snapshot's next legs (the short-wait re-read). */
     waiters: ((next: NextLegs) => void)[];
   } | null = null;
+  /** B-108: the time of the last line drained from the leg child's stderr (—verbose, where the
+   *  stub mirrors the agent's streams): a live signal the beat's liveness line counts. */
+  private legLineAt: number | null = null;
   private pendingAbort: PendingAbort | null = null;
   private lostLease = false;
   private closedDone = false;
@@ -557,6 +574,16 @@ export class Runner {
         const next = (view.next ?? null) as NextLegs | null;
         for (const w of this.inflight.waiters.splice(0)) w(next ?? []);
       }
+      // B-108: the liveness line — while a leg call is in flight, each beat says how long it has
+      // run and how old its newest activity signal is, so an operator watches a wedge form (and
+      // the leg's ceiling approach) instead of silence. Advice for the operator's eye, never a
+      // detector: the stub concludes its agent; this line only makes the wait visible.
+      if (this.inflight.child != null && this.inflight.leg != null) {
+        const leg = this.inflight.leg;
+        const signals = [...legActivity(this.o.home, this.inflight.ticket, leg), ...(this.legLineAt != null ? [{ name: 'drained-line', at: this.legLineAt }] : [])];
+        const newest = signals.reduce((a, b) => (b.at > a.at ? b : a));
+        this.log(`baton: ${this.inflight.ticket}'s ${leg} has run ${ageWords(this.now() - this.inflight.legAt)}; newest activity ${newest.at > 0 ? `${ageWords(this.now() - newest.at)} ago (${newest.name})` : 'not seen'}`);
+      }
     }
     for (const m of (answer.messages ?? []) as { id: number; kind: string; payload?: { reason?: string } }[]) {
       // 2026-10-24: every message is logged on receipt — a release or cue the runner acts on
@@ -582,6 +609,49 @@ export class Runner {
       }
     }
     if (!this.inflight) for (const id of this.toAck.splice(0)) await this.o.api.ack(id).catch(() => {});
+  }
+
+  /** B-229 (R-BTN-26): every other state file beside this session's that still names a claim
+   *  whose lease is lost by the file's own clock — a session that can no longer act on it, the
+   *  same reading its own fence makes — has that claim ended with its own worker's secret, as
+   *  `released:lease-lost`, and the file's claim cleared. A sibling session whose lease still
+   *  holds is a live runner on this host, and is left alone; a file never answered (no
+   *  `last_ok`) holds no lease to read, and is left too. A refusal clears the file (the claim is
+   *  ended or not that worker's any more); a failure to reach Baton leaves it for the next start. */
+  private async endEarlierSessions(): Promise<void> {
+    if (!this.o.apiFor) return;
+    const dir = dirname(this.o.stateFile);
+    let names: string[];
+    try {
+      names = readdirSync(dir).filter((n) => n.endsWith('.json'));
+    } catch {
+      return;
+    }
+    const now = this.now();
+    for (const name of names) {
+      const path = join(dir, name);
+      if (resolve(path) === resolve(this.o.stateFile)) continue;
+      let s: RunnerState;
+      try {
+        s = JSON.parse(readFileSync(path, 'utf8')) as RunnerState;
+      } catch {
+        continue;
+      }
+      if (!s?.claim || typeof s.secret !== 'string' || s.secret === '' || !leaseLostFrom(s, now)) continue;
+      const claim = s.claim;
+      const session = basename(name, '.json');
+      this.log(`baton: ending claim ${claim.id} on ${claim.ticket_id}, left by the earlier session ${session} (its lease is lost)`);
+      try {
+        await this.o.apiFor(s.secret).end(claim.id, { end_reason: 'released:lease-lost', next: null });
+      } catch (e) {
+        if (!(e instanceof BatonRefusal) || e.code === 'unavailable' || e.status >= 500) {
+          this.log(`baton: claim ${claim.id} could not be ended now (${e instanceof Error ? e.message : String(e)}); the next start tries again`);
+          continue;
+        }
+        if (e.code !== 'claim-ended') this.log(`baton: claim ${claim.id} of the earlier session ${session} was refused (${e.message}); its file lets it go`);
+      }
+      new StateFile(path).set({ claim: null });
+    }
   }
 
   /** An end whose failure is never fatal: claimed-ended is the answer we wanted anyway, and a
@@ -675,6 +745,11 @@ export class Runner {
    *  it, and it is stopped when the next leg starts or the claim ends. */
   private session: { handle: Handle; checkout: string } | null = null;
 
+  /** R-BTN-144 class 7 (B-170): the last leg's masked set, from the environment it was given. It
+   *  outlives the leg's call: the close and handoff that follow run in its session with the same
+   *  environment, and a leg's own failure text reaches this log after its stream closed. */
+  private legSecrets: readonly string[] = [];
+
   /** Start a session of `kind` on the executor the host chose. */
   private async startSession(kind: SessionKind, o: { session_id: string; run_id?: string; ticket?: string; leg?: string; snapshot_sha?: string; paths: string[]; env: Record<string, string> }): Promise<Handle> {
     return await this.executor.start({
@@ -705,12 +780,39 @@ export class Runner {
     if (s) await this.executor.stop(s.handle, reason).catch((e) => this.log(`baton: the executor's stop failed (${msg(e)})`));
   }
 
+  /** R-BTN-144 (B-170): one leg's class 7 masked stream sink — the leg's `run` call's stderr. The
+   *  runner holds a literal's length back across writes, so a value split by a stream is still
+   *  one literal, and the sink writes to the runner's log, which is what a leg log reads
+   *  (R-BTN-128): the masked bytes are what leaves the runner. `release` is the call's end — the
+   *  wrapper's outcome line rides the stream's last writes, so what it held goes first. */
+  private legSink(secrets: readonly string[]): { onStderr: (line: string) => void; release: () => void } {
+    const sink = createLegMasker(secrets);
+    return {
+      onStderr: (line) => {
+        const out = sink.push(line);
+        if (out !== '') this.log(out);
+      },
+      release: () => {
+        const out = sink.flush();
+        if (out !== '') this.log(out);
+      },
+    };
+  }
+
   /** One wrapper call (R-BTN-133) through the executor's `exec`: `node <wrapper> <call> <script>`,
-   *  its arguments on stdin's first line, its outcome on stdout's last. */
-  private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number): Running {
+   *  its arguments on stdin's first line, its outcome on stdout's last. `sink` is the leg's
+   *  running stream sink (R-BTN-144, B-170), which the leg's `run` passes and the runner releases
+   *  at the call's end; every other call's stderr is the verbose drain, masked of classes 5 and
+   *  6 and of the leg's class 7 set — those calls run in the leg's session, with the same
+   *  environment its literals came from. */
+  private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number, sink?: () => ReturnType<Runner['legSink']>): Running {
+    const leg = sink?.();
     return this.executor.exec(h, ['node', LEG_PROCESS, call, script], {
       cwd: this.o.home, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
-      ...(this.verbose ? { onStderr: (l: string) => this.log(`baton: ${call}: ${l}`) } : {}),
+      // R-BTN-144: what a leg's stderr carries leaves masked — class 5 and class 6 by the shared
+      // pattern, the leg's own class 7 set with it while its run streams, and by the drain after.
+      // B-108: a drained line is leg activity either way — the beat's liveness line counts it.
+      onStderr: leg ? (l: string) => { this.legLineAt = Date.now(); leg.onStderr(l); } : this.verbose ? (l: string) => { this.legLineAt = Date.now(); this.log(maskLegOutput(`baton: ${call}: ${l}`, this.legSecrets)); } : undefined,
     });
   }
 
@@ -902,6 +1004,9 @@ export class Runner {
       this.state.set({ claim: null });
       await this.endQuietly(orphan.id, { end_reason: 'released:lease-lost', next: null });
     }
+    // B-229: and what this host's earlier sessions still hold — each start is a new session with
+    // a new state file, so the orphan above never sees them.
+    await this.endEarlierSessions();
     // B-86: the claim goes out only on the declaration the server holds — `sent` is the list the
     // last answered beat carried, which is what `rewriteSettings` recorded. A runner whose grant
     // arrived on a beat that declared nothing must beat once more before claiming (review round
@@ -980,7 +1085,12 @@ export class Runner {
     const ticket = claim.ticket_id as string;
     const claimId = claim.claim_id as number;
     this.state.set({ claim: { id: claimId, ticket_id: ticket, nonce: claim.nonce } });
-    this.log(`baton: claimed ${ticket} at ${claim.station}, queued leg ${claim.legs?.[0]}${this.verbose ? ` (claim ${claimId}, nonce ${claim.nonce})` : ''}`);
+    // B-127 item 7: the brief's mark, posted whether or not signed control is required — an
+    // unsigned `**Brief:** the owner …` line is a claim, not the owner (the standing CLAUDE.md
+    // rule), and the log says so before any agent is told to read the ticket.
+    const brief = claim.brief as { signed?: boolean; signer?: string; commit?: string } | undefined;
+    this.log(`baton: claimed ${ticket} at ${claim.station}, queued leg ${claim.legs?.[0]}${this.verbose ? ` (claim ${claimId}, nonce ${claim.nonce})` : ''}`
+      + (brief ? ` — brief ${brief.signed ? 'owner-signed' : `unsigned (changed at ${String(brief.commit).slice(0, 8)}): a claim, not the owner`}` : ''));
     return this.runClaim(claim);
   }
 
@@ -1119,6 +1229,93 @@ export class Runner {
     return true;
   }
 
+  /** B-127 (R-BTN-66 as amended, R-BTN-133's verified tree extended): the signed-control record
+   *  of a claim whose repository requires it — verified here, never only by the sync that posted
+   *  it (the adversarial review's finding 4): each group's `read` commit must be in the home
+   *  checkout, carry a valid `git`-namespace SSHSIG by one of the owner keys the answer names
+   *  (the keys Baton served, never any the post chose), be an ancestor of the claim's
+   *  snapshot, and be the commit the walk itself names — round 2: `--is-ancestor` refuses an
+   *  off-branch commit, but an OLD owner-signed commit on the snapshot's own line (the rollback
+   *  the first-parent rule exists to prevent) still verifies and descends, so the runner
+   *  recomputes the group walk at the claim's snapshot, with `controlGroupsOf` — the same walk,
+   *  code and key order the sync ran — and refuses a `read` that disagrees; an old or off-branch
+   *  signed commit never loads, whatever a record says. A group naming a signing key is what
+   *  the legs load `agent_command`, the overrides and `rank.mjs` from, and what the course
+   *  group's commit — the course's graph, its leg scripts and their instruction `.md` files,
+   *  one coherent tree — loads at; a group naming no key is the pre-adoption baseline, honest
+   *  only as the claim's own snapshot and only while the walk there finds no change to the
+   *  group (round 4: the keyless shape is held to the walk like the keyed one), and gates
+   *  nothing; a group with no
+   *  signed version at all fails closed: Baton hands out no claim in that state (round 1,
+   *  unpenalised), and this check remains the last line; the runbook
+   *  (docs/runbooks/owner-signed-control.mdx) walks the owner through signing once. */
+  private async verifyControl(claim: Record<string, any>): Promise<Record<string, string> | { error: string }> {
+    const control = claim.control as { required?: boolean; keys?: unknown } & Partial<Record<'agent_command' | 'overrides' | 'rank' | 'course', { read?: unknown; key?: unknown }>> | null | undefined;
+    if (!control?.required) return {};
+    const keys = Array.isArray(control.keys) ? control.keys.filter((k): k is string => typeof k === 'string' && k !== '') : [];
+    // Round 2 (the on-branch rollback): recomputed once, compared per group — the walk is the
+    // runner's own word over its home checkout's history, never the record's.
+    const recomputed = keys.length ? controlGroupsOf(String(claim.snapshot_sha), keys.map((k) => ({ public_key: k, fingerprint: '' })), (...args) => git(this.o.home, args), nodeKeygen) : null;
+    const out: Record<string, string> = {};
+    for (const group of ['agent_command', 'overrides', 'rank', 'course'] as const) {
+      const read = control[group]?.read;
+      const key = control[group]?.key;
+      if (typeof read !== 'string' || read === '') {
+        return { error: `the repository requires owner-signed control and no owner-signed version of ${group} exists — an owner signs the current state once and the next post names it (B-127)` };
+      }
+      // The baseline: no signing key named, nothing gated for this group — and honest only as
+      // the claim's own snapshot (round 1: a record naming any other commit with no key is a
+      // lie or an edge, and never ungates the group on its word alone).
+      if (key == null) {
+        if (read !== claim.snapshot_sha) {
+          return { error: `the ${group} group names commit ${read.slice(0, 10)} with no signing key — only the snapshot itself (${String(claim.snapshot_sha).slice(0, 10)}) may stand as the unsigned baseline (B-127)` };
+        }
+        // Round 4 (the keyless lie): the keyless shape is held to the walk too — honest only
+        // when no commit in the walk's window changed the group at the snapshot (the group
+        // predates the walk's memory). A group with changes is either signed (a keyed read) or
+        // the fail-closed no-signed-version state, so a record naming the snapshot with no key
+        // over a nonempty log — `{read: <head>, key: null}` written over an unsigned push —
+        // refuses here, before the stub would read the group at the snapshot's pushed bytes.
+        let unchanged: boolean;
+        try {
+          unchanged = groupUnchangedAt(group, String(claim.snapshot_sha), (...args) => git(this.o.home, args));
+        } catch (e) {
+          return { error: `the ${group} group's history at the snapshot would not read (${msg(e).slice(0, 80)}) — refusing the keyless baseline (B-127)` };
+        }
+        if (!unchanged) {
+          return { error: `the ${group} record names the snapshot with no signing key, but the walk there finds changes to the group — not the unsigned baseline; refusing to load it (B-127)` };
+        }
+        continue;
+      }
+      if (!ensureSha(this.o.home, read, () => this.o.fetch?.(this.o.home))) {
+        return { error: `the owner-signed ${group} commit ${read.slice(0, 10)} is not in the home checkout — one fetch could not find it (B-127)` };
+      }
+      let raw: string;
+      try {
+        raw = git(this.o.home, ['cat-file', 'commit', read]);
+      } catch (e) {
+        return { error: `the owner-signed ${group} commit ${read.slice(0, 10)} would not read (${msg(e)}) (B-127)` };
+      }
+      if (!verifySignedCommit(raw, keys, nodeKeygen)) {
+        return { error: `the ${group} commit ${read.slice(0, 10)} the board post named carries no signature of an owner key — refusing to load it (B-127)` };
+      }
+      try {
+        git(this.o.home, ['merge-base', '--is-ancestor', read, String(claim.snapshot_sha)]);
+      } catch {
+        return { error: `the owner-signed ${group} commit ${read.slice(0, 10)} is not an ancestor of the claim's snapshot — refusing to load it (B-127)` };
+      }
+      // Round 2 (the on-branch rollback): the record's word on WHICH ancestor counts is never
+      // trusted alone — the walk at the snapshot, verified signature by verified signature,
+      // names the one commit that may load, and a record naming any other refuses the claim.
+      const walkRead = recomputed?.[group]?.read ?? null;
+      if (walkRead !== read) {
+        return { error: `the ${group} record names commit ${read.slice(0, 10)}, and the walk at the claim's snapshot names ${walkRead == null ? 'no signed version' : walkRead.slice(0, 10)} — the record does not match its own history, refusing to load it (B-127)` };
+      }
+      out[group] = read;
+    }
+    return out;
+  }
+
   /** B-134: one read of the home checkout's remote refs for the leg-end scope audit — the
    *  injected reader's, or the runner's bounded git of the home checkout. A read that fails is
    *  logged and returns null: an unreadable audit is no audit, and never fails a leg. */
@@ -1162,6 +1359,7 @@ export class Runner {
     const claimId = claim.claim_id as number;
     const ticket = claim.ticket_id as string;
     let course: CourseLoad | null = null;
+    let signedControl: Record<string, string> = {};
     // B-134: the parked report, its overflow count and the audit window belong to one claim
     // alone — an earlier claim's throw between parking and its finishing call must not land
     // that ticket's actions on this claim's report (and its end), so every claim starts clean.
@@ -1174,7 +1372,35 @@ export class Runner {
       if (!ensureSha(this.o.home, claim.snapshot_sha, () => this.o.fetch?.(this.o.home))) {
         return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
       }
-      course = loadCourse(this.o.home, claim.snapshot_sha, this.claimCourse(claim));
+      // B-127 (R-BTN-133's verified tree, extended): where the repository requires owner-signed
+      // control, verify the commits the board post names — here, in the runner, never only by
+      // the sync that posted them — BEFORE the course loads (round 1: the leg scripts are the
+      // code that enforces the gate, so they may not load from an unsigned snapshot). A failure
+      // fails the claim closed: the ticket stays on the board for the owner's signature (the
+      // `unsigned-control` notice names what to sign), and no agent runs code a push alone
+      // placed. Baton hands out no claim while a group has no signed version, so this path is
+      // a lying or stale record's.
+      signedControl = await this.verifyControl(claim);
+      if ('error' in signedControl) {
+        this.log(`baton: ${signedControl.error}`);
+        // Round 4: while the owner key register has moved since the record was computed (Baton
+        // says so, comparing the record's keys with today's), a refusal is the record's age —
+        // released as a stale board, unpenalised, until the next post re-computes it. Either
+        // way nothing loads.
+        if (claim.control?.register_moved === true) {
+          this.log(`baton: the owner key register changed since the board post computed this record — released as a stale board until the next post (B-127)`);
+          return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+        }
+        return await this.finish(claimId, { end_reason: 'released:cannot-finish:spec', reached: claim.station, detail: signedControl.error, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+      }
+      // B-127 (round 1, the course group): the course's graph and its leg scripts load — one
+      // coherent tree — at the commit the record named and this runner verified; with the gate
+      // off, the pre-adoption baseline, or a group that gates nothing, that is the claim's
+      // snapshot itself. A course the signed commit does not carry refuses here (stale-board,
+      // unpenalised): an unsigned course change keeps the last signed course in force, and a
+      // course no owner signed does not run.
+      const courseSha = typeof signedControl.course === 'string' && signedControl.course !== '' ? signedControl.course : claim.snapshot_sha as string;
+      course = loadCourse(this.o.home, courseSha, this.claimCourse(claim));
       // B-228: the legs start from the snapshot's code — the home fast-forwarded to it when it
       // can be; otherwise it runs as it stands, and the log says why.
       let stays: string | null;
@@ -1202,7 +1428,7 @@ export class Runner {
       rmSync(scratch, { recursive: true, force: true });
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
-    this.inflight = { claimId, ticket, course, leg: null, child: null, waiters: [] };
+    this.inflight = { claimId, ticket, course, leg: null, legAt: this.now(), child: null, waiters: [] };
     this.closedDone = false;
     // §2e/R-BTN-63: the legs git evidences are every earlier attempt's, flattened; the claim's
     // own legs are counted beside them when a leg's run number is taken.
@@ -1281,7 +1507,9 @@ export class Runner {
           return await this.finish(claimId, { end_reason: `suspended:${at}`, reached: at, next: legName }, url);
         }
         if (this.closedDone) return await this.finish(claimId, { end_reason: 'done', reached: at }, handoffUrl);
-        if (this.inflight) this.inflight.leg = legName;
+        // B-108: the leg's own start — its clock (the beat's liveness line) and a fresh drain.
+        if (this.inflight) { this.inflight.leg = legName; this.inflight.legAt = this.now(); }
+        this.legLineAt = null;
         const run = runNumber(course.graph, gitPath, legName, own);
         own.push(legName);
         const ctx = {
@@ -1289,6 +1517,12 @@ export class Runner {
           claim: { id: claimId, nonce: claim.nonce, station: at },
           leg: legName, run, ...(runId ? { run_id: runId } : {}),
           snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
+          // B-127: the owner-signed commits a verified board post named — where the repository
+          // requires signed control, the legs read `agent_command` and the overrides at these
+          // (and the course itself — the graph, these scripts — loaded at the `course` one),
+          // never the snapshot's newer bytes (verified above, in this runner, before anything
+          // loaded).
+          ...(Object.keys(signedControl).length ? { signed_control: signedControl } : {}),
           // The claim answer names the repository's default branch (R-BTN-34; §5.8's marker
           // legs, B-96's review round 2): the stub hands it to the close, so a marker line goes
           // to the branch the sync reads whatever branch this checkout is on.
@@ -1340,7 +1574,9 @@ export class Runner {
           return await this.finish(claimId, { end_reason: reason, reached, ...(next != null ? { next } : {}) }, await this.callHandoff(script, ctx));
         }
         if (outcome.kind === 'crashed') {
-          this.log(`baton: ${ticket}'s ${legName} failed (${outcome.error})`);
+          // R-BTN-144 (B-170): the leg's own error text leaves masked — a provider-auth message
+          // is the one that quotes the key. It was masked at its source too; this is the log.
+          this.log(`baton: ${ticket}'s ${legName} failed (${maskLegOutput(outcome.error, this.legSecrets)})`);
           return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: at, next: legName }, await this.callHandoff(script, ctx));
         }
         const result = outcome.result;
@@ -1348,7 +1584,7 @@ export class Runner {
           ? (result as { session: string }).session : session;
         const verdict = decide(result, course.graph, legName, at);
         if ('bug' in verdict) {
-          this.log(`baton: ${ticket}'s ${legName} script bug: ${verdict.why}`);
+          this.log(`baton: ${ticket}'s ${legName} script bug: ${maskLegOutput(verdict.why, this.legSecrets)}`);
           return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.next }, await this.callHandoff(script, ctx, verdict.why));
         }
         // R-BTN-83: `close` writes the closing marker from the validated result before anything
@@ -1394,8 +1630,10 @@ export class Runner {
           this.scopeOverflow = 0;
         }
         // 2026-10-24: the advance trail — every finished leg names where it landed and what it
-        // queued, so a suspension or an odd end position reads as a trail, not a riddle.
-        this.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : (answer.next?.[0]?.leg ?? verdict.leg)} (run ${run} of ${course.graph.legs.get(legName)?.maxRuns ?? 1})`);
+        // queued, so a suspension or an odd end position reads as a trail, not a riddle. B-108:
+        // a leg whose agent a bound concluded says so — the how-ended of the wait is the log's.
+        const howEnded = typeof (result as { conclusion?: { cause?: unknown } } | null)?.conclusion?.cause === 'string' ? ` — the agent ${(result as { conclusion: { cause: string } }).conclusion.cause}` : '';
+        this.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : (answer.next?.[0]?.leg ?? verdict.leg)} (run ${run} of ${course.graph.legs.get(legName)?.maxRuns ?? 1})${howEnded}`);
         if ('settle' in answer) return await this.finish(claimId, answer.settle, await this.callHandoff(script, ctx) ?? handoffUrl);
         gitPath = [...gitPath, { leg: legName, reached: verdict.reached }];
         at = answer.station ?? verdict.reached;
@@ -1495,6 +1733,23 @@ export class Runner {
     await this.stopSession('next-leg');
     const sessionId = typeof ctx.run_id === 'string' ? `${ctx.run_id}.r0` : `leg-${tag}`;
     const env = Object.fromEntries(Object.entries(childEnv).filter((e): e is [string, string] => typeof e[1] === 'string'));
+    // R-BTN-144 class 7 (B-170): the leg's masked set is computed once, here, from the environment
+    // the leg is given — every variable whose name says a secret, and every name `runner.json`
+    // `mask_env` lists. The environment spreads the runner's own, so the host's values are in it;
+    // a non-secret that matches is masked too (a readable log line lost, nothing else), and a
+    // value under 8 bytes is not masked at all (said once under --verbose). The set is the
+    // Runner's, not the call's: the close and handoff that follow run in the leg's session, and
+    // what a leg's own failure says reaches this log after its stream closed.
+    const maskEnv = this.o.maskEnv ?? [];
+    // `mask_env` names every other environment it reaches: a name the host keeps under no
+    // ending (a provider's key in `ANTHROPIC_API_KEY`, say) stays masked when a repository's
+    // environment spells it too.
+    const legSecrets = this.legSecrets = secretValues(env, maskEnv);
+    if (this.verbose) {
+      const short = Object.keys(env).filter((n) => (maskEnv.includes(n) || namesASecret(n)) && Buffer.byteLength(env[n], 'utf8') < MIN_SECRET_BYTES);
+      if (short.length) this.log(`baton: ${leg}'s ${short.join(', ')} ${short.length === 1 ? 'is' : 'are'} under ${MIN_SECRET_BYTES} bytes, so not masked (R-BTN-144)`);
+    }
+    const sink = this.legSink(legSecrets);
     let handle: Handle;
     try {
       handle = await this.startSession('leg', {
@@ -1502,15 +1757,25 @@ export class Runner {
         snapshot_sha: String((ctx.snapshot as { sha?: string })?.sha ?? ''), paths: [scratch, course.scratch], env,
       });
     } catch (e) {
-      return { kind: 'crashed', error: `the executor could not start the leg's session (${msg(e)})` };
+      // The leg's own failure text leaves masked, whatever of it the executor quoted.
+      return { kind: 'crashed', error: maskLegOutput(`the executor could not start the leg's session (${msg(e)})`, legSecrets) };
     }
     this.session = { handle, checkout: this.o.home };
     if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} run ${basename(script)} (session ${sessionId}, executor ${this.executor.source})`);
-    const running = this.wrapperCall(handle, 'run', script, [ctx]);
+    const running = this.wrapperCall(handle, 'run', script, [ctx], undefined, () => sink);
     const inflight = this.inflight!;
     inflight.child = { running };
+    // The call is over: the stream's held tail may leave with the outcome the wrapper prints last.
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      sink.release();
+    };
     let done = false;
     const exited = running.result.then((r) => {
+      // R-BTN-144 (B-170): the call is over — its held tail goes, before the outcome may be read.
+      release();
       done = true;
       return r;
     });
@@ -1532,6 +1797,7 @@ export class Runner {
       // record covers it (R-BTN-24) — and stop its session.
       this.killGroup(inflight.child);
       inflight.child = null;
+      release();
       await this.stopSession('lease-lost');
       return { kind: 'lease-lost' };
     }
@@ -1541,7 +1807,9 @@ export class Runner {
     inflight.child = null;
     const out = wrapperOutcome(exit.stdout);
     if (out == null) return { kind: 'crashed', error: 'the leg wrote no result' };
-    return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: out.error ?? 'the leg script failed' };
+    // A crashed leg's error is its own text (the thrown message the wrapper printed), masked
+    // here — where the set lives — so the log it reaches carries no literal of the leg's env.
+    return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: maskLegOutput(out.error ?? 'the leg script failed', legSecrets) };
   }
 
   /** `close(ctx, result)`: the closing marker from the validated result (R-BTN-83), retried
@@ -1557,7 +1825,7 @@ export class Runner {
         if (!out.ok) throw new Error(out.error ?? 'the close failed');
         return typeof out.result === 'string' ? out.result : null;
       } catch (e) {
-        this.log(`baton: the leg's close failed (${msg(e)}), attempt ${attempt + 1} of 3`);
+        this.log(`baton: the leg's close failed (${maskLegOutput(msg(e), this.legSecrets)}), attempt ${attempt + 1} of 3`);
       }
     }
     return undefined;
@@ -1574,7 +1842,7 @@ export class Runner {
       if (!out.ok) throw new Error(out.error ?? 'the hand-off failed');
       return typeof out.result === 'string' ? out.result : null;
     } catch (e) {
-      this.log(`baton: the leg's handoff failed (${msg(e)}) — the resume record covers it (R-BTN-24)`);
+      this.log(`baton: the leg's handoff failed (${maskLegOutput(msg(e), this.legSecrets)}) — the resume record covers it (R-BTN-24)`);
       return null;
     }
   }
@@ -1637,6 +1905,63 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /** B-23's slice (the owner, 2026-10-23): every log line carries the time it was written —
  * an ISO 8601 instant, one timezone-free spelling on every machine. */
 export const stampLine = (line: string): string => `${new Date().toISOString()} ${line}`;
+
+/** B-108: a path's newest write — itself, or the newest file under it, the walk bounded (a
+ *  store a live session grows without end is walked no further). A path that does not exist
+ *  answers 0: a signal that was never live. */
+export function newestWrite(path: string, depth = 0): number {
+  let st: { mtimeMs: number; isDirectory(): boolean } | null = null;
+  try {
+    st = statSync(path);
+  } catch {
+    return 0;
+  }
+  let best = st.mtimeMs;
+  if (!st.isDirectory() || depth >= 5) return best;
+  let names: string[] = [];
+  try {
+    names = readdirSync(path);
+  } catch {
+    return best;
+  }
+  for (let i = 0; i < names.length && i < 512; i++) best = Math.max(best, newestWrite(join(path, names[i]), depth + 1));
+  return best;
+}
+
+/** B-108: the leg in flight's disk activity signals — the wrapper's log (B-95's example path
+ *  under the home checkout) and the harness stores keyed by the home checkout, the same paths
+ *  the stub's idle bound reads. Which harnesses' stores are looked at is not narrowed by the
+ *  agent command here (the runner does not resolve it — the stub does, at its snapshot): every
+ *  path that does not exist answers 0 and never reads as live, so watching all of them is only
+ *  ever the safe direction for the line that reads them. */
+export function legActivity(home: string, ticket: string, leg: string): { name: string; at: number }[] {
+  const dashed = home.split('/').join('-');
+  const dataHome = process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME !== '' ? process.env.XDG_DATA_HOME : join(homedir(), '.local', 'share');
+  const opencode = join(dataHome, 'opencode');
+  const store = [join(opencode, 'opencode.db'), join(opencode, 'opencode.db-wal'), join(opencode, 'opencode.db-shm'), join(opencode, 'project', dashed)];
+  const key = createHash('sha1').update(home).digest('hex');
+  const snapshots = join(opencode, 'snapshot');
+  let instances: string[] = [];
+  try {
+    instances = readdirSync(snapshots);
+  } catch {
+    // No snapshots directory: no instances to walk.
+  }
+  for (const i of instances) store.push(join(snapshots, i, key));
+  const claude = process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== '' ? process.env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude');
+  store.push(join(claude, 'projects', dashed));
+  return [
+    { name: 'wrapper-log', at: newestWrite(join(home, '.baton', 'logs', `${ticket}-${leg}.log`)) },
+    { name: 'harness-store', at: store.reduce((best, p) => Math.max(best, newestWrite(p)), 0) },
+  ];
+}
+
+/** B-108: an age in the beat's liveness line — seconds under 90, minutes above; a negative age
+ *  (a clock the runner does not own) reads as zero. */
+export const ageWords = (ms: number): string => {
+  const age = Math.max(0, ms);
+  return age < 90_000 ? `${Math.round(age / 1000)}s` : `${Math.round(age / 60_000)}m`;
+};
 
 /** B-108's streaming half (2026-10-24): drain a leg child's stream line by line into the log —
  * chunks are not line-aligned and a stamp per chunk would land mid-prose, so a buffer holds the

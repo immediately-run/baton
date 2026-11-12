@@ -179,7 +179,11 @@ the runner's credentials under any other executor is that executor's, never Bato
   claim's `snapshot_sha`, one leg at a time (B-103; the bullet after this one). It owns the legs
   themselves —
   starting them through its executor (R-BTN-107), stopping them when necessary, and realizing
-  they are stuck (§1's division of labor; B-108) — and nothing else does. A leg's end is the end
+  they are stuck (§1's division of labor; B-108) — and nothing else does. While a leg runs, each
+  of its beats logs the leg's duration and the age of its newest activity signal — the same
+  signals the stub's idle bound reads (B-108, R-BTN-131) — so an operator watches a wedge form
+  and the leg's ceiling approach instead of silence; an operator's outside watch of the runner's
+  own kit is the backstop, never the detector. A leg's end is the end
   of every process it started, whatever ended the leg: under `builtin` the runner kills the
   wrapper's process group at the wrapper's exit — the lost lease's no-hand-off kill (R-BTN-24)
   and the wrapper's own return alike — so a process a leg started (a held lock, a background
@@ -477,6 +481,39 @@ the runner's credentials under any other executor is that executor's, never Bato
     `--against <sha>`.
 - **R-BTN-133 (a leg runs in a read-only checkout of its commit).** R-BTN-143 runs first; an
   off-branch sha is never checked out or installed.
+  - **Owner-signed control** (B-127, R-BTN-66 as amended): where the repository requires signed
+    control, the claim answer's `control` names, per group, the commit a runner loads
+    `agent_command` (with `agent_wrapper`, both in `.baton/baton.json`), the overrides
+    (`legs/<leg>.run.mjs`), `rank.mjs` (R-BTN-98) and the course's leg scripts with their
+    instruction files (`legs/*.mjs` and `legs/*.md`, overrides excluded) from. The runner
+    verifies each named commit's `git`-namespace SSHSIG (R-BTN-13) against the owner keys the
+    answer carries — Baton's own, never the post's choice — that the commit is an ancestor of
+    the claim's snapshot, and that it is the commit the walk itself names: the runner
+    recomputes the group walk at the claim's snapshot (round 2) and refuses a `read` that
+    disagrees, so an old on-branch signed commit — the rollback the first-parent rule exists
+    to prevent — never loads on a record's word. All of this happens before loading anything,
+    and each failure refuses the claim (`released:cannot-finish:spec`, fail closed): a named
+    commit that does not verify, is no ancestor of the snapshot, or names no signing key
+    without being the pre-adoption baseline — the one keyless shape that is honest: the
+    snapshot itself, and only while the walk there finds no change to the group (a group with
+    changes is either signed or names no signed version, so a keyless record over one is a lie
+    the runner refuses); a post that lied about a signature — or about which ancestor counts,
+    or whether a group is gated at all — changes what a runner refuses, not what it runs. While
+    the owner key register has moved since the record was computed (Baton compares the record's
+    keys with its own), a refusal releases the claim as a stale board, unpenalised, until the
+    next post recomputes under the register as it stands; nothing loads either way. While a
+    group names no signed version, no claim is handed out at all. An unsigned
+    change to a group keeps the last owner-signed version in force: the legs read that group
+    at the named commit, never the snapshot's newer bytes — and the course group's commit is
+    where the runner loads the course's graph, its leg scripts and their instruction files as
+    one coherent tree, so the code that enforces the gate is never a push's own bytes. A
+    group's read is atomic (§7.1): a signed change to one of its paths carries no sibling's
+    unsigned bytes. The course group's walk covers the leg scripts and their instruction
+    files only: a sourced course's `course.json` is pinned byte-equal by the sync (B-33) and
+    could never be signed after its scaffold, so the graph travels with the scripts —
+    byte-identical for a sourced course, an owned course's graph change taking effect with the
+    next signed change to its leg scripts — and a leg a pushed graph adds that the signed
+    `legs/` does not carry refuses the claim as a missing script.
   - **Leg trees** are sparse, detached, non-cone git worktrees: the home repository at
     `snapshot_sha` with only `/.baton/` (`ctx.snapshot.tree`), and, for a sourced course, the
     source repository at its commit with only the course directory (R-BTN-134). The course

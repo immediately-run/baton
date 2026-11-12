@@ -18,6 +18,7 @@ import { holdHome, legNeeds, readHead } from './home';
 import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 import { Runner, stampLine, withTimestamps } from './runner';
 import { loadExecutor } from './executor';
+import { readMaskEnv, runnerConfigPath, underBatonDirectory } from './mask';
 import { fileURLToPath } from 'node:url';
 
 /** The CLI's wrapper (R-BTN-133), which every executor runs. */
@@ -203,6 +204,21 @@ export function servedCourses(home: string, chosen?: string): { course: string; 
   return [one];
 }
 
+/** R-BTN-144 class 7 (B-170): the names `runner.json` `mask_env` lists for this runner's host,
+ *  read once at start. A path under a `.baton/` directory is refused: a home's or a course's
+ *  settings are repository files (R-BTN-69's rule that a repository cannot configure its host),
+ *  and no repository may name what its runner must mask. `BATON_CONFIG` names the file in tests
+ *  and in a deployment that keeps its configuration elsewhere; absent, `runner.json` sits at the
+ *  default §5.6 gives. A `mask_env` that is not a list of names refuses the runner at start. */
+export function hostMaskEnv(log: (line: string) => void, env: NodeJS.ProcessEnv = process.env): string[] {
+  const path = runnerConfigPath(env);
+  if (underBatonDirectory(path)) throw new Error(`${path}: runner.json is this host's configuration, never a repository's (it lies under .baton/, R-BTN-144)`);
+  const maskEnv = readMaskEnv(path);
+  if (maskEnv == null) return [];
+  if (maskEnv.length) log(`baton: masking ${maskEnv.length} more name${maskEnv.length === 1 ? '' : 's'} by runner.json's mask_env: ${maskEnv.join(', ')} (R-BTN-144)`);
+  return maskEnv;
+}
+
 /** The one place `~/.cache/immediately-run` is materialised for a cloud key (§6.4). */
 function cacheDir(): string {
   const dir = join(homedir(), '.cache', 'immediately-run', 'baton');
@@ -272,7 +288,7 @@ export const syncLogStamped = (verbose: boolean, l: string): void => syncLog(ver
  * permanent listener. One slot: the previous hook comes off before the next goes on. */
 let exitHookFn: ((code: number | undefined) => void) | null = null;
 
-export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void; transport?: (req: Request) => Promise<Response> } = {}): Promise<number> {
+export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void; transport?: (req: Request) => Promise<Response>; env?: NodeJS.ProcessEnv } = {}): Promise<number> {
   // §6.13: a leg session never claims — the runner that started it does. A nested `baton run`
   // is exactly that session trying, so it is refused before anything else. BATON_PARENT is the
   // runner's name for it (B-97: the transition's IR_BATON_PARENT is gone).
@@ -314,6 +330,11 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // Every course the home declares, or the one `--course` narrows to (B-103): refused at startup,
   // loudly, when the flag names one the home does not declare — not per claim.
   const courses = servedCourses(a.home, a.course);
+  // R-BTN-144 class 7 (B-170): the names this host's `runner.json` `mask_env` lists are masked
+  // with the ones that say a secret by their ending. A repository's own settings file is never
+  // read for it: only the runner host's configuration names what its legs must not print. The
+  // env comes from `io` so a test's runMain reads a configuration it chose, not the machine's.
+  const maskEnv = hostMaskEnv(say, io.env ?? process.env);
   // B-86: no `--capabilities` asks for nothing — the grant speaks, and each answer's
   // `grant.capabilities` is what the runner declares. The flag narrows that.
   if (a.capabilities == null) say('baton: no --capabilities given — the runner declares what the grant allows (narrow it with --capabilities, e.g. a machine without a browser)');
@@ -392,6 +413,8 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   runner = new Runner({
     executor,
     api: new BatonApi({ url: a.url, transport, auth }, say),
+    // B-229: the earlier sessions' claims are ended through an API of their own worker's.
+    apiFor: (secret: string) => { const other = new BatonApi({ url: a.url, transport, auth }, say); other.setSecret(secret); return other; },
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     courses,
@@ -407,6 +430,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     fetch: io.fetch ?? ((home) => fetchMain(home, say)),
     ...(agentCommand ? { agentCommand } : {}),
     ...(a.testHarness ? { testHarness: true } : {}),
+    ...(maskEnv ? { maskEnv } : {}),
   });
   try {
     await runner.work();

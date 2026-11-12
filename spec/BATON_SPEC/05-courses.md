@@ -681,7 +681,16 @@ mean (R-BTN-50).
     is `<!-- baton:verdict approve|changes -->`, queuing `merge` or `fix`; a push after it
     reaches `fixed`; all merged is `merged`; when fixes run out and the last round asks for
     changes, `adjudicate` is queued if the file has it, and a pusher's `<!-- baton:adjudicated
-    merge|owner -->` is its answer. `review-pr` reviews a PR named in `prs:`: each pusher's
+    merge|owner -->` is its answer. Its `run-tests` gate runs no agent: the stub runs the course
+    file's `test_script` on the PR's head, and the script's own exit is the verdict, green
+    queuing `review` and red `fix`; a run that never reached the tests is no verdict and fails
+    the leg (`released:cannot-finish:transient`) with no marker — dependencies declared and none
+    installed, the shell's 126 or 127, npm's missing script, npm that cannot start, or a run that
+    outlives the gate's bound. A `fix` run from the gate's red (`pr-open`, `fixed`) must push:
+    when the ticket's PR branch heads are where they were before its agent ran, it fails the leg
+    the same way and reports no position, since the gate would test the same tree again; from
+    `reviewed`, where a fix may answer the findings without a push, it is unchanged.
+    `review-pr` reviews a PR named in `prs:`: each pusher's
     verdict is a round; after changes the next waits on `author` until a push; on close or when
     rounds run out `conclude` is queued, and a pusher's `<!-- baton:concluded -->` is that leg.
     A commenting leg's answer line may name its PR (`<answer> <PR URL>`; `conclude`'s the URL
@@ -749,8 +758,9 @@ mean (R-BTN-50).
       - Where the policy admits `sync` for `std:decision@1`, a re-ask is answered by a changed
         `answer:`, since an unchanged one is the same `ref` and moves nothing.
     - **Plain git** (`forge: git`). The ticket's branch stands for the PR, and the CLI picks the
-      facts adapter by the repository's `forge` (R-BTN-96): `branches` there, `prs` elsewhere.
-      What counts as `pr-merged` on plain git is B-154's.
+      facts adapter by the forge of the repository it reads (R-BTN-96): the home's own is
+      `branches` there, and a `code_repos` entry's is its own forge, `prs` elsewhere. What
+      counts as `pr-merged` on plain git is B-154's.
   - **The PR courses' facts** below say what each course reads. Under R-BTN-39 they make legs
     `ready` or `waiting`, and settle a leg that declares `arrives` (R-BTN-192); they never place a
     ticket. A verdict a holder's leg writes is its evidence; the holder's `advance` or end moves
@@ -851,7 +861,9 @@ mean (R-BTN-50).
     completion rule it closes: the command's exit **is** the agent's, so a harness whose client
     can exit before its work (a client of a background service) must run its session in process
     (`opencode run --standalone`, or the equivalent) — else its truncated output fails the leg
-    while an orphaned session outlives and out-posts its claim.
+    while an orphaned session outlives and out-posts its claim. An agent's completion is its
+    **exit or its silence**, whichever comes first (B-108): the stub's wait for the agent ends at
+    the earliest of the agent's exit, the idle bound and the leg's ceiling (the stubs, below).
   - **Stubs** run the leg's agent command with `BATON_COURSE`, `BATON_LEG`,
     `BATON_TICKET_FILE` and `BATON_INSTRUCTIONS` (the source's `legs/<leg>.md` or the home's
     override, at the claim's snapshot); a result-dependent leg reads the agent's last line
@@ -867,6 +879,33 @@ mean (R-BTN-50).
     such a PR, a head the PR contains — the review reads what is pushed. What cannot be verified
     fails the leg naming what was looked for; the stub reports, never retries. The test kit fails
     such a stub that returns its position for an `agent_command` exiting 0 with no PR.
+    - **The stub's wait for its agent ends three ways (B-108)** — at the earliest of the agent's
+      exit, the **idle bound** (fifteen minutes of silence across every activity signal the stub
+      can see) and the **absolute bound** (five hours of the leg, whatever the agent is doing).
+      Liveness is a fact read from every signal, never a guess from one: a harness CLI may
+      legitimately print nothing on stdout until it exits (the answer protocol reads the last
+      line; some clients buffer the whole run), so the signals are the agent's stdout, streamed
+      and timestamped; the wrapper's log, when the repository runs one (the example tees to
+      `.baton/logs/<ticket>-<leg>.log`, whose mtime is streamed activity even when the stub
+      cannot see the pipe); and the harness's own activity record, when the agent's command
+      names a harness the stub knows (`opencode`'s session store, `claude-code`'s project
+      directory), keyed by the working directory the stub spawned the agent in — the store's
+      newest write is the agent's activity, and no session id is needed. Idle is silence on
+      **all** of them: a live signal anywhere vetoes the conclusion however long the rest stay
+      quiet, and before the absolute bound a working agent is never touched, however long it
+      runs. The absolute bound is the one duration-based conclusion — the leg's ceiling, which a
+      chatty agent that never converges cannot idle past. Either bound concluding is the same
+      act: the stub kills the agent (SIGKILL to the child alone; the stub is the parent), takes
+      the received stdout as the agent's output, and proceeds exactly as an exit would — the
+      last-line contract, the forge verification, the checks judging the work as it stands and
+      refusing what is not. The leg's result records the conclusion with its cause —
+      `agent_concluded_idle` with the signals that were quiet, `agent_concluded_absolute` — so
+      the close and the review round can see how the leg ended; Baton is told none of it (no
+      condition raised, no deadline taken, nothing posted: the server learns the leg ended as it
+      learns every leg, by the claim's end — the owner, 2026-10-22). Both bounds are the stub's
+      constants, a course's to raise or lower in its copy of the file. While a leg runs, each of
+      the runner's beats logs its duration and the age of its newest activity signal
+      (R-BTN-72), so an operator watches a wedge form instead of silence.
   - **Overrides replace `run`, never `close`.** A home's `legs/<leg>.run.<ext>` exports
     `run(ctx, standard)`; the leg script imports it from the leg tree at the claim's snapshot and
     calls it instead of its own `run`, keeping its own `close`. Its position must be an edge
@@ -885,14 +924,17 @@ mean (R-BTN-50).
     3, one claim per worker).
 - **R-BTN-190 (leg state: in the forge's conversation, or on a side branch where there is no
   forge).** State one leg hands the next that must never reach the default branch — review rounds
-  and their answers (B-101) — goes where the repository's `forge` says (R-BTN-92); every claim
-  response carries which (`leg_state`), and no policy knob chooses it (B-165's review default).
-  - **`forge`**, on GitHub, GitLab and Gitea: the rounds are the PR's conversation, as
-    R-BTN-131's PR courses already read and write it, and the rules below about the leg-state
-    branch do not apply.
-  - **`branch`**, where `forge` is `git`: the rounds live on the ticket's **leg-state branch**,
-    as follows. The courses using it are the `branch` course (R-BTN-131) and any
-    course whose legs pass rounds to one another.
+  and their answers (B-101) — goes where the PRs the course reads live; every claim response
+  carries which (`leg_state`), and no policy knob chooses it (B-165's review default). It is
+  `forge` when the home is on a forge **or** the claimed ticket's course reads PR facts
+  (`facts: ["prs"]`, R-BTN-134), and `branch` otherwise.
+  - **`forge`**, on GitHub, GitLab and Gitea, and on any home whose claimed ticket's course
+    reads PR facts — a `git` home's PR course among them: the rounds are the PR's conversation,
+    on whichever forge holds the PR, as R-BTN-131's PR courses already read and write it, and
+    the rules below about the leg-state branch do not apply.
+  - **`branch`**, where `forge` is `git` and the claimed ticket's course reads no PR facts: the
+    rounds live on the ticket's **leg-state branch**, as follows. The courses using it are the
+    `branch` course (R-BTN-131) and any course whose legs pass rounds to one another.
 
   On a `git` repository:
   - **A reserved namespace, an orphan history.** A ticket's leg-state branch is

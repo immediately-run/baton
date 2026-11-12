@@ -31,12 +31,12 @@
     "test/hosts/local.ts",
     "test/provided.d.ts",
     "test/unit/local-queue.test.ts",
-    "test/unit/ontology-conformance.test.ts",
     "test/unit/boundary-host.test.ts",
     "test/unit/cli.test.ts",
     "test/unit/sign.test.ts",
     "test/unit/runner-main.test.ts",
     "test/unit/runner-bundle.test.ts",
+    "test/unit/runner-mask.test.ts",
     "test/integration/S-BTN-41.runner.test.ts",
     "test/integration/S-BTN-202.runner-scope.test.ts",
     "test/integration/S-BTN-26.runner.test.ts",
@@ -72,7 +72,14 @@
     "test/integration/S-BTN-157.busy-sync.test.ts",
     "test/integration/S-BTN-159.quiet-start.test.ts",
     "test/integration/S-BTN-201.short-wait-alive.test.ts",
+    "test/integration/S-BTN-214.local-home.test.ts",
+    "test/integration/S-BTN-216.ids-decide.test.ts",
+    "test/integration/S-BTN-217.cross-host-pushers.test.ts",
     "test/unit/seed-owners-fresh.test.ts",
-    "test/unit/cloud-runner.test.ts"
+    "test/unit/cloud-runner.test.ts",
+    "test/unit/signed-control.test.ts",
+    "test/integration/S-BTN-219.require-signed-control.test.ts",
+    "test/unit/dependency-hygiene.test.ts",
+    "test/unit/start-runner.test.ts"
   ]
 }

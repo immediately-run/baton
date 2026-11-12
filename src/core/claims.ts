@@ -593,6 +593,9 @@ export class Claims {
    */
   private recommend(w: WorkerFacts, limit: number): Recommendation[] {
     const groups = new Map<string, { rows: (Candidate & { item: ItemFacts })[]; done: boolean }>();
+    // B-127 (fail closed, unpenalised): no ticket of a repository whose required control has no
+    // signed version is recommended — see unsignedControlBlocked.
+    const unsignedBlocked = this.unsignedControlBlocked();
     for (let page = 0; page < 4; page++) {
       const wanted = page === 0 ? null : [...groups].filter(([, g]) => !g.done && g.rows.length < limit).map(([k]) => k);
       if (wanted && !wanted.length) break;
@@ -601,6 +604,7 @@ export class Claims {
       for (const c of read) {
         const key = `${c.repository_id}\u0000${c.course_id}`;
         if (wanted && !wanted.includes(key)) continue;
+        if (unsignedBlocked.has(c.repository_id)) continue;
         counts.set(key, (counts.get(key) ?? 0) + 1);
         const g = groups.get(key) ?? { rows: [], done: false };
         groups.set(key, g);
@@ -639,6 +643,34 @@ export class Claims {
     }));
   }
 
+  /** B-127 (fail closed, unpenalised — review round 1): the repositories that require signed
+   *  control while the standing record names no owner-signed version for one of the groups (or
+   *  carries none, or names a group this Baton does not know). No claim on their tickets is
+   *  handed out until an owner signs the current state once: the pre-ceremony window is the
+   *  owner's to close, not a `cannot-finish:spec` the ticket pays an attempt and a non-retryable
+   *  hold for. The `unsigned-control` notice under Needs you names what to sign; the runner-side
+   *  verification remains as the last line (a record that lies about a signature still ends its
+   *  claim closed). */
+  private unsignedControlBlocked(): Set<string> {
+    const out = new Set<string>();
+    for (const r of this.rows<{ id: string; control_json: string | null }>(
+      `SELECT r.id AS id, sc.control_json AS control_json FROM repositories r
+       LEFT JOIN signed_control sc ON sc.repository_id = r.id
+       WHERE r.require_signed_control = 1 AND r.retired_at IS NULL`)) {
+      let groups: Record<string, { read?: unknown }> | null = null;
+      try {
+        groups = r.control_json ? (JSON.parse(r.control_json) as { groups: Record<string, { read?: unknown }> }).groups : null;
+      } catch {
+        groups = null;
+      }
+      if (!groups || ['agent_command', 'overrides', 'rank', 'course'].some((g) => {
+        const read = groups![g]?.read;
+        return typeof read !== 'string' || read === '';
+      })) out.add(r.id);
+    }
+    return out;
+  }
+
   /** R-BTN-79: whether `item` is a new ticket — at its course's start with an empty path — of a
    *  course whose intake is closed, and not expedited (R-BTN-12: the owner's say still counts). */
   private intakeClosed(item: ItemFacts): boolean {
@@ -669,6 +701,12 @@ export class Claims {
       // §12.8 (B-145, R-BTN-189): a ticket that reaches a repository whose floored guarantee is
       // broken is not claimable — rule `floor`, `floor-broken`.
       this.refuseStopped(wanted, w);
+      // B-127 (fail closed, unpenalised): the pre-ceremony window — the repository requires
+      // signed control and a group has no owner-signed version — hands out no claim; the notice
+      // under Needs you names what an owner signs once.
+      if (this.unsignedControlBlocked().has(repositoryOf(wanted))) {
+        throw new BatonError('not-eligible', `${wanted}: ${repositoryOf(wanted)} requires owner-signed control and a control input has no owner-signed version yet — an owner signs the current state once (B-127)`, { rule: 'unsigned-control' });
+      }
       const item = this.item(wanted);
       if (!item || !item.station?.next_leg) throw new BatonError('not-eligible', `${wanted} has no leg to claim`, { rule: 1, rule_code: GATE_CODES[1] });
       const v = this.gate(w, item, item.station.next_leg, 'claim');
@@ -807,7 +845,9 @@ export class Claims {
    *  home declares and needs this to load the claim's one), its queued leg, the latest snapshot's
    *  next legs, its hand-off document, its path and the snapshot the claim was decided on — never
    *  its content — and the earlier attempts, newest first, each with its resume record and the legs
-   *  it ran (§6.11, R-BTN-24). */
+   *  it ran (§6.11, R-BTN-24). B-127 adds two readings beside them: the ticket's brief mark, and —
+   *  while the repository requires signed control — the record of what counts, with the owner
+   *  keys a runner verifies the named commits against itself. */
   private claimResponse(id: number) {
     const c = this.rows<{ id: number; ticket_id: string; nonce: string; snapshot_sha: string; station: string; offered_leg: string | null; course_id: string | null }>(
       'SELECT id, ticket_id, nonce, snapshot_sha, station, offered_leg, course_id FROM claims WHERE id = ?', id)[0];
@@ -831,14 +871,27 @@ export class Claims {
     const previous = this.rows<{ id: number; status: string; end_reason: string | null; end_detail: string | null; ended_at: number | null; resume_json: string | null }>(
       `SELECT id, status, end_reason, end_detail, ended_at, resume_json FROM claims WHERE ticket_id = ? AND id < ? AND status != 'active' ORDER BY id DESC`, c.ticket_id, id);
     // §12.8 (B-145): the policy facts of the claim's repository (R-BTN-189) and where state one
-    // leg hands the next lives (R-BTN-188's `leg_state` — B-148 reads it).
+    // leg hands the next lives (R-BTN-188's `leg_state` — B-148 reads it). B-182 (R-BTN-190): a
+    // `git` home's claimed ticket on a course that reads PR facts keeps its rounds in its PR's
+    // conversation, on whichever forge holds the PR — the course's `facts` (R-BTN-134), as the
+    // registry posted it, says whether it reads any.
     const repo = repositoryOf(c.ticket_id);
     const policy = this.c.policies?.hashesFor(repo) ?? null;
-    const legState = this.c.policies?.current(repo) && this.c.forgeOf ? legStateOf(this.c.policies.current(repo)!.policy, this.c.forgeOf(repo)) : null;
+    const cur = this.c.policies?.current(repo);
+    const readsPrs = c.course_id != null && (this.rows<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', repo, c.course_id)[0]?.facts ?? '[]').includes('"prs"');
+    const legState = cur && this.c.forgeOf ? legStateOf(cur.policy, this.c.forgeOf(repo), readsPrs) : null;
+    // B-127: the brief's mark (item 7 — marked whether or not signed control is required), and,
+    // while the repository requires it, the signed-control record the runners load from and
+    // verify. `control.required` is Baton's own setting — never the post's word — and its keys
+    // are the repository's owner signing keys, so a runner that trusts the record still checks
+    // the signatures against keys the post did not choose.
+    const briefRow = this.rows<{ brief: string | null }>('SELECT brief FROM tickets WHERE id = ?', c.ticket_id)[0];
+    const brief = briefRow?.brief ? JSON.parse(briefRow.brief) as { signed: boolean; signer?: string; commit: string } : null;
     return {
       claim_id: c.id, ticket_id: c.ticket_id, course_id: c.course_id, course_version: courseVersion,
       ...(policy ? { policy_hash: policy.policy_hash, guarantees_hash: policy.guarantees_hash, floors_hash: policy.floors_hash } : {}),
       ...(legState ? { leg_state: legState } : {}),
+      ...(brief ? { brief } : {}),
       station: c.station, legs: c.offered_leg ? [c.offered_leg] : [], next: this.nextLegs(c.ticket_id, c.station),
       // B-134: the ticket's scope — its home and its `repos:` — as lowercased forge paths. The
       // runner audits each leg's pushes against this and reports what falls outside.
@@ -1806,8 +1859,21 @@ export class Claims {
 
   // @model alarmReap sha256:9767a3813e32
   // @model fenceTimeout sha256:b982fa4ef61b
-  alarm() {
+  alarm(): string[] {
     const now = this.c.now();
+    // B-229 (R-BTN-9): each reap is its own savepoint, and one that throws is named and passed
+    // over, never the tick's end — a single claim whose end cannot be written would otherwise
+    // roll back every reap of every tick after it (found live: twelve claims whose leases ended
+    // between 2026-10-30 and 2026-11-06 were still held on 2026-11-10). The caller commits the
+    // reaps that went through and then reports the ones that did not.
+    const failed: string[] = [];
+    const each = (claimId: number, ticketId: string, fn: () => void) => {
+      try {
+        this.c.store.transaction(fn);
+      } catch (e) {
+        failed.push(`claim ${claimId} on ${ticketId}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    };
     this.releaseBarHolders(now);
     // Silent workers: reaped at exactly their clamped timeout (R-BTN-9), never by Date.now().
     const silent = this.rows<{ id: number; ticket_id: string; worker_id: number; kind: string }>(
@@ -1815,8 +1881,10 @@ export class Claims {
        WHERE c.status = 'active' AND ((w.kind != 'legacy' AND ? - w.last_seen_at >= w.lease_timeout_ms)
                                       OR (w.kind = 'legacy' AND c.reap_after IS NOT NULL AND c.reap_after <= ?))`, now, now);
     for (const c of silent) {
-      this.finish(c.id, c.ticket_id, 'reaped', c.kind === 'legacy' ? 'reaped:legacy' : 'reaped:silent', 'alarm', {});
-      this.exec('UPDATE workers SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.worker_id);
+      each(c.id, c.ticket_id, () => {
+        this.finish(c.id, c.ticket_id, 'reaped', c.kind === 'legacy' ? 'reaped:legacy' : 'reaped:silent', 'alarm', {});
+        this.exec('UPDATE workers SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.worker_id);
+      });
     }
     // §9: a release delivered 2 h ago and still unacknowledged reaps the claim, fenced: the
     // worker is alive (it took the message), so the item waits for its fence (R-BTN-19).
@@ -1830,7 +1898,7 @@ export class Claims {
       this.exec(`UPDATE messages SET status = 'expired' WHERE id = ?`, c.mid);
       if (reaped.has(c.id)) continue; // two stale releases for one claim reap it once
       reaped.add(c.id);
-      this.finish(c.id, c.ticket_id, 'reaped', 'reaped:release-unacknowledged', 'alarm', { fence: { incarnation: c.incarnation } });
+      each(c.id, c.ticket_id, () => this.finish(c.id, c.ticket_id, 'reaped', 'reaped:release-unacknowledged', 'alarm', { fence: { incarnation: c.incarnation } }));
     }
     // A fence also clears when its worker goes silent past its own timeout (R-BTN-19).
     const lapsed = this.rows<{ id: number; ticket_id: string; worker_id: number }>(
@@ -1849,6 +1917,7 @@ export class Claims {
       this.exec('UPDATE held_snapshots SET accepted_at = ? WHERE repository_id = ? AND sha = ?', now, h.repository_id, h.sha);
       this.event('snapshot-accepted', 'alarm', { sha: h.sha, held: true, by: 'auto-accept' }, null, null, h.repository_id);
     }
+    return failed;
   }
 
   /** R-BTN-67: when a bar with `release_holders` starts, every holder whose worker carries its tag

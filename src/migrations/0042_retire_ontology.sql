@@ -1,4 +1,4 @@
--- 0039_retire_ontology.sql — B-167: the capability ontology and the route choices leave core
+-- 0042_retire_ontology.sql — B-167: the capability ontology and the route choices leave core
 -- (BATON_SPEC §5.9 R-BTN-174, §6.10; the restructure's retired rules, BATON_SPEC_HISTORY.md).
 -- Rule 4 matches the capabilities a ticket and its leg require against what a runner declares,
 -- granted, by name:
@@ -36,9 +36,9 @@ ALTER TABLE external_resources DROP COLUMN base_chain_json;
 
 -- The taken's `taken-invalid` leaves the event log's kinds, with the taken it logged; the two
 -- kinds the restructure's retired fields still write stay (`advice-overridden`, `scope-invalid`).
--- Nothing references `events`, so it is rebuilt with the narrower check — 0037's kinds less
--- `taken-invalid` — as 0027, 0031, 0035 and 0037 did, its indexes restored beside it.
-CREATE TABLE events_0039 (
+-- Nothing references `events`, so it is rebuilt with the narrower check — 0040's kinds less
+-- `taken-invalid` — as 0027, 0031, 0035, 0037 and 0040 did, its indexes restored beside it.
+CREATE TABLE events_0042 (
   seq           INTEGER PRIMARY KEY,
   at            INTEGER NOT NULL,
   kind          TEXT NOT NULL CHECK (kind IN ('claimed','completed','confirmed',
@@ -50,14 +50,14 @@ CREATE TABLE events_0039 (
                   'course-opened',
                   'question-posted','question-dropped','question-answered','question-expired',
                   'answer-invalid','arrival-unapplied','scope-exceeded','unclaimed-write',
-                  'scope-invalid','scope-resolved','renumbered')),
+                  'scope-invalid','scope-resolved','renumbered','unsigned-control')),
   ticket_id     TEXT,
   claim_id      INTEGER REFERENCES claims(id),
   actor         TEXT NOT NULL,
   detail_json   TEXT,
   repository_id TEXT
 );
-INSERT INTO events_0039 (seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id)
+INSERT INTO events_0042 (seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id)
   SELECT seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id FROM events
   WHERE kind != 'taken-invalid';
 DROP INDEX IF EXISTS events_by_ticket;
@@ -65,7 +65,7 @@ DROP INDEX IF EXISTS events_by_claim;
 DROP INDEX IF EXISTS events_by_repository;
 DROP INDEX IF EXISTS events_discrepancies;
 DROP TABLE events;
-ALTER TABLE events_0039 RENAME TO events;
+ALTER TABLE events_0042 RENAME TO events;
 CREATE INDEX events_by_ticket ON events(ticket_id, kind, seq);
 CREATE INDEX events_by_claim ON events(claim_id, kind, seq);
 CREATE INDEX events_by_repository ON events(repository_id, seq);

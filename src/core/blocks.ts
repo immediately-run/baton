@@ -11,7 +11,8 @@ import { BatonError } from './http';
 import { logEvent } from './db';
 import { grantedKeySql, isGrantedKey, qualify, repositoryOf, RESOURCE_NAME, TICKET_ID } from './validate';
 import { DISPATCH_WINDOW_MS } from './webhook';
-import { isForgePath, type Forge } from './links';
+import { ticketRepositories } from './codeRepos';
+import type { Forge } from './links';
 import { underWebBase } from '../shared/links.mjs';
 import type { PostedStation } from './board';
 import type { Store } from './ports';
@@ -494,7 +495,7 @@ export class Blocks {
   posted(repo: string, stations: Map<string, PostedStation>, live: string[]): { changed: string[]; dropped: string[] } {
     const changed: string[] = [];
     const dropped: string[] = [];
-    const home = this.rows<{ forge: string; web_base: string | null; github: string }>('SELECT forge, web_base, github FROM repositories WHERE id = ?', repo)[0];
+    const home = this.rows<{ id: string }>('SELECT id FROM repositories WHERE id = ?', repo)[0];
     const registered = new Set(this.rows<{ name: string }>('SELECT name FROM external_resources').map((r) => r.name));
     for (const local of live) {
       const id = qualify(repo, local);
@@ -517,7 +518,7 @@ export class Blocks {
         dropped.push(`${id}:decision:${d.id}`);
         return false;
       }).map((d) => ({
-        id: d.id, leg: d.leg && legs.has(d.leg) ? d.leg : '', asks: d.asks, url: d.url && repos.some((base) => underWebBase(d.url!, base)) ? d.url : null,
+        id: d.id, leg: d.leg && legs.has(d.leg) ? d.leg : '', asks: d.asks, url: d.url && repos.some((b) => underWebBase(d.url!, b.webBase)) ? d.url : null,
         question: d.question ?? null, options: d.options?.length ? JSON.stringify(d.options.map((o) => ({ id: o.id, ...(o.grants ? { grants: { leg: o.grants.leg, runs: o.grants.runs } } : {}) }))) : null,
       }))
         .sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -556,20 +557,20 @@ export class Blocks {
 
   /** R-BTN-92's link rule's bases for a ticket: its home repository's `web_base` and each of its
    *  `repos:` as a forge path on the home's host. */
-  private ticketRepos(id: string, home: { forge: string; web_base: string | null; github: string }): string[] {
-    if (!home.web_base) return [];
-    const host = home.web_base.slice(0, home.web_base.length - home.github.length);
-    const owner = home.github.slice(0, home.github.indexOf('/'));
+  private ticketRepos(id: string, home: { id: string }): { forge: Forge; webBase: string }[] {
     const repos = JSON.parse(this.rows<{ repos: string }>('SELECT repos FROM tickets WHERE id = ?', id)[0]?.repos ?? '[]') as string[];
-    return [home.web_base, ...repos.map((r) => (r.includes('/') ? r : `${owner}/${r}`)).filter((r) => isForgePath(home.forge as Forge, r)).map((r) => host + r)];
+    // B-182 (R-BTN-92): each repository a link is judged for carries its own `web_base` — the
+    // home's, and each `repos:` name resolving to a `code_repos` entry's (R-BTN-140), whatever
+    // its host; while the home lists none, every name keeps today's reading under the home's
+    // own host.
+    return ticketRepositories(this.c.store, home.id, repos);
   }
 
   /** Those bases by ticket id, for a reader that judges a link the same way `posted` judges a
    *  decision's `url` (R-BTN-92) — a person leg's question among them (R-BTN-116). */
   linkBases(id: string): string[] {
-    const home = this.rows<{ forge: string; web_base: string | null; github: string }>(
-      'SELECT forge, web_base, github FROM repositories WHERE id = ?', repositoryOf(id))[0];
-    return home ? this.ticketRepos(id, home) : [];
+    const home = this.rows<{ id: string }>('SELECT id FROM repositories WHERE id = ?', repositoryOf(id))[0];
+    return home ? this.ticketRepos(id, home).map((b) => b.webBase) : [];
   }
 
   // ── unblocking wakes work (R-BTN-77) ──────────────────────────────────────────────────────

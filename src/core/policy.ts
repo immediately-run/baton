@@ -12,6 +12,7 @@ import { BatonError } from './http';
 import { logEvent } from './db';
 import { KEY_FINGERPRINT } from './auth';
 import { REPOSITORY_ID } from './validate';
+import { crossHostEntries } from './codeRepos';
 import type { Store } from './ports';
 import type { Forge } from './links';
 
@@ -107,11 +108,17 @@ export interface OutboxRoute {
   min_release?: 'any' | 'signed';
 }
 
-/** The policy document: every knob the spec's table names, `leg_state` alone optional (unset
- *  means `forge` on a repository with a forge and `branch` on one whose `forge` is `git`). */
+/** The policy document: every knob the spec's table names, `leg_state` and `human_identity`
+ *  alone optional (unset `leg_state` means `forge` where the PRs are read, R-BTN-190; unset
+ *  `human_identity` means none). */
 export interface PolicyDocument {
   approvers: { members: ApproverEntry[]; trust: ApproverEntry[]; policy: ApproverEntry[] };
   human_key: 'any' | 'hardware';
+  /** R-BTN-188: the human-only identity as the fact reader and the merge runner see it — on a
+   *  forge its immutable forge user id, on `git` the `pre-receive` pusher identity. Absent or
+   *  null means none; B-182: while a `code_repos` entry sits on another host, it stays null —
+   *  one identity cannot be told from a pusher's across hosts. */
+  human_identity?: string | null;
   grants: { default_trust: 'trusted' | 'untrusted'; one_per_domain: boolean; trusted_domain: 'shared' | 'separate' };
   refs: Record<'default_branch' | 'tags' | 'other' | 'baton' | 'legs', RefWriter[]>;
   paths: { protected: string[]; control: 'any' | 'trusted-runner' | 'human'; tickets: 'any' | 'approval' };
@@ -128,7 +135,7 @@ export interface PolicyDocument {
 /** Every knob's dotted name, in the table's order — `diff` reports these, the change log
  *  carries them, and nothing else is a knob. */
 export const KNOBS = [
-  'approvers.members', 'approvers.trust', 'approvers.policy', 'human_key',
+  'approvers.members', 'approvers.trust', 'approvers.policy', 'human_key', 'human_identity',
   'grants.default_trust', 'grants.one_per_domain', 'grants.trusted_domain',
   'refs.default_branch', 'refs.tags', 'refs.other', 'refs.baton', 'refs.legs',
   'paths.protected', 'paths.control', 'paths.tickets',
@@ -206,7 +213,7 @@ function checkOutboxRoute(v: unknown, at: string): OutboxRoute {
  *  `service:` key's roles) are the `Policies` class's. */
 export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): PolicyDocument {
   const v: Record<string, unknown> = isObj(input) ? input : bad('policy', 'must be a JSON object');
-  only(v, ['approvers', 'human_key', 'grants', 'refs', 'paths', 'merge', 'authorship', 'tickets', 'leg_state', 'outbox', 'inputs', 'attestations', 'readings'], 'policy');
+  only(v, ['approvers', 'human_key', 'human_identity', 'grants', 'refs', 'paths', 'merge', 'authorship', 'tickets', 'leg_state', 'outbox', 'inputs', 'attestations', 'readings'], 'policy');
   const approvers = isObj(v.approvers) ? v.approvers : bad('policy.approvers', 'must be an object');
   only(approvers, ['members', 'trust', 'policy'], 'policy.approvers');
   const grants = isObj(v.grants) ? v.grants : bad('policy.grants', 'must be an object');
@@ -249,6 +256,12 @@ export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): 
   if (new Set(board).size !== board.length) bad('policy.inputs.board', 'names an input twice');
   if (inputs.answers !== 'git' && inputs.answers !== 'attestation') bad('policy.inputs.answers', "must be 'git' or 'attestation'");
   if (v.human_key !== 'any' && v.human_key !== 'hardware') bad('policy.human_key', "must be 'any' or 'hardware'");
+  // R-BTN-188's `human_identity`: absent or null is none; a set value is the identity as its
+  // forge or `pre-receive` log spells it — a short plain string, interpreted by the readers
+  // that need it (R-BTN-184, R-BTN-192), never by the hash or the diff.
+  if (v.human_identity != null && (typeof v.human_identity !== 'string' || !v.human_identity.length || v.human_identity.length > 100)) {
+    bad('policy.human_identity', 'must be null or a short identity string, the forge user id or pusher identity');
+  }
   const refsOf: PolicyDocument['refs'] = {
     default_branch: checkRefWriters(refs.default_branch, 'policy.refs.default_branch'),
     tags: checkRefWriters(refs.tags, 'policy.refs.tags'),
@@ -323,6 +336,7 @@ export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): 
       policy: checkApproverList(approvers.policy, 'policy.approvers.policy'),
     },
     human_key: v.human_key as PolicyDocument['human_key'],
+    ...(v.human_identity != null ? { human_identity: v.human_identity as string } : {}),
     grants: { default_trust: grants.default_trust as PolicyDocument['grants']['default_trust'], one_per_domain: grants.one_per_domain as boolean, trusted_domain: grants.trusted_domain as PolicyDocument['grants']['trusted_domain'] },
     refs: refsOf,
     paths: { protected: protectedPaths, control: paths.control as PolicyDocument['paths']['control'], tickets: paths.tickets as PolicyDocument['paths']['tickets'] },
@@ -403,11 +417,12 @@ export const PROTECTED: PolicyDocument = {
 export const PROTECTED_SIGNED: PolicyDocument = { ...PROTECTED, human_key: 'hardware', authorship: 'signed' };
 
 /** The `plain-git` preset: `cooperative` with what a repository with no forge cannot use taken
- *  out — `leg_state: branch` (R-BTN-190), `inputs.board` without `ci-identity`, and no
- *  `forge-check` deliverer. */
+ *  out — `inputs.board` without `ci-identity`, and no `forge-check` deliverer. Its leg state is
+ *  the side branch by R-BTN-190's rule, not by a knob: the preset writes no `leg_state`, so a
+ *  PR course's rounds still live in its PR's conversation on whichever forge holds the PR
+ *  (B-182). */
 export const PLAIN_GIT: PolicyDocument = {
   ...COOPERATIVE,
-  leg_state: 'branch',
   inputs: { board: ['sync-key', 'machine'], answers: 'git' },
   outbox: { ...COOPERATIVE.outbox, 'forge-check': { deliverers: [], trust: 'any' } },
 };
@@ -416,20 +431,25 @@ export const PRESETS = { cooperative: COOPERATIVE, protected: PROTECTED, 'protec
 export type PresetName = keyof typeof PRESETS;
 
 /** A preset applied to a repository on `forge` (R-BTN-188): it writes every knob it has a value
- *  for — and, where `forge` is `git`, the same three values `plain-git` carries, the preset's
- *  `inputs.board` keeping only what a git repository may take. */
+ *  for — and, where `forge` is `git`, the two values `plain-git` carries (no `ci-identity` in
+ *  `inputs.board`, no `forge-check` deliverer). `leg_state` is never a preset's to write
+ *  (R-BTN-190: where state lives follows where the PRs are read). */
 export function policyForPreset(name: PresetName, forge: Forge): PolicyDocument {
   const doc = structuredClone(PRESETS[name]);
   if (forge !== 'git') return doc;
   const board = doc.inputs.board.filter((b) => b !== 'ci-identity');
-  return { ...doc, leg_state: 'branch', inputs: { ...doc.inputs, board: board.length ? board : ['sync-key'] }, outbox: { ...doc.outbox, 'forge-check': { deliverers: [], trust: 'any' } } };
+  return { ...doc, inputs: { ...doc.inputs, board: board.length ? board : ['sync-key'] }, outbox: { ...doc.outbox, 'forge-check': { deliverers: [], trust: 'any' } } };
 }
 
-/** Where state one leg hands the next lives (R-BTN-188's `leg_state`): unset means `forge` on a
- *  repository with a forge and `branch` on one whose `forge` is `git`, where `forge` is refused. */
-export function legStateOf(policy: PolicyDocument, forge: Forge): 'forge' | 'branch' {
+/** Where state one leg hands the next lives (R-BTN-190 as amended by B-182): `forge` when the
+ *  home is on a forge **or** the claimed ticket's course reads PR facts (`facts: ["prs"]`,
+ *  R-BTN-134) — a `git` home's PR course among them, its rounds in its PR's conversation on
+ *  whichever forge holds the PR — `branch` otherwise. An explicit knob still chooses (a forge
+ *  home may force the side branch; a `git` home refuses `forge` in the validator, for its own
+ *  conversation is not where any PR lives). */
+export function legStateOf(policy: PolicyDocument, forge: Forge, courseReadsPrs = false): 'forge' | 'branch' {
   if (policy.leg_state !== undefined) return policy.leg_state;
-  return forge === 'git' ? 'branch' : 'forge';
+  return forge !== 'git' || courseReadsPrs ? 'forge' : 'branch';
 }
 
 // ── the guarantees (R-BTN-189's table) ──────────────────────────────────────────────────
@@ -728,6 +748,17 @@ export class Policies {
       doc = validatePolicyDocument(body.policy, { forge });
     }
 
+    // B-182 (R-BTN-188): `human_identity` names one identity, so while a code repository sits on
+    // a host other than the home's — every entry of a `git` home — a policy version may not set
+    // one: a human's merge or verdict there could not be told from a pusher's. Per-host human
+    // identities are a later ticket.
+    if (doc.human_identity != null) {
+      const cross = crossHostEntries(this.c.store, repository)[0];
+      if (cross) {
+        throw new BatonError('invalid-params', `policy.human_identity: ${repository} holds the code repository ${cross.path} on ${cross.host}, another host than the home's — no human identity across hosts yet (B-182); per-host identities are a later ticket`);
+      }
+    }
+
     // The list in force decides (R-BTN-188): every change, in any direction, needs an approver
     // on `approvers.policy` as it stands before the change.
     const factsNow = this.facts(repository, breakGlass);
@@ -876,6 +907,15 @@ export class Policies {
     }
     only(body, ['name', 'guarantees', 'remove_by'], 'body');
     const name = typeof body.name === 'string' && FLOOR_NAME.test(body.name) ? body.name : bad('name', 'must be a short floor name');
+    // B-182 (R-BTN-188): a floor names guarantees a human identity underwrites; while a code
+    // repository sits on another host, none may stand — the other order of the refusal `put`
+    // makes. Judged before the guarantees, so the refusal is the same whatever would be floored.
+    {
+      const cross = crossHostEntries(this.c.store, repository)[0];
+      if (cross) {
+        throw new BatonError('invalid-params', `floors: ${repository} holds the code repository ${cross.path} on ${cross.host}, another host than the home's — no floor may stand while a human identity cannot be named across hosts (B-182)`);
+      }
+    }
     const guarantees = Array.isArray(body.guarantees) && body.guarantees.length >= 1 && (body.guarantees as unknown[]).every((g) => (GUARANTEE_NAMES as readonly string[]).includes(g as string))
       ? [...new Set(body.guarantees as string[])] : bad('guarantees', `must name guarantees from ${GUARANTEE_NAMES.join(', ')}`);
     const remove_by = body.remove_by === undefined ? 'human' : body.remove_by === 'human' || body.remove_by === 'owner' ? body.remove_by : bad('remove_by', "must be 'human' or 'owner'");

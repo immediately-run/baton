@@ -789,7 +789,24 @@ describe('baton repo init, through the built CLI', () => {
       expect(exited.tail).toBe('npm run test exited 2; its last lines:\ntwo failed');
       writeFileSync(join(bin, 'npm'), '#!/bin/sh\nkill -TERM $$\n');
       await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test was killed by SIGTERM, which the gate did not send');
+      // B-230: a run that never reached the tests is no verdict either — the shell's 127 and 126
+      // (B-167's every gate: `vitest: not found`) and npm's missing script fail the leg, naming it.
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho "sh: 1: vitest: not found" >&2\nexit 127\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow(/npm run test exited 127, a command its script names could not be run \(not found, or not executable\) — the tests never ran: no verdict, no marker; its last lines:\nsh: 1: vitest: not found/);
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\nexit 126\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test exited 126, a command its script names could not be run');
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho "npm error Missing script: \\"test\\"" >&2\nexit 1\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test has no such script in package.json — the tests never ran');
       process.env.PATH = path;
+      // B-230: dependencies declared and none installed — neither the tested tree nor the home
+      // checkout has node_modules — is no verdict, before npm runs at all.
+      g('checkout', '-q', 'claude/A-1-gate');
+      writeFileSync(join(root, 'package.json'), `${JSON.stringify({ name: 'scaffold-gate', scripts: { test: 'node gate.mjs' }, devDependencies: { vitest: '1.0.0' } }, null, 2)}\n`);
+      commitAll(root);
+      g('push', '-q', 'origin', 'HEAD:refs/heads/claude/A-1-gate');
+      g('checkout', '-q', 'main');
+      expect(existsSync(join(root, 'node_modules'))).toBe(false);
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test cannot run: claude/A-1-gate declares dependencies and neither the tested tree nor the home checkout has node_modules');
       // The gate runs only at its two stations, and only on a branch it can reach.
       await expect(stub.run(ctx('reviewed'))).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not "reviewed"');
       await expect(stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot: { sha: main } })).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not null');
@@ -805,6 +822,47 @@ describe('baton repo init, through the built CLI', () => {
       rmSync(origin, { recursive: true, force: true });
       rmSync(bin, { recursive: true, force: true });
       writeFileSync(courseFile, courseBefore);
+    }
+  }, 120_000);
+
+  it('B-231: from the gate\'s red a fix that pushed nothing fails the leg; one that pushed reaches fixed; from reviewed nothing changes', async () => {
+    const g = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const origin = mkdtempSync(join(tmpdir(), 'baton-fix-origin-'));
+    const scratch = mkdtempSync(join(tmpdir(), 'baton-fix-legs-'));
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const scaffolded = readFileSync(settingsFile, 'utf8');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' });
+    g('remote', 'add', 'origin', origin);
+    const main = g('rev-parse', 'HEAD');
+    try {
+      // The agent: `true` pushes nothing; push.sh adds a commit to the PR branch and pushes it.
+      writeFileSync(join(root, 'push.sh'), '#!/bin/sh\ngit -C "$(dirname "$0")" commit -q --allow-empty -m fix && git -C "$(dirname "$0")" push -q origin HEAD:refs/heads/claude/A-1-fix\n');
+      chmodSync(join(root, 'push.sh'), 0o755);
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'true' }));
+      const quiet = { sha: commitAll(root) };
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: join(root, 'push.sh') }));
+      const pushing = { sha: commitAll(root) };
+      g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      g('push', '-q', 'origin', 'HEAD:refs/heads/claude/A-1-fix');
+      copyFileSync(join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs'), join(scratch, 'fix.mjs'));
+      const stub = await load(join(scratch, 'fix.mjs'));
+      const ctx = (station: string, snapshot: { sha: string }) => ({ ticket: { id: 'A-1' }, checkout: root, snapshot, claim: { station, nonce: 'n1' } });
+      const head = g('rev-parse', 'HEAD');
+      // From the gate's red, at fixed or pr-open: the agent exited 0 and pushed nothing — no fix.
+      await expect(stub.run(ctx('fixed', quiet))).rejects.toThrow(`the fix leg pushed nothing: claude/A-1-fix at ${head.slice(0, 10)} is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)`);
+      await expect(stub.run(ctx('pr-open', quiet))).rejects.toThrow('the fix leg pushed nothing');
+      // From a review's changes, a fix may answer the findings without a push: unchanged (B-110).
+      expect(await stub.run(ctx('reviewed', quiet))).toEqual({ reached: 'fixed', next: 'run-tests' });
+      // A fix that pushed reaches fixed.
+      expect(await stub.run(ctx('fixed', pushing))).toEqual({ reached: 'fixed', next: 'run-tests' });
+      expect(execFileSync('git', ['-C', origin, 'rev-parse', 'refs/heads/claude/A-1-fix'], { encoding: 'utf8' }).trim()).not.toBe(head);
+    } finally {
+      g('reset', '-q', '--hard', main);
+      g('remote', 'remove', 'origin');
+      rmSync(origin, { recursive: true, force: true });
+      rmSync(scratch, { recursive: true, force: true });
+      rmSync(join(root, 'push.sh'), { force: true });
+      writeFileSync(settingsFile, scaffolded);
     }
   }, 120_000);
 
@@ -987,6 +1045,302 @@ describe('baton repo init, through the built CLI', () => {
       commitAll(root);
     }
   }, 30_000);
+
+  // B-108 — the stub concludes for an agent that will not exit or never ends. The owner's
+  // numbers (idle 15 minutes across every activity signal, ceiling 5 hours) are pinned below;
+  // every test here shrinks them in the scaffold's own copy of the stub, exactly the way a
+  // course raises or lowers them in its.
+  /** One stub file's bounds, shrunk; the returned closure restores the file's text. */
+  const shrinkBounds = (file: string, idle: number, ceiling: number): (() => void) => {
+    const before = readFileSync(file, 'utf8');
+    writeFileSync(file, before.replace(/(AGENT_IDLE_MS = )[\d.e]+/, `$1${idle}`).replace(/(LEG_CEILING_MS = )[\d.e]+/, `$1${ceiling}`));
+    return () => writeFileSync(file, before);
+  };
+  /** Whether the pid a stubborn agent parked in `file` is gone — the conclusion's kill. */
+  const agentGone = async (file: string): Promise<boolean> => {
+    const pid = Number(readFileSync(file, 'utf8').trim());
+    for (let i = 0; i < 400; i++) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    return false;
+  };
+
+  it('the stubs carry the owner’s bounds — 15 minutes of idle across every signal, 5 hours of ceiling — as their named constants (B-108)', () => {
+    for (const leg of ['implement', 'review', 'fix', 'adjudicate', 'merge']) {
+      const stub = stubSourceOf(root, 'create-pr', leg);
+      expect(Number(new RegExp(`AGENT_IDLE_MS = ([\\d.e]+)`).exec(stub)?.[1]), leg).toBe(900_000);
+      expect(Number(new RegExp(`LEG_CEILING_MS = ([\\d.e]+)`).exec(stub)?.[1]), leg).toBe(18_000_000);
+      expect(stub).toContain('quiet_signals');
+      expect(stub).toContain('agent_concluded_absolute');
+    }
+  });
+
+  it('the stub concludes an agent gone quiet on every signal past the idle bound — killed, its received stdout its output, the cause with the quiet signals recorded (B-108)', async () => {
+    const agent = join(root, 'never-exits.sh');
+    writeFileSync(agent, '#!/bin/sh\necho "gate green, pushing"\necho $$ > "$(dirname "$0")/agent.pid"\nfor i in 1 2 3 4 5 6 7 8; do sleep 5; done\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const fix = join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs');
+    const restore = shrinkBounds(fix, 1000, 60_000);
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent }));
+      const snapshot = { sha: commitAll(root) };
+      const started = Date.now();
+      expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({
+        reached: 'fixed', next: 'run-tests',
+        conclusion: { cause: 'agent_concluded_idle', idle_ms: 1000, quiet_signals: ['stdout', 'wrapper-log'] },
+      });
+      // Minutes, not the five hours of the B-86 incident — and no server change anywhere.
+      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(await agentGone(join(root, 'agent.pid')), 'the conclusion SIGKILLs the agent: the stub is its parent').toBe(true);
+    } finally {
+      restore();
+      writeFileSync(settingsFile, before);
+      rmSync(join(root, 'agent.pid'), { force: true });
+      rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('an agent silent on stdout but live in its harness store is never concluded on idle — the db was the true signal that night (B-108)', async () => {
+    // The command names the harness, so the stub watches its store — no session id, keyed by
+    // the checkout. The fake opencode prints nothing on stdout the whole run (the trap: an
+    // idle stream is not an idle agent) and keeps writing its session store.
+    const bin = mkdtempSync(join(tmpdir(), 'baton-b108-bin-'));
+    const data = mkdtempSync(join(tmpdir(), 'baton-b108-data-'));
+    const agent = join(bin, 'opencode');
+    writeFileSync(agent, [
+      '#!/bin/sh',
+      'echo $$ > "$XDG_DATA_HOME/agent.pid"',
+      'mkdir -p "$XDG_DATA_HOME/opencode"',
+      ': >> "$XDG_DATA_HOME/opencode/opencode.db-wal"',
+      'for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60; do',
+      '  printf "session write %s\\n" "$(date +%s)" >> "$XDG_DATA_HOME/opencode/opencode.db-wal"',
+      '  sleep 0.15',
+      'done',
+      '',
+    ].join('\n'));
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const fix = join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs');
+    const restore = shrinkBounds(fix, 800, 60_000);
+    const path = process.env.PATH;
+    const dataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = data;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: 'opencode' }));
+      const snapshot = { sha: commitAll(root) };
+      const stop = new AbortController();
+      const started = Date.now();
+      const leg = (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, signal: stop.signal });
+      // Three times the idle bound: a stdout-only reader would have concluded at 0.8 s.
+      setTimeout(() => stop.abort('release'), 2_600);
+      await expect(leg, 'the live store vetoes the idle conclusion, however quiet stdout is').rejects.toThrow('the agent was stopped: release');
+      expect(Date.now() - started).toBeGreaterThanOrEqual(2_400);
+      expect(readFileSync(join(data, 'opencode', 'opencode.db-wal'), 'utf8')).toContain('session write');
+    } finally {
+      restore();
+      if (dataHome == null) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = dataHome;
+      if (path == null) delete process.env.PATH;
+      else process.env.PATH = path;
+      writeFileSync(settingsFile, before);
+      rmSync(bin, { recursive: true, force: true });
+      rmSync(data, { recursive: true, force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('a wrapper’s log keeps the wait up when the stub cannot see the pipe — its mtime is streamed activity (B-108)', async () => {
+    // The wrapper swallows the agent's stdout into .baton/logs/<ticket>-<leg>.log and keeps the
+    // log moving on its own cadence: the stub's stdout is silent the whole run, and only the
+    // log's mtime says the leg is alive.
+    const agent = join(root, 'silent-agent.sh');
+    writeFileSync(agent, '#!/bin/sh\nfor i in 1 2 3 4 5 6 7 8; do sleep 5; done\n');
+    const wrapper = join(root, 'log-wrapper.sh');
+    writeFileSync(wrapper, [
+      '#!/bin/sh',
+      'command_line="$*"',
+      'while [ $# -gt 3 ]; do shift; done',
+      'ticket="$1"; leg="$2"; checkout="$3"',
+      'mkdir -p "$checkout/.baton/logs"',
+      'log="$checkout/.baton/logs/${ticket}-${leg}.log"',
+      'i=0; while [ $i -lt 40 ]; do printf "wrapper tick %s\\n" "$(date +%s)" >> "$log"; i=$((i + 1)); sleep 0.2; done &',
+      '$command_line >> "$log" 2>&1',
+      '',
+    ].join('\n'));
+    chmodSync(agent, 0o755);
+    chmodSync(wrapper, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const fix = join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs');
+    const restore = shrinkBounds(fix, 800, 60_000);
+    const envWrapper = process.env.BATON_AGENT_WRAPPER;
+    try {
+      delete process.env.BATON_AGENT_WRAPPER;
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent, agent_wrapper: wrapper }));
+      const snapshot = { sha: commitAll(root) };
+      const stop = new AbortController();
+      const started = Date.now();
+      const leg = (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, signal: stop.signal });
+      setTimeout(() => stop.abort('release'), 2_600);
+      await expect(leg, 'the log\'s moving mtime vetoes the idle conclusion').rejects.toThrow('the agent was stopped: release');
+      expect(Date.now() - started).toBeGreaterThanOrEqual(2_400);
+      expect(readFileSync(join(root, '.baton', 'logs', 'A-1-fix.log'), 'utf8')).toContain('wrapper tick');
+    } finally {
+      restore();
+      if (envWrapper == null) delete process.env.BATON_AGENT_WRAPPER;
+      else process.env.BATON_AGENT_WRAPPER = envWrapper;
+      writeFileSync(settingsFile, before);
+      for (const f of ['silent-agent.sh', 'log-wrapper.sh']) rmSync(join(root, f), { force: true });
+      rmSync(join(root, '.baton', 'logs'), { recursive: true, force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('an agent printing at a slow cadence is never concluded on idle, however long it runs (B-108)', async () => {
+    const agent = join(root, 'slow-cadence.sh');
+    writeFileSync(agent, '#!/bin/sh\nfor i in 1 2 3 4 5 6 7 8 9 10; do echo "tick $(date +%s)"; sleep 0.4; done\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const fix = join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs');
+    const restore = shrinkBounds(fix, 900, 60_000);
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent }));
+      const snapshot = { sha: commitAll(root) };
+      const stop = new AbortController();
+      const started = Date.now();
+      const leg = (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, signal: stop.signal });
+      setTimeout(() => stop.abort('release'), 3_000);
+      await expect(leg, 'each line refreshes the stdout signal; the bound never sees silence').rejects.toThrow('the agent was stopped: release');
+      expect(Date.now() - started).toBeGreaterThanOrEqual(2_800);
+    } finally {
+      restore();
+      writeFileSync(settingsFile, before);
+      rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('a chatty agent that never converges ends at the leg’s ceiling, recorded agent_concluded_absolute, its received output judged by the same checks (B-108)', async () => {
+    // It printed its verdict and kept working — never idle, so only the ceiling ends it, and
+    // the review reads the verdict out of the output it received by the same last-line scan.
+    const agent = join(root, 'never-converges.sh');
+    writeFileSync(agent, '#!/bin/sh\necho changes\nfor i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do echo "still working $(date +%s)"; sleep 0.1; done\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const review = join(root, '.baton', 'courses', 'create-pr', 'legs', 'review.mjs');
+    const restore = shrinkBounds(review, 800, 2_200);
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent }));
+      const snapshot = { sha: commitAll(root) };
+      const started = Date.now();
+      expect(await (await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({
+        reached: 'reviewed', next: 'fix', verdict: 'changes',
+        conclusion: { cause: 'agent_concluded_absolute', ceiling_ms: 2_200 },
+      });
+      expect(Date.now() - started).toBeLessThan(15_000);
+    } finally {
+      restore();
+      writeFileSync(settingsFile, before);
+      rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('the ask-leg contract over concluded output: the last received line is the answer, or the leg fails naming what it read (B-108)', async () => {
+    const quiet = join(root, 'answered-then-quiet.sh');
+    const quietAgent = '#!/bin/sh\necho "reviewed the round"\necho approve\nfor i in 1 2 3 4 5 6 7 8; do sleep 5; done\n';
+    const noAnswer = join(root, 'prose-then-quiet.sh');
+    const noAnswerAgent = '#!/bin/sh\necho "the verdict is coming"\nfor i in 1 2 3 4 5 6 7 8; do sleep 5; done\n';
+    writeFileSync(quiet, quietAgent);
+    writeFileSync(noAnswer, noAnswerAgent);
+    chmodSync(quiet, 0o755);
+    chmodSync(noAnswer, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const review = join(root, '.baton', 'courses', 'create-pr', 'legs', 'review.mjs');
+    const restore = shrinkBounds(review, 900, 60_000);
+    try {
+      // An answer the received text still ends with (backwards past nothing): the round stands.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: quiet }));
+      const snapshot = { sha: commitAll(root) };
+      expect(await (await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({
+        reached: 'reviewed', next: 'merge', verdict: 'approve',
+        conclusion: { cause: 'agent_concluded_idle', idle_ms: 900, quiet_signals: ['stdout', 'wrapper-log'] },
+      });
+      // No line the reader would take: the concluded leg fails as any failed attempt would,
+      // naming the last line it received.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: noAnswer }));
+      const none = { sha: commitAll(root) };
+      await expect((await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: none }))
+        .rejects.toThrow(/the review agent printed no verdict .*the verdict is coming/);
+    } finally {
+      restore();
+      writeFileSync(settingsFile, before);
+      for (const f of [quiet, noAnswer]) rmSync(f, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('the B-86 shape replayed end to end: the work done, the PR open, every signal quiet — the stub concludes and the forge verify still gates pr-open (B-108)', async () => {
+    const agent = join(root, 'b-86.sh');
+    writeFileSync(agent, [
+      '#!/bin/sh',
+      '# the incident\'s shape: everything a finished leg does, then no exit',
+      'echo "baton: pushed and opened the PR"',
+      'echo "ticket record written"',
+      'echo $$ > "$(dirname "$0")/agent.pid"',
+      'for i in 1 2 3 4 5 6 7 8; do sleep 5; done',
+      '',
+    ].join('\n'));
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const implement = join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
+    const restore = shrinkBounds(implement, 1_000, 60_000);
+    // B-81: the stub verifies its PR on the forge before returning pr-open — the same scripted
+    // gh the spawn-contract test uses; the conclusion changes nothing about the gate.
+    const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegh-'));
+    writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\ncat "$(dirname "$0")/answer"\n');
+    writeFileSync(join(fakeBin, 'answer'), JSON.stringify([{ number: 7, headRefName: 'claude/B-1-b108', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
+    chmodSync(join(fakeBin, 'gh'), 0o755);
+    const path = process.env.PATH;
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    process.env.PATH = `${fakeBin}:${path}`;
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent }));
+      const snapshot = { sha: commitAll(root) };
+      const started = Date.now();
+      expect(await (await load(implement)).run({ ticket: { id: 'B-1' }, checkout: root, snapshot })).toEqual({
+        reached: 'pr-open', next: 'run-tests',
+        conclusion: { cause: 'agent_concluded_idle', idle_ms: 1_000, quiet_signals: ['stdout', 'wrapper-log'] },
+      });
+      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(await agentGone(join(root, 'agent.pid'))).toBe(true);
+      // The one line an operator reads when a leg ends this way, on the stub's own stderr.
+      expect(err.mock.calls.map((c) => String(c[0])).join('')).toContain('the agent agent_concluded_idle');
+    } finally {
+      err.mockRestore();
+      process.env.PATH = path;
+      restore();
+      writeFileSync(settingsFile, before);
+      rmSync(fakeBin, { recursive: true, force: true });
+      rmSync(join(root, 'agent.pid'), { force: true });
+      rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
 
   it('the stub prepends the agent_wrapper — the host’s BATON_AGENT_WRAPPER over the file — and the example wrapper passes the answer through with a byte-identical log (B-95)', async () => {
     // A wrapper sees the whole leg command as its arguments. Here it hands them to a reporter

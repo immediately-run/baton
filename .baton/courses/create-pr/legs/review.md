@@ -58,6 +58,12 @@ ends on anything else loses the round. Baton writes the verdict line on the PR f
    class taken where a narrow type or function would do, the one-implementation abstraction
    nothing needs, or the module-level state a second instance breaks. These are should-fix, or
    blocking when they duplicate a helper the ticket named or break a second instance.
+5. **Name every dependency the diff adds or upgrades** (B-132) — manifest and lockfile both:
+   name, version, publisher (its maintainers or owning scope, read from the registry) and that
+   version's age (when it was published). A dependency the round's report does not name is
+   itself a finding: unreviewed supply chain. One younger than the repository's registry age
+   floor, where it sets one, or from a publisher that only just appeared, is blocking until
+   someone says why it is worth the risk.
 
 Severity: **blocking** (wrong behaviour, a security hole, a broken exit criterion, a missing test
 for a behaviour change), **should-fix** (a real defect of smaller consequence), **nit** (style,

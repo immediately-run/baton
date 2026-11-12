@@ -34,6 +34,11 @@ is summarized in the principal table (§12.1).
       namespace `baton-request`, hash `sha256` or `sha512`, whose embedded public key is the one
       `keyid` names. The namespace keeps it from passing as any other signature by the same key,
       such as a signed commit.
+    - **Owner-signed commits** (B-127, R-BTN-66 as amended) use the same SSHSIG format in the
+      namespace `git`, over the commit object without its `gpgsig` header — git's own
+      `gpg.format ssh` writes them. The sync verifies them to mark what counts (§7.1) and each
+      runner verifies them again before loading what a post named (R-BTN-133); the two
+      namespaces keep one from passing as the other.
     - Both hosts verify with WebCrypto (Ed25519, P-256). An `sk-` signature must carry the
       user-presence flag; its counter is not checked.
   - **Refused `unauthenticated`:** `created` more than 5 minutes from Baton's clock; an
