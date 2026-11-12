@@ -142,15 +142,22 @@ export function codeReposOf(store: Store, repository: string): CodeRepo[] {
   return rowsOf(store, repository).map(({ path, forge, host, repo_id, owner_id, web_base }) => ({ path, forge, host, repo_id, owner_id, web_base }));
 }
 
-/** Replace the home's list in the caller's transaction, keeping an existing entry's `added_by`
- *  and `added_at` (a re-written list keeps the ids of the paths it keeps, and their history). */
+/** Replace the home's list in the caller's transaction. A path the list keeps keeps its whole
+ *  stored row — forge, host, ids, `web_base`, `added_by`/`added_at` — for a re-written list
+ *  cannot change what a kept path reaches (R-BTN-140: "a re-written list keeps the ids of the
+ *  paths it keeps"): the ids the CLI re-reads and posts for a kept path are validated, not
+ *  adopted, so a path deleted and re-created on the forge does not gain its new ids here — the
+ *  sync's id check (R-BTN-138) fails on them instead. New ids — or a new host — enter only
+ *  with a path the list did not hold: write the list without the path, then with it again,
+ *  which `loosensSettings` governs as reach gained. */
 export function writeCodeRepos(store: Store, repository: string, entries: CodeRepo[], addedBy: string, now: number): void {
   const old = new Map(rowsOf(store, repository).map((r) => [r.path.toLowerCase(), r]));
   store.exec('DELETE FROM code_repos WHERE repository_id = ?', repository);
   for (const e of entries) {
     const was = old.get(e.path.toLowerCase());
+    const row = was ?? { ...e, added_by: addedBy, added_at: now };
     store.exec('INSERT INTO code_repos (repository_id, path, forge, host, repo_id, owner_id, web_base, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      repository, e.path, e.forge, e.host, e.repo_id, e.owner_id, e.web_base, was?.added_by ?? addedBy, was?.added_at ?? now);
+      repository, row.path, row.forge, row.host, row.repo_id, row.owner_id, row.web_base, row.added_by, row.added_at);
   }
 }
 

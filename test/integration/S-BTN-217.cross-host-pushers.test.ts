@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import { keyCall, ORIGIN, rows, setAdminKeys, setClock } from '../helpers';
-import { makeKey } from '../lib/sshKeys';
+import { makeKey, type TestKey } from '../lib/sshKeys';
 import { githubFake } from '../githubFake';
 
 const T0 = Date.now() - 60_000;
@@ -23,6 +23,7 @@ let dir: string;
 let remote: string;
 const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
 
+let owner: TestKey;
 let scratch: string;
 function keyPair(name: string): { file: string; publicKey: string } {
   const file = join(scratch, name);
@@ -44,7 +45,8 @@ const verdict = (login: string) => ({ user: { login }, author_association: 'CONT
 const permission = (login: string, p: string, id: number) => ({ [`/repos/acme/monorepo/collaborators/${login}/permission`]: { permission: p, user: { id } } });
 
 let github: Record<string, unknown>;
-const forge = () => vi.stubGlobal('fetch', (url: string, init?: { body?: string }) => githubFake(github, [])(url, init));
+const asked: string[] = [];
+const forge = () => vi.stubGlobal('fetch', (url: string, init?: { body?: string }) => githubFake(github, asked)(url, init));
 
 let syncFile: string;
 async function sync(): Promise<number> {
@@ -63,7 +65,7 @@ beforeEach(async () => {
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote], { stdio: 'ignore' });
   for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's217@test'], ['config', 'user.name', 's217'], ['remote', 'add', 'origin', remote]]) execFileSync('git', ['-C', dir, ...a], { stdio: 'ignore' });
   const admin = await makeKey('ssh-ed25519', 'admin');
-  const owner = await makeKey('ssh-ed25519', 'owner');
+  owner = await makeKey('ssh-ed25519', 'owner');
   const syncKey = keyPair('sync');
   syncFile = syncKey.file;
   await setAdminKeys(admin);
@@ -109,5 +111,28 @@ describe('S-BTN-217 pushers across hosts', () => {
     github = { ...github, ...detail([verdict('pat')]), ...permission('pat', 'read', 77) };
     expect(await sync()).toBe(0);
     expect(await stationOf()).toMatchObject({ station: 'reviewed', next_leg: 'merge' });
+  });
+
+  it('a listed pusher counts by id alone — no collaborator read, whatever the association', async () => {
+    // quinn is no collaborator at all (the permission read would 404) and GitHub calls them
+    // NONE: R-BTN-139's two ways are independent, so the owners' listed id is enough — the id
+    // is read once per author (`GET /users/quinn`), and no collaborator permission is asked.
+    expect((await keyCall(owner, '/v1/owner/home/settings', {
+      pushers: [{ host: 'github.com', id: '78' }],
+    }, 'PUT')).status).toBe(200);
+    const driveBy = { user: { login: 'quinn' }, author_association: 'NONE', body: '<!-- baton:verdict approve -->\nbaton: home:LIN-1 review', created_at: '2026-11-12T12:30:00Z' };
+    // The user read answers an id that is not listed: neither way makes quinn a pusher, and
+    // the NONE association keeps the collaborator read from being asked at all.
+    github = { ...github, ...detail([driveBy]), '/users/quinn': { id: 999 } };
+    asked.length = 0;
+    expect(await sync()).toBe(0);
+    expect(await stationOf()).toMatchObject({ station: 'pr-open' });
+    expect(asked).toContain('/users/quinn');
+    expect(asked).not.toContain('/repos/acme/monorepo/collaborators/quinn/permission');
+    // With the listed id (78), the verdict counts on the id alone.
+    github = { ...github, '/users/quinn': { id: 78 } };
+    expect(await sync()).toBe(0);
+    expect(await stationOf()).toMatchObject({ station: 'reviewed', next_leg: 'merge' });
+    expect(asked).not.toContain('/repos/acme/monorepo/collaborators/quinn/permission');
   });
 });

@@ -135,7 +135,10 @@ repository reachable over SSH is enough (R-BTN-105).
     tenant's live repositories on one forge host (`conflict`). A webhook's numeric id is
     converted only when `Number.isSafeInteger` holds, else the delivery is ignored and logged.
   - **The ids decide.** A token or delivery whose ids match passes whatever path it carries;
-    one whose ids differ fails whatever path it carries. Checked on: a GitHub OIDC token's
+    one whose ids differ fails whatever path it carries. So does the fact adapter's read of a
+    `code_repos` entry's repository on its own host (R-BTN-140): the forge's ids for the
+    repository it reads are compared with the entry's, and a mismatch fails the sync naming
+    the entry — a re-created path never gains reach. Checked on: a GitHub OIDC token's
     `repository_id` and `repository_owner_id`; a GitLab `id_tokens` JWT's `project_id` and
     `namespace_id`; an App delivery's `repository.id`; a notification's GitLab `project.id`,
     Gitea `repository.id` and `repository.owner.id`, or GitHub repository webhook's

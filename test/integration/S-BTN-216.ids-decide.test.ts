@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import { keyCall, ORIGIN, rows, setAdminKeys, setClock } from '../helpers';
-import { makeKey } from '../lib/sshKeys';
+import { makeKey, type TestKey } from '../lib/sshKeys';
 import { githubFake } from '../githubFake';
 
 const T0 = Date.now() - 60_000;
@@ -29,6 +29,8 @@ function keyPair(name: string): { file: string; publicKey: string } {
   execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', name, '-f', file], { stdio: 'ignore' });
   return { file, publicKey: execFileSync('cat', [`${file}.pub`], { encoding: 'utf8' }).trim().split(' ').slice(0, 2).join(' ') };
 }
+
+let owner: TestKey;
 
 /** The ids the fake forge reports, and PR routes for one PR on a head LIN-1 owns. */
 const ids = (repo: number, owner: number) => ({ id: repo, owner: { id: owner } });
@@ -61,7 +63,7 @@ beforeEach(async () => {
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote], { stdio: 'ignore' });
   for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's216@test'], ['config', 'user.name', 's216'], ['remote', 'add', 'origin', remote]]) execFileSync('git', ['-C', dir, ...a], { stdio: 'ignore' });
   const admin = await makeKey('ssh-ed25519', 'admin');
-  const owner = await makeKey('ssh-ed25519', 'owner');
+  owner = await makeKey('ssh-ed25519', 'owner');
   const syncKey = keyPair('sync');
   syncFile = syncKey.file;
   await setAdminKeys(admin);
@@ -113,6 +115,25 @@ describe('S-BTN-216 the ids decide for a code repository', () => {
     // Only the listed repository was asked of the forge — the unlisted one has no reach
     // (R-BTN-140), its PRs place nothing, and the sync does not fail on it.
     expect([...new Set(asked.map((k) => (k.startsWith('graphql ') ? k : k.split('/').slice(2, 4).join('/'))))].sort()).toEqual(['acme/monorepo', 'graphql acme/monorepo 7']);
+    expect(await rows<{ station: string }>('SELECT station FROM ticket_stations WHERE ticket_id = ?', 'home:LIN-1')).toEqual([{ station: 'pr-open' }]);
+  });
+
+  it('a GitHub host other than github.com is read at its own endpoints', async () => {
+    // R-BTN-96/B-182: the entry names an Enterprise host — `host` is any lowercased DNS name
+    // (R-BTN-140) — which serves REST under `/api/v3` and GraphQL at `/api/graphql`, not
+    // github.com's paths. A kept path keeps its whole row (R-BTN-140), so moving the entry to
+    // the other host takes the list without it, then with it again.
+    expect((await keyCall(owner, '/v1/owner/home/settings', { code_repos: [] }, 'PUT')).status).toBe(200);
+    expect((await keyCall(owner, '/v1/owner/home/settings', {
+      code_repos: [{ path: 'acme/monorepo', forge: 'github', host: 'github.acme.example.com', repo_id: '7001', owner_id: '31' }],
+    }, 'PUT')).status).toBe(200);
+    github = { ...github, '/repos/acme/monorepo/pulls?state=all': [pull(7)], ...detail(7) };
+    asked.length = 0;
+    expect(await sync()).toBe(0);
+    // The ids decided on that host too, the PR list came over its REST and the owned PR's
+    // detail over its GraphQL — a doubled or missing endpoint prefix fails the read, so the
+    // station proves both halves were asked and answered.
+    expect(asked.filter((k) => k.startsWith('graphql '))).toEqual(['graphql acme/monorepo 7']);
     expect(await rows<{ station: string }>('SELECT station FROM ticket_stations WHERE ticket_id = ?', 'home:LIN-1')).toEqual([{ station: 'pr-open' }]);
   });
 });

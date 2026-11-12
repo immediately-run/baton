@@ -50,12 +50,15 @@ function prNode(routes: Routes, repo: string, n: number): unknown {
   };
 }
 
-/** A fetch answering `routes`; `calls` records each request as its REST key, or `graphql <owner/name> <numbers>`. */
+/** A fetch answering `routes`; `calls` records each request as its REST key, or `graphql <owner/name> <numbers>`.
+ * A GitHub host other than github.com — Enterprise — serves GraphQL at `/api/graphql` and REST
+ * under `/api/v3` (R-BTN-96's per-host adapter): both are answered from the same routes, the
+ * prefix stripped, so one fixture states a repository on either host. */
 export function githubFake(routes: Routes, calls: string[] = [], { checksForbidden = [] as string[] } = {}) {
   const forbidden = (repo: string) => checksForbidden.some((r) => r.toLowerCase() === repo.toLowerCase());
   return async (url: string, init?: { method?: string; body?: string }): Promise<Response> => {
     const u = new URL(url);
-    if (u.pathname === '/graphql') {
+    if (u.pathname === '/graphql' || u.pathname === '/api/graphql') {
       const { query, variables } = JSON.parse(String(init?.body)) as { query: string; variables: { owner: string; name: string } };
       const repo = `${variables.owner}/${variables.name}`;
       const numbers = [...query.matchAll(/p(\d+): pullRequest\(number: (\d+)\)/g)].map((m) => Number(m[2]));
@@ -70,7 +73,7 @@ export function githubFake(routes: Routes, calls: string[] = [], { checksForbidd
       });
     }
     u.searchParams.delete('per_page');
-    const key = `${u.pathname}${u.search}`;
+    const key = `${u.pathname.replace(/^\/api\/v3(?=\/)/, '')}${u.search}`;
     calls.push(key);
     if (/^\/repos\/[^/]+\/[^/]+\/commits\/[^/]+\/check-runs/.test(key) && forbidden(key.split('/').slice(2, 4).join('/'))) return new Response('{"message":"Resource not accessible by personal access token"}', { status: 403 });
     if (!(key in routes)) return new Response('{}', { status: 404 });

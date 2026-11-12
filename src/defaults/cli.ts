@@ -800,12 +800,13 @@ const detailQuery = (numbers: number[]): string =>
  *  and while the home lists no code repository at all, every name keeps today's reading.
  *  Live forge access — the tests inject recorded facts instead. */
 
-/** One host's API as the adapter reads it: the REST and GraphQL origins, the token, and the
- *  budget's key. GitHub's own host is `api.github.com`; a GitHub Enterprise host serves REST at
- *  `/api/v3` and GraphQL at `/api/graphql`. */
+/** One host's API as the adapter reads it: the REST origin REST paths append to, the GraphQL
+ *  endpoint whole (nothing is appended to it), and the budget's key. GitHub's own host is
+ *  `api.github.com`; a GitHub Enterprise host serves REST under `/api/v3` and GraphQL at
+ *  `/api/graphql`. */
 function githubConn(host: string): { host: string; rest: string; graphql: string } {
   return host === 'github.com'
-    ? { host, rest: 'https://api.github.com', graphql: 'https://api.github.com' }
+    ? { host, rest: 'https://api.github.com', graphql: 'https://api.github.com/graphql' }
     : { host, rest: `https://${host}/api/v3`, graphql: `https://${host}/api/graphql` };
 }
 
@@ -867,8 +868,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
    *  the head's workflow runs instead. Every error names its path, so a refusal says what. */
   const graphql = async (conn: { host: string; graphql: string; token: string }, query: string, variables: Record<string, unknown>): Promise<{ data: any; checksRefused: boolean }> => {
     spend(conn.host);
-    const url = `${conn.graphql}/graphql`;
-    const res = checked(await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${conn.token}`, 'Content-Type': 'application/json', 'User-Agent': 'baton-sync' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), `${url} (${String(variables.owner)}/${String(variables.name)})`);
+    const res = checked(await fetch(conn.graphql, { method: 'POST', headers: { Authorization: `Bearer ${conn.token}`, 'Content-Type': 'application/json', 'User-Agent': 'baton-sync' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), `${conn.graphql} (${String(variables.owner)}/${String(variables.name)})`);
     const body = (await res.json()) as { data?: any; errors?: { message?: string; type?: string; path?: (string | number)[] }[] };
     const errors = body.errors ?? [];
     const checksRefused = errors.length > 0 && body.data != null && errors.every((e) => e.type === 'FORBIDDEN' && (e.path ?? []).includes('checkSuites'));
@@ -906,12 +906,14 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     }
     return out;
   };
-  /** R-BTN-139, B-182: whether `login` counts on `conn`'s host — someone the forge reports can
-   *  push to the repository (the collaborator permission, read once per author per repository per
-   *  run), or an immutable forge user id in the owners' `pushers` for that host (the permission
-   *  answer carries it). A 404 is no collaborator. A 403 that is no rate limit is a token without
-   *  the scope: it degrades, failing closed — no verdict of that repository counts, said once.
-   *  Any other failure aborts the run, which posts nothing. */
+  /** R-BTN-139, B-182: whether `login` counts on `conn`'s host — one of two independent ways.
+   *  An immutable forge user id in the owners' `pushers` for that host counts on its own
+   *  (`idOf` below reads it), whatever `author_association` says and without a collaborator
+   *  read. The other way is someone the forge reports can push to the repository (the
+   *  collaborator permission, read once per author per repository per run); a 404 is no
+   *  collaborator, which leaves only the listed-id way. A 403 that is no rate limit is a token
+   *  without the scope: it degrades, failing closed — no verdict of that repository counts,
+   *  said once. Any other failure aborts the run, which posts nothing. */
   const pushers = new Map<string, Promise<boolean>>();
   const unreadable = new Set<string>();
   const pusherIds = new Map<string, Set<string>>();
@@ -920,6 +922,28 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     set.add(p.id);
     pusherIds.set(p.host, set);
   }
+  /** The author's immutable id on `conn`'s host, or null when none is at hand — the fact's own
+   *  when it carries one (REST lists do; GraphQL's `User.id` is the base64 node id, not the
+   *  numeric one `pushers` holds, so GraphQL facts take the read), else one user read
+   *  (`GET /users/{login}`), budgeted and cached per author per run, answered only while that
+   *  host lists some pusher id to match against — a host that lists none never looks an author
+   *  up, so every existing deployment reads byte for byte as before. A failed read answers
+   *  null: the listed way fails closed. */
+  const ids = new Map<string, Promise<string | null>>();
+  const idOf = async (conn: { host: string; rest: string; token: string }, login: string, carried?: unknown): Promise<string | null> => {
+    if (!(pusherIds.get(conn.host)?.size)) return null;
+    if (typeof carried === 'number' || typeof carried === 'string') return String(carried);
+    const key = `${conn.host}\u0000${login}`;
+    if (!ids.has(key)) {
+      ids.set(key, get(conn, `${conn.rest}/users/${encodeURIComponent(login)}`)
+        .then(async (res) => {
+          const b = (await res.json()) as { id?: unknown };
+          return b.id == null ? null : String(b.id);
+        })
+        .catch(() => null));
+    }
+    return ids.get(key)!;
+  };
   const canPush = (conn: { host: string; rest: string; token: string }, repo: string, login: string): Promise<boolean> => {
     const key = `${conn.host}\u0000${repo.toLowerCase()}\u0000${login}`;
     if (!pushers.has(key)) {
@@ -942,11 +966,18 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     }
     return pushers.get(key)!;
   };
-  /** The facts whose author is trusted, in their order (R-BTN-139). An author GitHub no longer
-   *  names (a deleted account) cannot be asked, so does not count. */
-  const trustedOnly = async <T extends { login?: string | null; association?: string }>(conn: { host: string; rest: string; token: string }, repo: string, facts: T[]): Promise<T[]> => {
+  /** The facts whose author is trusted, in their order (R-BTN-139) — a listed immutable id
+   *  first, one of the two ways on its own, then the forge's own report, which
+   *  `author_association` pre-filters. An author GitHub no longer names (a deleted account)
+   *  cannot be asked, so does not count. */
+  const trustedOnly = async <T extends { login?: string | null; userId?: unknown; association?: string }>(conn: { host: string; rest: string; token: string }, repo: string, facts: T[]): Promise<T[]> => {
     const out: T[] = [];
-    for (const f of facts) if (f.login != null && !CANNOT_PUSH.has(String(f.association)) && (await canPush(conn, repo, f.login))) out.push(f);
+    for (const f of facts) {
+      if (f.login == null) continue;
+      const id = await idOf(conn, f.login, f.userId);
+      if (id != null && (pusherIds.get(conn.host) ?? new Set()).has(id)) out.push(f);
+      else if (!CANNOT_PUSH.has(String(f.association)) && (await canPush(conn, repo, f.login))) out.push(f);
+    }
     return out;
   };
   const out: PrFact[] = [];
@@ -1033,13 +1064,15 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     });
     const pushes = commits.map((c) => c.at);
     // A verdict counts only from someone who can push to the repository (R-BTN-139) — never a
-    // drive-by comment on a public PR.
+    // drive-by comment on a public PR. The REST mappings carry `user.id` too: an author's
+    // immutable id is the owners' `pushers`' other way to count, consulted before any
+    // collaborator read (the GraphQL mapping has no numeric id to carry; `idOf` reads it).
     const reviews = (await trustedOnly(conn, repo, node.reviews.pageInfo.hasNextPage
-      ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
+      ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, userId: r.user?.id, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
       : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body }))))
       .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '' }));
     const comments = (await trustedOnly(conn, repo, node.comments.pageInfo.hasNextPage
-      ? (await all<any>(conn, `/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, association: c.author_association, at: c.created_at, body: c.body }))
+      ? (await all<any>(conn, `/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, userId: c.user?.id, association: c.author_association, at: c.created_at, body: c.body }))
       : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body }))))
       .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
     return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments], commits };

@@ -123,6 +123,14 @@ GITHUB_TOKEN=<a token that can read the repository>   node <baton checkout>/cli/
 lets your own verdicts on the PRs count when the token reports you as a read-only collaborator
 on a repository you may push to through `gh`.
 
+Re-running the command cannot change what a listed path reaches (R-BTN-140): a path the list
+keeps keeps its stored ids, host and `web_base` whole, however the command re-reads them. If
+GitHub really did move or re-create the repository — the sync then fails naming the entry,
+because the forge's ids no longer match — accept the new ids deliberately: re-run with
+`--code-repos none` (the path leaves the list), then with the path again. Both writes are
+yours to make as the owner; the second is reach gained, so it is governed like the first one
+was.
+
 ## 6. A ticket
 
 `tickets/LIN-1.md` in the home:

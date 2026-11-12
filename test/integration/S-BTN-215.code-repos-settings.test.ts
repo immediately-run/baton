@@ -113,6 +113,34 @@ describe('S-BTN-215 code repository settings refused', () => {
     expect((await policy('ops', { base_version: 1, policy: { ...COOPERATIVE, human_identity: '4242' } })).status).toBe(200);
   });
 
+  it('a re-written list keeps a kept path\'s ids — new ids enter only with a path the list did not hold', async () => {
+    // First write: one entry, ids 7001/31.
+    expect((await settings('docs', { code_repos: [{ path: 'acme/monorepo', repo_id: '7001', owner_id: '31' }] })).status).toBe(200);
+    const was = await rows('SELECT path, forge, host, repo_id, owner_id, web_base, added_by, added_at FROM code_repos WHERE repository_id = ?', 'docs');
+    // The routine re-write — the CLI re-reads every entry's ids on each `--code-repos` run, and
+    // a second entry is being added — now posts different ids for the kept path (the forge
+    // re-created it under the same spelling). R-BTN-140: the kept row keeps its ids, host and
+    // web_base whole, so the re-created path gains no reach here — the sync's id check
+    // (S-BTN-216) fails on the new ids instead, and adopting them takes the governed two-step
+    // below. Only the new entry's ids land as posted.
+    expect((await settings('docs', { code_repos: [
+      { path: 'acme/monorepo', repo_id: '8888', owner_id: '31' },
+      { path: 'immediately-run/site', repo_id: '10', owner_id: '5' },
+    ] })).status).toBe(200);
+    const kept = await rows('SELECT path, forge, host, repo_id, owner_id, web_base, added_by, added_at FROM code_repos WHERE repository_id = ? ORDER BY path', 'docs');
+    expect(kept.find((r) => r.path === 'acme/monorepo')).toEqual(was[0]);
+    expect(kept.find((r) => r.path === 'immediately-run/site')).toMatchObject({ forge: 'github', host: 'github.com', repo_id: '10', owner_id: '5' });
+    // The governed way to new ids (or a new host): the list written without the path, then
+    // with it again — a path the list did not hold, reach regained and approver-governed —
+    // adopts them.
+    expect((await settings('docs', { code_repos: [{ path: 'immediately-run/site', repo_id: '10', owner_id: '5' }] })).status).toBe(200);
+    expect((await settings('docs', { code_repos: [
+      { path: 'acme/monorepo', repo_id: '8888', owner_id: '31' },
+      { path: 'immediately-run/site', repo_id: '10', owner_id: '5' },
+    ] })).status).toBe(200);
+    expect(await rows('SELECT repo_id, owner_id FROM code_repos WHERE repository_id = ? AND path = ?', 'docs', 'acme/monorepo')).toEqual([{ repo_id: '8888', owner_id: '31' }]);
+  });
+
   it('the human_identity knob is a short plain string or null, and diffing alone never enforces it', async () => {
     const bad = await policy('docs', { base_version: 1, policy: { ...COOPERATIVE, human_identity: '' } });
     expect(bad).toMatchObject({ status: 400, json: { code: 'invalid-params' } });
