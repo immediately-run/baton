@@ -87,10 +87,12 @@ describe('the repository policy (R-BTN-188, R-BTN-189)', () => {
     expect(refuse({ ...PLAIN_GIT, leg_state: 'forge' })).toContain('git repository has no forge conversation');
     expect(refuse({ ...PLAIN_GIT, inputs: { ...PLAIN_GIT.inputs, board: ['sync-key', 'ci-identity'] } })).toContain('ci-identity');
     expect(refuse({ ...PLAIN_GIT, outbox: { ...PLAIN_GIT.outbox, 'forge-check': { deliverers: ['courier'], trust: 'any' } } })).toContain('forge-check deliverer');
-    // `protected` applied to a git repository writes plain-git's three values with it.
+    // `protected` applied to a git repository writes plain-git's two values with it — its leg
+    // state is the side branch by R-BTN-190's rule, not by a knob (B-182).
     const folded = policyForPreset('protected', 'git');
     expect(() => validatePolicyDocument(folded, { forge: 'git' })).not.toThrow();
-    expect(folded.leg_state).toBe('branch');
+    expect(folded.leg_state).toBeUndefined();
+    expect(legStateOf(folded, 'git')).toBe('branch');
     expect(folded.inputs.board).toEqual(['sync-key']);
     expect(folded.outbox['forge-check'].deliverers).toEqual([]);
   });
@@ -100,6 +102,16 @@ describe('the repository policy (R-BTN-188, R-BTN-189)', () => {
     expect(legStateOf(COOPERATIVE, 'git')).toBe('branch');
     expect(legStateOf(PLAIN_GIT, 'git')).toBe('branch');
     expect(legStateOf({ ...COOPERATIVE, leg_state: 'forge' }, 'github')).toBe('forge');
+  });
+
+  it('B-182: a git home whose course reads PR facts keeps its rounds in the PR conversation', () => {
+    // R-BTN-190 as amended: `forge` when the home is on a forge or the claimed ticket's course
+    // reads PR facts (facts: ["prs"], R-BTN-134) — a `git` home's PR course among them — else
+    // `branch`; an explicit knob still chooses.
+    expect(legStateOf(COOPERATIVE, 'git', true)).toBe('forge');
+    expect(legStateOf(COOPERATIVE, 'git', false)).toBe('branch');
+    expect(legStateOf(PLAIN_GIT, 'git', true)).toBe('forge');
+    expect(legStateOf({ ...PLAIN_GIT, leg_state: 'branch' }, 'git', true)).toBe('branch');
   });
 
   it('diff lists the knobs a change touches, in the table order, and nothing on a no-op', () => {

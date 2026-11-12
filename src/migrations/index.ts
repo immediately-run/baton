@@ -37,6 +37,7 @@ import scopeEvents from './0035_scope_events.sql';
 import retireModelTables from './0036_retire_model_tables.sql';
 import ticketVersions from './0037_ticket_versions.sql';
 import runIds from './0038_run_ids.sql';
+import crossHostCodeRepos from './0039_cross_host_code_repos.sql';
 import { isUniqueViolation, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -103,4 +104,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 36, sql: retireModelTables },
   { id: 37, sql: ticketVersions },
   { id: 38, sql: runIds, backfill: backfillRunIds },
+  // 0039 (B-182): code repositories name their own forge and host, and pushers are host-qualified.
+  { id: 39, sql: crossHostCodeRepos },
 ];

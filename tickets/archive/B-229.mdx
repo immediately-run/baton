@@ -2,7 +2,7 @@
 title: "B-229 — A claim outlives its runner: a restart's new session never ends the last one's claim, and expired leases stay on the board for weeks"
 id: B-229
 project: baton
-status: in-review
+status: done
 updated: 2026-11-11
 repos:
   - baton
@@ -14,7 +14,8 @@ description: "Found on vltava2, 2026-11-10. (1) The runner's orphan check reads 
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/224
 depends_on: []
 ---
 
@@ -22,7 +23,7 @@ depends_on: []
 `~/.cache/immediately-run/baton/run-<session>.json`; a host's earlier sessions are the other
 files there with a `claim`.
 
-**Spec:** [BATON_SPEC §9](../spec/BATON_SPEC/09-claims.md) (leases, reaping,
+**Spec:** [BATON_SPEC §9](../../spec/BATON_SPEC/09-claims.md) (leases, reaping,
 fences), R-BTN-19, R-BTN-24.
 
 **Depends on:** none.
