@@ -3,7 +3,7 @@ title: "B-182 — code repositories on another forge than the home's: a plain-gi
 id: B-182
 project: baton
 status: available
-updated: 2026-11-05
+updated: 2026-11-12
 tags:
   - roadmap-item
   - EXPEDITE
@@ -188,3 +188,5 @@ _filed 2026-11-05._
 _2026-11-05 — expedited (EXPEDITE) at the owner's request: the owner needs Baton for work today._
 
 _2026-11-05 — first slice built, ahead of the spec PR, so the owner can work today: the sync skips a plain-git home's own GitHub read (`plainGitRemote`, `githubFacts` in `src/defaults/cli.ts`) and reads only the `repos:` repositories, with no token when there are none; `docs/runbooks/local-home.mdx` is point 8's runbook, run end to end on a local Baton (registration, sync, claim, leg, release). Points 1–7 and the spec amendment remain._
+
+_2026-11-12 — built (points 1–7 and the spec amendment): R-BTN-92, R-BTN-96, R-BTN-138, R-BTN-139, R-BTN-140, R-BTN-190, §4.4, §12.3 and R-BTN-188 amended in their section files, the Decision (a) recorded in `91-decisions.md`, `npm run spec:index` current; migration 0039 (the `code_repos` table, `repositories.pushers`, `courses.facts`); the settings (`code_repos`, `pushers`) with the point-7 refusals both orders and the `human_identity` knob they turn on; the fact adapter per repository with per-host budgets and the ids verified at every read; leg state following the course's `facts`; `docs/runbooks/local-home.mdx` on the new flow. Scenarios S-BTN-214 to S-BTN-217. The CLI's `--code-repos` reads the ids from each entry's forge or takes `--forge-ids` (Baton never fetches)._

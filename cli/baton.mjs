@@ -42,6 +42,8 @@
 //                [--starts-at ISO] [--ends-at ISO] [--release-holders] --reason R
 //   baton owner -i KEY bar lift REPO ID
 //   baton owner -i KEY settings REPO [--required-bar LEG|'*' --course C|'*' [--except a,b] --tag-prefix P]… | --no-required-bars
+//                             [--code-repos [<forge>:]<owner>/<name>[@<host>],… | none] [--forge-ids <repo id>,<owner id>]   (B-182, R-BTN-140)
+//                             [--pushers <forge user id>[@<host>],… | none]                                                          (B-182, R-BTN-139)
 //                [--retry 1h,4h --max-failed 3 | --retry default] [--transcript-repos a,b]
 //                [--unblocked-workflow .github/workflows/F.yml | --unblocked-workflow none] [--remind-after 24h]
 //                [--independence 'review=implement,fix;adjudicate=implement' | --independence none]
@@ -361,7 +363,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       } };
     }
     if (cmd === 'settings') {
-      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'independence'], 1);
+      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'independence', 'code-repos', 'forge-ids', 'pushers'], 1);
       const body = {};
       if (flags['no-required-bars']) {
         if (groups.length) throw new Error('--no-required-bars clears them: name no --required-bar beside it');
@@ -389,8 +391,24 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
           return [leg.trim(), list(from)];
         }));
       }
+      // B-182 (R-BTN-140): the home's code repositories — each `[<forge>:]<path>[@<host>]`, or
+      // `none` to clear the list. The ids are read from each entry's forge with the operator's
+      // token (GITHUB_TOKEN, GITLAB_TOKEN, GITEA_TOKEN) or taken from --forge-ids, and posted;
+      // `main` resolves them before the PUT goes out.
+      let resolveCodeRepos = null;
+      if (flags['code-repos'] !== undefined) {
+        if (flags['code-repos'] === 'none') body.code_repos = [];
+        else {
+          const { entries, offline } = codeReposSpec(flags['code-repos'], flags['forge-ids']);
+          body.code_repos = entries;
+          if (entries.some((e) => e.repo_id == null)) resolveCodeRepos = { repository: need(positional[0], 'the repository id'), offline };
+        }
+      }
+      // B-182 (R-BTN-139): the owners' pushers, host-qualified — `id[@host]`, a comma list, or
+      // `none` to clear; a host-less entry is the home's host.
+      if (flags.pushers !== undefined) body.pushers = flags.pushers === 'none' ? null : pushersSpec(flags.pushers);
       if (!Object.keys(body).length) throw new Error('baton owner settings REPO names at least one setting');
-      return { method: 'PUT', path: `/v1/owner/${need(positional[0], 'the repository id')}/settings`, body };
+      return { method: 'PUT', path: `/v1/owner/${need(positional[0], 'the repository id')}/settings`, body, ...(resolveCodeRepos ? { resolveCodeRepos } : {}) };
     }
     if (cmd === 'courier' && rest[0] === 'add') {
       const { flags, positional } = parseArgs(rest.slice(1), [], ['key', 'asks'], 1);
@@ -451,6 +469,114 @@ function jsonArg(v, readJson) {
   } catch {
     throw new Error(`${v.slice(0, 40)}: not JSON`);
   }
+}
+
+/** B-182 (R-BTN-140): one `--code-repos` entry as the operator writes it —
+ *  `[<forge>:]<path>[@<host>]`, a comma list. Omitted forge and host are the home's (the
+ *  resolver fills them from the home's registration); a well-known host implies its forge.
+ *  `--forge-ids <repo>,<owner>` supplies the ids offline for one entry; otherwise `main`
+ *  reads them from the entry's forge before the PUT goes out. Pure, beside `plan`. */
+export function codeReposSpec(value, forgeIds = null) {
+  const known = { 'github.com': 'github', 'gitlab.com': 'gitlab', 'gitea.com': 'gitea' };
+  let offline = null;
+  if (forgeIds != null) {
+    const [repo, owner, ...extra] = String(forgeIds).split(',');
+    if (!/^\d+$/.test(repo ?? '') || !/^\d+$/.test(owner ?? '') || extra.length) {
+      throw new Error(`--forge-ids takes <repo id>,<owner id> as decimal numbers, not ${forgeIds}`);
+    }
+    offline = { repo_id: repo, owner_id: owner };
+  }
+  const entries = list(value).map((raw) => {
+    const m = /^(?:([a-z]+):)?([^@]+)(?:@([^@]+))?$/.exec(raw);
+    if (!m) throw new Error(`--code-repos takes [<forge>:]<owner>/<name>[@<host>] entries, not ${raw}`);
+    const [, forge, path, host] = m;
+    const byHost = host != null && forge == null ? known[host.toLowerCase()] : undefined;
+    return {
+      path,
+      ...(forge != null || byHost != null ? { forge: forge ?? byHost } : {}),
+      ...(host != null ? { host: host.toLowerCase() } : {}),
+      ...(offline ?? {}),
+    };
+  });
+  if (offline != null && entries.length !== 1) throw new Error('--forge-ids supplies the ids of one --code-repos entry');
+  return { entries, offline };
+}
+
+/** B-182 (R-BTN-139): `--pushers` — `id[@host]`, a comma list; a host-less entry is the home's. */
+export function pushersSpec(value) {
+  return list(value).map((raw) => {
+    const at = raw.lastIndexOf('@');
+    const [id, host] = at < 0 ? [raw, null] : [raw.slice(0, at), raw.slice(at + 1)];
+    if (!/^\d+$/.test(id) || (host != null && !/^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?$/.test(host))) {
+      throw new Error(`--pushers takes <forge user id>[@<host>] entries, not ${raw}`);
+    }
+    return host == null ? { id } : { host, id };
+  });
+}
+
+/** Fill the ids and defaults a `--code-repos` list still lacks, before the settings PUT goes out
+ *  (R-BTN-138's way: the CLI reads the forge, Baton never fetches). Host-less entries take the
+ *  home's forge and host — read from its registration, one signed GET — and each entry's ids are
+ *  read from its forge with the operator's token for that host (GITHUB_TOKEN, GITLAB_TOKEN,
+ *  GITEA_TOKEN), or taken from the `--forge-ids` the spec already folded in. */
+export async function resolveCodeRepos(url, keyFile, entries, { repository, fetchImpl = fetch, env = process.env } = {}) {
+  let home = null;
+  if (entries.some((e) => e.forge == null || e.host == null)) {
+    const read = await send(url, { method: 'GET', path: `/v1/owner/${encodeURIComponent(repository)}/grants` }, keyFile, fetchImpl);
+    if (!(read.status >= 200 && read.status < 300)) throw new Error(`reading ${repository}'s registration for --code-repos defaults: ${read.json?.code ?? read.status}: ${read.json?.message ?? 'refused'}`);
+    home = homeOf(read.json.settings);
+  }
+  const out = [];
+  for (const e of entries) {
+    const forge = e.forge ?? home?.forge;
+    const host = e.host ?? home?.host;
+    if (forge == null || host == null) {
+      throw new Error(`${e.path}: its forge and host cannot be defaulted (the home is a plain git repository) — write --code-repos ${e.path}@<host> with the forge named, e.g. github:${e.path}@github.com`);
+    }
+    if (e.repo_id != null && e.owner_id != null) {
+      out.push({ path: e.path, forge, host, repo_id: e.repo_id, owner_id: e.owner_id });
+      continue;
+    }
+    const token = env[`${forge.toUpperCase()}_TOKEN`];
+    if (!token) throw new Error(`${e.path}: no ${forge.toUpperCase()}_TOKEN to read its ids from ${host} — set it, or pass --forge-ids <repo id>,<owner id>`);
+    const base = forgeApi(forge, host);
+    const res = await fetchImpl(`${base}${repoPath(forge, e.path)}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'User-Agent': 'baton-cli' } });
+    if (!res.ok) throw new Error(`${forge} (${host}) answered ${res.status} for ${e.path}: the token cannot read it, or it does not exist`);
+    const ids = forgeIdsOf(forge, await res.json());
+    if (ids == null) throw new Error(`${forge} (${host}) answered no repository and owner ids for ${e.path}`);
+    out.push({ path: e.path, forge, host, repo_id: ids.repo_id, owner_id: ids.owner_id });
+  }
+  return out;
+}
+
+/** A forge's REST origin for `host`: GitHub's own is api.github.com; an Enterprise host serves
+ *  `/api/v3`; GitLab `/api/v4`; Gitea `/api/v1`. */
+function forgeApi(forge, host) {
+  if (forge === 'github') return host === 'github.com' ? 'https://api.github.com' : `https://${host}/api/v3`;
+  if (forge === 'gitlab') return `https://${host}/api/v4`;
+  return `https://${host}/api/v1`;
+}
+
+/** The REST path that reads a repository's ids on each forge. */
+function repoPath(forge, path) {
+  if (forge === 'github') return `/repos/${path}`;
+  if (forge === 'gitlab') return `/projects/${encodeURIComponent(path)}`;
+  return `/repos/${path}`;
+}
+
+/** The ids each forge's repository answer carries: GitHub and Gitea `{id, owner: {id}}`, GitLab
+ *  `{id, namespace: {id}}`. */
+function forgeIdsOf(forge, body) {
+  const repo = body?.id, owner = forge === 'gitlab' ? body?.namespace?.id : body?.owner?.id;
+  return repo != null && owner != null ? { repo_id: String(repo), owner_id: String(owner) } : null;
+}
+
+/** The home's forge and host from an owner settings row (B-182): its forge, and its `web_base`'s
+ *  authority — null on a plain git home, which names neither. */
+function homeOf(settings) {
+  if (!settings) return null;
+  const host = settings.web_base != null ? new URL(settings.web_base).host.toLowerCase() : null;
+  return { forge: settings.forge ?? 'github', host };
 }
 
 /** `--ci-identity` (R-BTN-93): none, github-actions, or a GitLab issuer (`gitlab-mirror:` when its
@@ -782,6 +908,12 @@ export async function main(argv) {
   const p = plan(role, args);
   const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
   const keyFile = need(flags.identity, '-i KEY (an administrator, owner or worker key file)');
+  // B-182 (R-BTN-140): `--code-repos` entries whose ids the operator did not supply offline are
+  // read from their forge here, before the settings PUT goes out — Baton never fetches.
+  if (p.resolveCodeRepos) {
+    p.body.code_repos = await resolveCodeRepos(url, keyFile, p.body.code_repos, p.resolveCodeRepos);
+    delete p.resolveCodeRepos;
+  }
   // R-BTN-178: `capacity set` reads what the courses' legs require and asks to confirm before
   // the PUT goes out — one name, one thing (R-BTN-137) is the administrator's own statement.
   if (p.preflight) {

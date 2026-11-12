@@ -32,6 +32,7 @@ import { Queues } from './queues';
 import { History, HISTORY_PAGE_MAX } from './history';
 import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
+import { codeReposOf, pushersOf } from './codeRepos';
 import { Policies, canonicalJson, sha256HexSync } from './policy';
 import { Scope } from './scope';
 import { randomHex, systemRandom } from './db';
@@ -484,7 +485,10 @@ export class BatonCore {
           // B-183 (§4.3): and each live ticket's last accepted `version`, handed back so the
           // source's own code — never Baton — judges whether its store read is older than what
           // the board holds, and refuses to post a ticket it judges behind (R-BTN-150).
-          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), ...this.claims.syncRecord(repo), versions: this.ticketVersions(repo) });
+          // B-182 (R-BTN-140): and the effective `code_repos`, each entry with its forge, host,
+          // ids and web_base, and the owners' `pushers` host-qualified — what the fact adapter
+          // reads each repository by, and whose words count there.
+          return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b), code_repos: codeReposOf(this.store, repo), pushers: pushersOf(this.store, repo), ...this.claims.syncRecord(repo), versions: this.ticketVersions(repo) });
         }
         if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
           const { repo, req: signed } = await this.verifySync(req, 'sync');

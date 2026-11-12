@@ -501,7 +501,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
   stable. `path` is required of every source but a `custom` one with `versions: "current"`,
   whose ticket may live in no tree at all.
 - `requires` arrives expanded to capabilities (`none` or no clause is `[]`). `repos` are forge
-  paths on the home's forge host (R-BTN-92), resolved by the sync from short names.
+  paths naming the home or a `code_repos` entry (R-BTN-92, R-BTN-140) — unique across the
+  reach, whatever the host — resolved by the sync from short names under the home's owner.
 - Every ticket with a ready leg is ranked, a suspended one included.
 - A `question` is stored only for a ticket whose queued leg is a person leg (R-BTN-116); any
   other is dropped and logged `question-dropped`.
