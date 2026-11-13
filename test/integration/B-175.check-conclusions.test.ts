@@ -1,14 +1,20 @@
 // B-175, the check conclusions built (BATON_SPEC §10 R-BTN-153 "Mapping the status", §9.4's
 // `exit_status`, §15 S-BTN-68's slice; G-BTN-93): in a course the owners' `checks` map names,
 // only the check command's exit status reaches the station mapped `success` — an advance or a
-// completed end arriving there carries `exit_status: 0`, which Baton requires, so an agent's
+// `done` end arriving there carries `exit_status: 0`, which Baton requires, so an agent's
 // `baton-leg-result` or channel `done`, which carries none, reaches only `failure` or
 // `timed_out` stations, and no conclusion passes a required check but a command's green exit. A
 // `0` belongs to the success station alone, and a timeout or an `exec` error — which has no exit
-// status — reaches `timed_out`, or `failure` where no station is mapped to it. The map's own
-// validation (one `success`, one `failure`, at most one `timed_out`, never `neutral`) is B-169's
-// build (test/integration/B-169.security-corrections.test.ts); the check runner that runs the
-// command first and the `forge-check` deliverer that posts the conclusion are B-46's and B-64's.
+// status — reaches `timed_out`, or `failure` where no station is mapped to it. A suspension or a
+// release reaches nothing and concludes nothing, so neither is held to the verdict; a departure
+// — a leg starting out of a station — is judged at the arrival its own finishing advance
+// reports. The map's own validation (one `success`, one `failure`, at most one `timed_out`,
+// never `neutral`) is B-169's build (test/integration/B-169.security-corrections.test.ts); the
+// check runner that runs the command first and the `forge-check` deliverer that posts the
+// conclusion are B-46's and B-64's — of §15's S-BTN-68 row, what remains for them is its
+// runner-side half: the command run first with its `timeout_s`, the status→station mapping, the
+// course file's `checks` refusal, the queueing and delivery of `forge-check` entries and the
+// forge's branch protection reading them.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { call as hostCall } from '#host';
@@ -94,7 +100,7 @@ describe('B-175 the check conclusions', () => {
     expect([out.status, (await claimRow(claimId)).status]).toEqual([200, 'completed']);
   });
 
-  it('a success-mapped station is the check command’s alone: an agent’s done, or a numbered exit, is refused; exit_status: 0 lands', async () => {
+  it('a success-mapped station is the check command’s alone: an agent’s done, or a numbered exit, is refused; exit_status: 0 lands; a suspension there concludes nothing', async () => {
     expect((await as(owner, '/v1/owner/ops/settings', { checks: { check: { conclusions: PASS } } }, 'PUT')).status).toBe(200);
     const w = await checkWorker();
     const { secret, claimId } = await held(w, 'check.1');
@@ -103,12 +109,18 @@ describe('B-175 the check conclusions', () => {
     expect([agent.status, agent.json.code, String(agent.json.message).startsWith('exit_status:')]).toEqual([400, 'invalid-params', true]);
     // A refusal changes nothing: the claim is still held, still active.
     expect((await claimRow(claimId)).status).toBe('active');
-    // Nor does a red command's exit buy the green station — nor a suspension's arrival.
+    // Nor does a red command's exit buy the green station.
     expect((await endClaim('vm-a', secret, claimId, { end_reason: 'done', reached: 'passed', exit_status: 1 })).status).toBe(400);
-    expect((await endClaim('vm-a', secret, claimId, { end_reason: 'suspended:passed' })).status).toBe(400);
     // The command's own green exit is the one arrival that stands.
     const done = await endClaim('vm-a', secret, claimId, { end_reason: 'done', reached: 'passed', exit_status: 0 });
     expect([done.status, (await claimRow(claimId)).status]).toEqual([200, 'completed']);
+    // Round 1, finding 1's other half: a suspension at a success-mapped station reaches nothing
+    // and concludes nothing (only a `done` end queues a conclusion, R-BTN-115), so it is never
+    // held to the command's verdict — a claim resting there may give its leg up and be
+    // reclaimed, never stranded between a refused advance and a refused suspension.
+    const rest = await held(w, 'check.2');
+    const suspended = await endClaim('vm-a', rest.secret, rest.claimId, { end_reason: 'suspended:passed' });
+    expect([suspended.status, (await claimRow(rest.claimId)).status]).toEqual([200, 'completed']);
   });
 
   it('failure and timed_out stations take an agent’s done; a 0 exit belongs to success, a numbered exit to failure, a timeout to neither', async () => {
@@ -131,18 +143,26 @@ describe('B-175 the check conclusions', () => {
     expect((await claimRow(claimId)).status).toBe('active');
   });
 
-  it('a map without timed_out: the unmapped station is not constrained here; success stays the command’s', async () => {
+  it('a map without timed_out: an agent’s done reaches failure (a timeout’s fallback) and never an unnamed station; success stays the command’s', async () => {
     expect((await as(owner, '/v1/owner/ops/settings', { checks: { check: { conclusions: { passed: 'success', failed: 'failure' } } } }, 'PUT')).status).toBe(200);
-    // The runner maps a timeout to `failure` where no `timed_out` station is named (R-BTN-153);
-    // the core holds no constraint on a station the map does not name.
+    // The runner maps a timeout to `failure` where no `timed_out` station is named (R-BTN-153) —
+    // a station the map does not name, round 1, finding 3: an agent's done reaches only a
+    // `failure` or `timed_out` station, and `hung` is neither, so the end is refused where the
+    // narrower first build let it stand. The owners map every end station or drop it.
     const w = await checkWorker();
     const hung = await held(w, 'check.1');
-    expect((await endClaim('vm-a', hung.secret, hung.claimId, { end_reason: 'done', reached: 'hung' })).status).toBe(200);
+    const refused = await endClaim('vm-a', hung.secret, hung.claimId, { end_reason: 'done', reached: 'hung' });
+    expect([refused.status, refused.json.code, String(refused.json.message).startsWith('exit_status:')]).toEqual([400, 'invalid-params', true]);
+    expect((await claimRow(hung.claimId)).status).toBe('active');
+    // A timeout's fallback — no exit status, the failure station — and the success station's
+    // refusal, unchanged.
+    const fell = await endClaim('vm-a', hung.secret, hung.claimId, { end_reason: 'done', reached: 'failed' });
+    expect([fell.status, (await claimRow(hung.claimId)).status]).toEqual([200, 'completed']);
     const passed = await held(w, 'check.2');
     expect((await endClaim('vm-a', passed.secret, passed.claimId, { end_reason: 'done', reached: 'passed' })).status).toBe(400);
   });
 
-  it('an advance arriving at a success-mapped station — a stale map’s, the course having grown a leg out of it — carries exit_status: 0', async () => {
+  it('an advance arriving at a success-mapped station — a stale map’s, the course having grown a leg out of it — carries exit_status: 0; the departure out of it is never asked for one', async () => {
     const probeAt = (version: number, course: unknown) => ({ id: 'probe', version, min_worker_version: 1, skill: 'next-roadmap-item', course, step_kinds: ['implement'], branch_pattern: 'claude/{ticket}-*' });
     git.registry = [...git.registry, probeAt(1, PROBE_V1)];
     expect((await git.post()).status).toBe(200);
@@ -160,6 +180,38 @@ describe('B-175 the check conclusions', () => {
     expect([refused.status, refused.json.code, String(refused.json.message).startsWith('exit_status:')]).toEqual([400, 'invalid-params', true]);
     expect((await rows<{ leg: string }>('SELECT leg FROM claims WHERE id = ?', c.claim_id)).map((r) => r.leg)).toEqual(['run']);
     expect((await advance('vm-a', w.secret, c.claim_id, { ...arrive, exit_status: 0 })).status).toBe(200);
+    // Round 1, finding 1: the claim rests at `passed` (here suspended by its holder, there
+    // reclaimed by a second worker) and the leg out of it merely departs — a departure reaches
+    // nothing, so the advance that starts it demands no exit status, and without the fix the
+    // ticket could leave a success-mapped station only by releases.
+    expect((await endClaim('vm-a', w.secret, c.claim_id, { end_reason: 'suspended:passed' })).status).toBe(200);
+    // The reading that makes it claimable again confirms the suspension first (rule 3's
+    // unconfirmed hold): the path shows the travelled edge, run's arrival at `passed`.
+    git.add('probe.1', { course_id: 'probe' }, placed('passed', [['run', 'passed']], [['file', 'ready']]));
+    expect((await git.post()).status).toBe(200);
+    const again = await claimItem('vm-a', w.secret, { ticket_id: 'ops:probe.1' });
+    const { json: againJson } = again;
+    expect((await advance('vm-a', w.secret, againJson.claim_id, { leg: 'file' })).status).toBe(200);
+  });
+
+  it('a stale-board recovery meets the same verdict: the holder’s done toward a success-mapped station is refused, the command’s green exit recovered', async () => {
+    expect((await as(owner, '/v1/owner/ops/settings', { checks: { check: { conclusions: PASS } } }, 'PUT')).status).toBe(200);
+    const { secret, claimId } = await held(await checkWorker(), 'check.1');
+    // R-BTN-8 pushes git first: the sync sees the ticket gone from the board and releases the
+    // claim stale-board before the worker's own end arrives — the recovery branch below `end`'s
+    // active path, which round 1, finding 2 traced re-completing an agent's `done` at a
+    // success-mapped station as the recorded (and confirmable) verdict. (A closure `done` would
+    // be the holder's own archive, never staleness — the ticket simply vanishes.)
+    git.tickets.delete('check.1');
+    delete git.stations['check.1'];
+    expect((await git.post()).status).toBe(200);
+    expect(await claimRow(claimId)).toMatchObject({ status: 'released', end_reason: 'released:stale-board' });
+    const agent = await endClaim('vm-a', secret, claimId, { end_reason: 'done', reached: 'passed' });
+    expect([agent.status, agent.json.code, String(agent.json.message).startsWith('exit_status:')]).toEqual([400, 'invalid-params', true]);
+    expect(await claimRow(claimId)).toMatchObject({ status: 'released', end_reason: 'released:stale-board' });
+    // The command's own green exit is recovered as the completion it is (R-BTN-8 vs R-BTN-35).
+    const done = await endClaim('vm-a', secret, claimId, { end_reason: 'done', reached: 'passed', exit_status: 0 });
+    expect([done.status, (await claimRow(claimId)).status, (await claimRow(claimId)).end_reason]).toEqual([200, 'completed', 'done']);
   });
 
   it('exit_status is an integer from 0 to 255, whatever the map', async () => {

@@ -1023,8 +1023,11 @@ export class Claims {
     }
     if (!leaves(g, leg, at)) throw offGraph(`${leg} does not leave ${at}`);
     // R-BTN-153 (B-175): an arrival at a station the owners' conclusions map holds is the check
-    // command's verdict or the agent's word — only the command's may be a success.
-    this.checkVerdict(repo, c.course_id, at, b.exit_status);
+    // command's verdict or the agent's word — only the command's may be a success. The arrival
+    // alone is judged: a finished leg's `reached`, never the station a leg merely leaves (a
+    // departure reaches nothing — a claim resting at a success-mapped station must be able to
+    // start the leg out of it, round 1, finding 1).
+    if (run) this.checkVerdict(repo, c.course_id, at, b.exit_status, false);
     const max = g.legs.get(leg)!.maxRuns;
     if (max != null) {
       const ran = [...(JSON.parse(c.start_path) as Step[]).map((s) => s.leg), ...this.rows<{ leg: string }>('SELECT leg FROM claim_legs WHERE claim_id = ?', claimId).map((r) => r.leg)];
@@ -1102,6 +1105,14 @@ export class Claims {
       // stale-board (R-BTN-35) before the worker's own end arrives: that completion is the
       // truth, recorded as such, and the release it no longer needs is withdrawn.
       if (c.status === 'released' && c.end_reason === 'released:stale-board' && e.status === 'completed' && this.gitEnded(c.ticket_id, c.id)) {
+        // R-BTN-153 (B-175, round 1, finding 2): this branch re-completes the holder's end just
+        // as the direct path below records it, so a `done` arrival meets the same verdict here —
+        // an agent's `done` toward a success-mapped station (or one the map does not name) is
+        // refused on this path too, never recorded completed and later confirmed as a green
+        // verdict. The station judged is the end's own (the release has already given the running
+        // leg up, so the claim's graph state is not the arrival's word); a suspension concludes
+        // nothing and is recovered as before.
+        if (e.end_reason === 'done') this.checkVerdict(repositoryOf(c.ticket_id), c.course_id, e.reached ?? c.station, e.exit_status, true);
         this.exec(`UPDATE claims SET status = 'completed', end_reason = ?, end_detail = ?, ended_at_sha = ?, end_observation = ? WHERE id = ?`,
           e.end_reason, e.detail, e.ended_at_sha ?? '', this.handedOut(repositoryOf(c.ticket_id)), c.id);
         this.exec(`UPDATE messages SET status = 'expired' WHERE to_worker_id = ? AND kind = 'release' AND status IN ('pending','delivered')
@@ -1120,10 +1131,11 @@ export class Claims {
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
     if (e.status === 'completed' && finished && g) this.checkEntry(repositoryOf(c.ticket_id), g, reached, e.outputs);
     else if (e.status === 'completed') this.checkOutputValues(repositoryOf(c.ticket_id), e.outputs);
-    // R-BTN-153 (B-175): a completed end's `reached` is what the owners' conclusions map reads, so
-    // a success-mapped one is the check command's alone — a release concludes nothing (§10) and is
-    // never held to the command's verdict.
-    if (e.status === 'completed') this.checkVerdict(repositoryOf(c.ticket_id), c.course_id, reached, e.exit_status);
+    // R-BTN-153 (B-175): a `done` end's `reached` is what the owners' conclusions map reads
+    // (R-BTN-115), so a success-mapped one is the check command's alone. A suspension rests
+    // where the claim already stands and concludes nothing, as a release does (§10) — neither
+    // reaches a station, so neither is held to the command's verdict (round 1, finding 1).
+    if (e.end_reason === 'done') this.checkVerdict(repositoryOf(c.ticket_id), c.course_id, reached, e.exit_status, true);
     // B-134: the ending claim's leg-end scope audit, likewise — the actions outside the claim's
     // ticket scope raise their findings (and their hold) in this transaction, and the report's
     // dropped count is logged `scope-invalid`, never a refusal.
@@ -1160,11 +1172,20 @@ export class Claims {
    * it reaches only `failure` or `timed_out` stations, and no conclusion passes a required check
    * but a command's green exit). A `0` belongs to the success station alone, and a timeout or an
    * `exec` error — which has no exit status — to `timed_out`, or to `failure` where none is
-   * mapped; a station the map does not name is not constrained here.
+   * mapped. A `done` end (`done` ends alone queue a conclusion, R-BTN-115) may not rest at a
+   * station the map does not name — an agent's done reaches only `failure` or `timed_out`
+   * stations, and a station the map does not name is neither (round 1, finding 3). An advance's
+   * arrival at an unmapped station is a course's ordinary travel — the map names end stations,
+   * not every one a leg passes through — and is not constrained here.
    */
-  private checkVerdict(repo: string, courseId: string | null, station: string, exitStatus: number | null): void {
-    const conclusion = (courseId ? this.c.admin.checkMap(repo)[courseId] : undefined)?.conclusions[station];
-    if (!conclusion) return;
+  private checkVerdict(repo: string, courseId: string | null, station: string, exitStatus: number | null, done: boolean): void {
+    const conclusions = (courseId ? this.c.admin.checkMap(repo)[courseId] : undefined)?.conclusions;
+    if (!conclusions) return;
+    const conclusion = conclusions[station];
+    if (conclusion === undefined) {
+      if (done) throw new BatonError('invalid-params', `exit_status: ${station} is not a station the owners' checks map names, and a done end of a mapped course rests only at one it does — only a failure or timed_out station is the agent's to reach (R-BTN-153)`);
+      return;
+    }
     if (conclusion === 'success') {
       if (exitStatus !== 0) {
         throw new BatonError('invalid-params', `exit_status: ${station} is mapped success, and only the check command's exit status reaches it — carry exit_status: 0 (R-BTN-153)`);
