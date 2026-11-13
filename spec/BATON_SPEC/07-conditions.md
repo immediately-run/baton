@@ -142,7 +142,9 @@ Limits that hold throughout:
     from Baton's list, never through a ticket (R-BTN-163).
   - **The handler ticket.**
     - The runner writes the handler ticket git first, through the ticket source's `file(ticket)`
-      export (R-BTN-74; the markdown source writes `<items>/<local id>.md`). It pushes the file
+      export (R-BTN-74; the markdown source writes `<items>/<local id>.md`), its id one Baton
+      itself names — the raising ticket's id and its own count of conditions raised, never a
+      scan (R-BTN-131). It pushes the file
       before the raise returns or the leg ends. Under the policy's `tickets.created: proposed`
       (R-BTN-188) the handler ticket is proposed, not filed: the runner writes it on
       `baton/proposed/<ticket>`, and it is not claimable until it lands with a `std:approval@1`
@@ -457,7 +459,7 @@ Limits that hold throughout:
     (R-BTN-162).
   - **What the script does.**
     - The script runs as any leg's does and writes the children git first, through the source's
-      `file` export. Each child names a course its `spawns` allows and `called_by: {leg, run}`.
+      `file` export, each child's id taken as R-BTN-131's allocator says. Each child names a course its `spawns` allows and `called_by: {leg, run}`.
       Under the policy's `tickets.created: proposed` (R-BTN-188) the children are proposed, not
       filed, and not claimable until they land with a `std:approval@1` (R-BTN-180).
     - The script then returns `spawned` (R-BTN-86).

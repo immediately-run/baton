@@ -74,11 +74,13 @@ describe('S-BTN-189 the ticket commands', () => {
     writeFileSync(join(repo.dir, 'draft.txt'), 'uncommitted\n');
     const head = git(repo.dir, 'rev-parse', 'HEAD');
 
-    // A request-style filing: the flag's dependency, tags and project, and the skeleton.
-    const first = repo.tickets('new', '--title', 'First', '--tags', 'EXPEDITE');
-    expect(first).toMatchObject({ status: 0, stderr: '' });
+    // A request-style filing: the flag's dependency, tags and project, and the skeleton. `new`
+    // lands through a PR by default (B-176); these are `--direct`, the landing this scenario
+    // has always walked — S-BTN-222 walks the PR one.
+    const first = repo.tickets('new', '--direct', '--title', 'First', '--tags', 'EXPEDITE');
+    expect(first).toMatchObject({ status: 0 });
     expect(first.stdout).toBe('✓ tickets: file B-1 — First\n');
-    const second = repo.tickets('new', '--title', 'Second', '--depends-on', 'B-1', '--project', 'baton');
+    const second = repo.tickets('new', '--direct', '--title', 'Second', '--depends-on', 'B-1', '--project', 'baton');
     expect(second.stdout).toBe('✓ tickets: file B-2 — Second\n');
 
     // One commit per command, the files of that command alone, and B-1's reverse mention.
@@ -114,7 +116,7 @@ describe('S-BTN-189 the ticket commands', () => {
     const body = join(repo.dir, 'body.md');
     writeFileSync(body, '**Brief:** a third\n\n**Depends on:** B-2.\n');
     const before = git(repo.bare, 'rev-parse', 'main');
-    const refused = repo.tickets('new', '--title', 'Third', '--body-file', body);
+    const refused = repo.tickets('new', '--direct', '--title', 'Third', '--body-file', body);
     expect(refused.status).toBe(2);
     expect(refused.stderr).toContain('**Depends on:** names B-2, which --depends-on does not');
     expect(git(repo.bare, 'rev-parse', 'main')).toBe(before);

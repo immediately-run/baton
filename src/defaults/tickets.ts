@@ -33,6 +33,7 @@ import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { remoteSlug } from './cli';
 import { builtIn, DEFAULT_COURSE } from './courses';
 import { holderRefusal, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
+import { batonTarget, fallbackNote, floorFor, nextMain, parseKind, takeNumber } from './sequences';
 
 /** The most tries one command makes when the default branch moves under it: the stopgap's. */
 export const TICKET_TRIES = 6;
@@ -45,6 +46,12 @@ const today = (): string => new Date().toISOString().slice(0, 10);
 /** git's own words for a push refused because the branch moved — the one refusal a re-read fixes;
  *  a hook's or a protected branch's says `[remote rejected]`, and no re-read fixes that. */
 const movedOnPush = (detail: string): boolean => /non-fast-forward|fetch first|stale info/.test(detail);
+
+/** The forge's own words for a push refused because the branch is protected (R-BTN-74, the
+ *  B-174 Decision's list): GitHub's `GH006` and a `GH013` ruleset refusal, GitLab's and Gitea's
+ *  messages, and the protected-branch hook's. Read from the forge's answer, never from the
+ *  policy — the one refusal whose answer is another landing. */
+export const protectedPush = (detail: string): boolean => /GH006|GH013|protected branch/i.test(detail);
 
 const detailOf = (e: unknown): string => {
   const err = e as { status?: unknown; stderr?: string | Uint8Array; message?: string };
@@ -69,6 +76,9 @@ export interface TicketsIo {
   url?: string;
   /** `--offline` (B-129): skip the Baton reads — git's word alone, for an unreachable Baton. */
   offline?: boolean;
+  /** `baton tickets new --direct` (B-176): keep today's one commit pushed straight to the
+   *  default branch, instead of the PR filing on `baton-ticket/<id>`. */
+  direct?: boolean;
   /** The fetch the reads use, for a test's stand-in. */
   fetchImpl?: typeof fetch;
 }
@@ -143,7 +153,11 @@ function transact(root: string, io: TicketsIo, describe: string, change: (dir: s
         const detail = detailOf(e);
         if (!movedOnPush(detail)) {
           const why = detail.trim().split('\n').map((l) => l.trim()).filter((l) => l !== '' && !/^To /.test(l) && !/failed to push some refs/.test(l));
-          throw new Error(`${describe}: the push was refused: ${why.join('; ') || 'no reason given'}`);
+          // The refusal's own words ride on the error: B-176's `--direct` reads them to tell a
+          // protected branch's refusal (another landing) from the operator's (none).
+          const refusal = new Error(`${describe}: the push was refused: ${why.join('; ') || 'no reason given'}`);
+          (refusal as Error & { detail?: string }).detail = detail;
+          throw refusal;
         }
         if (attempt === TICKET_TRIES) throw new Error(`${describe}: push refused ${TICKET_TRIES} times: ${detail.trim().split('\n').at(-1)}`);
         warn(`… ${describe}: ${remote}/${branch} moved; retrying on the new head (${attempt}/${TICKET_TRIES})`);
@@ -359,22 +373,9 @@ function isDone(dir: string, settings: TicketSettings, id: string): boolean {
   return status === 'done' || status === 'superseded';
 }
 
-/** Where the ticket commands' Baton reads go (B-129): the URL — `--url`, else `BATON_URL`, else
- *  the repository's own `baton_url`, else the default — the key (`-i`, else `BATON_KEY_FILE`),
- *  and this checkout's Baton repository: the `repos` short name whose forge path is the
- *  checkout's origin, else the origin path's last segment, `admin repo add`'s own default id. */
-export function batonTarget(root: string, io: TicketsIo): { url: string; keyFile: string | null; repository: string | null; forgePath: string | null } {
-  const json = readSettingsJson(root);
-  const forgePath = remoteSlug(root);
-  const slug = forgePath?.toLowerCase() ?? null;
-  const short = slug != null ? Object.entries(json.repos ?? {}).find(([, path]) => path.toLowerCase() === slug)?.[0] : undefined;
-  return {
-    url: io.url ?? process.env.BATON_URL ?? json.baton_url ?? DEFAULT_URL,
-    keyFile: io.identity?.trim() || process.env.BATON_KEY_FILE?.trim() || null,
-    repository: short ?? (slug != null ? (slug.split('/').at(-1) ?? null)?.toLowerCase() ?? null : null),
-    forgePath,
-  };
-}
+/** Where the ticket commands' Baton reads go (B-129): moved to sequences.ts, beside the
+ *  sequence reads that share it — re-exported for the tests that import it from here. */
+export { batonTarget } from './sequences';
 
 /** The course's `start` station (B-129): the ticket's `course:`, else the repository's
  *  `default_course`, else `create-pr` — from the checkout's own `.baton/courses/<course>/course.json`, else, with no such
@@ -473,13 +474,24 @@ export function skeletonBody(o: { description: string; deps: readonly string[]; 
   ].join('\n');
 }
 
-/** `baton tickets new …` (B-112): file one ticket — the next free id under `.baton/baton.json`'s
- *  prefix, its conventional body, `roadmap-item` unless `--tags` says otherwise — as one commit
- *  pushed straight to the default branch. Before the push the filing is judged as `baton tickets
- *  check` judges the same files: its `**Depends on:**` line against `depends_on`, and the board
- *  post's own validation — every id a live or closed ticket, no cycle — over the files the commit
- *  would leave. One that fails is written to no branch at all. Returns the id it took. */
-export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
+/** `baton tickets new …` (B-112, B-176): file one ticket — an id from Baton's sequence
+ *  (`ticket-<prefix>`, R-BTN-195) under `.baton/baton.json`'s prefix, its conventional body,
+ *  `roadmap-item` unless `--tags` says otherwise — unique before any push, so two filers at once
+ *  never take one number. With no key, no configured Baton, an unreachable Baton or `--offline`,
+ *  the id is today's next-free scan at the head it files on, and the output says so
+ *  (R-BTN-131): the sync's duplicate-id refusal is that path's backstop.
+ *
+ *  The filing lands as a PR by default (the owner, 2026-11-03: "Yes"): the new ticket file
+ *  ALONE on a branch `baton-ticket/<id>` — the reserved namespace no `branch_pattern` matches
+ *  (R-BTN-190) — with the PR asked of the forge; a `git` forge, which has no PR to ask for,
+ *  gets the pushed branch printed for a person to merge (value 8). The dependencies'
+ *  `**Used by:**` lines are not written by a PR filing, so two open filings that name one
+ *  dependency never share a write target; `--direct` keeps today's one commit pushed straight
+ *  to the default branch with the reverse mentions, falling back to the PR when the forge
+ *  refuses the push as protected — by the forge's answer, never by reading the policy. Before
+ *  the push it judges what it writes as `baton tickets check` judges the same files, whichever
+ *  way it lands. Returns the id it took. */
+export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Promise<string> {
   const title = t.title.trim();
   if (!title) throw new Error('new needs --title');
   const deps = t.dependsOn ?? [];
@@ -488,7 +500,33 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
   const branch = io.branch ?? defaultBranch(root);
   let filed: string | null = null;
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
-  transact(root, { ...io, quiet: true }, 'new ticket', (dir) => {
+  const warn = io.warn ?? ((l: string) => process.stderr.write(`${l}\n`));
+  // B-176: the id is Baton's to give (R-BTN-195), asked before any git runs. The floor is the
+  // highest number this checkout sees — the default branch and every open branch's head — so a
+  // lost or fresh Baton never reissues a number git holds. A Baton that cannot answer leaves
+  // today's scan at the head the filing lands on, and says so.
+  let given: string | null = null;
+  if (io.offline) {
+    warn("… id by the next-free scan (--offline): the number may collide with a branch's, and the duplicate check at merge is the backstop");
+  } else {
+    const target = batonTarget(root, io);
+    if (target.keyFile == null || target.repository == null) {
+      warn(`… ${fallbackNote(target.keyFile == null ? 'no key: pass -i KEY (or set BATON_KEY_FILE), or --offline to say nothing' : 'this checkout names no Baton repository')}`);
+    } else {
+      const kind = parseKind('ticket', root);
+      const floor = floorFor(root, remote, kind);
+      try {
+        const took = await takeNumber({ url: target.url, keyFile: target.keyFile, repository: target.repository, kind: kind.kind, floor, ...(io.fetchImpl ? { fetchImpl: io.fetchImpl } : {}) });
+        given = `${kind.prefix}-${took.number}`;
+      } catch (e) {
+        warn(`… ${fallbackNote(e instanceof Error ? e.message : String(e))}`);
+      }
+    }
+  }
+  /** Everything a filing's commit carries, judged as `check` judges it: `withMentions` writes
+   *  each dependency's `**Used by:**` line (the `--direct` landing's reverse mentions); a PR
+   *  filing carries the new ticket alone. Returns the commit's message and files. */
+  const buildFiling = (dir: string, withMentions: boolean): { id: string; message: string; write: { path: string; text: string }[] } => {
     const settings = settingsAt(dir, remote, branch);
     const items = (settings.items ?? 'tickets').replace(/\/$/, '');
     // The project: the flag, else the repository's default, else a refusal — there is no
@@ -499,7 +537,7 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
     const files = readItems(dir, items);
     const read = sourceAt(dir, settings);
     const prefix = `${allocatingPrefix(settings)}-`;
-    const id = `${prefix}${nextNumber(files, settings, prefix)}`;
+    const id = given ?? `${prefix}${nextNumber(files, settings, prefix)}`;
     // The prefix's pattern may name ids `new` cannot allocate (a fixed count, `\d{7}`): it says so
     // rather than write a wrong one.
     if (!allocates(settings, id)) throw new Error(`new allocates ${prefix}<n>, but ${prefix}'s pattern in .baton/baton.json is \`${settings.prefixes[prefix]}\` — write the pattern's number as \\d+, or name another ticket_prefix`);
@@ -519,8 +557,9 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
       if (gaps.length) throw new Error(`${id}: filed on or after check.sections_since (${since}), so ${gaps.map((m) => `### ${m} (${sectionHint(m)})`).join(' and ')} must be filled — pass ${gaps.map((m) => `--${m.toLowerCase()} "<text>"`).join(' and ')}, or a --body-file that fills them`);
     }
     // The reverse mentions: each dependency's `**Used by:**` line gains this id, so a file says
-    // who waits on it without a search (the generated page's rule).
-    const updates = reverseMentions(files, id, deps);
+    // who waits on it without a search (the generated page's rule) — the `--direct` landing's
+    // alone, for a PR filing writes the new ticket alone.
+    const updates = withMentions ? reverseMentions(files, id, deps) : [];
     const after = [...files.filter((f) => !updates.some((u) => u.path === f.path)), ...updates, { path: `${id}.mdx`, text }];
     // The board's own reading of what the commit would leave: one post, validated here rather
     // than by a sync that a broken filing would wedge.
@@ -532,13 +571,104 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
     } catch (e) {
       throw new Error(`${id}: the board would refuse the filing: ${(e as Error).message}`);
     }
-    filed = id;
     return {
+      id,
       message: `tickets: file ${id} — ${title}`,
       write: [{ path: `${items}/${id}.mdx`, text }, ...updates.map((u) => ({ path: `${items}/${u.path}`, text: u.text }))],
-      move: [],
     };
-  });
+  };
+  /** Land one commit on `baton-ticket/<id>`, cut from the freshly fetched default head — the PR
+   *  landing: the ticket file alone, never the reverse mentions, so two open filings never
+   *  share a write target. A push refused because the branch exists is the scan-path's
+   *  collision, the backstop's own moment. */
+  const landThroughPr = (): { id: string; branch: string; message: string } => {
+    git(root, 'fetch', '-q', remote, branch);
+    const dir = mkdtempSync(join(tmpdir(), 'baton-tickets-'));
+    try {
+      git(root, 'worktree', 'add', '-q', '--detach', dir, 'FETCH_HEAD');
+      const { id, message, write } = buildFiling(dir, false);
+      const sideBranch = `baton-ticket/${id}`;
+      for (const w of write) {
+        mkdirSync(dirname(join(dir, w.path)), { recursive: true });
+        writeFileSync(join(dir, w.path), w.text);
+      }
+      git(dir, 'add', '--', ...write.map((w) => w.path));
+      git(dir, 'commit', '-q', '-m', message);
+      try {
+        git(dir, 'push', '-q', remote, `HEAD:refs/heads/${sideBranch}`);
+      } catch (e) {
+        const detail = detailOf(e);
+        throw new Error(`${id}: the filing branch ${sideBranch} was refused: ${detail.trim().split('\n').filter(Boolean).at(-1) ?? 'no reason given'} — the branch exists, so the scanned id is taken (Baton did not answer): take the next id and file again`);
+      }
+      return { id, branch: sideBranch, message };
+    } finally {
+      try {
+        git(root, 'worktree', 'remove', '--force', dir);
+      } catch {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  };
+  /** The forge `origin` names: `github` where its host is `github.com`, else a plain `git`
+   *  remote — the adapter list is R-BTN-131's; the GitHub one is built here, and B-174 builds
+   *  the rest. */
+  const forgeOf = (): 'github' | 'git' => {
+    try {
+      return /github\.com/.test(git(root, 'remote', 'get-url', remote)) ? 'github' : 'git';
+    } catch {
+      return 'git';
+    }
+  };
+  /** The PR a filing branch carries, asked of the forge with the caller's own credential
+   *  (`gh`, the same credential pr-verify reads); a `git` forge — and a forge that does not
+   *  answer — keeps the pushed branch as the answer, printed for a person to merge (value 8). */
+  const askForge = (o: { branch: string; id: string; message: string }): void => {
+    if (forgeOf() === 'github') {
+      const body = [
+        `Files ${o.id} (baton tickets new).`,
+        '',
+        'The ticket becomes claimable when this PR merges, after `check:tickets` has run on it.',
+      ].join('\n');
+      try {
+        const out = execFileSync('gh', ['pr', 'create', '--head', o.branch, '--title', o.message, '--body', body],
+          { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+        const url = out.split('\n').filter(Boolean).at(-1) ?? '';
+        if (/^https?:\/\//.test(url)) {
+          log(`✓ ${o.message}`);
+          log(`  PR: ${url}`);
+          return;
+        }
+        warn(`… the forge answered no PR URL for ${o.branch}: ${out.slice(0, 200) || 'nothing'} — the branch is pushed`);
+      } catch (e) {
+        warn(`… gh could not open the PR for ${o.branch} (${detailOf(e).trim().split('\n').filter(Boolean).at(-1) ?? 'no reason given'}) — the branch is pushed`);
+      }
+    }
+    log(`✓ ${o.message}`);
+    log(`  branch: ${o.branch} — pushed for a person to merge`);
+  };
+  if (!io.direct) {
+    // The PR landing first (the owner's 2026-11-03 ruling): the id is unique before any push,
+    // so the branch is the filing, and a person — and `check:tickets` — sees it before it lands.
+    const landed = landThroughPr();
+    askForge(landed);
+    return landed.id;
+  }
+  // `--direct` keeps today's one commit pushed straight to the default branch, reverse mentions
+  // included; a push the forge refuses as protected falls back to the PR, by the forge's answer.
+  try {
+    transact(root, { ...io, quiet: true }, 'new ticket', (dir) => {
+      const { id, message, write } = buildFiling(dir, true);
+      filed = id;
+      return { message, write, move: [] };
+    });
+  } catch (e) {
+    const detail = (e as { detail?: string }).detail;
+    if (detail == null || !protectedPush(detail)) throw e;
+    warn(`… the default branch refused the push as protected — filing through a PR instead`);
+    const landed = landThroughPr();
+    askForge(landed);
+    return landed.id;
+  }
   log(`✓ tickets: file ${filed} — ${title}`);
   return filed!;
 }
@@ -822,7 +952,11 @@ export function ticketsHelp(): string[] {
   return [
     'baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]',
     '                   [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]',
-    '                   [--trust T] [--invariants I]',
+    '                   [--trust T] [--invariants I] [--direct] [-i KEY] [--url URL] [--offline]',
+    'baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--offline]',
+    '                   rule | scenario | gate | migration | ticket[-<prefix>]: the next number of',
+    '                   that sequence, taken from Baton (R-BTN-195) — what a PR takes a migration',
+    '                   number or a scenario id from; --offline prints the next free by the scan',
     'baton tickets claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]   available → in-progress;',
     '                   a ticket Baton holds past its start is taken over where Baton holds it;',
     '                   refused while the ticket cites a rule amended since it was filed, until',
@@ -842,7 +976,12 @@ export function ticketsHelp(): string[] {
     '',
     'Each command is one commit pushed straight to the default branch, made in a throwaway worktree',
     'at the freshly fetched head: your own branch and working tree are never touched, and a push',
-    'refused because the branch moved is retried on the new head.',
+    'refused because the branch moved is retried on the new head. new, though, files through a PR',
+    'by default (B-176): the new ticket alone on a branch baton-ticket/<id>, the PR asked of the',
+    'forge — pushed and printed on a git forge — and the ticket claimable once it merges, after',
+    'check:tickets has run; --direct keeps the push, and falls back to the PR when the forge',
+    'refuses it as protected. A PR filing carries the ticket alone, so the dependencies\'',
+    '**Used by:** lines are written only by --direct.',
     '',
     'claim asks Baton first (B-129): before it writes, it reads the ticket from Baton with the',
     'key -i names (or BATON_KEY_FILE) — the board for the station and ready leg, the history for',
@@ -870,6 +1009,12 @@ export function ticketsHelp(): string[] {
     '### Trust, ### Invariants, ### Tests, ### Exit criteria, **Requires:**, ## Status — and judges it as `baton tickets',
     'check` would before pushing, so a filing introduces no cycle and no undeclared dependency.',
     '',
+    'The id new takes is Baton\'s to give (R-BTN-195): the next number of the repository\'s',
+    'ticket-<prefix> sequence, asked with a floor this checkout sees (the default branch and every',
+    'open branch\'s head), so two filers at once never take one number. With no key, no configured',
+    'Baton, an unreachable Baton or --offline, the id is today\'s next-free scan and the output',
+    'says so; the sync\'s duplicate-id refusal is that path\'s backstop.',
+    '',
     'The tags Baton reads:',
     ...TAGS.map((t) => `  ${t.tag.padEnd(9)} ${t.means}.`),
     '',
@@ -894,9 +1039,11 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   }
   const [command, ...rest] = argv;
   if (command === 'check') return ticketsCheckMain(rest, io);
+  // B-176 (R-BTN-195): the sequence numbers, for a PR author and an agent.
+  if (command === 'next') return nextMain(rest, io);
   const COMMON = ['repo', 'branch', 'remote'];
   const allowed: Record<string, string[]> = {
-    new: ['title', 'description', 'project', 'depends-on', 'tags', 'tier', 'order', 'repos', 'course', 'body-file', 'trust', 'invariants', ...COMMON],
+    new: ['title', 'description', 'project', 'depends-on', 'tags', 'tier', 'order', 'repos', 'course', 'body-file', 'trust', 'invariants', 'direct', 'url', 'offline', ...COMMON],
     claim: ['url', 'offline', 'rules-reread', ...COMMON],
     set: ['url', 'offline', 'pr', 'note', 'rules-reread', ...COMMON],
     done: ['url', 'offline', 'pr', ...COMMON],
@@ -913,8 +1060,9 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
     } else if (a.startsWith('--')) {
       const name = a.slice(2);
       if (!allowed[command].includes(name) && name !== 'identity') throw new Error(`${a}: not a flag of baton tickets ${command}`);
-      if (name === 'offline') {
-        flags.offline = '1';
+      if (name === 'offline' || name === 'direct') {
+        if (name === 'offline') flags.offline = '1';
+        else flags.direct = '1';
         continue;
       }
       const value = rest[++i];
@@ -924,7 +1072,8 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   }
   const at: TicketsIo = {
     ...io, ...(flags.repo ? { root: resolve(flags.repo) } : {}), ...(flags.branch ? { branch: flags.branch } : {}), ...(flags.remote ? { remote: flags.remote } : {}),
-    ...(flags.identity != null ? { identity: flags.identity } : {}), ...(flags.url ? { url: flags.url } : {}), ...(flags.offline ? { offline: true } : {}), log,
+    ...(flags.identity != null ? { identity: flags.identity } : {}), ...(flags.url ? { url: flags.url } : {}), ...(flags.offline ? { offline: true } : {}),
+    ...(flags.direct ? { direct: true } : {}), log,
   };
   const root = resolve(at.root ?? process.env.BATON_HOME ?? process.cwd());
   if (command === 'new') {
@@ -937,7 +1086,7 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
     }
     const order = flags.order == null ? undefined : Number(flags.order);
     if (order != null && !Number.isFinite(order)) throw new Error(`--order ${flags.order} is not a number`);
-    const id = newTicket(root, at, {
+    const id = await newTicket(root, at, {
       title: flags.title ?? '',
       ...(flags.description != null ? { description: flags.description } : {}),
       ...(flags.tier ? { tier: flags.tier } : {}),

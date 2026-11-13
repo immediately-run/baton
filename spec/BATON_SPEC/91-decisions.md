@@ -255,3 +255,10 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a per-tenant request counter with a 5-minute mean over amending R-BTN-87 to live counts
   alone, so the envelope's figures are shown as stated (2026-11-09, the owner; R-BTN-87, §11.4;
   B-202 builds it).
+- Chose `baton ticket new` PR-first — the filing branch `baton-ticket/<id>` asked of the forge
+  before any push to the default branch, `--direct` keeping the push — over B-174's order (push
+  first, PR on the forge's refusal) for `new` alone: the id is unique before any push once
+  Baton hands it out, so the branch can be the filing, and a person — and `check:tickets` —
+  sees the ticket before it lands (2026-11-03, the owner, "Yes", to filing new tickets in a PR
+  before merge "now that they get ids from baton"; B-176; R-BTN-74, R-BTN-195). `baton ticket
+  request` keeps B-174's order unchanged.

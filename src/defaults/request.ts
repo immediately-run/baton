@@ -22,6 +22,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { batonTarget, fallbackNote, floorFor, parseKind, takeNumber } from './sequences';
 
 /** The most tries one request makes when the default branch moves under it, as
  *  scripts/ticket.mjs's transact does: a lost race is refetched and re-committed on the new head. */
@@ -239,6 +240,9 @@ export interface RequestOptions {
   warn?: (line: string) => void;
   /** The clock's date for `updated:`, for a test's fixed day. */
   date?: string;
+  /** B-176 (R-BTN-195): an id Baton's `ticket-<prefix>` sequence already gave — unique before
+   *  any push, so every try files the same one. */
+  allocated?: string;
 }
 
 /** File the plan's request: fetch, take the next free id at the fetched head, commit the one file
@@ -248,7 +252,9 @@ export interface RequestOptions {
  *  written, a half-finished request leaves the repository exactly as it was, and the commit is made
  *  by git itself, so a pre-commit hook or `commit.gpgsign` the repository sets applies to it as to
  *  any other. Git plumbing (a temp index and `commit-tree`) would skip those; a real worktree does
- *  not. */
+ *  not. `opts.allocated` (B-176) is the id Baton's sequence gave under the prefix the caller's
+ *  checkout reads; a landing tree whose own prefix differs falls back to its scan — the id would
+ *  file under a series the head does not use. */
 export function fileRequest(plan: RequestPlan, opts: RequestOptions = {}): Filed {
   const remote = opts.remote ?? 'origin';
   // The branch is resolved again on every try: a fetch may bring `origin/HEAD` the first pass lacked.
@@ -266,7 +272,7 @@ export function fileRequest(plan: RequestPlan, opts: RequestOptions = {}): Filed
       // the branch this ticket will be read from, never only on one the caller stands on. The
       // plan's root is swapped for the worktree for this try.
       const atHead = readRequestPlan(plan.root, plan.course, plan.sentence, dir, `${remote}/${branch()}`);
-      const id = nextId(dir, atHead.items, atHead.prefix);
+      const id = opts.allocated?.startsWith(`${atHead.prefix}-`) ? opts.allocated : nextId(dir, atHead.items, atHead.prefix);
       const text = requestFile(id, atHead.course, plan.sentence, opts.tier, opts.date);
       const message = requestMessage(id, plan.course, plan.sentence);
       const file = join(dir, atHead.items, `${id}.mdx`);
@@ -317,18 +323,22 @@ const topOf = (root: string): string | null => {
 
 /**
  * `baton request "<one sentence>" --course <course> [--repo DIR] [--tier T] [--branch B]
- * [--remote R]` (B-98): files ONE request ticket on a course that opts in, as one commit pushed
- * straight to the repository's default branch — the push triggers the sync, the board places the
- * ticket, the next claim starts the course. Prints the id and the course's first station.
+ * [--remote R] [-i KEY] [--url URL] [--offline]` (B-98): files ONE request ticket on a course
+ * that opts in, as one commit pushed straight to the repository's default branch — the push
+ * triggers the sync, the board places the ticket, the next claim starts the course. The id is
+ * Baton's to give (B-176, R-BTN-195): the next number of the `ticket-<prefix>` sequence, asked
+ * with a floor this checkout sees; a Baton that cannot answer — no key, none configured,
+ * unreachable, `--offline` — leaves today's next-free scan, and the output says so. Prints the
+ * id and the course's first station.
  *
  * A refusal — no `--course`, an empty sentence, no `.baton/baton.json`, a course it does not list,
  * a course not `starts_from: request` — throws, which the CLI prints as one `baton: …` line and
  * exits 2 on.
  */
-export function requestMain(
+export async function requestMain(
   argv: string[],
-  io: { root?: string; log?: (line: string) => void; warn?: (line: string) => void; date?: string } = {},
-): number {
+  io: { root?: string; log?: (line: string) => void; warn?: (line: string) => void; date?: string; identity?: string; url?: string; offline?: boolean; fetchImpl?: typeof fetch } = {},
+): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   const warn = io.warn ?? ((l: string) => process.stderr.write(`${l}\n`));
   let root = io.root ?? process.env.BATON_HOME ?? process.cwd();
@@ -355,6 +365,8 @@ export function requestMain(
       log('  files one request ticket on a course whose course.json says starts_from: request, commits');
       log('  it to the default branch and pushes it: the push starts the sync, the board places the');
       log('  ticket, the next claim starts the course. -- ends the flags: a sentence may start with -.');
+      log("  The id is Baton's to give (R-BTN-195); with --offline, or a Baton that does not answer,");
+      log("  it is today's next-free scan and the output says so.");
       return 0;
     }
     if (a === '--course') course = value();
@@ -362,6 +374,9 @@ export function requestMain(
     else if (a === '--tier') tier = value();
     else if (a === '--branch') branch = value();
     else if (a === '--remote') remote = value();
+    else if (a === '-i') io.identity = value();
+    else if (a === '--url') io.url = value();
+    else if (a === '--offline') io.offline = true;
     else if (a.startsWith('-')) throw new Error(`${a}: not a flag of baton request`);
     else sentence.push(a);
   }
@@ -380,9 +395,34 @@ export function requestMain(
   // (round 1, 1-A-2; round 2, 2-r0-1: judging them here both duplicated the check and refused
   // requests the target would have accepted).
   const plan = { root: top, sentence: said, course, items: 'tickets', prefix: 'B', start: '', startLeg: '' };
+  // B-176 (R-BTN-195): the id is Baton's to give, asked before any git runs — the request id IS
+  // the request ticket's id (the build-app legs write `product/<request id>/`), so the kind is
+  // the ticket sequence under the checkout's prefix; the landing tree's own prefix is re-read
+  // per try, and a mismatch falls back to its scan. A Baton that cannot answer leaves the scan
+  // and says so.
+  let allocated: string | undefined;
+  // The ask only needs a configured checkout; readRequestPlan below refuses one without it.
+  const configured = existsSync(join(top, '.baton', 'baton.json'));
+  if (io.offline) {
+    warn("… id by the next-free scan (--offline): the number may collide with a branch's, and the duplicate check at merge is the backstop");
+  } else if (configured) {
+    const target = batonTarget(top, io);
+    if (target.keyFile == null || target.repository == null) {
+      warn(`… ${fallbackNote(target.keyFile == null ? 'no key: pass -i KEY (or set BATON_KEY_FILE)' : 'this checkout names no Baton repository')}`);
+    } else {
+      const kind = parseKind('ticket', top);
+      const floor = floorFor(top, remote ?? 'origin', kind);
+      try {
+        const took = await takeNumber({ url: target.url, keyFile: target.keyFile, repository: target.repository, kind: kind.kind, floor, ...(io.fetchImpl ? { fetchImpl: io.fetchImpl } : {}) });
+        allocated = `${kind.prefix}-${took.number}`;
+      } catch (e) {
+        warn(`… ${fallbackNote(e instanceof Error ? e.message : String(e))}`);
+      }
+    }
+  }
   let filed: Filed;
   try {
-    filed = fileRequest(plan, { ...(branch ? { branch } : {}), ...(remote ? { remote } : {}), ...(tier ? { tier } : {}), ...(io.date ? { date: io.date } : {}), warn });
+    filed = fileRequest(plan, { ...(branch ? { branch } : {}), ...(remote ? { remote } : {}), ...(tier ? { tier } : {}), ...(io.date ? { date: io.date } : {}), ...(allocated != null ? { allocated } : {}), warn });
   } catch (e) {
     // A failure the git call itself raised carries git's stderr; a refusal of this command's does
     // not. A git one becomes the CLI's one `baton: …` line naming the repository and git's own

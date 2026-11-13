@@ -27,7 +27,8 @@ write nothing, and stop.
 For each draft, write a ticket file in the tickets directory (the `items` setting in
 `.baton/baton.json`, `tickets/` by default):
 
-- **id** the next free id the repository's tickets use (its id tool, if it has one).
+- **id** the next id the repository's id tool allocates (`baton tickets next ticket-<prefix>`:
+  an id from Baton's sequence, never a scan, R-BTN-131).
 - **parent** this ticket's id: every filed ticket is a child of the request.
 - **depends_on** the drafts' dependencies, by their filed ids.
 - **order** the draft's order, so the board takes them in the spec's order.

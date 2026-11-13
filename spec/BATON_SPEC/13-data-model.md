@@ -8,7 +8,9 @@ One SQLite database per tenant, in the tenant's Durable Object (or the local hos
 schema below is the current one, together with `BATON_MCP_OAUTH_SPEC` §12's rows (the OAuth
 tables, `mcp_keys`' OAuth columns, `oauth_redirect_uris`, its alarm instants and the `oauth` event
 kind), which B-73 folds in here; `src/migrations/` holds the numbered, append-only migrations that
-reach it, each new one the next free number at merge as R-BTN-31 numbers a scenario (legacy until B-176, R-BTN-193), and the object refuses to serve until every migration is applied (§2).
+reach it, each new one's number from `baton ticket next migration` (R-BTN-195) — a session
+without Baton takes the next free number at merge as R-BTN-31 numbers a scenario (the legacy
+path, R-BTN-193) — and the object refuses to serve until every migration is applied (§2).
 
 **Conventions.**
 
@@ -108,6 +110,7 @@ and never accepted holds no role (§12.1).
 |---|---|---|---|
 | `board_snapshots` | `(repository_id, sha)` | `parent_sha`, `received_at`, `ticket_count`, `posted_by` | Accepted posts (R-BTN-11, R-BTN-102) |
 | `board_head` | `repository_id` | `sha`, `observation`, `last_handed_out`, `observation_holder`, `observation_issued_at`, `observation_renewed_at`, `behind_since` (R-BTN-147), `reset_at` (set by a forced Resync until the next accepted post, R-BTN-11), `fleet_version`, `stations_observation` (the latest accepted snapshot to post stations), `source_kind` and `source_versions` (the last accepted post's ticket-source declaration, B-183) | The head and the observation counter (R-BTN-62, R-BTN-150, R-BTN-99); a station row's reading (R-BTN-70) |
+| `sequences` | `(repository_id, kind)` | `last_number` | The identifier sequences (R-BTN-195): the last number issued per repository and kind — `kind` opaque to core, the CLI naming `ticket-<prefix>`, `rule`, `scenario`, `gate`, `migration`; a kind and an integer is all it holds (R-BTN-33) |
 | `tickets` | `id` | `repository_id` (home), `local_id` (`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`), `course_id`, `course_json` (opaque), `path`, `title`, `display_json`, `tier`, `expedite`, `parent`, `repos` JSON, `rank`, `check_sha`, `check_head_repo_id`, `check_head_ref`, `snapshot_sha`, `row_hash`, `blocked_since`, `answer_lost` JSON, `version` (the source's opaque string, `''` when it posts none) and `key` (its stable name, default the `path`) — both inputs of `row_hash` (B-183) — and `last_written_by` JSON `{pusher, pusher_id?, commit, at}` (R-BTN-194: Baton's own record, never the post's, no input of `row_hash`) | Filter fields of each live ticket; an accepted snapshot rewrites only rows whose `row_hash` changed (R-BTN-33, R-BTN-77, R-BTN-86, R-BTN-153) |
 | `ticket_requires` | `(ticket_id, name)` | — | The ticket's `requires` clause, expanded to capabilities (R-BTN-120) |
 | `ticket_depends` | `(ticket_id, leg, ref)`; `leg` `''` for every leg | `on_ticket`, `ref` (`<ticket>@at:<station>,…`, `@reached:…`, `@done` or `@withdrawn`) | Posted `depends_at` entries; index `ticket_dependents` on `on_ticket` (R-BTN-120, R-BTN-132) |
@@ -187,7 +190,7 @@ Under §12.8 (proposal), `repository_policies` `(repository_id, version)` holds 
 `parent-invalid`, `not-before-invalid`, `output-unclaimed`, `reading-refused`, `invalid-pointer`,
 `scope-exceeded`, `unclaimed-write`, `scope-invalid`, `scope-resolved`,
 `admin` (its act in `detail.action`), `frozen`, `unfrozen`, `sealed`, `imported`; *adoption:* `adopted`, `cutover`, `shadow-conflict`,
-`foreign-claim`.
+`foreign-claim`; *the sequences (R-BTN-195):* `sequence`.
 
 **Indexes that rules depend on.** `one_active_claim_per_ticket`; `one_active_claim_per_runner`;
 `claims_unconfirmed` (completed, unconfirmed); claims by `(ticket_id, leg, ended_at)` for blocked

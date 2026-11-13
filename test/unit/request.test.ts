@@ -108,11 +108,11 @@ const originHead = (dir: string, branch = 'main'): { sha: string; parent: string
 
 /** `requestMain` with its output captured: the lines it logged, the notices it warned, and the
  *  exit code — or the refusal it threw. */
-function request(dir: string, argv: string[], io: { date?: string } = {}): { code: number | null; out: string[]; err: string[]; threw?: string } {
+async function request(dir: string, argv: string[], io: { date?: string } = {}): Promise<{ code: number | null; out: string[]; err: string[]; threw?: string }> {
   const out: string[] = [];
   const err: string[] = [];
   try {
-    const code = requestMain(argv, { root: dir, ...(io.date ? { date: io.date } : {}), log: (l) => out.push(l), warn: (l) => err.push(l) });
+    const code = await requestMain(argv, { root: dir, ...(io.date ? { date: io.date } : {}), log: (l) => out.push(l), warn: (l) => err.push(l) });
     return { code, out, err };
   } catch (e) {
     return { code: null, out, err, threw: (e as Error).message };
@@ -122,9 +122,9 @@ function request(dir: string, argv: string[], io: { date?: string } = {}): { cod
 const SENTENCE = 'Decide the export format, so two implementations agree';
 
 describe('baton request: the ticket it files (B-98)', () => {
-  it('the file is the markdown source’s ticket: id, course, the sentence, available, tags [request], and it reads at the course’s start', () => {
+  it('the file is the markdown source’s ticket: id, course, the sentence, available, tags [request], and it reads at the course’s start', async () => {
     const dir = repo();
-    const r = request(dir, ['--course', 'create-spec', SENTENCE, '--repo', dir]);
+    const r = await request(dir, ['--course', 'create-spec', SENTENCE, '--repo', dir]);
     expect(r.threw).toBeUndefined();
     expect(r.code).toBe(0);
     const text = atOrigin(dir, 'tickets/B-1.mdx')!;
@@ -153,19 +153,19 @@ describe('baton request: the ticket it files (B-98)', () => {
     expect(r.out).toEqual(['baton request: filed B-1 (course create-spec) — the next claim starts converse at requested']);
   });
 
-  it('a build-app request reads at `requested` with `define` ready too', () => {
+  it('a build-app request reads at `requested` with `define` ready too', async () => {
     const dir = repo({ courses: { 'build-app': BUILD_APP_COURSE }, listed: ['build-app'] });
-    const r = request(dir, ['--course', 'build-app', 'Build an online version of Blokus']);
+    const r = await request(dir, ['--course', 'build-app', 'Build an online version of Blokus']);
     expect(r.out).toEqual(['baton request: filed B-1 (course build-app) — the next claim starts define at requested']);
     // build-app is a marker course: its station function reads the course file and no markers.
     const text = atOrigin(dir, 'tickets/B-1.mdx')!;
     expect(parseFrontmatter(text)).toMatchObject({ course: 'build-app', status: 'available' });
   });
 
-  it('the sentence is quoted safely: a colon-and-space and a hash survive as the title and description', () => {
+  it('the sentence is quoted safely: a colon-and-space and a hash survive as the title and description', async () => {
     const dir = repo();
     const sentence = 'Export: what a file must hold #2, so two implementations agree';
-    expect(request(dir, ['--course', 'create-spec', sentence]).code).toBe(0);
+    expect((await request(dir, ['--course', 'create-spec', sentence])).code).toBe(0);
     const text = atOrigin(dir, 'tickets/B-1.mdx')!;
     const read = ticketsMarkdown([{ path: 'B-1.mdx', text }]).tickets[0];
     expect(read.title).toBe(`B-1 — ${sentence}`);
@@ -175,16 +175,16 @@ describe('baton request: the ticket it files (B-98)', () => {
     expect(text).toContain(`title: B-1 — ${sentence}`);
   });
 
-  it('the tier rides when given, and not otherwise', () => {
+  it('the tier rides when given, and not otherwise', async () => {
     const dir = repo();
-    expect(request(dir, ['--course', 'create-spec', SENTENCE, '--tier', 'routine']).code).toBe(0);
+    expect((await request(dir, ['--course', 'create-spec', SENTENCE, '--tier', 'routine'])).code).toBe(0);
     const dir2 = repo();
-    expect(request(dir2, ['--course', 'create-spec', SENTENCE]).code).toBe(0);
+    expect((await request(dir2, ['--course', 'create-spec', SENTENCE])).code).toBe(0);
     expect(parseFrontmatter(atOrigin(dir, 'tickets/B-1.mdx')!)!).toMatchObject({ tier: 'routine' });
     expect(parseFrontmatter(atOrigin(dir2, 'tickets/B-1.mdx')!)!).not.toHaveProperty('tier');
   });
 
-  it('every key the request writes is one the item schema admits, and the ticket-shaped ones are there', () => {
+  it('every key the request writes is one the item schema admits, and the ticket-shaped ones are there', async () => {
     const schema = JSON.parse(readFileSync(join(ROOT, 'tickets', 'item.schema.json'), 'utf8')) as { required: string[]; propertyNames: { enum: string[] } };
     const fm = parseFrontmatter(requestFile('B-9', 'create-spec', SENTENCE, 'routine', '2026-10-28'))!;
     // The ticket's own required keys are Baton's wiki's, not every repository's: a request
@@ -194,7 +194,7 @@ describe('baton request: the ticket it files (B-98)', () => {
     expect(fm.updated).toBe('2026-10-28');
   });
 
-  it('round 2, finding 3: the file carries the _filed Status line new writes, and the check exempts it as a request', () => {
+  it('round 2, finding 3: the file carries the _filed Status line new writes, and the check exempts it as a request', async () => {
     const text = requestFile('B-9', 'create-spec', SENTENCE, 'routine', '2026-10-28');
     expect(filedDate(text)).toBe('2026-10-28');
     expect(text.trimEnd().endsWith('## Status\n\n_filed 2026-10-28._')).toBe(true);
@@ -203,9 +203,9 @@ describe('baton request: the ticket it files (B-98)', () => {
 });
 
 describe('baton request: what it refuses (B-98)', () => {
-  it('a course not starts_from: request — an ordinary course keeps its hand-filed tickets', () => {
+  it('a course not starts_from: request — an ordinary course keeps its hand-filed tickets', async () => {
     const dir = repo({ courses: { 'create-pr': GRAPH['create-pr'] }, listed: ['create-pr'] });
-    const r = request(dir, ['--course', 'create-pr', SENTENCE]);
+    const r = await request(dir, ['--course', 'create-pr', SENTENCE]);
     expect(r.code).toBeNull();
     expect(r.threw).toMatch(/^origin\/main: course create-pr does not start from a request — its course\.json carries no starts_from: request\./);
     // Nothing was pushed: the origin's head is the fixture's.
@@ -213,49 +213,49 @@ describe('baton request: what it refuses (B-98)', () => {
     expect(atOrigin(dir, 'tickets/B-1.mdx')).toBeNull();
   });
 
-  it('a course .baton/baton.json does not list', () => {
+  it('a course .baton/baton.json does not list', async () => {
     const dir = repo({ courses: { 'create-spec': CREATE_SPEC_COURSE }, listed: ['create-pr'] });
-    const r = request(dir, ['--course', 'create-spec', SENTENCE]);
+    const r = await request(dir, ['--course', 'create-spec', SENTENCE]);
     expect(r.threw).toBe('origin/main: course create-spec is not one .baton/baton.json lists (create-pr) — add it to `courses` with `baton repo init --course create-spec`');
   });
 
-  it('an empty sentence, no --course, and no .baton/baton.json', () => {
+  it('an empty sentence, no --course, and no .baton/baton.json', async () => {
     const dir = repo();
-    expect(request(dir, ['--course', 'create-spec', '   ']).threw).toBe('the request is one sentence, in quotes: baton request "<what to do>" --course <id>');
-    expect(request(dir, [SENTENCE]).threw).toBe('--course is required: the course the request starts (a course whose course.json says starts_from: request)');
+    expect((await request(dir, ['--course', 'create-spec', '   '])).threw).toBe('the request is one sentence, in quotes: baton request "<what to do>" --course <id>');
+    expect((await request(dir, [SENTENCE])).threw).toBe('--course is required: the course the request starts (a course whose course.json says starts_from: request)');
     const bare = repo({ settings: false });
-    expect(request(bare, ['--course', 'create-spec', SENTENCE]).threw).toMatch(/^origin\/main has no \.baton\/baton\.json — `baton request` files a ticket into a repository the sync reads/);
+    expect((await request(bare, ['--course', 'create-spec', SENTENCE])).threw).toMatch(/^origin\/main has no \.baton\/baton\.json — `baton request` files a ticket into a repository the sync reads/);
   });
 
-  it('a directory that is no checkout, and a flag it does not take', () => {
+  it('a directory that is no checkout, and a flag it does not take', async () => {
     const dir = repo();
     const plain = tmp('baton-b98-plain-');
-    expect(request(plain, ['--course', 'create-spec', SENTENCE]).threw).toMatch(/is not a git checkout/);
-    expect(request(dir, ['--course', 'create-spec', SENTENCE, '--bogus', 'x']).threw).toBe('--bogus: not a flag of baton request');
+    expect((await request(plain, ['--course', 'create-spec', SENTENCE])).threw).toMatch(/is not a git checkout/);
+    expect((await request(dir, ['--course', 'create-spec', SENTENCE, '--bogus', 'x'])).threw).toBe('--bogus: not a flag of baton request');
   });
 });
 
 describe('baton request: the id, the branch and the push (B-98)', () => {
-  it('the next free id skips the live and the archived ones', () => {
+  it('the next free id skips the live and the archived ones', async () => {
     const existing = { 'tickets/B-1.mdx': '---\ntitle: "B-1 — x"\nid: B-1\nstatus: available\ntags: [request]\ntopics: [baton]\nowns: {}\nprs: []\ndepends_on: []\n---\n', 'tickets/archive/B-7.mdx': '---\ntitle: "B-7 — y"\nid: B-7\nstatus: done\ntags: [request]\ntopics: [baton]\nowns: {}\nprs: []\ndepends_on: []\n---\n' };
     const dir = repo({ existing });
     expect(nextId(dir, 'tickets')).toBe('B-8');
-    expect(requestMain(['--course', 'create-spec', SENTENCE], { root: dir, log: () => {}, warn: () => {} })).toBe(0);
+    expect(await requestMain(['--course', 'create-spec', SENTENCE], { root: dir, log: () => {}, warn: () => {} })).toBe(0);
     expect(atOrigin(dir, 'tickets/B-8.mdx')).not.toBeNull();
     // A custom `items` folder is where it files, and the archive under it is scanned there.
     const elsewhere = repo({ items: 'work', existing: { 'work/archive/B-3.mdx': '---\nid: B-3\nstatus: done\n---\n' } });
-    expect(request(elsewhere, ['--course', 'create-spec', SENTENCE]).code).toBe(0);
+    expect((await request(elsewhere, ['--course', 'create-spec', SENTENCE])).code).toBe(0);
     expect(atOrigin(elsewhere, 'work/B-4.mdx')).not.toBeNull();
     expect(atOrigin(elsewhere, 'tickets/B-4.mdx')).toBeNull();
   });
 
-  it('one commit, pushed straight to the origin’s default branch, and the caller’s branch, HEAD and tree untouched', () => {
+  it('one commit, pushed straight to the origin’s default branch, and the caller’s branch, HEAD and tree untouched', async () => {
     const dir = repo();
     git(dir, 'checkout', '-q', '-b', 'my-work');
     writeFileSync(join(dir, 'draft.txt'), 'uncommitted\n');
     const head = git(dir, 'rev-parse', 'HEAD');
     const branch = git(dir, 'symbolic-ref', '--short', 'HEAD');
-    expect(request(dir, ['--course', 'create-spec', SENTENCE]).code).toBe(0);
+    expect((await request(dir, ['--course', 'create-spec', SENTENCE])).code).toBe(0);
     const { sha, parent } = originHead(dir);
     expect(parent).toBe(head);
     expect(git(dir, 'rev-parse', 'HEAD')).toBe(head);
@@ -269,24 +269,24 @@ describe('baton request: the id, the branch and the push (B-98)', () => {
     expect(git(dir, 'worktree', 'list').split('\n').length).toBe(1);
   });
 
-  it('resolves the default branch from origin/HEAD, else main, and --branch wins over both', () => {
+  it('resolves the default branch from origin/HEAD, else main, and --branch wins over both', async () => {
     const dir = repo();
     expect(defaultBranch(dir)).toBe('main');
     const onTrunk = repo({ branch: 'trunk' });
     expect(defaultBranch(onTrunk)).toBe('trunk');
     expect(defaultBranch(onTrunk, 'release')).toBe('release');
-    expect(request(onTrunk, ['--course', 'create-spec', SENTENCE]).code).toBe(0);
+    expect((await request(onTrunk, ['--course', 'create-spec', SENTENCE])).code).toBe(0);
     expect(atOrigin(onTrunk, 'tickets/B-1.mdx', 'trunk')).not.toBeNull();
     expect(atOrigin(onTrunk, 'tickets/B-1.mdx', 'main')).toBeNull();
     // --branch names the branch it pushes to; here one the remote already has, else `fetch` of it has nothing to add.
     const absent = repo();
     execFileSync('git', ['-C', originOf(absent), 'branch', 'release', 'main'], { stdio: 'ignore' });
-    expect(request(absent, ['--course', 'create-spec', SENTENCE, '--branch', 'release']).code).toBe(0);
+    expect((await request(absent, ['--course', 'create-spec', SENTENCE, '--branch', 'release'])).code).toBe(0);
     expect(atOrigin(absent, 'tickets/B-1.mdx', 'release')).not.toBeNull();
     expect(atOrigin(absent, 'tickets/B-1.mdx', 'main')).toBeNull();
   });
 
-  it('a push refused because the branch moved is refetched, re-scanned and retried — up to six tries', () => {
+  it('a push refused because the branch moved is refetched, re-scanned and retried — up to six tries', async () => {
     // The loop a request shares with scripts/ticket.mjs's `new`: refetch, take the next free id at
     // the new head, commit and push again. A `git` on PATH turns the first push away as a moved
     // head would, and a peer's request lands on the branch before the retry, so the retry must take
@@ -348,15 +348,16 @@ describe('baton request: the id, the branch and the push (B-98)', () => {
     expect(log.slice(0, 3)).toEqual([requestMessage('B-10', 'create-spec', SENTENCE), 'a peer’s requests', 'fixture']);
   });
 
-  it('a repository with no remote is the CLI’s one line and exit 2, not a stack trace', () => {
+  it('a repository with no remote is the CLI’s one line and exit 2, not a stack trace', async () => {
     const dir = repo({ remote: false });
     const out = spawnSync(process.execPath, [CLI, 'request', '--course', 'create-spec', SENTENCE], { cwd: dir, encoding: 'utf8', env: { ...process.env, BATON_HOME: dir } });
     expect(out.status).toBe(2);
-    expect(out.stderr.split('\n')[0]).toMatch(/^baton: git in .*: fatal: 'origin' does not appear to be a git repository; fatal: Could not read from remote repository\.$/);
+    // B-176's fallback note precedes the refusal (the id Baton did not give, then git's own words).
+    expect(out.stderr.split('\n').find((l) => l.startsWith('baton:'))).toMatch(/^baton: git in .*: fatal: 'origin' does not appear to be a git repository; fatal: Could not read from remote repository\.$/);
     // And through the CLI's own path a refusal is the same one line and exit 2.
     const refused = spawnSync(process.execPath, [CLI, 'request', '--course', 'create-pr', SENTENCE], { cwd: repo({ courses: { 'create-pr': GRAPH['create-pr'] } }), encoding: 'utf8' });
     expect(refused.status).toBe(2);
-    expect(refused.stderr).toMatch(/^baton: origin\/main: course create-pr does not start from a request — its course\.json carries no starts_from: request\./);
+    expect(refused.stderr.split('\n').find((l) => l.startsWith('baton:'))).toMatch(/^baton: origin\/main: course create-pr does not start from a request — its course\.json carries no starts_from: request\./);
     // And the CLI's happy path: the line, exit 0.
     const ok = spawnSync(process.execPath, [CLI, 'request', '--course', 'create-spec', SENTENCE], { cwd: repo(), encoding: 'utf8' });
     expect(ok.status).toBe(0);
@@ -367,7 +368,7 @@ describe('baton request: the id, the branch and the push (B-98)', () => {
 describe('baton request: afterwards, the repository still checks (B-98)', () => {
   it('baton tickets check finds nothing in the fixture after a request', async () => {
     const dir = repo({ existing: { 'tickets/B-1.mdx': '---\ntitle: "B-1 — an earlier ticket"\nid: B-1\nstatus: done\ntags: [request]\ntopics: [baton]\nowns: {}\nprs: []\ndepends_on: []\n---\n' } });
-    expect(request(dir, ['--course', 'create-spec', SENTENCE]).code).toBe(0);
+    expect((await request(dir, ['--course', 'create-spec', SENTENCE])).code).toBe(0);
     // The checkout levels with the branch it pushed to, as the next sync's does.
     git(dir, 'fetch', '-q', 'origin');
     git(dir, 'reset', '-q', '--hard', 'origin/main');

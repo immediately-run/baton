@@ -71,9 +71,11 @@ node cli/baton.mjs tickets --help                         # every flag, the tags
 
 `claim` refuses a ticket that cites a rule `spec/BATON_SPEC_HISTORY.md` amended after the
 ticket was filed, naming each; re-read them, rewrite what they contradict, and claim with
-`--rules-reread` and the ids it named. A new migration number or scenario id is the next free
-one at merge: merge main before merging, and renumber if main took it (until B-176 has Baton
-hand them out). A ticket filed from 2026-11-03 carries `### Trust` and `### Invariants`
+`--rules-reread` and the ids it named. A new migration number or scenario id comes from
+`node cli/baton.mjs tickets next migration|scenario` — Baton's sequence (B-176, R-BTN-195); with
+Baton unreachable the command prints the next free number by the scan and says so, and then the
+old rule applies: merge main before merging, and renumber if main took it. A ticket filed from
+2026-11-03 carries `### Trust` and `### Invariants`
 (`check.sections_since` in `.baton/baton.json`), and every ticket from B-176 on carries the
 `_filed` Status line `new` writes, by which CI's shallow clone judges it (`check.sections_from_id`).
 

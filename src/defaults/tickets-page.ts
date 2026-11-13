@@ -51,7 +51,9 @@ export function ticketsPage(settings: TicketSettings): string {
     '',
     '## Ids',
     '',
-    `New tickets take \`${prefix}<n>\`, the next free number across \`${items}/\` and \`${items}/archive/\`.`,
+    `New tickets take \`${prefix}<n>\` from Baton's sequence (\`baton tickets new\` asks for it,`,
+    `unique across concurrent branches); with Baton unreachable, \`baton tickets new\` takes`,
+    `the next free number across \`${items}/\` and \`${items}/archive/\` and says so.`,
     ...(legacy.length
       ? [`Ids under ${legacy.map((p) => `\`${p}\``).join(', ')} are still accepted — a ticket may be named by one — but \`baton tickets new\` never allocates them.`]
       : ['No other id prefix is accepted in this repository.']),
