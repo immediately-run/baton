@@ -3,7 +3,7 @@ title: "B-228 — Legs start from the claim's snapshot: the runner fast-forwards
 id: B-228
 project: baton
 status: in-review
-updated: 2026-11-10
+updated: 2026-11-13
 repos:
   - baton
 tags:
@@ -49,3 +49,13 @@ No new input: the sha is the claim's, already checked to be on the default branc
 ## Status
 
 _filed 2026-11-10._
+
+_(2026-11-13: the implement leg found this one already delivered — 8565aa7 (2026-11-10, the
+same commit that filed the ticket) put `advanceHome` in `src/runner/home.ts` with every
+behaviour the What-to-build lists (nothing at the snapshot; `git merge --ff-only` on the default
+branch, clean and behind; everything else left as it is with its reason), the runner's call
+right after `ensureSha` and the course load (`src/runner/runner.ts`, the failure logged, never
+a release), and its tests (`test/unit/runner-main.test.ts`). `vitest run
+test/unit/runner-main.test.ts` (46 passed) and `npm run typecheck` are green on main. No PR
+opened — main lacks nothing this ticket asks for; a person closes the ticket or files what is
+missing.)_
