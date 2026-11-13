@@ -203,16 +203,22 @@ live solely in Baton, and both are exportable (R-BTN-88).
     filing without its sections — and claim no more.
   - **The ticket commands** (B-112, R-BTN-127): `baton ticket new | claim | set | done`, whose behaviour is
     the git-lock commands docs' `claim.sh` and the repositories' `scripts/ticket.mjs` had, kept
-    once in the CLI. `claim`, `set` and `done`'s push-retry as the mutex, and `new`'s next free
-    id, are legacy, to be retired (R-BTN-193); `new` itself stays. Each is one commit pushed straight to the default branch from a throwaway
+    once in the CLI. `claim`, `set` and `done`'s push-retry as the mutex is legacy, to be
+    retired (R-BTN-193); `new` itself stays, its id now Baton's to give (R-BTN-195) and its
+    landing a PR by default; `baton ticket next <kind> [--for <ticket>]` stands beside them
+    (R-BTN-195). `claim`, `set` and `done` are each one commit pushed straight to the default branch from a throwaway
     worktree at the freshly fetched head (`--branch`, else the checkout's `origin/HEAD`, else
     `main`), so the caller's branch, HEAD and working tree are never written; a push refused
     because the branch moved is fetched again and retried, up to six tries, and a refusal for any
     other reason is the operator's, reported in git's own words.
     - `new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y] [--tier T]
-      [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]` takes the next free `<prefix>-<n>`
-      on the head it pushes to (across the items folder at any depth, `archive/` included, among
-      files whose frontmatter carries an `id`), and writes the conventional body unless
+      [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]
+      [--direct] [-i KEY] [--url URL] [--offline]` takes `<prefix>-<n>` from the repository's
+      `ticket-<prefix>` sequence (R-BTN-195) — the number unique before any push — and with no
+      key, no configured Baton, an unreachable Baton or `--offline`, the next free `<prefix>-<n>`
+      on the head it files on (across the items folder at any depth, `archive/` included, among
+      files whose frontmatter carries an `id`), said in the output, the sync's duplicate-id
+      refusal that path's backstop. It writes the conventional body unless
       `--body-file` names one: `**Brief:**` (the description), `**Spec:**`, `**Depends on:**`
       (from `--depends-on`; `none.` when empty), `**Used by:**`, `### What to build`,
       `### Trust` (every new input the ticket adds — a field, a file, a commit trailer, a request —
@@ -223,9 +229,23 @@ live solely in Baton, and both are exportable (R-BTN-88).
       push it judges what it writes as `baton ticket check` judges it — the body line against
       `depends_on`, every id a live or closed ticket, the board post's validation of §4.4 (the
       cycle among it) over the files the commit would leave — and a filing that fails is written to
-      no branch at all. Each dependency's `**Used by:**` line gains the new id once: the reverse
-      mention. A description that ends with a `Requires:` clause (`… Requires: human-operator,
+      no branch at all. A description that ends with a `Requires:` clause (`… Requires: human-operator,
       drivable-browser.`) has the capabilities it names written on the `**Requires:**` line.
+      - **The landing** (B-176, the owner, 2026-11-03: "Yes" to filing new tickets in a PR).
+        `new` files through a PR by default: the new ticket file ALONE — one commit, cut from the
+        freshly fetched default head in a throwaway worktree — pushed to `baton-ticket/<id>`
+        (a reserved namespace no `branch_pattern` may match, R-BTN-190, read by the floor scan
+        like any open branch), the PR asked of the forge with the caller's own credential; on a
+        `git` forge, which has none, the branch is pushed and printed for a person to merge
+        (value 8). The ticket is claimable when that branch merges, after `check:tickets` has
+        run on it; where `paths.tickets` is `approval` (R-BTN-184), a person approves it too.
+        The dependencies' `**Used by:**` lines are not written by a PR filing — nothing reads
+        them — so two open filings that name one dependency never share a write target;
+        `--direct` keeps today's one commit pushed straight to the default branch, each
+        dependency's `**Used by:**` line gaining the new id once (the reverse mention), and a
+        push the forge refuses as protected falls back to the PR — decided by the forge's
+        answer, never by reading the policy, the B-174 Decision's order with the one departure
+        its own Decisions entry records: for `new` alone, PR-first.
     - `claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]` moves a ticket available → in-progress, and
       refuses one that is not available or whose `depends_on` are not all done (archived, or
       carrying any of the markdown source's closed statuses). Before it writes it reads the
@@ -451,6 +471,36 @@ live solely in Baton, and both are exportable (R-BTN-88).
       `path` (B-183): a tracker that renumbers its issues keeps the key, and Baton reads the
       move; a path was the git source's key all along.
 
+- **R-BTN-195 (Baton hands out every identifier that concurrent branches write to git).** A
+  number that must be unique across concurrent branches is one Baton hands out (R-BTN-193): a
+  per-repository, per-kind sequence, the observation counter's shape (R-BTN-62) for identifiers.
+  One route serves them all: `POST /v1/repositories/{repository}/sequences/{kind}/next` →
+  `{kind, number}`, for the principals that file tickets — a key granted on the repository, an
+  owner of it, an administrator, the repository's sync key, and a delegated key (a number is not
+  authority: issuing one more than needed only leaves a gap). `kind` is `^[a-z][a-z0-9-]{0,31}$`,
+  opaque to core, which knows no kind's meaning (value 3): the CLI names them — `ticket-<prefix>`
+  (one per allocating prefix; a request's id is its request ticket's, so it is this kind),
+  `rule`, `scenario`, `gate`, `migration` — and `baton ticket next <kind> [--for <ticket>]`
+  prints the next of one for a PR author and an agent to use. The number is
+  `max(stored, floor) + 1`: the caller's `floor` is the highest number it sees in git — the
+  default branch and every open branch's head, the one scan left (R-BTN-131: the CLI's floor
+  computation is its single reader of git for numbers) — so a lost or fresh Baton never issues a
+  number git holds (value 1: lost state fails closed). A floor more than 10 000 above the stored
+  number is refused `invalid-params`: gaps are harmless, and a bigger floor only burns numbers.
+  `for` names the ticket a number is for, recorded and never trusted. Each take is one
+  `sequence` event naming the caller, the kind, the number and the floor (§13.4 `sequences`).
+  - **What git still is.** The identifiers themselves are git's (R-BTN-1): the CLI writes the
+    number into git and never reads it back from Baton as the record of the work. A number a
+    branch holds only locally, not yet pushed, is one a floor cannot see; the duplicate check at
+    merge stays the backstop for it — the sync's duplicate-id refusal and `baton.renumbered`
+    (R-BTN-147) for tickets, the branch merging main before it merges and renumbering if main
+    took the number for the rest (R-BTN-31, §13). A repository or session without Baton keeps
+    the next-free scan (R-BTN-131), and the sync's duplicate-id refusal is that path's backstop.
+  - **What a filing branch is.** `baton ticket new` lands its filing on
+    `baton-ticket/<id>` — a reserved namespace no `branch_pattern` may match (R-BTN-190), read
+    by the floor scan like any open branch — so the id is unique before any push and the branch
+    is the filing (R-BTN-74).
+
 ### 4.4 The board post
 
 `POST /v1/sync/board` — the one normative schema:
@@ -626,7 +676,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
   has one holder and one position at a time; no two legs of one ticket run at once. Parallel
   work is **child tickets**.
   - **Spawning.** A leg writes child ticket files git first, each naming `parent: <local id>`
-    of the same repository; Baton stores the qualified id. A child is an ordinary ticket on any
+    of the same repository and each taking its id as R-BTN-131's allocator says; Baton stores
+    the qualified id. A child is an ordinary ticket on any
     course; parent and children may be held at once. Handler tickets (R-BTN-161) and a call's
     children (R-BTN-165) are children. A leg that waits for its children is a call leg
     (R-BTN-165); any other spawning leg does not wait, and its `spawns` declaration (R-BTN-111)

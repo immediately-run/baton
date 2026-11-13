@@ -18,9 +18,10 @@ import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, typ
 import { Claims } from './claims';
 import { Cutover } from './cutover';
 import { Mirror } from './mirror';
-import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkRepositoryId, COURSE_ID, GIT_BRANCH, GIT_REPO } from './validate';
+import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkRepositoryId, checkSequenceTake, COURSE_ID, GIT_BRANCH, GIT_REPO, SEQUENCE_KIND } from './validate';
 import { Courses } from './courses';
 import { Observations } from './observations';
+import { Sequences } from './sequences';
 import { Webhooks, type Delivery } from './webhook';
 import { fileUrl } from './links';
 import { Stats, STATS_WINDOW_MS } from './stats';
@@ -59,6 +60,8 @@ export class BatonCore {
   readonly registry: Registry;
   readonly courses: Courses;
   readonly observations: Observations;
+  /** §4.6 (B-176, R-BTN-195): the per-repository, per-kind sequences — every id written to git. */
+  readonly sequences: Sequences;
   readonly webhooks: Webhooks;
   readonly stations: Stations;
   readonly admin: Admin;
@@ -104,6 +107,8 @@ export class BatonCore {
     this.policies.releaseForFloor = (repository) => this.claims.releaseForFloor(repository);
     this.courses = new Courses({ store, requiredBars: (repo) => this.admin.requiredBars(repo), policies: this.policies });
     this.observations = new Observations({ store, now: () => this.now() });
+    // B-176 (R-BTN-195): the identifier sequences, beside the observation counter they follow.
+    this.sequences = new Sequences({ store, now: () => this.now() });
     // B-134: the scope audit, before the webhooks and the claims it serves — its hold callback
     // reaches the claims, built later, through the closure.
     this.scope = new Scope({ store, now: () => this.now(), hold: (ticket, claimId) => this.claims.holdForScope(ticket, claimId) });
@@ -599,6 +604,10 @@ export class BatonCore {
       }
       const read = await this.blocksRoute(req, url);
       if (read) return read;
+      // §4.6 (B-176, R-BTN-195): the sequence route — a write, so it has its own half beside
+      // the blocks' reads, with the sync key admitted among its principals.
+      const sequence = await this.sequenceRoute(req, url);
+      if (sequence) return sequence;
       if (url.pathname.startsWith('/v1/courier/')) return await this.courierRoute(req, url);
       if (req.method === 'POST' && url.pathname === '/v1/probe/readings') {
         // R-BTN-53, R-BTN-101: a probe key's readings, on any registered instance.
@@ -1237,6 +1246,57 @@ export class BatonCore {
     const t = url.searchParams.get('transitive');
     if (t != null && t !== '1' && t !== '0') throw new BatonError('invalid-params', 'transitive: must be 1 or 0');
     return json(this.blocks.blockedOn(repo, checkBlockedOn(on), t === '1'));
+  }
+
+  /**
+   * `POST /v1/repositories/{repository}/sequences/{kind}/next` (§4.3, B-176, R-BTN-195): the
+   * next number of a repository's sequence, for the principals that file tickets today — a key
+   * granted on the repository (the runner role), an owner of it, an administrator, the
+   * repository's sync key, and a delegated key (a number is not authority, and issuing one more
+   * than needed only leaves a gap). The caller's `floor` seeds and guards the sequence; `for` is
+   * recorded, never trusted.
+   */
+  private async sequenceRoute(req: Request, url: URL): Promise<Response | null> {
+    const m = /^\/v1\/repositories\/([^/]+)\/sequences\/([^/]+)\/next$/.exec(url.pathname);
+    if (!m || req.method !== 'POST') return null;
+    const seg = (raw: string): string => {
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        throw new BatonError('invalid-params', 'a malformed path segment');
+      }
+    };
+    const repo = checkRepositoryId(seg(m[1]));
+    if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
+    const kind = seg(m[2]);
+    if (!SEQUENCE_KIND.test(kind)) throw new BatonError('invalid-params', 'kind: must match ' + SEQUENCE_KIND);
+    // The same principals the repository's reads take (blocksRoute), with the repository's sync
+    // key beside them: a sync credential files tickets too, and its key is never a worker's.
+    let cred = req.headers.get('X-Baton-Credential');
+    let actor = 'runner';
+    if (req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key')) {
+      const admins = await this.admin.adminFingerprints();
+      // The signed request's body is put back by the verifier: read it from the returned request.
+      const v = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.registry.syncKey(fp)?.public_key ?? this.workers.publicKey(fp));
+      req = v.req;
+      cred = v.cred;
+      const sync = this.registry.syncKey(cred);
+      if (admins.has(cred)) actor = `admin:${cred}`;
+      else if (this.admin.ownerKey(cred)) {
+        if (!this.admin.owns(cred, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
+        actor = `owner:${cred}`;
+      } else if (sync?.role === 'sync' && sync.repository === repo) actor = 'sync';
+      else if (sync) throw new BatonError('forbidden', `this sync key serves ${sync.repository}, not ${repo}`);
+      else actor = `runner:${cred}`;
+    }
+    if (!cred) throw new BatonError('unauthenticated', 'no principal');
+    if (actor.startsWith('runner:')) {
+      if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
+        throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
+      }
+    }
+    const take = checkSequenceTake(await readJson(req).catch(() => null));
+    return json(this.sequences.next(repo, kind, take.floor, actor, take.forTicket));
   }
 
   /** A ticket in a path: a qualified id (R-BTN-47) of a registered repository. A malformed

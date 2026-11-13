@@ -78,12 +78,24 @@ const bad = (field: string, why: string): never => {
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const int = (v: unknown, lo: number, hi: number) => Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi;
 
+import { branchMatches } from './claims';
+
 /** Stars per branch pattern (spec-silent, recorded on R3-1231): a pattern is a name, not a glob. */
 const PATTERN_STARS_MAX = 4;
+
+/** R-BTN-190 (B-176): the reserved side-branch namespaces no `branch_pattern` may match —
+ *  `baton-legs/*` and `baton-request/*` (R-BTN-190) and `baton-ticket/*` (a filing PR, R-BTN-74)
+ *  — so no reader of a pattern (a station function, R-BTN-25's continuation, the PR courses'
+ *  mapping, the branch-holder query) ever sees them, and no work branch's name collides with
+ *  one. Judged by the same wildcard walk the branch-holder query uses, over a branch each
+ *  namespace could hold. */
+const RESERVED_NAMESPACES = ['baton-legs/B-1-r2', 'baton-request/B-1', 'baton-ticket/B-1-x'];
 
 function pattern(v: unknown, field: string): string {
   if (typeof v !== 'string' || !BRANCH_PATTERN.test(v) || !v.includes('{ticket}')) bad(field, 'must be a branch pattern containing {ticket}');
   if ((v as string).split('*').length - 1 > PATTERN_STARS_MAX) bad(field, `must have at most ${PATTERN_STARS_MAX} *`);
+  const inReserved = RESERVED_NAMESPACES.find((b) => branchMatches(v as string, b, 'B-1', 'baton'));
+  if (inReserved) bad(field, `must not match the reserved namespace ${inReserved.split('/')[0]}/* (R-BTN-190: no reader of a branch_pattern may see a side branch)`);
   return v as string;
 }
 

@@ -665,7 +665,7 @@ mean (R-BTN-50).
   | `branch` | R-BTN-96 | R-BTN-96 | branches |
   | `ask`, `deliver`, `announce` | condition handlers (R-BTN-169): `ask` asks through the person leg `answer` | R-BTN-169 | — |
 
-  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder, `archive/` and the open ticket and request branches, as every allocator below), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and a `## Status` with the `_filed` line (R-BTN-74), and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call — it asks Baton nothing. Where the forge refuses the push because the branch is protected (the CLI's adapter for the forge `--forge` names, else `github` where `origin`'s host is `github.com`, recognises that refusal by the forge's own message: GitHub's `GH006` protected-branch refusal, or a `GH013` ruleset refusal naming a pull-request or update rule and never secret push protection; GitLab's `not allowed to push code to protected branches`; Gitea's `Not allowed to push to protected branch`), it pushes the same commit to `baton-request/<ID>`, or takes the next free id when that branch exists — a branch no `branch_pattern` may match (R-BTN-190), so the request's PR is never one of the new ticket's PRs and no leg continues it (R-BTN-25) — opens a PR from it with the caller's forge credential and prints its URL. With no forge credential it prints the pushed branch and exits non-zero. On a `git` forge, which has no adapter, and for any other refusal — `refs.other` refusing the side branch to a runner under `protected` among them — it reports git's own words (R-BTN-74), opens nothing and exits non-zero. Otherwise the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
+  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the id from the repository's `ticket-<prefix>` sequence — the request id IS the request ticket's id, the prefix the commonest among its ticket files — taken as every allocator below does, R-BTN-195), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and a `## Status` with the `_filed` line (R-BTN-74), and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call — it asks Baton nothing but the id (R-BTN-195). Where the forge refuses the push because the branch is protected (the CLI's adapter for the forge `--forge` names, else `github` where `origin`'s host is `github.com`, recognises that refusal by the forge's own message: GitHub's `GH006` protected-branch refusal, or a `GH013` ruleset refusal naming a pull-request or update rule and never secret push protection; GitLab's `not allowed to push code to protected branches`; Gitea's `Not allowed to push to protected branch`), it pushes the same commit to `baton-request/<ID>`, or takes the next free id when that branch exists — a branch no `branch_pattern` may match (R-BTN-190), so the request's PR is never one of the new ticket's PRs and no leg continues it (R-BTN-25) — opens a PR from it with the caller's forge credential and prints its URL. With no forge credential it prints the pushed branch and exits non-zero. On a `git` forge, which has no adapter, and for any other refusal — `refs.other` refusing the side branch to a runner under `protected` among them — it reports git's own words (R-BTN-74), opens nothing and exits non-zero. Otherwise the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
 
   - **A wait for a person's answer is a person's leg** (R-BTN-116), answered by a
     `std:decision@1`: `decision`'s `answer` and `build-app`'s `decide`. Where the policy admits `sync` for `std:decision@1`, the ticket's `answer:`
@@ -707,13 +707,16 @@ mean (R-BTN-50).
       and `build-app`'s `report` (the record courses' legs) write each leg's record under its own `## <leg>` heading in the ticket's body,
       on the branch: a note for people, and the input the next leg reads from the branch's
       fetched head (R-BTN-5). Their outputs go on the same branch:
-      - a new ticket file, its id the next free one across the default branch, `archive/` and
-        the heads of the repository's open ticket branches: every branch matching a listed
-        course's `branch_pattern`, and every `baton-request/*` branch (R-BTN-131), with a commit
-        not reachable from the default branch (R-BTN-96).
-        Every allocator does the same: `baton ticket request`, `baton ticket new` and the source's
-        `file` export — a legacy scan, retired by B-176 (R-BTN-193). A collision that still happens is caught by the sync's duplicate-id
-        refusal (R-BTN-74), and the owner renumbers;
+      - a new ticket file, its id taken as R-BTN-195's allocator hands it out: the next number
+        of the repository's `ticket-<prefix>` sequence, asked with the floor the CLI reads — the
+        default branch, `archive/` and the heads of the repository's open branches: every branch
+        matching a listed course's `branch_pattern`, and every `baton-request/*` and
+        `baton-ticket/*` branch (R-BTN-131), with a commit not reachable from the default branch
+        (R-BTN-96). Every allocator does the same: `baton ticket request`, `baton ticket new`
+        and the source's `file` export. A session without Baton — no key, none configured,
+        unreachable, `--offline` — scans instead (the next free id across the same branches) and
+        says so; a collision that still happens is caught by the sync's duplicate-id refusal
+        (R-BTN-74), and the owner renumbers;
       - a document.
 
       A leg never edits another ticket's file. `bug-report`'s `fold` records the duplicate as
@@ -943,7 +946,8 @@ mean (R-BTN-50).
     **orphan** branch: its first commit has no parent and every commit's tree holds only
     `.baton-legs/`, so it shares no history with the work, no forge opens a PR from it, it holds no
     workflow to run, and merging it by hand needs `--allow-unrelated-histories`. No
-    `branch_pattern` may match `baton-legs/*` or `baton-request/*` (R-BTN-131; the course
+    `branch_pattern` may match `baton-legs/*`, `baton-request/*` or `baton-ticket/*` (R-BTN-131,
+    R-BTN-74; the course
     validator refuses one that does), so
     no reader of `branch_pattern` — a station function, R-BTN-25's continuation, the PR courses'
     mapping, the branch-holder query — ever sees it, and no work branch's name collides with it.

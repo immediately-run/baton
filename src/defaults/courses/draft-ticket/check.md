@@ -34,8 +34,9 @@ fix what fails:
 ## File
 
 - Write each ticket as a file in the tickets directory (the `items` setting in
-  `.baton/baton.json`, `tickets/` by default), with the next id the repository uses (its id tool,
-  if it has one), `depends_on` for the chain, and its course (the repository's default unless the
+  `.baton/baton.json`, `tickets/` by default), with the next id the repository uses — its id
+  tool if it has one (`baton tickets next ticket-<prefix>`: an id from Baton's sequence, never
+  a scan, R-BTN-131), `depends_on` for the chain, and its course (the repository's default unless the
   ticket says otherwise); each file ends in `## Status` with `_filed <today, YYYY-MM-DD>.` and carries the draft's Trust and
   Invariants as `###` sections.
 - Add `## check` to the request, naming each ticket you filed, and set the request's `status:` to `done`.

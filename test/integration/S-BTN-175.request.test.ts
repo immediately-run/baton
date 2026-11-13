@@ -102,9 +102,11 @@ describe('S-BTN-175 the request', () => {
     repo.publish();
     const before = repo.git('rev-parse', 'HEAD');
 
-    // The request, as an operator files it.
+    // The request, as an operator files it. B-176: with no key in this environment the id is
+    // the scan's, and the fallback's note is said on stderr.
     const filed = repo.request(SENTENCE, '--course', 'create-spec');
-    expect(filed).toMatchObject({ status: 0, stderr: '' });
+    expect(filed).toMatchObject({ status: 0 });
+    expect(filed.stderr).toMatch(/^… id by the next-free scan — Baton did not answer/);
     expect(filed.stdout).toBe('baton request: filed B-1 (course create-spec) — the next claim starts converse at requested\n');
 
     // One commit on the origin's main, on top of the scaffold, the ticket file and nothing else —

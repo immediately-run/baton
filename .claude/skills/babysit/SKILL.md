@@ -22,7 +22,7 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   | `spec/`, `docs/`, `tickets/` | `npm run check:spec`, `npm run check:wiki`, `npm run check:tickets`; for `spec/`, `npm run spec:impact` (below) |
   | `src/`, `cli/`, `scripts/` | `npm run typecheck`, and `npm test` (or `npm run test:no-quint` without quint) |
   | `src/shared/` | never by hand: change it in docs, then `npm run vendor` |
-  | `src/migrations/` | only a new numbered file, the next free number at merge (below); never edit an old one |
+  | `src/migrations/` | only a new numbered file, its number from `node cli/baton.mjs tickets next migration` (below); never edit an old one |
 
 - **Local failures that are not yours**: a cloud container without `ssh-keygen` or `ssh-agent`
   fails the signing tests (`sign.test.ts`, `cli.test.ts`, `defaults-cli.test.ts`,
@@ -46,14 +46,19 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 
 ## Ticket numbers and status
 
-- **Migration and scenario numbers are the next free ones at merge.** Until Baton hands them out
-  (B-176), a branch's new migration (`src/migrations/NNNN_*.sql`) or §15 `S-BTN-n` row takes the
-  next free number when the PR merges, not when the branch started: merge `origin/main` right
-  before merging, and if main took the number, renumber the branch's and every reference it added
-  (B-110 and B-107 both took 0028; B-129 and B-145 both took S-BTN-197).
-- **Ids are taken on `main`.** `node cli/baton.mjs tickets new` files a ticket with the next free id
-  straight onto `main`. A long-running branch that filed a ticket by hand can find its id taken
-  when `main` moves. Keep `main`'s ticket and give the branch's the next free id, then change every
+- **Migration and scenario numbers come from Baton.** `node cli/baton.mjs tickets next migration`
+  and `node cli/baton.mjs tickets next scenario` print the next number of each sequence (B-176,
+  R-BTN-195) — take them that way, with `--for <ticket>` naming the ticket the number is for.
+  With `--offline`, or when Baton does not answer, the command prints the next free number by
+  the scan and says so: merge `origin/main` right before merging and, if main took the number,
+  renumber the branch's and every reference it added — that fallback is the old race (B-110 and
+  B-107 both took 0028; B-129 and B-145 both took S-BTN-197), and the duplicate check at merge is
+  its backstop.
+- **Ticket ids are Baton's to give too.** `node cli/baton.mjs tickets new` takes its id from the
+  repository's `ticket-<prefix>` sequence and files the new ticket through a PR on
+  `baton-ticket/<id>` by default (`--direct` pushes to `main` as before). A long-running branch
+  that filed a ticket by hand can find its id taken when `main` moves. Keep `main`'s ticket and
+  give the branch's the next free id, then change every
   reference the branch added, and only those: check with `git show origin/main:<file> | grep -c <id>`
   that `main`'s copy of a file never named it before rewriting the file.
 - **Status follows the PR**, with `node cli/baton.mjs tickets` (B-112's commands):
