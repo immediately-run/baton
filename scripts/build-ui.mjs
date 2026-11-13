@@ -9,11 +9,27 @@
 // baton-deploy.yml runs it before `wrangler deploy`.
 import { build } from 'esbuild';
 import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const SRC = join(ROOT, 'src', 'dashboard');
 const OUT = join(SRC, 'dist');
+
+// The bundle's one bare import is 'react-dom/client' (main.tsx); everything else is this
+// repository. When it does not resolve, node_modules is incomplete — a stale or half-installed
+// tree, not a source fault — so say that instead of letting esbuild's "Could not resolve" stack
+// trace stand in for a diagnosis (B-132 installs with `npm ci --ignore-scripts`).
+const require = createRequire(import.meta.url);
+try {
+  require.resolve('react-dom/client');
+} catch {
+  console.error(
+    "build:ui: 'react-dom/client' does not resolve — node_modules is incomplete. " +
+      'Install from the lockfile: npm ci --ignore-scripts (B-132).',
+  );
+  process.exit(1);
+}
 
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
