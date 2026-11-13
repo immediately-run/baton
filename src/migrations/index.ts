@@ -122,7 +122,7 @@ export const MIGRATIONS: Migration[] = [
   { id: 30, sql: capacitySeats },
   { id: 31, sql: personLegs },
   { id: 32, sql: answerDeferred },
-  // 0033 is B-110's (owner runs), renumbered at the merge behind B-7's 0031/0032; 0028 stays reserved for B-107 (#149).
+  // 0033 is B-110's (owner runs), renumbered at the merge behind B-7's 0031/0032; 0028 was reserved for B-107 (#149), closed as superseded — it stays unused.
   { id: 33, sql: ownerRuns },
   { id: 34, sql: scopeAudit },
   { id: 35, sql: scopeEvents },
