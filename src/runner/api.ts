@@ -126,7 +126,7 @@ export class BatonApi {
   claim(body: { request_id: string; ticket_id?: string }): Promise<Record<string, any>> {
     return this.call('POST', '/v1/runner/claim', body);
   }
-  advance(claimId: number, body: { reached?: string; leg: string; bars?: string[]; evidence?: string; outputs?: unknown[]; taken?: { choice: string; alternative: string; dead: string[] }[] }): Promise<Record<string, any>> {
+  advance(claimId: number, body: { reached?: string; leg: string; bars?: string[]; evidence?: string; outputs?: unknown[]; taken?: { choice: string; alternative: string; dead: string[] }[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null }): Promise<Record<string, any>> {
     return this.call('POST', `/v1/runner/claims/${claimId}/advance`, body);
   }
   end(claimId: number, body: Record<string, unknown>): Promise<Record<string, any>> {

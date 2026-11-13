@@ -951,6 +951,48 @@ export class Claims {
       .map((l) => ({ leg: l.leg, ...(l.run_id ? { run_id: l.run_id } : {}), from: l.from_station, reached: l.to_station, outcome: l.finished_at != null ? 'finished' : l.abandoned_at != null ? 'abandoned' : 'running' }));
   }
 
+  /** B-190 (R-BTN-84, §14's `GET …/legs/{leg}/runs`): one leg's runs of a ticket, oldest first —
+   *  each with what replay needs: the claim's snapshot and course version, the head the holder
+   *  reported, and the run's recorded inputs (the ticket's version and its read's digest among
+   *  them, `leg_run_inputs`). `end` is the claim's end reason once the claim ended. */
+  runsOf(ticketId: string, leg: string) {
+    const runs = this.rows<{ claim_id: number; seq: number; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; worker_id: number }>(
+      `SELECT l.claim_id, l.seq, l.run_id, l.head_sha, l.from_station, l.started_at, l.finished_at, l.abandoned_at,
+              c.snapshot_sha, c.course_id, c.status, c.end_reason, c.ended_at, c.worker_id
+       FROM claim_legs l JOIN claims c ON c.id = l.claim_id
+       WHERE c.ticket_id = ? AND l.leg = ? ORDER BY l.claim_id, l.seq`, ticketId, leg);
+    const inputs = this.rows<{ claim_id: number; seq: number; name: string; from_leg: string | null; from_run: number | null; uri: string | null; digest: string | null; value_json: string | null; leg_version: number | null; ticket_version: string | null; read_digest: string | null }>(
+      'SELECT claim_id, seq, name, from_leg, from_run, uri, digest, value_json, leg_version, ticket_version, read_digest FROM leg_run_inputs WHERE ticket_id = ? ORDER BY claim_id, seq, name', ticketId);
+    const defaultBranch = this.rows<{ default_branch: string }>('SELECT default_branch FROM repositories WHERE id = ?', repositoryOf(ticketId))[0]?.default_branch ?? null;
+    const courseVersion = (run: typeof runs[number]): number | null => run.course_id
+      ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(ticketId), run.course_id)[0]?.version ?? null
+      : null;
+    return {
+      ...(defaultBranch ? { default_branch: defaultBranch } : {}),
+      runs: runs.map((r, ordinal) => {
+        const mine = inputs.filter((i) => i.claim_id === r.claim_id && i.seq === r.seq);
+        const ticket = mine.find((i) => i.name === '');
+        return {
+          run: ordinal + 1,
+          claim: r.claim_id, runner: r.worker_id, seq: r.seq, leg,
+          run_id: r.run_id, from: r.from_station, started_at: r.started_at,
+          ended_at: r.finished_at ?? r.abandoned_at ?? null,
+          end: r.status === 'active' ? null : r.end_reason,
+          snapshot_sha: r.snapshot_sha, head_sha: r.head_sha,
+          course: r.course_id, course_version: courseVersion(r),
+          ...(ticket?.ticket_version != null || ticket?.read_digest != null
+            ? { ticket: { ...(ticket.ticket_version != null ? { version: ticket.ticket_version } : {}), ...(ticket.read_digest != null ? { read_digest: ticket.read_digest } : {}) } }
+            : {}),
+          inputs: mine.filter((i) => i.name !== '').map((i) => ({
+            name: i.name, ...(i.from_leg != null ? { from_leg: i.from_leg } : {}), ...(i.from_run != null ? { from_run: i.from_run } : {}),
+            ...(i.uri != null ? { uri: i.uri } : {}), ...(i.digest != null ? { digest: i.digest } : {}),
+            ...(i.value_json != null ? { value: JSON.parse(i.value_json) as unknown } : {}), ...(i.leg_version != null ? { leg_version: i.leg_version } : {}),
+          })),
+        };
+      }),
+    };
+  }
+
   /** The claim's running leg, if any: its last started leg not yet finished or given up. */
   private runningLeg(claimId: number) {
     return this.rows<{ seq: number; leg: string; from_station: string; run_id: string | null }>(
@@ -1065,12 +1107,25 @@ export class Claims {
     for (let tries = 0; ; tries++) {
       runId = mintRunId(now, this.c.random);
       try {
-        this.exec(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          claimId, seq, runId, leg, at, JSON.stringify(b.bars), now, n);
+        this.exec(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation, head_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          claimId, seq, runId, leg, at, JSON.stringify(b.bars), now, n, b.head_sha);
         break;
       } catch (e) {
         if (!isUniqueViolation(e) || !/run_id/.test(String(e)) || tries >= 8) throw e;
       }
+    }
+    // B-190 (R-BTN-82, R-BTN-84, §13.5): the run's inputs as the runner reported them at its
+    // start — pointers and digests only (R-BTN-33), the ticket's version and its read's digest
+    // on the row whose name is empty. Replay reads these rows; a retried advance that reached
+    // this far never runs twice (its claim-legs insert above is the transaction's own).
+    for (const i of b.run_inputs.inputs) {
+      this.exec(`INSERT INTO leg_run_inputs (claim_id, seq, name, ticket_id, from_leg, from_run, uri, digest, value_json, leg_version)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        claimId, seq, i.name, c.ticket_id, i.from_leg, i.from_run, i.hasValue ? null : i.uri, i.digest, i.hasValue ? JSON.stringify(i.value) : null, i.leg_version);
+    }
+    if (b.run_inputs.ticket) {
+      this.exec(`INSERT INTO leg_run_inputs (claim_id, seq, name, ticket_id, ticket_version, read_digest) VALUES (?, ?, '', ?, ?, ?)`,
+        claimId, seq, c.ticket_id, b.run_inputs.ticket.version, b.run_inputs.ticket.read_digest);
     }
     const started = this.legFacts(claimId, leg, runId);
     this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}) } });

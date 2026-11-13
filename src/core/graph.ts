@@ -35,6 +35,9 @@ export interface Leg {
   asks: string | null;
   /** R-BTN-116: a person leg's expiry — unanswered this long, it reaches `reached`; null with none. */
   expires: { afterS: number; reached: string } | null;
+  /** R-BTN-82/R-BTN-84: false when the leg has side effects outside git and its forge, so
+   *  `baton leg replay` refuses it. True unless the course file marks `"replay_safe": false`. */
+  replaySafe: boolean;
 }
 
 export interface Graph {
@@ -92,7 +95,7 @@ export function graphOf(json: unknown): Graph {
     capability_roles?: Record<string, string[]>;
     stations: Record<string, { renamed_from?: string | string[]; entry?: { output: string; schema: string }[] }>;
     legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session'; requires?: { capabilities?: string[] };
-      kind?: 'person'; asks?: string; expires?: { after_s: number; reached: string } }>;
+      kind?: 'person'; asks?: string; expires?: { after_s: number; reached: string }; replay_safe?: boolean }>;
   };
   const legs = new Map<string, Leg>();
   const legRenames = new Map<string, string>();
@@ -100,7 +103,8 @@ export function graphOf(json: unknown): Graph {
   for (const [id, l] of Object.entries(f.legs)) {
     legs.set(id, { from: [...new Set(l.from)], to: [...new Set(names(l.to))], maxRuns: l.max_runs ?? null, maxQueue: l.max_queue ?? null,
       noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null, requires: legCapabilities(l.requires, f.capability_roles),
-      person: l.kind === 'person', asks: l.kind === 'person' ? l.asks ?? null : null, expires: l.kind === 'person' && l.expires ? { afterS: l.expires.after_s, reached: l.expires.reached } : null });
+      person: l.kind === 'person', asks: l.kind === 'person' ? l.asks ?? null : null, expires: l.kind === 'person' && l.expires ? { afterS: l.expires.after_s, reached: l.expires.reached } : null,
+      replaySafe: l.replay_safe !== false });
     for (const old of names(l.renamed_from)) legRenames.set(old, id);
   }
   const entry = new Map<string, { output: string; schema: string }[]>();
