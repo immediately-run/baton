@@ -491,6 +491,8 @@ export interface End {
    *  their shape, and actions beyond the report's sixteen, are counted in `dropped`, so a
    *  report is never silently shortened. */
   scope_exceeded: ScopeReport;
+  /** R-BTN-153 (B-175): the check command's exit status, when the end is its verdict. */
+  exit_status: number | null;
 }
 
 /** One action of a leg-end scope report (B-134): the kind of evidence and what it touched — a
@@ -564,6 +566,15 @@ export function checkScopeReport(v: unknown): ScopeReport {
   return { actions, dropped };
 }
 
+/** R-BTN-153 (B-175): the check command's exit status, as the executor's `exec` read it — an
+ *  integer 0 to 255. A timeout or an `exec` error has none (the executor's `status` is null), so
+ *  an arrival carrying no `exit_status` is nobody's green verdict; the claims judge what station
+ *  each may reach. */
+const exitStatus = (v: unknown): number => {
+  if (!isInt(v) || (v as number) < 0 || (v as number) > 255) bad('exit_status', 'must be an integer from 0 to 255, the check command’s exit status (R-BTN-153)');
+  return v as number;
+};
+
 /** §6.5's ends: `done`, `suspended:<station>` and `released:<reason>`, each with an optional
  *  course-defined `detail` (§10.4 free text core stores and shows but never reads); `reached`, the
  *  station the claim rests at (R-BTN-71); `next`, the queued leg (R-BTN-83); and an optional
@@ -613,7 +624,7 @@ export function checkEnd(body: unknown): End {
     prerequisite = { kind: 'capability', ref: (p as { ref: string }).ref };
   }
   retiredFields(b);
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null };
 }
 
 export interface Advance {
@@ -625,6 +636,8 @@ export interface Advance {
   outputs: Output[];
   /** B-134: the finished leg's scope audit, reported on the advance or end that finishes it. */
   scope_exceeded: ScopeReport;
+  /** R-BTN-153 (B-175): the check command's exit status, when the arrival is its verdict. */
+  exit_status: number | null;
 }
 
 /** `POST /v1/runner/claims/{id}/advance` (R-BTN-63, §11): the leg to start; `reached`, the
@@ -640,7 +653,7 @@ export function checkAdvance(body: unknown): Advance {
   if (!Array.isArray(raw) || raw.length > TAGS_MAX || !raw.every((t) => typeof t === 'string' && TAG.test(t))) bad('bars', `must be a list of at most ${TAGS_MAX} tags`);
   if (b.course !== undefined && JSON.stringify(b.course).length > 4096) bad('course', 'must be at most 4 KB');
   retiredFields(b);
-  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded) };
+  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */
