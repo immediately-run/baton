@@ -62,7 +62,6 @@ export interface RegistryEntry {
   skill: string;
   course: unknown;
   step_kinds: string[];
-  report_horizon_h: number;
   branch_pattern: string;
   previous_branch_pattern: string | null;
   /** R-BTN-108: the course's schemas, posted with its file at every sync. */
@@ -111,7 +110,6 @@ export function checkRegistry(v: unknown): RegistryEntry[] {
       || new Set(r.step_kinds).size !== r.step_kinds.length) {
       bad(`${at}.step_kinds`, `must be at most ${STEP_KINDS_MAX} distinct step kinds`);
     }
-    if (r.report_horizon_h !== undefined && !int(r.report_horizon_h, 1, 168)) bad(`${at}.report_horizon_h`, 'must be an integer from 1 to 168');
     // An oversized file is a refusal of that course, as any file failing R-BTN-69 is: the previous
     // one stays in force and the board still advances. It is never stored or walked.
     let size = Infinity;
@@ -164,7 +162,6 @@ export function checkRegistry(v: unknown): RegistryEntry[] {
       skill: r.skill as string,
       course: r.course,
       step_kinds: r.step_kinds as string[],
-      report_horizon_h: (r.report_horizon_h as number | undefined) ?? 6,
       branch_pattern: pattern(r.branch_pattern, `${at}.branch_pattern`),
       previous_branch_pattern: r.previous_branch_pattern == null ? null : pattern(r.previous_branch_pattern, `${at}.previous_branch_pattern`),
       facts,

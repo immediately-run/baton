@@ -258,6 +258,24 @@ function list(v: unknown, re: RegExp, what: string): string[] {
   return v as string[];
 }
 
+/** The part-4 retired fields a board post still carries (BATON_SPEC_HISTORY, Migrations: "part
+ *  4's retired fields"): the post's `ontology` and a registry entry's `route_choices` and
+ *  `report_horizon_h`, by wire name, each once. `checkPayload` ignores them; the route logs each
+ *  `deprecated-field` with the `Deprecated` it holds, so this stays pure. */
+export function retiredBoardFields(body: unknown): string[] {
+  if (!isObj(body)) return [];
+  const out = new Set<string>();
+  if ((body as Record<string, unknown>).ontology !== undefined) out.add('board.ontology');
+  const registry = (body as Record<string, unknown>).registry;
+  if (Array.isArray(registry)) {
+    for (const e of registry) {
+      if (!isObj(e)) continue;
+      for (const f of ['route_choices', 'report_horizon_h']) if ((e as Record<string, unknown>)[f] !== undefined) out.add(`registry.${f}`);
+    }
+  }
+  return [...out];
+}
+
 /** Validate the snapshot's shape before anything is written; refuses rather than guesses. A post
  *  is the normative shape (`tickets`, `closed`, `stations`, §7.1) or the interim one docs posts
  *  until R3-1233 (`state.items`, `ready`), never both. */
@@ -290,9 +308,10 @@ export function checkPayload(body: unknown): BoardPayload {
   // sync that still sends it is not refused for it, and Baton reads it nowhere.
   checkReference(p);
   // §5.9 (B-167): the capability ontology is gone from core. A post that still carries a field
-  // the restructure retired is taken with the field ignored — the sync's own logging is the
-  // record, and the history's Migrations entry "part 4's retired fields" says until when.
-  // (`route_choices` on a registry entry is ignored the same way, in `checkRegistry`.)
+  // the restructure retired is taken with the field ignored — the route logs it
+  // `deprecated-field` (`retiredBoardFields`, B-168), and the history's Migrations entry "part
+  // 4's retired fields" says until when. (A registry entry's `route_choices` and
+  // `report_horizon_h` are ignored the same way, in `checkRegistry`.)
   const retired = p as BoardPayload & { ontology?: unknown };
   if (retired.ontology !== undefined) delete retired.ontology;
   // R-BTN-191's envelope (§4.4): a typed fact about one ticket of the post. The shape here; each

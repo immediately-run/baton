@@ -1,9 +1,11 @@
-// resources.ts — external resources, their instances and the instruments' readings (BATON_SPEC §2g
-// R-BTN-76, §2l R-BTN-101; R3-1251). Per Baton, not per repository: an administrator registers a
-// resource (its scope and its readings' `detail` schema) and each account instance (what it serves,
-// which repositories' workers may use it); a worker declares the account instances it uses in its
-// heartbeat; workers, probes and administrators post readings, each kept per instrument and each
-// lapsing on its own. An instance's state — the administrator's reading while in force, else the
+// resources.ts — external resources, their instances and the instruments' readings (BATON_SPEC §6.3
+// R-BTN-76, R-BTN-101; R3-1251; B-168). Per Baton, not per repository: an administrator registers a
+// resource (its scope — `account` or `service` — and its readings' `detail` schema) and each
+// account instance (what it serves, which repositories' runners may use it). A repository's usable
+// instances of a resource are the `service` instance and the account instances that serve it and
+// list the repository — the same for every runner granted there. Runners, probes and
+// administrators post readings, each kept per instrument and each lapsing on its own; an
+// administrator's reading is one more instrument's, with no precedence. An instance's state — the
 // most recently observed `state` reading in force, else `unknown` — is evaluated here, stored, and
 // each change is a `resource` event that the blocks recount from. Core reads the envelope, never
 // `detail`, and no name here means anything.
@@ -12,20 +14,23 @@ import { logEvent } from './db';
 import { detailProblem, sameSchema, schemaProblem, type Schema } from './detailSchema';
 import { refinementGaps } from '../shared/schema.mjs';
 import { stdSchema } from '../shared/std.mjs';
-import { checkCapacity, checkInstance, checkReadings, checkResource, VALID_FOR, WORKER_INSTANCE } from './validate';
+import { checkCapacity, checkInstance, checkReadings, checkResource, VALID_FOR } from './validate';
 import type { Blocks } from './blocks';
+import type { Deprecated } from './deprecated';
 import type { Store } from './ports';
 
-/** R-BTN-76: at most one reading per worker, instance and kind a minute. */
+/** R-BTN-76: at most one reading per runner, instance and kind a minute. */
 export const WORKER_READING_EVERY_MS = 60_000;
 
 export interface Ctx {
   store: Store;
   now: () => number;
   blocks: Blocks;
+  /** The retired-fields window's one writer (`deprecated.ts`): a reading's `nonce`, `signature`. */
+  deprecated?: Deprecated;
 }
 
-/** Who posts a reading: a worker session, a probe key, or an administrator. */
+/** Who posts a reading: a runner session, a probe key, or an administrator — one more instrument. */
 export type Instrument =
   | { kind: 'worker'; workerId: number; credential: string }
   | { kind: 'probe'; fingerprint: string }
@@ -104,12 +109,12 @@ export class Resources {
       : null;
   }
 
-  /** `POST /v1/admin/resources`: `{name, scope, detail_schema, atoms_from?}`. The schema is refused outside
-   *  R-BTN-76's subset; an `x-baton-base` names a `std:` schema (and only one), and a
-   *  refinement R-BTN-108's check cannot prove is refused.
-   *  A `service` resource is its own one instance. Registering a name again is idempotent only
-   *  with the same scope and schema: instances and readings were judged by them; the same pair may
-   *  still change `atoms_from` — a retired field (B-167), accepted and never read. */
+  /** `POST /v1/admin/resources`: `{name, scope, detail_schema}`, `scope` `account` or `service`
+   *  (R-BTN-76: what a runner uses is its repository's, never one it declares). The schema is
+   *  refused outside R-BTN-76's subset; an `x-baton-base` names a `std:` schema (and only one),
+   *  and a refinement R-BTN-108's check cannot prove is refused. A `service` resource is its own
+   *  one instance. Registering a name again is idempotent only with the same scope and schema:
+   *  instances and readings were judged by them. */
   addResource(actor: string, body: unknown) {
     const r = checkResource(body);
     const problem = schemaProblem(r.detail_schema);
@@ -178,61 +183,21 @@ export class Resources {
     });
   }
 
-  // ── what a worker uses (the heartbeat's `uses`) ───────────────────────────────────────────
-
-  /** R-BTN-76: the account instances a worker declares it uses, each registered and listing a
-   *  repository its key works on; the rest are returned with why, and the heartbeat still
-   *  succeeds. Rewrites `worker_instances` only when it changes; returns whether it did. */
-  applyUses(workerId: number, repos: string[] | null, names: string[]): { changed: boolean; refused: { instance: string; code: string }[] } {
-    const refused: { instance: string; code: string }[] = [];
-    const keep: string[] = [];
-    for (const name of names) {
-      const inst = this.rows<{ repositories: string }>(
-        `SELECT i.repositories FROM resource_instances i WHERE i.name = ?
-           AND EXISTS (SELECT 1 FROM instance_serves s JOIN external_resources e ON e.name = s.resource WHERE s.instance = i.name AND e.scope = 'account')`, name)[0];
-      if (!inst) {
-        refused.push({ instance: name, code: 'not-found' });
-        continue;
-      }
-      const listed = JSON.parse(inst.repositories) as string[];
-      if (repos !== null && !listed.some((r) => repos.includes(r))) {
-        refused.push({ instance: name, code: 'forbidden' });
-        continue;
-      }
-      keep.push(name);
-    }
-    const before = this.rows<{ instance: string }>('SELECT instance FROM worker_instances WHERE worker_id = ? ORDER BY instance', workerId).map((r) => r.instance);
-    const after = [...keep].sort();
-    if (before.join('\u0000') === after.join('\u0000')) return { changed: false, refused };
-    this.exec('DELETE FROM worker_instances WHERE worker_id = ?', workerId);
-    for (const name of after) this.exec('INSERT INTO worker_instances (worker_id, instance) VALUES (?, ?)', workerId, name);
-    return { changed: true, refused };
-  }
-
   // ── readings (R-BTN-76, R-BTN-101) ────────────────────────────────────────────────────────
 
   /** The resources an instance serves, with their schemas — none when it is no registered
-   *  instance (a worker instance is one of a registered `worker` resource). */
+   *  instance. */
   private servedBy(instance: string): { resource: string; scope: string; schema: Schema }[] {
-    const w = WORKER_INSTANCE.exec(instance);
-    if (w) {
-      // Only a worker that exists has an instance: nothing makes rows for an imagined one.
-      if (!this.rows('SELECT 1 FROM workers WHERE id = ?', Number(w[2])).length) return [];
-      const r = this.rows<{ scope: string; detail_schema: string }>(`SELECT scope, detail_schema FROM external_resources WHERE name = ? AND scope = 'worker'`, w[1])[0];
-      return r ? [{ resource: w[1], scope: r.scope, schema: JSON.parse(r.detail_schema) }] : [];
-    }
     return this.rows<{ resource: string; scope: string; detail_schema: string }>(
       `SELECT s.resource, e.scope, e.detail_schema FROM instance_serves s JOIN external_resources e ON e.name = s.resource WHERE s.instance = ? ORDER BY s.resource`, instance)
       .map((r) => ({ resource: r.resource, scope: r.scope, schema: JSON.parse(r.detail_schema) }));
   }
 
-  /** Whether `who` may report on `instance` (R-BTN-101): an administrator and a probe on any
-   *  registered instance; a worker on its own worker instances and on any account instance that
-   *  lists a repository its key works on (`repos` null: a key with no grants, which reaches all). */
+  /** Whether `who` may report on `instance` (R-BTN-76): an administrator and a probe on any
+   *  registered instance; a runner on any account instance that lists a repository its key works
+   *  on (`repos` null: a key with no grants, which reaches all). */
   private mayReport(who: Instrument, instance: string, served: { scope: string }[], repos: string[] | null): 'ok' | 'forbidden' {
     if (who.kind !== 'worker') return 'ok';
-    const w = WORKER_INSTANCE.exec(instance);
-    if (w) return Number(w[2]) === who.workerId ? 'ok' : 'forbidden';
     if (!served.every((s) => s.scope === 'account')) return 'forbidden';
     const listed = JSON.parse(this.rows<{ repositories: string }>('SELECT repositories FROM resource_instances WHERE name = ?', instance)[0]?.repositories ?? '[]') as string[];
     return repos === null || listed.some((r) => repos.includes(r)) ? 'ok' : 'forbidden';
@@ -242,19 +207,22 @@ export class Resources {
    * `POST /v1/runner/readings`, `/v1/probe/readings` and `/v1/admin/readings`: each reading checked
    * on its own — the envelope, the instance registered, who may report on it, `detail` against its
    * resources' schema — and stored as this instrument's latest of its kind; a refused one is
-   * answered with its code, never the post. A `state` reading posted while an administrator's is
-   * in force is stored and answered `overridden`.
+   * answered with its code, never the post. An administrator's reading is one more instrument's
+   * (R-BTN-76): held to the same limits, stored beside the others and ordered with them, its
+   * writer class `admin` — no precedence. A reading's `nonce` and `signature` are its retired
+   * signature (R-BTN-181), read and ignored while the history's Migrations entry lasts.
    */
   // @model reading sha256:7c747d85a0b4
   post(who: Instrument, body: unknown, repos: string[] | null) {
-    const readings = checkReadings(body, who.kind === 'admin' ? VALID_FOR.admin_s : VALID_FOR.state_s);
+    const readings = checkReadings(body, VALID_FOR.state_s);
     return this.c.store.transaction(() => {
       const now = this.c.now();
       const refused: { instance: string; code: string; message?: string }[] = [];
-      const overridden: string[] = [];
       const touched = new Set<string>();
-      const source = who.kind === 'admin' ? 'admin' : who.kind === 'probe' ? `probe:${who.fingerprint}` : `worker:${who.workerId}`;
-      const postedBy = who.kind === 'admin' ? `admin:${who.fingerprint}` : source;
+      // An administrator's instrument is its key; a probe's, its key; a runner's, its session.
+      const source = who.kind === 'admin' ? `admin:${who.fingerprint}` : who.kind === 'probe' ? `probe:${who.fingerprint}` : `worker:${who.workerId}`;
+      const writer = who.kind === 'admin' ? 'admin' : who.kind === 'probe' ? 'instrument' : 'runner';
+      for (const field of new Set(readings.flatMap((r) => r.retired))) this.c.deprecated?.note(now, source, `reading.${field}`, 'readings');
       for (const r of readings) {
         const served = this.servedBy(r.instance);
         if (!served.length) {
@@ -288,41 +256,49 @@ export class Resources {
         // reading carries a new one or the instrument's row lapses whole.
         const priorDetail = this.rows<{ detail: string | null }>('SELECT detail FROM instance_readings WHERE instance = ? AND source = ? AND kind = ?', r.instance, source, r.kind)[0]?.detail ?? null;
         const detail = r.detail === undefined && r.kind === 'state' ? priorDetail : r.detail === undefined ? null : JSON.stringify(r.detail);
-        // §12.8 (B-145 item 9, R-BTN-181): the writer class the credential names, with the
-        // nonce and signature a signed reading carries.
-        const writer = who.kind === 'admin' ? 'admin' : who.kind === 'probe' ? 'instrument' : 'runner';
-        this.exec(`INSERT INTO instance_readings (instance, source, kind, available, until, observed_at, lapses_at, detail, posted_by, writer, nonce, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        // R-BTN-181: the writer class the credential names; a reading carries no signature, the
+        // request that posts it being its authentication.
+        this.exec(`INSERT INTO instance_readings (instance, source, kind, available, until, observed_at, lapses_at, detail, posted_by, writer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT (instance, source, kind) DO UPDATE SET available = excluded.available, until = excluded.until, observed_at = excluded.observed_at,
-                     lapses_at = excluded.lapses_at, detail = excluded.detail, posted_by = excluded.posted_by, writer = excluded.writer, nonce = excluded.nonce, signature = excluded.signature`,
-          r.instance, source, r.kind, r.kind === 'state' ? (r.available ? 1 : 0) : null, r.until, now, lapses, detail, postedBy, writer, r.nonce ?? null, r.signature ?? null);
-        if (r.kind === 'state') {
-          touched.add(r.instance);
-          if (who.kind !== 'admin' && this.adminInForce(r.instance, now)) overridden.push(r.instance);
-        }
+                     lapses_at = excluded.lapses_at, detail = excluded.detail, posted_by = excluded.posted_by, writer = excluded.writer`,
+          r.instance, source, r.kind, r.kind === 'state' ? (r.available ? 1 : 0) : null, r.until, now, lapses, detail, source, writer);
+        if (r.kind === 'state') touched.add(r.instance);
       }
       this.refresh(touched);
-      return { ok: true, refused, ...(who.kind === 'worker' || overridden.length ? { overridden } : {}) };
+      return { ok: true, refused };
     });
   }
 
-  private adminInForce(instance: string, now: number) {
-    return this.rows(`SELECT 1 FROM instance_readings WHERE instance = ? AND source = 'admin' AND kind = 'state' AND lapses_at > ?`, instance, now).length > 0;
+  /** `POST /v1/admin/readings {instance, clear: {source?}}` (R-BTN-76, R-BTN-151): every reading
+   *  in force on the instance from one instrument (the `source` a reading carries: `admin:<fp>`,
+   *  `probe:<fp>`, `worker:<id>`), or from all when none is named; logged, and the state follows. */
+  clear(actor: string, body: unknown) {
+    if (!isObj(body) || typeof body.instance !== 'string' || !isObj(body.clear)) throw new BatonError('invalid-params', 'body: must be {instance, clear}');
+    const instance = body.instance as string;
+    const raw = body.clear.source;
+    if (raw !== undefined && (typeof raw !== 'string' || raw.length > 200)) throw new BatonError('invalid-params', 'clear.source: must be the source a reading carries');
+    const source = raw as string | undefined;
+    return this.c.store.transaction(() => {
+      this.exec(`DELETE FROM instance_readings WHERE instance = ?${source !== undefined ? ' AND source = ?' : ''}`, ...(source !== undefined ? [instance, source] : [instance]));
+      this.refresh([instance]);
+      logEvent(this.c.store, this.c.now(), 'admin', actor, { act: 'readings-cleared', instance, ...(source !== undefined ? { source } : {}) }, null, null, null);
+      return { ok: true };
+    });
   }
 
-  /** R-BTN-76 with R-BTN-101's precedence: the administrator's `state` reading while in force,
-   *  else the most recently observed `state` reading in force, else `unknown`. */
+  /** R-BTN-76: the most recently observed `state` reading in force, else `unknown` — an
+   *  administrator's one instrument's among the rest. */
   stateOf(instance: string, now = this.c.now()): { state: InstanceState; until: number | null } {
     const r = this.rows<{ available: number; until: number | null }>(
       `SELECT available, until FROM instance_readings WHERE instance = ? AND kind = 'state' AND lapses_at > ?
-       ORDER BY source = 'admin' DESC, observed_at DESC LIMIT 1`, instance, now)[0];
+       ORDER BY observed_at DESC, rowid DESC LIMIT 1`, instance, now)[0];
     if (!r) return { state: 'unknown', until: null };
     return r.available ? { state: 'available', until: null } : { state: 'unavailable', until: r.until };
   }
 
   /** Re-evaluate these instances' states (every instance with a reading or a stored state when
    *  none is named): each change is stored and logged as a `resource` event, then all are
-   *  recounted at once. A worker's implicit instance back at `unknown` with no reading left loses
-   *  its row — one per worker session would otherwise accumulate for ever. */
+   *  recounted at once. */
   refresh(instances?: Iterable<string>) {
     const now = this.c.now();
     const names = instances ? [...instances] : this.rows<{ instance: string }>('SELECT instance FROM instance_states UNION SELECT instance FROM instance_readings').map((r) => r.instance);
@@ -330,16 +306,12 @@ export class Resources {
     for (const name of names) {
       const s = this.stateOf(name, now);
       const stored = this.rows<{ state: InstanceState; until: number | null }>('SELECT state, until FROM instance_states WHERE instance = ?', name)[0];
-      const transient = WORKER_INSTANCE.test(name) && s.state === 'unknown' && !this.rows('SELECT 1 FROM instance_readings WHERE instance = ?', name).length;
-      if (transient && stored) this.exec('DELETE FROM instance_states WHERE instance = ?', name);
       if (stored?.state === s.state && stored.until === s.until) continue;
       if (!stored && s.state === 'unknown') continue;
-      if (!transient) {
-        this.exec(`INSERT INTO instance_states (instance, state, until, changed_at) VALUES (?, ?, ?, ?)
-                   ON CONFLICT (instance) DO UPDATE SET state = excluded.state, until = excluded.until,
-                     changed_at = CASE WHEN instance_states.state = excluded.state THEN instance_states.changed_at ELSE excluded.changed_at END`,
-          name, s.state, s.until, now);
-      }
+      this.exec(`INSERT INTO instance_states (instance, state, until, changed_at) VALUES (?, ?, ?, ?)
+                 ON CONFLICT (instance) DO UPDATE SET state = excluded.state, until = excluded.until,
+                   changed_at = CASE WHEN instance_states.state = excluded.state THEN instance_states.changed_at ELSE excluded.changed_at END`,
+        name, s.state, s.until, now);
       if (stored?.state !== s.state) logEvent(this.c.store, now, 'resource', 'baton', { instance: name, state: s.state, ...(s.until != null ? { until: s.until } : {}), ...(stored ? { was: stored.state } : {}) }, null, null, null);
       changed.push(name);
     }

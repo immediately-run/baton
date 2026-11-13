@@ -106,6 +106,23 @@ describe('POST /v1/sync/board', () => {
     expect(await rows(`SELECT name FROM pragma_table_info('courses') WHERE name IN ('route_choices_json', 'report_horizon_h')`)).toEqual([]);
   });
 
+  it('B-168: an entry\'s report_horizon_h is ignored too, and each retired field is logged deprecated-field once a day', async () => {
+    // The history's Migrations entry "part 4's retired fields": accepted, read as absent, one
+    // `deprecated-field` event per credential, field and day.
+    const retired = { ontology: { builtin: 'baton@1' }, registry: [course(3, 3, { route_choices: { go: ['codegen'] }, report_horizon_h: 6 })] };
+    expect((await syncCall('/v1/sync/board', payload(A, null, board.states.A, retired))).status).toBe(200);
+    const logged = () => rows<{ field: string; actor: string; repository_id: string }>(
+      `SELECT json_extract(detail_json, '$.field') AS field, actor, repository_id FROM events WHERE kind = 'deprecated-field' ORDER BY seq`);
+    expect(await logged()).toEqual([
+      { field: 'board.ontology', actor: 'sync:docs', repository_id: 'docs' },
+      { field: 'registry.route_choices', actor: 'sync:docs', repository_id: 'docs' },
+      { field: 'registry.report_horizon_h', actor: 'sync:docs', repository_id: 'docs' },
+    ]);
+    // The same day's next post logs nothing more.
+    expect((await syncCall('/v1/sync/board', payload(board.shas.B, A, board.states.B, retired))).status).toBe(200);
+    expect(await logged()).toHaveLength(3);
+  });
+
   it.skipIf(!inject('liveBoard'))("accepts what the docs sync builds for today's board, reference data included", async () => {
     // buildPayload(origin/main) from the sibling docs checkout: the real producer's output
     // through the real validator (R3-386's annotated repos entry was refused before repoName).
