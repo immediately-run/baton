@@ -5,9 +5,11 @@
 // signature; the owners' `checks` map is refused when it names two `success` stations, none
 // `failure`, a `neutral` or a station its course lacks, accepted where it names none, any
 // owner key sets a course's first map, and under a human-only `approvers.policy` the plain
-// owner key's change is refused whichever way it moves while the human key's lands; every
+// owner key's loosening (a station newly `success`, a course's entry gone) is refused and its
+// tightening (a station dropped) lands, while the human key's loosening lands; every
 // answer a credential or a session authorizes carries `Cache-Control: no-store`. The masking
-// pattern is B-169's one definition, checked in test/unit/mask.test.ts. Runs on both hosts.
+// pattern is B-169's one definition (B-170 built R-BTN-144's engine on it), checked in
+// test/unit/mask.test.ts. Runs on both hosts.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { call as hostCall } from '#host';
 import { adminSession, course, syncToken, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, setPolicySigningKey, sessionCall, syncCall, withCore } from '../helpers';
@@ -138,6 +140,11 @@ describe('B-169 the security review’s corrections', () => {
     // A whole course leaving is a loosening, refused to the owner key.
     const emptied = await set({});
     expect([emptied.status, emptied.json.code]).toEqual([403, 'forbidden']);
+    expect(await stored()).toEqual({ check: { conclusions: { passed: 'success', failed: 'failure' } } });
+    // A station the map did not name, now `success` (the old `success` moved to `failure`, the
+    // old `failure` dropped): mapped to `success` that was not — a loosening, refused.
+    const unnamed = await set({ check: { conclusions: { hung: 'success', passed: 'failure' } } });
+    expect([unnamed.status, unnamed.json.code]).toEqual([403, 'forbidden']);
     expect(await stored()).toEqual({ check: { conclusions: { passed: 'success', failed: 'failure' } } });
     // The human key is the approver: the swap and the empty map land.
     expect((await set({ check: { conclusions: swap } }, human)).status).toBe(200);

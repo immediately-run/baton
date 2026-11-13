@@ -1042,9 +1042,11 @@ export class Admin {
       // R-BTN-114: a station mapped to `success` that was not is a loosening, and so is a
       // course's entry removed or renamed (the new name is a course the map did not have). Any
       // other change — a course added, a station dropped or moved away from `success` — tightens.
+      // The stations read are the new map's: one the old map did not name at all, now `success`,
+      // is mapped to `success` as much as one moved there from `failure`.
       const towardSuccess = Object.entries(next).some(([course, entry]) => {
         const before = was[course];
-        return before !== undefined && Object.keys(before.conclusions).some((station) => conclusionAt(station, before) !== 'success' && conclusionAt(station, entry) === 'success');
+        return before !== undefined && Object.keys(entry.conclusions).some((station) => conclusionAt(station, entry) === 'success' && (!Object.hasOwn(before.conclusions, station) || conclusionAt(station, before) !== 'success'));
       });
       if (towardSuccess) return true;
       if (Object.keys(was).some((course) => !Object.hasOwn(next, course))) return true;
