@@ -15,7 +15,8 @@ const src = (path) => JSON.stringify(join(ROOT, path));
 
 /** Each on-demand bundler cli/baton.mjs imports, as the module it would have bundled. */
 const PREBUILT = {
-  'baton-run.mjs': `export { runMain } from ${src('src/runner/main.ts')};`,
+  'baton-run.mjs': `export { runMain } from ${src('src/runner/main.ts')};
+export { replayMain } from ${src('src/runner/replay.ts')};`,
   'baton-cli.mjs': `export { initMain, migrateMarkersMain, parseSyncArgs, syncMain } from ${src('src/defaults/cli.ts')};
 export { ticketsMain } from ${src('src/defaults/tickets.ts')};
 export { requestMain } from ${src('src/defaults/request.ts')};`,
