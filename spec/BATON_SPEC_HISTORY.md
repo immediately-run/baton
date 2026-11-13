@@ -3064,15 +3064,17 @@ Each entry is a transition the specification no longer describes. The code keeps
 working until the stated condition holds, then removes it.
 
 - **The V1 dashboard's views (B-191, 2026-11-09).** §11.4's screens replace its view list
-  outright; no view name is kept as an alias. The old names map — Running and Ready to Board and
-  Tickets, Needs you to Conditions, Timeline to the runner page, Instances to `/instances`,
-  Capacity to `/capacities`, Courses to the course screens and the ticket page, Discrepancies
-  to Sync, and the Resolve page to `/repositories/{repository}/conditions/{condition}`, whose
-  old address `GET /conditions/{condition}` keeps answering with a `302` (R-BTN-163). V1
-  itself — `src/ui/` (`index.html`, `app.css`, `app.js`), polling `GET /v1/ui/state` — is
-  served until B-193's shell lands and deleted with it, V2 replacing V1 outright at `/` (the
-  owner's ruling); `GET /v1/ui/state` itself stays after it (R-BTN-179). Stop when `src/ui/`
-  is gone.
+  outright; no view name is kept as an alias. The old names map — Runners to `/runners`,
+  Running and Ready to Board and Tickets, Needs you to Conditions, Timeline to the runner
+  page, Instances to `/instances`, Capacity to `/state`, Courses to the course screens and the
+  ticket page, Discrepancies to Sync, and the Resolve page to
+  `/repositories/{repository}/conditions/{condition}`, whose old address `GET
+  /conditions/{condition}` keeps answering with a `302` (R-BTN-163). V1 itself — `src/ui/`
+  (`index.html`, `app.css`, `app.js`), polling `GET /v1/ui/state` — is served until B-193's
+  shell lands and deleted with it, V2 replacing V1 outright at `/` (the owner's ruling); the
+  route and `ui.state`'s §14 row follow with B-203, `uiState()` staying as the one function
+  that builds `GET /v1/admin/state`'s kept shape (Decision 4a; B-216 renames it `stateView()`).
+  Stop when `src/ui/` and `GET /v1/ui/state` are gone.
 
 - **Part 4's retired fields (B-166, 2026-11-02).** The board post's `ontology` and course
   entries' `route_choices` and `report_horizon_h`, the heartbeat's `uses`, the claim's and a

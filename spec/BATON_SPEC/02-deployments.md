@@ -257,8 +257,9 @@ process for development and CI. Nothing crosses a tenant.
     dashboard session; `POST /v1/login` a
     pending sign-in (R-BTN-155); `POST /v1/github/webhook` `X-Hub-Signature-256` (R-BTN-73);
     `POST /v1/forges/{repository}/notify` its forge's verifier (R-BTN-95). The static pages —
-    `/login`, `/oauth/authorize` and the shell at `/` and every §11.4 screen path — need no
-    session; `/.well-known/oauth-*` and `/v1/oauth/*`
+    `/login`, `/oauth/authorize` and the shell at `/`, every §11.4 screen path and the
+    redirect's own address `/conditions/{condition}` (R-BTN-163), which serves the shell to
+    the signed-out — need no session; `/.well-known/oauth-*` and `/v1/oauth/*`
     take no credential and fall under the per-IP rule, and `POST /v1/mcp`'s bearer is checked
     in the object (R-BTN-130, `BATON_MCP_OAUTH_SPEC` §13).
   - A per-IP rule (a Workers rate-limit binding keyed `<host>|<ip>`) applies only to

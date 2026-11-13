@@ -194,7 +194,8 @@ Every value below is validated on write; a value over its cap is refused `invali
     (B-192).
     Cloudflare Access may stand in front of the dashboard as extra hardening; Baton never
     requires it and never reads its cookie. Where it stands, it covers only the dashboard's
-    pages (`/`, `/login`, every §11.4 screen path, `/oauth/authorize`), `POST /v1/login` and
+    pages (`/`, `/login`, every §11.4 screen path, the redirect's own address
+    `/conditions/{condition}` (R-BTN-163), `/oauth/authorize`), `POST /v1/login` and
     `/v1/ui/*`, and is bypassed
     on every other route, which authenticates every request itself or is public: keys,
     webhooks, forge notifications, instruments, CI identities and MCP clients call

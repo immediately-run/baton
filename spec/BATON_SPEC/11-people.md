@@ -110,9 +110,9 @@ is summarized in the principal table (§12.1).
     - freeze, seal, export and import (R-BTN-88);
     - bind a sign-in code to an administrator's session, confirm that session's actions, and
       end every session, owners' included (R-BTN-155);
-    - read everything, including any claim's leg runs (R-BTN-128), and what the dashboard
-      draws — `GET /v1/admin/state`, the same answer an administrator's session reads from
-      `GET /v1/ui/state`, with no session and so no sign-in (B-118).
+    - read everything, including any claim's leg runs (R-BTN-128), and the state in one
+      request for a terminal — `GET /v1/admin/state`, built of the same functions the entity
+      reads use (R-BTN-179, B-216), with no session and so no sign-in (B-118).
 
     Each act is an `admin` event. No administrator action is reachable to a delegated key, which
     is an owner's (R-BTN-130, R-BTN-186).
@@ -577,10 +577,10 @@ is summarized in the principal table (§12.1).
   - **The tenant screens** — the registry with each repository's head, mode and owners
     (R-BTN-179); the instance view and the day's request and row-write counts (R-BTN-99); the
     registered resources, their instances and readings, and the instrument keys (R-BTN-76,
-    R-BTN-101); the request rate and live counts against the envelope (R-BTN-87); the instance
+    R-BTN-101); each capability's seats held with the holding claims (R-BTN-178); the instance
     settings — `link_hosts`, `session_hosts`, `check_app_id` (R-BTN-112, R-BTN-113, §12.7); the
-    tenant at one request, `GET /v1/ui/state`'s answer (R-BTN-179); the dashboard sessions
-    (R-BTN-155).
+    tenant at one request — the live counts and the request rate against the envelope, and
+    storage (R-BTN-87); the dashboard sessions (R-BTN-155).
 
   The rules, each stated once here:
   - **The rule.** A screen is drawn from one entity's REST reads — the §14 rows whose callers
