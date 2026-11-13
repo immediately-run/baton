@@ -5,13 +5,13 @@ A [Quint](https://quint-lang.org) model of Baton's core state machine, written a
 `immediately-run/docs` as merged at `b7537395`, docs#212) and being brought up to the spec's
 §2g–§2m by R3-1254 — so far R-BTN-98's one-transaction claim, R-BTN-83's queued leg, and a leg's
 prerequisites with their blocks, retries and blocked ends (R-BTN-75, -77, -78, -120, -122, -126).
-In sync with the 2026-10-22 spec rewrite: rule 4 reads H ∪ D(H) — the capability ontology's
-derived capabilities join the holdings before the check, and the model receives the union as the
-runner's capabilities (§5.9, R-BTN-174); the ontology's own machinery and route choices
-(R-BTN-177) are not modelled, for the reasons *Not modelled* gives. Seats are modelled since
-B-106 (R-BTN-178): a capability with a capacity has that many, held by the claims whose tickets
-require it and refused past by rule 11 — `sim` seats one, the proof instances none. Section
-numbers below were repointed to the spec's current layout in the same pass.
+In sync with the spec's 2026-11-02 restructure, part 4 (B-167): rule 4 matches capabilities by
+name (§5.9, R-BTN-174) — the model receives a runner's declared and granted capabilities
+(R-BTN-68) and nothing is derived; the capability ontology and route choices are gone
+(BATON_SPEC_HISTORY.md, Retired). Seats are modelled since B-106 (R-BTN-178): a capability with a capacity
+has that many, held by the claims whose tickets require it and refused past by rule 11 — `sim`
+seats one, the proof instances none. Section numbers below were repointed to the spec's current
+layout in the same pass.
 *Not modelled* lists the rest. Each action, helper
 and property names the requirement it models (`R-BTN-n`, §n). A counterexample is a spec
 defect: it is filed against BATON_SPEC with the trace, never fixed by weakening a property.
@@ -410,19 +410,10 @@ depth 5 back, and with it the `unblocked` event.
   comparisons with no interleaving of their own — a leg's `isolation: session` against the
   worker's latest declared mode; matching tests cover them (G-BTN-40, S-BTN-64). Rule 4 is
   modelled (R3-1254 part 2b).
-- **The capability ontology** (R-BTN-174, R-BTN-175, R-BTN-176): the program, its unit acceptance
-  with the course files, the bounded evaluation, input digests, why-not and the alarm cycle are
-  data core interprets and computation it performs — no interleaving of modelled state. What a
-  runner has for a repository is H ∪ D(H), and §5.9 hands the model that union as the runner's
-  capabilities: `DECLARED` stands for it, the grant bounding the holdings a derivation starts
-  from. A heartbeat, an end that removes a holding (R-BTN-126) or a program change makes sets
-  not current and the read brings them up to date before rule 4 reads them — atomic here — and
-  rule 4 never reads a set that is not current, so no model action separates the two.
-- **Route choices** (R-BTN-177): advice on how a leg runs, resolved at the advance that starts
-  it. Advice never refuses (§6.6), the alternative taken is an event (`advice-overridden`) and
-  `route_last` hysteresis, so no gate or modelled state moves. A dead holding reported in
-  `BATON_TAKEN` is removed in the reporting advance's transaction — another way the declared
-  set shrinks, in the company of the recount causes below.
+- **What a runner has is its declarations** (R-BTN-174, B-167): `DECLARED`, bounded by
+  `GRANTED`, is the whole of rule 4's input — nothing is derived, so there is no set to keep
+  current and no evaluation with an interleaving of its own. A heartbeat that changes the list
+  and an end that removes a holding (R-BTN-126) are the two ways it moves, both modelled.
 - **Seats' leg halves** (R-BTN-178, B-106): the seats modelled are the ticket's `requires`
   intersected with the capped names — a leg's own `requires.capabilities` (below) never joins
   them, so a capacity only a leg names is never checked here. The capacities are constants, an
@@ -453,9 +444,8 @@ depth 5 back, and with it the `unblocked` event.
   record, so it admits a fence report after the live set dropped the worker — a superset of
   core's interleavings, which the safety properties tolerate.
 - **Other causes of a recount** (R-BTN-75, R-BTN-58): a worker registering, a grant made,
-  changed or revoked, a credential revoked (`LIVE` drops it), a post changing a ticket's
-  `requires` or needs, and a route choice's dead-holding report (R-BTN-177, removed in the
-  reporting advance's transaction). Each is fixed here — `GRANTED`, `REQUIRES` and `NEEDS` are
+  changed or revoked, a credential revoked (`LIVE` drops it), and a post changing a ticket's
+  `requires` or needs. Each is fixed here — `GRANTED`, `REQUIRES` and `NEEDS` are
   constants, every worker registered at the start — so the rows change only through
   declarations, liveness and the ends above.
 - **R-BTN-39** (where a ticket is, replayed from git) is the sync's `syncRead` taking any git

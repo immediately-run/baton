@@ -27,13 +27,13 @@ describe('S-BTN-22 review queue bound', () => {
   it('core’s default order, nothing flagged; a claim against it is accepted and recorded', async () => {
     const w = await register('vm-a');
     const res = await workerCall('/v1/runner/recommendations?limit=50', { secret: w.secret });
-    const recs = ((await res.json()) as { recommendations: { ticket_id: string; station: string; legs: string[]; flags: string[]; score: unknown; advice: unknown }[] }).recommendations;
+    const recs = ((await res.json()) as { recommendations: { ticket_id: string; station: string; legs: string[]; flags: string[]; score: unknown }[] }).recommendations;
     // Resume before start: one leg to an end (M-1 at reviewed), then two (X-1 at fixed), then the
     // filed tickets by rank; the waiting reviews are not offered at all.
     expect(recs.map((r) => [r.ticket_id, r.station, r.legs])).toEqual([
       ['docs:M-1', 'reviewed', ['merge']], ['docs:X-1', 'fixed', ['review']],
       ['docs:F-1', 'filed', ['implement']], ['docs:F-2', 'filed', ['implement']], ['docs:F-3', 'filed', ['implement']]]);
-    expect(recs.every((r) => r.flags.length === 0 && r.score === null && r.advice === null)).toBe(true);
+    expect(recs.every((r) => r.flags.length === 0 && r.score === null)).toBe(true);
     // ?limit= applies after the merge.
     const two = (await (await workerCall('/v1/runner/recommendations?limit=2', { secret: w.secret })).json()) as { recommendations: unknown[] };
     expect(two.recommendations).toHaveLength(2);

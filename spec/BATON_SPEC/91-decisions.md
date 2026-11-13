@@ -205,3 +205,8 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   anything — might as well get rid of it entirely"; §2.1, §15, R-BTN-56). The scenarios run on
   the local host and in the Workers runtime project; the envelope is read from production's own
   `capacity` log (R-BTN-87); B-224 removes the deployment, B-225 the Cloudflare resources.
+- Chose to keep R-BTN-105's plain repository over SSH with `git-shell` as the single-machine
+  runbook's home remote, over allowing a `file://` or absolute-path `remote` on a local host
+  bound to loopback (B-182's decision, option (a)): slightly fiddly once — a second OS user for
+  the runners' keys — and no spec change; a later ticket can loosen it if (a) proves too awkward
+  in practice (2026-11-12, B-182; R-BTN-105, `docs/runbooks/local-home.mdx`).

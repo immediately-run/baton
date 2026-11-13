@@ -30,8 +30,10 @@ process for development and CI. Nothing crosses a tenant.
     its own key: a repeated end is `ok` (§9.4), owner and administrator writes set a value, a
     repeated board post is `stale-observation` (the sync then reads `GET /v1/sync/wanted`'s
     `head_sha` to learn whether its post landed), and a repeated raise or report finds its row.
-- **One alarm, every 60 seconds**, also set early to the earliest instant Baton holds. It fires
-  every due instant, each with the effect its owning rule gives:
+- **One alarm, every 60 seconds**, also set early to the earliest instant Baton holds. Every
+  start and every request sets it again for the next period when none is set or the one set is
+  more than two periods overdue (B-229). It fires every due instant, each with the effect its
+  owning rule gives:
 
   | Instant | Rule |
   |---|---|

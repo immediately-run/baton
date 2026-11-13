@@ -1,7 +1,8 @@
-// mask.mjs — the one list of what a leg's output may not carry (BATON_SPEC §8.4 R-BTN-144),
-// shared by the runner and the archiver: the class-5 bearer prefixes every Baton credential
-// starts with, and the class-6 private key block. One definition, so the runner's output stream
-// and an archiver's transcripts mask the same spellings — a prefix added here is added to both.
+// mask.mjs — R-BTN-144 classes 5 and 6: the bearer prefixes every Baton credential starts with,
+// and the private key block. One definition, shared by every stream that masks — a prefix added
+// here is masked wherever masking runs. Class 7 (the value of a kept variable, by its name) is the
+// environment's to compute: `src/runner/mask.ts` finds the values in the environment the runner
+// holds and masks them as literals beside this pattern (B-170).
 //
 // The prefixes: `brt_`, `bak_` and `bmcp_` for a runner, an API key and an MCP key (§12.1), and
 // `bps_` (the pending sign-in cookie's value) and `bds_` (a dashboard session), `bmo_` (an OAuth
@@ -45,7 +46,10 @@ export function maskKeys(text) {
 
 /** `text`, with every class-5 and class-6 occurrence replaced by `***`. */
 export function maskSecrets(text) {
-  return maskKeys(text).replace(BEARER_TOKEN, '***');
+  // A fresh pattern per call, so nothing a previous replacement left in a shared `lastIndex` can
+  // move where this one starts.
+  const tokens = new RegExp(BEARER_TOKEN.source, 'g');
+  return maskKeys(text).replace(tokens, '***');
 }
 
 /** R-BTN-144 class 6 across a stream, which a line-at-a-time sink cannot do: from a `BEGIN`
@@ -56,23 +60,27 @@ export function maskSecrets(text) {
  *  masked on every line as it leaves, and a token never spans a line. */
 export function createMasker() {
   const out = [];
-  let held = '';
+  let held = false;
+  let bytes = 0;
   const release = () => {
     out.push('***');
-    held = '';
+    held = false;
+    bytes = 0;
   };
   return {
     push(line) {
       if (held) {
-        held += '\n' + line;
-        if (KEY_END.test(line) || held.length >= KEY_HOLD) release();
+        bytes += line.length + 1;
+        if (KEY_END.test(line) || bytes >= KEY_HOLD) release();
       } else {
         const open = line.search(KEY_BEGIN);
         if (open < 0) out.push(maskSecrets(line));
         else {
-          // What is not key material on the `BEGIN` line (`key: …`) leaves with it.
+          // What is not key material on the `BEGIN` line (`key: …`) leaves with it, and the
+          // block holds from that line on, never answered now.
           if (open > 0) out.push(maskSecrets(line.slice(0, open)).replace(/\s+$/, ''));
-          held = line.slice(open);
+          held = true;
+          bytes = line.length;
         }
       }
       return out.length ? out.splice(0).join('\n') : '';

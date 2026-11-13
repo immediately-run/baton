@@ -1,0 +1,172 @@
+---
+title: Owner-signed control inputs
+description: Requiring that .baton/, goals, EXPEDITE and agent configuration count only at commits an owner's human-only key signed — the setting, the signing habit, the verifier a privileged session runs, and what each part refuses.
+nav: Owner-signed control
+order: 30
+tags: [security, runbook]
+---
+
+<Lede>A push can no longer change what every runner executes or how work is scheduled: with
+`require_signed_control` on, a control input counts only at a commit an owner's human-only key
+signed, an unsigned change keeps the last signed version in force, and each runner verifies the
+signature itself before loading anything (B-127, security model mitigation C).</Lede>
+
+## What counts, and who may sign
+
+The control inputs are `.baton/**` (the settings, `agent_command`, course sources, overrides,
+`rank.mjs`, `sync.mjs`), goal files, the `EXPEDITE` tag, and agent configuration (`.claude/**`,
+every `CLAUDE.md` and `AGENTS.md`, `.mcp.json`, plugin manifests). A ticket's `tier` is
+deliberately not one: a tier routes work by quality, not privilege, so a changed tier sends a
+ticket to no runner whose credentials it could not already reach through its body.
+
+Only a key of the repository's owners that **no agent session holds** counts — the human-only
+register (R-BTN-185): a key registered with the tenant (`BATON_HUMAN_KEYS` on the host, or
+`POST /v1/human-keys`), then made an owner of the repository (`baton owner owners REPO --add
+PUB`). An ordinary owner key an agent session can reach does not count (an injected session
+could sign with it), and an API key cannot sign a commit at all. Until B-136's hardware
+attestation lands, the register is a custody promise; the strictest available rule is to keep
+the key on a hardware token that touches on every signature.
+
+## Configure git once
+
+```sh
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519_owner   # the owner key's private file
+```
+
+Any commit made with `git commit -S` after that carries an SSHSIG in the namespace `git` —
+exactly what Baton verifies. `baton owner -i KEY sign -- <paths>` wraps the same commit (it
+configures both settings for the one call and refuses to commit no path), and either is equally
+good:
+
+```sh
+baton owner -i ~/.ssh/id_ed25519_owner sign -m "the agent the fleet runs" -- .baton/baton.json
+# or, the same thing by hand:
+git commit -S -m "the agent the fleet runs" -- .baton/baton.json
+```
+
+## Turning it on
+
+```sh
+baton owner -i OWNER_KEY settings REPO --require-signed-control
+```
+
+The setting tightens: any owner may turn it on, and turning it **off** is a loosening an
+`approvers.policy` approver signs for (R-BTN-186). With it off, today's behaviour stands and
+only the marks post (briefs are marked `signed`/`unsigned` either way).
+
+**Sign the current state once when opting in.** A control input counts only from a commit that
+*changed it* and is signed, so turn the setting on only after signing one real change per
+control file — a comment bump is enough; an empty `--allow-empty` signature signs nothing the
+walk can see. The runner-loaded groups are read atomically per file: the ceremony's one commit
+must touch every file of a group (`.baton/baton.json`; each course's every `legs/*.mjs` and
+`legs/*.md` — the leg instructions are group paths beside the scripts they order; the
+overrides of their own group; `rank.mjs` when a loader exists), or a later signed change to
+one file would otherwise be held back by an unsigned sibling. Until then no claim on the
+repository's tickets is handed out — not a `cannot-finish:spec` the ticket would pay an attempt
+and a non-retryable hold for — and the `unsigned-control` notice under Needs you names what to
+sign. After the one-time signing, an unsigned change keeps the last signed version in force —
+the runners keep loading it, the notice names the paths and commits, and the owner signs or
+reverts at leisure.
+
+An agent's change to a control input becomes a proposal an owner signs (that is the point of
+the gate — R-BTN-66's "agents may improve it" narrows to this). The everyday shape: the agent
+lands its `.baton/` change on a branch, the owner reviews and merges, then re-makes the change
+signed — or merges with `-S` — so the default branch's first-parent history carries the
+signature on the commit that changed the path.
+
+## The notice and the marks
+
+An unsigned change to a control input raises one `unsigned-control` notice under Needs you,
+naming the paths and the commits — the push alone is never silent, and a standing unsigned
+change is named once, not on every later head move. A ticket's `**Brief:** the
+owner …` line is marked `signed` or `unsigned` with its provenance whether or not the setting is
+on: the mark is served with the ticket, printed at the claim, and the standing `CLAUDE.md` rule
+reads an unsigned owner quote as a claim, not the owner.
+
+## The verifier privileged sessions run
+
+Baton cannot stop a harness loading an unsigned `.claude/settings.json` hook, and a check kept
+inside the repository is rewritten by the very push it guards. For those paths the deliverable
+is a verifier installed **outside** the repository:
+
+```sh
+baton owner -i OWNER_KEY verify-config REPO --checkout ~/work/REPO
+```
+
+It reads the repository's owner signing keys from Baton, walks the checkout's first-parent
+history, and exits 1 naming every agent-configuration path whose last change no owner key
+signed. Install it where your privileged sessions start — user-level settings, never the
+repository's:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "baton owner -i ~/.ssh/id_ed25519_owner verify-config REPO --checkout \"$CLAUDE_PROJECT_DIR\""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+(That is `~/.claude/settings.json` — the user-level file — for Claude Code; the equivalent
+startup hook for other harnesses. The hook's non-zero exit is the refusal to open; how strictly
+your harness enforces it is its own setting.)
+
+## What each part refuses
+
+| Part | Refuses |
+|---|---|
+| the sync | nothing — it computes what counts and posts it, marking briefs and the record |
+| Baton | handing out any claim while a group has no owner-signed version (no attempt charged); silently missing an unsigned change: a post that moves the head onto one raises the notice (while the setting is on), once per change no notice in the window already named; a claim answer serves the record read in the claim's own transaction, stored with every claim whatever the setting — a lost-response replay re-serves the same pairing, never a newer post's record |
+| each runner | loading what a post named without verifying: a forged or non-owner signature, a commit that is no ancestor of the claim's snapshot, a `read` the walk at the snapshot does not name (an old on-branch signed commit — the rollback — never loads on a record's word), or a keyless read that is not the pre-adoption baseline (the snapshot itself, with no change to the group in the walk's window), each ends the claim `cannot-finish:spec` — released unpenalised as a stale board instead while the owner key register has moved since the record was computed |
+| the runner (fail closed) | a group with no signed version: no claim runs until an owner signs the state once |
+| `verify-config` | a privileged session on a checkout whose agent configuration was last changed unsigned |
+| the merge runner | nothing new — control paths land by the policy's `paths.control` as ever (R-BTN-184) |
+
+## Bounds, honestly
+
+- The walks read the default branch's **first parents**, bounded: 2000 commits for a path's
+  last change, and — per group — the newest 64 changers, four groups at 64 fitting the
+  256-check verification budget exactly, so a group's own newest signed change is never the
+  one the budget skipped. A merge whose result differs from its first parent on a control
+  path is that merge's change, so a crafted rollback to an older signed version never counts;
+  burying a change past the bound takes that many accepted head moves, each flagged while in
+  memory. B-137's server-side read of the push deliveries is the memory-free answer.
+- A group is read **atomically per file**: the record's read commit is the newest owner-signed
+  change that leaves every other file of the group at its own last owner-signed change — a
+  signed change to `b.run.mjs` never carries an unsigned `a.run.mjs`'s bytes into force through
+  its tree. When a sibling's unsigned change stands, the group holds at the earlier signed
+  state and the notice names both, until an owner signs the whole group once.
+- The verification budget is spent on certainty, never on accusation: the groups' walks are
+  bounded to fit their budget whole (above), and past the notice's own 256-check budget a
+  path is left **unnamed** — as a brief or an `EXPEDITE` past one is left **unmarked** —
+  because "not verified either way" is not `unsigned`, and the owner's signed words are not
+  called a claim by exhaustion. The notice's list itself is bounded (200 entries): what the
+  bound drops is never named and never counted, by path order — an honest bound, disclosed
+  here.
+- The notice fires once per **change** — a newly listed path, or the same path under a new
+  unsigned commit — that no notice in the 7-day window already named: two notices that named
+  different sets do not re-notify each other's names on every later head move, and entries one
+  event's 50-line display slice left out are not news again on the next.
+- `EXPEDITE` gating and the notice are the sync's computation until B-137 moves them
+  server-side; the runner-loaded groups are verified by every runner — each named commit's
+  signature, its ancestry, and the walk at the claim's own snapshot recomputed with the keys
+  the answer served — so a lying post changes what a runner refuses, not what it runs.
+- The course group covers each course's `legs/*.mjs` and the leg instructions `legs/*.md`
+  beside them — the code a runner executes and the words that order its agent, one coherent
+  tree at the group's commit. The graph loads with the scripts; the group's *walk* covers the
+  scripts and instructions only, because a sourced course's `course.json` is pinned byte-equal by the sync
+  itself (B-33 refuses the post when it differs) and could never be signed after its scaffold —
+  byte-identical for a sourced course, an owned course's graph change taking effect with the
+  next signed change to its leg scripts, and a leg a pushed graph adds that the signed `legs/`
+  does not carry refuses the claim as a missing script. No pushed code runs either way.
+- `sync.mjs` and `.baton/tickets.mjs` still run at the head the sync reads (their unsigned
+  changes raise the notice); gating their execution joins B-139's sourced-course work.

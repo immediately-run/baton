@@ -1,15 +1,20 @@
-// Types for mask.mjs (R-BTN-144).
-/** R-BTN-144 class 5: every bearer prefix Baton issues, followed by `[A-Za-z0-9_-]*`. */
-export const BEARER_TOKEN: RegExp;
-/** R-BTN-144 class 6: the line that opens a private key block, and the line that closes one. */
-export const KEY_BEGIN: RegExp;
-export const KEY_END: RegExp;
-/** R-BTN-144 class 6: how much of a block never closed is held before it is masked whole. */
-export const KEY_HOLD: number;
-/** Class 6 over one whole string: a block's body masked whole, `BEGIN` and `END` lines alike. */
-export function maskKeys(text: string): string;
-/** `text`, with every class-5 and class-6 occurrence replaced by `***`. */
-export function maskSecrets(text: string): string;
-/** Class 6 across a stream fed whole lines: `push` takes what arrived and returns what may
- *  leave now (`''` while a block is held); `flush` returns what is still held. */
-export function createMasker(): { push(text: string): string; flush(): string };
+// mask.d.mts — the types for the shared masking pattern, `src/shared/mask.mjs` (R-BTN-144 classes
+// 5 and 6). The implementation is JavaScript; these declarations give `src/runner` the same
+// shapes at type-check time. Baton's own file, not vendored: the masking happens in Baton.
+export declare const BEARER_TOKEN: RegExp;
+export declare const KEY_BEGIN: RegExp;
+export declare const KEY_END: RegExp;
+export declare const KEY_HOLD: number;
+
+/** `text` with every class-6 key block masked whole, then every class-5 token. */
+export declare function maskKeys(text: string): string;
+export declare function maskSecrets(text: string): string;
+
+export interface Masker {
+  /** One line in; the lines that may leave now, joined by `\n` (`''` while a block is held). */
+  push(line: string): string;
+  /** The stream's end: the `***` a held block leaves, if one is held. */
+  flush(): string;
+}
+
+export declare function createMasker(): Masker;

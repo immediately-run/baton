@@ -51,7 +51,7 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
     expect(c.json).toEqual({ claim_id: expect.any(Number), ticket_id: 'docs:R3-9001', course_id: 'roadmap-pr', course_version: 3, default_branch: 'main',
       policy_hash: expect.stringMatching(/^[0-9a-f]{64}$/), guarantees_hash: expect.stringMatching(/^[0-9a-f]{64}$/), floors_hash: expect.stringMatching(/^[0-9a-f]{64}$/), leg_state: 'forge',
       station: 'filed', legs: ['implement'], next: [{ leg: 'implement', state: 'ready' }], scope: ['immediately-run/docs'],
-      path: 'content/roadmap/R3-9001.mdx', nonce: expect.stringMatching(/^[0-9a-f]{6}$/), snapshot_sha: sha.A, previous_attempts: [], advice: null,
+      path: 'content/roadmap/R3-9001.mdx', nonce: expect.stringMatching(/^[0-9a-f]{6}$/), snapshot_sha: sha.A, previous_attempts: [],
       // B-183 (§4.5): the ticket's version as the board holds it ('' — the interim post carries none)
       // and no `ticket_source` (the interim post declared none).
       version: '' });
@@ -125,6 +125,78 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
     expect((await endClaim('vm-a', a.secret, c.claim_id, { end_reason: 'released:requested' })).json.code).toBe('claim-ended');
     expect(await claimRow(c.claim_id)).toMatchObject({ status: 'completed', end_reason: 'suspended:filed', confirmed_at: null });
     expect(await rows('SELECT end_detail, station FROM claims WHERE id = ?', c.claim_id)).toEqual([{ end_detail: 'awaiting-owner', station: 'filed' }]);
+  });
+
+  it('B-167: an end or an advance still carrying the retired `taken` is taken with the field ignored', async () => {
+    // §5.9's restructure took the route choices out of core: a runner older than B-167 still
+    // reports the alternative it ran and the holdings it found dead. The call is taken — the end
+    // completes, the advance starts its leg — and the field is read nowhere: no holding is
+    // dropped, no `taken-invalid` or `advice-overridden` is logged, and no `claim_legs` column
+    // keeps it.
+    const { id, secret } = await register('vm-a', { capabilities: [...capabilitiesOf(['agent-venue']), 'holding:x'] });
+    const has = () => rows(`SELECT capability FROM worker_capabilities WHERE worker_id = ? AND capability = 'holding:x'`, id);
+    const taken = [{ choice: 'codegen', alternative: 'a', dead: ['holding:x'] }];
+    // An end.
+    const end = await claimItem('vm-a', secret);
+    expect(await has()).toEqual([{ capability: 'holding:x' }]);
+    expect((await endClaim('vm-a', secret, end.json.claim_id, { end_reason: 'suspended:filed', taken })).status).toBe(200);
+    expect(await claimRow(end.json.claim_id)).toMatchObject({ status: 'completed', end_reason: 'suspended:filed' });
+    // §6.7: claimable again only after a sync since that end; an advance finishes a leg that ran
+    // and reports the taken with it.
+    await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B));
+    const next = await claimItem('vm-a', secret);
+    const advanced = await workerCall(`/v1/runner/claims/${next.json.claim_id}/advance`, { cred: 'vm-a', secret, body: { leg: 'implement', taken } });
+    expect((await advanced.json() as Record<string, unknown>).ok).toBe(true);
+    expect(await rows(`SELECT leg FROM claim_legs WHERE claim_id = ?`, next.json.claim_id)).toEqual([{ leg: 'implement' }]);
+    // Nothing of the taken was read, in either call.
+    expect(await has()).toEqual([{ capability: 'holding:x' }]);
+    expect(await rows(`SELECT kind FROM events WHERE claim_id IN (?, ?) AND kind IN ('taken-invalid', 'advice-overridden')`, end.json.claim_id, next.json.claim_id)).toEqual([]);
+    expect(await rows(`SELECT name FROM pragma_table_info('claim_legs') WHERE name = 'taken_json'`)).toEqual([]);
+  });
+
+  it('G-BTN-5, R-BTN-174: rule 4 matches by name — a capability the key is not granted never counts, however it is declared', async () => {
+    // §5.9's restructure (B-167) left rule 4 with one input: the runner's declarations its grant
+    // admits, compared with the ticket's and the leg's needs as strings. Nothing is derived, so a
+    // runner declaring a name it is not granted is refused it by rule 4 at the claim, at the
+    // advance, and in the candidate query — the same verdict three ways.
+    const needs = JSON.parse(JSON.stringify(roadmapPr)) as Record<string, any>;
+    // A type this file declares, so the name passes the course file's own check (R-BTN-121).
+    needs.capability_types = { ...(needs.capability_types ?? {}), lab: { description: 'a lab bench', values: '^[a-z0-9-]{1,32}$' } };
+    needs.legs.implement.requires = { capabilities: ['lab:bench-1'] };
+    await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { registry: [course(3, 3, { course: needs })] }));
+    // The file the registry applied carries the leg's need: the query reads that view (R-BTN-120).
+    expect(JSON.parse((await rows<{ v: string }>(`SELECT leg_capabilities_json AS v FROM courses WHERE id = 'roadmap-pr'`))[0].v)).toMatchObject({ implement: ['lab:bench-1'] });
+    const ticketId = 'docs:R3-9002';
+    const granted = await makeKey('ssh-ed25519', 'admin-b167');
+    await setAdminKeys(granted);
+    const workerKey = async (name: string, capabilities: string[]) => {
+      const key = await makeKey('ssh-ed25519', name);
+      expect((await keyCall(granted, '/v1/admin/grants', { repository: 'docs', public_key: key.publicKey, hostname: name, capabilities })).status).toBe(200);
+      const body = hbBody('vm-a', { hostname: name, session_name: name, secret_hash: await sha256(name), capabilities, model_id: 'opencode-go/kimi-k3', courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }] });
+      const res = await hostCall(await signedRequest(key, `${ORIGIN}/v1/runner/heartbeat`, { created: Math.floor((await withCore((x) => x.now())) / 1000), body: JSON.stringify(body) }));
+      expect([name, res.status]).toEqual([name, 200]);
+      return { worker_id: (await res.json() as { worker_id: number }).worker_id, key, secret: name };
+    };
+    const call = async (key: Awaited<ReturnType<typeof makeKey>> & { secret?: string }, path: string, body: unknown) => {
+      const sec = Math.floor((await withCore((x) => x.now())) / 1000);
+      const signed = await signedRequest(key, `${ORIGIN}${path}`, { created: sec, body: JSON.stringify(body) });
+      signed.headers.set('X-Worker-Secret', key.secret ?? '');
+      const res = await hostCall(signed);
+      return { status: res.status, json: (await res.json()) as Record<string, any> };
+    };
+    // Granted only `agent-venue`: the grant does not admit the leg's name, so rule 4 refuses it
+    // (R-BTN-174, R-BTN-58) — a capability a key is not granted never counts, whichever way it is
+    // declared, because the declaration recorded is the role the grant admits.
+    const ungranted = await workerKey('b167-ungranted', ['agent-venue']);
+    expect(await recommended(ungranted.worker_id)).not.toContain(ticketId);
+    expect(await call({ ...ungranted.key, secret: ungranted.secret }, '/v1/runner/claim', { request_id: requestId(), ticket_id: ticketId })).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 4 } });
+    expect(await rows(`SELECT capability FROM worker_capabilities WHERE worker_id = ? AND capability = 'lab:bench-1'`, ungranted.worker_id)).toEqual([]);
+    // Granted it as well: held, at the claim and at the advance that starts the leg.
+    const held = await workerKey('b167-held', ['lab:bench-1', 'agent-venue']);
+    expect(await recommended(held.worker_id)).toContain(ticketId);
+    const claim = await call({ ...held.key, secret: held.secret }, '/v1/runner/claim', { request_id: requestId(), ticket_id: ticketId });
+    expect(claim).toMatchObject({ status: 200, json: { ticket_id: ticketId } });
+    expect((await call({ ...held.key, secret: held.secret }, `/v1/runner/claims/${claim.json.claim_id}/advance`, { leg: 'implement' })).status).toBe(200);
   });
 
   it('§6.9: an end closes the claim’s open activities abandoned', async () => {

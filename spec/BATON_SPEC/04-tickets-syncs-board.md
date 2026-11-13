@@ -476,10 +476,25 @@ live solely in Baton, and both are exportable (R-BTN-88).
                display: { status?, group?, project? },           -- shown; core reads project and status only (R-BTN-33)
                handoff_url?,                                     -- R-BTN-24
                question?: { id, url?, severity?, options?: [{ id, reached }] },  -- the queued person leg's, R-BTN-116
+               brief?: { signed, signer?, commit },              -- B-127: whose words the brief is
                bars: { <leg>: [<tag>] },                         -- R-BTN-60
                course: <opaque> }],
   closed:   [{ id, as: 'done' | 'withdrawn' }],                  -- tickets that left the board
   attestations: [{ type, ticket, ref?, value }],                 -- the sync's attestations, this run's observation (R-BTN-191)
+  control?: { keys: [<fingerprint>],                             -- B-127: what the sync verified with
+              groups: { agent_command, overrides, rank,          --   each {read, key, unsigned}: the
+                                                                 --   commit a runner loads from (null: no
+                                                                 --   signed version; key null: the
+                                                                 --   pre-adoption baseline, honest only as
+                                                                 --   the post's own head where the walk
+                                                                 --   finds no change to the group), its signing
+                                                                 --   key, the unsigned changes left behind;
+                                                                 --   course (a course's legs/*.mjs and
+                                                                 --   legs/*.md) may be absent from a sync
+                                                                 --   before the group — while the setting
+                                                                 --   is on, a claim fails closed on a
+                                                                 --   missing group
+              unsigned: [{ path, commits, fields? }] },          --   the notice's list (fields: EXPEDITE)
   course_data: { <course>: <opaque> } }
 ```
 
@@ -501,7 +516,29 @@ live solely in Baton, and both are exportable (R-BTN-88).
   stable. `path` is required of every source but a `custom` one with `versions: "current"`,
   whose ticket may live in no tree at all.
 - `requires` arrives expanded to capabilities (`none` or no clause is `[]`). `repos` are forge
-  paths on the home's forge host (R-BTN-92), resolved by the sync from short names.
+  paths naming the home or a `code_repos` entry (R-BTN-92, R-BTN-140) — unique across the
+  reach, whatever the host — resolved by the sync from short names under the home's owner.
+- **B-127's marks and record.** Each ticket's `brief` — `{signed, signer?, commit}`, marked
+  whether or not the repository requires signed control — is stored with the ticket and served
+  with the claim answer, so a privileged session's first sight of a brief is whose words it is;
+  an unsigned one is a claim, not the owner (the standing harness rule). The post's `control`
+  record stands for the repository, and a post that moves the head onto unsigned control inputs
+  while the repository requires them signed raises one `unsigned-control` event under Needs you
+  for the changes no raised event in the 7-day window already named — the paths and the commits
+  — so one standing unsigned change does not re-notice on every later head move, and two
+  notices that named different sets do not re-notify each other's names; the claim answers
+  carry the record read in the claim's own transaction and stored with the claim, whatever the
+  setting at the claim (round 2's pairing: a lost-response replay re-serves the same pairing,
+  never a newer post's record, even after the owner turned the setting on),
+  with the repository's own setting and owner keys, and every runner verifies the named
+  commits' signatures — and the walk's own answer — before loading them (R-BTN-133). A group is read atomically:
+  the record's `read` is the newest owner-signed commit that changed any of the group's paths
+  while leaving every other path of the group at its own last owner-signed change — a signed
+  change to one file never carries a sibling's earlier unsigned bytes into force. While a group
+  names no signed version, no claim on the repository's tickets is handed out (fail closed,
+  no attempt charged: the notice names what an owner signs once). The sync computes both where
+  the git objects are, with the owner keys served by the observation (never read from the
+  repository it is judging); B-137 moves the verification server-side over the raw commits.
 - Every ticket with a ready leg is ranked, a suspended one included.
 - A `question` is stored only for a ticket whose queued leg is a person leg (R-BTN-116); any
   other is dropped and logged `question-dropped`.

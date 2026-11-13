@@ -1,11 +1,11 @@
-// ../../../../../baton-bundle-T7S5h0/entry.ts
+// ../../../../tmp/baton-bundle-z143Om/entry.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-// ../cli/src/defaults/ticket-state.ts
+// src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
 var CLOSE_TIMEOUT_MS = 12e4;
 var GIT_NONINTERACTIVE_ENV = {
@@ -26,7 +26,7 @@ function bareTicketId(ticket) {
   return colon < 0 ? ticket.id : ticket.id.slice(colon + 1);
 }
 
-// ../cli/src/defaults/pr-close.ts
+// src/defaults/pr-close.ts
 function testsClose(ctx, result, run2 = exec) {
   if (result?.tests !== "green" && result?.tests !== "red") {
     throw new Error(`the run-tests gate returned neither green nor red, got ${JSON.stringify(result?.tests)}`);
@@ -40,7 +40,7 @@ function testsClose(ctx, result, run2 = exec) {
   return result.marker;
 }
 
-// ../cli/src/defaults/course-pr.ts
+// src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
 var CREATE_SPEC_COURSE = {
   start: "requested",
@@ -100,11 +100,11 @@ function branchMatches(pattern, branch) {
 }
 var matchPatterns = (branchPatterns) => (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, "*"));
 
-// ../../../../../baton-bundle-T7S5h0/entry.ts
+// ../../../../tmp/baton-bundle-z143Om/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (args, opts = {}) => execFileSync2("git", args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
-var RUN_TESTS_TIMEOUT_MS = 24e4;
+var RUN_TESTS_TIMEOUT_MS = 18e5;
 var OUTPUT_MAX = 67108864;
 async function run(ctx) {
   const sha = ctx.snapshot?.sha;
@@ -137,8 +137,11 @@ function verdictOf(cwd, script) {
   } catch (e) {
     const tail = [String(e?.stdout ?? ""), String(e?.stderr ?? "")].join("\n").split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n");
     const named = (why) => ({ tests: "red", tail: "npm run " + script + " " + why + (tail ? "; its last lines:\n" + tail : "; it printed nothing") });
-    if (e?.code === "ETIMEDOUT") return named("timed out after " + Math.round(RUN_TESTS_TIMEOUT_MS / 1e3) + " s");
+    const setup = (why) => new Error("npm run " + script + " " + why + " \u2014 the tests never ran: no verdict, no marker" + (tail ? "; its last lines:\n" + tail : ""));
+    if (e?.code === "ETIMEDOUT") throw setup("outlived the gate\u2019s bound of " + Math.round(RUN_TESTS_TIMEOUT_MS / 1e3) + " s (a suite that needs longer raises it in its own copy of this leg)");
     if (e?.code === "ENOBUFS") return named("printed more than " + OUTPUT_MAX + " bytes");
+    if (e?.status === 126 || e?.status === 127) throw setup("exited " + e.status + ", a command its script names could not be run (not found, or not executable)");
+    if (/\bMissing script:/.test(String(e?.stderr ?? ""))) throw setup("has no such script in package.json");
     if (typeof e?.status === "number") return named("exited " + e.status);
     if (e?.signal) throw new Error("npm run " + script + " was killed by " + e.signal + ", which the gate did not send \u2014 no verdict, no marker");
     throw new Error("npm run " + script + " could not run (" + (e?.code ?? e?.message ?? String(e)) + ") \u2014 no verdict, no marker");
@@ -181,6 +184,15 @@ async function standard(ctx) {
     gitRun(["-C", ctx.checkout, "worktree", "add", "-q", "--detach", tree, tested]);
     const modules = join(ctx.checkout, "node_modules");
     if (existsSync(modules) && !existsSync(join(tree, "node_modules"))) symlinkSync(modules, join(tree, "node_modules"), "dir");
+    let pkg = {};
+    try {
+      pkg = JSON.parse(readFileSync(join(tree, "package.json"), "utf8"));
+    } catch {
+    }
+    const declared = ["dependencies", "devDependencies"].some((k) => pkg && typeof pkg[k] === "object" && pkg[k] !== null && Object.keys(pkg[k]).length > 0);
+    if (declared && !existsSync(join(tree, "node_modules"))) {
+      throw new Error("npm run " + script + " cannot run: " + branch + " declares dependencies and neither the tested tree nor the home checkout has node_modules \u2014 install them where the leg runs (npm ci); the tests never ran: no verdict, no marker");
+    }
     verdict = verdictOf(tree, script);
   } finally {
     try {

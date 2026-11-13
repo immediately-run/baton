@@ -116,8 +116,9 @@ Every value below is validated on write; a value over its cap is refused `invali
   `^[a-z][a-z0-9_]{0,31}$`, whose values are numbers, booleans, free-text strings or a
   pull-request URL, plus under the one key `resume` a nested object under the same rules; at
   most 2 KB. A pull-request URL is the `web_base` (R-BTN-92) of the ticket's home, or of a
-  `repos:` entry with reach (R-BTN-140), followed by the forge's path: `/pull/<n>` on GitHub,
-  `/pulls/<n>` on Gitea, `/-/merge_requests/<n>` on GitLab, none on a plain `git` repository.
+  `repos:` entry with reach (R-BTN-140) — on that repository's own forge, whatever the home's —
+  followed by the forge's path: `/pull/<n>` on GitHub, `/pulls/<n>` on Gitea,
+  `/-/merge_requests/<n>` on GitLab, none on a plain `git` repository of its own.
 - **Identifiers.** A ticket's local id matches `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` and is
   qualified as `<repository id>:<local id>` (R-BTN-47); a decision id or restart id matches
   `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`, the prefix `baton.` reserved to core; an `asks` label
@@ -128,7 +129,9 @@ Every value below is validated on write; a value over its cap is refused `invali
   `^[A-Za-z0-9][A-Za-z0-9._:+/=-]{0,255}$`. Both are untrusted text validated on write; Baton
   compares each for equality only (values 4), never orders two and never reads one as a time.
 - **Links.** Every link Baton accepts or draws passes R-BTN-92's link rule for one of the
-  ticket's repositories with reach (R-BTN-140), or names a host an administrator allowed:
+  ticket's repositories with reach (R-BTN-140) — each by its own `web_base`, so a plain `git`
+  home draws its code repositories' links while none of its own — or names a host an
+  administrator allowed:
   `link_hosts` for a view's `link` (R-BTN-112), `session_hosts` for a session link
   (R-BTN-113). A person leg's question `url` (R-BTN-116) and a condition's `url` (R-BTN-160) are the
   only links they carry; one that fails the rule is dropped, so no `javascript:` link reaches a
@@ -338,7 +341,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     | `approvers.roles` — a grant's role (`runner`, `trusted-runner`), its domain, and whether it is the protection checker | `[owner]` | `[human]` | | Baton | R-BTN-180 |
     | `approvers.policy` — every change to this policy, this list and `floors` included, every loosening of an R-BTN-66 setting (R-BTN-186), and every `baton ticket adopt` (R-BTN-39) | `[owner]` | `[human]` | | Baton | R-BTN-186, R-BTN-189 |
     | `human_key` — the minimum for a human-only key acting on this repository; the instance's is a floor under it | `any` | `any` | `hardware` | Baton | R-BTN-185 |
-    | `human_identity` — the human-only identity (R-BTN-185) as the fact reader and the merge runner see it: on a forge its immutable forge user id (R-BTN-138's kind), on `git` the pusher identity the `pre-receive` hook logs (R-BTN-180); the owners set it before applying `protected`, since Baton refuses `paths.control: human`, or an `attestations` entry admitting no `sync` for `std:arrival@1`, while it is null (`invalid-params`, naming it) | null | no value: an apply never writes it | no value | Baton, trusted runners | R-BTN-184, R-BTN-192 |
+    | `human_identity` — the human-only identity (R-BTN-185) as the fact reader and the merge runner see it: on a forge its immutable forge user id (R-BTN-138's kind), on `git` the pusher identity the `pre-receive` hook logs (R-BTN-180); the owners set it before applying `protected`, since Baton refuses `paths.control: human`, or an `attestations` entry admitting no `sync` for `std:arrival@1`, while it is null (`invalid-params`, naming it). B-182: `human_identity` names one identity, so a human's merge or verdict on a code repository on another host cannot be told from a pusher's — while the repository's `code_repos` names an entry on a host other than the home's, the policy may set no `human_identity` and no floor may stand, and adding such an entry is refused while either does (`invalid-params`, naming the entry or the knob); per-host human identities are a later ticket | null | no value: an apply never writes it | no value | Baton, trusted runners | R-BTN-184, R-BTN-192, R-BTN-140 |
     | `refs.default_branch`, `refs.tags`, `refs.other` (branches outside `branch_pattern`, `baton/proposed/*` among them, `baton-legs/*` not) — who may update them, from `runner`, `trusted-runner`, `mirror` (*adoption*; on its deletion it stays legal and inert in stored versions and is refused in new ones, §16), `human` | all four, for each | `[trusted-runner, human]` for each | | the forge; Baton prints it, the protection checker checks it | R-BTN-180 |
     | `paths.protected` — the owner's protected paths, beside the computed floor | `[]` | `[]` | | trusted runners, the forge | R-BTN-184 |
     | `paths.control` — who lands a control path | `any` | `human` | | trusted runners, the forge | R-BTN-184 |
@@ -358,8 +361,8 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     `transcript_repos`, `leg_log_root`, `artifact_buckets`) stay R-BTN-66 settings, whose loosening
     `approvers.policy` governs. Three values that were knobs are constants: `refs/baton/*` is open
     to every writer (GitHub cannot restrict it, R-BTN-180); `baton-legs/*` is open to `runner`,
-    `trusted-runner` and `human` (R-BTN-190); and where leg state lives follows the forge
-    (R-BTN-190).
+    `trusted-runner` and `human` (R-BTN-190); and where leg state lives follows where the PRs
+    the course reads live (R-BTN-190).
   - **Approvers.** Each `approvers.*` knob is a non-empty list; a credential is an approver for
     it when it matches an entry:
     - `owner`: any owner key or owner session of the repository; an administrator (R-BTN-57)

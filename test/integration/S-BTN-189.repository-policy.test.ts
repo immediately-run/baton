@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { call as hostCall } from '#host';
 import { cutover, course, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, setPolicySigningKey, syncCall, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
-import { COOPERATIVE, PLAIN_GIT, canonicalJson } from '../../src/core/policy';
+import { COOPERATIVE, PLAIN_GIT, canonicalJson, legStateOf } from '../../src/core/policy';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-30T12:00:00Z');
@@ -82,7 +82,12 @@ describe('S-BTN-189 the repository policy', () => {
     const applied = await as(owner, '/v1/owner/plain/policy', { base_version: 1, preset: 'protected' }, 'PUT');
     expect(applied.status).toBe(200);
     const doc = JSON.parse((await policyRow('plain')).policy_json);
-    expect(doc.leg_state).toBe('branch');
+    // B-182 (R-BTN-190): where leg state lives is not a preset's to write — the seeded and the
+    // applied documents carry no `leg_state`, and the claim answer follows the PRs: `branch` on a
+    // git home for a course that reads no PR facts, `forge` for one that reads them.
+    expect(doc.leg_state).toBeUndefined();
+    expect(legStateOf(doc, 'git')).toBe('branch');
+    expect(legStateOf(doc, 'git', true)).toBe('forge');
     expect(doc.inputs.board).toEqual(['sync-key']);
     expect(doc.outbox['forge-check'].deliverers).toEqual([]);
     expect(doc.approvers.policy).toEqual(['human']);

@@ -472,6 +472,12 @@ is stale. Never edit it by hand.
 | S-BTN-211 | the per-leg channel | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-212 | executor data | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-213 | the executor's declaration and the run's record | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-214 | a plain-git home on a GitHub code repository | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-215 | code repository settings refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-216 | the ids decide for a code repository | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-217 | pushers across hosts | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-218 | owner-signed briefs and the control record (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-219 | require_signed_control (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
