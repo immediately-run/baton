@@ -324,7 +324,8 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       }
       if (sub === 'retire') {
         parseArgs(more, [], [], 0);
-        return { method: 'POST', path: '/v1/admin/repositories', body: { id: need(target, 'the repository id'), retire: true } };
+        // §12.2: `admin.repo.retire` is destructive, so the body carries confirm: true.
+        return { method: 'POST', path: '/v1/admin/repositories', body: { id: need(target, 'the repository id'), retire: true, confirm: true } };
       }
       throw new Error('baton admin repos | baton admin repo add|set|retire');
     }

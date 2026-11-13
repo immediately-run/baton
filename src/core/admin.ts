@@ -13,7 +13,7 @@ import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId, 
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
-import { checkRegistration, seedEntries, tierPosition, type Registration, type Registry } from './registry';
+import { checkRegistration, retiredPath, seedEntries, tierPosition, type Registration, type Registry } from './registry';
 import { graphOf, resolveLeg, type Graph } from './graph';
 import { humanOnlyList, type ApproverEntry, type ApproverFacts, type Policies } from './policy';
 import type { Config, Store } from './ports';
@@ -122,6 +122,9 @@ export class Admin {
     dispatchSync: (repository: string) => void;
     /** R-BTN-75, R-BTN-76: a grant made, changed or revoked moves the fleet's counts. */
     fleetChanged?: () => void;
+    /** R-BTN-47 (B-173): retirement reaps the repository's active claims as an administrator's
+     *  force-reap does, inside the retiring transaction. */
+    reapForRetire?: (repository: string, actor: string) => void;
     /** R-BTN-80: a courier registered or revoked queues or closes its notices. */
     notices?: Notices;
     /** §12.8 (B-145): the repository policies — the approver lists the owner routes read. */
@@ -166,14 +169,20 @@ export class Admin {
     return out;
   }
 
-  /** An owner key's line by fingerprint, if it owns any repository (R-BTN-58). */
+  /** An owner key's line by fingerprint, if it owns any live repository (R-BTN-58, R-BTN-47: a
+   *  key whose only repositories are retired owns none, R-BTN-155). */
   ownerKey(fingerprint: string): string | null {
-    return this.rows<{ public_key: string }>('SELECT public_key FROM repository_owners WHERE fingerprint = ? AND removed_at IS NULL LIMIT 1', fingerprint)[0]?.public_key ?? null;
+    return this.rows<{ public_key: string }>(
+      `SELECT o.public_key FROM repository_owners o JOIN repositories r ON r.id = o.repository_id
+       WHERE o.fingerprint = ? AND o.removed_at IS NULL AND r.retired_at IS NULL LIMIT 1`, fingerprint)[0]?.public_key ?? null;
   }
 
-  /** Whether `fingerprint` owns `repository` now. */
+  /** Whether `fingerprint` owns `repository` now (a retired repository is owned by no one,
+   *  R-BTN-47). */
   owns(fingerprint: string, repository: string): boolean {
-    return this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND repository_id = ? AND removed_at IS NULL', fingerprint, repository).length > 0;
+    return this.rows(
+      `SELECT 1 FROM repository_owners o JOIN repositories r ON r.id = o.repository_id
+       WHERE o.fingerprint = ? AND o.repository_id = ? AND o.removed_at IS NULL AND r.retired_at IS NULL`, fingerprint, repository).length > 0;
   }
 
   /** R-BTN-185: a registered human-only key's public line (a live one) — the tenant's own, as
@@ -189,10 +198,13 @@ export class Admin {
     return (await this.humanMarks()).has(fingerprint);
   }
 
-  /** R-BTN-57: the role a key already holds, if any — one role per key. */
+  /** R-BTN-57: the role a key already holds, if any — one role per key. A key whose only
+   *  repositories are retired owns none (R-BTN-47, R-BTN-155). */
   private roleOf(fingerprint: string, admins: Map<string, string>): string | null {
     if (admins.has(fingerprint)) return 'administrator';
-    if (this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND removed_at IS NULL', fingerprint).length) return 'owner';
+    if (this.rows(
+      `SELECT 1 FROM repository_owners o JOIN repositories r ON r.id = o.repository_id
+       WHERE o.fingerprint = ? AND o.removed_at IS NULL AND r.retired_at IS NULL`, fingerprint).length) return 'owner';
     if (this.rows('SELECT 1 FROM sync_keys WHERE fingerprint = ?', fingerprint).length) return 'sync';
     const c = this.rows<{ kind: string }>('SELECT kind FROM credentials WHERE id = ?', fingerprint)[0];
     return c ? c.kind : null;
@@ -307,20 +319,26 @@ export class Admin {
   // ── administrators (R-BTN-57) ───────────────────────────────────────────────────────────
 
   /** `POST /v1/admin/repositories`: register one with its first owner keys, change one (never its
-   *  forge or forge path, R-BTN-92), or retire one. */
+   *  forge or forge path, R-BTN-92), or retire one. R-BTN-47 (B-173): a retired id is never
+   *  registered again (`conflict`), and retiring is final — `retireRepository`, in one
+   *  transaction, ends everything scoped to the repository. */
   async repositories(actor: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
     const id = checkRepositoryId(b.id, 'id');
     const known = this.c.registry.get(id);
     if (b.retire === true) {
-      only(b, ['id', 'retire'], 'body');
-      if (!known) throw new BatonError('not-found', `${id} is not registered`);
-      this.c.store.transaction(() => {
-        this.exec('UPDATE repositories SET retired_at = ? WHERE id = ? AND retired_at IS NULL', this.c.now(), id);
-        this.event(actor, { act: 'repository-retired', repository: id }, id);
-      });
+      only(b, ['id', 'retire', 'confirm'], 'body');
+      // A retired repository is as one never registered (R-BTN-47): a second retire names what
+      // is no longer there.
+      if (!known || known.retired_at != null) throw new BatonError('not-found', `${id} is not registered`);
+      // §12.2: a destructive action takes confirm: true.
+      if (b.confirm !== true) throw new BatonError('confirm-required', 'retiring a repository takes confirm: true');
+      this.retireRepository(actor, id, known);
       return { ok: true };
+    }
+    if (known?.retired_at != null) {
+      throw new BatonError('conflict', `${id} is retired; its id is never registered again (R-BTN-47)`);
     }
     if (!known) {
       const owners = await this.ownerKeys(b.owner_keys, 'owner_keys');
@@ -438,6 +456,46 @@ export class Admin {
     return { ok: true };
   }
 
+  /** R-BTN-47's *Retirement* (B-173), in one transaction over today's stores — final, never
+   *  undone: the row's tombstone (its path to `former_paths`, `~retired/<id>` in its place, so
+   *  the path is free among live rows and the id is never registered again), its sync and
+   *  mirror keys and runner grants revoked, each active claim on its tickets reaped as an
+   *  administrator's force-reap (fence-pending where its runner is alive, so the holder can
+   *  still heartbeat and report the fence, R-BTN-19), its sync wants, `webhook_syncs` stamps
+   *  and unblocked trigger deleted, and its id out of every account instance's `repositories`
+   *  list. The stores later tickets build (owner sessions, MCP keys, OAuth, registration
+   *  tokens, check-runners, consents, ticket timers, the outbox) carry their own step in the
+   *  ticket that builds each. */
+  private retireRepository(actor: string, id: string, known: { github: string; former_paths: string[] }) {
+    const now = this.c.now();
+    this.c.store.transaction(() => {
+      // The tombstone first (R-BTN-138): the wants the reaps' ends would record below read the
+      // predicate and find the repository already retired, so none is recorded (R-BTN-94).
+      const former = [...new Set([known.github, ...known.former_paths])].slice(0, 10);
+      this.exec(`UPDATE repositories SET retired_at = ?, github = ?, former_paths = ?, web_base = NULL, dispatch = NULL,
+                   unblocked_trigger = NULL, sync_wanted_at = NULL, sync_wanted_after = NULL
+                 WHERE id = ? AND retired_at IS NULL`, now, retiredPath(id), JSON.stringify(former), id);
+      // R-BTN-93, R-BTN-58: its sync and mirror keys and its runner grants.
+      this.exec('UPDATE sync_keys SET revoked_at = ? WHERE repository_id = ? AND revoked_at IS NULL', now, id);
+      this.exec('UPDATE worker_grants SET revoked_at = ? WHERE repository_id = ? AND revoked_at IS NULL', now, id);
+      // R-BTN-19: each active claim on its tickets, as an administrator's force-reap reaps one.
+      this.c.reapForRetire?.(id, actor);
+      // R-BTN-94, R-BTN-73, R-BTN-77: its wants, its webhook stamps and windows, its trigger's.
+      this.exec('DELETE FROM webhook_dispatch WHERE repository_id = ?', id);
+      this.exec('DELETE FROM webhook_syncs WHERE repository_id = ?', id);
+      this.exec('DELETE FROM unblocked_dispatch WHERE repository_id = ?', id);
+      // R-BTN-76: its id out of every account instance's repositories list.
+      for (const i of this.rows<{ name: string; repositories: string }>(
+        `SELECT name, repositories FROM resource_instances WHERE EXISTS (SELECT 1 FROM json_each(repositories) j WHERE j.value = ?)`, id)) {
+        this.exec('UPDATE resource_instances SET repositories = ? WHERE name = ?',
+          JSON.stringify((JSON.parse(i.repositories) as string[]).filter((r) => r !== id)), i.name);
+      }
+      this.event(actor, { act: 'repository-retired', repository: id, github: known.github }, id);
+      // The fleet's counts read the grants and the instance lists (R-BTN-75, R-BTN-76).
+      this.c.fleetChanged?.();
+    });
+  }
+
   /** BATON_REPOSITORIES' `owner_keys` at start (B-91; R-BTN-47, R-BTN-58), read and parsed before
    *  the seed registers anything: each entry's keys as the administrator's route reads `owner_keys`
    *  (`ownerKeys`; at least one where the field is given), so a malformed key stops the start
@@ -459,7 +517,8 @@ export class Admin {
    *  live owner and is not retired — so a registration that has owners keeps them. Every key of
    *  every entry is checked as the route checks an owner (`mayOwn`, R-BTN-57), owned repository or
    *  not, and the whole pass is one transaction: a key that holds another role stops the start
-   *  with nothing written. A key an administrator revoked is skipped, never written and never a
+   *  with nothing written. R-BTN-47 (B-173): an entry naming a retired id is skipped whole, never
+   *  a stop. A key an administrator revoked is skipped, never written and never a
    *  stop — a revocation after the seed was written must not take the instance down (the owner,
    *  2026-10-27); a repository it leaves with no owner is named in `seed_owners`. */
   async seedOwners(entries: { id: string; keys: { fingerprint: string; line: string }[] }[]): Promise<void> {
@@ -467,8 +526,8 @@ export class Admin {
     const admins = await this.adminFingerprints();
     this.c.store.transaction(() => {
       for (const { id, keys } of entries) {
-        const write = !this.rows('SELECT 1 FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', id).length
-          && !this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NOT NULL', id).length;
+        if (this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NOT NULL', id).length) continue;
+        const write = !this.rows('SELECT 1 FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', id).length;
         for (const key of keys) {
           if (this.revokedOwner(key.fingerprint)) continue;
           this.mayOwn(key.fingerprint, admins);
@@ -1087,12 +1146,14 @@ export class Admin {
   // ── reads ───────────────────────────────────────────────────────────────────────────────
 
   /** The owner bars of `repositories` in force at `now` — and, with `scheduled`, those not yet
-   *  started — for the heartbeat, the observation and the gates (R-BTN-67). */
+   *  started — for the heartbeat, the observation and the gates (R-BTN-67). R-BTN-47 (B-173): a
+   *  retired repository's bars reach no one, so they are not in force at all. */
   bars(repositories: string[] | null, now: number, scheduled = false): OwnerBar[] {
     return this.rows<Omit<OwnerBar, 'legs' | 'release_holders'> & { legs: string; release_holders: number }>(
-      `SELECT id, repository_id, course, tag, legs, applies, starts_at, ends_at, release_holders, reason FROM owner_bars
-       WHERE lifted_at IS NULL AND (ends_at IS NULL OR ends_at > ?) AND (? OR starts_at <= ?)
-         AND (? IS NULL OR repository_id IN (SELECT value FROM json_each(?))) ORDER BY id`,
+      `SELECT b.id, b.repository_id, b.course, b.tag, b.legs, b.applies, b.starts_at, b.ends_at, b.release_holders, b.reason FROM owner_bars b
+       JOIN repositories r ON r.id = b.repository_id AND r.retired_at IS NULL
+       WHERE b.lifted_at IS NULL AND (b.ends_at IS NULL OR b.ends_at > ?) AND (? OR b.starts_at <= ?)
+         AND (? IS NULL OR b.repository_id IN (SELECT value FROM json_each(?))) ORDER BY b.id`,
       now, scheduled ? 1 : 0, now, repositories ? 1 : null, JSON.stringify(repositories ?? []))
       .map((b) => ({ ...b, legs: JSON.parse(b.legs) as string[], release_holders: !!b.release_holders }));
   }

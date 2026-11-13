@@ -275,6 +275,18 @@ export class WorkerApi {
       const ladder = JSON.parse(r.tiers) as string[];
       if (!ladder.includes(tier)) throw new BatonError('invalid-params', `tier_ceilings.${repo}: must be one of ${ladder.join(', ')}`);
     }
+    // R-BTN-47 (B-173): a course the heartbeat declares of a retired repository is dropped,
+    // never a refusal (R-BTN-3) — the old holder can still heartbeat and report its fence.
+    // Dropped before the settings hash, so what is hashed is what is stored; a course of an
+    // unknown repository is kept, as today (rule 9 reads it if it ever registers).
+    const coursesRetired: string[] = [];
+    hb.courses = hb.courses.filter((c) => {
+      if (this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NOT NULL', c.repository).length) {
+        coursesRetired.push(c.repository);
+        return false;
+      }
+      return true;
+    });
     // Every hash first; then every read and write in one synchronous transaction (§3).
     const presented = secretHeader ? await sha256Hex(secretHeader) : null;
     const settingsHash = await sha256Hex(JSON.stringify({
@@ -286,7 +298,11 @@ export class WorkerApi {
       tags: [...hb.tags].sort(),
     }));
     const answer = this.c.store.transaction(() => this.heartbeatTx(credentialId, presented, settingsHash, hb));
-    return ignoredCeilings.length ? { ...answer, tier_ceilings_unregistered: ignoredCeilings } : answer;
+    return {
+      ...answer,
+      ...(ignoredCeilings.length ? { tier_ceilings_unregistered: ignoredCeilings } : {}),
+      ...(coursesRetired.length ? { courses_retired: [...new Set(coursesRetired)] } : {}),
+    };
   }
 
   private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat) {

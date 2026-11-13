@@ -41,6 +41,7 @@ import crossHostCodeRepos from './0039_cross_host_code_repos.sql';
 import signedControl from './0040_signed_control.sql';
 import claimControl from './0041_claim_control.sql';
 import retireOntology from './0042_retire_ontology.sql';
+import retirement from './0043_retirement.sql';
 import { isUniqueViolation, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -115,4 +116,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 41, sql: claimControl },
   // 0042 is B-167's (the ontology and route choices leave core), renumbered at the merge behind main's 0039–0041.
   { id: 42, sql: retireOntology },
+  // 0043 is B-173's (a repository's retirement): the tombstone's `former_paths`.
+  { id: 43, sql: retirement },
 ];

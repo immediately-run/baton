@@ -1262,7 +1262,11 @@ describe('S-BTN-41 the runner', () => {
       // work() runs the heartbeat interval, so beats land while the leg runs — as `baton run`
       // does; runOnce alone beats only between claims.
       const done = runner.work();
-      await until(async () => home.evidence().filter((l) => l.includes('merge ran')));
+      // Wait for the end the test asserts, not the merge leg's last evidence line: the leg
+      // writes its evidence before its process exits, and stopping between the two kills it as
+      // a lost lease (a loaded machine widens that window — found when B-173's scenarios joined
+      // the suite).
+      await until(async () => lines.filter((l) => l.includes('docs:T-1 done at')));
       runner.stop();
       await done;
       const outcome = lines.join('\n');

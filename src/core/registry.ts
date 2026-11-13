@@ -5,6 +5,7 @@
 // already knows. The sync principal is bound to one repository here.
 import { BatonError } from './http';
 import { parseSshKey } from './auth';
+import { logEvent } from './db';
 import type { Config, Store } from './ports';
 import { REPOSITORY_ID, TIER_NAME } from './validate';
 import { FORGES, isForgePath, isWebBase, parseTranscriptRepo, type Forge } from './links';
@@ -38,7 +39,14 @@ export interface Repository {
   tiers: string[];
   cutover_at: number | null;
   retired_at: number | null;
+  /** R-BTN-138 (B-173): the paths a retirement moved off the row, latest first. They reach
+   *  the fence alone (the branch-holder query, §9), never authentication or links. */
+  former_paths: string[];
 }
+
+/** R-BTN-138: a retired repository's row carries this in place of its forge path, so the path
+ *  is free among live rows. The tombstone names the id, so no two rows ever share one. */
+export const retiredPath = (id: string) => `~retired/${id}`;
 
 /** A registration as `POST /v1/admin/repositories` takes it (§11), less the owner keys
  *  (`registration` in admin.ts), checked before anything is written (§10.4). */
@@ -216,9 +224,9 @@ export interface SyncClaims {
   job_workflow_ref: string;
 }
 
-type RepoRow = Omit<Repository, 'transcript_repos' | 'tiers' | 'ci_identity'> & { transcript_repos: string; tiers: string; ci_identity: string | null };
-const parse = (r: RepoRow): Repository => ({ ...r, transcript_repos: JSON.parse(r.transcript_repos), tiers: JSON.parse(r.tiers), ci_identity: r.ci_identity ? JSON.parse(r.ci_identity) : null });
-const REPO_COLUMNS = 'id, github, forge, remote, web_base, ci_identity, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, tiers, cutover_at, retired_at';
+type RepoRow = Omit<Repository, 'transcript_repos' | 'tiers' | 'ci_identity' | 'former_paths'> & { transcript_repos: string; tiers: string; ci_identity: string | null; former_paths: string | null };
+const parse = (r: RepoRow): Repository => ({ ...r, transcript_repos: JSON.parse(r.transcript_repos), tiers: JSON.parse(r.tiers), ci_identity: r.ci_identity ? JSON.parse(r.ci_identity) : null, former_paths: r.former_paths ? JSON.parse(r.former_paths) : [] });
+const REPO_COLUMNS = 'id, github, forge, remote, web_base, ci_identity, default_branch, sync_workflow, mirror_workflow, weight, transcript_repos, tiers, cutover_at, retired_at, former_paths';
 
 export class Registry {
   constructor(private readonly c: { store: Store; now: () => number; ensurePolicy?: (repository: string, forge: Forge) => void }) {}
@@ -255,11 +263,18 @@ export class Registry {
   /** BATON_REPOSITORIES at start: each entry not yet known is registered; a known one is left
    *  as it is. A malformed value throws, so a broken deploy is seen at once. B-91: an entry's
    *  `owner_keys` (R-BTN-58) are its repository's first owners — read before this runs and
-   *  written after it by `Admin.readSeedOwners` / `Admin.seedOwners`. */
+   *  written after it by `Admin.readSeedOwners` / `Admin.seedOwners`. R-BTN-47 (B-173): an
+   *  entry naming a retired id is skipped and logged, never a stop, as a revoked owner key is. */
   seed(config: Config): string[] {
     const added: string[] = [];
     for (const { entry, r } of seedEntries(config)) {
-      if (this.rows('SELECT 1 FROM repositories WHERE id = ?', r.id).length) continue;
+      const known = this.rows<{ retired_at: number | null }>('SELECT retired_at FROM repositories WHERE id = ?', r.id)[0];
+      if (known) {
+        if (known.retired_at != null) {
+          logEvent(this.c.store, this.c.now(), 'admin', 'server', { act: 'seed-skipped-retired', repository: r.id }, null, null, r.id);
+        }
+        continue;
+      }
       this.register(entry, { keysAddedLater: true });
       added.push(r.id);
     }
@@ -317,9 +332,11 @@ export class Registry {
 
   /** BATON_REPOSITORIES' `sync_keys` at start, beside the administrator's routes: each key not yet known is
    *  added for its repository; one already serving that repository in that role is left; any other
-   *  conflict throws, as a malformed seed does. */
+   *  conflict throws, as a malformed seed does. R-BTN-47 (B-173): a retired repository's entry is
+   *  skipped with its keys, never a stop. */
   async seedSyncKeys(config: Config, adminKeys: string[]): Promise<void> {
     for (const { r } of seedEntries(config)) {
+      if (this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NOT NULL', r.id).length) continue;
       for (const k of r.sync_keys) {
         const fp = (await parseSshKey(k.public_key)).fingerprint;
         const known = this.rows<{ repository_id: string; role: string }>('SELECT repository_id, role FROM sync_keys WHERE fingerprint = ?', fp)[0];
@@ -340,6 +357,14 @@ export class Registry {
 
   get(id: string): Repository | null {
     const r = this.rows<RepoRow>(`SELECT ${REPO_COLUMNS} FROM repositories WHERE id = ?`, id)[0];
+    return r ? parse(r) : null;
+  }
+
+  /** R-BTN-47 (B-173): the one predicate every rule that counts registered repositories reads —
+   *  a repository is live while its row is not retired. `get` answers for administrators' reads
+   *  and the retire route; this answers for every rule. */
+  live(id: string): Repository | null {
+    const r = this.rows<RepoRow>(`SELECT ${REPO_COLUMNS} FROM repositories WHERE id = ? AND retired_at IS NULL`, id)[0];
     return r ? parse(r) : null;
   }
 
