@@ -7,13 +7,13 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
-import { asksHelp, declareCourses, fetchMain, parseRunArgs, runMain, servedCourses } from '../../src/runner/main';
+import { asksHelp, declareCourses, fetchMain, hostMaskEnv, parseRunArgs, runMain, servedCourses } from '../../src/runner/main';
 import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { HARNESS_AGENTS, AGENT_PROMPT } from '../../src/runner/harness';
 import { splitWords } from '../../src/defaults/agent-words';
 import { envAuth } from '../../src/runner/api';
-import { courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
+import { advanceHome, courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
 import { declarationFrom } from '../../src/runner/runner';
 import { validateCourse } from '../../src/core/course';
 
@@ -392,16 +392,19 @@ describe('the courses a runner serves (R-BTN-131, B-103)', () => {
   // answers the calls itself (no Baton), so what it sees is the body the heartbeat path composed.
   // `runMain`'s loop runs until stopped, so the probe drains it the way SIGTERM does: one signal,
   // the first path, which ends `work()` without exiting.
-  const probe = async (dir: string, argv: string[] = [], signal: NodeJS.Signals = 'SIGTERM') => {
+  const probe = async (dir: string, argv: string[] = [], signal: NodeJS.Signals = 'SIGTERM', env: NodeJS.ProcessEnv = {}) => {
     const seen = { heartbeats: [] as Record<string, unknown>[] };
     const lines: string[] = [];
-    const saved = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE'].map((n) => [n, process.env[n]] as const);
+    // BATON_REPOSITORY too: parseRunArgs defaults the repository from it, and the enclosing
+    // runner (this test itself run by a Baton leg) exports it — the probe asserts 'docs'.
+    const saved = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE', 'BATON_REPOSITORY'].map((n) => [n, process.env[n]] as const);
     for (const [n] of saved) delete process.env[n];
     process.env.BATON_TOKEN = 'tok-vm-a'; // a credential, so the run gets as far as its beats
     try {
       const running = runMain(['--home', dir, '--test-harness', '--beat-every', '50', '--session', 'courses-probe', ...argv], {
         log: (l) => lines.push(l),
         fetch: () => {}, // the home's snapshot is never needed: no ticket is claimable
+        env, // B-170: the host configuration this run reads, pinned by the test
         transport: async (req: Request) => {
           const path = new URL(req.url).pathname;
           const body = JSON.parse(req.body ? await new Response(req.body).text() : '{}') as Record<string, unknown>;
@@ -456,8 +459,45 @@ describe('the courses a runner serves (R-BTN-131, B-103)', () => {
       expect(lines.join('\n'), signal).toContain('stopping at once (the immediate stop)');
     }
   }, 30_000);
+  it('runMain reads the host\'s runner.json through io.env, saying the names it masks there (B-170, R-BTN-144)', async () => {
+    const config = mkdtempSync(join(tmpdir(), 'baton-170-env-'));
+    writeFileSync(join(config, 'runner.json'), JSON.stringify({ mask_env: ['BATON170_TEST_VENDOR'] }));
+    try {
+      // One home per probe: a probe run ends by removing its home.
+      const { lines } = await probe(declaring({ skills_version: 3, courses: [{ id: 'create-pr', version: 1 }], agent_command: 'true' }), [], 'SIGTERM', { BATON_CONFIG: join(config, 'runner.json') });
+      expect(lines.join('\n')).toContain('masking 1 more name by runner.json\'s mask_env: BATON170_TEST_VENDOR (R-BTN-144)');
+      // A home with no configuration beyond the env: nothing is said, and the run is the same.
+      const bare = await probe(declaring({ skills_version: 3, courses: [{ id: 'create-pr', version: 1 }], agent_command: 'true' }), [], 'SIGTERM', { BATON_CONFIG: join(config, 'absent-runner.json') });
+      expect(bare.lines.join('\n')).not.toContain('mask_env');
+    } finally {
+      rmSync(config, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
+
+describe('hostMaskEnv — the host\'s own runner.json (B-170, R-BTN-144)', () => {
+  it('names its mask_env once at start; a repository\'s .baton/ path and a file it cannot read are refused', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-170-hme-'));
+    try {
+      const lines: string[] = [];
+      const config = join(dir, 'runner.json');
+      writeFileSync(config, JSON.stringify({ mask_env: ['VENDOR_API_KEY', 'ANOTHER'] }));
+      expect(hostMaskEnv((l) => lines.push(l), { BATON_CONFIG: config })).toEqual(['VENDOR_API_KEY', 'ANOTHER']);
+      expect(lines.join('\n')).toContain("baton: masking 2 more names by runner.json's mask_env: VENDOR_API_KEY, ANOTHER (R-BTN-144)");
+      writeFileSync(config, JSON.stringify({ origin: 'https://baton.test' }));
+      expect(hostMaskEnv(() => {}, { BATON_CONFIG: config })).toEqual([]);
+      expect(hostMaskEnv(() => {}, { BATON_CONFIG: join(dir, 'absent.json') })).toEqual([]);
+      // Never a repository's own settings: a .baton/ path is refused, and so is a damaged file
+      // that asks for masking by name — never silently masking nothing.
+      expect(() => hostMaskEnv(() => {}, { BATON_CONFIG: '/srv/repo/.baton/runner.json' })).toThrow(/never a repository's/);
+      writeFileSync(config, '{"mask_env": ["VENDOR_API_KEY",]}');
+      expect(() => hostMaskEnv(() => {}, { BATON_CONFIG: config })).toThrow(/not JSON, so its mask_env cannot be read/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('declareCourses (rule 9)', () => {
   it('reads the spec’s baton.json courses[]', () => {
@@ -958,5 +998,210 @@ export async function run(ctx) {
     }
     expect(alive).toBe('gone'); // the wrapper exited on its own; the group died with the leg
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// B-170 (R-BTN-144 class 7): the runner's own half of the masking — which environment a leg's
+// set is computed from, the sink its `run` stderr goes through, the release at the call's end and
+// at a lost lease, and the failure texts a leg leaves in the runner's log after its stream closed.
+// The pure half (names, values, the sink's line algebra) is in runner-mask.test.ts; S-BTN-119's
+// masking guarantee ('tokens and key blocks printed … all masked') is what these exercise at the
+// wiring, through the real wrapper and executor the runner runs them with.
+describe('a leg\'s output leaves the runner masked (B-170, R-BTN-144 class 7)', () => {
+  /** The environment the tests pin: a provider-shaped key under a name that says so, and a
+   *  vendor's credential a `runner.json` `mask_env` list alone names. */
+  const KEY = 'sk-ant-api03-AbCdEfGhIjKlMn';
+  const VENDOR = 'vendor-credential-9f2c71';
+  const ENV_NAMES = ['BATON170_TEST_API_KEY', 'BATON170_TEST_VENDOR'];
+
+  /** A Runner over a temp home with the state sidecar stubbed out, as the fixtures above hand
+   *  it over, running legs through the real builtin executor and wrapper. */
+  const maskRunner = (lines: string[], state: Record<string, unknown>, beatEvery = 60_000): { r: Runner; home: string } => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-170-sink-'));
+    mkdirSync(join(dir, 'scratch'), { recursive: true });
+    const api = {
+      setSecret: () => {},
+      heartbeat: async () => ({ worker_id: 1, incarnation: 1, messages: [] }),
+      recommendations: async () => ({ recommendations: [] }),
+      claim: async () => { throw new BatonRefusal('no-eligible-ticket', undefined, 'none', 400); },
+    } as unknown as BatonApi;
+    const r = new Runner({ api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'b170-sink',
+      courses: [], stateFile: join(dir, 's.json'), beatEvery, log: (l) => lines.push(l), verbose: true, maskEnv: ['BATON170_TEST_VENDOR'] });
+    (r as unknown as { state: unknown }).state = { get: () => state, set: () => {}, spool: join(dir, 'spool.jsonl') };
+    (r as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null };
+    return { r, home: dir };
+  };
+  const legOf = (r: Runner) => (r as unknown as { runLeg(course: { scripts: Map<string, string>; scratch?: string }, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: string; result?: unknown; error?: string }> });
+
+  it('the leg\'s stderr goes through the class 7 sink: whole, split and mask_env values, a bearer token, and a held tail the call\'s end releases', async () => {
+    const saved = ENV_NAMES.map((n) => [n, process.env[n]] as const);
+    process.env.BATON170_TEST_API_KEY = KEY;
+    process.env.BATON170_TEST_VENDOR = VENDOR;
+    const lines: string[] = [];
+    const state: Record<string, unknown> = { worker_id: 1, claim: null };
+    const { r, home } = maskRunner(lines, state);
+    try {
+      // A leg that prints its credential every way a leaking one does: whole, split across a
+      // line break (the wrap), a mask_env name's value, a bearer token, and a trailing partial
+      // the stream's last write never completed — read from the environment it was given.
+      const script = join(home, 'leak.mjs');
+      writeFileSync(script, `export async function run() {
+  const key = process.env.BATON170_TEST_API_KEY;
+  process.stderr.write('whole key: ' + key + '\\n');
+  process.stderr.write('split: ' + key.slice(0, 14) + '\\n' + key.slice(14) + '\\n');
+  process.stderr.write('vendor: ' + process.env.BATON170_TEST_VENDOR + '\\n');
+  process.stderr.write('token: brt_abc123XYZ\\n');
+  process.stderr.write('tail: ' + key.slice(0, 10));
+  return { done: true };
+}
+`);
+      const out = await legOf(r).runLeg({ scripts: new Map([['implement', script]]) }, 'implement', { leg: 'implement' }, join(home, 'scratch'));
+      expect(out).toEqual({ kind: 'ok', result: { done: true } });
+      const said = lines.join('\n');
+      // Not one byte of any literal the set holds is in the log — not the whole values, not
+      // either half of the split, not the vendor's, not the token's, not the held tail's.
+      for (const secret of [KEY, KEY.slice(0, 14), KEY.slice(14), VENDOR, 'brt_abc123XYZ', KEY.slice(0, 10)]) expect(said, said).not.toContain(secret);
+      expect(said).toContain('whole key: ***');
+      // The split line's head leaves with its line; the completing half leaves as *** on the
+      // next — never either half of the key (the not.toContain assertions above).
+      expect(said).toContain('split: ');
+      expect(said).toContain('vendor: ***');
+      expect(said).toContain('token: ***');
+      // The trailing partial the stream ended on leaves masked, at the call's release.
+      expect(said).toContain('tail: ');
+    } finally {
+      for (const [n, v] of saved) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('a crashed leg\'s own error text, the close\'s and the handoff\'s failures, and every other call\'s drain leave masked', async () => {
+    const saved = ENV_NAMES.map((n) => [n, process.env[n]] as const);
+    process.env.BATON170_TEST_API_KEY = KEY;
+    process.env.BATON170_TEST_VENDOR = VENDOR;
+    const lines: string[] = [];
+    const state: Record<string, unknown> = { worker_id: 1, claim: null };
+    const { r, home } = maskRunner(lines, state);
+    try {
+      // The leg crashes quoting the key — the provider-auth shape the wrapper hands back.
+      const script = join(home, 'crash.mjs');
+      writeFileSync(script, `export async function run() { throw new Error('provider auth failed with ' + process.env.BATON170_TEST_API_KEY); }
+export async function close() { throw new Error('close saw ' + process.env.BATON170_TEST_API_KEY); }
+export async function handoff() { return 'https://example.test/handoff'; }
+`);
+      const leg = legOf(r);
+      const out = await leg.runLeg({ scripts: new Map([['implement', script]]) }, 'implement', { leg: 'implement' }, join(home, 'scratch'));
+      expect(out.kind).toBe('crashed');
+      // The error is masked where the set lives, before the log that quotes it (round 1, finding 3).
+      expect(out.error).toContain('***');
+      expect(out.error).not.toContain(KEY);
+      // The close's failures — three attempts, each quoting the leg's key in its thrown text.
+      const close = (r as unknown as { callClose(script: string, ctx: Record<string, unknown>, result: unknown): Promise<string | null | undefined> });
+      expect(await close.callClose(script, { leg: 'implement' }, { done: true })).toBeUndefined();
+      // The handoff's drain, under --verbose, for a call whose stderr is not the leg's sink.
+      const handoff = (r as unknown as { callHandoff(script: string, ctx: Record<string, unknown>): Promise<string | null> });
+      const noisy = join(home, 'noisy.mjs');
+      writeFileSync(noisy, `export async function handoff() { process.stderr.write('handoff drain: ' + process.env.BATON170_TEST_VENDOR + '\\n'); return 'https://example.test/noisy'; }
+`);
+      expect(await handoff.callHandoff(noisy, { leg: 'implement' })).toBe('https://example.test/noisy');
+      const said = lines.join('\n');
+      expect(said).not.toContain(KEY);
+      expect(said).not.toContain(VENDOR);
+      expect(said.match(/the leg's close failed/g)?.length).toBe(3);
+      expect(said).toContain('handoff drain: ***');
+    } finally {
+      for (const [n, v] of saved) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('a lost lease kills the leg and releases what its sink held — masked, never the held bytes', async () => {
+    const saved = ENV_NAMES.map((n) => [n, process.env[n]] as const);
+    process.env.BATON170_TEST_API_KEY = KEY;
+    const lines: string[] = [];
+    // The lease is lost only once the leg is streaming: the state stub the fence polls is this
+    // object, so the test turns it after the leg's first line has gone through the sink.
+    const state: Record<string, unknown> = { worker_id: 1, claim: null };
+    const { r, home } = maskRunner(lines, state, 60);
+    try {
+      const marker = join(home, 'streaming');
+      const script = join(home, 'hold.mjs');
+      writeFileSync(script, `import { writeFileSync } from 'node:fs';
+export async function run() {
+  const key = process.env.BATON170_TEST_API_KEY;
+  process.stderr.write('streaming: ' + key.slice(0, 12) + '\\n');
+  writeFileSync(${JSON.stringify(marker)}, 'here');
+  await new Promise(() => {}); // runs until the lease takes it
+}
+`);
+      const running = legOf(r).runLeg({ scripts: new Map([['implement', script]]) }, 'implement', { leg: 'implement' }, join(home, 'scratch'));
+      // The marker is written after the line, but the line still has to cross the pipe and the
+      // sink: wait for both (on a loaded runner the lease was lost before the line arrived), on
+      // wall time.
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline && !(existsSync(marker) && lines.join('\n').includes('streaming: '))) await new Promise((res) => setTimeout(res, 10));
+      expect(existsSync(marker)).toBe(true); // the leg is streaming: its partial line is held
+      expect(lines.join('\n')).toContain('streaming: ');
+      state.lease_lost = true;
+      expect(await running).toEqual({ kind: 'lease-lost' });
+      const said = lines.join('\n');
+      expect(said).toContain('streaming: ');
+      // The head left; the held partial never did — only the *** the release flushed.
+      expect(said).not.toContain(KEY.slice(0, 12));
+      expect(said).not.toContain(KEY);
+      expect(said).toContain('***');
+    } finally {
+      for (const [n, v] of saved) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+describe('advanceHome — legs start from the claim\'s snapshot (B-228, R-BTN-34)', () => {
+  it('fast-forwards a clean home on the default branch; leaves one ahead, diverged, elsewhere or edited, saying why', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-228-'));
+    const g = (...a: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { encoding: 'utf8' }).trim();
+    try {
+      g('init', '-q', '-b', 'main');
+      writeFileSync(join(dir, 'f'), '1');
+      g('add', 'f');
+      g('commit', '-qm', 'one');
+      const one = g('rev-parse', 'HEAD');
+      writeFileSync(join(dir, 'f'), '2');
+      g('commit', '-qam', 'two');
+      const two = g('rev-parse', 'HEAD');
+      g('reset', '-q', '--hard', one);
+      // Behind, clean, on main: fast-forwarded to the snapshot.
+      expect(advanceHome(dir, two, 'main')).toBeNull();
+      expect(g('rev-parse', 'HEAD')).toBe(two);
+      // At the snapshot: nothing to do. Ahead of it: left as it is.
+      expect(advanceHome(dir, two, 'main')).toBeNull();
+      expect(advanceHome(dir, one, 'main')).toMatch(/is not behind the snapshot/);
+      expect(g('rev-parse', 'HEAD')).toBe(two);
+      // Tracked changes, or another branch: left as it is.
+      g('reset', '-q', '--hard', one);
+      writeFileSync(join(dir, 'f'), 'edited');
+      expect(advanceHome(dir, two, 'main')).toBe('the home has tracked changes');
+      g('checkout', '-q', '--', 'f');
+      g('checkout', '-q', '-b', 'claude/B-1-x');
+      expect(advanceHome(dir, two, 'main')).toBe('the home is on claude/B-1-x, not main');
+      expect(g('rev-parse', 'HEAD')).toBe(one);
+      // An untracked file does not stop it.
+      g('checkout', '-q', 'main');
+      writeFileSync(join(dir, 'scratch.txt'), 'x');
+      expect(advanceHome(dir, two, 'main')).toBeNull();
+      expect(g('rev-parse', 'HEAD')).toBe(two);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

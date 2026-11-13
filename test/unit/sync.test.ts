@@ -72,23 +72,55 @@ describe('POST /v1/sync/board', () => {
     ['a course file over 64 KiB with none in force', { ...payload(A, null, board.states.A), registry: [course(3, 3, { course: { pad: 'x'.repeat(65 * 1024) } })] }],
     ['a previous branch pattern without {ticket}', { ...payload(A, null, board.states.A), registry: [course(3, 3, { previous_branch_pattern: 'feature/*' })] }],
     ['65 step kinds', { ...payload(A, null, board.states.A), registry: [course(3, 3, { step_kinds: Array.from({ length: 65 }, (_, i) => `k${i}`) })] }],
-    ['a report horizon past 168 hours', { ...payload(A, null, board.states.A), registry: [course(3, 3, { report_horizon_h: 169 })] }],
     ['a version past the ceiling', { ...payload(A, null, board.states.A), registry: [course(1_000_000_001, 0)] }],
     ['an item naming a malformed course', { sha: A, parent_sha: null, state: { items: [{ id: 'R3-1', title: 't', status: 'available', queue: 'autonomous', node: 'blocked', course: 'Roadmap PR' }] }, ready: [] }],
-    ['an account list that is not a list', { ...payload(A, null, board.states.A), providers: { accounts: 'x', peak_schedules: [], models: [] } }],
-    ['an unknown billing kind', { ...payload(A, null, board.states.A), providers: { accounts: [{ id: 'zai', name: 'Z', billing: 'credits', window_limits: null }], peak_schedules: [], models: [] } }],
-    ['a model on an unknown schedule', { ...payload(A, null, board.states.A), providers: { accounts: [{ id: 'zai', name: 'Z', billing: 'api', window_limits: null }], peak_schedules: [], models: [{ provider: 'zai', model: 'm', monthly_limit_usd: null, peak_schedule: 'nope' }] } }],
-    ['a model on an unknown account', { ...payload(A, null, board.states.A), providers: { accounts: [], peak_schedules: [], models: [{ provider: 'zai', model: 'm', monthly_limit_usd: null }] } }],
-    ['a price pattern that does not compile', { ...payload(A, null, board.states.A), prices: { models: [{ match: '(', input: 1 }] } }],
-    ['a repeated peak schedule id', { ...payload(A, null, board.states.A), providers: { accounts: [], peak_schedules: [{ id: 'x', rules: { days: [1], hoursUtc: [[1, 2]] }, factor: 0.5 }, { id: 'x', rules: { days: [1], hoursUtc: [[1, 2]] }, factor: 0.5 }], models: [] } }],
-    ['a repeated (provider, model) pair', { ...payload(A, null, board.states.A), providers: { accounts: [{ id: 'zai', name: 'Z', billing: 'api', window_limits: null }], peak_schedules: [], models: [{ provider: 'zai', model: 'm', monthly_limit_usd: null }, { provider: 'zai', model: 'm', monthly_limit_usd: 1 }] } }],
-    ['a repeated account id', { ...payload(A, null, board.states.A), providers: { accounts: [{ id: 'zai', name: 'Z', billing: 'api', window_limits: null }, { id: 'zai', name: 'Z2', billing: 'api', window_limits: null }], peak_schedules: [], models: [] } }],
     ['a reviewer with no bills', { ...payload(A, null, board.states.A), matrix: { families: {}, agents: { 'review-pr-x': { reviews_on: 'm' } } } }],
   ])('refuses %s with invalid-params, writing nothing', async (_what, bad) => {
     const res = await syncCall('/v1/sync/board', bad);
     expect(res.status).toBe(400);
     expect((await body(res)).code).toBe('invalid-params');
     expect(await head()).toBeNull();
+  });
+
+  it('B-142: a post still carrying a providers block or prices is accepted and stores nothing', async () => {
+    // The fixture states are the real sync's buildPayload output, `providers` and `prices`
+    // included — the tables they wrote are gone (§6.3's readings are the replacement), so the
+    // window accepts the post and ignores both. Even a malformed advisory block no longer
+    // refuses: it is residue, read nowhere.
+    const res = await syncCall('/v1/sync/board', payload(A, null, board.states.A));
+    expect(res.status).toBe(200);
+    const residue = { providers: { accounts: 'not even a list' }, prices: { models: [{ match: '(', input: 'x' }] } };
+    expect((await syncCall('/v1/sync/board', payload(board.shas.B, A, board.states.B, residue))).status).toBe(200);
+    expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('model_providers', 'provider_models', 'peak_schedules')`)).toEqual([]);
+    expect(await head()).toBe(board.shas.B);
+  });
+
+  it('B-167: a post still carrying an ontology, or an entry its route choices, is accepted and stores nothing', async () => {
+    // §5.9's restructure took the ontology and route choices out of core: a sync older than
+    // B-167 keeps posting both, and the window takes the fields ignored — nothing is validated
+    // in them, nothing is stored, and the registry entry's own route_choices go the same way.
+    const retired = { ontology: { builtin: 'baton@1', program: { not: 'a program' } }, registry: [course(3, 3, { route_choices: { go: ['codegen'] } })] };
+    expect((await syncCall('/v1/sync/board', payload(A, null, board.states.A, retired))).status).toBe(200);
+    expect(await head()).toBe(A);
+    expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('ontologies', 'worker_derived', 'worker_derived_inputs', 'ontology_refusals', 'route_last')`)).toEqual([]);
+    expect(await rows(`SELECT name FROM pragma_table_info('courses') WHERE name IN ('route_choices_json', 'report_horizon_h')`)).toEqual([]);
+  });
+
+  it('B-168: an entry\'s report_horizon_h is ignored too, and each retired field is logged deprecated-field once a day', async () => {
+    // The history's Migrations entry "part 4's retired fields": accepted, read as absent, one
+    // `deprecated-field` event per credential, field and day.
+    const retired = { ontology: { builtin: 'baton@1' }, registry: [course(3, 3, { route_choices: { go: ['codegen'] }, report_horizon_h: 6 })] };
+    expect((await syncCall('/v1/sync/board', payload(A, null, board.states.A, retired))).status).toBe(200);
+    const logged = () => rows<{ field: string; actor: string; repository_id: string }>(
+      `SELECT json_extract(detail_json, '$.field') AS field, actor, repository_id FROM events WHERE kind = 'deprecated-field' ORDER BY seq`);
+    expect(await logged()).toEqual([
+      { field: 'board.ontology', actor: 'sync:docs', repository_id: 'docs' },
+      { field: 'registry.route_choices', actor: 'sync:docs', repository_id: 'docs' },
+      { field: 'registry.report_horizon_h', actor: 'sync:docs', repository_id: 'docs' },
+    ]);
+    // The same day's next post logs nothing more.
+    expect((await syncCall('/v1/sync/board', payload(board.shas.B, A, board.states.B, retired))).status).toBe(200);
+    expect(await logged()).toHaveLength(3);
   });
 
   it.skipIf(!inject('liveBoard'))("accepts what the docs sync builds for today's board, reference data included", async () => {
@@ -98,7 +130,9 @@ describe('POST /v1/sync/board', () => {
     const res = await syncCall('/v1/sync/board', payload('f'.repeat(40), null, live));
     expect(res.status).toBe(200);
     expect(await rows('SELECT count(*) AS n FROM tickets')).toEqual([{ n: live.state.items.length }]);
-    expect(await rows('SELECT count(*) AS n FROM model_providers')).toEqual([{ n: live.providers.accounts.length }]);
+    // B-142: the providers block the sync still posts is accepted and ignored — no table exists.
+    expect(live.providers.accounts.length).toBeGreaterThan(0);
+    expect(await rows(`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'model_providers'`)).toEqual([{ n: 0 }]);
     expect(await rows('SELECT count(*) AS n FROM reviewer_agents')).toEqual([{ n: Object.keys(live.reviewers).length }]);
   });
 });

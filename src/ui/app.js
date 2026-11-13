@@ -1,10 +1,11 @@
-// app.js — the dashboard (BATON_SPEC §14): Needs you, Running, Timeline, Ready, Providers,
-// Workers, Suspensions and Limits (owners, grants, owner bars and settings — read-only: the
+// app.js — the dashboard (BATON_SPEC §14): Needs you, Running, Timeline, Ready,
+// Workers and Limits (owners, grants, owner bars and settings — read-only: the
 // `baton` CLI changes them, R-BTN-66), with the owner's actions (status request, release,
-// force-reap, accept a held history, suspend and lift). At /login it trades the one-time token in
+// force-reap, accept a held history). At /login it trades the one-time token in
 // the URL's fragment for a session (R-BTN-57, R-BTN-16) and goes to /. It polls
 // GET /v1/ui/state every 10 seconds and renders with textContent only (§10.4): no markup is
-// ever built from server text.
+// ever built from server text. B-142: the model tables' views are gone — an unavailable
+// provider is a reading and a peak preference a course rule (§6.3, §6.10), not a dashboard row.
 
 const POLL_MS = 10_000;
 let state = null;
@@ -103,7 +104,13 @@ function renderBlocked() {
   const box = document.getElementById('blocked');
   box.replaceChildren();
   for (const t of state.blocked ?? []) {
-    const why = t.blocks.map((b) => `${b.kind} ${b.ref}${b.leg ? ` (${b.leg})` : ''}${b.until ? ` until ${fmtTime(b.until)}` : ''}`).join('; ');
+    // B-133: a decision block carries its computed options — what answering each does — beside
+    // the packet's own question; every other block prints as before.
+    const why = t.blocks.map((b) => {
+      if (b.kind !== 'decision') return `${b.kind} ${b.ref}${b.leg ? ` (${b.leg})` : ''}${b.until ? ` until ${fmtTime(b.until)}` : ''}`;
+      const options = (b.options ?? []).map((o) => `${o.id}: ${o.action}`).join('; ');
+      return `decision ${b.ref}${b.asks ? ` (asks ${b.asks})` : ''}${b.question ? ` — “${b.question}” (the ticket’s words)` : ''}${options ? ` — ${options}` : ''}`;
+    }).join('; ');
     box.append(el('li', { text: `${t.ticket_id}: blocked since ${fmtTime(t.since)} — ${why}` }));
   }
   if (!box.children.length) box.append(el('li', { text: 'No ticket is blocked.', cls: 'muted' }));
@@ -131,28 +138,6 @@ function renderResources() {
     box.append(el('li', { text: `${i.name}: ${i.state}${i.until ? ` until ${fmtTime(i.until)}` : ''} — serves ${i.serves.join(', ')}${i.repositories.length ? ` · for ${i.repositories.join(', ')}` : ''}` }));
   }
   if (!box.children.length) box.append(el('li', { text: 'No external resource is registered.', cls: 'muted' }));
-}
-
-function renderProviders() {
-  const box = document.getElementById('providers');
-  box.replaceChildren();
-  for (const p of state.providers) {
-    const card = el('div', { cls: 'card' }, el('h3', { text: p.name }), el('div', { text: `${p.id} · ${p.billing}`, cls: 'muted' }));
-    if (p.window_limits) {
-      card.append(el('div', { text: `Limits: ${Object.entries(p.window_limits).map(([w, f]) => `${Math.round(f * 100)}% per ${w}`).join(', ')}`, cls: 'muted' }));
-    }
-    for (const pk of p.peaks) {
-      const line = el('div');
-      line.append(el('span', { text: pk.in_peak ? 'Peak now' : 'Off-peak now', cls: pk.in_peak ? 'peak' : 'offpeak' }));
-      line.append(document.createTextNode(` (${pk.schedule}) · changes ${fmtTime(pk.next_change)}`));
-      card.append(line);
-    }
-    if (!p.peaks.length) card.append(el('div', { text: 'No peak schedule', cls: 'muted' }));
-    const limited = p.models.filter((m) => m.monthly_limit_usd != null);
-    if (limited.length) card.append(el('div', { text: `${limited.length} model(s) with a monthly limit`, cls: 'muted' }));
-    box.append(card);
-  }
-  if (!state.providers.length) box.append(el('p', { text: 'No provider data yet.', cls: 'muted' }));
 }
 
 /** An owner action (R-BTN-16: a JSON body from this Origin; the Access cookie authenticates it).
@@ -187,14 +172,12 @@ function renderWorkers() {
   body.replaceChildren();
   for (const w of state.workers) {
     const who = el('td', {}, el('div', { text: w.hostname }), el('div', { text: `${w.session_name} · ${w.harness} · ${w.kind} · ${w.isolation ?? 'process'} · #${w.id}`, cls: 'muted' }));
-    // §14: tier ceiling, capabilities, providers and lease timeout.
+    // §14: tier ceiling, capabilities and lease timeout.
     const caps = (w.capabilities ?? []).map((c) => c.capability).join(', ') || 'no capabilities';
-    const provs = (w.providers ?? []).map((p) => `${p.prefix}→${p.provider_id}`).join(', ') || 'no known accounts';
     // R-BTN-66: a ceiling per repository where the worker named one.
     const per = Object.entries(w.tier_ceilings ?? {}).map(([r, t]) => `${r} ${t}`).join(', ');
     who.append(el('div', { text: `ceiling ${w.tier_ceiling}${per ? ` (${per})` : ''} · lease ${Math.round(w.lease_timeout_ms / 60_000)} min`, cls: 'muted' }));
     who.append(el('div', { text: caps, cls: 'muted' }));
-    who.append(el('div', { text: provs, cls: 'muted' }));
     // R-BTN-48: the courses its checkouts run, flagged where below the course's minimum.
     const runs = (w.courses ?? []).map((c) => `${c.repository}:${c.course} v${c.version}${c.min_worker_version != null && c.version < c.min_worker_version ? ` (below ${c.min_worker_version})` : ''}`).join(', ') || 'declares no course';
     who.append(el('div', { text: runs, cls: 'muted' }));
@@ -230,47 +213,10 @@ function renderWorkers() {
         }));
       }
     }
-    body.append(el('tr', {}, who, el('td', { text: `${w.model_id ?? '—'}${w.model_provider_id ? ` (${w.model_provider_id})` : ''}` }), stateCell, claim, activity, el('td', { text: report, cls: 'muted' }), actions));
+    body.append(el('tr', {}, who, el('td', { text: w.model_id ?? '—' }), stateCell, claim, activity, el('td', { text: report, cls: 'muted' }), actions));
   }
   if (!state.workers.length) body.append(el('tr', {}, el('td', { text: 'No worker has sent a heartbeat.', attrs: { colspan: '7' }, cls: 'muted' })));
 }
-
-function renderSuspensions() {
-  const list = document.getElementById('suspensions');
-  list.replaceChildren();
-  for (const s of state.suspensions) {
-    const when = s.starts_at > state.server_time ? `from ${fmtTime(s.starts_at)}` : 'in force';
-    const li = el('li', { text: `${s.provider_id}${s.model_id ? ` / ${s.model_id}` : ''} · ${s.mode} · ${when}${s.ends_at ? ` until ${fmtTime(s.ends_at)}` : ''}${s.reason ? ` · ${s.reason}` : ''}` });
-    li.append(button('Lift', () => act(`/v1/ui/suspensions/${s.id}/lift`)));
-    list.append(li);
-  }
-  if (!state.suspensions.length) list.append(el('li', { text: 'No account is suspended.', cls: 'muted' }));
-  const select = document.getElementById('s-provider');
-  const chosen = select.value;
-  select.replaceChildren(...state.providers.map((p) => el('option', { text: p.name, attrs: { value: p.id } })));
-  if (chosen) select.value = chosen;
-}
-
-/** datetime-local is the viewer's local time; empty means "now" (start) or "until lifted" (end). */
-const localMs = (id) => {
-  const v = document.getElementById(id).value;
-  return v ? new Date(v).getTime() : undefined;
-};
-
-document.getElementById('suspend').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const body = { provider_id: document.getElementById('s-provider').value, mode: document.getElementById('s-mode').value };
-  const model = document.getElementById('s-model').value.trim();
-  const reason = document.getElementById('s-reason').value.trim();
-  if (model) body.model_id = model;
-  if (reason) body.reason = reason;
-  const starts = localMs('s-start');
-  const ends = localMs('s-end');
-  if (starts !== undefined) body.starts_at = starts;
-  if (ends !== undefined) body.ends_at = ends;
-  if (body.mode === 'stop' && !confirm('Stop sends a release to every holder on this account. Continue?')) return;
-  act('/v1/ui/suspensions', body);
-});
 
 const minutes = (ms) => `${Math.round(ms / 60_000)} min`;
 
@@ -357,6 +303,15 @@ function renderNeeds() {
   const n = state.needs_you;
   const list = document.getElementById('needs');
   list.replaceChildren();
+  // B-133 (R-BTN-116): a person leg's question, each option with its computed action — where
+  // the ticket lands and what queues there — beside the packet's words. Nothing is pre-selected;
+  // the owner answers with `baton decision answer` naming the option.
+  for (const q of n.questions ?? []) {
+    const options = (q.options ?? []).map((o) => `${o.id} → ${o.action}`).join(' · ');
+    const li = el('li', { text: `${q.ticket_id} — ${q.title}: ${q.question_id ?? q.leg} asks ${q.asks}${q.severity ? ` (${q.severity})` : ''} — ${options}${q.expires_at ? ` · expires ${fmtTime(q.expires_at)}` : ''}` });
+    if (q.url) li.append(document.createTextNode(' '), httpsLink('the ticket', q.url));
+    list.append(li);
+  }
   for (const c of n.unconfirmed) {
     // §6.7: never confirmed automatically; the owner confirms it or releases it.
     const li = el('li', { text: `${c.ticket_id}: completed ${fmtTime(c.ended_at)} (${c.end_reason}) at ${short(c.ended_at_sha)}, not confirmed by git after 6 h` });
@@ -412,8 +367,26 @@ function renderNeeds() {
     const first = c.violations[0];
     list.append(el('li', { text: `${c.repository_id}:${c.course_id} version ${c.version} refused at ${c.snapshot_sha.slice(0, 8)} (${c.violations.length} problem${c.violations.length === 1 ? '' : 's'}${first ? `, first: ${first.path || 'the file'} — ${first.message}` : ''}); the previous file stays in force` }));
   }
+  // B-127: an unsigned change to a control input of a repository that requires them signed —
+  // the last owner-signed version stays in force until an owner signs the state once.
+  for (const u of n.unsigned_control ?? []) {
+    const changes = (u.changes ?? []).map((c) => `${c.path} @ ${(c.commits ?? [])[0] ? c.commits[0].slice(0, 8) : '?'}`).join(', ');
+    list.append(el('li', { text: `${u.repository_id}: control inputs changed with no owner signature at ${short(u.sha)} — the last signed version stays in force (${changes || 'no paths listed'}${u.omitted ? `, +${u.omitted} more` : ''})` }));
+  }
   // R3-1239: the BATON_KEYS seed; the keys in force stay until a list seeds.
   if (n.keys?.refused) list.append(el('li', { text: `BATON_KEYS was refused (${n.keys.refused}); the keys in force stay` }));
+  // B-134: a leg reported outside its ticket's scope, and a worker push no open claim covers —
+  // each open until an owner resolves it.
+  for (const s of n.scope ?? []) {
+    const what = s.kind === 'unclaimed-write'
+      ? `a push by a named worker pusher to ${s.target}, which no open claim covers`
+      : `a leg of ${s.ticket_id} pushed to ${s.target}${s.detail?.ref ? ` (${s.detail.ref})` : ''}, outside its ticket's scope`;
+    const li = el('li', { text: `${s.repository_id}: ${s.kind} — ${what}, since ${fmtTime(s.raised_at)}` });
+    li.append(document.createTextNode(' '), button('Resolve', () => {
+      if (confirm(`Resolve ${s.repository_id}'s ${s.kind} on ${s.target}: it was looked into?`)) act(`/v1/ui/scope/${s.id}/resolve`, {});
+    }));
+    list.append(li);
+  }
   // R-BTN-75, R-BTN-76: a day blocked on a capability no live worker has; an instance a posted leg
   // needs that no instrument has reported on for a day.
   for (const b of n.blocked_capability ?? []) list.append(el('li', { text: `${b.ticket_id}: blocked since ${fmtTime(b.since)} on ${b.capability}, which no live worker declares` }));
@@ -423,13 +396,6 @@ function renderNeeds() {
   // R-BTN-103: a pool copy no worker courier took for an hour; owner decisions no person hears of.
   for (const p of n.pool_unclaimed ?? []) list.append(el('li', { text: `${p.ticket_id}: decision ${p.decision}'s pool copy unclaimed since ${fmtTime(p.since)} — no worker courier is delivering ${p.repository_id}` }));
   for (const r of n.no_owner_channel ?? []) list.append(el('li', { text: `${r.repository_id}: ${r.decisions} owner decision${r.decisions === 1 ? '' : 's'} open and no personal courier for owner — baton owner courier add` }));
-  // B-126 (R-BTN-194): a control input changed by a pusher who is not an owner's recorded forge
-  // identity — detection only; nothing was held, the owner is told whose push it was.
-  for (const c of n.control_changes ?? []) {
-    const who = (c.changes ?? []).flatMap((x) => x.pushers ?? []).map((p) => p.login ?? p.id ?? 'pusher-unknown');
-    const paths = (c.changes ?? []).map((x) => x.path ?? (x.fields?.length ? `its ${x.fields.join(', ')}` : 'paths not recordable (delivery truncated)'));
-    list.append(el('li', { text: `${c.repository_id}: control inputs changed at ${short(c.sha)} by ${[...new Set(who)].join(', ') || 'pusher-unknown'} — ${[...new Set(paths)].join(', ')}; record the owner's forge ids with baton owner identity add` }));
-  }
   for (const fp of n.keys?.revoked_listed ?? []) list.append(el('li', { text: `BATON_KEYS names ${fp}, a revoked key: it stays revoked — give the machine a new key` }));
   for (const h of n.held_items) {
     // §6.10: the owner decides what a hold means — retry (Lift), re-draft, re-tier or park.
@@ -516,8 +482,6 @@ function renderLimits() {
     if (transcripts) parts.push(`transcripts: ${transcripts.join(', ')}`);
     const trigger = parsed(s.unblocked_trigger, null);
     if (trigger) parts.push(`unblocked trigger: ${trigger.kind}${trigger.workflow ? ` ${trigger.workflow}` : ''}${trigger.ref ? ` @${trigger.ref}` : ''}`);
-    // R-BTN-106: the legs a key that ran any of the named ones may not take.
-    for (const [leg, from] of Object.entries(parsed(s.required_independence, {}))) parts.push(`${leg}: not by a key that ran ${from.join(', ')}`);
     if (s.remind_after != null) parts.push(`reminders after ${s.remind_after % 3600 ? `${Math.round(s.remind_after / 60)} min` : `${s.remind_after / 3600} h`}`);
     return `${s.repository_id}: ${parts.join(' · ')}`;
   }), 'No repository is registered.');
@@ -529,13 +493,11 @@ function render() {
   renderBlocked();
   renderDiscrepancies();
   renderResources();
-  renderProviders();
   renderMode();
   renderNeeds();
   renderRunning();
   renderTimeline();
   renderWorkers();
-  renderSuspensions();
   renderLimits();
   document.getElementById('status').textContent = `Updated ${fmtTime(state.server_time)}`;
 }

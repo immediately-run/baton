@@ -1,0 +1,112 @@
+---
+title: "B-200 — Governance, read-only: /policy shows the policy in force with its guarantees, floors and log; /settings the owner settings and the registry's tiers and weight; /bars the owner and required bars; /consents the code-repository consents"
+id: B-200
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1199
+tier: judgement
+description: "Four read-only governance screens of BATON-UI-V2 under /repositories/{r}, from reads that exist and admit a session since B-192: /policy from GET …/policy and GET /v1/owner/{repository}/policy/log (version, hash, preset, the document as pretty-printed text, guarantees met with the floors marked, check app id, the versions log); /settings from the grants read's settings and repo.list's tiers and weight; /bars from the grants read's bars and settings (owner bars in force or scheduled with set_by shown with its MCP key's name, required bars); /consents from B-199's consents field. Each names the R-BTN-127 command that changes it; no control, since policy, settings, bars and consents are keys' and approvers' writes. Requires: B-208, B-199."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-208
+  - B-199
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Governance** — `/policy`, `/settings`, `/bars`,
+`/consents`, `/attestations` — the knobs, floors, bars and people's signed statements."
+Attestations are B-213's; this ticket is the four read-only screens.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (read-only limits),
+[§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8):
+the policy and its log; [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8): guarantees and
+floors; [R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8): a lift is an approver's),
+[§13.1](../spec/BATON_SPEC/13-data-model.md#sec-13-1) (owner settings), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)
+([R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): what lives in Baton),
+[§5.6](../spec/BATON_SPEC/05-courses.md#sec-5-6) ([R-BTN-67](../spec/BATON_SPEC/05-courses.md#sec-5-6):
+owner bars and required bars), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)
+([R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4): consents),
+[§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3):
+`set_by: mcp:<id>` shown with its name; [R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3)),
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) (`GET …/policy`, `…/policy/log`, the grants read).
+
+**Depends on:** B-208 (the shell), B-199 (the grants read's `consents`; the session callers on
+`policy` and `policy/log` are B-192's).
+
+**Used by:** B-203.
+
+### What to build
+
+1. **`/repositories/{r}/policy`** (`src/dashboard/screens/governance/`): from `GET …/policy`
+   — version, hash, the preset if one was applied, `check_app_id`, the document pretty-printed
+   as text (§12.3: a blob), the `guarantees` as a list with a mark per guarantee met and the
+   `floors` among them marked as floors (R-BTN-189); below, `…/policy/log` as a `<table>` —
+   version, hash, previous hash, changed by, approver, preset, at, changed keys — newest first,
+   with "earlier" by `?after=`. `baton owner policy set <repository> <file>` and `baton owner
+   policy apply <repository> <preset>` as text.
+2. **`/repositories/{r}/settings`**: the grants read's `settings` — every §13.1 owner setting
+   (`code_repos`, `retry`, `transcript_repos`, `api_keys`, `scope_policy` and the rest the data
+   model lists), each as its value as text with the one-line meaning the data model gives it —
+   and the repository's `tiers` and `weight` from `repo.list` (B-204 carries them so an owner's
+   session needs no administrator read). `baton owner settings set <repository> […]` as text.
+3. **`/repositories/{r}/bars`**: the owner bars in force and scheduled (course, tag, legs,
+   applies, starts, ends, release holders, reason, set by — `mcp:<id>` drawn with the key's
+   name by joining `mcp_keys[].id`, which B-199 adds to the read) and the required bars (course, except legs, tag prefix) from the
+   grants read's `bars` and `settings`; `baton owner bar add …`, `baton owner bar lift
+   <repository> <id>` and `baton owner bar follow <repository> <course>` as text — a lift is an
+   approver's by key (R-BTN-186), not a session's.
+4. **`/repositories/{r}/consents`**: from the grants read's `consents` — each home listing this
+   repository, consented or not, by whom and when, withdrawn when; `baton owner consent add
+   <repository> <home>` and `… withdraw …` as text.
+5. **Phone.** Tables collapse to cards at 375 px; the policy document scrolls inside its box.
+
+### What not to do
+
+- No write: policy, settings, bars and consents are keys' and approvers' (R-BTN-186,
+  R-BTN-188); the screens name the commands.
+- No guarantee or floor computed in the app: `guarantees` and `floors` are the read's.
+- No attestation here (B-213).
+
+### Trust
+
+- **The reads** — Baton's rows and the policy document as an opaque blob (§12.3), drawn
+  through `Text` and as pretty-printed JSON; `set_by`, reasons and preset names as text; an
+  owner's session on its repositories. Nothing is written.
+
+### Invariants
+
+- **The policy is held in Baton, never in git** (R-BTN-188), shown from the read.
+- **Floors are Baton's refusals** (R-BTN-189): marked, never enforced here.
+- **Read-only** (§11.4); **text, never markup** (§12.3); **an owner's session, its repositories**
+  (R-BTN-155).
+
+### Tests
+
+Under `test/ui/` with fixtures (a `protected` policy with two versions, a scheduled bar set over
+MCP, a required bar, one consent): the policy screen marks the floors and lists the log; the
+settings screen shows `tiers` and `weight` from `repo.list`; the bars screen draws `mcp:<id>` with
+its name; the consents screen lists the home; every command line matches R-BTN-127's tree (the
+same test as B-199's); no control is drawn; a hostile reason is text.
+
+### Exit criteria
+
+- [ ] The four screens built, read-only, each naming its verified command.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09._
+
+_2026-11-09 — revised after review: the attestations read and screen split out to B-213;
+`consents` taken from B-199's read; the `policy/log` hedge removed; `tiers` and `weight` from
+`repo.list`._
+
+_2026-11-09 — revised after the second review: the `mcp:<id>` join names B-199's `id`._

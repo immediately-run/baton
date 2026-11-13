@@ -30,6 +30,8 @@ same day.
 its lane bound); §6.1 (prerequisites, `depends_on`); R-BTN-98 (Baton runs no repository code);
 R-BTN-33 (filter fields only); R-BTN-47 (home, qualified ids); §7.1 (the board post).
 **Depends on:** none.
+
+**Used by:** B-198 (the Goals screen draws this read).
 **Waits on:** B-113 (a dependency naming another repository's ticket). A goal whose `needs`
 stay in its own home works without it.
 
@@ -74,7 +76,13 @@ written: once, in a pull request the owner reviews. Everything after that is a g
    goal, its open work and done count, the ready tickets in order, and the blocked ones with
    their blocks (R-BTN-75), so Needs you shows when a goal waits on a person rather than on
    runners. A goal whose `needs` are all done is shown as met; the file's `status: met` is
-   git's to write.
+   git's to write. The read's row, stated here once so the Goals screen (B-198) adds nothing:
+   callers the repository reads' principals and a dashboard session; per goal `id`, `title`,
+   `status`, `priority`, `exclusive`, `needs`, `open` (the open work in Baton's order, each
+   ticket with its position — station and queued leg, R-BTN-83 — and its `critical_path`
+   length), `done` (count and ids) and `blocked` (each open ticket with its blocks and, where a
+   block is an open condition, its `condition_id`). No state word: that is the ticket list's
+   (B-194), and the Goals screen draws the position and a blocked mark.
 7. **The vocabulary page** gains **Goal**: "A named objective in a home repository: the
    tickets it needs, and its priority. Baton ranks a goal's open work first, by priority."
 

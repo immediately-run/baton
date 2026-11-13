@@ -2,8 +2,8 @@
 // `cloudflare` project runs every test in the Workers runtime; the `local` project runs every
 // integration scenario again against the local Node host (R-BTN-55), plus the tests only Node
 // can run. The test signing keys are made here, per run, and exist only in these bindings:
-// wrangler.toml has no BATON_TEST_BINDINGS, so no deployed Worker — baton-staging included —
-// ever trusts them, and a local start refuses them (src/local/main.ts).
+// wrangler.toml has no BATON_TEST_BINDINGS, so the deployed Worker never trusts them, and a
+// local start refuses them (src/local/main.ts).
 import { configDefaults, defineConfig, type Plugin } from 'vitest/config';
 import { cloudflareTest } from '@cloudflare/vitest-plugin';
 import { exportJWK, generateKeyPair } from 'jose';
@@ -16,7 +16,7 @@ import { makeKey } from './test/lib/sshKeys.ts';
  *  TOKEN_HASHES and CREDENTIALS Worker secrets take in production (R3-1208). The `test`
  *  credential exists only here, and only it may send test_harness (R-BTN-32). */
 export const TEST_TOKENS = { 'vm-a': 'tok-vm-a', mac: 'tok-mac', test: 'tok-test', 'vm-b': 'tok-vm-b' };
-// B-104: the holdings the ontology tests declare too — a seed credential's allow-list is its
+// B-104: the holdings the runner tests declare too — a seed credential's allow-list is its
 // grant, so rule 4's H = declared ∩ allow-list needs them listed here.
 const VENUE = ['agent-venue', 'authentication', 'llm-call', 'create-pr', 'drivable-browser', 'mcp-chrome', 'none',
   'key:anthropic', 'key:zai', 'key:opencode-go', 'key:deepinfra', 'dependency:claude-code', 'dependency:opencode-v2', 'capability:code-generation-llm', 'capability:review-llm'];
@@ -38,10 +38,11 @@ async function testKeys() {
 }
 
 /** wrangler.toml's top-level `[vars]`: the production Worker's settings, which the local
- *  project's host takes too, so both hosts run with the same values. */
+ *  project's host takes too, so both hosts run with the same values. The block runs to the next
+ *  section header or to the end of the file — since B-224 removed `[env.staging]`, it is last. */
 function wranglerVars(): Record<string, string> {
   const toml = readFileSync(resolve(import.meta.dirname, 'wrangler.toml'), 'utf8');
-  const block = /^\[vars\]\n([\s\S]*?)(?=^\[)/m.exec(toml)?.[1] ?? '';
+  const block = /^\[vars\]\n([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(toml)?.[1] ?? '';
   // Basic strings ("…") and TOML literal strings ('…', for JSON values).
   return Object.fromEntries([...block.matchAll(/^([A-Z_]+) = (?:"([^"]*)"|'([^']*)')$/gm)].map((m) => [m[1], m[2] ?? m[3]]));
 }
@@ -82,9 +83,10 @@ const SCRIPT_TESTS = ['scripts/**/*.test.mjs'];
 /** The tests only the local project runs: they need Node (the request queue, the file scan,
  *  the runner's leg child processes, the model replay). It also runs every integration scenario
  *  and the mirror's unit tests (S-BTN-14's server half). */
-const NODE_ONLY = ['test/unit/routes.test.ts', 'test/unit/spec-files.test.ts', 'test/unit/ontology-conformance.test.ts', 'test/unit/local-queue.test.ts', 'test/unit/boundary-host.test.ts', 'test/unit/cli.test.ts', 'test/model/replay.test.ts', 'test/unit/check-traces.test.ts', 'test/unit/runner-main.test.ts', 'test/unit/runner-bundle.test.ts', 'test/integration/S-BTN-41.runner.test.ts', 'test/integration/S-BTN-26.runner.test.ts', 'test/integration/S-BTN-21.machine-lock.test.ts', 'test/unit/test-course.test.ts', 'test/unit/stats-size.test.ts', 'test/integration/S-BTN-43.defaults.test.ts', 'test/unit/defaults-cli.test.ts', 'test/unit/standard-courses.test.ts', 'test/unit/ticket-state.test.ts', 'test/unit/bounded-git.test.ts', 'test/integration/S-BTN-104.standard-courses.test.ts', 'test/integration/S-BTN-105.course-sources.test.ts', 'test/integration/S-BTN-106.cross-repo-prs.test.ts', 'test/integration/S-BTN-107.build-app-course.test.ts', 'test/integration/S-BTN-174.create-spec.test.ts', 'test/integration/S-BTN-157.busy-sync.test.ts', 'test/unit/sign.test.ts', 'test/integration/S-BTN-156.sync-key.test.ts', 'test/integration/S-BTN-147.runner-half.test.ts', 'test/unit/seed-owners-fresh.test.ts', 'test/unit/tickets-check.test.ts', 'test/unit/tickets-commands.test.ts', 'test/integration/S-BTN-189.ticket-commands.test.ts', 'test/unit/request.test.ts', 'test/unit/request-round2.test.ts', 'test/unit/request-round4.test.ts', 'test/integration/S-BTN-172.ticket-check.test.ts', 'test/unit/check-wiki-vocabulary.test.ts', 'test/unit/pr-markers.test.ts', 'test/unit/cloud-runner.test.ts', 'test/unit/safe-render.test.ts'];
-/** `BATON_SKIP_QUINT=1` (`npm run test:no-quint`, what hosted CI runs) leaves out the one test
- *  that runs quint, the model-drawn replay (R3-1244); `npm test` and `npm run model:full` run it. */
+const NODE_ONLY = ['test/unit/spec-files.test.ts', 'test/unit/local-queue.test.ts', 'test/unit/boundary-host.test.ts', 'test/unit/cli.test.ts', 'test/model/replay.test.ts', 'test/unit/check-traces.test.ts', 'test/unit/runner-main.test.ts', 'test/unit/runner-bundle.test.ts', 'test/unit/runner-mask.test.ts', 'test/integration/S-BTN-41.runner.test.ts', 'test/integration/S-BTN-26.runner.test.ts', 'test/integration/S-BTN-21.machine-lock.test.ts', 'test/unit/test-course.test.ts', 'test/unit/stats-size.test.ts', 'test/integration/S-BTN-43.defaults.test.ts', 'test/unit/defaults-cli.test.ts', 'test/unit/standard-courses.test.ts', 'test/unit/ticket-state.test.ts', 'test/unit/bounded-git.test.ts', 'test/integration/S-BTN-104.standard-courses.test.ts', 'test/integration/S-BTN-105.course-sources.test.ts', 'test/integration/S-BTN-106.cross-repo-prs.test.ts', 'test/integration/S-BTN-107.build-app-course.test.ts', 'test/integration/S-BTN-174.create-spec.test.ts', 'test/integration/S-BTN-157.busy-sync.test.ts', 'test/unit/sign.test.ts', 'test/integration/S-BTN-156.sync-key.test.ts', 'test/integration/S-BTN-204.runner-half.test.ts', 'test/integration/S-BTN-209.executor-sources.test.ts', 'test/integration/S-BTN-210.exec-calls.test.ts', 'test/unit/seed-owners-fresh.test.ts', 'test/unit/tickets-check.test.ts', 'test/unit/ticket-pr.test.ts', 'test/unit/tickets-commands.test.ts', 'test/integration/S-BTN-189.ticket-commands.test.ts', 'test/unit/request.test.ts', 'test/unit/request-round2.test.ts', 'test/unit/request-round4.test.ts', 'test/integration/S-BTN-172.ticket-check.test.ts', 'test/unit/check-wiki-vocabulary.test.ts', 'test/unit/pr-markers.test.ts', 'test/unit/cloud-runner.test.ts', 'test/unit/start-runner.test.ts', 'test/unit/safe-render.test.ts', 'test/integration/S-BTN-202.runner-scope.test.ts', 'test/integration/S-BTN-207.ticket-versions-sync.test.ts', 'test/integration/S-BTN-214.local-home.test.ts', 'test/integration/S-BTN-216.ids-decide.test.ts', 'test/integration/S-BTN-217.cross-host-pushers.test.ts', 'test/unit/signed-control.test.ts', 'test/integration/S-BTN-219.require-signed-control.test.ts', 'test/unit/dependency-hygiene.test.ts'];
+/** `BATON_SKIP_QUINT=1` (`npm test`, what hosted CI runs) leaves out the model-drawn replay
+ *  (R3-1244); test/unit/check-traces.test.ts skips its own Quint cases on the same variable.
+ *  `npm run test:full` and `npm run model:full` run them. */
 const QUINT_TESTS = process.env.BATON_SKIP_QUINT === '1' ? ['test/model/replay.test.ts'] : [];
 const host = (name: string) => ({ '#host': resolve(import.meta.dirname, `test/hosts/${name}.ts`) });
 

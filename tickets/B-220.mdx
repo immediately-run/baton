@@ -1,0 +1,89 @@
+---
+title: "B-220 — The Sync screen: /sync draws the mirror's view with Resync and Accept as one click, and the administrator's Force resync, Cut over and Confirm adoption through the confirmation-code dialog"
+id: B-220
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1219
+tier: judgement
+description: "The screen of BATON-UI-V2's Sync entity on B-201's read: the mode banner (SHADOW, with Cut over for an administrator's session), the head line linking the forge commit with Resync and, for an administrator, Force resync onto a sha; the observation counter with an outstanding number's age; the last post and its refusal spelt out; wants and dispatches; held posts with Accept; pending adoptions with Confirm adoption; and Discrepancies as the mockup's table — kind, ticket linking its history, Baton had struck through as a style on text, Git showed, observation, age — with ?since= as URL query. 375 px. Requires: B-201, B-207."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-201
+  - B-207
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "**Sync** `/sync` — the mirror's view … and
+Discrepancies." The mockup's Discrepancies table and its SHADOW banner with "Cut docs over…" are
+this screen's rows; its "Accept history" is not built (R-BTN-85, B-191's drop list).
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the Sync screen, carrying
+the retired Discrepancies view; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): forced
+resync, cut over and an adoption confirm are confirmed; resync and accept are not),
+[§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) ([R-BTN-85](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7)),
+[§16.1](../spec/BATON_SPEC/16-adoption.md#sec-16-1) ([R-BTN-28](../spec/BATON_SPEC/16-adoption.md#sec-16-1)),
+[§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) ([R-BTN-92](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1):
+the forge link from `web_base`), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`POST /v1/ui/cutover`,
+`POST /v1/ui/adoptions/{claim}/confirm`, B-201's rows).
+
+**Depends on:** B-201 (the read and the two writes), B-207 (controls and dialogs).
+
+**Used by:** B-203.
+
+### What to build
+
+1. **`/repositories/{r}/sync`** (`src/dashboard/screens/sync/`), sections in this order, every
+   control through B-207 by `ui.view` with context `{repository, sha, claim, runner_id}` as each
+   needs: the mode banner (the mockup's `SHADOW` line; **Cut over** for an administrator's
+   session, the code dialog); the head line — sha linking the forge commit through `web_base`
+   (R-BTN-92), age, ticket count, source kind — with **Resync** (one click) and, for an
+   administrator's session, **Force resync onto …** (a `sha` field; the code dialog); the
+   observation counter with an outstanding number's age, marked past 10 minutes; the last post
+   and its refusal code spelt out as text; wants and dispatches; held posts with their
+   auto-accept time and **Accept** (one click, `repo.accept-post`); pending adoptions with
+   **Confirm adoption** (an administrator's; the code dialog, naming the requesting runner as
+   the read shows it); and **Discrepancies** as the mockup's `<table>` — kind (`sub`), ticket
+   linking its page's history section, "Baton had" (`baton`, struck through as a style on a
+   text node), "Git showed" (`git`), observation, age — with `?since=` as URL query.
+2. **Phone.** The banner, head line and Resync fit 375 px; the table collapses to cards.
+
+### What not to do
+
+- No sync logic in the client; no "Accept history"; no count of its own (the sidebar's Sync
+  entry draws `repo.list.discrepancies_7d`, B-208).
+- No forced resync elsewhere: B-214's registry screen names `baton admin repo resync` as text.
+
+### Trust
+
+- **Every value** is the read's text through `Text`; the forge link from `web_base` only.
+- **Resync and Accept** — one click through `authorize`; **Force resync, Cut over, Confirm
+  adoption** — an administrator's session, confirmed by the minting key (R-BTN-155).
+
+### Invariants
+
+- **R-BTN-155's confirmed list** as B-201 states it; **text, never markup** (§12.3); **an owner's
+  session, its repositories**.
+
+### Tests
+
+Under `test/ui/` with fixture reads and a fixture `GET /v1/actions`: Resync and Accept send with
+no dialog; Force resync, Cut over and Confirm adoption draw only for an administrator's entries
+and open the code dialog; the table links each ticket's history; the outstanding observation is
+marked past 10 minutes; a hostile `git` value is text; `?since=` round-trips.
+
+### Exit criteria
+
+- [ ] `/sync` built with its controls by role, usable on a local Baton at desktop and 375 px.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-201 after the second review._

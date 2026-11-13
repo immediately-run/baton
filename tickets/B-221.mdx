@@ -1,0 +1,98 @@
+---
+title: "B-221 — The shell's machinery: the router generated from screens.ts with the repository picker, one polling layer with ETag and freshness, the two refusal screens, light and dark, and the 375 px drawer"
+id: B-221
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1220
+tier: judgement
+description: "The third shell ticket of BATON-UI-V2: a client router generated from src/core/screens.ts (each path pattern to a screen component registered by id; history push, back, forward and reload; an unregistered screen says 'not built yet'; role: administrator screens hidden from an owner); one polling layer — a screen declares its reads, fetched together every 10 seconds with If-None-Match, last good answer kept on error, paused while hidden, stopped on unauthenticated, GET /v1/actions re-read on sign-in and every 60 seconds — with the freshness line; the two refusal screens §11.4 words; prefers-color-scheme light and dark with a three-way override in localStorage; and at 375 px the sidebar as a drawer. Requires: B-206, B-205."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-206
+  - B-205
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): the dashboard is "a walk down the same tree the URLs
+already draw". The mockup's phone render stacks the sidebar under the content; this ticket uses
+a drawer instead (a deep screen needs its navigation without scrolling) — recorded as a
+decision here.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the screens, polling,
+refusal and strip rules as B-191 amends them; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4):
+an owner's session sees no administrator screen), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3)
+(Admission: 600 calls a minute per credential), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (the
+error codes). Context: the brief — phone-readable, light and dark, accessible.
+
+**Depends on:** B-206 (the frame, `Text`, `View`, sign-in), B-205 (ETag on every session read).
+
+**Used by:** B-207, B-208, and through them every screen ticket; B-210, B-212 (the router and polling layer).
+
+### What to build
+
+1. **The router.** Client-side, generated from `src/core/screens.ts` (B-193's table, imported
+   into the bundle as data): each entry's `path` pattern maps to a screen component registered
+   by `id` under `src/dashboard/screens/`; history push on navigation, back and forward and
+   reload land on the same screen; an unregistered screen id draws "not built yet" with the
+   screen's name (the screen tickets fill them); a `role: administrator` screen is hidden from
+   an owner's session (and refused by the server anyway). The root `/` is B-208's screen.
+2. **The polling layer.** `useReads([...])`: a screen's reads are fetched together every 10
+   seconds with `If-None-Match` (B-205); the last good answer is kept on an error; polling
+   pauses while `document.visibilityState` is hidden and fetches at once on return; it stops
+   and shows sign-in on `unauthenticated`; `GET /v1/actions` is re-read on sign-in and every 60
+   seconds for B-207; the code dialog's 5-second poll (B-207) is the one exception B-191
+   records. Freshness ("updated 7 s ago", "stale since 12:04 — forbidden") is measured from the
+   last `200` or `304` by the browser's clock and drawn in the sidebar's line. Worst case is
+   well under §2.3's 600 calls a minute per credential.
+3. **Refusals**, one component with §11.4's wording: a repository the session cannot read or
+   none — "This repository is not yours or does not exist", linking `/`; an entity not found —
+   "No such ticket" (condition, runner, course, goal) with the id as text. Any other code is
+   drawn as the code and message, as text, in the freshness line.
+4. **Theme, size, access.** `prefers-color-scheme` light and dark through CSS custom properties
+   with a three-way override (system, light, dark) in the footer kept in `localStorage` — the
+   only thing stored there; at 375 px the sidebar is a drawer opened from the header, the main
+   column single; headings per section; every control reachable by keyboard; focus visible;
+   state never by colour alone.
+5. **Tests** under `test/ui/`: the router maps every `screens.ts` entry and hides
+   `role: administrator` entries for an owner; back and reload keep the screen; the polling
+   layer sends `If-None-Match`, keeps the last answer on an error, pauses when hidden, stops on
+   `unauthenticated`, re-reads actions every 60 s; both refusal wordings; the drawer at 375 px;
+   the theme override round-trips.
+
+### What not to do
+
+- No entity screen, no control, no dialog (B-207, B-208 and the screen tickets).
+- No permission logic beyond hiding administrator screens by the session's role.
+- No `localStorage` beyond the theme override; no polling while hidden; no router library.
+
+### Trust
+
+- **The URL** is matched against `screens.ts` and sent to the server as-is; the client
+  interprets nothing.
+- **Refusal codes and messages** are text through `Text`.
+
+### Invariants
+
+- **One polling rule** (§11.4). **R-BTN-155**: an owner's session sees no administrator screen.
+- **The brief's constraints**: 375 px, light and dark, keyboard, course-agnostic.
+
+### Tests
+
+Named in item 5.
+
+### Exit criteria
+
+- [ ] The router, polling layer, refusals, theme and drawer work on a local Baton for both roles.
+- [ ] The tests pass; `npm test`, `npm run typecheck`, `npm run check:wiki` and
+      `npm run check:tickets` are green.
+
+## Status
+
+_filed 2026-11-09, split from B-206 after the second review._

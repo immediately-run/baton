@@ -125,6 +125,32 @@ describe('the standard courses (R-BTN-131)', () => {
     }
   });
 
+  // B-132 (dependency hygiene, OWASP ASI04): the instruction, not a scanner, is the instrument —
+  // the words are where the agents read them, and this repository's own legs run its own copies.
+  it("create-pr's implement and fix instructions carry the dependency-hygiene rules, and this repository's own .baton copies with them (B-132)", () => {
+    for (const leg of ['implement', 'fix']) {
+      for (const dir of [instructionsDir('create-pr'), join(__dirname, '..', '..', '.baton', 'courses', 'create-pr', 'legs')]) {
+        const text = readFileSync(join(dir, `${leg}.md`), 'utf8');
+        expect(text, `${dir} ${leg}.md installs from the lockfile only`).toContain('`npm ci`');
+        expect(text, `${dir} ${leg}.md installs with lifecycle scripts off`).toContain('ignore-scripts');
+        expect(text, `${dir} ${leg}.md names the allow list`).toContain('allow_install_scripts');
+      }
+    }
+  });
+
+  it("the review legs' instructions name every added or upgraded dependency with its publisher and age (B-132)", () => {
+    for (const file of [
+      join(instructionsDir('create-pr'), 'review.md'),
+      join(instructionsDir('review-pr'), 'review.md'),
+      join(__dirname, '..', '..', '.baton', 'courses', 'create-pr', 'legs', 'review.md'),
+    ]) {
+      const text = readFileSync(file, 'utf8');
+      expect(text, file).toMatch(/dependency the diff adds or upgrades/);
+      expect(text, file).toContain('publisher');
+      expect(text, file).toContain('age');
+    }
+  });
+
   it('the instruction directories hold exactly the registered courses', () => {
     const root = join(__dirname, '..', '..', 'src', 'defaults', 'courses');
     expect(readdirSync(root).filter((d) => existsSync(join(root, d, '.'))).sort()).toEqual(BUILT_INS.map((b) => b.id).sort());

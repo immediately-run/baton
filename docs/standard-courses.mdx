@@ -37,7 +37,12 @@ Two things in `create-pr` run without an agent (2026-10-24):
   checkout is never touched. No model runs, so the outcome never depends on one: green advances
   to the review round; red routes straight to `fix` — never back to `implement` — and the
   marker it leaves on the branch, an empty commit on the head it tested, names the failing
-  script and its last lines. The gate may run 30 times (and `fix` 30 with it) while the review
+  script and its last lines. A run that never reached the tests is no verdict: dependencies
+  declared and none installed, a command the script names not found (exit 127) or not
+  executable (126), a missing script, or a run longer than the gate's bound fails the leg with no
+  marker, and the ticket goes back to the board as an environment failure rather than to `fix`
+  (B-230). A `fix` after a red gate must push: one that leaves the PR branch where it was fails
+  its leg instead of sending the same tree back to the gate (B-231). The gate may run 30 times (and `fix` 30 with it) while the review
   rounds stay at 3: the gate is deterministic and cheap, and spending retries there harms
   nothing the way a wasted review round does. A repository whose suite runs longer than the
   gate's bound raises it in its own copy of the leg script (`baton repo init --course create-pr
@@ -158,6 +163,14 @@ Three details carry weight:
   arguments after the message.
 - **The prompt spells the last-line contract.** A result-dependent leg's answer is read from the
   agent's last line; the prompt says so in the words the machine enforces.
+- **The stub stops waiting at the agent's exit or its silence (B-108).** A finished agent that
+  will not exit once cost its claim five hours. The stub's wait now ends at the earliest of the
+  agent's exit, fifteen minutes of quiet on every activity signal it can see — the agent's
+  stdout, the wrapper's log, the harness's own store — and five hours of the leg, its ceiling.
+  Silence past the bound reads as a finished agent: the stub kills it and the stdout it received
+  is judged as any exit's is. A live signal anywhere keeps the wait going, however long. Both
+  bounds are constants of the leg scripts `repo init` writes; a course whose legs need longer
+  raises them in its copy.
 
 A runner refuses to start for a settings file whose `agent_command` is exactly `echo` — the
 no-op stub whose every leg "succeeds" while nothing happens. It is for tests, and tests pass
@@ -185,7 +198,9 @@ its harness, and with no command named, it is the command.
   checkout's branch has none. The workflow's token reads public repositories; a private one
   needs a token that can read it. This repository's workflow takes it from the
   `BATON_GITHUB_READ_TOKEN` secret (never `BATON_SYNC_TOKEN`, which the CLI sends to Baton as its
-  bearer): a fine-grained token, read-only (Pull requests, Checks, Contents, Metadata), over every
+  bearer): a fine-grained token, read-only (Pull requests, Contents, Actions, Metadata — such a
+  token cannot hold Checks, so a private repository's CI is read from its Actions workflow runs,
+  B-226), over every
   repository its `repos` map names, this one included — the home's own PR list and a
   collaborator's permission (R-BTN-139) are read through it too. The token expires: an expired
   one fails the sync with a 401 on the home repository's PR list, and the remedy is a new token
@@ -249,7 +264,11 @@ belongs in the leg's `.md` instead.
 
 The instructions are yours once scaffolded. Edit `.baton/courses/<course>/legs/<leg>.md` to
 match how your repository works: its checks, its review rubric, where its tickets live. A
-release of the CLI never touches them. Each leg's stub runs the command `.baton/baton.json`
+release of the CLI never touches them. Which model a leg runs on is the repository's choice
+too (§6.10, R-BTN-131): the stub runs `agent_command`'s `--model` exactly as written, and Baton
+delivers no advice about a model, a key or a route. A leg that should pick its model at run
+time, from the machine's configuration or the instance views, replaces its run with a leg
+override (`baton repo init --override <leg>`) that decides it there. Each leg's stub runs the command `.baton/baton.json`
 names in `agent_command` — [the two shipped ones are above](#the-agent-that-runs-the-legs) —
 with the ticket, the leg and the checkout as its arguments. It hands
 the agent the instructions, read at the claim's snapshot, through `BATON_INSTRUCTIONS`, so a

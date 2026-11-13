@@ -1,5 +1,5 @@
 ---
-title: "R3-1208 — [OP] Provision Baton on Cloudflare: Worker route, Access, secrets, staging namespace"
+title: "R3-1208 — [OP] Provision Baton on Cloudflare: Worker route, Access, secrets"
 id: R3-1208
 project: baton
 status: available
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1049
 tier: critical
-description: "The owner sets up the Cloudflare account, the baton.immediately.run route, the Access application (covering only the dashboard's pages, `POST /v1/login` and `/v1/ui/*`, R-BTN-16), the Worker and GitHub secrets, and the baton-staging namespace, then runs the first deploy. Requires: cloudflare-admin, github-admin, human-operator."
+description: "The owner sets up the Cloudflare account, the baton.immediately.run route, the Access application (covering only the dashboard's pages, `POST /v1/login` and `/v1/ui/*`, R-BTN-16), the Worker and GitHub secrets, then runs the first deploy. Requires: cloudflare-admin, github-admin, human-operator."
 topics:
   - baton
   - infra
@@ -24,7 +24,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project.
-**Spec:** [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) (the service, the `baton-staging` tenant), [§11.1](../spec/BATON_SPEC/11-people.md#sec-11-1) (keys), [§11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) [R-BTN-57](../spec/BATON_SPEC/11-people.md#sec-11-2), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4) (dashboard sign-in), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (principals), [§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) [R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4), [§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7) (Baton's GitHub App), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) (staging)
+**Spec:** [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) (the service: one production instance), [§11.1](../spec/BATON_SPEC/11-people.md#sec-11-1) (keys), [§11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) [R-BTN-57](../spec/BATON_SPEC/11-people.md#sec-11-2), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4) (dashboard sign-in), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (principals), [§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) [R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4), [§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7) (Baton's GitHub App), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) (staging)
 **Depends on:** R3-1207
 **Runbook:** `DEPLOY-RUNBOOK` — every step below from the command line, with the check after each.
 
@@ -45,12 +45,11 @@ exist, and only the owner holds them.
 The owner, in one sitting (about 30 minutes):
 
 1. In Cloudflare: the `immediately.run` zone serves the Worker `baton` at
-   `baton.immediately.run/*` and the staging Worker `baton-staging` (its own Durable Object
-   namespace) at `baton-staging.immediately.run/*` — both declared in
+   `baton.immediately.run/*` — declared in
    `immediately-run/baton`'s `wrangler.toml` (baton#2), so the first deploy creates them. Add
    the DNS records both hostnames need (proxied).
 2. *(Optional hardening, R-BTN-16.)* In Zero Trust → Access: a self-hosted application for
-   `baton.immediately.run` (and one for `baton-staging.immediately.run`) with a policy allowing
+   `baton.immediately.run` with a policy allowing
    only the owner's email, **covering only** the dashboard's pages `/`, `/login` and
    `/oauth/authorize`, `POST /v1/login` and `/v1/ui/*`, and **bypassed on every other path**:
    keys, webhooks (`/v1/github/webhook`), forge notifications, couriers, instruments, CI
@@ -87,7 +86,7 @@ The owner, in one sitting (about 30 minutes):
 
 ### Architecture — the decisions, named
 
-- One account, one zone; staging shares the Worker code but never the Durable Object.
+- One account, one zone, one Worker; no staging (B-224).
 - The API token is scoped to Workers Scripts on this account and Zone Read plus Workers
   Routes on the one zone, nothing else.
 - **Do not:** add the test signing key to any deployed environment (§15); allow any email
@@ -127,3 +126,5 @@ _(filed 2026-10-13)_
 _(2026-11-01: the dispatch credentials move out of Baton (BATON_SPEC [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), [R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8), B-152): `BATON_GITHUB_APP_KEY` is no longer a Worker secret: the App's key goes to the dispatch courier's host (`baton courier start --github-app-key`), and only `BATON_GITHUB_WEBHOOK_SECRET` stays with the Worker.)_
 
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) reverses the note of 2026-11-01: `BATON_GITHUB_APP_KEY` stays a Worker secret and Baton dispatches workflows itself (B-160, B-152 superseded; R-BTN-94, §12.7). The checklist's App step provisions the key through the secret sink, as `baton admin github-app create` now does (R-BTN-57).)_
+
+_(2026-11-09: the staging deployment is retired — B-224, the owner: a home repository binds to one Baton, and every registered one binds to production, so staging held nothing and tested nothing. This ticket provisions production only; the staging Worker, route and Access application it once named are B-225's to delete.)_

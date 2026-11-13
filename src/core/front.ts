@@ -2,9 +2,9 @@
 // principal for the path, applies the R-BTN-16 rules, serves the dashboard's static files, and
 // forwards the API to the core — through the Durable Object on Cloudflare, through the request
 // queue locally (R-BTN-55). Every response leaves with the security headers.
-import { API_KEY, verifyOwner, verifyRequest, verifySyncCredential, verifyWorker, checkStateChanging, withBody } from './auth';
-import { BatonError, SESSION_COOKIE, errorResponse, withSecurityHeaders } from './http';
-import { pickDelivery, verifyDelivery } from './webhook';
+import { API_KEY, readCapped, verifyOwner, verifyRequest, verifySyncCredential, verifyWorker, checkStateChanging, withBody } from './auth';
+import { BatonError, NO_STORE, SESSION_COOKIE, errorResponse, noStore, withSecurityHeaders } from './http';
+import { MAX_DELIVERY, pickDelivery, verifyDelivery } from './webhook';
 import type { Config } from './ports';
 import page from '../ui/index.html';
 import style from '../ui/app.css';
@@ -75,22 +75,59 @@ const apiKeyOf = (req: Request): string | null => {
 /** The headers that carry a verified principal to the object. A request never brings its own. */
 const PRINCIPAL_HEADERS = ['X-Baton-Credential', 'X-Baton-Owner', 'X-Baton-Sync', 'X-Baton-Signed', 'X-Baton-Webhook', 'X-Baton-Session', 'X-Baton-Api-Key'];
 
-async function route(req: Request, env: Config, to: Forward): Promise<Response> {
-  const { pathname } = new URL(req.url);
-  if (pathname.startsWith('/v1/sync/')) {
-    // R-BTN-93: a sync key's signature is pre-checked here like every signed request, and its key
-    // checked in the core; a CI identity token is verified here, and the core binds its claims to
-    // one repository and role (Registry.forSync, forGitlab), so the front names no repository.
-    if (isSigned(req)) return forwardSigned(req, env, to);
-    const claims = await verifySyncCredential(req, env);
-    // A header carries bytes only: characters from U+007F up go as \u escapes (round 3, 3-A-1).
-    const ascii = JSON.stringify(claims).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
-    return forward(req, to, { 'X-Baton-Sync': ascii });
+/** A route's answer, and the R-BTN-16 class its request is. `route` decides the class in the
+ *  very branch that decides the route — beside the verification, for the answer and for that
+ *  branch's refusal — so a route added below can never be missing from a second list of paths.
+ *  `private`: a request a credential or a dashboard session authorizes, or an answer that
+ *  hands out a cookie or carries a sign-in code; `public`: the dashboard's pages and files. */
+type Answer = { res: Response; cache: 'public' | 'private' };
+
+/** A branch's refusal: thrown like a `BatonError` (its `code` is one) and classed for the
+ *  header. It wears its class as a plain own property, so it survives the `await`s between a
+ *  branch and `front` without `instanceof` — a host's realm has `BatonError` classes of its own. */
+function refuse(code: BatonError['code'], message: string, cache: Answer['cache'], extra: Record<string, unknown> = {}): BatonError {
+  const e = new BatonError(code, message, extra);
+  Object.defineProperty(e, 'cache', { value: cache, enumerable: true });
+  return e;
+}
+
+/** The class `e` was thrown under, or `undefined` for one no branch classed (`internal`). */
+function classOf(e: unknown): Answer['cache'] | undefined {
+  const c = (e as { cache?: unknown } | null)?.cache;
+  return c === 'public' || c === 'private' ? c : undefined;
+}
+
+/** The answer `run` gives — or gives by refusing — as the branch `cache` decides it. */
+async function under(cache: Answer['cache'], run: () => Promise<Response> | Response): Promise<Answer> {
+  try {
+    return { res: await run(), cache };
+  } catch (e) {
+    // A verifier below throws a `BatonError` of the host's realm: its code is kept, the class
+    // is the branch's.
+    const b = e as Partial<BatonError> | null;
+    if (classOf(e) !== undefined) throw e;
+    if (b && typeof b.code === 'string' && typeof b.message === 'string') throw refuse(b.code, b.message, cache, b.extra);
+    throw refuse('internal', 'internal error', cache);
   }
-  if (pathname === '/v1/github/webhook') {
-    // R-BTN-73: the GitHub App's delivery — the one route whose credential is GitHub's
-    // signature. Verified before anything is read; then only R-BTN-73's fields go on, in a
-    // request that carries nothing else of the delivery's.
+}
+
+/** R-BTN-73 / R-BTN-95: a forge's notification is a trigger too, and its body is bounded as the
+ *  App's is. The route's verification (a GitLab token, a Gitea or GitHub HMAC under the
+ *  repository's own secret) is the core's, which B-169 does not build; until it does the route
+ *  answers `not-found`, and a body over the cap is `too-large` before anything else is looked at. */
+function forgeNotify(req: Request): Promise<Answer> {
+  return under('private', async () => {
+    if (req.method !== 'POST') throw new BatonError('not-found', 'no such route');
+    await readCapped(req, MAX_DELIVERY, 'too-large');
+    throw new BatonError('not-found', 'no such route: a forge’s notification is not verified yet');
+  });
+}
+
+/** R-BTN-73: the GitHub App's delivery — the one route whose credential is GitHub's signature.
+ *  Verified before anything is read; then only R-BTN-73's fields go on, in a request that
+ *  carries nothing else of the delivery's. */
+function delivery(req: Request, env: Config, to: Forward): Promise<Answer> {
+  return under('private', async () => {
     if (req.method !== 'POST') throw new BatonError('not-found', 'no such route');
     const body = await verifyDelivery(req, env.BATON_GITHUB_WEBHOOK_SECRET);
     let payload: unknown = null;
@@ -105,23 +142,48 @@ async function route(req: Request, env: Config, to: Forward): Promise<Response> 
     // the core's JSON.parse turns back into the same value (round 3, 3-A-0).
     const ascii = JSON.stringify(d).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
     return forward(new Request(req.url, { method: 'POST' }), to, { 'X-Baton-Webhook': ascii });
+  });
+}
+
+async function route(req: Request, env: Config, to: Forward): Promise<Answer> {
+  const { pathname } = new URL(req.url);
+  if (pathname.startsWith('/v1/sync/')) {
+    return under('private', async () => {
+      // R-BTN-93: a sync key's signature is pre-checked here like every signed request, and its
+      // key checked in the core; a CI identity token is verified here, and the core binds its
+      // claims to one repository and role (Registry.forSync, forGitlab), so the front names no
+      // repository.
+      if (isSigned(req)) return forwardSigned(req, env, to);
+      const claims = await verifySyncCredential(req, env);
+      // A header carries bytes only: characters from U+007F up go as \u escapes (round 3, 3-A-1).
+      const ascii = JSON.stringify(claims).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+      return forward(req, to, { 'X-Baton-Sync': ascii });
+    });
   }
+  if (/^\/v1\/forges\/[^/]+\/notify$/.test(pathname)) return forgeNotify(req);
+  if (pathname === '/v1/github/webhook') return delivery(req, env, to);
   if (pathname.startsWith('/v1/courier/')) {
     // R-BTN-80, R-BTN-103: a courier key or a machine key signs; the core checks which.
-    if (!isSigned(req)) throw new BatonError('unauthenticated', 'sign with a courier key or a machine key (R-BTN-13)');
-    return forwardSigned(req, env, to);
+    return under('private', async () => {
+      if (!isSigned(req)) throw new BatonError('unauthenticated', 'sign with a courier key or a machine key (R-BTN-13)');
+      return forwardSigned(req, env, to);
+    });
   }
   if (pathname === '/v1/probe/readings') {
     // R-BTN-53, R-BTN-101: a probe key signs; the core checks it is one.
-    if (!isSigned(req)) throw new BatonError('unauthenticated', 'sign with a probe key (R-BTN-13)');
-    return forwardSigned(req, env, to);
+    return under('private', async () => {
+      if (!isSigned(req)) throw new BatonError('unauthenticated', 'sign with a probe key (R-BTN-13)');
+      return forwardSigned(req, env, to);
+    });
   }
   if (pathname === '/v1/human-keys') {
     // R-BTN-185 (B-145): a human_only key's own route — registered human keys and the host's
     // BATON_HUMAN_KEYS lines sign; the core checks which.
-    if (req.method !== 'POST') throw new BatonError('not-found', 'no such route');
-    if (!isSigned(req)) throw new BatonError('unauthenticated', 'sign with a human_only key (R-BTN-185)');
-    return forwardSigned(req, env, to);
+    return under('private', async () => {
+      if (req.method !== 'POST') throw new BatonError('not-found', 'no such route');
+      if (!isSigned(req)) throw new BatonError('unauthenticated', 'sign with a human_only key (R-BTN-185)');
+      return forwardSigned(req, env, to);
+    });
   }
   // The repository reads (§11): a course's record, its blocks and a ticket's history — any key
   // granted on it; the blocks and the history also an owner's or an administrator's, whose keys
@@ -130,48 +192,57 @@ async function route(req: Request, env: Config, to: Forward): Promise<Response> 
   // slice): the attestation write signs the same way — the core checks the writer it names.
   // B-126 (R-BTN-194): a ticket itself, `GET …/tickets/{ticket}`, read like its blocks.
   if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|board|policy|attestations|tickets\/[^/]+(\/(blocks|history))?)$/.test(pathname)) {
-    if (isSigned(req)) return forwardSigned(req, env, to);
-    // R-BTN-159: a worker's (or, on the reads, an owner's or administrator's) API key.
-    const apiKey = apiKeyOf(req);
-    if (apiKey) return forward(req, to, { 'X-Baton-Api-Key': apiKey });
-    // The transition (R3-1239): a bearer token still serves until every worker signs.
-    const credential = await verifyWorker(req, env);
-    return forward(req, to, { 'X-Baton-Credential': credential });
+    return under('private', async () => {
+      if (isSigned(req)) return forwardSigned(req, env, to);
+      // R-BTN-159: a worker's (or, on the reads, an owner's or administrator's) API key.
+      const apiKey = apiKeyOf(req);
+      if (apiKey) return forward(req, to, { 'X-Baton-Api-Key': apiKey });
+      // The transition (R3-1239): a bearer token still serves until every worker signs.
+      const credential = await verifyWorker(req, env);
+      return forward(req, to, { 'X-Baton-Credential': credential });
+    });
   }
   if (pathname.startsWith('/v1/admin/') || pathname.startsWith('/v1/owner/')) {
     // R-BTN-57, R-BTN-58: an administrator's or an owner's key signs every request, or — an API
     // key (R-BTN-159) — comes as a bearer; the core checks which, and for which repository.
-    if (isSigned(req)) return forwardSigned(req, env, to);
-    const apiKey = apiKeyOf(req);
-    if (!apiKey) throw new BatonError('unauthenticated', 'sign with an administrator or owner key, or send its API key as a bearer (R-BTN-13, R-BTN-159)');
-    return forward(req, to, { 'X-Baton-Api-Key': apiKey });
+    return under('private', async () => {
+      if (isSigned(req)) return forwardSigned(req, env, to);
+      const apiKey = apiKeyOf(req);
+      if (!apiKey) throw new BatonError('unauthenticated', 'sign with an administrator or owner key, or send its API key as a bearer (R-BTN-13, R-BTN-159)');
+      return forward(req, to, { 'X-Baton-Api-Key': apiKey });
+    });
   }
   if (pathname === '/v1/login') {
-    // R-BTN-16: against login CSRF, the token comes as JSON from this Baton's own page.
-    if (req.method !== 'POST') throw new BatonError('not-found', 'no such route');
-    checkStateChanging(req, env);
-    return forward(req, to, {});
+    // R-BTN-16: against login CSRF, the token comes as JSON from this Baton's own page; the
+    // answer hands out the session cookie, so it is withheld whatever it says.
+    return under('private', async () => {
+      if (req.method !== 'POST') throw new BatonError('not-found', 'no such route');
+      checkStateChanging(req, env);
+      return forward(req, to, {});
+    });
   }
-  if (pathname === '/' || pathname.startsWith('/ui/') || pathname.startsWith('/v1/ui/') || PUBLIC.has(pathname)) {
-    if (PUBLIC.has(pathname)) return serve(pathname, req);
-    const principal = await dashboardPrincipal(req, env);
-    if (pathname.startsWith('/v1/ui/')) {
-      if (req.method !== 'GET' && req.method !== 'HEAD') checkStateChanging(req, env);
-      return forward(req, to, principal);
-    }
-    // An exotic /ui/ path that is not one of the public files: the principal decides whether
-    // even the not-found is named (the dashboard pages themselves are in PUBLIC, above).
-    const ok = await forward(new Request(new URL('/v1/ui/session', req.url)), to, principal);
-    if (!ok.ok) return ok;
-    return serve(pathname, req);
+  if (PUBLIC.has(pathname)) return { res: serve(pathname, req), cache: 'public' };
+  // A session's own routes — `/v1/ui/*` — and an exotic `/ui/` path that is not one of the
+  // public files: the principal decides whether even the not-found is named (the dashboard's
+  // own pages are in `PUBLIC`, above).
+  if (pathname.startsWith('/v1/ui/') || pathname.startsWith('/ui/')) {
+    return under('private', async () => {
+      const principal = await dashboardPrincipal(req, env);
+      if (pathname.startsWith('/v1/ui/')) {
+        if (req.method !== 'GET' && req.method !== 'HEAD') checkStateChanging(req, env);
+        return forward(req, to, principal);
+      }
+      const ok = await forward(new Request(new URL('/v1/ui/session', req.url)), to, principal);
+      return ok.ok ? serve(pathname, req) : ok;
+    });
   }
-  throw new BatonError('not-found', 'no such route');
+  throw refuse('not-found', 'no such route', 'public');
 }
 
 function serve(pathname: string, req: Request): Response {
   const file = STATIC[pathname];
   if (!file || req.method !== 'GET') throw new BatonError('not-found', 'no such page');
-  return new Response(file[0], { headers: { 'Content-Type': file[1], 'Cache-Control': 'no-store' } });
+  return new Response(file[0], { headers: { 'Content-Type': file[1], 'Cache-Control': NO_STORE } });
 }
 
 /** The one core (§3): every request reaches it carrying only the principal the front verified. */
@@ -182,14 +253,18 @@ function forward(req: Request, to: Forward, principal: Record<string, string>): 
   return to(new Request(req, { headers }));
 }
 
-/** A request from outside, answered: both hosts' entry point. */
+/** A request from outside, answered: both hosts' entry point. Every answer leaves with the
+ *  security headers and, when its route decided so, `Cache-Control: no-store` (R-BTN-16). */
 export async function front(req: Request, env: Config, to: Forward): Promise<Response> {
+  let res: Response;
+  let cache: Answer['cache'] = 'public';
   try {
-    return withSecurityHeaders(await route(req, env, to));
+    ({ res, cache } = await route(req, env, to));
   } catch (e) {
     // A refused request's body is never read; release it so the runtime does not.
     if (req.body && !req.bodyUsed) req.body.cancel().catch(() => {});
-    if (e instanceof BatonError) return withSecurityHeaders(errorResponse(e.code, e.message, e.extra));
-    return withSecurityHeaders(errorResponse('internal', 'internal error'));
+    cache = classOf(e) ?? 'public';
+    res = e instanceof BatonError ? errorResponse(e.code, e.message, e.extra) : errorResponse('internal', 'internal error');
   }
+  return withSecurityHeaders(cache === 'private' ? noStore(res) : res);
 }

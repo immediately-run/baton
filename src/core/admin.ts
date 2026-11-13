@@ -5,25 +5,25 @@
 // grants, owners, owner bars and the settings — never read from a board post. Administrators are
 // BATON_ADMIN_KEYS alone. One key holds one role: administrator, owner, worker, probe, courier or
 // sync key. Each act is an `admin` event; a bar change also dispatches the repository's sync.
-import { BatonError, SESSION_COOKIE } from './http';
+import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, verifyNamespacedSignature, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId, HOLDING_TYPE } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
+import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
 import { checkRegistration, seedEntries, tierPosition, type Registration, type Registry } from './registry';
 import { graphOf, resolveLeg, type Graph } from './graph';
 import { humanOnlyList, type ApproverEntry, type ApproverFacts, type Policies } from './policy';
-import { checkControlPaths } from './control';
 import type { Config, Store } from './ports';
 import { sha256Hex } from './workerApi';
 
 /** A one-time link lives 5 minutes; a session 12 hours (R-BTN-57). */
 export const LOGIN_LINK_MS = 5 * 60_000;
 export const SESSION_MS = 12 * 3_600_000;
-/** R-BTN-16: the one cookie Baton sets. */
-export { SESSION_COOKIE };
+/** R-BTN-16: the two cookies Baton sets — a session, and R-BTN-155's pending sign-in. */
+export { SESSION_COOKIE, PENDING_COOKIE };
 /** Spec-silent bounds (recorded on R3-1240): owner bars in force per repository, required bars,
  *  legs per bar, owners per repository, capabilities per grant, backoffs per retry policy. */
 const BARS_MAX = 200;
@@ -32,6 +32,8 @@ const LEGS_MAX = 64;
 const OWNERS_MAX = 16;
 const CAPABILITIES_MAX = 64;
 const BACKOFFS_MAX = 8;
+/** R-BTN-114: check courses a repository's `checks` map may name. */
+const CHECKS_MAX = 200;
 /** A registered repository's fields §11's change form may set besides weight, tiers and keys. */
 const LINK_FIELDS = ['remote', 'web_base', 'ci_identity', 'sync_workflow', 'mirror_workflow'] as const;
 /** A capability or role name, as a heartbeat declares one. */
@@ -51,6 +53,21 @@ export interface RetryPolicy {
   backoff_ms: number[];
   max_failed: number;
 }
+
+/** R-BTN-114: the conclusions a required check may be posted with. Every one but `success`
+ *  fails a GitHub required check; `neutral`, which a required check passes, is not one. */
+export const CONCLUSIONS = ['success', 'failure', 'timed_out'] as const;
+
+/** A check course's end stations mapped to conclusions: `{name?, url?, conclusions}`. */
+export interface CheckConclusion {
+  name?: string;
+  url?: string;
+  conclusions: Record<string, (typeof CONCLUSIONS)[number]>;
+}
+
+/** A station's conclusion in the map (R-BTN-114): the one `success` that passes the check, the
+ *  one `failure` every other status but a timeout reaches, or the at-most-one `timed_out`. */
+const conclusionAt = (station: string, entry: CheckConclusion): (typeof CONCLUSIONS)[number] => entry.conclusions[station];
 
 export interface OwnerBar {
   id: number;
@@ -78,6 +95,16 @@ const only = (b: Record<string, unknown>, keys: string[], at: string) => {
 };
 /** A key's stored line: its type and base64 only — a comment is for people, never stored. */
 const lineOf = (key: SshKey, text: string) => `${key.type} ${text.trim().split(/\s+/)[1]}`;
+
+/** A setting's value as the settings event carries it: the JSON settings parse back to their
+ *  value; `scope_policy`'s bare word (B-134) is its own value, not JSON. */
+function settingValue(v: string): unknown {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return v;
+  }
+}
 
 /** R-BTN-67: an owner bar's reason becomes `released:<reason>`; never one of §6.5's closed
  *  reasons, so an owner bar's release is never counted as a failed attempt (§6.10). */
@@ -216,6 +243,23 @@ export class Admin {
   /** BATON_HUMAN_KEYS' fingerprints alone — the break-glass set (R-BTN-185). */
   private async breakGlassSet(): Promise<Set<string>> {
     return new Set(this.c.humanBreakGlass ? (await this.c.humanBreakGlass()).keys() : []);
+  }
+
+  /** B-127: the repository's owner signing keys — its owners' keys the human-only register
+   *  marks (`human_keys`, or a break-glass line; R-BTN-185), which is what an owner-signed
+   *  control input accepts, and nothing else: a key an agent session holds would let an injected
+   *  session sign (finding 3), and an API key cannot sign a commit at all. Public keys only —
+   *  the sync and the runners verify signatures against them; the private halves never leave
+   *  their owners. */
+  async signingKeys(repository: string): Promise<{ public_key: string; fingerprint: string }[]> {
+    const marks = await this.humanMarks();
+    // The register is the truth, not the column's cached mark: a key registered with the tenant
+    // after it became an owner counts the day it registers (R-BTN-185's `human_only` column
+    // records only what held at the addition).
+    return this.rows<{ public_key: string; fingerprint: string }>(
+      'SELECT public_key, fingerprint FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL ORDER BY fingerprint', repository)
+      .filter((k) => marks.has(k.fingerprint))
+      .map((k) => ({ public_key: k.public_key, fingerprint: k.fingerprint }));
   }
 
   /** B-145 item 12: membership through `approvers.members` — the one authorisation hook for
@@ -677,40 +721,6 @@ export class Admin {
     });
   }
 
-  // ── the owners' forge identities (B-126, R-BTN-194) ──────────────────────────────────────
-
-  /** `POST /v1/owner/{repository}/identities`: `{forge_user_id, login?}` records one of the
-   *  owners' forge identities and `{forge_user_id, remove: true}` removes it — one entry of the
-   *  `pushers` setting (R-BTN-139's list), the user id a push delivery's `sender.id` is judged
-   *  by, so a control input its pushes change raises nothing (B-126 item 3). With none recorded,
-   *  every control change raises, the owner's own pushes included: recording is what quietens
-   *  them. The login is kept beside the id as a label; only the id, which the forge keeps
-   *  immutable, is matched. */
-  identities(actor: string, repository: string, body: unknown) {
-    if (!isObj(body)) bad('body', 'must be a JSON object');
-    const b = body as Record<string, unknown>;
-    only(b, ['forge_user_id', 'login', 'remove'], 'body');
-    const id = typeof b.forge_user_id === 'number' && Number.isSafeInteger(b.forge_user_id) && b.forge_user_id > 0
-      ? b.forge_user_id : bad('forge_user_id', 'must be a positive integer (the forge user id, not the login)');
-    if (b.login !== undefined && b.login !== null && (typeof b.login !== 'string' || b.login.length < 1 || b.login.length > 100)) bad('login', 'must be a short login label, or null');
-    return this.c.store.transaction(() => {
-      // The setting is the one list (§13): read, one entry moved, written back whole — the
-      // `PUT …/settings {pushers}` route replaces it, this route edits one id of it.
-      const now = JSON.parse(this.rows<{ pushers: string }>('SELECT pushers FROM repositories WHERE id = ?', repository)[0]?.pushers ?? '[]') as unknown;
-      const list = Array.isArray(now) && now.every((x) => typeof x === 'number') ? now as number[] : [];
-      if (b.remove === true) {
-        if (!list.includes(id)) throw new BatonError('not-found', `no identity ${id} on ${repository}`);
-        this.exec('UPDATE repositories SET pushers = ? WHERE id = ?', JSON.stringify(list.filter((x) => x !== id)), repository);
-        this.event(actor, { act: 'identity-removed', repository, forge_user_id: id }, repository);
-        return { ok: true, pushers: list.filter((x) => x !== id) };
-      }
-      const next = list.includes(id) ? list : [...list, id].sort((a, b2) => a - b2);
-      this.exec('UPDATE repositories SET pushers = ? WHERE id = ?', JSON.stringify(next), repository);
-      this.event(actor, { act: 'identity-added', repository, forge_user_id: id, login: (b.login as string | null) ?? null }, repository);
-      return { ok: true, pushers: next };
-    });
-  }
-
   // ── couriers (R-BTN-80) ─────────────────────────────────────────────────────────────────
 
   /**
@@ -906,21 +916,62 @@ export class Admin {
   }
 
   /** `PUT /v1/owner/{repository}/settings`: `required_bars`, `retry`, `transcript_repos`,
-   *  `unblocked_trigger`, `remind_after` (seconds, R-BTN-80), `required_independence`
-   *  (R-BTN-106), `control_paths` (B-126, R-BTN-194: paths beside the fixed control-input list)
-   *  and `pushers` (R-BTN-139's list, replaced whole; `baton owner identity add` edits one id of
-   *  it) — each given replaces that setting whole. R-BTN-188's knob table: every
-   *  LOOSENING of an R-BTN-66 setting needs an approver on `approvers.policy` (R-BTN-186 names
-   *  `retry`, `transcript_repos` and `required_independence` flatly, and the removing or
-   *  narrowing of a bar; tightening — adding a bar — stays open to any owner). */
+   *  `unblocked_trigger`, `remind_after` (seconds, R-BTN-80), `scope_policy` and
+   *  `worker_pushers` (B-134), `code_repos` (R-BTN-140, B-182), `pushers` (R-BTN-139, B-182) and
+   *  `require_signed_control` (B-127) — each given replaces that setting whole.
+   *  `required_independence` is gone (B-168): `no_chain_from` in the course file is the one
+   *  statement of it (R-BTN-106). R-BTN-188's knob table: every LOOSENING of an R-BTN-66 setting
+   *  needs an approver on `approvers.policy` (R-BTN-186 names `retry` and `transcript_repos`
+   *  flatly, the removing or narrowing of a bar, and — R-BTN-94 — setting or changing the
+   *  unblocked trigger, which widens what Baton starts; tightening — adding a bar — stays open to
+   *  any owner); B-182 adds the two reach lists: a `code_repos` entry or a pusher added is reach
+   *  gained, so it is governed the same way. And `checks` (R-BTN-114): a change toward success
+   *  loosens, a check's move away from success tightens, a delegated key's `checks` change refused. */
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'required_independence', 'control_paths', 'pushers'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'scope_policy', 'worker_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
+    // R-BTN-114: a check's conclusion decides what branch protection sees, so the map is the
+    // owners', not an agent's — refused here, before the approver question, whichever it changes.
+    const delegated = this.delegated(actor);
+    if (b.checks !== undefined && delegated) throw new BatonError('forbidden', 'a delegated key changes no checks map: the conclusions are the owners’ (R-BTN-114)');
     const sets: [string, string | null][] = [];
+    // B-182 (R-BTN-140): the home's code repositories, each naming its own forge and host. The
+    // list is stored in its own table; `codeRepos` holds it validated, `web_base` derived.
+    let codeRepos: CodeRepo[] | null = null;
+    if (b.code_repos !== undefined) {
+      const home = homeForgeOf(this.c.store, repository);
+      if (!home) throw new BatonError('not-found', `${repository} is not registered`);
+      codeRepos = checkCodeRepos(b.code_repos, home);
+      // B-182 point 7 (R-BTN-188): no human identity or floor while a code repository sits on
+      // another host — here, an entry being added while one stands is the refused order.
+      const homeHost = home.forge === 'git' ? null : home.host;
+      const cross = codeRepos.find((e) => homeHost == null || e.host !== homeHost);
+      if (cross) {
+        const cur = this.c.policies?.current(repository);
+        const floors = this.c.policies?.floors(repository) ?? [];
+        if (cur?.policy.human_identity != null || floors.length) {
+          const which = cur?.policy.human_identity != null ? `a human_identity (${cur.policy.human_identity})` : `${floors.length} floor(s)`;
+          throw new BatonError('invalid-params', `code_repos: the entry ${cross.path} is on ${cross.host}, another host than the home's, while ${repository}'s policy names ${which} — no human identity across hosts yet (B-182); per-host identities are a later ticket`);
+        }
+      }
+    }
+    // B-182 (R-BTN-139): the owners' pushers, host-qualified — an entry without a host is the
+    // home's, and on a `git` home one is refused (there is no host to default to).
+    if (b.pushers !== undefined) {
+      const home = homeForgeOf(this.c.store, repository);
+      if (!home) throw new BatonError('not-found', `${repository} is not registered`);
+      sets.push(['pushers', JSON.stringify(checkPushers(b.pushers, home))]);
+    }
     if (b.required_bars !== undefined) sets.push(['required_bars', JSON.stringify(this.checkRequiredBars(repository, b.required_bars))]);
     if (b.retry !== undefined) sets.push(['retry', b.retry === null ? null : JSON.stringify(checkRetry(b.retry))]);
+    // B-127 (R-BTN-66 as amended): whether the repository's control inputs count only at
+    // owner-signed commits. Turning it on tightens (any owner may); off is a loosening below.
+    if (b.require_signed_control !== undefined) {
+      if (typeof b.require_signed_control !== 'boolean') bad('require_signed_control', 'must be a boolean (R-BTN-66, B-127)');
+      sets.push(['require_signed_control', b.require_signed_control ? '1' : '0']);
+    }
     if (b.transcript_repos !== undefined) {
       const t = Array.isArray(b.transcript_repos) && b.transcript_repos.length <= 20 && b.transcript_repos.every((x) => typeof x === 'string' && parseTranscriptRepo(x) !== null)
         ? b.transcript_repos : bad('transcript_repos', 'must be at most 20 repositories, each a GitHub owner/name or <forge>:<web_base>');
@@ -932,18 +983,29 @@ export class Admin {
         ? (b.remind_after as number) : bad('remind_after', `must be whole seconds from ${REMIND_AFTER_S.min} to ${REMIND_AFTER_S.max}`);
       sets.push(['remind_after_s', JSON.stringify(r)]);
     }
-    if (b.required_independence !== undefined) sets.push(['required_independence', JSON.stringify(checkIndependence(b.required_independence))]);
-    // B-126 (R-BTN-194): control paths beside the fixed list — widening detection, an owner's
-    // own tuning like `remind_after`, never a governed loosening.
-    if (b.control_paths !== undefined) sets.push(['control_paths', JSON.stringify(checkControlPaths(b.control_paths))]);
-    // R-BTN-139's list, replaced whole here (`baton owner identity add` edits one entry of it).
-    if (b.pushers !== undefined) {
-      const p = Array.isArray(b.pushers) && b.pushers.length <= 100 && b.pushers.every((x) => typeof x === 'number' && Number.isSafeInteger(x) && x > 0)
-        ? [...new Set(b.pushers as number[])].sort((a, c) => a - c) : bad('pushers', 'must be a list of forge user ids (positive integers)');
-      sets.push(['pushers', JSON.stringify(p)]);
+    // B-134: what a scope-exceeded finding does (`report`, Needs you alone — the default — or
+    // `hold`, the ticket parked until an owner lifts it), and the forge logins the fleet's VM
+    // runners push as, whose pushes are cross-checked against open claims. Null or an empty
+    // list names none: the cross-check is off until the owners name one. `scope_policy` is a
+    // bare word (its column's CHECK admits two), not JSON like the list settings.
+    if (b.scope_policy !== undefined) {
+      if (b.scope_policy !== 'report' && b.scope_policy !== 'hold') bad('scope_policy', "must be 'report' or 'hold'");
+      sets.push(['scope_policy', b.scope_policy as string]);
     }
-    // R-BTN-188/R-BTN-186: the loosening needs an approver on `approvers.policy` as it stands.
-    if (this.loosensSettings(repository, sets)) {
+    if (b.worker_pushers !== undefined) {
+      // A forge login, or an app bot's `<app>[bot]` — the very identity per-claim push tokens
+      // (B-131) push as and the webhook side bounds the same way (its `MAX_PUSHER`).
+      const w = b.worker_pushers === null ? [] : Array.isArray(b.worker_pushers) && b.worker_pushers.length <= 50
+        && b.worker_pushers.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 100 && /^[A-Za-z0-9-]+(\[bot\])?$/.test(x))
+          ? [...new Set(b.worker_pushers as string[])] : bad('worker_pushers', 'must be null or a list of at most 50 forge logins');
+      sets.push(['worker_pushers', JSON.stringify(w)]);
+    }
+    if (b.checks !== undefined) sets.push(['checks', JSON.stringify(this.checkConclusions(repository, b.checks))]);
+    // R-BTN-114: a `checks` change that TIGHTENS — a course added, a station moved away from
+    // `success` — is any owner key's, as every owner route is (`/v1/owner/…` refuses a key that
+    // does not own the repository, and a delegated key above); a LOOSENING needs an approver on
+    // `approvers.policy` as it stands, the same gate R-BTN-188 puts on an R-BTN-66 setting.
+    if (this.loosensSettings(repository, sets, codeRepos)) {
       const policies = this.c.policies;
       const cur = policies?.current(repository);
       if (policies && cur) {
@@ -955,7 +1017,8 @@ export class Admin {
     }
     return this.c.store.transaction(() => {
       for (const [k, v] of sets) this.exec(`UPDATE repositories SET ${k} = ? WHERE id = ?`, v, repository);
-      this.event(actor, { act: 'settings', repository, ...Object.fromEntries(sets.map(([k, v]) => [k === 'remind_after_s' ? 'remind_after' : k, v == null ? null : JSON.parse(v)])) }, repository);
+      if (codeRepos != null) writeCodeRepos(this.c.store, repository, codeRepos, actor, this.c.now());
+      this.event(actor, { act: 'settings', repository, ...Object.fromEntries(sets.map(([k, v]) => [k === 'remind_after_s' ? 'remind_after' : k, v == null ? null : settingValue(v)])), ...(codeRepos != null ? { code_repos: codeRepos } : {}) }, repository);
       // Required bars are applied as a snapshot's legs are stored: the next sync re-stores them
       // now rather than at the schedule (round 1, 1-A-8).
       if (b.required_bars !== undefined) this.c.dispatchSync(repository);
@@ -963,30 +1026,142 @@ export class Admin {
     });
   }
 
-  /** Whether the settings this change writes loosen what stands: R-BTN-186 names `retry`,
-   *  `transcript_repos` and `required_independence` flatly — any change to one is governed —
-   *  while a bar's removal or narrowing loosens and its addition tightens. `remind_after` and
-   *  `unblocked_trigger` tune operation, not trust, and are never governed. */
-  private loosensSettings(repository: string, sets: [string, string | null][]): boolean {
-    const flat = ['retry', 'transcript_repos', 'required_independence'];
+  /** Whether the settings this change writes loosen what stands: R-BTN-186 names `retry` and
+   *  `transcript_repos` flatly — any change to one is governed — while a bar's removal or
+   *  narrowing loosens and its addition tightens. R-BTN-94 governs the unblocked trigger: setting
+   *  or changing it widens what Baton starts, so any change is a loosening. `remind_after` tunes
+   *  operation, not trust, and is never governed. B-134's two scope settings are governed one way
+   *  each: a hold that stops holding, and a cross-check that names fewer pushers, loosen. R-BTN-114's
+   *  `checks` loosens when a station moves toward `success` or a course's map loses one, and
+   *  tightens otherwise. */
+  private loosensSettings(repository: string, sets: [string, string | null][], codeRepos: CodeRepo[] | null = null): boolean {
+    // R-BTN-114 before the flat knobs: a map that governs nothing and is given is no change,
+    // and one that adds a course is a tightening whatever the flat settings beside it do.
+    const checks = sets.find(([k]) => k === 'checks');
+    if (checks) {
+      const was = this.checkMap(repository);
+      const next = JSON.parse(checks[1]!) as Record<string, CheckConclusion>;
+      // R-BTN-114: a station mapped to `success` that was not is a loosening, and so is a
+      // course's entry removed or renamed (the new name is a course the map did not have). Any
+      // other change — a course added, a station dropped or moved away from `success` — tightens.
+      // The stations read are the new map's: one the old map did not name at all, now `success`,
+      // is mapped to `success` as much as one moved there from `failure`.
+      const towardSuccess = Object.entries(next).some(([course, entry]) => {
+        const before = was[course];
+        return before !== undefined && Object.keys(entry.conclusions).some((station) => conclusionAt(station, entry) === 'success' && (!Object.hasOwn(before.conclusions, station) || conclusionAt(station, before) !== 'success'));
+      });
+      if (towardSuccess) return true;
+      if (Object.keys(was).some((course) => !Object.hasOwn(next, course))) return true;
+    }
+    const flat = ['retry', 'transcript_repos'];
     for (const [k, v] of sets) {
       if (flat.includes(k)) {
-        const old = k === 'retry' ? this.retry(repository) : k === 'required_independence' ? this.requiredIndependence(repository) : null;
+        const old = k === 'retry' ? this.retry(repository) : null;
         const before = k === 'transcript_repos' ? JSON.parse(this.rows<{ v: string | null }>('SELECT transcript_repos AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? 'null') : old;
         if (JSON.stringify(before ?? null) !== (v ?? 'null')) return true;
       }
+      // B-127: requiring signed control tightens (any owner may turn it on); turning it off
+      // loosens — a push alone could then change what every runner executes.
+      if (k === 'require_signed_control' && v === '0') {
+        const was = this.rows<{ flag: number }>('SELECT require_signed_control AS flag FROM repositories WHERE id = ?', repository)[0]?.flag ?? 0;
+        if (was) return true;
+      }
+    }
+    // R-BTN-94 (B-168): the workflow Baton starts when a ticket unblocks, set or changed.
+    const trigger = sets.find(([k]) => k === 'unblocked_trigger');
+    if (trigger && trigger[1] !== (this.rows<{ v: string | null }>('SELECT unblocked_trigger AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? null)) return true;
+    // B-134: both scope settings only loosen one way — a hold that stops holding, and a
+    // cross-check that names fewer pushers. Naming more, or holding, tightens.
+    const policy = sets.find(([k]) => k === 'scope_policy');
+    if (policy && policy[1] === 'report' && this.rows<{ v: string }>('SELECT scope_policy AS v FROM repositories WHERE id = ?', repository)[0]?.v === 'hold') return true;
+    const pushers = sets.find(([k]) => k === 'worker_pushers');
+    if (pushers) {
+      const was = JSON.parse(this.rows<{ v: string | null }>('SELECT worker_pushers AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? '[]') as string[];
+      const next = JSON.parse(pushers[1]!) as string[];
+      // The cross-check matches logins case-blind, so a case-only rewrite names the same
+      // pushers and loosens nothing; only a login leaving the list does.
+      if (was.some((p) => !next.some((q) => q.toLowerCase() === p.toLowerCase()))) return true;
     }
     const bars = sets.find(([k]) => k === 'required_bars');
-    if (!bars) return false;
-    const next = JSON.parse(bars[1] ?? '[]') as RequiredBar[];
-    const was = this.requiredBars(repository);
-    // A bar removed, or narrowed (a course or leg it covered no longer covered, an `except`
-    // grown), loosens; a new bar or a widened one tightens.
-    return was.some((oldBar) => {
-      const cover = (bar: RequiredBar) => `${bar.course}|${bar.leg}|${(bar.except ?? []).slice().sort().join(',')}`;
-      const twin = next.find((n) => cover(n) === cover(oldBar) && n.tag_prefix === oldBar.tag_prefix);
-      return !twin;
-    });
+    if (bars) {
+      const next = JSON.parse(bars[1] ?? '[]') as RequiredBar[];
+      const was = this.requiredBars(repository);
+      // A bar removed, or narrowed (a course or leg it covered no longer covered, an `except`
+      // grown), loosens; a new bar or a widened one tightens.
+      if (was.some((oldBar) => {
+        const cover = (bar: RequiredBar) => `${bar.course}|${bar.leg}|${(bar.except ?? []).slice().sort().join(',')}`;
+        const twin = next.find((n) => cover(n) === cover(oldBar) && n.tag_prefix === oldBar.tag_prefix);
+        return !twin;
+      })) return true;
+    }
+    // B-182: a `code_repos` entry or a `pushers` entry the list did not hold is reach gained.
+    if (codeRepos != null) {
+      const was = new Set(codeReposOf(this.c.store, repository).map((e) => e.path.toLowerCase()));
+      if (codeRepos.some((e) => !was.has(e.path.toLowerCase()))) return true;
+    }
+    const owners = sets.find(([k]) => k === 'pushers');
+    if (owners) {
+      const was = new Set(pushersOf(this.c.store, repository).map((p) => `${p.host}\u0000${p.id}`));
+      const next = (JSON.parse(owners[1]!) as { host: string; id: string }[] | null) ?? [];
+      if (next.some((p) => !was.has(`${p.host}\u0000${p.id}`))) return true;
+    }
+    return false;
+  }
+
+  /** R-BTN-114's `checks`: `{<course>: {name?, url?, conclusions: {<end station>: success |
+   *  failure | timed_out}}}`, at most 200 courses, each one the repository registers, its map
+   *  naming exactly one end station `success`, exactly one `failure` and at most one `timed_out`,
+   *  every station one of the course's end stations — or `invalid-params` naming the course. */
+  private checkConclusions(repository: string, v: unknown): Record<string, CheckConclusion> {
+    if (!isObj(v)) bad('checks', 'must be an object of course id → {name?, url?, conclusions}');
+    const courses = v as Record<string, unknown>;
+    if (Object.keys(courses).length > CHECKS_MAX) bad('checks', `must name at most ${CHECKS_MAX} courses`);
+    const out: Record<string, CheckConclusion> = {};
+    for (const [course, raw] of Object.entries(courses)) {
+      const at = `checks.${course}`;
+      if (!COURSE_ID.test(course)) bad(at, 'is not a course id');
+      const row = this.rows<{ course_json: string }>('SELECT course_json FROM courses WHERE repository_id = ? AND id = ?', repository, course)[0];
+      if (!row) bad(at, `${repository} registers no course ${course}`);
+      const graph = graphOf(JSON.parse(row.course_json));
+      const ends = [...graph.ends].sort();
+      if (!isObj(raw)) bad(at, 'must be an object');
+      const r = raw as Record<string, unknown>;
+      only(r, ['name', 'url', 'conclusions'], at);
+      const entry: CheckConclusion = { conclusions: {} };
+      for (const k of ['name', 'url'] as const) {
+        if (r[k] === undefined) continue;
+        if (typeof r[k] !== 'string' || !(r[k] as string).length || (r[k] as string).length > 100) bad(`${at}.${k}`, 'must be a string of 1 to 100 characters');
+        entry[k] = r[k] as string;
+      }
+      if (!isObj(r.conclusions)) bad(`${at}.conclusions`, 'must be an object of end station → conclusion');
+      const counts = { success: 0, failure: 0, timed_out: 0 };
+      for (const [station, named] of Object.entries(r.conclusions as Record<string, unknown>)) {
+        const cat = `${at}.conclusions.${station}`;
+        if (!ends.includes(station)) bad(cat, `is not one of ${course}'s end stations (${ends.join(', ')})`);
+        const conclusion = CONCLUSIONS.find((c) => c === named);
+        if (!conclusion) bad(cat, 'must be success, failure or timed_out: neutral passes a required check and is not a conclusion (R-BTN-114)');
+        counts[conclusion!] += 1;
+        entry.conclusions[station] = conclusion!;
+      }
+      const want = `one end station success, one failure and at most one timed_out, not ${JSON.stringify(entry.conclusions)}`;
+      if (counts.success !== 1 || counts.failure !== 1 || counts.timed_out > 1) bad(`${at}.conclusions`, `must name exactly ${want}`);
+      out[course] = entry;
+    }
+    return out;
+  }
+
+  /** R-BTN-130's delegated key: an owner key acting on a hosted MCP client's behalf. None is
+   *  registered until B-124 builds them, so no actor is one today; the refusals above read the
+   *  one place that will say so, as `Policies.entryMatches` reads its own. The actor is
+   *  `<class>:<fingerprint>` (`owner:` from `/v1/owner/…`); B-124's `delegated:` actor keeps
+   *  that shape, and the fingerprint after the prefix is what an `approvers.policy` entry admits. */
+  private delegated(actor: string): boolean {
+    return actor.startsWith('delegated:');
+  }
+
+  /** A repository's `checks` map (R-BTN-114) as stored, `{}` while the owners set none. */
+  checkMap(repository: string): Record<string, CheckConclusion> {
+    return JSON.parse(this.rows<{ checks: string }>('SELECT checks AS checks FROM repositories WHERE id = ?', repository)[0]?.checks ?? '{}');
   }
 
   /** R-BTN-67's required bars: `{course | *, leg | *, except?, tag_prefix}`, a named `leg` only
@@ -1033,12 +1208,6 @@ export class Admin {
     return JSON.parse(this.rows<{ required_bars: string }>('SELECT required_bars FROM repositories WHERE id = ?', repository)[0]?.required_bars ?? '[]');
   }
 
-  /** R-BTN-106: the owners' `required_independence`, leg → the legs a key that ran any of them
-   *  on a ticket may not take it; joined to every course file's `no_chain_from`. */
-  requiredIndependence(repository: string): Record<string, string[]> {
-    return JSON.parse(this.rows<{ v: string }>('SELECT required_independence AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? '{}');
-  }
-
   /** A repository's retry policy (R-BTN-23), or null for the default. */
   retry(repository: string): RetryPolicy | null {
     const r = this.rows<{ retry: string | null }>('SELECT retry FROM repositories WHERE id = ?', repository)[0]?.retry;
@@ -1065,7 +1234,12 @@ export class Admin {
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
-      settings: this.rows('SELECT id AS repository_id, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, required_independence, control_paths, pushers FROM repositories WHERE retired_at IS NULL ORDER BY id'),
+      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, scope_policy, worker_pushers, pushers, require_signed_control FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
+        ...s,
+        // B-182: the home's code repositories beside the column settings — its own table's rows,
+        // as the observation hands them to the sync, so the CLI and the dashboard read one shape.
+        code_repos: codeReposOf(this.c.store, String(s.repository_id)),
+      })) as (Record<string, unknown> & { code_repos: CodeRepo[] })[],
       // R-BTN-80: the personal channels, by repository.
       couriers: this.c.notices?.couriers() ?? [],
     };
@@ -1103,22 +1277,6 @@ export class Admin {
   }
 }
 
-/** R-BTN-106's `required_independence`: `{<leg>: [<leg>, …]}`, leg names compared as strings
- *  in every course of the repository (a renamed leg is followed at the gate). At most
- *  LEGS_MAX legs, each naming at most LEGS_MAX; an empty list is dropped. */
-export function checkIndependence(v: unknown): Record<string, string[]> {
-  if (!isObj(v) || Object.keys(v).length > LEGS_MAX) bad('required_independence', `must be an object of at most ${LEGS_MAX} leg names`);
-  const out: Record<string, string[]> = {};
-  for (const [leg, from] of Object.entries(v as Record<string, unknown>)) {
-    const at = `required_independence.${leg}`;
-    if (!COURSE_ID.test(leg)) bad(at, 'must be a leg name');
-    if (!Array.isArray(from) || from.length > LEGS_MAX || !from.every((l) => typeof l === 'string' && COURSE_ID.test(l))) bad(at, `must be a list of at most ${LEGS_MAX} leg names`);
-    const legs = [...new Set(from as string[])].sort();
-    if (legs.length) out[leg] = legs;
-  }
-  return out;
-}
-
 /** R-BTN-23's policy as owners set it: 1–8 backoffs, each 1 minute to 30 days, and the failed
  *  attempt that holds the ticket, 1–10. */
 export function checkRetry(v: unknown): RetryPolicy {
@@ -1131,7 +1289,9 @@ export function checkRetry(v: unknown): RetryPolicy {
   return { backoff_ms: backoff, max_failed: max };
 }
 
-/** R-BTN-94's dispatch shape for `unblocked_trigger` (R-BTN-77): on GitHub a workflow path. */
+/** R-BTN-94's dispatch shape for `unblocked_trigger` (R-BTN-77, B-168: a GitHub workflow on the
+ *  default branch, a GitLab trigger or Gitea's — Baton never reads the workflow file; a forge
+ *  that refuses the dispatch is logged with its reason). */
 function checkTrigger(v: unknown): Record<string, unknown> {
   if (!isObj(v) || typeof v.kind !== 'string') bad('unblocked_trigger', 'must be a dispatch {kind, …}');
   const t = v as Record<string, unknown>;

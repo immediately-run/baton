@@ -2534,28 +2534,302 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   "past its start".
   S-BTN-199's row follows.
 
-- **2026-11-06 — R-BTN-194 added; R-BTN-73, R-BTN-58 amended: control inputs watched, provenance on every ticket (B-126).**
-  Rules changed: R-BTN-73, R-BTN-58. Rule added: R-BTN-194.
-  The security model's hardening option 6 (mitigation G, the owner 2026-10-27): when an accepted
-  board post's head changes a control input — the fixed path list (`.baton/**`, goals,
-  workflows, agent configuration, dependency manifests) plus the owners' `control_paths` and a
-  live ticket's `EXPEDITE`, `tier`, `requires` and `depends_on` watched as fields — and the
-  pusher of the commits that changed it is not one of the owners' recorded forge identities,
-  Baton raises one `control-changed` event under Needs you. Detection only: nothing is refused
-  or held (option 7, B-127, is the gate). The pusher comes from the forge's push deliveries —
-  R-BTN-73's GitHub push now records `sender.id` (immutable; the commit author never counts),
-  `ref`, `before`, `after` and each commit's changed paths, bounded, kept 24 hours — and a
-  missing, truncated or absent delivery fails closed as `pusher-unknown` (a plain git remote
-  included), the writer never assumed an owner's. A push delivery past the bounds is remembered
-  `truncated` with no paths. The owners' identities are the `pushers` setting (R-BTN-139's list,
-  §13, not built before), `baton owner identity add` writing one id of it (R-BTN-58); with none
-  recorded every control change raises, the owner's own pushes included. Every ticket is served
-  with `last_written_by: {pusher, pusher_id?, commit, at}` — the pusher of the newest recorded
-  commit that changed its file — in the board read, the recommendations, the dashboard and the
-  claim answer, whose runner prints it at the claim; `baton ticket show` (new) prints it first;
-  a `signer` joins when B-127 builds owner-signed control. The adversarial review's finding 9
-  (immutable `sender.id`, not `pusher.name`) and finding 19 (default-branch changes after the
-  fact; ticket bodies are provenance's, not the watch's) are taken. Scenario S-BTN-204.
+- **2026-11-06 — B-183: opaque ticket versions.**
+  Rules changed: R-BTN-5, R-BTN-11, R-BTN-34, R-BTN-62, R-BTN-74, R-BTN-84, R-BTN-147
+  (R-BTN-35's rewording to "the ticket source is the truth about tickets" is B-183's decision
+  (a), which the owner took on 2026-11-09 and is recorded in its own entry, with value 1's edit).
+  Each posted ticket gains `version`, an opaque
+  string of 1–128 characters of `[A-Za-z0-9._:+/=-]` whose meaning is the ticket source's own,
+  compared by Baton for equality only (values 4: no ordering, no clock); a stable `key`
+  (default the ticket's `path`), by which a dropped-and-replaced ticket is `renumbered`
+  (first-class `renumbered` event, actor `sync`); and the
+  board names its `source` — `markdown` or `custom`, and how it reads: `versions: "pinned"` (at
+  a version) or `"current"` (as it is now), a declaration exporting `read(id, {version})`
+  accordingly — refused at load without one — run on the runner like its other exports. The
+  version contract is stated
+  (R-BTN-74): a version changes exactly when something a runner reads of the ticket changes, and
+  a digest of what `read` returns, optionally prefixed by the store's own stamp, is recommended
+  over a timestamp alone. The markdown source is pinned by the ticket file's blob id at the
+  posted commit — a blob id, not the commit's sha, so an unrelated commit changes no version —
+  and behaves exactly as before; a ticket whose file is not at the commit is posted with no
+  version at all, never a present-but-empty string §12.3 would refuse. A refresh may now add,
+  close or change any ticket whose version
+  differs from the row Baton holds, `version` an input of `row_hash` (R-BTN-11) — but only a
+  body read at the head it refreshes: the post carries `read_sha`, the commit its tickets were
+  read at, and a `confirm-only` re-post from a checkout behind the head (or an older CLI's post
+  naming none) changes no ticket row, never rolling the cache back (review round 1); a refresh
+  overtaken while its rows were hashed is refused by the new-head path's re-checks; the
+  observation
+  returns each live ticket's last accepted version for the source's own staleness judgement, and
+  `tickets(ctx)` reads its store after the number (R-BTN-62's obligation on the source); the
+  claim answer names the ticket's version and the source's way of reading, and the runner
+  re-verifies by it before any leg runs (R-BTN-5, R-BTN-34); replay records the version and the
+  digest of what `read` returned (R-BTN-84); a `custom` source with `versions: "current"` posting
+  to a repository whose floors include `tickets-approved` is refused `invalid-params`, naming
+  the guarantee (R-BTN-184). Scenarios S-BTN-206 and S-BTN-207.
+- **2026-11-07 — §12.9 (new), R-BTN-73, R-BTN-106, §13, §14, §15** (B-134, OWASP ASI10 hole 7).
+  Rules changed: R-BTN-73, R-BTN-106.
+  A leg's scope — its ticket's home and `repos:` — is carried in the claim answer, audited at
+  each leg's end by the runner from its own git (a cooperative aid, not a control: it runs inside
+  the trust domain it audits), and cross-checked by Baton against the forge's push deliveries
+  for the owners' `worker_pushers` logins (the control). `scope-exceeded` findings (reported
+  with the claim) and `unclaimed-write` findings (a push no active claim covers) are listed
+  under Needs you until an owner resolves each; `scope_policy: hold` holds the ticket. R-BTN-73
+  states the one thing besides the want a delivery produces; R-BTN-106 states the leg-end audit.
+  `code_repos` (R-BTN-140) is not built yet, so until it is the scope holds every `repos:` entry
+  that resolves to a forge path on the home's forge host, as R-BTN-92 reads a short name.
+  S-BTN-202's row follows.
+
+- **2026-11-08 — R-BTN-24, R-BTN-63, R-BTN-69, R-BTN-81, R-BTN-106, R-BTN-123, R-BTN-128, R-BTN-144,
+  R-BTN-180, R-BTN-181, R-BTN-183, R-BTN-188, R-BTN-189, §13, §14, §15** (B-185, B-187).
+  Rules changed: R-BTN-24, R-BTN-63, R-BTN-69, R-BTN-81, R-BTN-106, R-BTN-123, R-BTN-128, R-BTN-144,
+  R-BTN-180, R-BTN-181, R-BTN-183, R-BTN-188, R-BTN-189.
+  From the owner's design session on runner placement and leg isolation. The owner asked "Does
+  each leg attempt have a unique execution id?" and agreed to a first-class one ("Yes"): every run
+  gets an opaque `run_id` minted at its start (R-BTN-63), carried by the history, the resume
+  record and the run list, exported as `BATON_RUN_ID` and `BATON_SESSION_ID` (R-BTN-144, R-BTN-123),
+  and keying leg-log paths under the tenant's host (R-BTN-128). The owner then ruled, for Fieldhouse: "I don't think it makes sense for the
+  initial iteration of fieldhouse to claim guarantees against a compromised runner if the leg
+  processes are sandboxed. That may come later if necessary." Offered a choice between counting
+  review independence by a label the runner reports per run, a second dispatcher on its own key,
+  or dropping the domain rule, the owner answered "yes" to the first; and asked that Baton "be
+  completely agnostic regarding how runner sandbox legs, if at all". So a policy may list grants whose domain is per run
+  (`domains.per_run`, R-BTN-180): their runs carry single-use labels Baton compares and never
+  interprets; `std:wrote@1`, `std:ran@1` and `std:review@1` carry the grant's domain and the run's
+  label as separate fields (R-BTN-181), a labelled run's attestations superseding only their own
+  label's, and independent review compares them (R-BTN-183) — a label counting only under a
+  repository that listed the credential, and two runs by one runner key always one domain; `no_chain_from` (R-BTN-106) refuses a listed
+  credential only within one claim or against its unlabelled runs. A run carries its grant's domain and its label as separate fields,
+  and a labelled run and any unlabelled run on the same domain count as one, whichever key made
+  either, so listing or un-listing never makes a grant independent of
+  itself; only an `approvers.policy` change lists a credential, never a trusted-runner, checker or
+  domainless one, and its dry run names what the change disables (R-BTN-188). Review: round 1 (two fresh
+  reviewers) found the cross-version self-review, the inert `no_chain_from` and the leg-log
+  directory in the claim reply; round 2 (one) the same-host second key and B-187's drift; round 3
+  (one) that a listed key's second review would supersede its first, that a multi-repository
+  ticket's labels counted under a policy that never listed the key, `no_chain_from` admitting an
+  un-listed key on its old label, and re-domaining as a way to self-independence. All fixed before
+  merge. `independent-review` counts labelled runs as their own domains, and §12.8's outside list
+  says it does not withstand a compromised runner of a listed credential or a leg that can act as
+  it (R-BTN-189).
+  S-BTN-204 and S-BTN-205's rows follow.
+
+- **2026-11-09 — R-BTN-189, §12.8, §15** (B-187).
+  Rules changed: R-BTN-189.
+  The first draft of the 2026-11-08 entry added a weaker `independent-runs` beside an
+  `independent-review` that never held with a listed credential. After a runner-trust audit the
+  owner accepted collapsing it ("I accept all recommendations"): the split rested on a leg being
+  able to act as its runner. `independent-review` counts labelled runs as their own domains; the
+  `domains.per_run`-empty condition and the floor case are gone; S-BTN-205 follows.
+- **2026-11-11 — §2.1's one alarm is kept by every request** (B-229).
+  Rules changed: R-BTN-9.
+  After the reaper's fix was deployed the twelve claims stayed held, and a live tail showed no
+  alarm firing at all while requests kept arriving. The alarm was set only by a start that found
+  none, so one the platform had stopped firing was never set again. Every start, and a request
+  at most once a period, now sets a missing or more than two periods overdue alarm for the next
+  period.
+
+- **2026-11-11 — R-BTN-6 and §9.5's reaping** (B-229).
+  Rules changed: R-BTN-6.
+  On 2026-11-10 the board still listed twelve claims of `oc-vltava2-vm0` whose leases had ended
+  between 2026-10-30 and 2026-11-06, and claim 123 on B-150 outlived vltava2's runner until it
+  was ended by hand. The alarm ran the reaper and every other step of its tick in one
+  transaction, so any step that threw rolled back every reap, every minute; and a restarted
+  runner, a new session with a new state file, never saw the claim its predecessor left. The
+  reaps now commit on their own, each claim's apart, and a failing tick names its step; a runner
+  that starts ends what its host's earlier sessions still hold once their leases are lost.
+
+- **2026-11-10 — §8.3's immediate stop** (B-227).
+  Rules changed: R-BTN-72.
+  The first leg vltava2 ran through the E2B executor did not take an immediate stop: the
+  standard stubs never passed `ctx.signal` to their agent, so no release reached a safe point,
+  and the hard stop killed the runner's call but left the session — the sandbox ran on, its
+  agent spending its model key, and the claim held. The stubs now stop their agent on the
+  release, and the hard stop stops the session. Retired text: "a leg child that will not take
+  the release has its whole group killed after ten seconds (the lease-loss mechanism)".
+
+- **2026-11-10 — R-BTN-96** (B-226).
+  Rules changed: R-BTN-96.
+  The sync had posted no board since 2026-11-07: its GraphQL read of fieldhouse#16 and #17's head
+  check suites was refused (`Resource not accessible by personal access token`), and any error
+  failed the sync. GitHub offers fine-grained tokens no Checks permission, and public baton read
+  without it. The owner, 2026-11-10: "I would very much prefer to use fine-grained personal access
+  tokens instead of creating a GitHub app. Because anybody using Baton would then need to create a
+  GitHub app." An answer whose errors all refuse check suites now stands, and that repository's
+  checks are its heads' Actions workflow runs. Retired text: "an answer with `errors` fails the
+  sync."
+
+- **2026-11-11 — R-BTN-131: a fix from the gate's red must push** (B-231).
+  Rules changed: R-BTN-131.
+  B-167's fix legs on vltava2 reached `fixed` four times without a commit, and each time the
+  `run-tests` gate tested the unchanged tree again and recorded red, up to the course's 30 runs.
+  A `fix` run from `pr-open` or `fixed` now reads the ticket's PR branch heads before its agent
+  and after; unchanged, the leg fails (`cannot-finish:transient`, a counted attempt, so R-BTN-122's
+  backoff and hold reach the owner) instead of reporting a fix. From `reviewed` nothing changes:
+  a fix may answer a review's findings without a push. The other candidates were rejected: the
+  gate comparing its tested tree with its last red marker's (a station-function change for the
+  same signal), and a fix leg's own time ceiling (R-BTN-167's leg deadline already bounds a leg).
+
+- **2026-11-11 — R-BTN-131: a run-tests run that never reached the tests is no verdict** (B-230).
+  Rules changed: R-BTN-131.
+  On vltava2 every `run-tests` gate of B-167 ran in a leg checkout without `node_modules` and
+  ended `sh: 1: vitest: not found` (exit 127), which the gate recorded as `Baton-Tests: red`: five
+  red markers sent fix legs after code that was never tested, until the ninth ran into the
+  executor's leg timeout. B-168's gate then outlived the 240 s bound, red again. R-BTN-131 now says
+  what the gate's verdict is: the script's own exit. Dependencies declared and none installed, the
+  shell's 126 or 127, npm's missing script, and a run that outlives the bound fail the leg
+  (`cannot-finish:transient`, a counted attempt) with no marker. The bound is a setup failure,
+  not red, because a hung test is caught by the runner's per-test timeouts as a failure the
+  script reports; a whole run that outlives the bound says the environment or the bound is short,
+  which no fix leg can change. Retired text (the stub's): "a timeout or output overflow is red
+  too, named" — output overflow stays red.
+
+- **2026-11-09 — R-BTN-182, §12.8** (B-184).
+  Rules changed: R-BTN-182.
+  The owner: "I don't want the merge leg to be different from the other legs for the plain baton
+  scenario. For field house, we already have sandboxing, so it requires no special custom
+  infrastructure beyond potentially a dedicated sandbox Docker image. Even that might be
+  unnecessary." A trusted leg's `run.mjs` override runs as any leg's code does, by the runner's
+  own means; the `bubblewrap` requirement and the refusal where no sandbox exists are retired
+  (they were never built). It still may only add refusals, R-BTN-183 applied afterwards. That the
+  override cannot reach the trusted runner's credential joins §12.8's list of what the deployment
+  must make true. Retired text: "It runs in a sandbox with no network, no credential, a private PID
+  namespace and `/proc`, the computed diff as its only input, a fixed time, and no checkout, `.git`
+  or home directory (`bubblewrap` or an equivalent on Linux; where none is available the override
+  is refused, not run unsandboxed)."
+
+- **2026-11-09 — R-BTN-35, values 1** (B-183).
+  Rules changed: R-BTN-35.
+  B-183 (opaque ticket versions, baton#190) asked the owner to settle values 1 and R-BTN-35, which
+  named git as the truth about the work although a tracker may now be the ticket source. The owner
+  chose the recommended wording: "The ticket source is the truth about tickets and git about the
+  code and its evidence; Baton holds what no write may decide." `docs/context/values.mdx` value 1 and
+  R-BTN-35 now say so; a git-only repository reads exactly as before. Retired text: R-BTN-35's
+  title "the home repository wins, except about what Baton owns" and "About anything else, git is
+  authoritative: every other ticket fact Baton holds (its existence, filter fields, closure) is a
+  cache of the head snapshot". The owner also waived B-183's seventh scenario (replay against a
+  moved version), which moves to B-190 with replay itself.
+
+- **2026-11-09 — R-BTN-3, R-BTN-19, R-BTN-51, R-BTN-72, R-BTN-98, R-BTN-106, R-BTN-107, R-BTN-113,
+  R-BTN-114, R-BTN-119, R-BTN-121, R-BTN-123, R-BTN-124, R-BTN-126, R-BTN-128, R-BTN-131,
+  R-BTN-133, R-BTN-134, R-BTN-144, R-BTN-145, R-BTN-153, R-BTN-155, R-BTN-174, R-BTN-180, R-BTN-181, R-BTN-182,
+  R-BTN-183, R-BTN-189, §6.6, §8, §9.2, §11, §12, §13, §14, §15** (B-184, the leg executor).
+  Rules changed: R-BTN-3, R-BTN-19, R-BTN-51, R-BTN-72, R-BTN-98, R-BTN-106, R-BTN-107, R-BTN-113,
+  R-BTN-114, R-BTN-119, R-BTN-121, R-BTN-123, R-BTN-124, R-BTN-126, R-BTN-128, R-BTN-131,
+  R-BTN-133, R-BTN-134, R-BTN-144, R-BTN-145, R-BTN-153, R-BTN-155, R-BTN-174, R-BTN-180, R-BTN-181, R-BTN-182,
+  R-BTN-183, R-BTN-189.
+  From the owner's design session on runner placement, 2026-11-08: "Ideally, baton does not
+  dictate the host, runner, leg process isolation policy: a single-user completely non-isolated
+  baton setup would not benefit from having this complexity within baton, while the full
+  fieldhouse software factory may require a highly complex and frequently evolving
+  architecture", and "Perhaps the 'start a leg' hook should be something that can be
+  reimplemented in each repo's `.baton/`"; Baton is to be "completely agnostic regarding how
+  runners sandbox legs, if at all". The session's answer: the hook may live in `.baton/`, but
+  whether a runner believes it is the runner's host's call, since the hook creates the sandbox
+  and a push that replaced it would be reach 1 (`docs/security-model.mdx`) — the precedent being
+  a host's `BATON_AGENT_WRAPPER` winning over a repository's `agent_wrapper`. R-BTN-107 is
+  rewritten as the executor rule (the same id): one versioned interface (`executor_api: 1`:
+  `start`, `stop`, `end`, `exec`, `salvage`) keyed by run id, four sources the host picks
+  (`builtin`, `home`, `home-signed`, `pinned`), every call into repository code by `exec` in a
+  session of its kind, executor data Baton never reads or stores, the heartbeat's `executor`
+  block in place of `isolation`, and three opaque strings on the run's record. `session` and
+  `attached` become executors Baton ships. The per-leg channel (R-BTN-106) carries only the leg
+  verbs. On 2026-11-09 the owner settled two choices B-184 left to this amendment: check legs
+  require `checks:withheld-credentials`, a capability only an executor's `provides` declares
+  (R-BTN-114, R-BTN-121), so a `builtin` runner runs none; and a leg's agent command is the first
+  present of the home's per-leg setting, the course file's per-leg `agent_command`, the home's
+  top-level `agent_command` and the `--harness` fill (R-BTN-131) — the top-level value is a
+  permanent default, never removed, which supersedes B-184 item 6's "dual-read window". The
+  trusted leg's override (R-BTN-182, the owner's 2026-11-09 choice recorded above) now names the
+  executor it runs through; §12.8's list says its isolation is the deployment's. Decided in the
+  drafting and flagged for the owner's approval: a silence reap of a claim whose leg runs under
+  any executor but `builtin` stays fence-pending until the executor's `stop` returns (R-BTN-19,
+  as `session` mode's was); the `pinned` digest's canonical listing and a directory-only bundle;
+  executor data bounded at 4 KB, checked by the sync and stripped from the posted course file;
+  the wrapper reading `ctx` from stdin and writing its result on stdout's last line; the run
+  strings' shape (1–256 printable ASCII without spaces); `--sessions` and `--attached` kept as
+  selectors of the shipped executors. Retired text: R-BTN-107's three modes — "`process`
+  (default): legs are the runner's child processes, as its OS user", "`attached`: `baton runner
+  start --attached` runs in the background inside an agent session's own container …", "`session`:
+  the runner starts one cloud session per agent leg through a session provider … The provider
+  adapter is runner code; core knows only the mode's name" — and "A leg that must run in `session`
+  mode requires the built-in capability `runner:session` (R-BTN-133), which only a runner started
+  in `session` mode declares"; R-BTN-133's `runner:` value `session`; R-BTN-114's "Check legs
+  require `runner:session` (R-BTN-107): no `process` or `attached` runner takes one"; R-BTN-153's
+  "a fresh sandbox … through the provider method `exec` … A runner whose provider has no `exec`
+  takes no verdict leg"; R-BTN-123's provider `contextUse(sessionId)`; R-BTN-3's "`vm`
+  (Firecracker)" (the host `kind` stays, a label no rule reads); R-BTN-180's domain as "a label
+  naming the host or VM the grant's process runs in"; §9.2's and `no_chain_from`'s "containers
+  sharing one key" (said of credentials); R-BTN-69's refusal of `isolation` "which is the
+  capability `runner:session`" (the field stays refused); the wrapper's `<ctx.json> <out.json>`
+  files; the heartbeat's `isolation`, `runners.isolation` and the run list's `mode`.
+  `docs/context/architecture.mdx`'s *Parallelism is horizontal* no longer prescribes Firecracker
+  sandboxes packing several runners under cgroups, nor says a sandbox is one domain; *Who decides
+  what* gives a threat to "the deployment, the forge or the credential proxy". No id is retired.
+  S-BTN-208–S-BTN-213 and G-BTN-168 are new; S-BTN-4, -64, -78, -88, -123 and G-BTN-14, -90
+  follow.
+
+- **2026-11-12 — R-BTN-131: the stub concludes for an agent that will not exit or never ends** (B-108).
+  Rules changed: R-BTN-131, R-BTN-72.
+  The B-86 incident (2026-10-22): an implement agent finished its work, pushed, opened its PR,
+  wrote its ticket record — and never exited, so the stub waited five hours on an exit that never
+  came while every health signal stayed green. The owner, the same day: "the runner is responsible
+  for detecting that the agent has completed its work and wont exit. The baton server has no role
+  in this," and the numbers: "leg timeout: 5 hours, idle timeout: 15 minutes." An agent's
+  completion is now its exit **or its silence**, whichever comes first: the stub's wait ends at the
+  earliest of the agent's exit, fifteen minutes of quiet across every activity signal the stub can
+  see (its stdout, streamed and timestamped; the wrapper's log's mtime; the harness's own store,
+  keyed by the working directory, no session id) and five hours of the leg — the one
+  duration-based conclusion, a chatty agent that never converges cannot idle past it. Idle is
+  silence on all the signals: a live one anywhere vetoes the conclusion (a harness CLI may
+  legitimately print nothing on stdout until it exits — the stdout-silence trap, the db the true
+  signal that night), and before the ceiling a working agent is never touched. Either bound
+  concluding is the same act — SIGKILL to the child, the received stdout as the agent's output,
+  the checks judging the work as it stands — recorded in the leg's result as
+  `agent_concluded_idle` (with the quiet signals) or `agent_concluded_absolute`; Baton is told
+  none of it. R-BTN-72 gains the runner's liveness line: while a leg runs, each beat logs its
+  duration and the age of its newest activity signal, so a wedge forms in the log instead of
+  silence. The briefing's exit sentence (2026-10-22) and B-84's exit contract stand beside it —
+  prevention and detection.
+
+- **2026-11-12 — R-BTN-133, §4.4: the keyless control record is held to the walk** (B-127).
+  Rules changed: R-BTN-133.
+  B-127's review round 3, reproduced by its adjudication: a stored signed-control record
+  rewritten to `{read: <the claim's snapshot>, key: null, unsigned: []}` passed the runner's
+  check — a keyless read equal to the snapshot was taken as the pre-adoption baseline before the
+  walk comparison ran — and the leg ran the pushed `agent_command`. The keyless shape is now
+  held to the walk like the keyed one: honest only as the snapshot itself while the walk there
+  finds no change to the group, since a group with changes is either signed or names no signed
+  version. Two smaller amendments from the same round: the claim's record pairing is stored on
+  every claim whatever the setting (a claim made with it off and replayed after it was turned
+  on used to pair the old snapshot with the moved board's record, and the runner refused the
+  honest claim), and while the owner key register has moved since the record was computed — the
+  record's `keys` against Baton's own — a refusal releases the claim as a stale board,
+  unpenalised, instead of a counted `cannot-finish:spec`; every check still runs against the
+  register as it stands, so nothing more loads. The reviewer's other remedy, walking under the
+  record's own keys, was not taken: the post names those keys, and a post naming fewer could
+  roll a group back to an older owner-signed commit.
+
+- **2026-11-13 — R-BTN-194 added, R-BTN-73 amended: every ticket carries who last wrote it** (B-126).
+  Rules changed: R-BTN-194, R-BTN-73.
+  The security model's option 9 (reach 3; the owner, 2026-10-27): each ticket is served with
+  `last_written_by: {pusher, pusher_id?, commit, at}` — the pusher of the newest commit that
+  changed its file, read from Baton's own record of the App's push deliveries over the range a
+  post accepts, never the post's account and never the commit author — in the board read, the
+  dashboard's ready rows, the recommendations, the claim answer (whose runner prints it at the
+  claim) and a new ticket read, `GET /v1/repositories/{repository}/tickets/{ticket}`, which
+  `baton ticket show` prints first. A change no recorded delivery accounts for (missing, pruned,
+  past the recording bounds, or a forge that sends none) is `pusher-unknown`. The signer half is
+  B-127's existing brief mark `{signed, signer?, commit}`, served beside it, not a second field.
+  R-BTN-73's GitHub push now also records `sender.id`, `sender.login`, `ref`, `before`, `after`
+  and each commit's changed paths, bounded (30 commits, 600 paths) and kept 24 hours
+  (`push_deliveries`, §13). **Descoped** (the owner, 2026-11-13): B-126 as filed also asked for
+  a `control-changed` notice when a non-owner's push changes a control input, with an
+  owner-identities route (`baton owner identity add`) and a `control_paths` setting to serve it;
+  all of it is dropped, for under `cooperative` Baton carries no foreign-write notice (the
+  owner's 2026-11-01 ruling, R-BTN-66, "Remove it"), and B-127's opt-in `unsigned-control`
+  notice (`require_signed_control`) is the detection for a repository that wants it. Provenance
+  is information only: nothing is refused, held or noticed. Scenario S-BTN-220.
 
 ## Retired requirements
 
@@ -4124,6 +4398,28 @@ changes):
   the source moves, so they are merged at read time; **course directories that import their
   repository** — a sparse tree could not run them and owning a course would not be a copy, so
   shared code is copied in by the source repository's own script.
+
+- **One deployed instance: production, no staging** (2026-11-09, the owner; §2.1, §15,
+  R-BTN-56; B-224, B-225). The owner: "A home repo can be associated with one baton server. In
+  the case of the baton, fieldhouse and immediately-run/hq home repos that is the production
+  baton instance at baton.immediately.run. This leaves the staging instance with no connected
+  repos, no data, and no reasonable way to test anything — might as well get rid of it
+  entirely." Rejected: keeping `baton-staging` as a smoke target after each deploy (it registers
+  no repository, so the smoke runs prove nothing a CI run does not), and gating production on
+  staging's health (the gate is the test job). The scenarios run in CI on both hosts; the
+  envelope is read from production's own `capacity` log (R-BTN-87); the load test runs on the
+  local host (R3-1258). The owner's answer to BATON-UI-V2's Decision 7 ("we don't need staging at
+  all") is the same ruling.
+
+- **The leg executor: how a leg runs is the runner host's choice** (2026-11-08 and 2026-11-09,
+  the owner; R-BTN-107, R-BTN-114, R-BTN-131; B-184). Rejected: Baton's closed list of modes
+  (`process`, `attached`, `session`), which made isolation a Baton concept a single-user setup
+  pays for and a factory outgrows; a repository-selected start hook every host obeys, which a push
+  could replace at the runner's level (reach 1); repository code (`close`, `handoff`, `rank.mjs`,
+  the ticket source) left in the runner's own process; a built-in `runner:session` for check legs
+  in place of a name the executor states; and a course-only `agent_command` with the home's value
+  read through a window, which would have broken every home that customizes a sourced course's
+  command.
 
 ## Review record
 

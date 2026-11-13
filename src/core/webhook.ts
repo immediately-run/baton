@@ -1,7 +1,7 @@
 // webhook.ts — GitHub App deliveries trigger repository syncs (BATON_SPEC §7.1 R-BTN-73, §10.1;
 // R3-1247). A delivery is only a trigger: the sync still computes everything from git. A push
 // delivery is also recorded (`push_deliveries`, B-126): its immutable pusher and the commits it
-// brought, for §4.4's control-input watch and ticket provenance (R-BTN-194).
+// brought, for §4.4's ticket provenance (R-BTN-194).
 //
 // The front verifies `X-Hub-Signature-256` with BATON_GITHUB_WEBHOOK_SECRET before anything else
 // is read, then `pickDelivery` — the only code that touches a payload — returns exactly the
@@ -17,8 +17,10 @@ import type { Store } from './ports';
 /** The events the App subscribes to (R-BTN-73; `check_suite` dropped after the sixth review). */
 export const WEBHOOK_EVENTS = ['push', 'pull_request', 'pull_request_review', 'issue_comment', 'workflow_run'] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
-/** GitHub caps a delivery's payload at 25 MB; nothing larger is a delivery. */
-export const MAX_DELIVERY = 25 << 20;
+/** R-BTN-73: a delivery's body is at most 26,214,400 bytes (25 MiB, above the largest GitHub
+ *  sends) on either route — `/v1/github/webhook` and `/v1/forges/{repository}/notify` — and one
+ *  larger is `too-large` before any digest is computed. */
+export const MAX_DELIVERY = 26_214_400;
 export const DISPATCH_WINDOW_MS = 30_000;
 export const DELIVERY_TTL_MS = 24 * 3_600_000;
 /** B-89: how stale a repository's last webhook-driven sync may be before the alarm sends
@@ -59,15 +61,15 @@ export interface Delivery {
   /** B-126 (R-BTN-194): a push's own record — the immutable pusher and the commits it brought,
    * each with its changed paths — read only when every field of it parses; a push past the
    * bounds is remembered `truncated` with no paths, and a shape that does not parse leaves the
-   * delivery unrecorded. Either way the range fails closed (§4.4) while the delivery still
-   * triggers its syncs. */
+   * delivery unrecorded. Either way what it changed reads as `pusher-unknown` (§4.4) while the
+   * delivery still triggers its syncs. */
   push?: PushDelivery;
 }
 
 /** A push delivery's recorded half (B-126, R-BTN-73): `sender.id` is the pusher — immutable,
  *  unlike `pusher.name` or the commit author, which anyone sets; `before`/`after` chain the
  *  deliveries into the range a board post accepts; each commit carries its changed paths, kind
- *  undistinguished (a control input is changed as much by a removal as by an addition). */
+ *  undistinguished (a file is changed as much by a removal as by an addition). */
 export interface PushDelivery {
   sender_id: number | null;
   sender_login?: string;
@@ -105,12 +107,14 @@ export async function deliverySignature(secret: string, body: Uint8Array): Promi
 }
 
 /** The delivery's body, once its signature is the App's — before a byte of it is parsed. An
- *  unconfigured secret refuses every delivery: nothing unsigned is ever accepted. */
+ *  unconfigured secret refuses every delivery: nothing unsigned is ever accepted. The size is
+ *  judged first (R-BTN-73): a body over the cap is `too-large` on its Content-Length or once
+ *  that many bytes are read, so no digest is computed over one. */
 export async function verifyDelivery(req: Request, secret: string | undefined): Promise<Uint8Array> {
+  const body = await readCapped(req, MAX_DELIVERY, 'too-large');
   if (!secret) throw new BatonError('forbidden', 'the GitHub App webhook secret is not configured');
   const presented = req.headers.get('X-Hub-Signature-256') ?? '';
   if (!/^sha256=[0-9a-f]{64}$/.test(presented)) throw new BatonError('unauthenticated', 'X-Hub-Signature-256 is required');
-  const body = await readCapped(req, MAX_DELIVERY);
   const want = await deliverySignature(secret, body);
   if (!equalBytes(enc.encode(presented), enc.encode(want))) throw new BatonError('unauthenticated', 'the delivery signature does not verify');
   return body;
@@ -129,8 +133,8 @@ const at = (o: unknown, k: string): unknown => (o !== null && typeof o === 'obje
  * payload. A push also carries its recorded half for R-BTN-194 (`push`: `sender.id`,
  * `sender.login`, `ref`, `before`, `after` and each commit's `id` with its `added`, `removed`
  * and `modified` paths) when every field of it parses: a shape that does not records nothing,
- * and a push past the bounds a `truncated` record with no paths — either way the range fails
- * closed (B-126), and the delivery still triggers its syncs.
+ * and a push past the bounds a `truncated` record with no paths — either way what it changed
+ * reads as `pusher-unknown` (B-126), and the delivery still triggers its syncs.
  */
 export function pickDelivery(event: string | null, id: string | null, payload: unknown): Delivery | null {
   if (!event || !(WEBHOOK_EVENTS as readonly string[]).includes(event)) return null;
@@ -172,7 +176,7 @@ export function pickDelivery(event: string | null, id: string | null, payload: u
 
 /** A push's recorded half (B-126, R-BTN-194): undefined when the payload carries none of it (a
  *  delivery older than the App's push payload, a branch deletion's zero shas) — the range then
- *  has no record and fails closed; `{truncated}` when the push is past the bounds. */
+ *  has no record and reads as `pusher-unknown`; `{truncated}` when the push is past the bounds. */
 function pickPush(payload: unknown): PushDelivery | undefined {
   const ref = str(at(payload, 'ref'));
   const before = str(at(payload, 'before'));
@@ -220,7 +224,10 @@ export type DeliveryOutcome =
   | { outcome: 'dispatched'; now: string[]; trailing: string[] };
 
 export class Webhooks {
-  constructor(private readonly c: { store: Store; now: () => number }) {}
+  constructor(private readonly c: { store: Store; now: () => number; /** B-134: the forge
+   *  cross-check — a push by a named worker pusher to a repository no open claim covers (rule
+   *  3's reading of still holding, as `openScopes` reads it) raises `unclaimed-write`. */
+   scope?: { pushDelivery(d: Delivery): void } }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec(q, ...p).toArray() as T[];
@@ -238,7 +245,7 @@ export class Webhooks {
     this.c.store.exec('INSERT INTO webhook_deliveries (delivery_id, received_at) VALUES (?, ?)', d.id, now);
     // B-126 (R-BTN-194): the push's own record, kept for the 24 hours a sync needs to accept the
     // head it moved — before anything drops the delivery as a duplicate of Baton's own work: a
-    // mirror push moves the default branch too, and its pusher is judged like any other.
+    // mirror push moves the default branch too, and its pusher is recorded like any other.
     if (d.push) {
       this.c.store.exec('DELETE FROM push_deliveries WHERE received_at < ?', now - DELIVERY_TTL_MS);
       this.c.store.exec(
@@ -254,6 +261,10 @@ export class Webhooks {
     const registered = this.rows<Registered>(`SELECT id, github, sync_workflow, mirror_workflow FROM repositories
        WHERE retired_at IS NULL AND forge = 'github' AND lower(web_base) = 'https://github.com/' || lower(github)`);
     if (this.ownWork(d, full, registered)) return { outcome: 'own-work' };
+    // B-134's control: every push delivery — a duplicate was dropped above, Baton's own work
+    // just before — is cross-checked against the claims open now, whatever repositories the
+    // delivery's want ends up dispatching.
+    this.c.scope?.pushDelivery(d);
     // B-89: a merge is the trigger; a pull_request the App sends for an opened, synchronised or
     // closed-without-merging PR moves the default branch nowhere, so the board owes nothing.
     if (d.event === 'pull_request' && d.merged !== true) return { outcome: 'not-a-merge' };

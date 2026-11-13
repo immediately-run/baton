@@ -22,7 +22,7 @@ const ORIGIN = 'http://127.0.0.1';
  *  takes, with the `owner_keys` B-91 adds. */
 function batonEntry(): Record<string, unknown> {
   const toml = readFileSync(resolve(ROOT, 'wrangler.toml'), 'utf8');
-  const vars = /^\[vars\]\n([\s\S]*?)(?=^\[)/m.exec(toml)?.[1] ?? '';
+  const vars = /^\[vars\]\n([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(toml)?.[1] ?? '';
   const raw = /^BATON_REPOSITORIES = '(.*)'$/m.exec(vars)![1];
   return (JSON.parse(raw) as Record<string, unknown>[]).find((e) => e.id === 'baton')!;
 }

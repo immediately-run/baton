@@ -1,0 +1,131 @@
+---
+title: "B-187 — Per-run domains: a listed credential's runs carry single-use labels, which independent review compares beside the grant's domain"
+id: B-187
+project: baton
+status: available
+updated: 2026-11-08
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1186
+tier: judgement
+description: "A domain is a grant's label (R-BTN-180), so a runner that runs every leg in an environment of its own is still one domain and is refused its own review legs. Let the policy (approvers.policy) list credentials in domains.per_run, never a trusted-runner, checker or domainless one; a listed credential's runner reports a single-use run label on the advance that starts each run; attestations carry the grant's domain and the label as separate fields; two runs on one domain differ only when both carry different labels, whichever key made either; no_chain_from still refuses within one claim and against unlabelled runs; independent-review counts labelled runs as their own domains (the weaker independent-runs of the first draft collapsed into it, the owner 2026-11-09). Baton verifies no label and knows nothing of what one names. Requires: B-185."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-185
+---
+
+**Brief:** the owner, 2026-11-08, ruled that Fieldhouse's first edition does not guard against a
+compromised runner whose legs all run in sandboxes, and agreed to count review independence by a
+label the runner attests for each leg's sandbox, over a second dispatcher or over dropping the domain rule
+(FIELDHOUSE_SPEC R-FH-80, R-FH-82 and its Decisions, 2026-11-08). With one runner credential,
+today's rules refuse that runner its own review legs.
+
+This is a proposal: the spec half lands first, as its own spec PR, with the owner's approval.
+
+**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8),
+[R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-183](../spec/BATON_SPEC/12-security.md#sec-12-8),
+[R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8): `independent-review`, `merge.reviews`),
+[§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) (`no_chain_from`), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)
+([R-BTN-46](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)).
+**Depends on:** B-185 (the run id a per-run label is bound to). Works with any executor; what a label stands for (a sandbox, a VM,
+a container, nothing) is the deployment's, and Baton never learns it.
+**Used by:** FIELDHOUSE_SPEC R-FH-82 (its section 5), FLDH-53's findings.
+
+### What to build
+
+1. **A credential may be listed in `domains.per_run` — a policy change.** Marking a grant `per-run` changes what
+   `independent-review` means for its work, so it is a change to the repository policy, governed
+   by `approvers.policy` (R-BTN-186), not a role setting: the policy gains `domains.per_run:
+   [fingerprints]`. `independent-review` counts per-run domains (no separate guarantee: the owner, 2026-11-09,
+   collapsed the weaker `independent-runs` of the first draft into it), and §12.8's outside list
+   states what a labelled review does not withstand: a
+   compromised runner of a per-run grant, and — under `builtin`, where any leg can read the runner's
+   key (R-BTN-144) — a hostile leg acting as that runner; it holds only as far as the deployment
+   keeps runs apart from each other and from the runner. Such a grant's runner reports a `run_label`
+   once per run, on the `advance` that starts it (the run's label is then stored; the finishing
+   `advance` or `end` needs none, and an `advance` that both finishes one run and starts the next
+   carries the new run's label); a missing label is refused `invalid-params`. A refresh (R-BTN-123)
+   keeps its run's label. The label comes only from the runner's own call, never through a leg's
+   channel (B-184 item 2).
+2. **The label and the domain are separate fields.** A run is attributed its grant's domain (which
+   may not contain `/`) and its label, 1–128 characters of `[A-Za-z0-9_.:-]` (opaque: an executor's per-run `instance`, B-184 item 7 — not its `environment`, which may
+   repeat across runs). It is stored on the run's
+   `claim_legs` row beside B-185's `run_id`.
+3. **A label is used once.** Baton refuses (`invalid-params`, rule `label-reused`) a label the same
+   credential reported for any earlier run on the tenant, atomically (`run_labels`, §13). Two runs
+   count as different domains when their domains differ, or when their domains are equal and both
+   carry different labels; a labelled run and any unlabelled run on the same domain count as one,
+   whichever key made either.
+4. **Attestations carry the label.** `std:wrote@1`, `std:ran@1` and `std:review@1` (R-BTN-181)
+   carry the grant's domain and, for a labelled run, its label; R-BTN-183's independent review
+   compares those, unchanged otherwise: each review from a domain other than every writer domain
+   of `H`, no two from one domain.
+5. **`no_chain_from` for a listed credential** refuses within one claim and against the
+   credential's unlabelled runs, as today; across claims it admits a labelled run only while the
+   credential is listed and the new run is labelled. A labelled run and any unlabelled run on one
+   domain count as one, and so do two runs by one runner key (R-BTN-180). For every other
+   credential it compares credentials, as today.
+6. **Shown on the record.** The ticket's history (R-BTN-81) and the dashboard show a run's per-run
+   domain, so an owner sees that a review ran under a label no writer used.
+
+### What not to do
+
+- **No verification Baton cannot do:** Baton checks a label's shape and its single use, never that
+  it names anything real or fresh (R-BTN-46; R-BTN-180: "Baton compares domains as labels and
+  verifies nothing about them").
+- **No isolation vocabulary:** the API, the schema and the dashboard say `run_label`, never
+  sandbox, VM or container (B-184's agnosticism).
+- **No silent relaxation of `no_chain_from`:** for a listed credential it still refuses within one
+  claim and against unlabelled runs, and admits only a labelled run from another claim; the
+  policy's dry run names the legs this relaxes (R-BTN-188).
+- **No change for grants not marked `per-run`.**
+- **No per-run marking of a `trusted-runner` grant** (the merge runner stays one labelled domain).
+
+### Trust
+
+- **`domains.per_run`** — a policy knob, changed only through `approvers.policy` and checked
+  against the floors (R-BTN-189).
+- **The `run_label`** — the runner's word. Marking a grant `per-run` is the owner's statement
+  that the runner is trusted to report it honestly (FIELDHOUSE_SPEC R-FH-80); a compromised
+  per-run runner can forge independence, which is exactly the risk that ruling accepts.
+
+### Invariants
+
+- **R-BTN-189's guarantees keep their meaning for labelled grants.** For a listed credential's
+  labelled runs, `independent-review` holds only as far as the deployment keeps runs apart from
+  each other and from the runner — Baton cannot tell — never against a compromised runner; §12.8's
+  *Outside every guarantee* list says so.
+- **Validate before you write:** the label goes through `src/core/validate.ts` before SQL.
+- **Migrations are append-only:** one new file for the column.
+- **Filter fields only** (R-BTN-33).
+
+### Tests
+
+- A per-run grant implements and then reviews one ticket under two labels: the review is admitted,
+  and two such reviews satisfy `merge.reviews {count: 2}`.
+- The same grant reporting a label twice is refused `label-reused`.
+- With a credential listed, `independent-review` computes held, its labelled reviews counting as
+  separate domains.
+- A per-run grant omitting the label on `advance` is refused.
+- A labelled grant behaves exactly as today (the existing scenarios pass unchanged).
+- Each behaviour change names its `S-BTN-n` scenario (R-BTN-31).
+
+### Exit criteria
+
+- [ ] the spec PR (the policy's `domains.per_run`, R-BTN-189's `independent-review` promise, §12.8's outside list, R-BTN-181's attestations,
+  R-BTN-183's comparison, §8.3's `no_chain_from`, the policy view's note) is merged with the
+  owner's approval
+- [ ] built as above; the tests pass; `npm test` and `npm run typecheck` are green
+
+## Status
+
+_filed 2026-11-08._
+
+_(2026-11-08: rules re-read: R-BTN-63, R-BTN-106, R-BTN-180, R-BTN-183, R-BTN-188, R-BTN-189)_ — this ticket's spec half is in baton#197; the items above match it.
+
+_2026-11-09: the owner accepted collapsing the weaker `independent-runs` into `independent-review` ("I accept all recommendations"): the split rested on a leg being able to act as its runner. Items and tests rewritten in place; the spec in baton#197 matches. (2026-11-09: rules re-read: R-BTN-189)_

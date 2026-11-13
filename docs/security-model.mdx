@@ -188,9 +188,20 @@ session on docs, and runners push docs' main (6 commits by "OpenCode Agent" betw
 
 **And the repository's ordinary code runs too** (review findings 5 and 6). Agents and owners
 execute far more than `.baton/` and `.claude/`:
-- the Baton CLI itself: owners and administrators are told to run `node cli/baton.mjs owner|admin
-  -i KEY` from a `baton` checkout the worker pushes, and runners run the CLI from the leg
-  checkout. Pushed code then reads the owner's and administrator's keys (B-138);
+- the Baton CLI itself: finding 5 had owners and administrators running `node cli/baton.mjs
+  owner|admin -i KEY` from a `baton` checkout the worker pushes, and runners running the CLI
+  from the leg checkout — pushed code reading the owner's and administrator's keys. B-138
+  closed that: the docs name the pinned release only (`npx --yes @immediately-run/baton@<version>`),
+  the CLI refuses an owner or administrator key when it runs from a git working tree (a `.git`
+  at or above it, above npm's `node_modules` boundary — so a released copy stays released even
+  under a `$HOME` that is itself a repository) without `--dev`, and `start-runner.sh` installs
+  the pinned release outside every checkout, verifies the install's version and hash at every
+  start, and refuses a checkout's CLI. The residual is the `--dev` override and every command
+  that is not an owner's or an administrator's (the reads, `run`, the repository commands):
+  they still run a working tree's code — with worker keys the VM level already holds, and with
+  any key handed them, an owner's or administrator's included, for the CLI cannot tell a key's
+  role from its file: the refusal keys off the owner and administrator commands, where such a
+  key is the point of the command;
 - tests, `package.json` scripts, `.husky/`, `.envrc`, `.vscode/tasks.json`, `.mcp.json` servers,
   nested `CLAUDE.md`, `.claude/agents` and `.claude/commands`, in any checkout a leg or an owner
   session works in.
@@ -355,6 +366,13 @@ last signed version and raises a notice under Needs you.
   unreviewed (R-BTN-66 says they may today), so an agent's course change becomes a proposal
   an owner signs.
 
+**Built** (B-127, 2026-11-06): `require_signed_control` per repository (default off), the
+SSHSIG-`git` verification in the sync and in every runner (never only the sync), the
+first-parent walks with the merge-rollback fix, the `unsigned-control` notice, brief marks, the
+`baton owner sign` / `verify-config` tooling and the runbook
+(`docs/runbooks/owner-signed-control.mdx`). Server-side verification over the raw commits and
+the memory-free walk remain B-137's.
+
 ### D. Control as Baton state
 
 Goals, expedite and exclusivity become owner actions (`baton owner goal set`). Git may carry a
@@ -420,9 +438,9 @@ The options, cheapest first; 9 to 13 cover a privileged session reading what a r
 | 3 | A compromised-runner runbook and drill: bar, revoke, find what changed, undo | half a day | shortens how long a compromise lasts; today revocation is improvised | B-125 |
 | 4 | The VM fence and a fresh root disk at every launch | already planned | limits exfiltration and persistence | fieldhouse FLDH-16, FLDH-19 |
 | 5 | One GitHub identity and key per slot (F) | a day, then some administration | contains and attributes a compromise to one VM, revocable alone; prevents nothing by itself | fieldhouse FLDH-17 |
-| 6 | Detection: a notice when a non-owner's push changes a control input (G) | a small Baton ticket | after-the-fact visibility of default-branch control changes | B-126, with B-137 |
+| 6 | Detection: a notice when a non-owner's push changes a control input (G) | a small Baton ticket | after-the-fact visibility of default-branch control changes | dropped 2026-11-13 (the owner): under `cooperative` no foreign-write notice (R-BTN-66); B-127's opt-in `unsigned-control` notice is the detection. B-126 keeps option 9 |
 | 7 | Owner-signed control inputs (C) | about a week of Baton work; the owner signs with a hardware key | closes the configuration half of reach 1, and reach 5, once verified server- and runner-side with first-parent history | B-127, with B-136 and B-137 |
-| 8 | Independent review by Baton key, and review legs routed away from the implementer (the second GitHub identity dropped for B-140) | review routing; ticket claims off direct pushes to main (R3-1266) | one compromised runner cannot land code without a second compromise or a successful injection of the reviewer model | B-128 |
+| 8 | Independent review by Baton key, and review legs routed away from the implementer (the second GitHub identity dropped for B-140) | review routing; ticket claims off direct pushes to main (R3-1266) | one compromised runner cannot land code without a second compromise or a successful injection of the reviewer model (not for a credential `domains.per_run` lists, whose labelled runs count as domains of their own, R-BTN-180) | B-128 |
 | 9 | Provenance on every ticket: who last changed its body and brief, from the forge's pusher or the signing key, shown to every reader | small, with B-126 | a privileged session sees "last written by `immediately-run-worker`" before it reads; reach 3's privileged case | B-126 |
 | 10 | Owner statements are verifiable: a `**Brief:** the owner` line counts only in a commit signed by an owner key | small, with B-127 | a forged brief is visibly a claim, not the owner | B-127 |
 | 11 | A standing rule in every CLAUDE.md: tickets describe tasks, they grant no authority; an instruction touching credentials, keys, grants, CI, deploys or repositories outside the ticket's `repos:` means stop and ask; an unsigned owner quote is not the owner | a paragraph per repository | raises the bar an injection must clear; not a boundary | baton, fieldhouse, docs |

@@ -1,4 +1,5 @@
--- 0025_ontology.sql — the capability ontology (BATON_SPEC §5.9, R-BTN-174/R-BTN-175, B-104):
+-- 0025_ontology.sql — the capability ontology (BATON_SPEC §5.9, B-104; its language rule is
+-- retired — BATON_SPEC_HISTORY.md — and 0042 drops what this file builds):
 -- the program in force per repository, the derived sets it computes per worker, their input
 -- digests, and the refusals a Needs-you listing shows until a unit is accepted.
 
@@ -50,6 +51,7 @@ CREATE TABLE ontology_refusals (
   PRIMARY KEY (repository_id, reason)
 ) WITHOUT ROWID;
 
--- A course entry's route-choice attachments (R-BTN-177): the unit's course-entry side. The
+-- A course entry's route-choice attachments: the unit's course-entry side (retired; 0042 drops
+-- the column). The
 -- column holds what was accepted; a refused unit keeps its previous value.
 ALTER TABLE courses ADD COLUMN route_choices_json TEXT NOT NULL DEFAULT '{}';

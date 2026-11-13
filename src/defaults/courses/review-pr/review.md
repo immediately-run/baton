@@ -15,7 +15,7 @@ verdict line on the PR from it. If the PR is in another repository (named in the
 > completion: a harness that is a client of a background service must keep its session in
 > process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
 > work ends leaves truncated output and an orphaned session posting to a claim that no longer
-> exists (B-84). A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> exists (B-84). Your completion is your exit **or your silence** (B-108): the stub stops waiting at the earliest of your exit, fifteen minutes of quiet on every activity signal it can see — your stdout, the wrapper’s log, the harness’s own store — and five hours of the leg, its ceiling; the stdout you left is judged as any exit’s is. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
 > `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
 > your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95).
 
@@ -36,6 +36,10 @@ verdict line on the PR from it. If the PR is in another repository (named in the
   unless the reply is wrong; then say why, once.
 - For each candidate, find a `file:line` and a one-sentence mechanism, and run the test or probe
   that shows it. Drop what you cannot show.
+- **Name every dependency the diff adds or upgrades** (B-132) — manifest and lockfile both:
+  name, version, publisher (its maintainers or owning scope, read from the registry) and that
+  version's age. A dependency the review does not name is itself a finding: unreviewed supply
+  chain.
 
 Severity: **blocking**, **should-fix**, **nit**, as the `create-pr` review defines them.
 

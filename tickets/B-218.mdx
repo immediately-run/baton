@@ -1,0 +1,94 @@
+---
+title: "B-218 — The ticket detail read: GET …/tickets/{ticket} is one ticket with its claim, attempts, overrides, open conditions, scope findings, parent, children, resume record, forge link and the allowed actions the caller may take on it"
+id: B-218
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1217
+tier: judgement
+description: "The detail read the ticket page of BATON-UI-V2 draws. ticket.show: the ticket's repo.tickets row plus its live claim (holder, run id, lease, deadline, attempt and backoff, session link, log directory), its earlier attempts on the current leg, overrides (expedite; hold with set_by and reason), open condition ids and types, open scope findings (§12.9), parent and children ids, the resume record's branches and PRs (R-BTN-24), web_url from web_base (R-BTN-92), and allowed — the target-dependent actions the caller may take (ticket.unhold where the session's key is an approver on approvers.policy), computed by authorize (B-191's rule). Requires: B-194."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-194
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "A ticket page gathers every read about it."
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the `allowed` rule as
+B-191 amends it), [§6.8](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8) ([R-BTN-12](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8):
+expedite and hold), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8):
+a lift is an approver's), [§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4) (attempts and
+backoff), [§9.8](../spec/BATON_SPEC/09-claims.md#sec-9-8) ([R-BTN-24](../spec/BATON_SPEC/09-claims.md#sec-9-8):
+the resume record), [§4.6](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6) ([R-BTN-86](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6)),
+[§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9) (scope findings), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3)
+([R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§8.5](../spec/BATON_SPEC/08-runners.md#sec-8-5)
+([R-BTN-128](../spec/BATON_SPEC/08-runners.md#sec-8-5)), [§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1)
+([R-BTN-92](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1): `web_base`),
+[§14](../spec/BATON_SPEC/14-api.md#sec-14).
+
+**Depends on:** B-194 (`repo.tickets` and its state function).
+
+**Used by:** B-210, B-222.
+
+### What to build
+
+The §14 row first, then the code, in `src/core/tickets.ts` beside B-194's.
+
+1. **`GET /v1/repositories/{repository}/tickets/{ticket}`** (`ticket.show`, read; the repository
+   reads' principals and a session): the ticket's `repo.tickets` row plus
+   - `claim`: null, or `{claim_id, runner_id, hostname, session_name, leg, run_id, claimed_at,
+     lease_ends_at, deadline_at, attempt, max_runs, next_backoff_until, session_url, log_dir}`
+     (`session_url` only where R-BTN-113 passed it; `log_dir` text, R-BTN-128);
+   - `attempts`: earlier attempts on the current leg, `[{run, runner_id, hostname, started_at,
+     ended_at, end_reason, detail}]`;
+   - `overrides: {expedite, hold: {set_by, reason, since} | null}`;
+   - `conditions: [{condition_id, type}]` (open); `scope: [{id, kind, target, ref, at}]` (open
+     scope findings, §12.9);
+   - `parent`, `children` (ids); `resume` as `history` returns it (R-BTN-24); `web_url` (the
+     ticket's page on its forge from `web_base`, R-BTN-92; null for a `git` forge);
+   - `allowed: [<action id>]` — the target-dependent actions the caller may take on this ticket,
+     computed by `authorize` with the caller as principal: today `ticket.unhold` (an approver on
+     `approvers.policy`, R-BTN-186, or the delegated key that set the hold); a later
+     target-dependent action joins the list in its own ticket.
+   `not-found` for a ticket not in the repository, the same as for none.
+
+### What not to do
+
+- No body; no permission beyond `allowed`'s hint — `authorize` decides again on the call.
+- No screen (B-210, B-222).
+
+### Trust
+
+- **The read** — Baton's rows; hostnames, reasons, refs, URIs and detail are untrusted text
+  validated on write (§12.3), returned as text; `session_url` as the server passed it; `web_url`
+  built from `web_base` only.
+- **`allowed`** — computed by `authorize`; a drawing hint, not authority.
+
+### Invariants
+
+- **Positions are Baton's** (R-BTN-39); **filter fields only** (R-BTN-33); **log directories as
+  text** (R-BTN-128); **session links only from `session_hosts`** (R-BTN-113).
+- **An owner's session, its repositories** (R-BTN-155); **both hosts** (R-BTN-55).
+
+### Tests
+
+A scenario numbered at merge, on both hosts: `ticket.show` carries the claim, attempts,
+overrides, conditions, scope findings, children, resume and `web_url`; `allowed` names
+`ticket.unhold` for an approver's session and not for a non-approver's; a foreign id is
+`not-found`.
+
+### Exit criteria
+
+- [ ] `ticket.show` in §14 and the registry, built, with tests.
+- [ ] `npm test`, `npm run typecheck`, `npm run check:wiki` and `npm run check:tickets` green.
+
+## Status
+
+_filed 2026-11-09, split from B-194 after the second review._

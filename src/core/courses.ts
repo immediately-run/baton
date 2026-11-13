@@ -17,8 +17,6 @@ export { COURSE_ID };
 
 /** A skill's name (`next-ticket`), as a directory under `.claude/skills/`. */
 const SKILL = /^[a-z0-9][a-z0-9-]{0,63}$/;
-/** R-BTN-175's entry id, which a route choice id shares (one namespace, R-BTN-174). */
-const ENTRY = /^[a-z][a-z0-9-]{0,63}$/;
 /** A branch pattern (R-BTN-51): `{ticket}` and `{repository}` placeholders and `*`. */
 const BRANCH_PATTERN = /^[A-Za-z0-9._/{}*-]{1,200}$/;
 /** The size of one course file (spec-silent, recorded on R3-1231): a whole registry of them
@@ -64,14 +62,14 @@ export interface RegistryEntry {
   skill: string;
   course: unknown;
   step_kinds: string[];
-  report_horizon_h: number;
   branch_pattern: string;
   previous_branch_pattern: string | null;
   /** R-BTN-108: the course's schemas, posted with its file at every sync. */
   schemas: PostedSchema[];
-  /** R-BTN-177 (B-104): the route choices this repository attaches to the course's legs, ids
-   *  the program in force defines; judged with the ontology unit at each post. */
-  route_choices?: Record<string, string[]>;
+  /** R-BTN-134: what the course's entry declares it reads — `prs` (the forge's PRs through the
+   *  fact adapter, R-BTN-96) or `branches` (the home repository's git). R-BTN-190 (B-182) reads
+   *  it to follow the PRs: a `git` home's PR course keeps its rounds in its PR's conversation. */
+  facts: string[];
 }
 
 const bad = (field: string, why: string): never => {
@@ -112,7 +110,6 @@ export function checkRegistry(v: unknown): RegistryEntry[] {
       || new Set(r.step_kinds).size !== r.step_kinds.length) {
       bad(`${at}.step_kinds`, `must be at most ${STEP_KINDS_MAX} distinct step kinds`);
     }
-    if (r.report_horizon_h !== undefined && !int(r.report_horizon_h, 1, 168)) bad(`${at}.report_horizon_h`, 'must be an integer from 1 to 168');
     // An oversized file is a refusal of that course, as any file failing R-BTN-69 is: the previous
     // one stays in force and the board still advances. It is never stored or walked.
     let size = Infinity;
@@ -142,19 +139,19 @@ export function checkRegistry(v: unknown): RegistryEntry[] {
         schemas.push({ id: o.id as string, digest: o.digest as string, schema: n > SCHEMA_MAX_BYTES ? null : o.schema, oversized: n > SCHEMA_MAX_BYTES });
       }
     }
-    // R-BTN-177 (B-104): the route choices this repository attaches to the course's legs — at
-    // most 8 per leg, each an entry id. Whether they name route choices the program in force
-    // defines, on legs the course file has, is the ontology unit's judgement at each post.
-    let routeChoices: Record<string, string[]> | undefined;
-    if (r.route_choices !== undefined) {
-      if (!isObj(r.route_choices) || Object.keys(r.route_choices).length > 64) bad(`${at}.route_choices`, 'must map at most 64 legs to route choice ids');
-      routeChoices = {};
-      for (const [leg, ids] of Object.entries(r.route_choices as Record<string, unknown>)) {
-        if (!COURSE_ID.test(leg) || !Array.isArray(ids) || ids.length > 8 || !ids.every((x) => typeof x === 'string' && ENTRY.test(x))) {
-          bad(`${at}.route_choices.${leg}`, 'must be a list of at most 8 route choice ids');
-        }
-        routeChoices[leg] = [...new Set(ids as string[])];
+    // B-167: a course entry's `route_choices` is a field the restructure took out of the wire,
+    // taken with the field ignored — a sync older than B-167 keeps posting (the history's
+    // Migrations entry "part 4's retired fields"), and nothing is stored.
+    const retired = r as Record<string, unknown>;
+    if (retired.route_choices !== undefined) delete retired.route_choices;
+    // R-BTN-134: what the course's entry declares it reads. `prs` and `branches` are the names
+    // built so far; a course declaring none reads as none (R-BTN-190's rule treats it so).
+    let facts: string[] = [];
+    if (r.facts !== undefined) {
+      if (!Array.isArray(r.facts) || r.facts.length > 2 || !r.facts.every((x) => x === 'prs' || x === 'branches')) {
+        bad(`${at}.facts`, "must be a list from 'prs', 'branches'");
       }
+      facts = [...new Set(r.facts as string[])];
     }
     return {
       schemas,
@@ -165,10 +162,9 @@ export function checkRegistry(v: unknown): RegistryEntry[] {
       skill: r.skill as string,
       course: r.course,
       step_kinds: r.step_kinds as string[],
-      report_horizon_h: (r.report_horizon_h as number | undefined) ?? 6,
       branch_pattern: pattern(r.branch_pattern, `${at}.branch_pattern`),
       previous_branch_pattern: r.previous_branch_pattern == null ? null : pattern(r.previous_branch_pattern, `${at}.previous_branch_pattern`),
-      route_choices: routeChoices,
+      facts,
     };
   });
 }
@@ -194,7 +190,7 @@ export class Courses {
    *  passes is written whole and its refusal cleared; each whose file fails keeps the row it had
    *  and is recorded under Needs you. A failing course with no row in force refuses the post:
    *  its tickets would have no course. Returns the refused course ids. */
-  apply(repo: string, registry: RegistryEntry[], sha: string, now: number, acceptedRoutes?: Map<string, Record<string, string[]>>): string[] {
+  apply(repo: string, registry: RegistryEntry[], sha: string, now: number): string[] {
     const listed = JSON.stringify(registry.map((e) => e.id));
     this.c.store.exec('DELETE FROM courses WHERE repository_id = ? AND id NOT IN (SELECT value FROM json_each(?))', repo, listed);
     this.c.store.exec('DELETE FROM course_refusals WHERE repository_id = ? AND course_id NOT IN (SELECT value FROM json_each(?))', repo, listed);
@@ -260,21 +256,15 @@ export class Courses {
         refused.push(e.id);
         continue;
       }
-      // A7 (round 1): a refused unit keeps every entry's previous attachments — read the
-      // stored value before the statement, never inside its arguments (a nested exec during
-      // argument binding trips the host's binder).
-      const routesJson = acceptedRoutes === undefined
-        ? this.c.store.exec<{ route_choices_json: string }>('SELECT route_choices_json FROM courses WHERE repository_id = ? AND id = ?', repo, e.id).toArray()[0]?.route_choices_json ?? '{}'
-        : JSON.stringify(acceptedRoutes.get(e.id) ?? {});
       this.c.store.exec(
-        `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, person_legs_json, step_kinds, min_worker_version, report_horizon_h, branch_pattern, previous_branch_pattern, route_choices_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, person_legs_json, step_kinds, min_worker_version, branch_pattern, previous_branch_pattern, facts)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (repository_id, id) DO UPDATE SET version = excluded.version, skill = excluded.skill, course_json = excluded.course_json,
            leg_capabilities_json = excluded.leg_capabilities_json,
            person_legs_json = excluded.person_legs_json,
-           step_kinds = excluded.step_kinds, min_worker_version = excluded.min_worker_version, report_horizon_h = excluded.report_horizon_h,
+           step_kinds = excluded.step_kinds, min_worker_version = excluded.min_worker_version,
            branch_pattern = excluded.branch_pattern, previous_branch_pattern = excluded.previous_branch_pattern,
-           route_choices_json = excluded.route_choices_json`,
+           facts = excluded.facts`,
         // §12.1's `courses` row holds the validated file as the repository posted it — its
         // `capability_roles` and its own lists (§12: "each course as the repository's last accepted
         // snapshot posted it"; `GET …/courses` returns the roles, and the CLI expands a grant's
@@ -283,12 +273,8 @@ export class Courses {
         // `graphOf` reads (`legNeedsOf`), for the candidate query's SQL — a view, kept in step with
         // the file by being written in the same statement. So is R-BTN-116's view (`personLegsOf`):
         // the person legs the candidate query's SQL leaves out, as rule `person` refuses them.
-        // B-104 (round 1, A7): `acceptedRoutes === undefined` names a refused ontology unit —
-        // every entry keeps its previous attachments, so the value written is the one already
-        // stored (a no-op); an accepted unit's map names this post's attachments whole, and an
-        // entry absent from it carries none.
-        repo, e.id, e.version, e.skill, JSON.stringify(e.course), JSON.stringify(legNeedsOf(e.course)), JSON.stringify(personLegsOf(e.course)), JSON.stringify(e.step_kinds), e.min_worker_version, e.report_horizon_h,
-        e.branch_pattern, e.previous_branch_pattern, routesJson);
+        repo, e.id, e.version, e.skill, JSON.stringify(e.course), JSON.stringify(legNeedsOf(e.course)), JSON.stringify(personLegsOf(e.course)), JSON.stringify(e.step_kinds), e.min_worker_version,
+        e.branch_pattern, e.previous_branch_pattern, JSON.stringify(e.facts));
       this.c.store.exec('DELETE FROM course_refusals WHERE repository_id = ? AND course_id = ?', repo, e.id);
       // Immutable: a schema already held has the same digest (schemaViolations), so it is kept.
       for (const x of e.schemas) {

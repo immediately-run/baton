@@ -70,7 +70,9 @@ const unquote = (v: string): string => {
 /** A scalar field, as the text the file wrote (`id: 0042` is the id `0042`, never `42`). */
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 /** A list field: a list, or one scalar standing for a list of one (`depends_on: S0`). */
-const strList = (v: unknown): string[] => (Array.isArray(v) ? v : v == null || v === '' ? [] : [v]).map(str).filter((x): x is string => x != null);
+/** A list field: a list, or one scalar standing for a list of one (`depends_on: S0`). B-127's
+ *  signed-control walk reads tags through the same rule as the source itself. */
+export const strList = (v: unknown): string[] => (Array.isArray(v) ? v : v == null || v === '' ? [] : [v]).map(str).filter((x): x is string => x != null);
 
 const CLOSED: Record<string, 'done' | 'withdrawn'> = { done: 'done', withdrawn: 'withdrawn', superseded: 'withdrawn', deferred: 'withdrawn' };
 

@@ -9,10 +9,6 @@ import { capabilitiesOf, fitsTier } from '../shared/vocabulary.mjs';
 export interface GateWorker {
   /** Capability and role names as declared. */
   declared: string[];
-  /** B-104 (R-BTN-174): the capabilities the repository's ontology derives from the worker's
-   * granted holdings, by repository — D(H), read only from a current set (the caller brings
-   * it up to date first). Absent, nothing is derived. */
-  derived?: Record<string, string[]>;
   /** Its ceiling in the ticket's repository's ladder, resolved by the caller (R-BTN-66). */
   tier_ceiling: string;
   tags: string[];
@@ -47,8 +43,7 @@ export interface GateLeg {
   state: 'ready' | 'waiting' | null;
   /** The tags the sync posted barred from this leg of the ticket (`ticket_bars`). */
   bars: string[];
-  /** R-BTN-106: the course file's `no_chain_from` joined to the owners' `required_independence`
-   *  for this leg, as current leg names. */
+  /** R-BTN-106 (B-168): the course file's `no_chain_from` for this leg, as current leg names. */
   noChainFrom?: string[];
   /** R-BTN-107: the course file's floor, `session`, or null. */
   isolation?: 'session' | null;
@@ -149,25 +144,22 @@ export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, p
   const grant = worker.grants ? worker.grants[ticket.repository] ?? null : undefined;
   if (grant === null) return refuse(7);
 
-  // Rule 4 (R-BTN-174, B-104): what a runner has for this repository is H ∪ D(H) — its
-  // holdings (declared ∩ grant, its `runner:` capabilities beside them, R-BTN-133) and what
-  // the repository's ontology derives from them. The grant is checked against holdings only:
-  // authority bounds H, never a derivation — a grant that names a derived capability admits a
-  // runner that declares it directly, and a derivation satisfies a need the grant never names.
-  // The leg's own `requires.capabilities` is rule 4's input beside the ticket's clause
-  // (R-BTN-120, B-86); both arrive expanded, capabilities only (§12.5), `human-operator`
-  // included as the literal R-BTN-121 compares — rule 6 is retired, so it is met by declaring
-  // it and granted like any capability (R-BTN-121 as amended).
+  // Rule 4 (R-BTN-174): capabilities are matched by name against what the runner has for this
+  // repository — its declared holdings, minus what its grant does not admit (R-BTN-58), its
+  // declared `runner:` capabilities beside them (R-BTN-133). Nothing is derived: a capability
+  // a runner means to offer is one it declares. The leg's own `requires.capabilities` is rule
+  // 4's input beside the ticket's clause (R-BTN-120, B-86); both arrive expanded, capabilities
+  // only (§12.5), `human-operator` included as the literal R-BTN-121 compares — rule 6 is
+  // retired, so it is met by declaring it and granted like any capability (R-BTN-121 as
+  // amended).
   const held = capabilitiesOf(worker.declared);
   const granted = grant ? new Set(grant.capabilities) : null;
   // R-BTN-58: a grant entry `<type>:*` admits every holding of that type.
   const admits = (capability: string) => granted ? granted.has(capability) || granted.has(`${capability.split(':')[0]}:*`) : true;
-  const derived = new Set(worker.derived?.[ticket.repository] ?? []);
   // R-BTN-178: rule 11 reads the same set — every capability with a capacity in it holds a seat.
   const needs = new Set([...capabilitiesOf(ticket.requires), ...(leg.requires ?? [])]);
   for (const need of needs) {
-    const isHolding = need.startsWith('runner:') || admits(need);
-    if ((!held.has(need) || !isHolding) && !derived.has(need)) return refuse(4);
+    if (!held.has(need) || !(need.startsWith('runner:') || admits(need))) return refuse(4);
   }
 
   // Rule 5: the caller passes the lower of the declared ceiling and the grant's max_tier.

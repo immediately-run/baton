@@ -27,6 +27,7 @@ import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
 import { appendStatus, filingDate, firstCommit, historyEntries, rereadMismatch, rereadNote, rulesConfig, sectionGaps, sectionHint, sectionsSince, staleIds, staleList, staleRules, unshallow } from './tickets-rules';
 import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
+import { claimMismatch, formatTicket, ticketPathsUnder, ticketPrView } from '../shared/ticketPr.mjs';
 import { defaultBranch } from './request';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { remoteSlug } from './cli';
@@ -673,13 +674,27 @@ export function pageFinding(root: string, settings: TicketSettings): { path: str
     : { path: rel, message: 'differs from the "How tickets work" page this release generates — `baton repo init --force` writes it again' };
 }
 
-/** `baton tickets check [--repo DIR] [--quiet]` (B-111, B-112): B-111's findings, then the
- *  generated page's when it has drifted. One `path: message` line each, then the count; exit 1
- *  with a finding, 0 without; `--quiet` keeps stdout for the exit code alone. */
+/** `baton tickets check [--repo DIR] [--pr BASE [--claimed-status-only] [--forge FILE]]
+ *  [--quiet]` (B-111, B-112, B-133): B-111's findings, then the generated page's when it has
+ *  drifted, then — with `--pr` — the machine-computed view of what this checkout changes in the
+ *  tickets against `BASE` (the merge-base): which tickets change, which frontmatter fields
+ *  (control fields named), whether a body or brief changed (with a bounded diff), each path's
+ *  commits, and the computed status-only label. `--claimed-status-only` — set by CI when the
+ *  PR's own description says "status-only" — CHECKS that claim against the computation, and a
+ *  mismatch is a finding: the label is the check's, never the description's (B-133).
+ *  `--forge FILE` — built by CI from the forge API — adds the forge's reading of each commit
+ *  (the accounts the commit's author and committer emails map to — email-derived, steered by
+ *  the commit's writer exactly as git's own names are, and labelled as such — and the signature
+ *  verification) beside git's, which is labelled as git's: anyone sets an author or committer
+ *  (B-126). One `path: message` line each, then the count; exit 1 with a finding, 0 without;
+ *  `--quiet` keeps stdout for the exit code alone. */
 export async function ticketsCheckMain(argv: string[], io: TicketsIo = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   let root = io.root ?? process.env.BATON_HOME ?? process.cwd();
   let quiet = false;
+  let prBase: string | null = null;
+  let claimedStatusOnly = false;
+  let forgePath: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = (): string => {
@@ -689,6 +704,9 @@ export async function ticketsCheckMain(argv: string[], io: TicketsIo = {}): Prom
     };
     if (a === '--repo') root = resolve(value());
     else if (a === '--quiet') quiet = true;
+    else if (a === '--pr') prBase = value();
+    else if (a === '--claimed-status-only') claimedStatusOnly = true;
+    else if (a === '--forge') forgePath = value();
     else throw new Error(`${a}: not a flag of baton tickets check`);
   }
   // The settings first: a repository with none has no page to judge, and the check says so.
@@ -700,12 +718,102 @@ export async function ticketsCheckMain(argv: string[], io: TicketsIo = {}): Prom
   const tickets = Number(/(\d+) ticket\(s\)/.exec(last)?.[1] ?? 0);
   const before = Number(/(\d+) finding\(s\)/.exec(last)?.[1] ?? 0);
   if (page) lines.push(`${page.path}: ${page.message}`);
-  const findings = before + (page ? 1 : 0);
+  const findings = before + (page ? 1 : 0) + ticketPrFindings(root, settings, prBase, claimedStatusOnly, forgePath, lines);
   if (!quiet) {
     for (const l of lines) log(l);
     log(findings ? `baton tickets check: ${tickets} ticket(s), ${findings} finding(s)` : `baton tickets check: ${tickets} ticket(s), ✓ no findings`);
   }
   return findings ? 1 : code;
+}
+
+/** B-133: the ticket-PR view against `base`, as `baton tickets check --pr` prints it, and the
+ *  finding when a PR's own description claims what the computation contradicts. The view is the
+ *  vendored library's (src/shared/ticketPr.mjs, R-BTN-37 — docs' scripts/lib is the source);
+ *  git is read here. Returns how many findings it added; every line it prints goes to `lines`. */
+function ticketPrFindings(root: string, settings: TicketSettings, base: string | null, claimedStatusOnly: boolean, forgePath: string | null, lines: string[]): number {
+  if (base == null) return 0;
+  // Trimmed stdout for shas, paths and logs; RAW for `show` — a file's bytes are the view's
+  // input, and a trimmed trailing newline would read as a body change.
+  const run = (...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
+  const raw = (...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } });
+  let mergeBase: string;
+  try {
+    mergeBase = run('merge-base', base, 'HEAD');
+  } catch (e) {
+    lines.push(`ticket-pr: cannot resolve a merge-base with ${base} — is it fetched? (git fetch origin) (${gitStderr(e)})`);
+    return 1;
+  }
+  // NUL-separated with quoting off: a path with a non-ASCII byte, `"` or `\` is emitted QUOTED
+  // by git's default settings, fails the prefix test and so hides from the computed view — the
+  // exact failure B-133 exists to prevent.
+  const paths = ticketPathsUnder(settings.items ?? 'tickets', execFileSync(
+    'git', ['-C', root, '-c', 'core.quotepath=false', 'diff', '--name-only', '--no-renames', '-z', mergeBase],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } },
+  ).split('\0').filter(Boolean));
+  const read = (rev: string, path: string): string | undefined => {
+    try {
+      return raw('show', `${rev}:${path}`);
+    } catch {
+      return undefined; // not there at that revision
+    }
+  };
+  const baseFiles: Record<string, string | undefined> = {};
+  const headFiles: Record<string, string | undefined> = {};
+  // The forge's reading of the PR's commits (B-126), when CI built it. A malformed file is a
+  // loud one-line refusal naming --forge, never a silent fallthrough that would show git's
+  // reading as the only one over a file the caller did pass (round two's finding — docs'
+  // readForge shape).
+  type ForgeFile = { pr_author: string; commits: Record<string, import('../shared/ticketPr.mjs').TicketForge> };
+  let forge: ForgeFile | null = null;
+  if (forgePath != null) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(forgePath, 'utf8'));
+    } catch (e) {
+      throw new Error(`--forge ${forgePath} does not parse (${(e as Error).message})`);
+    }
+    if (typeof parsed !== 'object' || parsed === null || typeof (parsed as { pr_author?: unknown }).pr_author !== 'string' || typeof (parsed as { commits?: unknown }).commits !== 'object') {
+      throw new Error(`--forge ${forgePath} is not {"pr_author": "…", "commits": {"<sha>": {author, committer, verified}}}`);
+    }
+    forge = parsed as ForgeFile;
+  }
+  const provenance: Record<string, import('../shared/ticketPr.mjs').TicketProvenance[]> = {};
+  for (const p of paths) {
+    baseFiles[p] = read(mergeBase, p);
+    headFiles[p] = existsSync(join(root, p)) ? readFileSync(join(root, p), 'utf8') : undefined;
+    // B-126's direction: git's reading — authors AND committers, since anyone sets an author —
+    // labelled as git's, with the forge's reading of each commit beside it when CI passed one:
+    // the account the commit's author and committer EMAILS map to (email-derived, printed as
+    // such) and its signature verification.
+    provenance[p] = run('log', `${mergeBase}..HEAD`, '--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%aI', '--', p)
+      .split('\n').filter(Boolean).map((row) => {
+        const [sha, author, committer, date] = row.split('\x1f');
+        return { sha, author, committer, date, ...(forge?.commits?.[sha] ? { forge: forge.commits[sha] } : {}) };
+      });
+  }
+  const view = ticketPrView({ items: settings.items ?? 'tickets', base: baseFiles, head: headFiles, provenance });
+  lines.push(`ticket-pr (B-133): ${view.changed.length} ticket file(s) changed against ${base} (${mergeBase.slice(0, 10)})`);
+  if (!view.changed.length) lines.push('  no ticket changes — the status-only label does not apply');
+  else {
+    // "Beside the forge's" is keyed on the forge's reading EXISTING — at least one commit: a
+    // passed file naming no commit (a failed API call) degrades to git's reading alone; the
+    // forge's name is never printed over nothing (round two's finding).
+    const forgeRead = forge != null && Object.keys(forge.commits).length > 0 ? forge : null;
+    lines.push(forgeRead
+      ? `  provenance: git's reading beside the forge's — the PR is opened by ${forgeRead.pr_author} (B-126)`
+      : "  provenance: git's reading — anyone sets an author or committer; the forge's reading is not read here (B-126)");
+    for (const c of view.changed) for (const l of formatTicket(c)) lines.push(l);
+    lines.push(`status-only: ${view.statusOnly ? 'yes — only status fields changed; no body, brief or control field' : `no — ${view.reasons.join('; ')}`}`);
+  }
+  const mismatch = claimMismatch(view, claimedStatusOnly);
+  if (mismatch) lines.push(`ticket-pr: the PR is ${mismatch} — the label is this check's computation (B-133), never the PR's own description`);
+  return mismatch ? 1 : 0;
+}
+
+/** git's own complaint from a failed execFileSync, for the one-line refusal the check prints. */
+function gitStderr(e: unknown): string {
+  const stderr = (e as { stderr?: Buffer })?.stderr;
+  return (stderr ? String(stderr) : String(e)).trim();
 }
 
 /** `baton tickets --help` (B-112): the commands, the tags Baton reads and what each means, and
@@ -723,6 +831,14 @@ export function ticketsHelp(): string[] {
     '                   any live status; --pr adds a pull request; --note is a release\'s "what is left"',
     'baton tickets done <id> [--pr URL]            done, moved to archive/',
     'baton tickets check [--repo DIR] [--quiet]    check the tickets without posting them',
+    '                   --pr BASE [--claimed-status-only] [--forge FILE]',
+    '                                                  also print the computed ticket-PR view',
+    '                   against BASE (fields, body and brief diffs, provenance, the status-only',
+    '                   label); with the claim flag — set by CI when the PR body claims it on a',
+    '                   line of its own — a PR whose diff contradicts the claim is a finding',
+    '                   (B-133: the label is the check\'s, never the description\'s); --forge,',
+    '                   built by CI from the forge API, adds the forge\'s reading of each commit',
+    '                   beside git\'s (B-126)',
     '',
     'Each command is one commit pushed straight to the default branch, made in a throwaway worktree',
     'at the freshly fetched head: your own branch and working tree are never touched, and a push',

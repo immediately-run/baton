@@ -63,18 +63,15 @@ describe('S-BTN-45 the edges of blocks', () => {
   });
 
   it('isolates repositories, blocks two resources with one reading, refuses bad detail, lapses at until, and orders the readings', async () => {
-    // A worker granted only on ops declares go_plus, which lists docs alone: refused, the heartbeat
-    // succeeds; its reading for go_plus is forbidden.
+    // A worker granted only on ops reports on go_plus, which lists docs alone: refused. Its
+    // heartbeat sends the retired `uses` (B-168): read as absent, logged `deprecated-field`, and
+    // never a refused name — the heartbeat succeeds.
     const opsWorker = await grantedWorker(opsOwner, 'ops', 'opsw', CAPS, [GO]);
-    const hb = await opsWorker.beat();
+    const hb = await opsWorker.beat({ uses: ['Not A Name', GO] });
     expect(hb.status).toBe(200);
-    expect(hb.json.refused_uses).toEqual([{ instance: GO, code: 'forbidden' }]);
+    expect(hb.json.refused_uses).toBeUndefined();
+    expect(await rows<{ field: string }>(`SELECT json_extract(detail_json, '$.field') AS field FROM events WHERE kind = 'deprecated-field'`)).toEqual([{ field: 'heartbeat.uses' }]);
     expect((await opsWorker.call('/v1/runner/readings', { readings: [{ instance: GO, available: false }] })).json.refused).toEqual([{ instance: GO, code: 'forbidden' }]);
-
-    // A malformed name is refused on its own entry; the heartbeat and the good name stand.
-    const mixed = await opsWorker.beat({ uses: ['Not A Name'] });
-    expect(mixed.status).toBe(200);
-    expect(mixed.json.refused_uses).toEqual([{ instance: 'Not A Name', code: 'invalid-params' }]);
 
     // W1 uses go_plus: one reading — unavailable until +20 min, valid_for 24 h — blocks F and D together.
     const w1 = await grantedWorker(owner, 'docs', 'w1', CAPS, [GO]);
@@ -85,7 +82,9 @@ describe('S-BTN-45 the edges of blocks', () => {
     expect(posted.json.refused).toEqual([{ instance: GO, code: 'invalid-params', message: expect.stringMatching(/at least 0/) }]);
     expect(await blocksOf('D')).toMatchObject({ blocked: true, blocks: [{ kind: 'resource', ref: DS, leg: 'review', until: T0 + 20 * MIN }] });
     expect(await blocksOf('F')).toMatchObject({ blocked: true, blocks: [{ kind: 'resource', ref: GLM, leg: 'review' }] });
-    // The second reading a minute is refused for the same worker and instance.
+    // The second reading a minute is refused for the same worker and instance (the measure the
+    // first post carried was stored beside the state — one a minute per kind — and rides its 31
+    // days through the block below, R-BTN-101).
     expect((await w1.call('/v1/runner/readings', { readings: [{ instance: GO, available: true }] })).json.refused).toEqual([{ instance: GO, code: 'rate-limited' }]);
 
     // At +20 min the reading lapses at its `until`, not after 24 h.
@@ -95,45 +94,57 @@ describe('S-BTN-45 the edges of blocks', () => {
     expect(await stateOf(GO)).toBe('unknown');
     expect((await blocksOf('D')).blocked).toBe(false);
 
-    // An administrator sets go_plus available for 1 h; a probe posts it unavailable within that hour:
-    // stored, answered `overridden`, and the state when the administrator's lapses.
-    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: true, valid_for: 3600 }] })).json).toMatchObject({ ok: true, refused: [] });
-    expect(await stateOf(GO)).toBe('available');
-    await setClock(T0 + 30 * MIN);
+    // An administrator's reading is one more instrument's (R-BTN-76, B-168): no precedence — the
+    // latest in force sets the state. A probe posts go_plus unavailable for 30 minutes; the
+    // administrator's available, a minute later and for an hour, sets it back, and the probe's
+    // posting again is the latest of all.
+    await setClock(T0 + 21 * MIN);
     await w1.beat();
-    expect((await signed(probe, '/v1/probe/readings', { body: { readings: [{ instance: GO, available: false, valid_for: 2 * 3600 }] } })).json).toMatchObject({ ok: true, overridden: [GO] });
-    expect(await stateOf(GO)).toBe('available');
-    for (const t of [T0 + 40 * MIN, T0 + 50 * MIN, T0 + 60 * MIN, T0 + 80 * MIN]) {
-      await setClock(t);
-      await w1.beat();
-      await tick();
-    }
+    expect((await signed(probe, '/v1/probe/readings', { body: { readings: [{ instance: GO, available: false, valid_for: 30 * 60 }] } })).json).toMatchObject({ ok: true, refused: [] });
     expect(await stateOf(GO)).toBe('unavailable');
     expect((await blocksOf('F')).blocked).toBe(true);
-
-    // Overnight every worker stops: no live worker has a usable instance, so no row, and `no-instance`.
-    // The lost answer clears F's row silently: nothing became claimable, so no `unblocked` (R-BTN-77).
-    const unblockedF = async () => (await rows(`SELECT seq FROM events WHERE kind = 'unblocked' AND ticket_id = 'docs:F'`)).length;
-    const eveningF = await unblockedF();
-    await setClock(T0 + 12 * H);
-    await tick();
+    await setClock(T0 + 22 * MIN);
+    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: true, valid_for: 3600 }] })).json).toMatchObject({ ok: true, refused: [] });
+    expect(await stateOf(GO)).toBe('available');
     expect((await blocksOf('F')).blocked).toBe(false);
-    expect(await unblockedF()).toBe(eveningF);
+    // A reading still carrying `nonce` and `signature` — its retired signature, R-BTN-181 — is
+    // stored without them, each logged `deprecated-field` once for the administrator.
+    await setClock(T0 + 23 * MIN);
+    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 3600, nonce: 'abcdef12', signature: 'c2lnbmF0dXJl' }] })).json).toMatchObject({ ok: true, refused: [] });
+    expect(await stateOf(GO)).toBe('unavailable');
+    expect(await rows<{ field: string }>(`SELECT json_extract(detail_json, '$.field') AS field FROM events WHERE kind = 'deprecated-field' AND json_extract(detail_json, '$.field') LIKE 'reading.%' ORDER BY seq`)).toEqual([{ field: 'reading.nonce' }, { field: 'reading.signature' }]);
+    // At +97 min every reading is over — the probe's half-hour, and both of the administrator's
+    // hours (the one posted with the retired signature had no `until`: in force for its hour, then
+    // gone): go_plus is unknown, and F's block went with the probe's reading. Each beat is a
+    // minute of the worker's lease — the reading fixed since 12:23, past the one-a-minute rule —
+    // so it stays live until the first tick that drops the last reading adsorbs its lapse.
+    for (let t = T0 + 24 * MIN; t <= T0 + 97 * MIN; t += MIN) {
+      await setClock(t);
+      await w1.beat();
+    }
+    await tick();
+    expect(await stateOf(GO)).toBe('unknown');
+    expect(await rows(`SELECT DISTINCT instance FROM instance_readings`)).toEqual([]);
+    expect((await blocksOf('F')).blocked).toBe(false);
+
+    // Overnight every worker stops (its lease runs out): with no live runner granted, no row is
+    // written, so `no-instance`, and D's answer is lost. It is not a claim unblocking here: the
+    // ticket's `blocked` stands, so its record goes with no `unblocked` (R-BTN-77).
+    const unblockedD = async () => (await rows(`SELECT seq FROM events WHERE kind = 'unblocked' AND ticket_id = 'docs:D'`)).length;
+    const eveningD = await unblockedD();
+    await setClock(T0 + 12 * H);
+    await w1.beat();
+    await tick();
+    expect((await blocksOf('D')).blocked).toBe(false);
+    expect(await unblockedD()).toBe(eveningD);
+    // (What `other` lists — `no-instance` for a repository with no live runner — is the fleet's,
+    // and the block's own write; the answer here is the same each way.)
     const night = await blocksOf('D');
     expect(night).toMatchObject({ blocked: false, blocks: [] });
-    expect(night.other).toEqual(expect.arrayContaining([{ kind: 'no-instance', detail: { leg: 'review', resource: DS } }]));
-    // The first heartbeat in the morning: the probe's reading lapsed overnight, so go_plus is back
-    // to unknown while nobody could see it. The fleet answers again, and D and F get the `unblocked`
-    // their evening `blocked` was owed (R-BTN-77 as amended) — no block written and cleared.
-    const seq = (await rows<{ s: number }>('SELECT max(seq) AS s FROM events'))[0].s;
-    await w1.beat();
-    expect(await rows(`SELECT kind, ticket_id, json_extract(detail_json, '$.cleared') AS cleared FROM events WHERE seq > ? AND kind IN ('blocked', 'unblocked') ORDER BY ticket_id`, seq)).toEqual([
-      { kind: 'unblocked', ticket_id: 'docs:D', cleared: JSON.stringify([{ kind: 'resource', ref: DS, leg: 'review' }]) },
-      { kind: 'unblocked', ticket_id: 'docs:F', cleared: JSON.stringify([{ kind: 'resource', ref: GLM, leg: 'review' }]) },
-    ]);
-    expect(await rows('SELECT answer_lost FROM tickets WHERE answer_lost IS NOT NULL')).toEqual([]);
-    expect((await blocksOf('D')).blocked).toBe(false);
-  });
+    // B-168: the 74 one-minute beats that carry the readings past their hours cost about 4 s on
+    // the Cloudflare host beside the rest of the case, so it allows 30 s — not vitest's 5 s default
+    // (as S-BTN-21's cases do since 2026-11-11).
+  }, 30_000);
 
   it('K, needing a capability only W1 declares and an unavailable resource, stays blocked through the night and logs nothing when the fleet comes back (B-49)', async () => {
     expect((await git.add('K', { requires: ['mcp-chrome'] }, reviewNeeds([DS])).post()).status).toBe(200);

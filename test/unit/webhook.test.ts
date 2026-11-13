@@ -147,7 +147,7 @@ describe('the one parser (R-BTN-73)', () => {
   it.each([
     ['no sender at all', pushPayload({ sender: undefined })],
     ['a sender login that is not a string (read as none)', pushPayload({ sender: { id: 1, login: 7 } })],
-  ])('a push with no pusher to name (%s) is recorded without one — fail closed, its chain held', (_what, payload) => {
+  ])('a push with no pusher to name (%s) is recorded without one — its pusher unknown, its chain held', (_what, payload) => {
     const d = pickDelivery('push', 'p-2b', payload)!;
     expect(d.push).toMatchObject({ sender_id: payload.sender === undefined ? null : 1, ref: 'refs/heads/main', after: A, commits: [{ sha: A, paths: ['.baton/baton.json', 'docs/readme.md'] }] });
   });

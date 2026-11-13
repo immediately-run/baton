@@ -4,6 +4,8 @@
 import { describe, it, expect } from 'vitest';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { MIGRATIONS } from '../../src/migrations';
+import { mintRunId } from '../../src/core/db';
+import type { Store } from '../../src/core/ports';
 
 describe('migration 0005: work items become tickets (R3-1230)', () => {
   it('keeps every row under the new names', async () => {
@@ -397,6 +399,150 @@ describe('migration 0029: the repository policy tables (B-145)', () => {
       for (const table of ['policy_conditions', 'protection_reports', 'policy_pins', 'human_keys']) {
         expect(sql.exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${table}'`).toArray()).toHaveLength(1);
       }
+    });
+  });
+});
+
+// B-142 — migration 0036 retires the pre-route-choice model tables: a database at 0035 holding
+// rows in every one — providers, models, schedules, suspensions, a worker's billing rows and
+// its usage — keeps its workers (less model_provider_id) and loses the tables whole, children
+// before parents, so nothing references what is gone and no code path reads a row.
+describe('migration 0036: the model tables retire (B-142)', () => {
+  it('drops every retired table and the workers row’s model_provider_id, keeping the rest', async () => {
+    const id = env.BATON.idFromName('migrations-0036');
+    await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
+      for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id <= 35)) sql.exec(m.sql);
+      sql.exec(`INSERT INTO repositories (id, github, default_branch, sync_workflow) VALUES ('docs', 'immediately-run/docs', 'main', '.github/workflows/baton-sync.yml')`);
+      sql.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('vm-1', 'vm-1', '[]')`);
+      sql.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, model_id, model_provider_id, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+                VALUES ('vm-1', 's', 'h', 'vm-1', 'opencode', 'vm', 'zai-coding-plan/glm-5.3', 'zai', 'critical', 900000, '', 1, 1)`);
+      sql.exec(`INSERT INTO model_providers (id, name, billing) VALUES ('zai', 'Z.AI', 'subscription')`);
+      sql.exec(`INSERT INTO peak_schedules (id, rules_json, factor) VALUES ('zai', '{"days":[1],"hoursUtc":[[1,4]]}', 0.5)`);
+      sql.exec(`INSERT INTO provider_models (provider_id, model_id, monthly_limit_usd, peak_schedule_id) VALUES ('zai', 'glm-5.3', 10, 'zai')`);
+      sql.exec(`INSERT INTO worker_providers (worker_id, prefix, provider_id) VALUES (1, 'zai-coding-plan', 'zai')`);
+      sql.exec(`INSERT INTO provider_suspensions (provider_id, mode, starts_at, set_by) VALUES ('zai', 'no-new-work', 1, 'owner:x')`);
+      sql.exec(`INSERT INTO usage_reports (worker_id, provider_id, model_id, hour, usd_list) VALUES (1, 'zai', 'glm-5.3', 0, 1.5)`);
+      sql.exec(`INSERT INTO rate_limit_events (provider_id, worker_id, at) VALUES ('zai', 1, 1)`);
+
+      sql.exec('PRAGMA foreign_keys = ON'); // as the host runs it
+      sql.exec(MIGRATIONS.find((x) => x.id === 36)!.sql);
+
+      const all = (q: string) => sql.exec(q).toArray() as Record<string, unknown>[];
+      for (const gone of ['model_providers', 'provider_models', 'peak_schedules', 'provider_suspensions', 'worker_providers', 'usage_reports', 'rate_limit_events']) {
+        expect(all(`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = '${gone}'`)).toEqual([{ n: 0 }]);
+      }
+      // The worker keeps its row, minus the retired column; and a new worker registers against
+      // the migrated schema.
+      expect(all('SELECT hostname, session_name, model_id FROM workers')).toEqual([{ hostname: 'vm-1', session_name: 's', model_id: 'zai-coding-plan/glm-5.3' }]);
+      expect(all(`SELECT name FROM pragma_table_info('workers') WHERE name = 'model_provider_id'`)).toEqual([]);
+      sql.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+                VALUES ('vm-2', 's', 'h', 'vm-1', 'opencode', 'vm', 'critical', 900000, '', 1, 1)`);
+      expect(all('SELECT count(*) AS n FROM workers')).toEqual([{ n: 2 }]);
+    });
+  });
+});
+
+describe('migration 0038: run ids (B-185, S-BTN-204)', () => {
+  it('rebuilds claim_legs keeping every row, and the backfill gives each a distinct run id minted from its started_at', async () => {
+    const id = env.BATON.idFromName('migrations-0038');
+    await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
+      for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id <= 37)) sql.exec(m.sql);
+      sql.exec(`INSERT INTO claims (id, ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status) VALUES (1, 'docs:A', 1, 'r1', 'abcdef', 'sha', 1, 'active')`);
+      const T = Date.parse('2026-11-01T00:00:00Z');
+      sql.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, to_station, bars, started_at, started_observation, finished_at, evidence, route_choices_json, taken_json)
+                VALUES (1, 1, 'implement', 'filed', 'pr-open', '["x"]', ?, 3, ?, 'https://pr/1', '[{"choice":"c"}]', '[]')`, T, T + 1);
+      sql.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, started_at, started_observation, abandoned_at)
+                VALUES (1, 2, 'review', 'pr-open', ?, 4, ?)`, T + 2, T + 3);
+
+      sql.exec('PRAGMA foreign_keys = ON'); // as the host runs it
+      const m38 = MIGRATIONS.find((x) => x.id === 38)!;
+      sql.exec(m38.sql);
+      let draw = 0;
+      m38.backfill!({ exec: (q: string, ...p: unknown[]) => sql.exec(q, ...p) } as unknown as Store, (n) => new Uint8Array(n).fill(++draw), () => T);
+
+      const all = (q: string) => sql.exec(q).toArray() as Record<string, unknown>[];
+      expect(all(`SELECT id, claim_id, seq, leg, from_station, to_station, bars, started_at, started_observation, finished_at, abandoned_at, evidence, route_choices_json, taken_json
+                  FROM claim_legs ORDER BY seq`)).toEqual([
+        { id: 1, claim_id: 1, seq: 1, leg: 'implement', from_station: 'filed', to_station: 'pr-open', bars: '["x"]', started_at: T, started_observation: 3, finished_at: T + 1, abandoned_at: null, evidence: 'https://pr/1', route_choices_json: '[{"choice":"c"}]', taken_json: '[]' },
+        { id: 2, claim_id: 1, seq: 2, leg: 'review', from_station: 'pr-open', to_station: null, bars: '[]', started_at: T + 2, started_observation: 4, finished_at: null, abandoned_at: T + 3, evidence: null, route_choices_json: null, taken_json: null },
+      ]);
+      const ids = all('SELECT run_id, started_at FROM claim_legs ORDER BY seq') as { run_id: string; started_at: number }[];
+      expect(ids.map((r) => r.run_id)).toEqual([mintRunId(T, () => new Uint8Array(10).fill(1)), mintRunId(T + 2, () => new Uint8Array(10).fill(2))]);
+      expect(new Set(ids.map((r) => r.run_id)).size).toBe(2);
+      // The run id is unique, (claim_id, seq) still is, and the history has the column.
+      expect(() => sql.exec(`UPDATE claim_legs SET run_id = ? WHERE seq = 2`, ids[0].run_id)).toThrow(/UNIQUE/);
+      expect(() => sql.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, started_at, started_observation) VALUES (1, 2, 'fix', 'x', 1, 1)`)).toThrow(/UNIQUE/);
+      expect(all(`SELECT name FROM pragma_table_info('claim_legs') WHERE name IN ('head_sha', 'session_url', 'leg_log_dir') ORDER BY name`)).toEqual([{ name: 'head_sha' }, { name: 'leg_log_dir' }, { name: 'session_url' }]);
+      expect(all(`SELECT name FROM pragma_table_info('ticket_history') WHERE name = 'run_id'`)).toEqual([{ name: 'run_id' }]);
+    });
+  });
+});
+
+// B-167 — migration 0042 retires the capability ontology and the route choices: a database at
+// 0041 holding a program, derived sets, refusals, hysteresis rows, a course's and a run's route
+// choices and a `taken-invalid` event keeps every other row and loses the tables and columns the
+// retired reads used, so nothing references what is gone and no code path reads a row.
+describe('migration 0042: the ontology and route choices retire (B-167)', () => {
+  it('drops the retired tables and columns, keeping the rows beside them and the event log minus taken-invalid', async () => {
+    const id = env.BATON.idFromName('migrations-0042');
+    await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
+      for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id <= 41)) sql.exec(m.sql);
+      sql.exec(`INSERT INTO repositories (id, github, default_branch, sync_workflow) VALUES ('docs', 'immediately-run/docs', 'main', '.github/workflows/baton-sync.yml')`);
+      sql.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('vm-1', 'vm-1', '[]')`);
+      sql.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+                VALUES ('vm-1', 's', 'h', 'vm-1', 'opencode', 'vm', 'critical', 900000, '', 1, 1)`);
+      sql.exec(`INSERT INTO courses (repository_id, id, version, skill, course_json, step_kinds, min_worker_version, report_horizon_h, route_choices_json)
+                VALUES ('docs', 'roadmap-pr', 3, 'next', '{}', '[]', 3, 6, '{"implement":["codegen"]}')`);
+      sql.exec(`INSERT INTO external_resources (name, scope, detail_schema, atoms_from, base_chain_json) VALUES ('anthropic-capacity', 'account', '{}', 'any', '["std:api-capacity@1"]')`);
+      sql.exec(`INSERT INTO claims (id, ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status) VALUES (1, 'docs:A', 1, 'r1', 'abcdef', 'sha', 1, 'active')`);
+      sql.exec(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, started_at, started_observation, route_choices_json, taken_json)
+                VALUES (1, 1, 'r_01', 'implement', 'filed', 1, 1, '[{"choice":"codegen"}]', '[{"choice":"codegen"}]')`);
+      sql.exec(`INSERT INTO ontologies (repository_id, digest, fixed_json, program_json, snapshot_sha, accepted_at) VALUES ('docs', 'd', '[]', '{}', 'sha', 1)`);
+      sql.exec(`INSERT INTO worker_derived (worker_id, repository_id, capability, evaluated_at) VALUES (1, 'docs', 'model:x', 1)`);
+      sql.exec(`INSERT INTO worker_derived_inputs (worker_id, repository_id, input_digest, limited, evaluated_at) VALUES (1, 'docs', 'i', 0, 1)`);
+      sql.exec(`INSERT INTO ontology_refusals (repository_id, reason, detail, at) VALUES ('docs', 'program', 'x', 1)`);
+      sql.exec(`INSERT INTO route_last (worker_id, repository_id, choice, alternative, demoted, resolved_at) VALUES (1, 'docs', 'codegen', 'a', 0, 1)`);
+      sql.exec(`INSERT INTO events (at, kind, actor, ticket_id) VALUES (1, 'advanced', 'worker:1', 'docs:A')`);
+      sql.exec(`INSERT INTO events (at, kind, actor, ticket_id) VALUES (2, 'taken-invalid', 'worker:1', 'docs:A')`);
+      sql.exec(`INSERT INTO events (at, kind, actor, repository_id) VALUES (3, 'unsigned-control', 'sync', 'docs')`);
+
+      sql.exec('PRAGMA foreign_keys = ON'); // as the host runs it
+      sql.exec(MIGRATIONS.find((x) => x.id === 42)!.sql);
+
+      const all = (q: string) => sql.exec(q).toArray() as Record<string, unknown>[];
+      for (const gone of ['ontologies', 'worker_derived', 'worker_derived_inputs', 'ontology_refusals', 'route_last']) {
+        expect(all(`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = '${gone}'`)).toEqual([{ n: 0 }]);
+      }
+      const cols = (table: string) => all(`SELECT name FROM pragma_table_info('${table}')`).map((r) => r.name);
+      expect(cols('courses')).not.toContain('route_choices_json');
+      expect(cols('courses')).not.toContain('report_horizon_h');
+      expect(cols('claim_legs')).not.toContain('route_choices_json');
+      expect(cols('claim_legs')).not.toContain('taken_json');
+      expect(cols('external_resources').sort()).toEqual(['detail_schema', 'name', 'scope']);
+      // What is beside the retired reads is kept whole.
+      expect(all(`SELECT id, version FROM courses`)).toEqual([{ id: 'roadmap-pr', version: 3 }]);
+      expect(all(`SELECT name FROM external_resources`)).toEqual([{ name: 'anthropic-capacity' }]);
+      expect(all(`SELECT seq, leg, run_id FROM claim_legs`)).toEqual([{ seq: 1, leg: 'implement', run_id: 'r_01' }]);
+      // The event log keeps every kind but the taken's.
+      expect(all(`SELECT kind FROM events ORDER BY seq`)).toEqual([{ kind: 'advanced' }, { kind: 'unsigned-control' }]);
+      // The narrowed check refuses a new `taken-invalid`, and takes the kinds the restructure kept.
+      expect(() => sql.exec(`INSERT INTO events (at, kind, actor) VALUES (5, 'taken-invalid', 'worker:1')`)).toThrow(/CHECK/);
+      sql.exec(`INSERT INTO events (at, kind, actor) VALUES (4, 'advice-overridden', 'worker:1')`);
+      sql.exec(`INSERT INTO events (at, kind, actor) VALUES (6, 'unsigned-control', 'sync')`);
+      sql.exec(`INSERT INTO courses (repository_id, id, version, skill, course_json, step_kinds, min_worker_version) VALUES ('docs', 'runbook', 1, 'run', '{}', '[]', 1)`);
+      sql.exec(`INSERT INTO external_resources (name, scope, detail_schema) VALUES ('bench', 'service', '{}')`);
     });
   });
 });

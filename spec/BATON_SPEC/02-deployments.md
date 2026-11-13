@@ -30,8 +30,10 @@ process for development and CI. Nothing crosses a tenant.
     its own key: a repeated end is `ok` (§9.4), owner and administrator writes set a value, a
     repeated board post is `stale-observation` (the sync then reads `GET /v1/sync/wanted`'s
     `head_sha` to learn whether its post landed), and a repeated raise or report finds its row.
-- **One alarm, every 60 seconds**, also set early to the earliest instant Baton holds. It fires
-  every due instant, each with the effect its owning rule gives:
+- **One alarm, every 60 seconds**, also set early to the earliest instant Baton holds. Every
+  start and every request sets it again for the next period when none is set or the one set is
+  more than two periods overdue (B-229). It fires every due instant, each with the effect its
+  owning rule gives:
 
   | Instant | Rule |
   |---|---|
@@ -52,8 +54,9 @@ process for development and CI. Nothing crosses a tenant.
   numbered schema migrations (append-only; the object refuses to serve until all are applied),
   the wrangler configuration and the integration harness, deployed by a GitHub Action on
   `main`. immediately.run's own instance is `https://baton.immediately.run` (provisioned by
-  R3-1208); `baton-staging` is a separate tenant with its own Worker and hostname
-  (`wrangler.toml` `env.staging`).
+  R3-1208), and it is the only deployed instance: a home repository binds to one Baton
+  (R-BTN-56), every registered repository binds to production, and a staging instance would hold
+  nothing and test nothing (B-224; the owner, 2026-11-09).
 - **R-BTN-37 (shared modules are vendored by hash).** The Worker imports byte-identical copies
   of the pure modules it shares with docs — `baton.mjs`, `vocabulary.mjs`, `sessionUsage.mjs`
   and `batonSync.mjs` — from `src/shared/`, listed in `src/shared/manifest.json` with the docs

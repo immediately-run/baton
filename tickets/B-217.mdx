@@ -1,0 +1,90 @@
+---
+title: "B-217 — Three small reads nobody owned: GET …/tickets/{ticket}/children, GET …/courses, and GET …/schemas for the dashboard's View"
+id: B-217
+project: baton-ui-v2
+status: available
+updated: 2026-11-09
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1216
+tier: judgement
+description: "Three reads BATON-UI-V2 screens draw that no ticket built. ticket.children: the tickets whose parent is the ticket, with station and blocked (§14's row, R-BTN-86). repo.courses: each course file as last accepted with its capability types and roles, and the refused newer version (§14's row, R-BTN-69). repo.schemas (new): the shared registry's schemas by id, so the dashboard's View can render a value through R-BTN-112's ui renderer in the browser — the one read the renderer needs and the reason the mockup's Schemas view was dropped. Each read admits the repository reads' principals and a session. Requires: B-192."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-192
+---
+
+**Brief:** the owner, 2026-11-09 (B-191): "Every screen = one entity's REST reads." The ticket
+page draws children, the course screens the course list, and every screen that shows a reading,
+a leg output, a condition's detail or an attestation value draws it through R-BTN-112's `ui`
+renderer, which needs the schema.
+
+**Spec:** [BATON_SPEC §4.6](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6) ([R-BTN-86](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6):
+children), [§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2):
+a refused file keeps the previous), [§5.6](../spec/BATON_SPEC/05-courses.md#sec-5-6) ([R-BTN-121](../spec/BATON_SPEC/05-courses.md#sec-5-6):
+capability types and roles with the course), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5)
+([R-BTN-108](../spec/BATON_SPEC/05-courses.md#sec-5-5): the shared schema registry; [R-BTN-112](../spec/BATON_SPEC/05-courses.md#sec-5-5):
+the `ui` renderer draws a value by its schema's view), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3)
+(an opaque blob), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`children`, `courses`).
+
+**Depends on:** B-192 (sessions on the repository reads; the registry).
+
+**Used by:** B-206 (`View` resolves schemas through `repo.schemas`), B-210, B-212, B-223.
+
+### What to build
+
+The §14 rows first (`schemas` is new; `children` and `courses` exist as rows), then the code.
+
+1. **`GET /v1/repositories/{repository}/tickets/{ticket}/children`** (`ticket.children`, read;
+   the repository reads' principals and a session): `{children: [{ticket_id, station, blocked,
+   closed?}]}` as §14 states it, from the tickets whose `parent` is the ticket (R-BTN-86) joined
+   with `stations.ts` and `blocks.ts`; `not-found` for a ticket not in the repository.
+2. **`GET /v1/repositories/{repository}/courses`** (`repo.courses`, read; same callers): each
+   course `{id, version, file, capability_types, roles, refused: {version, reason} | null}` — the
+   file as last accepted, an opaque blob (§12.3); types and roles as R-BTN-121 attaches them;
+   the refused newer version where one was (R-BTN-69). From `courses.ts`.
+3. **`GET /v1/repositories/{repository}/schemas`** (`repo.schemas`, read; same callers):
+   `?ids=<schema id>,…` (at most 50), answering `{schemas: {<id>: <schema>}}` from the shared
+   registry R-BTN-108 defines — the `std:` library and the repository's posted course schemas —
+   each as the validator holds it, with its `x-baton-view` where one is declared; an unknown id
+   is absent from the map, never an error. The dashboard's `View` (B-206) calls it once per
+   unseen id and caches by id for the session; the response carries an ETag (B-205) and is the
+   same bytes for every caller of the repository.
+
+### What not to do
+
+- No schema registry screen: the mockup's Schemas view stays dropped (B-191); this read serves
+  the renderer, not a page.
+- No course validation, no body, no screen.
+
+### Trust
+
+- **The three reads** — Baton's rows and opaque blobs (the course file, a schema) validated on
+  their post (§12.3), answered to the repository reads' principals and a session of the
+  repository; a schema is data the renderer interprets, never code.
+
+### Invariants
+
+- **Filter fields only** (R-BTN-33); **an owner's session, its repositories** (R-BTN-155);
+  **readable with a key** (R-BTN-179); **both hosts** (R-BTN-55).
+
+### Tests
+
+Scenarios numbered at merge, on both hosts: `ticket.children` lists a fixture parent's children
+with station and blocked; `repo.courses` returns the accepted file with its types and roles and
+the refused newer version; `repo.schemas` returns `std:decision@1` and a posted course schema
+with its view, omits an unknown id, caps `ids` at 50, and answers an owner's session.
+
+### Exit criteria
+
+- [ ] The three reads in §14 and the registry, built, with tests.
+- [ ] `npm test`, `npm run typecheck`, `npm run check:wiki` and `npm run check:tickets` green.
+
+## Status
+
+_filed 2026-11-09, split from B-192 after the second review._

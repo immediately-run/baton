@@ -23,6 +23,8 @@ import { CREATE_PR_COURSE, stationsPr, stationsReviewPr, type PrFact } from '../
 import { prClose, verdictLine, type Exec } from '../../src/defaults/pr-close';
 import { splitWords } from '../../src/defaults/agent-words';
 import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
+import { stampMarkdownVersions } from '../../src/defaults/ticket-versions';
+import { syncOnce } from '../../src/shared/batonSync.mjs';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const CLI = join(ROOT, 'cli', 'baton.mjs');
@@ -407,6 +409,81 @@ describe('syncMain’s busy retry (B-89, R-BTN-62)', () => {
     expect(waits).toEqual([]);
     expect(none.seen).toEqual(['POST /v1/sync/observation']);
   });
+
+  it('a ticket source that declares versions without read is refused at load, pinned or current (B-183, review round 1)', async () => {
+    // A `current` declaration is the one whose claims would silently skip re-verification
+    // without a `read` — the read-now comparison is that source's whole staleness protection
+    // (§4.2) — so the load refuses it exactly as it refuses a pinned one.
+    dir = await scaffold();
+    writeFileSync(join(dir, '.baton', 'tickets.mjs'), `export default { versions: 'current', async tickets() { return { tickets: [], closed: [] }; } }`);
+    await expect(syncMain({ root: dir, url: 'https://baton.test', token: 't', transport: scripted({}).transport, sleep: async () => {}, log: () => {} }))
+      .rejects.toThrow(/declares versions: "current" but exports no read/);
+    const pinnedDir = await scaffold();
+    try {
+      writeFileSync(join(pinnedDir, '.baton', 'tickets.mjs'), `export default { versions: 'pinned', async tickets() { return { tickets: [], closed: [] }; } }`);
+      await expect(syncMain({ root: pinnedDir, url: 'https://baton.test', token: 't', transport: scripted({}).transport, sleep: async () => {}, log: () => {} }))
+        .rejects.toThrow(/declares versions: "pinned" but exports no read/);
+    } finally {
+      rmSync(pinnedDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('syncOnce’s confirm-only re-post (B-183, review round 1)', () => {
+  /** `syncOnce` with every effect injected (the module is pure): a head, a payload and an
+   * ancestry the test scripts, recording the one board post. */
+  const run = async (over: { head: string; next: string; ancestor?: boolean; unconfirmed?: unknown[] }) => {
+    const posts: Record<string, unknown>[] = [];
+    const out = await syncOnce(over.next, {
+      observe: async () => ({ sha: over.head, observation: 7 }),
+      fetchNext: async () => over.next,
+      readHead: async () => ({ sha: over.head, unconfirmed: over.unconfirmed ?? [] }),
+      post: async (body: Record<string, unknown>) => {
+        posts.push(body);
+        return { ok: true };
+      },
+      // `next` is the head, an ancestor of it (the checkout behind), or ahead of it, as scripted.
+      isAncestor: async (a: string, b: string) => (over.ancestor ? a !== over.head || b === over.head : a === over.head),
+      buildPayload: async () => ({ source: { kind: 'custom', versions: 'current', cli: 't' }, tickets: [{ id: 'T-1', version: 'v1' }], closed: [] }),
+      statusOf: () => 'done',
+      sleep: async () => {},
+    });
+    return { out, posts };
+  };
+
+  it('a checkout behind the head re-posts the head labelled with the commit its body was read at', async () => {
+    const head = 'a'.repeat(40);
+    const behind = 'b'.repeat(40);
+    const { out, posts } = await run({
+      head, next: behind, ancestor: true,
+      // Without a confirmation the behind run posts nothing (§7.1); with one it re-posts the head.
+      unconfirmed: [{ claim_id: 1, ticket_id: 'docs:T-1', end_reason: 'done', ended_at_sha: behind }],
+    });
+    expect(out.outcome).toBe('confirmed');
+    expect(posts).toHaveLength(1);
+    // The body is labelled with the head (R3-1212) but names `read_sha` — the checkout it was
+    // read at — so Baton materializes no ticket of it (§4.3): writing the ancestor's reading
+    // would roll the cache back.
+    expect(posts[0]).toMatchObject({ sha: head, parent_sha: head, read_sha: behind, observation: 7 });
+  });
+
+  it('a run at the head names the head as its read, so its refresh carries its tickets', async () => {
+    const head = 'a'.repeat(40);
+    const { out, posts } = await run({ head, next: head });
+    expect(out.outcome).toBe('confirmed');
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ sha: head, parent_sha: head, read_sha: head });
+  });
+
+  it('an advancing run posts no read_sha: its body is read at its sha by construction', async () => {
+    const head = 'a'.repeat(40);
+    const next = 'c'.repeat(40);
+    const { out, posts } = await run({ head, next });
+    expect(out.outcome).toBe('advanced');
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ sha: next, parent_sha: head });
+    expect('read_sha' in posts[0]).toBe(false);
+  });
 });
 
 
@@ -479,7 +556,7 @@ describe('baton repo init, through the built CLI', () => {
     expect(settings.agent_command).not.toMatch(/[<>|]/);
     expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -712,7 +789,24 @@ describe('baton repo init, through the built CLI', () => {
       expect(exited.tail).toBe('npm run test exited 2; its last lines:\ntwo failed');
       writeFileSync(join(bin, 'npm'), '#!/bin/sh\nkill -TERM $$\n');
       await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test was killed by SIGTERM, which the gate did not send');
+      // B-230: a run that never reached the tests is no verdict either — the shell's 127 and 126
+      // (B-167's every gate: `vitest: not found`) and npm's missing script fail the leg, naming it.
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho "sh: 1: vitest: not found" >&2\nexit 127\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow(/npm run test exited 127, a command its script names could not be run \(not found, or not executable\) — the tests never ran: no verdict, no marker; its last lines:\nsh: 1: vitest: not found/);
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\nexit 126\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test exited 126, a command its script names could not be run');
+      writeFileSync(join(bin, 'npm'), '#!/bin/sh\necho "npm error Missing script: \\"test\\"" >&2\nexit 1\n');
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test has no such script in package.json — the tests never ran');
       process.env.PATH = path;
+      // B-230: dependencies declared and none installed — neither the tested tree nor the home
+      // checkout has node_modules — is no verdict, before npm runs at all.
+      g('checkout', '-q', 'claude/A-1-gate');
+      writeFileSync(join(root, 'package.json'), `${JSON.stringify({ name: 'scaffold-gate', scripts: { test: 'node gate.mjs' }, devDependencies: { vitest: '1.0.0' } }, null, 2)}\n`);
+      commitAll(root);
+      g('push', '-q', 'origin', 'HEAD:refs/heads/claude/A-1-gate');
+      g('checkout', '-q', 'main');
+      expect(existsSync(join(root, 'node_modules'))).toBe(false);
+      await expect(stub.run(ctx('fixed'))).rejects.toThrow('npm run test cannot run: claude/A-1-gate declares dependencies and neither the tested tree nor the home checkout has node_modules');
       // The gate runs only at its two stations, and only on a branch it can reach.
       await expect(stub.run(ctx('reviewed'))).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not "reviewed"');
       await expect(stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot: { sha: main } })).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not null');
@@ -728,6 +822,47 @@ describe('baton repo init, through the built CLI', () => {
       rmSync(origin, { recursive: true, force: true });
       rmSync(bin, { recursive: true, force: true });
       writeFileSync(courseFile, courseBefore);
+    }
+  }, 120_000);
+
+  it('B-231: from the gate\'s red a fix that pushed nothing fails the leg; one that pushed reaches fixed; from reviewed nothing changes', async () => {
+    const g = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const origin = mkdtempSync(join(tmpdir(), 'baton-fix-origin-'));
+    const scratch = mkdtempSync(join(tmpdir(), 'baton-fix-legs-'));
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const scaffolded = readFileSync(settingsFile, 'utf8');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' });
+    g('remote', 'add', 'origin', origin);
+    const main = g('rev-parse', 'HEAD');
+    try {
+      // The agent: `true` pushes nothing; push.sh adds a commit to the PR branch and pushes it.
+      writeFileSync(join(root, 'push.sh'), '#!/bin/sh\ngit -C "$(dirname "$0")" commit -q --allow-empty -m fix && git -C "$(dirname "$0")" push -q origin HEAD:refs/heads/claude/A-1-fix\n');
+      chmodSync(join(root, 'push.sh'), 0o755);
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'true' }));
+      const quiet = { sha: commitAll(root) };
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: join(root, 'push.sh') }));
+      const pushing = { sha: commitAll(root) };
+      g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      g('push', '-q', 'origin', 'HEAD:refs/heads/claude/A-1-fix');
+      copyFileSync(join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs'), join(scratch, 'fix.mjs'));
+      const stub = await load(join(scratch, 'fix.mjs'));
+      const ctx = (station: string, snapshot: { sha: string }) => ({ ticket: { id: 'A-1' }, checkout: root, snapshot, claim: { station, nonce: 'n1' } });
+      const head = g('rev-parse', 'HEAD');
+      // From the gate's red, at fixed or pr-open: the agent exited 0 and pushed nothing — no fix.
+      await expect(stub.run(ctx('fixed', quiet))).rejects.toThrow(`the fix leg pushed nothing: claude/A-1-fix at ${head.slice(0, 10)} is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)`);
+      await expect(stub.run(ctx('pr-open', quiet))).rejects.toThrow('the fix leg pushed nothing');
+      // From a review's changes, a fix may answer the findings without a push: unchanged (B-110).
+      expect(await stub.run(ctx('reviewed', quiet))).toEqual({ reached: 'fixed', next: 'run-tests' });
+      // A fix that pushed reaches fixed.
+      expect(await stub.run(ctx('fixed', pushing))).toEqual({ reached: 'fixed', next: 'run-tests' });
+      expect(execFileSync('git', ['-C', origin, 'rev-parse', 'refs/heads/claude/A-1-fix'], { encoding: 'utf8' }).trim()).not.toBe(head);
+    } finally {
+      g('reset', '-q', '--hard', main);
+      g('remote', 'remove', 'origin');
+      rmSync(origin, { recursive: true, force: true });
+      rmSync(scratch, { recursive: true, force: true });
+      rmSync(join(root, 'push.sh'), { force: true });
+      writeFileSync(settingsFile, scaffolded);
     }
   }, 120_000);
 
@@ -883,6 +1018,325 @@ describe('baton repo init, through the built CLI', () => {
       rmSync(fakeBin, { recursive: true, force: true });
       writeFileSync(settingsFile, before);
       rmSync(join(root, 'stdin.facts'), { force: true });
+      rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('a release stops the agent at once: the stub TERMs it on ctx.signal and the leg rejects as stopped, inside the immediate-stop window (B-227)', async () => {
+    const agent = join(root, 'slow-agent.sh');
+    writeFileSync(agent, '#!/bin/sh\nsleep 60\necho done\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const implement = join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent }));
+      const snapshot = { sha: commitAll(root) };
+      const stop = new AbortController();
+      const started = Date.now();
+      const leg = (await load(implement)).run({ ticket: { id: 'B-1' }, checkout: root, snapshot, signal: stop.signal });
+      setTimeout(() => stop.abort('release'), 500);
+      await expect(leg).rejects.toThrow('the agent was stopped: release');
+      expect(Date.now() - started).toBeLessThan(10_000);
+    } finally {
+      writeFileSync(settingsFile, before);
+      rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 30_000);
+
+  // B-108 — the stub concludes for an agent that will not exit or never ends. The owner's
+  // numbers (idle 15 minutes across every activity signal, ceiling 5 hours) are pinned below;
+  // every test here shrinks them in the scaffold's own copy of the stub, exactly the way a
+  // course raises or lowers them in its.
+  /** One stub file's bounds, shrunk; the returned closure restores the file's text. */
+  const shrinkBounds = (file: string, idle: number, ceiling: number): (() => void) => {
+    const before = readFileSync(file, 'utf8');
+    writeFileSync(file, before.replace(/(AGENT_IDLE_MS = )[\d.e]+/, `$1${idle}`).replace(/(LEG_CEILING_MS = )[\d.e]+/, `$1${ceiling}`));
+    return () => writeFileSync(file, before);
+  };
+  /** Whether the pid a stubborn agent parked in `file` is gone — the conclusion's kill. */
+  const agentGone = async (file: string): Promise<boolean> => {
+    const pid = Number(readFileSync(file, 'utf8').trim());
+    for (let i = 0; i < 400; i++) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    return false;
+  };
+
+  it('the stubs carry the owner’s bounds — 15 minutes of idle across every signal, 5 hours of ceiling — as their named constants (B-108)', () => {
+    for (const leg of ['implement', 'review', 'fix', 'adjudicate', 'merge']) {
+      const stub = stubSourceOf(root, 'create-pr', leg);
+      expect(Number(new RegExp(`AGENT_IDLE_MS = ([\\d.e]+)`).exec(stub)?.[1]), leg).toBe(900_000);
+      expect(Number(new RegExp(`LEG_CEILING_MS = ([\\d.e]+)`).exec(stub)?.[1]), leg).toBe(18_000_000);
+      expect(stub).toContain('quiet_signals');
+      expect(stub).toContain('agent_concluded_absolute');
+    }
+  });
+
+  it('the stub concludes an agent gone quiet on every signal past the idle bound — killed, its received stdout its output, the cause with the quiet signals recorded (B-108)', async () => {
+    const agent = join(root, 'never-exits.sh');
+    writeFileSync(agent, '#!/bin/sh\necho "gate green, pushing"\necho $$ > "$(dirname "$0")/agent.pid"\nfor i in 1 2 3 4 5 6 7 8; do sleep 5; done\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const fix = join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs');
+    const restore = shrinkBounds(fix, 1000, 60_000);
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent }));
+      const snapshot = { sha: commitAll(root) };
+      const started = Date.now();
+      expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({
+        reached: 'fixed', next: 'run-tests',
+        conclusion: { cause: 'agent_concluded_idle', idle_ms: 1000, quiet_signals: ['stdout', 'wrapper-log'] },
+      });
+      // Minutes, not the five hours of the B-86 incident — and no server change anywhere.
+      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(await agentGone(join(root, 'agent.pid')), 'the conclusion SIGKILLs the agent: the stub is its parent').toBe(true);
+    } finally {
+      restore();
+      writeFileSync(settingsFile, before);
+      rmSync(join(root, 'agent.pid'), { force: true });
+      rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('an agent silent on stdout but live in its harness store is never concluded on idle — the db was the true signal that night (B-108)', async () => {
+    // The command names the harness, so the stub watches its store — no session id, keyed by
+    // the checkout. The fake opencode prints nothing on stdout the whole run (the trap: an
+    // idle stream is not an idle agent) and keeps writing its session store.
+    const bin = mkdtempSync(join(tmpdir(), 'baton-b108-bin-'));
+    const data = mkdtempSync(join(tmpdir(), 'baton-b108-data-'));
+    const agent = join(bin, 'opencode');
+    writeFileSync(agent, [
+      '#!/bin/sh',
+      'echo $$ > "$XDG_DATA_HOME/agent.pid"',
+      'mkdir -p "$XDG_DATA_HOME/opencode"',
+      ': >> "$XDG_DATA_HOME/opencode/opencode.db-wal"',
+      'for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60; do',
+      '  printf "session write %s\\n" "$(date +%s)" >> "$XDG_DATA_HOME/opencode/opencode.db-wal"',
+      '  sleep 0.15',
+      'done',
+      '',
+    ].join('\n'));
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const fix = join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs');
+    const restore = shrinkBounds(fix, 800, 60_000);
+    const path = process.env.PATH;
+    const dataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = data;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: 'opencode' }));
+      const snapshot = { sha: commitAll(root) };
+      const stop = new AbortController();
+      const started = Date.now();
+      const leg = (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, signal: stop.signal });
+      // Three times the idle bound: a stdout-only reader would have concluded at 0.8 s.
+      setTimeout(() => stop.abort('release'), 2_600);
+      await expect(leg, 'the live store vetoes the idle conclusion, however quiet stdout is').rejects.toThrow('the agent was stopped: release');
+      expect(Date.now() - started).toBeGreaterThanOrEqual(2_400);
+      expect(readFileSync(join(data, 'opencode', 'opencode.db-wal'), 'utf8')).toContain('session write');
+    } finally {
+      restore();
+      if (dataHome == null) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = dataHome;
+      if (path == null) delete process.env.PATH;
+      else process.env.PATH = path;
+      writeFileSync(settingsFile, before);
+      rmSync(bin, { recursive: true, force: true });
+      rmSync(data, { recursive: true, force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('a wrapper’s log keeps the wait up when the stub cannot see the pipe — its mtime is streamed activity (B-108)', async () => {
+    // The wrapper swallows the agent's stdout into .baton/logs/<ticket>-<leg>.log and keeps the
+    // log moving on its own cadence: the stub's stdout is silent the whole run, and only the
+    // log's mtime says the leg is alive.
+    const agent = join(root, 'silent-agent.sh');
+    writeFileSync(agent, '#!/bin/sh\nfor i in 1 2 3 4 5 6 7 8; do sleep 5; done\n');
+    const wrapper = join(root, 'log-wrapper.sh');
+    writeFileSync(wrapper, [
+      '#!/bin/sh',
+      'command_line="$*"',
+      'while [ $# -gt 3 ]; do shift; done',
+      'ticket="$1"; leg="$2"; checkout="$3"',
+      'mkdir -p "$checkout/.baton/logs"',
+      'log="$checkout/.baton/logs/${ticket}-${leg}.log"',
+      'i=0; while [ $i -lt 40 ]; do printf "wrapper tick %s\\n" "$(date +%s)" >> "$log"; i=$((i + 1)); sleep 0.2; done &',
+      '$command_line >> "$log" 2>&1',
+      '',
+    ].join('\n'));
+    chmodSync(agent, 0o755);
+    chmodSync(wrapper, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const fix = join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs');
+    const restore = shrinkBounds(fix, 800, 60_000);
+    const envWrapper = process.env.BATON_AGENT_WRAPPER;
+    try {
+      delete process.env.BATON_AGENT_WRAPPER;
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent, agent_wrapper: wrapper }));
+      const snapshot = { sha: commitAll(root) };
+      const stop = new AbortController();
+      const started = Date.now();
+      const leg = (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, signal: stop.signal });
+      setTimeout(() => stop.abort('release'), 2_600);
+      await expect(leg, 'the log\'s moving mtime vetoes the idle conclusion').rejects.toThrow('the agent was stopped: release');
+      expect(Date.now() - started).toBeGreaterThanOrEqual(2_400);
+      expect(readFileSync(join(root, '.baton', 'logs', 'A-1-fix.log'), 'utf8')).toContain('wrapper tick');
+    } finally {
+      restore();
+      if (envWrapper == null) delete process.env.BATON_AGENT_WRAPPER;
+      else process.env.BATON_AGENT_WRAPPER = envWrapper;
+      writeFileSync(settingsFile, before);
+      for (const f of ['silent-agent.sh', 'log-wrapper.sh']) rmSync(join(root, f), { force: true });
+      rmSync(join(root, '.baton', 'logs'), { recursive: true, force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('an agent printing at a slow cadence is never concluded on idle, however long it runs (B-108)', async () => {
+    const agent = join(root, 'slow-cadence.sh');
+    writeFileSync(agent, '#!/bin/sh\nfor i in 1 2 3 4 5 6 7 8 9 10; do echo "tick $(date +%s)"; sleep 0.4; done\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const fix = join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs');
+    const restore = shrinkBounds(fix, 900, 60_000);
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent }));
+      const snapshot = { sha: commitAll(root) };
+      const stop = new AbortController();
+      const started = Date.now();
+      const leg = (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, signal: stop.signal });
+      setTimeout(() => stop.abort('release'), 3_000);
+      await expect(leg, 'each line refreshes the stdout signal; the bound never sees silence').rejects.toThrow('the agent was stopped: release');
+      expect(Date.now() - started).toBeGreaterThanOrEqual(2_800);
+    } finally {
+      restore();
+      writeFileSync(settingsFile, before);
+      rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('a chatty agent that never converges ends at the leg’s ceiling, recorded agent_concluded_absolute, its received output judged by the same checks (B-108)', async () => {
+    // It printed its verdict and kept working — never idle, so only the ceiling ends it, and
+    // the review reads the verdict out of the output it received by the same last-line scan.
+    const agent = join(root, 'never-converges.sh');
+    writeFileSync(agent, '#!/bin/sh\necho changes\nfor i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do echo "still working $(date +%s)"; sleep 0.1; done\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const review = join(root, '.baton', 'courses', 'create-pr', 'legs', 'review.mjs');
+    const restore = shrinkBounds(review, 800, 2_200);
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent }));
+      const snapshot = { sha: commitAll(root) };
+      const started = Date.now();
+      expect(await (await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({
+        reached: 'reviewed', next: 'fix', verdict: 'changes',
+        conclusion: { cause: 'agent_concluded_absolute', ceiling_ms: 2_200 },
+      });
+      expect(Date.now() - started).toBeLessThan(15_000);
+    } finally {
+      restore();
+      writeFileSync(settingsFile, before);
+      rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('the ask-leg contract over concluded output: the last received line is the answer, or the leg fails naming what it read (B-108)', async () => {
+    const quiet = join(root, 'answered-then-quiet.sh');
+    const quietAgent = '#!/bin/sh\necho "reviewed the round"\necho approve\nfor i in 1 2 3 4 5 6 7 8; do sleep 5; done\n';
+    const noAnswer = join(root, 'prose-then-quiet.sh');
+    const noAnswerAgent = '#!/bin/sh\necho "the verdict is coming"\nfor i in 1 2 3 4 5 6 7 8; do sleep 5; done\n';
+    writeFileSync(quiet, quietAgent);
+    writeFileSync(noAnswer, noAnswerAgent);
+    chmodSync(quiet, 0o755);
+    chmodSync(noAnswer, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const review = join(root, '.baton', 'courses', 'create-pr', 'legs', 'review.mjs');
+    const restore = shrinkBounds(review, 900, 60_000);
+    try {
+      // An answer the received text still ends with (backwards past nothing): the round stands.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: quiet }));
+      const snapshot = { sha: commitAll(root) };
+      expect(await (await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({
+        reached: 'reviewed', next: 'merge', verdict: 'approve',
+        conclusion: { cause: 'agent_concluded_idle', idle_ms: 900, quiet_signals: ['stdout', 'wrapper-log'] },
+      });
+      // No line the reader would take: the concluded leg fails as any failed attempt would,
+      // naming the last line it received.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: noAnswer }));
+      const none = { sha: commitAll(root) };
+      await expect((await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: none }))
+        .rejects.toThrow(/the review agent printed no verdict .*the verdict is coming/);
+    } finally {
+      restore();
+      writeFileSync(settingsFile, before);
+      for (const f of [quiet, noAnswer]) rmSync(f, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('the B-86 shape replayed end to end: the work done, the PR open, every signal quiet — the stub concludes and the forge verify still gates pr-open (B-108)', async () => {
+    const agent = join(root, 'b-86.sh');
+    writeFileSync(agent, [
+      '#!/bin/sh',
+      '# the incident\'s shape: everything a finished leg does, then no exit',
+      'echo "baton: pushed and opened the PR"',
+      'echo "ticket record written"',
+      'echo $$ > "$(dirname "$0")/agent.pid"',
+      'for i in 1 2 3 4 5 6 7 8; do sleep 5; done',
+      '',
+    ].join('\n'));
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const implement = join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
+    const restore = shrinkBounds(implement, 1_000, 60_000);
+    // B-81: the stub verifies its PR on the forge before returning pr-open — the same scripted
+    // gh the spawn-contract test uses; the conclusion changes nothing about the gate.
+    const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegh-'));
+    writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\ncat "$(dirname "$0")/answer"\n');
+    writeFileSync(join(fakeBin, 'answer'), JSON.stringify([{ number: 7, headRefName: 'claude/B-1-b108', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
+    chmodSync(join(fakeBin, 'gh'), 0o755);
+    const path = process.env.PATH;
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    process.env.PATH = `${fakeBin}:${path}`;
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent }));
+      const snapshot = { sha: commitAll(root) };
+      const started = Date.now();
+      expect(await (await load(implement)).run({ ticket: { id: 'B-1' }, checkout: root, snapshot })).toEqual({
+        reached: 'pr-open', next: 'run-tests',
+        conclusion: { cause: 'agent_concluded_idle', idle_ms: 1_000, quiet_signals: ['stdout', 'wrapper-log'] },
+      });
+      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(await agentGone(join(root, 'agent.pid'))).toBe(true);
+      // The one line an operator reads when a leg ends this way, on the stub's own stderr.
+      expect(err.mock.calls.map((c) => String(c[0])).join('')).toContain('the agent agent_concluded_idle');
+    } finally {
+      err.mockRestore();
+      process.env.PATH = path;
+      restore();
+      writeFileSync(settingsFile, before);
+      rmSync(fakeBin, { recursive: true, force: true });
+      rmSync(join(root, 'agent.pid'), { force: true });
       rmSync(agent, { force: true });
       commitAll(root);
     }
@@ -1101,8 +1555,16 @@ describe('baton repo init, through the built CLI', () => {
     const files = ['README.md', 'a.md', 'archive/b.md'].map((f) => ({ path: f, text: readFileSync(join(root, 'tickets', f), 'utf8') }));
     const ejected = await load(join(root, '.baton', 'tickets.mjs'));
     const out = await ejected.default.tickets(ctx);
-    expect(out).toEqual(ticketsMarkdown(files, ctx.settings));
+    // The ejected source answers what the default answers, versions included (B-183: each
+    // ticket's version is its file's blob id at the commit).
+    expect(out).toEqual(stampMarkdownVersions(root, ticketsMarkdown(files, ctx.settings), ctx.settings.items));
     expect(out.closed).toEqual([{ id: 'B-1', as: 'done' }]);
+    // Nothing is committed yet: a ticket whose file the commit does not hold carries NO version
+    // field — a present-but-empty one fails §12.3's grammar and the whole post with it (review
+    // round 1); it is posted with no version and the row stores ''.
+    expect(out.tickets.every((t: { version?: string }) => t.version === undefined)).toBe(true);
+    expect(ejected.default.versions).toBe('pinned');
+    expect(await ejected.default.read('A-1', { version: 'f'.repeat(40), checkout: root })).toEqual({ version: 'f'.repeat(40), ticket: null });
     // A second eject would overwrite edits: refused without --force.
     expect(() => baton(root, 'repo', 'init', '--eject', 'tickets')).toThrow();
     baton(root, 'repo', 'init', '--eject', 'tickets', '--force');
@@ -1373,6 +1835,39 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     expect(facts[0].reviews.map((r) => r.body)).toEqual(['<!-- baton:verdict approve -->']);
     // The home in another case is no sibling; the unowned sibling PR costs nothing beyond the list.
     expect(calls).toEqual(['/repos/o/r/pulls?state=all', '/repos/o/site/pulls?state=all', 'graphql o/site 7', '/repos/o/site/collaborators/x/permission']);
+  });
+
+  it('a private repository a fine-grained token reads: check suites refused, the checks are the head\'s workflow runs; any other error still fails, naming its path (B-226)', async () => {
+    const routes = {
+      '/repos/o/r/pulls?state=all': [],
+      '/repos/o/priv/pulls?state=all': [pr(7, 'claude/A-1-x', 'open'), pr(9, 'claude/A-1-y', 'open')],
+      '/repos/o/priv/commits/s7/check-runs': { check_runs: [{ conclusion: 'success' }] },
+      '/repos/o/priv/actions/runs?head_sha=s7': { workflow_runs: [{ status: 'completed', conclusion: 'success' }, { status: 'in_progress', conclusion: null }] },
+      '/repos/o/priv/actions/runs?head_sha=s9': { workflow_runs: [{ status: 'completed', conclusion: 'failure' }] },
+      '/repos/o/priv/pulls/7/commits': [{ sha: 'c1', commit: { committer: { date: '2026-10-02T00:00:00Z' }, message: 'x' } }],
+      '/repos/o/priv/pulls/7/reviews': [],
+      '/repos/o/priv/issues/7/comments': [who('MEMBER', '<!-- baton:verdict approve -->', '2026-10-05T00:00:00Z')],
+      ...may('o/priv', 'x', 'write'),
+    };
+    vi.stubGlobal('fetch', githubFake(routes, calls, { checksForbidden: ['o/priv'] }));
+    const lines: string[] = [];
+    const facts = await githubFacts(dir, (l) => lines.push(l), (p) => p.repository === 'o/priv', [{ repository: 'o/priv', tickets: ['A-1'] }]);
+    // The rest of the GraphQL answer stands: commits and verdicts as before; the checks come from Actions.
+    expect(facts.map((f) => [f.number, f.checks])).toEqual([[7, ['success', null]], [9, ['failure']]]);
+    expect(facts[0]).toMatchObject({ pushedAt: Date.parse('2026-10-02T00:00:00Z') });
+    expect(facts[0].reviews.map((r) => r.body)).toEqual(['<!-- baton:verdict approve -->']);
+    expect(lines.filter((l) => l.includes('workflow runs'))).toEqual(['baton: o/priv: this token cannot read check runs (a fine-grained token holds no Checks) — its PRs\' checks are their heads\' workflow runs (B-226)']);
+    expect(calls).toEqual(['/repos/o/r/pulls?state=all', '/repos/o/priv/pulls?state=all', 'graphql o/priv 7,9', '/repos/o/priv/actions/runs?head_sha=s7', '/repos/o/priv/collaborators/x/permission', '/repos/o/priv/actions/runs?head_sha=s9']);
+    // No Actions: read either: the sync fails, naming both permissions.
+    const noActions = githubFake({ ...routes, '/repos/o/priv/actions/runs?head_sha=s7': undefined }, [], { checksForbidden: ['o/priv'] });
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.includes('/actions/runs') ? new Response('{}', { status: 403 }) : noActions(url, init)));
+    await expect(githubFacts(dir, () => {}, () => true, [{ repository: 'o/priv', tickets: ['A-1'] }])).rejects.toThrow(/neither the head's check runs .* nor its workflow runs \(give it Actions: read\)/);
+    // A refusal of anything but the check suites fails the sync as before, now naming where.
+    const other = githubFake(routes);
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.endsWith('/graphql')
+      ? Response.json({ data: { repository: { p7: null } }, errors: [{ type: 'FORBIDDEN', path: ['repository', 'p7', 'commits'], message: 'Resource not accessible by personal access token' }] })
+      : other(url, init)));
+    await expect(githubFacts(dir, () => {}, () => true, [{ repository: 'o/priv', tickets: ['A-1'] }])).rejects.toThrow('GitHub GraphQL (o/priv): Resource not accessible by personal access token (at repository.p7.commits)');
   });
 
   it('a plain-git home is never read: only the repositories tickets name in repos:, and with none no request and no token (B-182, S-BTN-106)', async () => {
@@ -1710,8 +2205,8 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     expect(settings.default_course).toBe('create-pr');
     expect(settings.courses.map((c: { id: string }) => c.id)).toEqual(['create-pr', 'bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets']);
-    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_worker_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('bug-report') });
-    expect(settings.courses[5]).toEqual({ id: 'spec-to-tickets', version: 1, min_worker_version: 1, skill: 'baton-spec-to-tickets', step_kinds: ['decompose', 'check', 'file'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('spec-to-tickets') });
+    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_worker_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('bug-report') });
+    expect(settings.courses[5]).toEqual({ id: 'spec-to-tickets', version: 1, min_worker_version: 1, skill: 'baton-spec-to-tickets', step_kinds: ['decompose', 'check', 'file'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('spec-to-tickets') });
     for (const [course, legs] of [['bug-report', 6], ['decision', 2], ['review-pr', 2], ['draft-ticket', 3], ['spec-to-tickets', 3]] as const) {
       expect(readdirSync(join(root, '.baton', 'courses', course, 'legs')).length, course).toBe(legs * 2);
     }

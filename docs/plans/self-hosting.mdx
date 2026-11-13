@@ -103,7 +103,7 @@ merge.
   agents from claiming the fix. The break-glass path in R3-1266:
   - a person (never an agent) may fix `main` directly;
   - `wrangler rollback` follows §11's rule about migrations;
-  - staging's health gates the production deploy.
+  - the test job gates the production deploy; there is no staging instance (B-224).
 - **Publishing private content.** Items, plans and review records were written in a private
   repository. They may name other projects, private repositories, costs, accounts or people.
   R3-1267 scrubs them, and the owner reviews the diff before it is pushed: publishing cannot
