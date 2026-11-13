@@ -570,7 +570,11 @@ export class Admin {
     const fingerprint = KEY_FINGERPRINT.test(raw) || TOKEN_CREDENTIAL.test(raw) ? raw : bad('fingerprint', 'must be a key fingerprint, SHA256:…, or a token credential’s id');
     // The pool's reserved credential has no key to revoke (R-BTN-103).
     if (fingerprint === 'pool') bad('fingerprint', 'pool is reserved for worker couriers’ pool copies, not a key');
-    for (const { repository_id } of this.rows<{ repository_id: string }>('SELECT DISTINCT repository_id FROM repository_owners WHERE fingerprint = ? AND removed_at IS NULL', fingerprint)) {
+    // Judged over the live repositories the key owns only (R-BTN-47): a retired repository's
+    // policy blocks no revocation — its rows stay, read-only, and no route can change it again.
+    for (const { repository_id } of this.rows<{ repository_id: string }>(
+      `SELECT DISTINCT o.repository_id FROM repository_owners o JOIN repositories r ON r.id = o.repository_id
+       WHERE o.fingerprint = ? AND o.removed_at IS NULL AND r.retired_at IS NULL`, fingerprint)) {
       const facts = await this.factsWithout(repository_id, null);
       this.refuseUnsatisfiableLists(repository_id, { owners: new Map([...facts.owners].filter(([fp2]) => fp2 !== fingerprint)), humans: facts.humans, breakGlass: facts.breakGlass, humanOwners: new Set([...facts.humanOwners].filter((fp2) => fp2 !== fingerprint)) });
     }
@@ -856,8 +860,11 @@ export class Admin {
       if (b.confirm !== true) throw new BatonError('confirm-required', 'revoking a human key takes confirm: true');
       const fp = fingerprintOf(b.fingerprint, 'fingerprint');
       // Refuse where the key is the last live credential a list or a floor's `remove_by` has
-      // (R-BTN-188) — judged per repository it owns, with the key counted out.
-      for (const { repository_id } of this.rows<{ repository_id: string }>('SELECT DISTINCT repository_id FROM repository_owners WHERE fingerprint = ? AND removed_at IS NULL', fp)) {
+      // (R-BTN-188) — judged per live repository it owns (R-BTN-47: a retired repository's
+      // policy blocks no revocation), with the key counted out.
+      for (const { repository_id } of this.rows<{ repository_id: string }>(
+        `SELECT DISTINCT o.repository_id FROM repository_owners o JOIN repositories r ON r.id = o.repository_id
+         WHERE o.fingerprint = ? AND o.removed_at IS NULL AND r.retired_at IS NULL`, fp)) {
         const facts = await this.factsWithout(repository_id, null);
         this.refuseUnsatisfiableLists(repository_id, { owners: new Map([...facts.owners].filter(([fp2]) => fp2 !== fp)), humans: facts.humans, breakGlass: facts.breakGlass, humanOwners: new Set([...facts.humanOwners].filter((fp2) => fp2 !== fp)) });
       }

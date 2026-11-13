@@ -7,7 +7,7 @@ import * as http from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { answerPlan, confirmCapacity, createApiKey, duration, main, parseArgs, plan, policyDiff, send, workingTreeOf } from '../../cli/baton.mjs';
+import { answerPlan, confirmAsk, confirmCapacity, createApiKey, duration, main, parseArgs, plan, policyDiff, send, workingTreeOf } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
 import { ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
@@ -16,7 +16,7 @@ import { call as hostCall } from '#host';
 const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwner';
 const key = (p: string) => p;
 
-/** A stdin for confirmCapacity's tests: a TTY that answers `line` once asked. */
+/** A stdin for the confirm prompts' tests: a TTY that answers `line` once asked. */
 import { EventEmitter } from 'node:events';
 const fakeIn = (line?: string) => {
   const input = new EventEmitter() as EventEmitter & { isTTY: boolean };
@@ -31,7 +31,12 @@ describe('plan: one request per command', () => {
       method: 'POST', path: '/v1/admin/repositories',
       body: { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', weight: 2, tiers: ['routine', 'critical'], cut_over: true, owner_keys: [PUB] },
     });
-    expect(plan('admin', ['repo', 'retire', 'ops'], key)).toEqual({ method: 'POST', path: '/v1/admin/repositories', body: { id: 'ops', retire: true, confirm: true } });
+    // §12.2: retire is destructive — the plan carries the ask, and --yes answers it beforehand.
+    expect(plan('admin', ['repo', 'retire', 'ops'], key)).toEqual({
+      method: 'POST', path: '/v1/admin/repositories', body: { id: 'ops', retire: true, confirm: true },
+      confirm: { question: 'retire ops? everything scoped to it ends — sessions, keys, grants, claims — and its id is never registered again', yes: false },
+    });
+    expect(plan('admin', ['repo', 'retire', 'ops', '--yes'], key).confirm.yes).toBe(true);
     expect(plan('admin', ['grant', 'docs', '--key', PUB, '--hostname', 'h', '--capabilities', 'human-operator'], key).body)
       .toEqual({ repository: 'docs', public_key: PUB, hostname: 'h', capabilities: ['human-operator'] });
     expect(plan('admin', ['revoke', 'SHA256:a/b'], key).path).toBe('/v1/admin/keys/SHA256%3Aa%2Fb/revoke');
@@ -83,6 +88,20 @@ describe('plan: one request per command', () => {
     // No course names it: setting is the administrator's own statement, still confirmed.
     expect(await confirmCapacity({ capacities: [], requiring: [] }, 'set it?', true, out, fakeIn())).toBe(true);
     expect(lines.at(-1)).toContain('no course of this Baton names the capability');
+  });
+
+  it('retire\'s confirm (§12.2): the ask decides — --yes, a terminal, or a pipe\'s refusal', async () => {
+    const lines: string[] = [];
+    const out = { write: (s: string) => lines.push(s) };
+    // --yes answers beforehand.
+    expect(await confirmAsk('retire ops?', true, out, fakeIn())).toBe(true);
+    // A terminal's y confirms; anything else does not.
+    expect(await confirmAsk('retire ops?', false, out, fakeIn('y'))).toBe(true);
+    expect(await confirmAsk('retire ops?', false, out, fakeIn('n'))).toBe(false);
+    // No terminal: refused rather than a prompt on a pipe.
+    const pipe = fakeIn('y'); pipe.isTTY = false;
+    expect(await confirmAsk('retire ops?', false, out, pipe)).toBe(false);
+    expect(lines.at(-1)).toContain('not confirmed');
   });
 
   it('owner commands, the required bars in their groups', () => {

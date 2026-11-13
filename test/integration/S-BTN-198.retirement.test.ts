@@ -13,8 +13,8 @@
 // check-runners, consents, ticket timers, the outbox) extend this file with their own cases.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, captureDispatches, claimItem, claimRow, course, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, sha256, syncCall, tick, ticket, withCore, webhookCall, workerCall } from '../helpers';
-import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
+import { adminSession, captureDispatches, claimItem, claimRow, course, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, setHumanKeys, setPolicySigningKey, sha256, syncCall, tick, ticket, withCore, webhookCall, workerCall } from '../helpers';
+import { makeKey, signedRequest, sshsig, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
 const T0 = Date.parse('2026-11-13T12:00:00Z');
@@ -234,5 +234,93 @@ describe('S-BTN-198 retirement', () => {
     await withCore((c) => c.start());
     expect(await rows(`SELECT 1 FROM sync_keys WHERE repository_id = 'baton'`)).toEqual([]);
     expect(await rows(`SELECT count(*) AS n FROM events WHERE kind = 'admin' AND json_extract(detail_json, '$.act') = 'seed-skipped-retired'`)).toEqual([{ n: 2 }]);
+  });
+
+  it('the seed skips a retired entry whole: its owner keys never stop the start (B-91, R-BTN-47)', async () => {
+    await aLiveRepository();
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'baton', retire: true, confirm: true })).status).toBe(200);
+    // The retired entry's owner_keys name a key that holds another role — ops' sync key. The
+    // entry is skipped before `mayOwn` could refuse it, as the sync-key case above skips its keys.
+    const seeded = await withCore((c) => (c as unknown as { ports: { config: { BATON_REPOSITORIES?: string } } }).ports.config.BATON_REPOSITORIES!);
+    await withCore((c) => {
+      (c as unknown as { ports: { config: Record<string, string | undefined> } }).ports.config.BATON_REPOSITORIES = JSON.stringify([
+        ...(JSON.parse(seeded) as Record<string, unknown>[]).filter((e) => e.id !== 'baton'),
+        { id: 'baton', github: 'immediately-run/baton', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', cut_over: true,
+          owner_keys: [opsSync.publicKey] },
+      ]);
+    });
+    await withCore((c) => c.start());
+    expect(await rows(`SELECT 1 FROM repository_owners WHERE repository_id = 'baton'`)).toEqual([]);
+    expect(await rows(`SELECT count(*) AS n FROM events WHERE kind = 'admin' AND json_extract(detail_json, '$.act') = 'seed-skipped-retired'`)).toEqual([{ n: 1 }]);
+  });
+
+  it('a retired repository\'s bars reach no one, and its id names no mode (R-BTN-67, R-BTN-47)', async () => {
+    await aLiveRepository();
+    expect((await keyCall(opsOwner, '/v1/owner/ops/bars', { course: 'roadmap-pr', tag: 'block:ops-retire', applies: 'claim', reason: 'ops-retire-pin' })).status).toBe(200);
+    // Before: the granted runner's heartbeat carries the bar in force on its repository.
+    const before = (await (await beat()).json()) as { bars: { tag: string }[] };
+    expect(before.bars.map((b) => b.tag)).toEqual(['block:ops-retire']);
+    await retire();
+    // The bar stays on the row, unlifted — and reaches no one (R-BTN-47: outside every rule).
+    expect(await rows(`SELECT count(*) AS n FROM owner_bars WHERE repository_id = 'ops' AND lifted_at IS NULL`)).toEqual([{ n: 1 }]);
+    const after = (await (await beat()).json()) as { bars: unknown[]; courses_retired: string[] };
+    expect(after.bars).toEqual([]);
+    expect(after.courses_retired).toEqual(['ops']);
+    // `?repository=` of /v1/runner/mode reads the live predicate: a retired id is as one never
+    // registered.
+    expect(await code(await signed(runner, '/v1/runner/mode?repository=ops', undefined, { 'X-Worker-Secret': secret }))).toBe('invalid-params');
+  });
+
+  it('a retired repository\'s policy blocks no revocation (R-BTN-57, R-BTN-47)', async () => {
+    await aLiveRepository();
+    await setPolicySigningKey();
+    const breakGlass = await makeKey('ssh-ed25519', 'retire-break-glass');
+    await setHumanKeys(breakGlass);
+    // A human-only key H, an owner of ops, its approvers.trust naming it alone; opsOwner's
+    // approvers.policy naming opsOwner alone (S-BTN-192's shape).
+    const h = await makeKey('ssh-ed25519', 'ops-human');
+    const blob = await sshsig(breakGlass, new TextEncoder().encode(h.publicKey.trim()), 'baton-human-keys@1');
+    expect((await signed(breakGlass, '/v1/human-keys', { public_key: h.publicKey, signature: btoa(String.fromCharCode(...blob)) })).status).toBe(200);
+    expect((await keyCall(opsOwner, '/v1/owner/ops/owners', { public_key: h.publicKey })).status).toBe(200);
+    const cur = (await rows<{ version: number; policy_json: string }>('SELECT version, policy_json FROM repository_policies WHERE repository_id = ? ORDER BY version DESC LIMIT 1', 'ops'))[0];
+    const doc = JSON.parse(cur.policy_json) as Record<string, unknown> & { approvers: Record<string, string[]> };
+    const put = await keyCall(opsOwner, '/v1/owner/ops/policy', {
+      base_version: cur.version,
+      policy: { ...doc, approvers: { ...doc.approvers, policy: [`key:${opsOwner.fingerprint}`], trust: [`key:${h.fingerprint}`] } },
+    }, 'PUT');
+    expect(put.status, JSON.stringify(await put.clone().json())).toBe(200);
+    // While ops is live, each list blocks the revocation of the key that alone satisfies it —
+    // the refusal the round found (R-BTN-188).
+    const adminRevoke = await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(opsOwner.fingerprint)}/revoke`, {});
+    expect(await code(adminRevoke)).toBe('unsatisfiable-approvers');
+    expect(((await adminRevoke.json()) as { list: string }).list).toBe('approvers.policy');
+    const humanRevoke = await signed(breakGlass, '/v1/human-keys', { fingerprint: h.fingerprint, revoke: true, confirm: true });
+    expect(((await humanRevoke.clone().json()) as { code: string }).code).toBe('unsatisfiable-approvers');
+    // Retired, the same rows block nothing: no route can change the policy again, so it never
+    // holds a revocation (R-BTN-47). Both keys revoke — their owner rows go with them.
+    expect((await retire()).status).toBe(200);
+    expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(opsOwner.fingerprint)}/revoke`, {})).status).toBe(200);
+    expect((await signed(breakGlass, '/v1/human-keys', { fingerprint: h.fingerprint, revoke: true, confirm: true })).status).toBe(200);
+    expect(await rows(`SELECT removed_at, revoked_at FROM repository_owners WHERE repository_id = 'ops' AND fingerprint = ?`, opsOwner.fingerprint))
+      .toEqual([{ removed_at: T0, revoked_at: T0 }]);
+    // The owner of two repositories keeps its row on ops — only the revoked keys' go.
+    expect(await rows(`SELECT count(*) AS n FROM repository_owners WHERE repository_id = 'ops' AND removed_at IS NULL`)).toEqual([{ n: 1 }]);
+    expect(await rows(`SELECT revoked_at FROM human_keys WHERE fingerprint = ?`, h.fingerprint)).toEqual([{ revoked_at: T0 }]);
+  });
+
+  it('a claim naming a retired repository\'s ticket is not-found, before the cutover gate (R-BTN-47)', async () => {
+    await aLiveRepository();
+    await retire();
+    // Every live repository un-cut-over: docs never did, and baton (the seeded cut-over) and ops
+    // are retired — so the claim's cutover gate would refuse first if it ran first.
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', retire: true, confirm: true })).status).toBe(200);
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'baton', retire: true, confirm: true })).status).toBe(200);
+    const w = await register('vm-a');
+    const retired = await claimItem('vm-a', w.secret, { ticket_id: 'ops:T-1' });
+    expect(retired.json.code).toBe('not-found');
+    // A wanted claim naming a repository never registered answers the same — as one never
+    // registered (a disclosure of this change: the cutover gate used to answer for it).
+    const ghost = await claimItem('vm-a', w.secret, { ticket_id: 'ghost:T-9' });
+    expect(ghost.json.code).toBe('not-found');
   });
 });

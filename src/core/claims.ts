@@ -693,15 +693,20 @@ export class Claims {
     return new BatonError(code, `${ticketId}: ${v.code} at ${phase === 'claim' ? 'a claim' : 'an advance'}`, { rule: v.rule, rule_code: v.code });
   }
 
+  /** R-BTN-47 (B-173): a ticket of a repository not registered — retired, or never there — is
+   *  `not-found`, outside every rule that reads registered repositories, before any other
+   *  refusal a claim could meet (a ticket of it never reaches the cutover gate). */
+  private refuseUnregisteredTicket(ticketId: string): void {
+    if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NULL', repositoryOf(ticketId)).length) {
+      throw new BatonError('not-found', `${repositoryOf(ticketId)} is not registered`);
+    }
+  }
+
   /** The ticket a claim by `w` gets now (§6.2): the named one if it passes the gates, recommended
    *  or not, with the advice it went against; else the first recommendation. Throws the §11 refusal. */
   private decide(w: WorkerFacts, wanted: string | null): { item: ItemFacts; advice: Record<string, unknown> | null } {
     if (wanted) {
-      // R-BTN-47 (B-173): a retired repository's tickets are never claimable — outside every
-      // rule that reads registered repositories, as one never registered.
-      if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NULL', repositoryOf(wanted)).length) {
-        throw new BatonError('not-found', `${repositoryOf(wanted)} is not registered`);
-      }
+      this.refuseUnregisteredTicket(wanted);
       if (!this.cutOver(wanted)) throw new BatonError('not-cut-over', `${repositoryOf(wanted)}'s claims go through git until its cutover (R-BTN-28)`);
       // §12.8 (B-145, R-BTN-189): a ticket that reaches a repository whose floored guarantee is
       // broken is not claimable — rule `floor`, `floor-broken`.
@@ -787,6 +792,9 @@ export class Claims {
   // @model claim sha256:2474e2bb5224
   claim(workerId: number, body: unknown) {
     const b = checkClaim(body);
+    // R-BTN-47 (B-173): a wanted ticket of a repository not registered — retired, or never
+    // there — is not-found before the cutover gate, which reads the live repositories alone.
+    if (b.ticket_id) this.refuseUnregisteredTicket(b.ticket_id);
     if (!this.anyCutOver()) throw new BatonError('not-cut-over', 'claims go through git until cutover (R-BTN-28)');
     const prior = this.rows<{ id: number; worker_id: number }>('SELECT id, worker_id FROM claims WHERE request_id = ?', b.request_id)[0];
     if (prior) {
