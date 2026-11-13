@@ -21,13 +21,13 @@ import { controlGroupsOf, groupUnchangedAt } from '../defaults/signed-control';
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
-import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, type CourseLoad } from './home';
+import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, readHead, type CourseLoad } from './home';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
 import { MIN_SECRET_BYTES, createLegMasker, maskLegOutput, namesASecret, secretValues } from './mask';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { StateFile, leaseLostFrom, type RunnerState } from './state';
 import { bareTicketId } from '../defaults/ticket-state';
-import { MARKDOWN_SOURCE } from '../defaults/ticket-versions';
+import { digestOfRead, MARKDOWN_SOURCE } from '../defaults/ticket-versions';
 
 const LEG_PROCESS = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
@@ -1121,20 +1121,23 @@ export class Runner {
     return courseOf(this.o.home, claim.snapshot_sha as string, want);
   }
 
-  /** B-183 (§4.5): whether the claim's ticket still reads at the version the claim names. Null:
-   *  it does — or there is nothing to compare, a board that held no version for the ticket or a
-   *  source that declared no way of reading, which run exactly as before. A string: why not, for
-   *  the log, and the claim releases `stale-board` before any leg runs. The version is the
-   *  source's opaque string (the markdown source's is the ticket file's blob id); the source at
-   *  the claim's snapshot decides how it is read — `pinned` at the version, `current` as the
-   *  store holds the ticket now — and Baton, never the runner, orders nothing. A source that
-   *  declares `versions` but exports no `read` cannot read at all — the CLI refuses one at load
-   *  (§4.2), so this is a source the snapshot broke — and the claim releases rather than run
-   *  with no re-verification (round 1). */
-  private async verifyTicketVersion(claim: Record<string, any>, scratch: string): Promise<string | null> {
+  /** B-183 (§4.5): whether the claim's ticket still reads at the version the claim names. The
+   *  `why` is null when it does — or there is nothing to compare, a board that held no version
+   *  for the ticket or a source that declared no way of reading, which run exactly as before. A
+   *  string is why not, for the log, and the claim releases `stale-board` before any leg runs.
+   *  The version is the source's opaque string (the markdown source's is the ticket file's blob
+   *  id); the source at the claim's snapshot decides how it is read — `pinned` at the version,
+   *  `current` as the store holds the ticket now — and Baton, never the runner, orders nothing.
+   *  A source that declares `versions` but exports no `read` cannot read at all — the CLI
+   *  refuses one at load (§4.2), so this is a source the snapshot broke — and the claim releases
+   *  rather than run with no re-verification (round 1).
+   *
+   *  B-190 (R-BTN-84): a read that succeeded is also the claim's recorded read — its digest
+   *  joins the run's inputs (`leg_run_inputs`), so replay re-reads the same way and compares. */
+  private async verifyTicketVersion(claim: Record<string, any>, scratch: string): Promise<{ why: string | null; read: { version: string; read_digest: string } | null }> {
     const version = typeof claim.version === 'string' ? claim.version : '';
     const how = (claim.ticket_source ?? null) as { versions?: string | null } | null;
-    if (version === '' || how?.versions == null) return null;
+    if (version === '' || how?.versions == null) return { why: null, read: null };
     // R-BTN-107 (B-184): the repository's ticket source runs only through the executor, in a
     // `source` session; the CLI's own markdown source (no `.baton/tickets.mjs`) runs here.
     const file = extractTicketSource(this.o.home, claim.snapshot_sha as string, scratch);
@@ -1142,31 +1145,33 @@ export class Runner {
     const src = MARKDOWN_SOURCE as unknown as Record<string, unknown>;
     // A source that declares neither `versions` nor `read` is read as declaring nothing (§4.2):
     // an existing custom source keeps working until it opts in.
-    if (typeof src.versions !== 'string' || !['pinned', 'current'].includes(src.versions)) return null;
-    if (typeof src.read !== 'function') return `the ticket source declares versions: ${JSON.stringify(src.versions)} but exports no read — the ticket cannot be re-verified at it (R-BTN-74)`;
+    if (typeof src.versions !== 'string' || !['pinned', 'current'].includes(src.versions)) return { why: null, read: null };
+    if (typeof src.read !== 'function') return { why: `the ticket source declares versions: ${JSON.stringify(src.versions)} but exports no read — the ticket cannot be re-verified at it (R-BTN-74)`, read: null };
     const read = src.read as (id: string, o: { version?: string; checkout?: string }) => Promise<{ version?: unknown; ticket?: unknown } | null>;
     const id = bareTicketId({ id: claim.ticket_id as string });
     try {
       if (src.versions === 'pinned') {
         const out = await read(id, { version, checkout: this.o.home });
-        return out == null || out.ticket == null ? `the ticket cannot be read at its version ${version.slice(0, 16)}` : null;
+        if (out == null || out.ticket == null) return { why: `the ticket cannot be read at its version ${version.slice(0, 16)}`, read: null };
+        return { why: null, read: { version, read_digest: digestOfRead(out.ticket) } };
       }
       const out = await read(id, { checkout: this.o.home });
-      if (out == null) return 'the ticket source no longer reads the ticket';
-      return out.version === version ? null : `the ticket's version is ${typeof out.version === 'string' && out.version !== '' ? out.version.slice(0, 16) : '(none)'}, the claim's ${version.slice(0, 16)}`;
+      if (out == null) return { why: 'the ticket source no longer reads the ticket', read: null };
+      if (out.version !== version) return { why: `the ticket's version is ${typeof out.version === 'string' && out.version !== '' ? out.version.slice(0, 16) : '(none)'}, the claim's ${version.slice(0, 16)}`, read: null };
+      return { why: null, read: { version, read_digest: digestOfRead(out.ticket) } };
     } catch (e) {
-      return `the ticket source's read failed (${msg(e)})`;
+      return { why: `the ticket source's read failed (${msg(e)})`, read: null };
     }
   }
 
   /** §4.5 (R-BTN-74) through the executor: the source's `versions` and `read`, each a wrapper call
    *  in one `source` session, stopped when the check ends. Same answers as the in-process check. */
-  private async verifyBySource(file: string, claim: Record<string, any>, version: string, scratch: string): Promise<string | null> {
+  private async verifyBySource(file: string, claim: Record<string, any>, version: string, scratch: string): Promise<{ why: string | null; read: { version: string; read_digest: string } | null }> {
     let handle: Handle;
     try {
       handle = await this.startSession('source', { session_id: `source-${randomBytes(6).toString('hex')}`, snapshot_sha: String(claim.snapshot_sha ?? ''), paths: [scratch], env: this.baseEnv() });
     } catch (e) {
-      return `the executor could not start the ticket source's session (${msg(e)})`;
+      return { why: `the executor could not start the ticket source's session (${msg(e)})`, read: null };
     }
     try {
       const call = async (fn: string, args: unknown[]) => {
@@ -1179,22 +1184,24 @@ export class Runner {
       try {
         versions = await call('describe', []);
       } catch (e) {
-        return `the ticket source at the snapshot would not load (${msg(e)})`;
+        return { why: `the ticket source at the snapshot would not load (${msg(e)})`, read: null };
       }
       const v = (versions ?? {}) as { versions?: unknown; read?: boolean };
-      if (typeof v.versions !== 'string' || !['pinned', 'current'].includes(v.versions)) return null;
-      if (!v.read) return `the ticket source declares versions: ${JSON.stringify(v.versions)} but exports no read — the ticket cannot be re-verified at it (R-BTN-74)`;
+      if (typeof v.versions !== 'string' || !['pinned', 'current'].includes(v.versions)) return { why: null, read: null };
+      if (!v.read) return { why: `the ticket source declares versions: ${JSON.stringify(v.versions)} but exports no read — the ticket cannot be re-verified at it (R-BTN-74)`, read: null };
       const id = bareTicketId({ id: claim.ticket_id as string });
       try {
         if (v.versions === 'pinned') {
           const out = await call('read', [id, { version, checkout: this.o.home }]) as { ticket?: unknown } | null;
-          return out == null || out.ticket == null ? `the ticket cannot be read at its version ${version.slice(0, 16)}` : null;
+          if (out == null || out.ticket == null) return { why: `the ticket cannot be read at its version ${version.slice(0, 16)}`, read: null };
+          return { why: null, read: { version, read_digest: digestOfRead(out.ticket) } };
         }
-        const out = await call('read', [id, { checkout: this.o.home }]) as { version?: unknown } | null;
-        if (out == null) return 'the ticket source no longer reads the ticket';
-        return out.version === version ? null : `the ticket's version is ${typeof out.version === 'string' && out.version !== '' ? out.version.slice(0, 16) : '(none)'}, the claim's ${version.slice(0, 16)}`;
+        const out = await call('read', [id, { checkout: this.o.home }]) as { version?: unknown; ticket?: unknown } | null;
+        if (out == null) return { why: 'the ticket source no longer reads the ticket', read: null };
+        if (out.version !== version) return { why: `the ticket's version is ${typeof out.version === 'string' && out.version !== '' ? out.version.slice(0, 16) : '(none)'}, the claim's ${version.slice(0, 16)}`, read: null };
+        return { why: null, read: { version, read_digest: digestOfRead(out.ticket) } };
       } catch (e) {
-        return `the ticket source's read failed (${msg(e)})`;
+        return { why: `the ticket source's read failed (${msg(e)})`, read: null };
       }
     } finally {
       await this.executor.stop(handle, 'source-checked').catch(() => {});
@@ -1424,10 +1431,11 @@ export class Runner {
     // source at the claim's snapshot (else the CLI's markdown default) is the reader. A ticket
     // that moved under the claim releases `stale-board`; one that did not runs. The two
     // file-less cases (check tickets, a `cancel` claim) carry no version and are re-verified
-    // against Baton's record as before.
-    const versionWhy = await this.verifyTicketVersion(claim, course.scratch);
-    if (versionWhy != null) {
-      this.log(`baton: ${ticket}'s ticket moved under the claim — ${versionWhy}`);
+    // against Baton's record as before. B-190: a read that succeeded is the claim's recorded
+    // read — its digest joins every run's inputs (R-BTN-84), reported on each advance.
+    const versionCheck = await this.verifyTicketVersion(claim, course.scratch);
+    if (versionCheck.why != null) {
+      this.log(`baton: ${ticket}'s ticket moved under the claim — ${versionCheck.why}`);
       dropCourse(course.scratch);
       rmSync(scratch, { recursive: true, force: true });
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
@@ -1465,7 +1473,7 @@ export class Runner {
       if (!(await this.ensureLegLocks(legName, course))) {
         return await this.finish(claimId, { end_reason: `suspended:${claim.station}`, reached: claim.station, next: legName }, null);
       }
-      const firstAnswer = await this.advance(claimId, { leg: legName }, at);
+      const firstAnswer = await this.advance(claimId, { leg: legName, ...this.runInputsReport(versionCheck.read) }, at);
       if ('settle' in firstAnswer) return await this.finish(claimId, firstAnswer.settle, null);
       at = firstAnswer.station ?? at;
       nextLegs = (firstAnswer.next ?? nextLegs) as NextLegs;
@@ -1624,7 +1632,7 @@ export class Runner {
           return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg }, await this.callHandoff(script, ctx) ?? handoffUrl);
         }
         this.auditLeg();
-        const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}), ...(this.pendingScope ? { scope_exceeded: { actions: this.pendingScope, dropped: this.scopeOverflow } } : {}) }, verdict.reached);
+        const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}), ...(this.pendingScope ? { scope_exceeded: { actions: this.pendingScope, dropped: this.scopeOverflow } } : {}), ...this.runInputsReport(versionCheck.read) }, verdict.reached);
         // The parked report is cleared only when the advance DELIVERED it: a refused advance
         // (§6.13, settled below) never reached the core's report handling, and the end that
         // settles the claim carries it instead — the report rides "the advance or end that
@@ -1658,10 +1666,23 @@ export class Runner {
     }
   }
 
+  /** B-190 (R-BTN-82, R-BTN-84): what each advance reports of the run it starts — the claim's
+   *  recorded ticket read (`version` and `read_digest`, absent when the source declared no way of
+   *  reading or the board held no version), the resolved inputs (none until R-BTN-82's resolution
+   *  hands the runner any), and the home checkout's head: where replay checks the ticket's code
+   *  out. Reported at the run's start, stored in `leg_run_inputs` and on the run's row. */
+  private runInputsReport(read: { version: string; read_digest: string } | null): { run_inputs: { ticket?: { version: string; read_digest: string }; inputs: [] }; head_sha: string | null } {
+    const head = readHead(this.o.home);
+    return {
+      run_inputs: { ...(read ? { ticket: read } : {}), inputs: [] },
+      head_sha: /^[0-9a-f]{40}$/.test(head) ? head : null,
+    };
+  }
+
   /** One `advance`, its refusal settled by §6.13: off-graph ends `released:course-changed`; an
    * `entry` refusal (R-BTN-109) ends `released:cannot-finish:contract-output`; every other
    * refusal suspends at the station the claim reached, never releasing. */
-  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[] }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string } | { settle: Record<string, unknown> }> {
+  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string } | { settle: Record<string, unknown> }> {
     try {
       return await this.o.api.advance(claimId, body) as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string };
     } catch (e) {

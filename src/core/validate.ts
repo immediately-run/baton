@@ -625,6 +625,99 @@ export interface Advance {
   outputs: Output[];
   /** B-134: the finished leg's scope audit, reported on the advance or end that finishes it. */
   scope_exceeded: ScopeReport;
+  /** B-190 (§13.5 `claim_legs.head_sha`): the branch head the holder's checkout stands at when
+   *  the run starts — where replay checks the ticket's code out. Null when unreported. */
+  head_sha: string | null;
+  /** B-190 (R-BTN-82, R-BTN-84): the run's own record, reported at its start — each resolved
+   *  input as a pointer, and the ticket's version with the digest of what its source's `read`
+   *  returned for the run. Stored in `leg_run_inputs` for replay. */
+  run_inputs: RunInputs;
+}
+
+/** B-190 (§5.5 R-BTN-82, §13.5): one resolved input of a run, as the envelope carries a pointer
+ *  or a bounded inline value — never content. */
+export interface RunInput {
+  name: string;
+  from_leg: string | null;
+  from_run: number | null;
+  uri: string;
+  digest: string | null;
+  value: unknown;
+  hasValue: boolean;
+  leg_version: number | null;
+}
+
+/** B-190: the run's ticket row — the source's posted `version` (B-183) and the digest of what
+ *  its `read` returned for the run, the two replay compares. */
+export interface RunTicket {
+  version: string;
+  read_digest: string;
+}
+
+export interface RunInputs {
+  ticket: RunTicket | null;
+  inputs: RunInput[];
+}
+
+/** B-190: an input name — the same grammar an output's is; the empty name is the run's ticket
+ *  row's, reserved. */
+const INPUT_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+/** B-183 (§4.2): a ticket version, 1–128 characters of the source's own opaque string. */
+export const TICKET_VERSION = /^[A-Za-z0-9._:+/=-]{1,128}$/;
+
+/** B-190: `run_inputs` as the advance carries it (§13.5 `leg_run_inputs`): pointers and digests
+ *  only, validated before SQL (R-BTN-33). */
+export function checkRunInputs(v: unknown): RunInputs {
+  if (v === undefined || v === null) return { ticket: null, inputs: [] };
+  if (!isObj(v)) bad('run_inputs', 'must be {ticket?, inputs: […]}');
+  const r = v as Record<string, unknown>;
+  for (const k of Object.keys(r)) if (!['ticket', 'inputs'].includes(k)) bad(`run_inputs.${k}`, 'is not a run_inputs field');
+  let ticket: RunTicket | null = null;
+  if (r.ticket !== undefined && r.ticket !== null) {
+    if (!isObj(r.ticket)) bad('run_inputs.ticket', 'must be {version, read_digest}');
+    const t = r.ticket as Record<string, unknown>;
+    ticket = { version: matches(TICKET_VERSION, 'run_inputs.ticket.version')(t.version), read_digest: matches(OUTPUT_DIGEST, 'run_inputs.ticket.read_digest')(t.read_digest) };
+  }
+  const raw = r.inputs ?? [];
+  if (!Array.isArray(raw) || raw.length > OUTPUTS_MAX) bad('run_inputs.inputs', `must be a list of at most ${OUTPUTS_MAX} inputs`);
+  const names = new Set<string>();
+  const inputs = (raw as unknown[]).map((e, i) => {
+    const at = `run_inputs.inputs[${i}]`;
+    if (!isObj(e)) bad(at, 'must be {name, uri, digest?} or {name, value}');
+    const o = e as Record<string, unknown>;
+    for (const k of Object.keys(o)) if (!['name', 'from_leg', 'from_run', 'uri', 'digest', 'value', 'leg_version'].includes(k)) bad(`${at}.${k}`, 'is not an input field');
+    const name = matches(INPUT_NAME, `${at}.name`)(o.name);
+    if (names.has(name)) bad(`${at}.name`, `repeats ${name}`);
+    names.add(name);
+    const from_leg = optional(o.from_leg, matches(COURSE_ID, `${at}.from_leg`)) ?? null;
+    // `optional`'s inference cannot carry a predicate, so the two bounded integers read directly.
+    const optionalInt = (v: unknown, field: string): number | null => {
+      if (v === undefined || v === null) return null;
+      if (!Number.isInteger(v) || (v as number) < 1) bad(field, 'must be an integer of at least 1');
+      return v as number;
+    };
+    const from_run = optionalInt(o.from_run, `${at}.from_run`);
+    const leg_version = optionalInt(o.leg_version, `${at}.leg_version`);
+    const hasValue = Object.prototype.hasOwnProperty.call(o, 'value');
+    if (hasValue === (o.uri !== undefined)) bad(at, 'gives exactly one of uri and value');
+    if (hasValue) {
+      if (o.digest !== undefined) bad(`${at}.digest`, 'an inline value carries no digest');
+      let n = Infinity;
+      try { n = new TextEncoder().encode(JSON.stringify(o.value)).length; } catch { /* not JSON */ }
+      if (n > VALUE_MAX_BYTES) bad(`${at}.value`, `must be at most ${VALUE_MAX_BYTES} bytes serialized`);
+      return { name, from_leg, from_run, uri: '', digest: null, value: o.value, hasValue: true, leg_version };
+    }
+    const uri = o.uri;
+    if (typeof uri !== 'string' || uri.length > 1000 || !(GIT_POINTER.test(uri) || S3_POINTER.test(uri) || isHttpsPointer(uri))) {
+      bad(`${at}.uri`, 'must be a git:, https:// or s3:// pointer of at most 1000 characters');
+    }
+    const digest = optional(o.digest, matches(OUTPUT_DIGEST, `${at}.digest`));
+    // Anything not content-addressed carries its digest (R-BTN-82) — a git pointer may name its
+    // bytes itself (a blob id), and replay checks the digest when one is recorded.
+    if (!(uri as string).startsWith('git:') && !digest) bad(`${at}.digest`, 'an https:// or s3:// input carries its sha256:<hex> digest');
+    return { name, from_leg, from_run, uri: uri as string, digest: digest ?? null, value: null, hasValue: false, leg_version };
+  });
+  return { ticket, inputs };
 }
 
 /** `POST /v1/runner/claims/{id}/advance` (R-BTN-63, §11): the leg to start; `reached`, the
@@ -638,9 +731,10 @@ export function checkAdvance(body: unknown): Advance {
   const evidence = b.evidence === undefined || b.evidence === null ? null : isPointer(b.evidence) ? (b.evidence as string) : bad('evidence', 'must be a commit sha or an https URL of at most 1000 characters');
   const raw = b.bars ?? [];
   if (!Array.isArray(raw) || raw.length > TAGS_MAX || !raw.every((t) => typeof t === 'string' && TAG.test(t))) bad('bars', `must be a list of at most ${TAGS_MAX} tags`);
+  const head_sha = optional(b.head_sha, matches(GIT_SHA, 'head_sha')) ?? null;
   if (b.course !== undefined && JSON.stringify(b.course).length > 4096) bad('course', 'must be at most 4 KB');
   retiredFields(b);
-  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded) };
+  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs) };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */

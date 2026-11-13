@@ -67,6 +67,11 @@
 //   baton board -i KEY REPO                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
 //   baton run [--home <checkout>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
 //             [--harness opencode|claude-code] [--verbose]   (R-BTN-72: the worker loop)
+//   baton leg replay <repository>:<ticket> <leg> [--run <n> | --run-id <id>] [-i KEY]
+//                [--against <sha>] [--accept-moved] [--home DIR] [--env NAME]… [--report FILE]
+//                 — re-run one recorded leg run without a claim, writing nothing to Baton
+//                (R-BTN-84): the course's scripts at the recorded snapshot, the ticket's code at
+//                its recorded head, the inputs checked by digest, a masked local report
 //   baton ticket -i KEY history TICKET [--before ID] [--limit N]                    (R-BTN-81)
 //   baton ticket -i KEY show TICKET                        — the ticket as Baton holds it (B-126): who
 //                last pushed it and its brief's mark (B-127) printed first, then the ticket as JSON
@@ -1040,6 +1045,12 @@ export async function main(argv) {
     // its devDependencies), then run it in this process's stead.
     const { runMain } = await import('../scripts/baton-run.mjs');
     return runMain(argv.slice(1));
+  }
+  if (argv[0] === 'leg' && argv[1] === 'replay') {
+    // §9.8 R-BTN-84: re-run one recorded leg run without a claim — the replay half of the
+    // runner-side bundle, read with the owner's or administrator's key the flags name.
+    const { replayMain } = await import('../scripts/baton-run.mjs');
+    return replayMain(argv.slice(2));
   }
   if (argv[0] === 'repo' && (argv[1] === 'sync' || argv[1] === 'init' || argv[1] === 'migrate-markers')) {
     // §2f, R-BTN-127's names: the defaults are TypeScript under src/defaults, bundled the same way.
