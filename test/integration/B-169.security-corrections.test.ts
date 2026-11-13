@@ -188,10 +188,10 @@ describe('B-169 the security review’s corrections', () => {
     expect([refused.status, refused.headers.get('Cache-Control')]).toEqual([403, 'no-store']);
     const delivery = await hostCall(new Request(ORIGIN + '/v1/github/webhook', { method: 'POST', headers: { 'X-Hub-Signature-256': 'sha256=' + '0'.repeat(64) }, body: '{}' }));
     expect([delivery.status, delivery.headers.get('Cache-Control')]).toEqual([401, 'no-store']);
-    // A public page holds no data, and is served by the public branch, not the withheld one: the
-    // header it carries is the page's own (`serve`'), and no principal is asked for (a 200 and
+    // A public asset holds no data, and is served by the public branch, not the withheld one: the
+    // header it carries is the asset's own (`serve`'), and no principal is asked for (a 200 and
     // no cookie, where an unauthorized `/v1/ui` read is a 401).
-    const page = await hostCall(new Request(ORIGIN + '/ui/app.js'));
+    const page = await hostCall(new Request(ORIGIN + '/dashboard/app.js'));
     expect([page.status, page.headers.get('Cache-Control'), page.headers.get('Set-Cookie')]).toEqual([200, 'no-store', null]);
     const anonymousUi = await sessionCall('', '/v1/ui/state');
     expect([anonymousUi.status, anonymousUi.headers.get('Cache-Control')]).toEqual([401, 'no-store']);

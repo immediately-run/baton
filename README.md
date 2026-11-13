@@ -71,7 +71,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/local/` | The local host: `node:sqlite` as the `Store` (`store.ts`), one queue for every request and alarm tick (`queue.ts`), a timer as the alarm (`host.ts`), `node:http` (`server.ts`), the command line (`main.ts`); the course test kit (`testCourse.ts`, R3-1248) |
 | `src/runner/` | `baton run`'s worker loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`), the CLI entry (`main.ts`) and `baton leg replay` (§9.8 R-BTN-84, `replay.ts`) |
 | `src/migrations/` | Numbered schema migrations, applied before the object serves |
-| `src/ui/` | The dashboard: one HTML page, one stylesheet, one ES module (`textContent` only) |
+| `src/dashboard/` | The dashboard (BATON-UI-V2): React 19 and TypeScript, no other runtime dependency, built by `npm run build:ui` (esbuild) into `src/dashboard/dist/` (gitignored) — one bundle served as text by both hosts (R-BTN-55), never Workers assets |
 | `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list` (`decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
 | `src/shared/` | **Vendored** from docs `scripts/lib/` — never edit here (R-BTN-37); `batonSync.mjs` is the board sync's own decision code, which S-BTN-13 drives. Except two of Baton's own, which every part imports: `schema.mjs`, the one validator of leg outputs and readings (R-BTN-108: the subset, the linear-time pattern engine, the refinement check), and `std.mjs`, the `std:` library (R-BTN-110) |
 | `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
@@ -101,7 +101,12 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   Baton — the core accepts the file, the live tickets FILE places keep their paths, a removal raised
   `min_worker_version`, each `legs/` script pairs with a leg and exports `run`, `handoff` and
   `close`, and a ticket runs the shortest route to a confirmed done. Exit 1 names each violation.
-- `npm run typecheck` — the Worker, the local host and the Node scripts.
+- `npm run typecheck` — the Worker, the local host, the Node scripts and the dashboard.
+- `npm run build:ui` — the dashboard's one esbuild bundle into `src/dashboard/dist/` (gitignored):
+  `app.js` and `app.css` with `index.html` copied beside them, served as text by both hosts and
+  embedded in the published CLI. `npm test`, `npm run typecheck`, `npm run dev`,
+  `npm run start:local` and `npm run build:cli` build it first (their `pre*` scripts), so a clean
+  checkout works.
 - `npm run model:links`, `npm run traces` — the code against the formal model (R3-1244; `model/README.md`).
   `npm run test:full` runs both after the suite, and the model's own checks; `npm run model:pr` and
   `model:full` run `traces` too, on a fresh set.

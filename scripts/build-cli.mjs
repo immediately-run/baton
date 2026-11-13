@@ -7,7 +7,7 @@ import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { LOCAL_LOADERS, uiScriptAsText } from './bundle.mjs';
+import { LOCAL_LOADERS, dashboardScriptAsText } from './bundle.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const OUT = join(ROOT, 'dist');
@@ -48,7 +48,7 @@ await build({
   target: 'node22',
   packages: 'external',
   loader: { ...LOCAL_LOADERS, '.json': 'json', '.txt': 'text' },
-  plugins: [prebuilt, uiScriptAsText],
+  plugins: [prebuilt, dashboardScriptAsText],
   logLevel: 'warning',
 });
 // The runner spawns its leg process by path (src/runner/runner.ts LEG_PROCESS), beside the bundle.

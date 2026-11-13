@@ -3,7 +3,7 @@
 declare module '*.sql' { const text: string; export default text; }
 declare module '*.html' { const text: string; export default text; }
 declare module '*.css' { const text: string; export default text; }
-declare module '*/ui/app.js' { const text: string; export default text; }
+declare module '*/dashboard/dist/app.js' { const text: string; export default text; }
 declare module '*/shared/baton.mjs';
 declare module '*/shared/vocabulary.mjs';
 declare module '*/shared/sessionUsage.mjs';

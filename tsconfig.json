@@ -28,6 +28,8 @@
     "test"
   ],
   "exclude": [
+    "src/dashboard",
+    "test/ui",
     "test/global-setup.ts",
     "test/lib",
     "src/local",

@@ -66,7 +66,7 @@ describe('the owner principal (R-BTN-16)', () => {
     const page = await ownerCall('/');
     expect(page.status).toBe(200);
     expect(page.headers.get('Content-Type')).toMatch(/text\/html/);
-    expect(await page.text()).toContain('<script type="module" src="/ui/app.js">');
+    expect(await page.text()).toContain('src="/dashboard/app.js"');
   });
 
   it('refuses another email, another aud, no assertion, and a sync token', async () => {
@@ -83,7 +83,7 @@ describe('the owner principal (R-BTN-16)', () => {
     const page = await call('/');
     expect(page.status).toBe(200);
     expect(page.headers.get('Content-Type')).toMatch(/text\/html/);
-    expect(await page.text()).toContain('<script type="module" src="/ui/app.js">');
+    expect(await page.text()).toContain('src="/dashboard/app.js"');
     expect((await call('/v1/ui/state')).status).toBe(401);
   });
 
@@ -101,7 +101,7 @@ describe('the owner principal (R-BTN-16)', () => {
 describe('every response carries the R-BTN-16 headers', () => {
   it.each([
     ['an owner page', () => ownerCall('/')],
-    ['the module', () => ownerCall('/ui/app.js')],
+    ['the module', () => ownerCall('/dashboard/app.js')],
     ['an API answer', () => syncCall('/v1/sync/head')],
     ['a refusal', () => call('/v1/ui/state')],
     ['an unknown path', () => call('/nope')],

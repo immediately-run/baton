@@ -6,26 +6,34 @@ import { API_KEY, readCapped, verifyOwner, verifyRequest, verifySyncCredential, 
 import { BatonError, NO_STORE, SESSION_COOKIE, errorResponse, noStore, withSecurityHeaders } from './http';
 import { MAX_DELIVERY, pickDelivery, verifyDelivery } from './webhook';
 import type { Config } from './ports';
-import page from '../ui/index.html';
-import style from '../ui/app.css';
-import script from '../ui/app.js';
+import { ID_SEGMENT, isScreenPath } from './screens';
+import page from '../dashboard/dist/index.html';
+import style from '../dashboard/dist/app.css';
+import script from '../dashboard/dist/app.js';
 
 /** How the front reaches the one core (§3): the request carries only the principal headers
  *  the front set. */
 export type Forward = (req: Request) => Promise<Response>;
 
-const STATIC: Record<string, [string, string]> = {
-  '/': [page, 'text/html; charset=utf-8'],
-  '/login': [page, 'text/html; charset=utf-8'],
-  '/ui/app.css': [style, 'text/css; charset=utf-8'],
-  '/ui/app.js': [script, 'text/javascript; charset=utf-8'],
+/** The dashboard's two code assets (B-193): the one bundle `npm run build:ui` builds and this
+ *  Worker and the local host embed as text (R-BTN-55) — never Workers assets. */
+const ASSETS: Record<string, [string, string]> = {
+  '/dashboard/app.css': [style, 'text/css; charset=utf-8'],
+  '/dashboard/app.js': [script, 'text/javascript; charset=utf-8'],
 };
-/** What anyone may fetch: the dashboard and login pages and the code they run. The two pages
- *  are the same bytes and hold no data (R-BTN-57's one-time link is opened before any session
- *  exists); an unauthenticated browser gets the page all the same — the app itself says what
- *  it needs (`baton admin open`) and recovers when the session cookie lands — while every
- *  data call under `/v1/ui` keeps its principal and its refusal (R-BTN-16). */
-const PUBLIC = new Set(['/', '/login', '/ui/app.css', '/ui/app.js']);
+const PAGE: [string, string] = [page, 'text/html; charset=utf-8'];
+
+/** What anyone may fetch: the shell — `/`, `/login`, every §11.4 screen path with its
+ *  parameters id-shaped (src/core/screens.ts), and `/conditions/{id}`, B-195's redirect address
+ *  served as the shell until the redirect lands — and its two assets. The pages are one set of
+ *  bytes and hold no data (R-BTN-57's one-time link is opened before any session exists); an
+ *  unauthenticated browser gets the page all the same — the app itself says what it needs
+ *  (`baton admin open`) and recovers when the session cookie lands — while every data call
+ *  under `/v1/ui` keeps its principal and its refusal (R-BTN-16). */
+function isShell(pathname: string): boolean {
+  return pathname === '/' || pathname === '/login' || isScreenPath(pathname)
+    || (pathname.startsWith('/conditions/') && ID_SEGMENT.test(pathname.slice('/conditions/'.length)));
+}
 
 function cookie(req: Request, name: string): string | null {
   for (const part of (req.headers.get('Cookie') ?? '').split(';')) {
@@ -223,26 +231,22 @@ async function route(req: Request, env: Config, to: Forward): Promise<Answer> {
       return forward(req, to, {});
     });
   }
-  if (PUBLIC.has(pathname)) return { res: serve(pathname, req), cache: 'public' };
-  // A session's own routes — `/v1/ui/*` — and an exotic `/ui/` path that is not one of the
-  // public files: the principal decides whether even the not-found is named (the dashboard's
-  // own pages are in `PUBLIC`, above).
-  if (pathname.startsWith('/v1/ui/') || pathname.startsWith('/ui/')) {
+  if (ASSETS[pathname] || isShell(pathname)) return { res: serve(pathname, req), cache: 'public' };
+  // A session's own routes — `/v1/ui/*` — until B-203 retires them with V1's state read: the
+  // principal decides whether even the not-found is named (the dashboard's own pages are in the
+  // public branch, above).
+  if (pathname.startsWith('/v1/ui/')) {
     return under('private', async () => {
       const principal = await dashboardPrincipal(req, env);
-      if (pathname.startsWith('/v1/ui/')) {
-        if (req.method !== 'GET' && req.method !== 'HEAD') checkStateChanging(req, env);
-        return forward(req, to, principal);
-      }
-      const ok = await forward(new Request(new URL('/v1/ui/session', req.url)), to, principal);
-      return ok.ok ? serve(pathname, req) : ok;
+      if (req.method !== 'GET' && req.method !== 'HEAD') checkStateChanging(req, env);
+      return forward(req, to, principal);
     });
   }
   throw refuse('not-found', 'no such route', 'public');
 }
 
 function serve(pathname: string, req: Request): Response {
-  const file = STATIC[pathname];
+  const file = ASSETS[pathname] ?? (isShell(pathname) ? PAGE : undefined);
   if (!file || req.method !== 'GET') throw new BatonError('not-found', 'no such page');
   return new Response(file[0], { headers: { 'Content-Type': file[1], 'Cache-Control': NO_STORE } });
 }
