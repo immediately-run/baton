@@ -241,7 +241,8 @@ Limits that hold throughout:
 ### 7.3 The debugger and Baton's own conditions
 
 - **R-BTN-163 (the debugger: unhandled conditions, waiting people, and core's own).**
-  - **Needs you is the debugger.** **Needs you** (§11) lists the following until each closes:
+  - **Needs you is the debugger.** **Needs you**, which the dashboard's Conditions screen draws
+    (§11.4), lists the following until each closes:
     - every open condition with no handler ticket;
     - every queued person's leg, with its question (R-BTN-116);
     - the floor (below).
@@ -290,8 +291,13 @@ Limits that hold throughout:
   - **Baton's own conditions need no ticket.** A `baton.*` condition is answered only through
     Baton's own authenticated surfaces — `baton ticket resolve`, an owner's or administrator's
     dashboard session; never a delegated key (R-BTN-130) — on its resolve page,
-    `https://<origin>/conditions/<condition_id>` (§11.4), where a signed-in owner chooses one of
-    its restarts (R-BTN-155). Nothing in git is read for it, and Baton files no handler ticket,
+    `/repositories/{repository}/conditions/{condition}` (§11.4), where a signed-in owner of the
+    repository or an administrator chooses one of its restarts (R-BTN-155). The `resolve_url` of
+    `GET …/conditions` is that path, and `GET /conditions/{condition}` — the page's address
+    before the tree — is answered by the front with `302` to it when the core finds the id among
+    the session's repositories; otherwise it serves the shell, which shows sign-in to the
+    signed-out and `not-found` for no such id and for another repository's alike. Nothing in git
+    is read for it, and Baton files no handler ticket,
     queues no outbox entry and withdraws nothing for it (the owner, 2026-11-01). How the owner
     learns of it is a **delivery runner's**: any runner, or a process with a key granted on the
     repository, that polls `GET /v1/repositories/{repository}/conditions?open=1` — with `person=1` for

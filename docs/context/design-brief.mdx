@@ -44,12 +44,12 @@ The mockup draws the *content* of the screens and their visual language; the das
 8. **Is the instance healthy?** Capacity — request rate and live counts against the
    envelope — and the instance view runners rank from (shared resources and their readings).
 
-These are answered on the entity screens of [BATON_SPEC §11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4)
-(as B-191 amends it): the overview strip on every repository screen — running now · ready ·
-needs you — and Conditions (1); Board (2); Runners (3); a runner's page (4); Board and Tickets
-(5); Courses (6); Sync (7); the tenant screens `/state` and `/instances` (8). Running, Ready and
-Needs you are no longer screens of their own (the owner, 2026-11-09): the task answers stay one
-glance away on the strip, and each screen is one entity.
+These are answered on the entity screens of [BATON_SPEC §11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4):
+the overview strip on every repository screen — running now · ready · needs you — and Conditions
+(1); Board (2); Runners (3); a runner's page (4); Board and Tickets (5); Courses (6); Sync (7);
+the tenant screens `/state`, `/instances` and `/resources` (8). Running, Ready and Needs you
+are no longer screens of their own (the owner, 2026-11-09): the task answers stay one glance
+away on the strip, and each screen is one entity.
 
 ## What it does
 
@@ -68,8 +68,10 @@ that changes it.
 - **Text, never markup.** Everything from tickets and runners is untrusted text. It is shown
   as a text node, never rendered as HTML or Markdown — no `innerHTML`, no
   `dangerouslySetInnerHTML` ([BATON_SPEC §12.3](../../spec/BATON_SPEC/12-security.md#sec-12-3)).
-- **Polling, not push.** Each screen polls its entity's reads every 10 seconds, with `ETag`.
-  Show how fresh the data is.
+- **Polling, not push.** Each screen polls its entity's reads every 10 seconds with
+  `If-None-Match`, paused while the page is hidden; show how fresh the data is. The one
+  exception is the confirmation-code dialog, which polls every 5 seconds for its two minutes
+  ([BATON_SPEC §11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4)).
 - **One entity per screen.** The dashboard is a walk down the tree the REST API, the CLI and MCP
   already draw: sign in (`/login`), pick a repository (`/`), then one entity per screen under
   `/repositories/{r}/…` — Board, Tickets, Goals, Courses, Conditions, Runners, the credentials,
