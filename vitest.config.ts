@@ -9,7 +9,7 @@ import { cloudflareTest } from '@cloudflare/vitest-plugin';
 import { exportJWK, generateKeyPair } from 'jose';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { makeKey } from './test/lib/sshKeys.ts';
 
 /** The test credentials (R-BTN-13): tokens, their hashes and their policy — the shapes the
@@ -65,14 +65,23 @@ function testVars(vars: Record<string, string>): Record<string, string> {
   return out;
 }
 
-/** Schema migrations and the dashboard load as text, as wrangler's Text rule bundles them. */
+/** Schema migrations and the dashboard's built files load as text, as wrangler's Text rule
+ *  bundles them. A stylesheet is re-id'd first — as `.js`, whose bytes it still are — because
+ *  Vitest empties every CSS module it is not told to process: the file is data the front
+ *  serves, never style a test run applies. */
 const textModules: Plugin = {
   name: 'baton-text-modules',
   enforce: 'pre',
+  resolveId(source, importer) {
+    if (!source.endsWith('.css') || !importer || source.startsWith('baton-text:')) return null;
+    return `baton-text:${resolve(dirname(importer), source)}.js`;
+  },
   load(id) {
-    const file = id.split('?')[0];
-    if (/\.(sql|html|css)$/.test(file) || /[\\/]ui[\\/]app\.js$/.test(file)) return `export default ${JSON.stringify(readFileSync(file, 'utf8'))};`;
-    return null;
+    const virtual = /^baton-text:(.*)\.js$/.exec(id)?.[1];
+    const plain = id.split('?')[0];
+    const file = virtual ?? (/\.(sql|html)$/.test(plain) || /[\\/]dashboard[\\/]dist[\\/]app\.js$/.test(plain) ? plain : null);
+    if (!file) return null;
+    return `export default ${JSON.stringify(readFileSync(file, 'utf8'))};`;
   },
 };
 
@@ -134,7 +143,7 @@ export default defineConfig({
           globalSetup: ['./test/global-setup.ts'],
           setupFiles: ['./test/setup.ts'],
           include: ['test/**/*.test.ts'],
-          exclude: NODE_ONLY,
+          exclude: [...NODE_ONLY, 'test/ui/**'],
         },
       },
       {
@@ -148,6 +157,18 @@ export default defineConfig({
           include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...NODE_ONLY, ...SCRIPT_TESTS],
           exclude: [...configDefaults.exclude, ...QUINT_TESTS],
           provide: { localConfig: { ...testVars(wranglerVars()), ...bindings } },
+        },
+      },
+      {
+        // B-193: the dashboard's own tests — React in a DOM (jsdom), @testing-library/react,
+        // and the source gate (Decision 6a), which reads the checkout from Node. Nothing here
+        // runs in the Workers runtime or against the local host: the client speaks HTTP only,
+        // and these tests never do.
+        oxc: { jsx: { runtime: 'automatic' } },
+        test: {
+          name: 'ui',
+          environment: 'jsdom',
+          include: ['test/ui/**/*.test.{ts,tsx}'],
         },
       },
     ],

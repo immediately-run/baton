@@ -99,9 +99,9 @@ second. Exceptions stand out; the normal case recedes.
 
 ## Where to look
 
-The current page is `src/ui/` (`index.html`, `app.css`, `app.js`), served at the instance's
-origin; its data is `GET /v1/ui/state`. V2 is built under `src/dashboard/` by the BATON-UI-V2
-tickets (B-191 to B-216; the project page is `tickets/projects/baton-ui-v2.mdx`) and replaces it
-outright — the owner ruled the transition needs no smoothing (2026-11-09); its data is the entity
-reads of [BATON_SPEC §14](../../spec/BATON_SPEC/14-api.md#sec-14).
+V1 is gone (the owner ruled the transition needs no smoothing, 2026-11-09): the dashboard is
+`src/dashboard/` — React 19 and TypeScript, built by `npm run build:ui` into the one bundle both
+hosts serve at `/dashboard/app.js` — grown by the BATON-UI-V2 tickets (B-191 to B-216; the project
+page is `tickets/projects/baton-ui-v2.mdx`); its data is the entity reads of
+[BATON_SPEC §14](../../spec/BATON_SPEC/14-api.md#sec-14).
 The screens are [BATON_SPEC §11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4).
