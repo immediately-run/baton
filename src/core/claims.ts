@@ -697,6 +697,11 @@ export class Claims {
    *  or not, with the advice it went against; else the first recommendation. Throws the §11 refusal. */
   private decide(w: WorkerFacts, wanted: string | null): { item: ItemFacts; advice: Record<string, unknown> | null } {
     if (wanted) {
+      // R-BTN-47 (B-173): a retired repository's tickets are never claimable — outside every
+      // rule that reads registered repositories, as one never registered.
+      if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NULL', repositoryOf(wanted)).length) {
+        throw new BatonError('not-found', `${repositoryOf(wanted)} is not registered`);
+      }
       if (!this.cutOver(wanted)) throw new BatonError('not-cut-over', `${repositoryOf(wanted)}'s claims go through git until its cutover (R-BTN-28)`);
       // §12.8 (B-145, R-BTN-189): a ticket that reaches a repository whose floored guarantee is
       // broken is not claimable — rule `floor`, `floor-broken`.
@@ -1514,20 +1519,30 @@ export class Claims {
    *  `{repository}` its repository's id, `*` anything — among the tickets whose home is that git
    *  repository or whose `repos` name it; and whether another live worker holds one of them or a
    *  reaped claim on one is fence-pending. Two repositories' tickets sharing a local id both map,
-   *  and the push is refused if either is held: a collision fails safe. */
+   *  and the push is refused if either is held: a collision fails safe. R-BTN-47 (B-173) with
+   *  R-BTN-138: a retired repository's former path still reaches the fence — its tickets map
+   *  while no live repository holds the path and a fence is pending on one of them, and never
+   *  for anything else. */
   branchHolder(callerId: number | null, gitRepo: string, branch: string) {
     const name = gitRepo.slice(gitRepo.indexOf('/') + 1).toLowerCase();
     const full = gitRepo.toLowerCase();
-    const live = this.rows<{ id: string; local_id: string; repository_id: string; repos: string; github: string; branch_pattern: string | null; previous_branch_pattern: string | null }>(
-      `SELECT t.id, t.local_id, t.repository_id, t.repos, p.github, k.branch_pattern, k.previous_branch_pattern
+    const rows = this.rows<{ id: string; local_id: string; repository_id: string; repos: string; github: string; former_paths: string | null; retired_at: number | null; branch_pattern: string | null; previous_branch_pattern: string | null }>(
+      `SELECT t.id, t.local_id, t.repository_id, t.repos, p.github, p.former_paths, p.retired_at, k.branch_pattern, k.previous_branch_pattern
        FROM tickets t JOIN repositories p ON p.id = t.repository_id
-       LEFT JOIN courses k ON k.repository_id = t.repository_id AND k.id = t.course_id
-       WHERE p.retired_at IS NULL`);
-    const tickets = live.filter((t) => {
+       LEFT JOIN courses k ON k.repository_id = t.repository_id AND k.id = t.course_id`);
+    const taken = this.rows('SELECT 1 FROM repositories WHERE retired_at IS NULL AND lower(github) = ?', full).length > 0;
+    const fencePending = (repository: string) => this.rows(
+      `SELECT 1 FROM claims c JOIN tickets t ON t.id = c.ticket_id
+       WHERE t.repository_id = ? AND c.status = 'reaped' AND c.fence_pending = 1`, repository).length > 0;
+    const tickets = rows.filter((t) => {
       // `repos` holds owner/name once the sync resolves them (§7.1); docs' interim post sends
       // short names, matched against the repository's own name.
       const repos = (JSON.parse(t.repos) as string[]).map((r) => r.toLowerCase());
-      if (t.github.toLowerCase() !== full && !repos.includes(full) && !repos.includes(name)) return false;
+      const named = t.retired_at == null
+        ? t.github.toLowerCase() === full || repos.includes(full) || repos.includes(name)
+        // A retired repository's former path, and only the fence (R-BTN-47, R-BTN-138).
+        : !taken && (JSON.parse(t.former_paths ?? '[]') as string[]).some((p) => p.toLowerCase() === full) && fencePending(t.repository_id);
+      if (!named) return false;
       return [t.branch_pattern ?? DEFAULT_BRANCH_PATTERN, t.previous_branch_pattern].some((pat) => pat != null && branchMatches(pat, branch, t.local_id, t.repository_id));
     }).map((t) => t.id).sort();
     // The same answer per ticket as the ticket holder query (R-BTN-7), any of them counting.
@@ -1592,6 +1607,23 @@ export class Claims {
     this.finish(c.id, c.ticket_id, 'reaped', 'reaped:owner', `owner:${owner}`, { fence: alive ? { incarnation: w.incarnation } : null });
     if (!alive) this.exec('UPDATE workers SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, w.id);
     return { ok: true, fence_pending: alive };
+  }
+
+  /** R-BTN-47 (B-173): retirement's reaps, inside the retiring transaction — each active claim
+   *  on the repository's tickets as an administrator's force-reap reaps one (§9.5), actor
+   *  `admin:<fingerprint>`, fence-pending where its runner is alive so the old holder can still
+   *  heartbeat and report the fence (R-BTN-19, R-BTN-3). The repository is already retired when
+   *  this runs, so the ends record no want (R-BTN-94). */
+  retireReaps(repository: string, actor: string) {
+    const now = this.c.now();
+    for (const c of this.rows<{ id: number; ticket_id: string; worker_id: number; kind: string; incarnation: number; last_seen_at: number; lease_timeout_ms: number }>(
+      `SELECT c.id, c.ticket_id, c.worker_id, w.kind, w.incarnation, w.last_seen_at, w.lease_timeout_ms FROM claims c
+       JOIN workers w ON w.id = c.worker_id
+       WHERE c.status = 'active' AND substr(c.ticket_id, 1, length(?) + 1) = ? || ':' ORDER BY c.id`, repository, repository)) {
+      const alive = c.kind !== 'legacy' && now - c.last_seen_at < c.lease_timeout_ms;
+      this.finish(c.id, c.ticket_id, 'reaped', 'reaped:owner', actor, { fence: alive ? { incarnation: c.incarnation } : null });
+      if (!alive) this.exec('UPDATE workers SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.worker_id);
+    }
   }
 
   /** `POST /v1/ui/claims/{id}/resolve` (§6.7): an unconfirmed completion is never confirmed

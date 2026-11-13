@@ -31,7 +31,7 @@ describe('plan: one request per command', () => {
       method: 'POST', path: '/v1/admin/repositories',
       body: { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', weight: 2, tiers: ['routine', 'critical'], cut_over: true, owner_keys: [PUB] },
     });
-    expect(plan('admin', ['repo', 'retire', 'ops'], key)).toEqual({ method: 'POST', path: '/v1/admin/repositories', body: { id: 'ops', retire: true } });
+    expect(plan('admin', ['repo', 'retire', 'ops'], key)).toEqual({ method: 'POST', path: '/v1/admin/repositories', body: { id: 'ops', retire: true, confirm: true } });
     expect(plan('admin', ['grant', 'docs', '--key', PUB, '--hostname', 'h', '--capabilities', 'human-operator'], key).body)
       .toEqual({ repository: 'docs', public_key: PUB, hostname: 'h', capabilities: ['human-operator'] });
     expect(plan('admin', ['revoke', 'SHA256:a/b'], key).path).toBe('/v1/admin/keys/SHA256%3Aa%2Fb/revoke');
