@@ -43,6 +43,7 @@ import claimControl from './0041_claim_control.sql';
 import retireOntology from './0042_retire_ontology.sql';
 import part4Resources from './0043_part4_resources.sql';
 import part4Settings from './0044_part4_settings.sql';
+import checkConclusions from './0045_check_conclusions.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -139,4 +140,6 @@ export const MIGRATIONS: Migration[] = [
   // renumbered at the merge behind main's 0039–0042.
   { id: 43, sql: part4Resources, backfill: backfillPart4Resources, first: true },
   { id: 44, sql: part4Settings },
+  // 0045 is B-169's (the owners' `checks` map), renumbered at the merge behind B-168's 0043–0044.
+  { id: 45, sql: checkConclusions },
 ];

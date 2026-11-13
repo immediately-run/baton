@@ -5,7 +5,7 @@
 // grants, owners, owner bars and the settings — never read from a board post. Administrators are
 // BATON_ADMIN_KEYS alone. One key holds one role: administrator, owner, worker, probe, courier or
 // sync key. Each act is an `admin` event; a bar change also dispatches the repository's sync.
-import { BatonError, SESSION_COOKIE } from './http';
+import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, verifyNamespacedSignature, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
@@ -22,8 +22,8 @@ import { sha256Hex } from './workerApi';
 /** A one-time link lives 5 minutes; a session 12 hours (R-BTN-57). */
 export const LOGIN_LINK_MS = 5 * 60_000;
 export const SESSION_MS = 12 * 3_600_000;
-/** R-BTN-16: the one cookie Baton sets. */
-export { SESSION_COOKIE };
+/** R-BTN-16: the two cookies Baton sets — a session, and R-BTN-155's pending sign-in. */
+export { SESSION_COOKIE, PENDING_COOKIE };
 /** Spec-silent bounds (recorded on R3-1240): owner bars in force per repository, required bars,
  *  legs per bar, owners per repository, capabilities per grant, backoffs per retry policy. */
 const BARS_MAX = 200;
@@ -32,6 +32,8 @@ const LEGS_MAX = 64;
 const OWNERS_MAX = 16;
 const CAPABILITIES_MAX = 64;
 const BACKOFFS_MAX = 8;
+/** R-BTN-114: check courses a repository's `checks` map may name. */
+const CHECKS_MAX = 200;
 /** A registered repository's fields §11's change form may set besides weight, tiers and keys. */
 const LINK_FIELDS = ['remote', 'web_base', 'ci_identity', 'sync_workflow', 'mirror_workflow'] as const;
 /** A capability or role name, as a heartbeat declares one. */
@@ -51,6 +53,21 @@ export interface RetryPolicy {
   backoff_ms: number[];
   max_failed: number;
 }
+
+/** R-BTN-114: the conclusions a required check may be posted with. Every one but `success`
+ *  fails a GitHub required check; `neutral`, which a required check passes, is not one. */
+export const CONCLUSIONS = ['success', 'failure', 'timed_out'] as const;
+
+/** A check course's end stations mapped to conclusions: `{name?, url?, conclusions}`. */
+export interface CheckConclusion {
+  name?: string;
+  url?: string;
+  conclusions: Record<string, (typeof CONCLUSIONS)[number]>;
+}
+
+/** A station's conclusion in the map (R-BTN-114): the one `success` that passes the check, the
+ *  one `failure` every other status but a timeout reaches, or the at-most-one `timed_out`. */
+const conclusionAt = (station: string, entry: CheckConclusion): (typeof CONCLUSIONS)[number] => entry.conclusions[station];
 
 export interface OwnerBar {
   id: number;
@@ -908,12 +925,17 @@ export class Admin {
    *  flatly, the removing or narrowing of a bar, and — R-BTN-94 — setting or changing the
    *  unblocked trigger, which widens what Baton starts; tightening — adding a bar — stays open to
    *  any owner); B-182 adds the two reach lists: a `code_repos` entry or a pusher added is reach
-   *  gained, so it is governed the same way. */
+   *  gained, so it is governed the same way. And `checks` (R-BTN-114): a change toward success
+   *  loosens, a check's move away from success tightens, a delegated key's `checks` change refused. */
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'scope_policy', 'worker_pushers', 'code_repos', 'pushers', 'require_signed_control'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'scope_policy', 'worker_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
+    // R-BTN-114: a check's conclusion decides what branch protection sees, so the map is the
+    // owners', not an agent's — refused here, before the approver question, whichever it changes.
+    const delegated = this.delegated(actor);
+    if (b.checks !== undefined && delegated) throw new BatonError('forbidden', 'a delegated key changes no checks map: the conclusions are the owners’ (R-BTN-114)');
     const sets: [string, string | null][] = [];
     // B-182 (R-BTN-140): the home's code repositories, each naming its own forge and host. The
     // list is stored in its own table; `codeRepos` holds it validated, `web_base` derived.
@@ -978,7 +1000,11 @@ export class Admin {
           ? [...new Set(b.worker_pushers as string[])] : bad('worker_pushers', 'must be null or a list of at most 50 forge logins');
       sets.push(['worker_pushers', JSON.stringify(w)]);
     }
-    // R-BTN-188/R-BTN-186: the loosening needs an approver on `approvers.policy` as it stands.
+    if (b.checks !== undefined) sets.push(['checks', JSON.stringify(this.checkConclusions(repository, b.checks))]);
+    // R-BTN-114: a `checks` change that TIGHTENS — a course added, a station moved away from
+    // `success` — is any owner key's, as every owner route is (`/v1/owner/…` refuses a key that
+    // does not own the repository, and a delegated key above); a LOOSENING needs an approver on
+    // `approvers.policy` as it stands, the same gate R-BTN-188 puts on an R-BTN-66 setting.
     if (this.loosensSettings(repository, sets, codeRepos)) {
       const policies = this.c.policies;
       const cur = policies?.current(repository);
@@ -1005,8 +1031,28 @@ export class Admin {
    *  narrowing loosens and its addition tightens. R-BTN-94 governs the unblocked trigger: setting
    *  or changing it widens what Baton starts, so any change is a loosening. `remind_after` tunes
    *  operation, not trust, and is never governed. B-134's two scope settings are governed one way
-   *  each: a hold that stops holding, and a cross-check that names fewer pushers, loosen. */
+   *  each: a hold that stops holding, and a cross-check that names fewer pushers, loosen. R-BTN-114's
+   *  `checks` loosens when a station moves toward `success` or a course's map loses one, and
+   *  tightens otherwise. */
   private loosensSettings(repository: string, sets: [string, string | null][], codeRepos: CodeRepo[] | null = null): boolean {
+    // R-BTN-114 before the flat knobs: a map that governs nothing and is given is no change,
+    // and one that adds a course is a tightening whatever the flat settings beside it do.
+    const checks = sets.find(([k]) => k === 'checks');
+    if (checks) {
+      const was = this.checkMap(repository);
+      const next = JSON.parse(checks[1]!) as Record<string, CheckConclusion>;
+      // R-BTN-114: a station mapped to `success` that was not is a loosening, and so is a
+      // course's entry removed or renamed (the new name is a course the map did not have). Any
+      // other change — a course added, a station dropped or moved away from `success` — tightens.
+      // The stations read are the new map's: one the old map did not name at all, now `success`,
+      // is mapped to `success` as much as one moved there from `failure`.
+      const towardSuccess = Object.entries(next).some(([course, entry]) => {
+        const before = was[course];
+        return before !== undefined && Object.keys(entry.conclusions).some((station) => conclusionAt(station, entry) === 'success' && (!Object.hasOwn(before.conclusions, station) || conclusionAt(station, before) !== 'success'));
+      });
+      if (towardSuccess) return true;
+      if (Object.keys(was).some((course) => !Object.hasOwn(next, course))) return true;
+    }
     const flat = ['retry', 'transcript_repos'];
     for (const [k, v] of sets) {
       if (flat.includes(k)) {
@@ -1060,6 +1106,62 @@ export class Admin {
       if (next.some((p) => !was.has(`${p.host}\u0000${p.id}`))) return true;
     }
     return false;
+  }
+
+  /** R-BTN-114's `checks`: `{<course>: {name?, url?, conclusions: {<end station>: success |
+   *  failure | timed_out}}}`, at most 200 courses, each one the repository registers, its map
+   *  naming exactly one end station `success`, exactly one `failure` and at most one `timed_out`,
+   *  every station one of the course's end stations — or `invalid-params` naming the course. */
+  private checkConclusions(repository: string, v: unknown): Record<string, CheckConclusion> {
+    if (!isObj(v)) bad('checks', 'must be an object of course id → {name?, url?, conclusions}');
+    const courses = v as Record<string, unknown>;
+    if (Object.keys(courses).length > CHECKS_MAX) bad('checks', `must name at most ${CHECKS_MAX} courses`);
+    const out: Record<string, CheckConclusion> = {};
+    for (const [course, raw] of Object.entries(courses)) {
+      const at = `checks.${course}`;
+      if (!COURSE_ID.test(course)) bad(at, 'is not a course id');
+      const row = this.rows<{ course_json: string }>('SELECT course_json FROM courses WHERE repository_id = ? AND id = ?', repository, course)[0];
+      if (!row) bad(at, `${repository} registers no course ${course}`);
+      const graph = graphOf(JSON.parse(row.course_json));
+      const ends = [...graph.ends].sort();
+      if (!isObj(raw)) bad(at, 'must be an object');
+      const r = raw as Record<string, unknown>;
+      only(r, ['name', 'url', 'conclusions'], at);
+      const entry: CheckConclusion = { conclusions: {} };
+      for (const k of ['name', 'url'] as const) {
+        if (r[k] === undefined) continue;
+        if (typeof r[k] !== 'string' || !(r[k] as string).length || (r[k] as string).length > 100) bad(`${at}.${k}`, 'must be a string of 1 to 100 characters');
+        entry[k] = r[k] as string;
+      }
+      if (!isObj(r.conclusions)) bad(`${at}.conclusions`, 'must be an object of end station → conclusion');
+      const counts = { success: 0, failure: 0, timed_out: 0 };
+      for (const [station, named] of Object.entries(r.conclusions as Record<string, unknown>)) {
+        const cat = `${at}.conclusions.${station}`;
+        if (!ends.includes(station)) bad(cat, `is not one of ${course}'s end stations (${ends.join(', ')})`);
+        const conclusion = CONCLUSIONS.find((c) => c === named);
+        if (!conclusion) bad(cat, 'must be success, failure or timed_out: neutral passes a required check and is not a conclusion (R-BTN-114)');
+        counts[conclusion!] += 1;
+        entry.conclusions[station] = conclusion!;
+      }
+      const want = `one end station success, one failure and at most one timed_out, not ${JSON.stringify(entry.conclusions)}`;
+      if (counts.success !== 1 || counts.failure !== 1 || counts.timed_out > 1) bad(`${at}.conclusions`, `must name exactly ${want}`);
+      out[course] = entry;
+    }
+    return out;
+  }
+
+  /** R-BTN-130's delegated key: an owner key acting on a hosted MCP client's behalf. None is
+   *  registered until B-124 builds them, so no actor is one today; the refusals above read the
+   *  one place that will say so, as `Policies.entryMatches` reads its own. The actor is
+   *  `<class>:<fingerprint>` (`owner:` from `/v1/owner/…`); B-124's `delegated:` actor keeps
+   *  that shape, and the fingerprint after the prefix is what an `approvers.policy` entry admits. */
+  private delegated(actor: string): boolean {
+    return actor.startsWith('delegated:');
+  }
+
+  /** A repository's `checks` map (R-BTN-114) as stored, `{}` while the owners set none. */
+  checkMap(repository: string): Record<string, CheckConclusion> {
+    return JSON.parse(this.rows<{ checks: string }>('SELECT checks AS checks FROM repositories WHERE id = ?', repository)[0]?.checks ?? '{}');
   }
 
   /** R-BTN-67's required bars: `{course | *, leg | *, except?, tag_prefix}`, a named `leg` only
