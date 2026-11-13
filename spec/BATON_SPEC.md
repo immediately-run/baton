@@ -480,6 +480,7 @@ is stale. Never edit it by hand.
 | S-BTN-218 | owner-signed briefs and the control record (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-219 | require_signed_control (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-220 | ticket provenance (B-126) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-221 | the screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

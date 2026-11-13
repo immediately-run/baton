@@ -47,11 +47,11 @@ stated once, in the rule it cites.
 | Instrument (probe) | `/v1/probe/*` | SSH-signed | post readings of any registered instance (R-BTN-101) |
 | Registration token | `POST /v1/register` | `Authorization: Baton-Token <token>` | register one credential within its scope (R-BTN-117, R-BTN-157) |
 | Administrator | `/v1/admin/*`; any claim's leg runs | a `BATON_ADMIN_KEYS` line, SSH-signed or API key | R-BTN-57 |
-| Dashboard session | `/`, `/v1/ui/*`, `GET …/prerequisites` (R-BTN-120); an owner's, `POST …/attestations` (R-BTN-116) | the session cookie (R-BTN-155) | as `session` with its minting key's role (R-BTN-129): an administrator's, every action listed for it, under R-BTN-155's confirmations; an owner's, those listed for it on the repositories its key still owns, under the same confirmations, never an administrator's |
+| Dashboard session | `/`, every §11.4 screen path, `/v1/ui/*`, the repository and owner reads §14 lists `session` on, and an owner's `POST …/attestations` (R-BTN-116) | the session cookie (R-BTN-155) | as `session` with its minting key's role (R-BTN-129): an administrator's, every action listed for it, under R-BTN-155's confirmations; an owner's, those listed for it on the repositories its key still owns, under the same confirmations, never an administrator's |
 | Repository owner | `/v1/owner/{repository}/*`; the repository's reads and leg runs | an owner key, SSH-signed or API key | R-BTN-58 |
 | Human-only key | `POST /v1/human-keys`; `POST`, `DELETE …/attestations` as writer `human`; as an owner, or as a break-glass line on every repository it satisfies (R-BTN-188), the owner's routes | an SSH key registered `human_only` (R-BTN-185), on an owner key or a key of no other role | open human gates: a `human` attestation, every action an `approvers.*` list names `human` for, `human-key.add` and `human-key.revoke`; as an owner, R-BTN-58; never through a session, which is `owner` (R-BTN-185) |
 | MCP key (a delegated key) | `POST /v1/mcp` only | bearer `bmcp_…` | as `owner` on one repository, narrowed to the ids listed at minting: reads, tightenings and the undoing of its own; never an attestation, a route, an adopt, a credential or the policy (R-BTN-186, R-BTN-130) |
-| Public | `POST /v1/login`, the dashboard's static assets | none | start a sign-in |
+| Public | `POST /v1/login`, the dashboard shell's three assets — its page, its one script, its one stylesheet | none | start a sign-in |
 
 The repository reads (`GET /v1/repositories/{repository}/…`) are open to any key granted on the
 repository, its owners and administrators, except where a route's rule narrows them.
@@ -150,8 +150,16 @@ Every value below is validated on write; a value over its cap is refused `invali
 - **Opaque blobs** (course data, a ticket's and a leg's course fields, a runner's profile and
   reports, readings' `detail`) are JSON stored verbatim and never rendered as markup, so the
   brace rule does not apply: at most 16 KB per blob and 256 KB of a repository's course data.
-- **Rendering.** The dashboard renders text only through `textContent`, never `innerHTML`, and a
-  blob only as pretty-printed JSON. `baton leg log` strips terminal escapes and every C0 and C1
+- **Rendering.** The dashboard renders every value as a text node (a React text child or
+  `textContent`); a value whose schema carries a view is drawn by R-BTN-112's `ui` renderer —
+  its node tree mapped to elements with text children, the schema fetched from
+  `GET …/schemas` (B-217) — and any other blob only as pretty-printed JSON. The dashboard's own
+  source (`src/dashboard/**`) never uses `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`,
+  `insertAdjacentHTML`, `document.write`, `DOMParser` or `createContextualFragment`: React is
+  the only code that touches the DOM, and the page is one bundle built from this repository that
+  loads no script, style, font or data from another origin. Links on the client pass the same
+  `src/shared/links.mjs` rule the server applies, with `web_base`, `link_hosts` and
+  `session_hosts` from the read. `baton leg log` strips terminal escapes and every C0 and C1
   control but newline and tab (R-BTN-128).
 - **Models.** Profiles, reports, readings' `detail`, course fields, resume records, hand-off
   documents and an earlier claimant's text reach a model only as quoted data, in their own file,
@@ -181,10 +189,13 @@ Every value below is validated on write; a value over its cap is refused `invali
     carries an `Origin` equal to the origin when it carries one, and `Sec-Fetch-Site:
     same-origin` when it carries that header, else `forbidden`.
   - **Sessions.** `/v1/ui/*` requires a dashboard session minted from an administrator or owner key
-    (R-BTN-155).
+    (R-BTN-155). A session's reads outside `/v1/ui/*` — the entity reads its screens poll (§14's
+    `session` rows) — are authenticated by Baton alone, the cookie and nothing in front of it
+    (B-192).
     Cloudflare Access may stand in front of the dashboard as extra hardening; Baton never
     requires it and never reads its cookie. Where it stands, it covers only the dashboard's
-    pages (`/`, `/login`, `/oauth/authorize`), `POST /v1/login` and `/v1/ui/*`, and is bypassed
+    pages (`/`, `/login`, every §11.4 screen path, `/oauth/authorize`), `POST /v1/login` and
+    `/v1/ui/*`, and is bypassed
     on every other route, which authenticates every request itself or is public: keys,
     webhooks, forge notifications, instruments, CI identities and MCP clients call
     them without an Access cookie.

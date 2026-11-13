@@ -677,7 +677,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
   | sub | when |
   |---|---|
-  | `position-disagrees` | a posted ticket whose `status` is `available` while the same post places it past its course's start (R-BTN-74), core's witness being a non-empty path (B-129); judged on those two alone, since core reads no course field (R-BTN-50), so a release that kept its PRs logs it too; once per station; both values are positions, never a PR list (R-BTN-33): logged and listed among the dashboard's discrepancies, nothing adopted, never on Needs you |
+  | `position-disagrees` | a posted ticket whose `status` is `available` while the same post places it past its course's start (R-BTN-74), core's witness being a non-empty path (B-129); judged on those two alone, since core reads no course field (R-BTN-50), so a release that kept its PRs logs it too; once per station; both values are positions, never a PR list (R-BTN-33): logged and listed on the dashboard's Sync screen (§11.4), nothing adopted, never on Needs you |
   | `bars-mismatch` | posted bars lack a tag the holder declared (R-BTN-63) |
   | `closed-under-claim` | a ticket closed while a claim is active on it, a claim of its `cancel` leg excepted (R-BTN-168) |
   | `spawned-unposted` | a reported child the first snapshot after the end does not post (R-BTN-86) |

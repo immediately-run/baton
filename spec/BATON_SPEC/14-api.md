@@ -178,7 +178,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `POST /v1/ui/adoptions/{claim}/confirm` | admin session | `{runner_id}` (the requesting runner, shown with its hostname and session name) | `202 {confirm_code}` | *adoption*, R-BTN-28 |
 | **Other** | | | | |
 | `POST /v1/register` | `Authorization: Baton-Token <token>` | `{name, public_key}` or `{name, api_key: true}` | `{credential_id, grant}`, and `{api_key}` once for the second form; `forbidden` beyond the token's scope; `unauthenticated` for a spent, expired or revoked token; `conflict` | R-BTN-117 |
-| `GET /v1/actions` | any key (never an MCP key, R-BTN-130) | — | the caller's registry entries, with `input` schemas; `baton help` reads it | R-BTN-129 |
+| `GET /v1/actions` | any key, a session (never an MCP key, R-BTN-130) | — | the caller's registry entries, with `input` schemas — to a session, minus `delegated`, with `ui`; `baton help` reads it | R-BTN-129 |
 | `POST /v1/mcp` | an MCP key, as a bearer | JSON-RPC `initialize`, `ping`, `tools/list`, `tools/call`; the tools are the key's ids within R-BTN-186 | streamable HTTP, JSON only; `GET` answers `405` | R-BTN-130, R-BTN-186 |
 
 **Runners drain the outbox** (R-BTN-171) through the two `/v1/runner/outbox` routes above,

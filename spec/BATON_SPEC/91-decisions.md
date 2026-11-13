@@ -211,3 +211,42 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   bound to loopback (B-182's decision, option (a)): slightly fiddly once — a second OS user for
   the runners' keys — and no spec change; a later ticket can loosen it if (a) proves too awkward
   in practice (2026-11-12, B-182; R-BTN-105, `docs/runbooks/local-home.mdx`).
+- Chose the V2 dashboard as a walk down the entity tree — sign in, pick a repository, one entity
+  per screen, its controls the registry actions `ui.view` places there — over standalone console
+  screens, so what a session sees and what it can do come from one definition (2026-11-09, the
+  owner, handing over the mockup; R-BTN-129, §11.4).
+- Chose React and TypeScript with a build step — one bundle built from this repository, loading
+  nothing from another origin — over the dashboard's dependency-free rule (2026-11-09, the
+  owner; §12.3, §11.4).
+- Chose Board, Tickets, Conditions and the overview strip over Running, Ready and Needs you as
+  screens: the task answers stay one glance away on the strip, and every screen is one entity
+  (2026-11-09, the owner; §11.4).
+- Chose V2 replacing V1 outright at `/`, no transition, over a gradual one: nobody uses the V1
+  dashboard (2026-11-09, the owner, "the transition doesn't need to be smooth"; §11.4).
+- Chose the timeline per runner on its page over a fleet-wide one, and runners grouped by
+  hostname as R-BTN-3 says — the state each card's mark — over grouped by state as the mockup
+  draws them (2026-11-09, the owner; R-BTN-3, §11.4).
+- Chose to build none of the mockup's elements for which no fact exists: Schemas (no read
+  exists; B-54's renderers), Providers and Suspensions (B-142 retired their tables; availability
+  is a reading on `/instances`), Accept history (R-BTN-85 adopts git's value at once), Stream
+  stdout/stderr (R-BTN-128: a log is its directory), the runner's model (R-BTN-3 names none) and
+  "Workers" (B-68: runners) (2026-11-09, the owner; §11.4).
+- Chose the tenant screens read-only, each naming the CLI command that changes it, over the
+  brief's controls: nothing changes authority from a cookie, and the tenant's export stays the
+  CLI's alone (2026-11-09, the owner; R-BTN-155, §11.4).
+- Chose `ticket.route` and `ticket.adopt` to stay the CLI's, named as text on the ticket page,
+  over session actions for them (2026-11-09, the owner; R-BTN-83, R-BTN-39, §11.4).
+- Chose Stop as one click — the session's release message, no dialog, no code, `confirm: true`
+  staying the CLI's and the owner route's — over a confirm dialog (2026-11-09, the owner;
+  R-BTN-155, §11.4).
+- Chose to keep `GET /v1/admin/state`'s shape, built by one named core function with each
+  section equal to the matching entity read's first page at the same instant, over retiring it
+  with `ui.state`: a terminal keeps one request (2026-11-09, the owner; R-BTN-57, R-BTN-179,
+  S-BTN-170; B-216 builds it).
+- Chose to keep the held board post's Accept on Sync, unconfirmed — it accepts a post the sync
+  already made — over auto-accept alone (2026-11-09, the owner; §11.4; B-201 files its row).
+- Chose one unit test over `src/dashboard/**` refusing the markup-parsing APIs, over ESLint
+  scoped to the dashboard (2026-11-09, the owner; §12.3, G-BTN-13).
+- Chose a per-tenant request counter with a 5-minute mean over amending R-BTN-87 to live counts
+  alone, so the envelope's figures are shown as stated (2026-11-09, the owner; R-BTN-87, §11.4;
+  B-202 builds it).
