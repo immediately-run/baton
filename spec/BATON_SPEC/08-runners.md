@@ -430,7 +430,7 @@ the runner's credentials under any other executor is that executor's, never Bato
     `environment` (what the leg ran on, such as an image digest; it may repeat across runs) and
     `instance` (the session's own id, unique to the run), each 1–256 characters of printable
     ASCII without spaces. Baton validates their shape (`invalid-params`), stores them on
-    `claim_legs`, shows them on the run list and the Timeline, and never reads them.
+    `claim_legs`, shows them on the run list and the runner page (§11.4), and never reads them.
 - **R-BTN-123 (a leg hands off to a fresh session when its context fills).** A fresh session may
   one day ask the session it replaced about its work; that may prove useful and is not built. A
   leg may declare
@@ -458,7 +458,8 @@ the runner's credentials under any other executor is that executor's, never Bato
   the running leg, and `advance` or `end` for the leg it finishes. It must be `https`, at most
   512 characters, without userinfo, with its host in the instance's `session_hosts` (an
   administrator's setting, default `claude.ai`), else it is dropped and logged. Stored on
-  `claim_legs.session_url` (latest wins while running) and shown on Running and the Timeline;
+  `claim_legs.session_url` (latest wins while running) and shown on Board and the runner page
+  (§11.4);
   under an executor whose handle names its session's link (R-BTN-107), it is that link.
 
 ### 8.4 Where and how a leg runs
