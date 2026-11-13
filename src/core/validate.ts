@@ -121,8 +121,6 @@ export interface Heartbeat {
   fenced?: { claim_id: number };
   transcripts: TranscriptReport[];
   transcript_refusals: { index: number; code: string; message: string }[];
-  /** R-BTN-76: the account instances it uses (absent declares none), and the strings refused as names. */
-  uses: { names: string[]; refused: { instance: string; code: string }[] };
   /** R-BTN-103: the repositories and `asks` this session delivers notices for, as a worker courier,
    *  and the entries refused as malformed. */
   couriers: { entries: { repository: string; asks: string[] }[]; refused: { repository: string; code: string }[] };
@@ -199,7 +197,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     last_activity_at: b.last_activity_at as number | undefined,
     test_harness: b.test_harness === true,
     fenced: checkFenced(b.fenced),
-    uses: checkUses(b.uses),
     couriers: checkCouriers(b.couriers),
     protection: checkProtection(b.protection),
     policy_pins: checkPolicyPins(b.policy_pins),
@@ -395,12 +392,16 @@ export const GIT_SHA = /^[0-9a-f]{40}$/;
 export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output',
   'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed'] as const;
 
-export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null } {
+/** A claim's request (§6.2). `bills` is retired (B-168: a `prefer` entry bills no account once
+ *  route choices are gone, R-BTN-100): a request carrying one is read as if it did not, the
+ *  caller logging `deprecated-field` while the history's Migrations entry lasts. */
+export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null; retired: string[] } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
   return {
     request_id: matches(REQUEST_ID, 'request_id')(b.request_id),
     ticket_id: optional(b.ticket_id, matches(TICKET_ID, 'ticket_id')) ?? null,
+    retired: b.bills !== undefined ? ['bills'] : [],
   };
 }
 
@@ -754,18 +755,18 @@ export const DECISION_TYPE_NAME = 'std:decision@1';
 
 /** R-BTN-76: an external resource's name — opaque to core (`llm:<model>`, `github-api`). */
 export const RESOURCE_NAME = /^[a-z][a-z0-9:._/-]{0,79}$/;
-/** An account instance's name (`opencode-go:go_plus`): the resource rule with `_` (spec-silent,
- *  recorded on R3-1251 — the scenarios' own instances carry it). Never `@`: that is a worker's. */
+/** An instance's name (`opencode-go:go_plus`, a `service` resource's own): the resource rule with
+ *  `_` (spec-silent, recorded on R3-1251 — the scenarios' own instances carry it). */
 export const INSTANCE_NAME = /^[a-z][a-z0-9_:./-]{0,79}$/;
-/** A worker-scope resource's implicit instance per worker: `<resource>@worker:<workers.id>`. */
-export const WORKER_INSTANCE = /^([a-z][a-z0-9:._/-]{0,79})@worker:([1-9][0-9]{0,14})$/;
 /** R-BTN-78: a decision's id and its `asks` label. */
 export const DECISION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 export const ASKS = /^[a-z][a-z0-9-]{0,31}$/;
-export const RESOURCE_SCOPES = ['worker', 'account', 'service'] as const;
-/** Instances one heartbeat declares in `uses`, readings one post carries, resources one leg
- *  needs, decisions one ticket posts (spec-silent, recorded on R3-1251). */
-export const USES_MAX = 64;
+/** R-BTN-76 (§6.3): a resource's two scopes. A `service` resource is its own one instance; an
+ *  `account` one has a registered instance per account. What a runner uses is the repository's:
+ *  the `service` instance and the account instances that list it. */
+export const RESOURCE_SCOPES = ['account', 'service'] as const;
+/** Readings one post carries, resources one leg needs, decisions one ticket posts (spec-silent,
+ *  recorded on R3-1251). */
 export const READINGS_MAX = 50;
 export const NEEDS_MAX = 32;
 export const DECISIONS_MAX = 32;
@@ -776,8 +777,9 @@ export const DECISION_OPTIONS_MAX = 8;
 export const DECISION_GRANT_MAX = 10;
 /** B-110: a posted decision's question — one line of display text, rendered as text (§10.4). */
 export const DECISION_QUESTION = /^[^\u0000-\u001f\u007f]{1,200}$/;
-/** R-BTN-76, R-BTN-101: how long a reading may stay in force, in seconds, by who posts it. */
-export const VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600, admin_s: 7 * 24 * 3600 } as const;
+/** R-BTN-76, R-BTN-101: how long a reading may stay in force, in seconds, by who posts it. An
+ *  administrator's reading is one more instrument's, held to the same limits (R-BTN-181). */
+export const VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600 } as const;
 
 /** R-BTN-58: a key an owner or administrator registered works only where it is granted; any other
  *  (a bearer token, a BATON_KEYS seed key) keeps its interim reach on every repository. The one
@@ -785,21 +787,17 @@ export const VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 
 export const isGrantedKey = (createdBy: string | null | undefined): boolean => !!createdBy && /^(owner|admin):/.test(createdBy);
 export const grantedKeySql = (column: string) => `(${column} LIKE 'owner:%' OR ${column} LIKE 'admin:%')`;
 
-export const isInstanceName = (v: unknown): v is string => typeof v === 'string' && (INSTANCE_NAME.test(v) || WORKER_INSTANCE.test(v));
+export const isInstanceName = (v: unknown): v is string => typeof v === 'string' && INSTANCE_NAME.test(v);
 
-/** The heartbeat's `uses` (R-BTN-76): a list of at most 64 strings, or the heartbeat is refused;
- *  a string that is no instance name is returned refused, never refusing the heartbeat — a
- *  failed heartbeat would stop `last_seen_at` and get a live worker reaped. Whether each name may
- *  be used is the heartbeat's own check. */
-export function checkUses(v: unknown): { names: string[]; refused: { instance: string; code: string }[] } {
-  if (v === undefined) return { names: [], refused: [] };
-  if (!Array.isArray(v) || v.length > USES_MAX || !v.every((x) => typeof x === 'string')) bad('uses', `must be a list of at most ${USES_MAX} instance names`);
-  const names = [...new Set(v as string[])];
-  return { names: names.filter((n) => INSTANCE_NAME.test(n)), refused: names.filter((n) => !INSTANCE_NAME.test(n)).map((n) => ({ instance: n.slice(0, 100), code: 'invalid-params' })) };
-}
+/** A reading's `nonce` and `signature` (B-145) are its retired signature — R-BTN-181: a reading
+ *  is authenticated by the request that posts it and carries no signature of its own. They are
+ *  read and ignored while the history's Migrations entry "part 4's retired fields" lasts; the
+ *  caller logs each `deprecated-field` and drops it. */
+const RETIRED_READING = ['nonce', 'signature'] as const;
 
 /** One reading's envelope (R-BTN-76, R-BTN-101), checked before any write; `detail` against its
- *  resources' schema is the caller's, which knows them. `valid_for` is seconds. */
+ *  resources' schema is the caller's, which knows them. `valid_for` is seconds. `retired` names
+ *  the fields the post carried that the window still reads (never a refusal of the reading). */
 export interface Reading {
   instance: string;
   kind: 'state' | 'measure';
@@ -807,22 +805,14 @@ export interface Reading {
   until: number | null;
   valid_for_s: number;
   detail: unknown;
-  /** §12.8 (B-145 item 9, R-BTN-181): a reading may be signed — `nonce` and `signature` ride
-   *  beside it; which readings count for a repository is its policy's `readings` knob, read
-   *  once B-146 builds the requirements that gate on one. */
-  nonce?: string;
-  signature?: string;
+  retired: string[];
 }
 export function checkReading(v: unknown, field: string, maxStateS: number): Reading {
   if (!isObj(v)) bad(field, 'must be an object');
   const r = v as Record<string, unknown>;
-  for (const k of Object.keys(r)) if (!['instance', 'kind', 'available', 'until', 'valid_for', 'detail', 'nonce', 'signature'].includes(k)) bad(`${field}.${k}`, 'is not a reading field');
+  for (const k of Object.keys(r)) if (!['instance', 'kind', 'available', 'until', 'valid_for', 'detail', ...RETIRED_READING].includes(k)) bad(`${field}.${k}`, 'is not a reading field');
   if (!isInstanceName(r.instance)) bad(`${field}.instance`, 'must be an instance name');
-  // R-BTN-181 (B-145 item 9): a signed reading carries both a nonce and its signature.
-  if ((r.nonce === undefined) !== (r.signature === undefined)) bad(field, 'a signed reading carries both nonce and signature');
-  if (r.nonce !== undefined && (typeof r.nonce !== 'string' || !/^[A-Za-z0-9+/_=-]{8,128}$/.test(r.nonce))) bad(`${field}.nonce`, 'must be a short nonce');
-  if (r.signature !== undefined && (typeof r.signature !== 'string' || !/^[A-Za-z0-9+/=\s]{16,8192}$/.test(r.signature))) bad(`${field}.signature`, 'must be the reading’s signature');
-  const signed = r.nonce !== undefined ? { nonce: r.nonce as string, signature: r.signature as string } : {};
+  const retired = RETIRED_READING.filter((k) => r[k] !== undefined);
   const raw = r.kind ?? 'state';
   if (raw !== 'state' && raw !== 'measure') bad(`${field}.kind`, "must be 'state' or 'measure'");
   const kind = raw as Reading['kind'];
@@ -832,11 +822,11 @@ export function checkReading(v: unknown, field: string, maxStateS: number): Read
   if (kind === 'measure') {
     if (r.available !== undefined || r.until !== undefined) bad(field, 'a measure carries only detail and valid_for');
     if (r.detail === undefined) bad(`${field}.detail`, 'a measure carries a detail');
-    return { instance: r.instance as string, kind, available: null, until: null, valid_for_s: valid as number, detail: r.detail, ...signed };
+    return { instance: r.instance as string, kind, available: null, until: null, valid_for_s: valid as number, detail: r.detail, retired };
   }
   if (typeof r.available !== 'boolean') bad(`${field}.available`, 'must be a boolean');
   if (r.until !== undefined && (r.available || !isTime(r.until))) bad(`${field}.until`, 'is epoch ms, for an unavailable instance only');
-  return { instance: r.instance as string, kind, available: r.available as boolean, until: (r.until as number | undefined) ?? null, valid_for_s: valid as number, detail: r.detail, ...signed };
+  return { instance: r.instance as string, kind, available: r.available as boolean, until: (r.until as number | undefined) ?? null, valid_for_s: valid as number, detail: r.detail, retired };
 }
 
 /** A readings post: `{readings: [...]}`, each checked. */
@@ -845,18 +835,15 @@ export function checkReadings(body: unknown, maxStateS: number = VALID_FOR.state
   return ((body as { readings: unknown[] }).readings).map((r, i) => checkReading(r, `readings[${i}]`, maxStateS));
 }
 
-/** `POST /v1/admin/resources` (R-BTN-76): the schema itself is detailSchema.ts's to judge.
- *  B-167: `atoms_from` is a retired field — the restructure took route choices out of core — so
- *  it is accepted, shape-checked and read nowhere. */
-export function checkResource(body: unknown): { name: string; scope: (typeof RESOURCE_SCOPES)[number]; detail_schema: unknown; atoms_from: 'admin' | 'any' } {
+/** `POST /v1/admin/resources` (R-BTN-76): the schema itself is detailSchema.ts's to judge. */
+export function checkResource(body: unknown): { name: string; scope: (typeof RESOURCE_SCOPES)[number]; detail_schema: unknown } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
-  for (const k of Object.keys(b)) if (!['name', 'scope', 'detail_schema', 'atoms_from'].includes(k)) bad(`body.${k}`, 'is not a field of a resource');
+  for (const k of Object.keys(b)) if (!['name', 'scope', 'detail_schema'].includes(k)) bad(`body.${k}`, 'is not a field of a resource');
   if (typeof b.name !== 'string' || !RESOURCE_NAME.test(b.name)) bad('name', `must match ${RESOURCE_NAME}`);
-  if (!RESOURCE_SCOPES.includes(b.scope as never)) bad('scope', `must be one of ${RESOURCE_SCOPES.join(', ')}`);
-  if (b.atoms_from !== undefined && b.atoms_from !== 'admin' && b.atoms_from !== 'any') bad('atoms_from', "must be 'admin' or 'any'");
+  if (!RESOURCE_SCOPES.includes(b.scope as never)) bad('scope', `must be one of ${RESOURCE_SCOPES.join(', ')} (R-BTN-76)`);
   if (b.detail_schema === undefined) bad('detail_schema', 'is required');
-  return { name: b.name as string, scope: b.scope as (typeof RESOURCE_SCOPES)[number], detail_schema: b.detail_schema, atoms_from: (b.atoms_from as 'admin' | 'any') ?? 'admin' };
+  return { name: b.name as string, scope: b.scope as (typeof RESOURCE_SCOPES)[number], detail_schema: b.detail_schema };
 }
 
 /** `POST /v1/admin/instances` (R-BTN-76): an account instance, what it serves and who may use it. */
@@ -914,7 +901,7 @@ export const CLAIM_MAX = 50;
 const CHANNEL = /^[A-Za-z0-9][A-Za-z0-9 ._:@/-]{0,63}$/;
 
 /** A heartbeat's `couriers` (R-BTN-103): `[{repository, asks: [<label>]}]`, absent for none. As
- *  with `uses`, a list that is not one, or is over its bound, refuses the heartbeat; an entry that
+ *  with `transcripts`, a list that is not one, or is over its bound, refuses the heartbeat; an entry that
  *  fails its own check — a repository id, a label, a repeat — is returned refused and reported,
  *  never refusing the heartbeat, which would stop `last_seen_at` and get a live worker reaped. */
 export function checkCouriers(v: unknown): { entries: { repository: string; asks: string[] }[]; refused: { repository: string; code: string }[] } {

@@ -1141,8 +1141,13 @@ export async function run() {
 }
 `);
       const running = legOf(r).runLeg({ scripts: new Map([['implement', script]]) }, 'implement', { leg: 'implement' }, join(home, 'scratch'));
-      for (let i = 0; i < 500 && !existsSync(marker); i++) await new Promise((res) => setTimeout(res, 10));
+      // The marker is written after the line, but the line still has to cross the pipe and the
+      // sink: wait for both (on a loaded runner the lease was lost before the line arrived), on
+      // wall time.
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline && !(existsSync(marker) && lines.join('\n').includes('streaming: '))) await new Promise((res) => setTimeout(res, 10));
       expect(existsSync(marker)).toBe(true); // the leg is streaming: its partial line is held
+      expect(lines.join('\n')).toContain('streaming: ');
       state.lease_lost = true;
       expect(await running).toEqual({ kind: 'lease-lost' });
       const said = lines.join('\n');

@@ -916,19 +916,21 @@ export class Admin {
   }
 
   /** `PUT /v1/owner/{repository}/settings`: `required_bars`, `retry`, `transcript_repos`,
-   *  `unblocked_trigger`, `remind_after` (seconds, R-BTN-80), `required_independence`
-   *  (R-BTN-106), `scope_policy` and `worker_pushers` (B-134), `code_repos` (R-BTN-140, B-182)
-   *  and `pushers` (R-BTN-139, B-182) — each given replaces that setting whole. R-BTN-188's
-   *  knob table: every LOOSENING of an R-BTN-66 setting needs an approver on `approvers.policy`
-   *  (R-BTN-186 names `retry`, `transcript_repos` and `required_independence` flatly, and the
-   *  removing or narrowing of a bar; tightening — adding a bar — stays open to any owner);
-   *  B-182 adds the two reach lists: a `code_repos` entry or a pusher added is reach gained, so
-   *  it is governed the same way. And `checks` (R-BTN-114): a change toward success loosens, a
-   *  check's move away from success tightens, a delegated key's `checks` change refused. */
+   *  `unblocked_trigger`, `remind_after` (seconds, R-BTN-80), `scope_policy` and
+   *  `worker_pushers` (B-134), `code_repos` (R-BTN-140, B-182), `pushers` (R-BTN-139, B-182) and
+   *  `require_signed_control` (B-127) — each given replaces that setting whole.
+   *  `required_independence` is gone (B-168): `no_chain_from` in the course file is the one
+   *  statement of it (R-BTN-106). R-BTN-188's knob table: every LOOSENING of an R-BTN-66 setting
+   *  needs an approver on `approvers.policy` (R-BTN-186 names `retry` and `transcript_repos`
+   *  flatly, the removing or narrowing of a bar, and — R-BTN-94 — setting or changing the
+   *  unblocked trigger, which widens what Baton starts; tightening — adding a bar — stays open to
+   *  any owner); B-182 adds the two reach lists: a `code_repos` entry or a pusher added is reach
+   *  gained, so it is governed the same way. And `checks` (R-BTN-114): a change toward success
+   *  loosens, a check's move away from success tightens, a delegated key's `checks` change refused. */
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'required_independence', 'scope_policy', 'worker_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'scope_policy', 'worker_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     // R-BTN-114: a check's conclusion decides what branch protection sees, so the map is the
     // owners', not an agent's — refused here, before the approver question, whichever it changes.
@@ -981,7 +983,6 @@ export class Admin {
         ? (b.remind_after as number) : bad('remind_after', `must be whole seconds from ${REMIND_AFTER_S.min} to ${REMIND_AFTER_S.max}`);
       sets.push(['remind_after_s', JSON.stringify(r)]);
     }
-    if (b.required_independence !== undefined) sets.push(['required_independence', JSON.stringify(checkIndependence(b.required_independence))]);
     // B-134: what a scope-exceeded finding does (`report`, Needs you alone — the default — or
     // `hold`, the ticket parked until an owner lifts it), and the forge logins the fleet's VM
     // runners push as, whose pushes are cross-checked against open claims. Null or an empty
@@ -1025,13 +1026,14 @@ export class Admin {
     });
   }
 
-  /** Whether the settings this change writes loosen what stands: R-BTN-186 names `retry`,
-   *  `transcript_repos` and `required_independence` flatly — any change to one is governed —
-   *  while a bar's removal or narrowing loosens and its addition tightens. `remind_after` and
-   *  `unblocked_trigger` tune operation, not trust, and are never governed. B-134's two scope
-   *  settings are governed one way each: a hold that stops holding, and a cross-check that
-   *  names fewer pushers, loosen. R-BTN-114's `checks` loosens when a station moves toward
-   *  `success` or a course's map loses one, and tightens otherwise. */
+  /** Whether the settings this change writes loosen what stands: R-BTN-186 names `retry` and
+   *  `transcript_repos` flatly — any change to one is governed — while a bar's removal or
+   *  narrowing loosens and its addition tightens. R-BTN-94 governs the unblocked trigger: setting
+   *  or changing it widens what Baton starts, so any change is a loosening. `remind_after` tunes
+   *  operation, not trust, and is never governed. B-134's two scope settings are governed one way
+   *  each: a hold that stops holding, and a cross-check that names fewer pushers, loosen. R-BTN-114's
+   *  `checks` loosens when a station moves toward `success` or a course's map loses one, and
+   *  tightens otherwise. */
   private loosensSettings(repository: string, sets: [string, string | null][], codeRepos: CodeRepo[] | null = null): boolean {
     // R-BTN-114 before the flat knobs: a map that governs nothing and is given is no change,
     // and one that adds a course is a tightening whatever the flat settings beside it do.
@@ -1051,10 +1053,10 @@ export class Admin {
       if (towardSuccess) return true;
       if (Object.keys(was).some((course) => !Object.hasOwn(next, course))) return true;
     }
-    const flat = ['retry', 'transcript_repos', 'required_independence'];
+    const flat = ['retry', 'transcript_repos'];
     for (const [k, v] of sets) {
       if (flat.includes(k)) {
-        const old = k === 'retry' ? this.retry(repository) : k === 'required_independence' ? this.requiredIndependence(repository) : null;
+        const old = k === 'retry' ? this.retry(repository) : null;
         const before = k === 'transcript_repos' ? JSON.parse(this.rows<{ v: string | null }>('SELECT transcript_repos AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? 'null') : old;
         if (JSON.stringify(before ?? null) !== (v ?? 'null')) return true;
       }
@@ -1065,6 +1067,9 @@ export class Admin {
         if (was) return true;
       }
     }
+    // R-BTN-94 (B-168): the workflow Baton starts when a ticket unblocks, set or changed.
+    const trigger = sets.find(([k]) => k === 'unblocked_trigger');
+    if (trigger && trigger[1] !== (this.rows<{ v: string | null }>('SELECT unblocked_trigger AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? null)) return true;
     // B-134: both scope settings only loosen one way — a hold that stops holding, and a
     // cross-check that names fewer pushers. Naming more, or holding, tightens.
     const policy = sets.find(([k]) => k === 'scope_policy');
@@ -1203,12 +1208,6 @@ export class Admin {
     return JSON.parse(this.rows<{ required_bars: string }>('SELECT required_bars FROM repositories WHERE id = ?', repository)[0]?.required_bars ?? '[]');
   }
 
-  /** R-BTN-106: the owners' `required_independence`, leg → the legs a key that ran any of them
-   *  on a ticket may not take it; joined to every course file's `no_chain_from`. */
-  requiredIndependence(repository: string): Record<string, string[]> {
-    return JSON.parse(this.rows<{ v: string }>('SELECT required_independence AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? '{}');
-  }
-
   /** A repository's retry policy (R-BTN-23), or null for the default. */
   retry(repository: string): RetryPolicy | null {
     const r = this.rows<{ retry: string | null }>('SELECT retry FROM repositories WHERE id = ?', repository)[0]?.retry;
@@ -1235,7 +1234,7 @@ export class Admin {
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
-      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, required_independence, scope_policy, worker_pushers, pushers, require_signed_control FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
+      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, scope_policy, worker_pushers, pushers, require_signed_control FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
         ...s,
         // B-182: the home's code repositories beside the column settings — its own table's rows,
         // as the observation hands them to the sync, so the CLI and the dashboard read one shape.
@@ -1278,22 +1277,6 @@ export class Admin {
   }
 }
 
-/** R-BTN-106's `required_independence`: `{<leg>: [<leg>, …]}`, leg names compared as strings
- *  in every course of the repository (a renamed leg is followed at the gate). At most
- *  LEGS_MAX legs, each naming at most LEGS_MAX; an empty list is dropped. */
-export function checkIndependence(v: unknown): Record<string, string[]> {
-  if (!isObj(v) || Object.keys(v).length > LEGS_MAX) bad('required_independence', `must be an object of at most ${LEGS_MAX} leg names`);
-  const out: Record<string, string[]> = {};
-  for (const [leg, from] of Object.entries(v as Record<string, unknown>)) {
-    const at = `required_independence.${leg}`;
-    if (!COURSE_ID.test(leg)) bad(at, 'must be a leg name');
-    if (!Array.isArray(from) || from.length > LEGS_MAX || !from.every((l) => typeof l === 'string' && COURSE_ID.test(l))) bad(at, `must be a list of at most ${LEGS_MAX} leg names`);
-    const legs = [...new Set(from as string[])].sort();
-    if (legs.length) out[leg] = legs;
-  }
-  return out;
-}
-
 /** R-BTN-23's policy as owners set it: 1–8 backoffs, each 1 minute to 30 days, and the failed
  *  attempt that holds the ticket, 1–10. */
 export function checkRetry(v: unknown): RetryPolicy {
@@ -1306,7 +1289,9 @@ export function checkRetry(v: unknown): RetryPolicy {
   return { backoff_ms: backoff, max_failed: max };
 }
 
-/** R-BTN-94's dispatch shape for `unblocked_trigger` (R-BTN-77): on GitHub a workflow path. */
+/** R-BTN-94's dispatch shape for `unblocked_trigger` (R-BTN-77, B-168: a GitHub workflow on the
+ *  default branch, a GitLab trigger or Gitea's — Baton never reads the workflow file; a forge
+ *  that refuses the dispatch is logged with its reason). */
 function checkTrigger(v: unknown): Record<string, unknown> {
   if (!isObj(v) || typeof v.kind !== 'string') bad('unblocked_trigger', 'must be a dispatch {kind, …}');
   const t = v as Record<string, unknown>;
