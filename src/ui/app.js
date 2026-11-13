@@ -90,8 +90,9 @@ function renderReady() {
     body.append(el('tr', {},
       el('td', { text: i + 1, cls: 'num' }),
       el('td', {}, el('span', { text: r.id, cls: 'muted' }), document.createTextNode(' '), httpsLink(r.title, r.url)),
-      // A ticket's tier is git's: shown beside the commit that last changed the ticket (S-BTN-39).
-      el('td', { text: `${r.tier ?? 'untiered'}${r.changed_in ? ` · ${short(r.changed_in)}` : ''}` }),
+      // A ticket's tier is git's: shown beside the commit that last changed the ticket (S-BTN-39)
+      // and, when Baton read one, the pusher that last wrote it (B-126).
+      el('td', { text: `${r.tier ?? 'untiered'}${r.changed_in ? ` · ${short(r.changed_in)}` : ''}${r.last_written_by ? ` · last by ${r.last_written_by.pusher}` : ''}` }),
       reqs,
       el('td', { text: r.rank_reason, cls: 'muted' })));
   });

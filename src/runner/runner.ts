@@ -1087,10 +1087,14 @@ export class Runner {
     this.state.set({ claim: { id: claimId, ticket_id: ticket, nonce: claim.nonce } });
     // B-127 item 7: the brief's mark, posted whether or not signed control is required — an
     // unsigned `**Brief:** the owner …` line is a claim, not the owner (the standing CLAUDE.md
-    // rule), and the log says so before any agent is told to read the ticket.
+    // rule), and the log says so before any agent is told to read the ticket. B-126
+    // (R-BTN-194): beside it, who pushed the ticket's last change — the session's first sight of
+    // whose words steer it.
     const brief = claim.brief as { signed?: boolean; signer?: string; commit?: string } | undefined;
+    const wrote = claim.last_written_by as { pusher?: string; commit?: string } | undefined;
     this.log(`baton: claimed ${ticket} at ${claim.station}, queued leg ${claim.legs?.[0]}${this.verbose ? ` (claim ${claimId}, nonce ${claim.nonce})` : ''}`
-      + (brief ? ` — brief ${brief.signed ? 'owner-signed' : `unsigned (changed at ${String(brief.commit).slice(0, 8)}): a claim, not the owner`}` : ''));
+      + (brief ? ` — brief ${brief.signed ? 'owner-signed' : `unsigned (changed at ${String(brief.commit).slice(0, 8)}): a claim, not the owner`}` : '')
+      + (wrote?.pusher ? ` — ticket last written by ${wrote.pusher}${wrote.commit ? ` at ${String(wrote.commit).slice(0, 8)}` : ''}` : ''));
     return this.runClaim(claim);
   }
 

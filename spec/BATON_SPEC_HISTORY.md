@@ -2810,6 +2810,27 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   record's own keys, was not taken: the post names those keys, and a post naming fewer could
   roll a group back to an older owner-signed commit.
 
+- **2026-11-13 — R-BTN-194 added, R-BTN-73 amended: every ticket carries who last wrote it** (B-126).
+  Rules changed: R-BTN-194, R-BTN-73.
+  The security model's option 9 (reach 3; the owner, 2026-10-27): each ticket is served with
+  `last_written_by: {pusher, pusher_id?, commit, at}` — the pusher of the newest commit that
+  changed its file, read from Baton's own record of the App's push deliveries over the range a
+  post accepts, never the post's account and never the commit author — in the board read, the
+  dashboard's ready rows, the recommendations, the claim answer (whose runner prints it at the
+  claim) and a new ticket read, `GET /v1/repositories/{repository}/tickets/{ticket}`, which
+  `baton ticket show` prints first. A change no recorded delivery accounts for (missing, pruned,
+  past the recording bounds, or a forge that sends none) is `pusher-unknown`. The signer half is
+  B-127's existing brief mark `{signed, signer?, commit}`, served beside it, not a second field.
+  R-BTN-73's GitHub push now also records `sender.id`, `sender.login`, `ref`, `before`, `after`
+  and each commit's changed paths, bounded (30 commits, 600 paths) and kept 24 hours
+  (`push_deliveries`, §13). **Descoped** (the owner, 2026-11-13): B-126 as filed also asked for
+  a `control-changed` notice when a non-owner's push changes a control input, with an
+  owner-identities route (`baton owner identity add`) and a `control_paths` setting to serve it;
+  all of it is dropped, for under `cooperative` Baton carries no foreign-write notice (the
+  owner's 2026-11-01 ruling, R-BTN-66, "Remove it"), and B-127's opt-in `unsigned-control`
+  notice (`require_signed_control`) is the detection for a repository that wants it. Provenance
+  is information only: nothing is refused, held or noticed. Scenario S-BTN-220.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

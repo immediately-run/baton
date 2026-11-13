@@ -167,7 +167,14 @@ describe('plan: one request per command', () => {
     expect(plan('ticket', ['history', 'docs:R3-1'], key)).toEqual({ method: 'GET', path: '/v1/repositories/docs/tickets/R3-1/history' });
     expect(plan('ticket', ['history', 'docs:R3-1', '--before', '40', '--limit', '20'], key).path).toBe('/v1/repositories/docs/tickets/R3-1/history?before=40&limit=20');
     expect(() => plan('ticket', ['history', 'R3-1'], key)).toThrow('<repository>:<id>');
-    expect(() => plan('ticket', ['show', 'docs:R3-1'], key)).toThrow('baton ticket history');
+    // B-126 (R-BTN-194): the ticket itself, provenance first.
+    expect(plan('ticket', ['show', 'docs:R3-1'], key)).toEqual({ method: 'GET', path: '/v1/repositories/docs/tickets/R3-1' });
+    expect(() => plan('ticket', ['show', 'R3-1'], key)).toThrow('<repository>:<id>');
+    expect(() => plan('ticket', ['show', 'docs:R3-1', 'extra'], key)).toThrow('no further argument');
+  });
+
+  it('owner identity is no command (B-126 descoped, the owner 2026-11-13: no control-changed notice to quieten)', () => {
+    expect(() => plan('owner', ['identity', 'add', 'docs', '707'], key)).toThrow('baton owner grants|');
   });
 
   it('owner courier commands (R-BTN-80)', () => {

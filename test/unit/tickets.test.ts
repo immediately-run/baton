@@ -74,7 +74,9 @@ describe('the tickets cache', () => {
       // B-183: the ticket's opaque version ('' when the source posts none) and stable key.
       'version', 'key',
       // B-127: the brief's mark (0040).
-      'brief']);
+      'brief',
+      // B-126: who last pushed the ticket's body (R-BTN-194).
+      'last_written_by']);
   });
 });
 

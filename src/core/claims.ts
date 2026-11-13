@@ -17,6 +17,7 @@ import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from
 import type { Seen, Stations } from './stations';
 import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
 import { legStateOf } from './policy';
+import { briefMark, writtenBy, type LastWrittenBy } from './provenance';
 import type { Row, SqlValue, Store } from './ports';
 import type { Blocks } from './blocks';
 import type { History } from './history';
@@ -95,6 +96,10 @@ interface ItemFacts {
   operator_only: boolean;
   expedite: boolean;
   rank: number | null;
+  /** B-126 (R-BTN-194): who last pushed the ticket's body, when Baton has a record of it. */
+  last_written_by?: LastWrittenBy;
+  /** B-127 item 7: the brief's mark — whether an owner key signed it, and which. */
+  brief?: { signed: boolean; signer?: string; commit: string };
   /** Where the head snapshot places it, or null when it places it nowhere. */
   station: { station: string; path: Step[]; next_leg: string | null; to_end: number; handoff_url: string | null } | null;
 }
@@ -120,6 +125,10 @@ export interface Recommendation {
   reasons: string[];
   flags: string[];
   handoff_url: string | null;
+  /** B-126 (R-BTN-194): who last pushed the ticket's body, when Baton has a record of it. */
+  last_written_by?: LastWrittenBy;
+  /** B-127 item 7: the brief's mark, served beside it (the signer half of provenance). */
+  brief?: { signed: boolean; signer?: string; commit: string };
 }
 
 interface HeldClaim {
@@ -323,8 +332,8 @@ export class Claims {
 
   /** A ticket's filter fields and where the head snapshot places it (R-BTN-33, R-BTN-70). */
   private item(id: string): ItemFacts | null {
-    const r = this.rows<{ id: string; repository_id: string; course_id: string; path: string; tier: string | null; requires_clause: string; operator_only: number; rank: number | null; expedite: number }>(
-      'SELECT id, repository_id, course_id, path, tier, requires_clause, operator_only, rank, expedite FROM tickets WHERE id = ?', id)[0];
+    const r = this.rows<{ id: string; repository_id: string; course_id: string; path: string; tier: string | null; requires_clause: string; operator_only: number; rank: number | null; expedite: number; last_written_by: string | null; brief: string | null }>(
+      'SELECT id, repository_id, course_id, path, tier, requires_clause, operator_only, rank, expedite, last_written_by, brief FROM tickets WHERE id = ?', id)[0];
     if (!r) return null;
     const requires = r.requires_clause === 'listed'
       ? this.rows<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ? ORDER BY name', id).map((x) => x.name)
@@ -334,7 +343,28 @@ export class Claims {
     return {
       id: r.id, repository: r.repository_id, course: r.course_id, path: r.path, tier: r.tier, requires, operator_only: !!r.operator_only, rank: r.rank,
       expedite: !!r.expedite || !!this.override(id)?.expedite,
+      ...((w) => (w ? { last_written_by: w } : {}))(writtenBy(r.last_written_by)),
+      ...((b) => (b ? { brief: b } : {}))(briefMark(r.brief)),
       station: s ? { station: s.station, path: JSON.parse(s.path) as Step[], next_leg: s.next_leg, to_end: s.to_end, handoff_url: s.handoff_url } : null,
+    };
+  }
+
+  /** `GET /v1/repositories/{repository}/tickets/{ticket}` (§11, R-BTN-194): the ticket as Baton
+   *  holds it — its filter fields, where the head snapshot places it, who last pushed its body
+   *  and its brief mark (B-127) — for the principals that may read its blocks. Null when the ticket is not on the board. */
+  ticketView(id: string): Record<string, unknown> | null {
+    const item = this.item(id);
+    if (!item) return null;
+    const r = this.rows<{ title: string; project: string | null; expedite: number; snapshot_sha: string; course_id: string }>(
+      'SELECT title, project, expedite, snapshot_sha, course_id FROM tickets WHERE id = ?', id)[0];
+    return {
+      ticket_id: item.id, repository: item.repository, course_id: r?.course_id ?? item.course, title: r?.title ?? null,
+      path: item.path, tier: item.tier, requires: item.requires ?? [], operator_only: item.operator_only, expedite: item.expedite,
+      rank: item.rank, snapshot_sha: r?.snapshot_sha ?? null,
+      station: item.station ? { station: item.station.station, path: item.station.path, next_leg: item.station.next_leg, to_end: item.station.to_end,
+        ...(item.station.handoff_url ? { handoff_url: item.station.handoff_url } : {}) } : null,
+      ...(item.last_written_by ? { last_written_by: item.last_written_by } : {}),
+      ...(item.brief ? { brief: item.brief } : {}),
     };
   }
 
@@ -640,6 +670,8 @@ export class Claims {
       reasons: [...(r.lane ? ['expedite lane'] : []), `${r.to_end} leg${r.to_end === 1 ? '' : 's'} to an end`, `rank ${r.item.rank ?? '—'} in ${r.repository_id}`],
       flags: r.waits ? ['expedite-bound'] : [],
       handoff_url: r.item.station!.handoff_url,
+      ...(r.item.last_written_by ? { last_written_by: r.item.last_written_by } : {}),
+      ...(r.item.brief ? { brief: r.item.brief } : {}),
     }));
   }
 
@@ -857,7 +889,7 @@ export class Claims {
     const courseVersion = c.course_id
       ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(c.ticket_id), c.course_id)[0]?.version ?? null
       : null;
-    const ticketRow = this.rows<{ path: string; version: string; key: string | null }>('SELECT path, version, key FROM tickets WHERE id = ?', c.ticket_id)[0] ?? null;
+    const ticketRow = this.rows<{ path: string; version: string; key: string | null; last_written_by: string | null }>('SELECT path, version, key, last_written_by FROM tickets WHERE id = ?', c.ticket_id)[0] ?? null;
     const path = ticketRow?.path ?? null;
     // B-183 (§4.5): the ticket's opaque `version` as the board holds it, and how its source
     // reads — pinned (at a version) or current (as it is now) — so the runner re-verifies the
@@ -901,6 +933,9 @@ export class Claims {
       // B-183 (§4.5): the ticket's version and the source's reading of it — `version` is `''`
       // when the source posts none, and `ticket_source` is null when the board declared none.
       version: ticketRow?.version ?? '', ...(source?.source_kind ? { ticket_source: { kind: source.source_kind, versions: source.source_versions } } : {}),
+      // B-126 (R-BTN-194): who last changed the ticket's body — beside the brief's mark (B-127),
+      // the first thing a privileged session should know of it, before it reads the body.
+      ...((w) => (w ? { last_written_by: w } : {}))(writtenBy(ticketRow?.last_written_by)),
       ...(defaultBranch ? { default_branch: defaultBranch } : {}),
       previous_attempts: previous.map((p) => ({
         claim_id: p.id, status: p.status, end_reason: p.end_reason, detail: p.end_detail, ended_at: p.ended_at,

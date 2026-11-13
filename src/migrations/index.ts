@@ -44,6 +44,7 @@ import retireOntology from './0042_retire_ontology.sql';
 import part4Resources from './0043_part4_resources.sql';
 import part4Settings from './0044_part4_settings.sql';
 import checkConclusions from './0045_check_conclusions.sql';
+import ticketProvenance from './0046_ticket_provenance.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -142,4 +143,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 44, sql: part4Settings },
   // 0045 is B-169's (the owners' `checks` map), renumbered at the merge behind B-168's 0043–0044.
   { id: 45, sql: checkConclusions },
+  // 0046 is B-126's (ticket provenance), numbered behind B-169's 0045.
+  { id: 46, sql: ticketProvenance },
 ];

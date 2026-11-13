@@ -68,6 +68,8 @@
 //   baton run [--home <checkout>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
 //             [--harness opencode|claude-code] [--verbose]   (R-BTN-72: the worker loop)
 //   baton ticket -i KEY history TICKET [--before ID] [--limit N]                    (R-BTN-81)
+//   baton ticket -i KEY show TICKET                        — the ticket as Baton holds it (B-126): who
+//                last pushed it and its brief's mark (B-127) printed first, then the ticket as JSON
 //   baton decision list -i KEY [--watch | --all]
 //                — the CLI courier (R-BTN-80): claims the key's notices, prints them as text and
 //                marks them sent; --watch asks once a minute; --all lists every open decision it delivers
@@ -268,14 +270,25 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
   }
   if (role === 'ticket') {
     // R-BTN-81: a ticket's history, newest first — signed by an owner, an administrator or a key
-    // granted on its repository, the principals of its blocks.
-    if (cmd !== 'history') throw new Error('baton ticket history TICKET [--before ID] [--limit N]');
-    const { flags, positional } = parseArgs(rest, [], ['before', 'limit'], 1);
-    const ticket = need(positional[0], 'the ticket, <repository>:<id>');
-    const i = ticket.indexOf(':');
-    if (i < 1) throw new Error('the ticket is <repository>:<id>');
-    const q = new URLSearchParams({ ...(flags.before ? { before: flags.before } : {}), ...(flags.limit ? { limit: flags.limit } : {}) });
-    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(ticket.slice(0, i))}/tickets/${encodeURIComponent(ticket.slice(i + 1))}/history${q.size ? `?${q}` : ''}` };
+    // granted on its repository, the principals of its blocks. B-126 (R-BTN-194): `show` reads
+    // the ticket itself, the same three ways.
+    const ticket = (t) => {
+      const i = String(t).indexOf(':');
+      if (i < 1) throw new Error('the ticket is <repository>:<id>');
+      return { repository: String(t).slice(0, i), local: String(t).slice(i + 1) };
+    };
+    if (cmd === 'history') {
+      const { flags, positional } = parseArgs(rest, [], ['before', 'limit'], 1);
+      const t = ticket(need(positional[0], 'the ticket, <repository>:<id>'));
+      const q = new URLSearchParams({ ...(flags.before ? { before: flags.before } : {}), ...(flags.limit ? { limit: flags.limit } : {}) });
+      return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(t.repository)}/tickets/${encodeURIComponent(t.local)}/history${q.size ? `?${q}` : ''}` };
+    }
+    if (cmd === 'show') {
+      const { positional } = parseArgs(rest, [], [], 1);
+      const t = ticket(need(positional[0], 'the ticket, <repository>:<id>'));
+      return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(t.repository)}/tickets/${encodeURIComponent(t.local)}` };
+    }
+    throw new Error('baton ticket history TICKET [--before ID] [--limit N] | baton ticket show TICKET');
   }
   if (role === 'board') {
     // B-90: the board of one repository, as the dashboard reads it — a GET any key granted on the
@@ -1077,6 +1090,15 @@ export async function main(argv) {
     return 1;
   }
   if (role === 'admin' && args[0] === 'open' && json?.url) process.stdout.write(`${json.url}\n`);
+  else if (role === 'ticket' && args[0] === 'show' && json && status >= 200 && status < 300) {
+    // B-126 (R-BTN-194): the provenance first — a privileged session sees whose words steer the
+    // ticket before it reads anything else of it.
+    const lw = json.last_written_by ?? null;
+    const brief = json.brief ?? null;
+    process.stdout.write(`last written by ${lw ? `${lw.pusher}${lw.commit ? ` at ${String(lw.commit).slice(0, 8)}` : ''}${lw.at ? ` (${new Date(lw.at).toISOString()})` : ''}` : 'no one Baton could name'}`
+      + `${brief ? ` — brief ${brief.signed ? `owner-signed${brief.signer ? ` by ${brief.signer}` : ''}` : 'unsigned'}` : ''}\n`);
+    process.stdout.write(`${JSON.stringify(json)}\n`);
+  }
   else process.stdout.write(`${JSON.stringify(json)}\n`);
   return status >= 200 && status < 300 ? 0 : 1;
 }
