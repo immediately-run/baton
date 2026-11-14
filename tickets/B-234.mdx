@@ -1,0 +1,92 @@
+---
+title: "B-234 — Build R-BTN-195: autonomous legs and the interaction request (`interact`), delivered from Baton's list"
+id: B-234
+project: baton
+status: available
+updated: 2026-11-14
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1233
+tier: judgement
+description: "Build what PR #237 specified: a leg may be declared `autonomous` (it never asks for a person and fails with the non-retryable `error.needs-person`); any other leg may raise the standard `notify` type `interact` while it has a `deadline_s` and its run has a session link, Baton setting the condition's `url` from the stored `session_url`, filing no handler ticket and listing it on Needs you for a delivery runner to send; one open per run; a joinable session ends at its posted result and the runner then stops it. Requires: PR #237 merged."
+topics:
+  - baton
+  - conditions
+  - people
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** see the description. The owner's discussion and rulings are in
+`spec/BATON_SPEC_HISTORY.md`'s 2026-11-14 entry.
+
+**Spec:** [BATON_SPEC §7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1)
+([R-BTN-195](../spec/BATON_SPEC/07-conditions.md#sec-7-1), [R-BTN-160](../spec/BATON_SPEC/07-conditions.md#sec-7-1)),
+[§7.2](../spec/BATON_SPEC/07-conditions.md#sec-7-2) ([R-BTN-161](../spec/BATON_SPEC/07-conditions.md#sec-7-2)),
+[§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3)),
+[§5](../spec/BATON_SPEC/05-courses.md) ([R-BTN-69](../spec/BATON_SPEC/05-courses.md)),
+[§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3), [R-BTN-113](../spec/BATON_SPEC/08-runners.md#sec-8-3)).
+
+### What to build
+
+1. **The course file (R-BTN-69).** The leg field `autonomous`. The validator refuses it on a
+   `kind: person`, `call` or `arrives` leg, and beside a `conditions` list naming `interact`, a
+   `suspend` type or a subtype of either, naming the leg and the field.
+2. **The standard types (R-BTN-160).** `interact` (`notify`) and `error.needs-person`
+   (`interrupt`, `retryable: false`) in the standard table and the signature `baton course test`
+   prints.
+3. **The runner's raise check (R-BTN-160, R-BTN-195).** Refuse on the channel, with the reason
+   and without reaching Baton:
+   - from an autonomous leg: `interact` and every `suspend` type;
+   - `interact` from a leg with no `deadline_s`, or from a run with no session link.
+
+   An autonomous leg's `error` is never resolved through a `"replaces": "retry"` binding. Carry
+   `autonomous` in the executor's brief as a hint (R-BTN-107).
+4. **The core (R-BTN-195, R-BTN-160, R-BTN-161, R-BTN-163).**
+   - On an `interact` report, set `conditions.url` from `claim_legs.session_url` and ignore the
+     body's `url`. Refuse the report when no session link is stored.
+   - Ignore a binding of `interact`; file no handler id.
+   - Close an open `interact` of the same run, outcome `superseded`, in the transaction that
+     records a new one, and close it when its run ends.
+   - List open `interact` conditions on Needs you and in
+     `GET /v1/repositories/{repository}/conditions?type=interact`, with `url`.
+5. **A joinable session's end (R-BTN-107, R-BTN-195).** `end(handle)` resolves at the result
+   posted on the leg's channel for a session that does not exit by itself; the runner then calls
+   `stop`, whether or not a person is in the session.
+6. **The CLI.** `baton leg raise interact --subject … [--body <file>]`. The subject and body stay
+   in the runner's log and are never sent to Baton.
+
+**Done when** S-BTN-222 passes as a scenario test, `npm test` and `npm run typecheck` are green,
+and `baton course test` prints the two new standard types.
+
+### Trust
+
+- **The raise** is the claim holder's command on its channel, checked by the runner (R-BTN-106).
+  Its `url` is not trusted: Baton uses the session link it already holds, which the holder
+  reported on a heartbeat and Baton kept only on a `session_hosts` host (R-BTN-113, G-BTN-101).
+  A compromised holder can therefore point a request only at an allowlisted host.
+- **The subject and body** are the leg's own text, and may be hostile. They never reach Baton or
+  a delivery runner, so no link in them reaches a person through this path.
+- **`autonomous`** is course-file text under the repository's control paths (R-BTN-66). Under
+  `cooperative`, anyone who can push can clear it; that only makes a leg able to ask.
+- **The delivery runner** reads the conditions list with a reader grant, the read R-BTN-163
+  already serves. It writes nothing to Baton.
+
+### Invariants
+
+- **R-BTN-33, filter fields only:** no subject, body or other leg text is stored. The condition
+  holds identifiers and the checked `url`.
+- **R-BTN-50 and R-BTN-98:** core names `interact` and `error.needs-person` as its own vocabulary.
+  It reads no course meaning and runs no repository code. Delivery stays a runner's.
+- **R-BTN-116:** a course still waits on a person only through a person leg. Nothing waits on
+  `interact`: the raise returns at once.
+- **R-BTN-113 / G-BTN-101:** the only link a request carries is a stored, allowlisted session link.
+- **R-BTN-162:** `hitl` from a leg that is not autonomous, scripts with no link included, behaves
+  exactly as before (S-BTN-127, S-BTN-131, G-BTN-149 stay green).
+
+## Status
+
+_filed 2026-11-14, with PR #237's amendment (R-BTN-195)._
