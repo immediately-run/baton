@@ -2894,26 +2894,31 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   mockup's unbuilt elements are a Decisions line with their reasons. The old view names go to
   the Migrations below; the brief (`docs/context/design-brief.mdx`) was checked against the
   amended §11.4 and its drift fixed.
-- **2026-11-14 — R-BTN-195 added; R-BTN-69, R-BTN-107, R-BTN-113, R-BTN-160, R-BTN-161, R-BTN-169 amended: a person is asked into the leg's session.**
-  Rules changed: R-BTN-195, R-BTN-69, R-BTN-107, R-BTN-113, R-BTN-160, R-BTN-161, R-BTN-169.
+- **2026-11-14 — R-BTN-195 added; R-BTN-69, R-BTN-107, R-BTN-113, R-BTN-160, R-BTN-161, R-BTN-163 amended: a person is asked into the leg's session.**
+  Rules changed: R-BTN-195, R-BTN-69, R-BTN-107, R-BTN-113, R-BTN-160, R-BTN-161, R-BTN-163,
+  and the leads of §6.4 and §7.
   The owner, on how a leg asks for human input: the native harnesses already handle a person
-  in the loop well, so Baton should hand the person to the harness rather than mediate, and
-  "we need to remove concepts". A leg may be declared `autonomous` (deterministic code, or an
-  agent that succeeds or fails): it never asks, and fails with its error or trace when it would
-  need a person; live debugging is not an option. Any other leg runs in an agent harness whose
-  UI a person can join (the session link of R-BTN-113), and asks for a person by raising the new
-  standard `notify` type `interact`, bound by default to `announce`, whose delivery runner sends
-  the link. "The user may choose to end their interaction with the agent harness web ui, which
-  leaves open a future interaction request invoked by the same leg during its execution": Baton
-  holds no state for an interaction, and the leg may raise again. The link a person is sent is
-  the run's session link as Baton checked it (R-BTN-113), carried as the condition's `url`
-  (R-BTN-160) — never a link from the handler ticket, whose text the leg wrote — and a runner
-  may report a page of its own that leads to the session as that link (R-BTN-113; the owner:
-  "The link should point to a runner on the tailnet with the ticket, leg and run id in the url.
-  The runner could then redirect or include the harness web ui via iframe"). Left out of the first version
-  and listed as possible later work in FIELDHOUSE_SPEC §5.1: a question with a menu that the
-  delivery runner delivers and the person answers without joining the session, and hibernating
-  a long-waiting leg, revived when the person loads the harness's UI or answers. Scenario S-BTN-222.
+  in the loop well, so Baton hands the person to the harness rather than mediating, and "we need
+  to remove concepts". A leg may be declared `autonomous` (deterministic code, or an agent that
+  succeeds or fails): it never asks, and fails with the new non-retryable `error.needs-person`;
+  live debugging is not an option. Any other leg may raise the new standard type `interact`
+  while its run has a session link and a `deadline_s`. Baton sets the condition's `url` from the
+  run's stored session link; no binding applies and no handler ticket is filed; the condition is
+  on Needs you and a delivery runner sends it from Baton's list with the ticket, leg and link and
+  none of the leg's text. "The user may choose to end their interaction with the agent harness
+  web ui, which leaves open a future interaction request invoked by the same leg during its
+  execution": Baton tracks nothing of the interaction, and a later raise in the run supersedes the
+  open one. A joinable session ends at the result posted on its channel, and the runner then stops
+  it. R-BTN-113 lets the session link be a page the runner serves that leads to the session (the
+  owner: "The link should point to a runner on the tailnet with the ticket, leg and run id in the
+  url. The runner could then redirect or include the harness web ui via iframe"). §6.4 and §7 now
+  say a course waits on a person one way, a person leg. Before the PR merged, an adversarial review
+  moved delivery from a handler ticket bound to `announce` to Baton's list: under
+  `tickets-approved` a handler ticket is only proposed and nothing would have sent it (the owner:
+  "read from Baton's list"). Left out of the first version and listed as possible later work in
+  FIELDHOUSE_SPEC §5.1: a question with a menu that the delivery runner delivers and the person
+  answers without joining the session, and hibernating a long-waiting leg, revived when the
+  person loads the leg page or answers. Scenario S-BTN-222.
 
 ## Retired requirements
 
