@@ -211,3 +211,4 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   bound to loopback (B-182's decision, option (a)): slightly fiddly once — a second OS user for
   the runners' keys — and no spec change; a later ticket can loosen it if (a) proves too awkward
   in practice (2026-11-12, B-182; R-BTN-105, `docs/runbooks/local-home.mdx`).
+- Chose, for the first factory, a person joining the leg's own agent session through its harness's UI, asked by an `interact` notice a delivery runner sends with the session's link, Baton holding nothing for the interaction, and autonomous legs that fail rather than ask, over answers, pauses and hibernation in Baton (2026-11-14, the owner: "we need to remove concepts"; R-BTN-195, R-BTN-69, R-BTN-107).

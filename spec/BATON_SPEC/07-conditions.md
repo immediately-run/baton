@@ -37,6 +37,7 @@ Limits that hold throughout:
     |---|---|---|
     | `hitl` | `suspend` | any leg |
     | `warning` | `notify` | any leg |
+    | `interact` | `notify` | a leg that is not autonomous, while its run has a session link (R-BTN-195) |
     | `error` | `interrupt` | any leg; core's classes are `error.transient`, `error.capability`, `error.spec`, `error.contract-output`, `error.contract-input` |
     | `baton` | per sub (R-BTN-163) | core only |
 
@@ -117,6 +118,33 @@ Limits that hold throughout:
     - Core conditions are `normal`, except `baton.contract`, which is `high`.
   - **What it does.** Severity is data for the handler course and the order of the debugger's
     list (R-BTN-163). It routes nothing and gates nothing.
+- **R-BTN-195 (an interaction request asks a person into the leg's session).** A leg that wants
+  a person raises `interact`; the person joins the leg's agent session in its harness's own UI,
+  and everything they and the agent say passes there, never through Baton.
+  - **Autonomous legs.** A leg declared `"autonomous": true` (R-BTN-69) never asks for a person:
+    it may raise neither `interact` nor `hitl`, and the validator refuses it with a `conditions`
+    list naming either. The executor's brief carries the flag (R-BTN-107), so a session a person
+    can join is started only for a leg that is not autonomous. A leg whose run has no session
+    link (R-BTN-113) — a script's, or an agent's under an executor that names none — is
+    autonomous whatever it declares. An autonomous leg that cannot go on without a person fails:
+    it raises an `error` type (an exception the script does not type is `error.transient`,
+    R-BTN-160), its message the error's and its trace in the leg log (R-BTN-128).
+  - **The raise.** `interact` is checked as every raise is (R-BTN-160); a raise from an
+    autonomous leg, or from a run with no session link, is refused on the channel with the
+    reason. The runner writes the run's session link into the handler ticket (R-BTN-161) after
+    the subject and body the leg supplied, so the link travels in git, never in Baton's state
+    (R-BTN-33).
+  - **Delivery.** Like any `notify` type, a bound `interact` files its handler ticket and an
+    unbound one is only recorded (R-BTN-160), so no one is asked. The standard binding is
+    `announce` (R-BTN-169), whose `send` leg delivers the subject, the body and the link through
+    a delivery runner's channel (R-BTN-161).
+  - **Baton holds nothing for the interaction.** The raise returns at once and the leg goes on.
+    Baton does not learn when the person joins, answers or leaves. The person may close the
+    harness's UI at any time; the leg runs on, and may raise `interact` again later in the same
+    run. Each raise is a new condition, within R-BTN-160's limits.
+  - **Nobody comes.** Nothing waits on the request. The session is bounded by the run's
+    `deadline_s` and by the lease (R-BTN-167, R-BTN-9); an end at the deadline is a failed
+    attempt (R-BTN-90).
 ### 7.2 Handlers
 
 - **R-BTN-161 (bindings choose a handler course; the handler is a ticket file).**
@@ -695,9 +723,9 @@ Limits that hold throughout:
       stays on the floor.
     - The shipped scripts send a generic signed webhook and SMTP mail. A repository overrides
       `push` and `retract` for its own channel.
-  - **`announce`**, for `warning` and `error`, has one leg, `send`, which needs the
+  - **`announce`**, for `warning`, `error` and `interact` (R-BTN-195), has one leg, `send`, which needs the
     capability `channel:push`. Its ends are `sent` and `undeliverable`. It never handles
     `baton.*`, which no ticket carries (R-BTN-163).
   - **Binding them.** `baton repo init --bind-conditions` writes `{"hitl": "ask", "warning":
-    "announce"}` into `.baton/baton.json`. Without that option a repository binds nothing, and
+    "announce", "interact": "announce"}` into `.baton/baton.json`. Without that option a repository binds nothing, and
     every leg-raised condition reaches the debugger.

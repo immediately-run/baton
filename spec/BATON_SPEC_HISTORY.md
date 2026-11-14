@@ -2831,6 +2831,24 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   notice (`require_signed_control`) is the detection for a repository that wants it. Provenance
   is information only: nothing is refused, held or noticed. Scenario S-BTN-220.
 
+- **2026-11-14 — R-BTN-195 added; R-BTN-69, R-BTN-107, R-BTN-160, R-BTN-169 amended: a person is asked into the leg's session.**
+  Rules changed: R-BTN-195, R-BTN-69, R-BTN-107, R-BTN-160, R-BTN-169.
+  The owner, on how a leg asks for human input: the native harnesses already handle a person
+  in the loop well, so Baton should hand the person to the harness rather than mediate, and
+  "we need to remove concepts". A leg may be declared `autonomous` (deterministic code, or an
+  agent that succeeds or fails): it never asks, and fails with its error or trace when it would
+  need a person; live debugging is not an option. Any other leg runs in an agent harness whose
+  UI a person can join (the session link of R-BTN-113), and asks for a person by raising the new
+  standard `notify` type `interact`, bound by default to `announce`, whose delivery runner sends
+  the link. "The user may choose to end their interaction with the agent harness web ui, which
+  leaves open a future interaction request invoked by the same leg during its execution": Baton
+  holds no state for an interaction, and the leg may raise again. Considered in the same
+  discussion and left out of the first version — answers and restarts for in-session
+  questions, keeping a waiting leg's sandbox alive past its claim, hibernation to a disk
+  snapshot with an expiry, a debug mode for infrastructure failures, takeover of a blocked leg,
+  mapping each harness's own ask tool onto a raise — are listed as later work in FIELDHOUSE_SPEC
+  §5, since each depends on the sandbox layer. Scenario S-BTN-221.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

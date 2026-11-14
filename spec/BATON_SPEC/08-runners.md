@@ -342,7 +342,8 @@ the runner's credentials under any other executor is that executor's, never Bato
   - **The interface**, `executor_api: 1`:
     - `start({brief, executor, inputs, channel}) → handle` starts a leg session. `brief` holds the
       session's kind, the ticket, the leg, its input URIs, the hand-off document, the leg's
-      instructions and its agent command (R-BTN-131), and `reads_only` as a hint (R-BTN-183) —
+      instructions and its agent command (R-BTN-131), whether the leg is `autonomous`
+      (R-BTN-195), and `reads_only` as a hint (R-BTN-183) —
       never the claim id, the runner secret or a Baton credential; `executor` is the leg's
       executor data (below); `channel` is the address of the leg's channel (R-BTN-106). A
       handle may name the session's link, which the runner reports as R-BTN-113 says.
