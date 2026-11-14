@@ -2831,8 +2831,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   notice (`require_signed_control`) is the detection for a repository that wants it. Provenance
   is information only: nothing is refused, held or noticed. Scenario S-BTN-220.
 
-- **2026-11-14 — R-BTN-195 added; R-BTN-69, R-BTN-107, R-BTN-160, R-BTN-169 amended: a person is asked into the leg's session.**
-  Rules changed: R-BTN-195, R-BTN-69, R-BTN-107, R-BTN-160, R-BTN-169.
+- **2026-11-14 — R-BTN-195 added; R-BTN-69, R-BTN-107, R-BTN-113, R-BTN-160, R-BTN-161, R-BTN-169 amended: a person is asked into the leg's session.**
+  Rules changed: R-BTN-195, R-BTN-69, R-BTN-107, R-BTN-113, R-BTN-160, R-BTN-161, R-BTN-169.
   The owner, on how a leg asks for human input: the native harnesses already handle a person
   in the loop well, so Baton should hand the person to the harness rather than mediate, and
   "we need to remove concepts". A leg may be declared `autonomous` (deterministic code, or an
@@ -2842,7 +2842,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   standard `notify` type `interact`, bound by default to `announce`, whose delivery runner sends
   the link. "The user may choose to end their interaction with the agent harness web ui, which
   leaves open a future interaction request invoked by the same leg during its execution": Baton
-  holds no state for an interaction, and the leg may raise again. Left out of the first version
+  holds no state for an interaction, and the leg may raise again. The link a person is sent is
+  the run's session link as Baton checked it (R-BTN-113), carried as the condition's `url`
+  (R-BTN-160) — never a link from the handler ticket, whose text the leg wrote — and a runner
+  may report a page of its own that leads to the session as that link (R-BTN-113; the owner:
+  "The link should point to a runner on the tailnet with the ticket, leg and run id in the url.
+  The runner could then redirect or include the harness web ui via iframe"). Left out of the first version
   and listed as possible later work in FIELDHOUSE_SPEC §5.1: a question with a menu that the
   delivery runner delivers and the person answers without joining the session, and hibernating
   a long-waiting leg, revived when the person loads the harness's UI or answers. Scenario S-BTN-221.

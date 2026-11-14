@@ -460,7 +460,8 @@ the runner's credentials under any other executor is that executor's, never Bato
   512 characters, without userinfo, with its host in the instance's `session_hosts` (an
   administrator's setting, default `claude.ai`), else it is dropped and logged. Stored on
   `claim_legs.session_url` (latest wins while running) and shown on Running and the Timeline;
-  under an executor whose handle names its session's link (R-BTN-107), it is that link.
+  under an executor whose handle names its session's link (R-BTN-107), it is that link, or a
+  page the runner serves that leads a person to the session.
 
 ### 8.4 Where and how a leg runs
 

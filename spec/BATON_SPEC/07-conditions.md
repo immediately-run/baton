@@ -89,8 +89,9 @@ Limits that hold throughout:
     /v1/runner/claims/{id}/conditions` and the body `{type, disposition, handler?, restarts,
     default?, severity?, url?}`.
     - The body holds filter fields only (R-BTN-33), never the subject or the body. `url` is sent
-      only for an unbound `suspend` and points to where git holds the question (the leg's
-      evidence or its hand-off), under R-BTN-92's link rule.
+      for an unbound `suspend`, pointing to where git holds the question (the leg's evidence or
+      its hand-off) under R-BTN-92's link rule, and for `interact`, as the run's session link
+      under R-BTN-113's (R-BTN-195); it is sent for no other raise.
     - Baton answers with a `condition_id` and, when `handler` names a course, the handler's id
       `handler_id` (below), and stores the `conditions` row; the runner then writes the handler
       ticket under that id. It records an activity of kind `condition` on the leg run and a
@@ -131,13 +132,14 @@ Limits that hold throughout:
     R-BTN-160), its message the error's and its trace in the leg log (R-BTN-128).
   - **The raise.** `interact` is checked as every raise is (R-BTN-160); a raise from an
     autonomous leg, or from a run with no session link, is refused on the channel with the
-    reason. The runner writes the run's session link into the handler ticket (R-BTN-161) after
-    the subject and body the leg supplied, so the link travels in git, never in Baton's state
-    (R-BTN-33).
+    reason. Its report's `url` is the run's session link, which Baton checks as R-BTN-113 checks
+    one and stores on the condition, and the handler's input carries it (R-BTN-161). The link a
+    person is sent is that one, never a link in the handler ticket, whose subject and body are the
+    leg's own text.
   - **Delivery.** Like any `notify` type, a bound `interact` files its handler ticket and an
     unbound one is only recorded (R-BTN-160), so no one is asked. The standard binding is
-    `announce` (R-BTN-169), whose `send` leg delivers the subject, the body and the link through
-    a delivery runner's channel (R-BTN-161).
+    `announce` (R-BTN-169), whose `send` leg delivers the subject and the condition's `url`
+    through a delivery runner's channel (R-BTN-161), and no link from the leg's own text.
   - **Baton holds nothing for the interaction.** The raise returns at once and the leg goes on.
     Baton does not learn when the person joins, answers or leaves. The person may close the
     harness's UI at any time; the leg runs on, and may raise `interact` again later in the same
@@ -187,8 +189,8 @@ Limits that hold throughout:
       an ordinary ticket.
   - **A handler course's contract.**
     - Its input (R-BTN-111) is a **`std:condition@1`**: `{type, disposition, restarts, default?,
-      severity?, raised_by: {ticket, leg?, run?}, question: <std:git.file@1>}`, `question` the
-      handler file.
+      severity?, url?, raised_by: {ticket, leg?, run?}, question: <std:git.file@1>}`, `question`
+      the handler file and `url` the condition's.
     - A course bound to a `suspend` type, or to an `interrupt` type with `"replaces": "retry"`
       (R-BTN-122), **asks through a person's leg** (R-BTN-116): every path of its graph from
       `start` to an end passes a person leg, or that leg's expiry reaching an end station (the
