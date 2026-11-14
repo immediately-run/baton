@@ -18,10 +18,11 @@ Limits that hold throughout:
 - Baton writes no git, sends no mail and calls no service but a forge's workflow dispatch
   (R-BTN-94). Every git write and every check run Baton intends goes through the outbox, which
   runners deliver (R-BTN-171).
-- Baton queues nothing for people. A person is reached one way, by a person's leg (R-BTN-116): a
-  `hitl` condition's handler course asks through one (R-BTN-169), and Baton's own conditions are
-  answered on their resolve page, which a delivery runner reads from Baton's own list
-  (R-BTN-163). No ticket file, outbox entry or deliverer stands between Baton and a person.
+- Baton queues nothing for people. A course waits on a person one way, by a person's leg
+  (R-BTN-116): a `hitl` condition's handler course asks through one (R-BTN-169), and Baton's own
+  conditions are answered on their resolve page, which a delivery runner reads from Baton's own
+  list (R-BTN-163). A leg asks a person into its session by `interact`, which nothing waits on
+  (R-BTN-195). No ticket file, outbox entry or deliverer stands between Baton and a person.
 - A ticket stays sequential (R-BTN-86). Everything below that runs in parallel is a child ticket.
 
 ### 7.1 Raising a condition

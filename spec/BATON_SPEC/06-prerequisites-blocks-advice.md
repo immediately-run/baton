@@ -302,11 +302,13 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
     `unavailable` for that requirement.
 ### 6.4 People
 
-A person is reached one way: a **person's leg**, a leg of the course that no runner may run and
+A course waits on a person one way: a **person's leg**, a leg of the course that no runner may run and
 that arrives when a person answers it with a `std:decision@1` (R-BTN-116). A question a running
 leg asks is a `hitl` condition whose handler course asks it through a person's leg (R-BTN-161,
 R-BTN-169); a decision a ticket source records in its own form is the question of a person's leg
 its course already has. Baton's own conditions are answered on their resolve page (R-BTN-163).
+A leg that wants a person in its agent session, waiting on no answer, raises `interact`
+(R-BTN-195).
 
 - **R-BTN-116 (a person's leg: the one way a course waits on a person).** A leg may be `"kind":
   "person"` with `"asks": <label>` (who answers; matches `^[a-z][a-z0-9-]{0,31}$`). No runner is
