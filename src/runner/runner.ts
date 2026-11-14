@@ -18,11 +18,13 @@ import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { verifySignedCommit, nodeKeygen } from '../shared/commitSign.mjs';
 import { controlGroupsOf, groupUnchangedAt } from '../defaults/signed-control';
+import { checkRaise, dispositionOf, errorClassOf, SEVERITIES, type ConditionDeclaration } from '../core/conditionTypes';
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
 import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, readHead, type CourseLoad } from './home';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
+import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
 import { MIN_SECRET_BYTES, createLegMasker, maskLegOutput, namesASecret, secretValues } from './mask';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { StateFile, leaseLostFrom, type RunnerState } from './state';
@@ -33,6 +35,10 @@ const LEG_PROCESS = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
 /** §6.3: the sidecar's cadence — every beat 2 minutes. */
 export const BEAT_MS = 2 * 60_000;
+/** B-234 (R-BTN-195, R-BTN-145): the default grace a released leg gets to take its safe point
+ * and exit by itself before its still-running session is treated as joinable-and-stuck — the
+ * stop ladder's own bound. */
+export const SIGNAL_GRACE_MS = 30_000;
 /** B-86: how many beats one claim attempt spends making the server's record of the declaration
  *  match the list the claim will carry — one for a fresh or legacy runner, one for the change it
  *  settles (review round 4, finding 4). */
@@ -98,6 +104,11 @@ export interface RunnerOptions {
    *  besides the names that say a secret by their ending. `baton run` reads them before the
    *  loop; absent (a caller that is not the CLI), none are named. */
   maskEnv?: string[];
+  /** B-234 (R-BTN-195, R-BTN-145): how long a released leg gets to take its safe point and exit
+   *  by itself before its still-running session is treated as joinable-and-stuck — killed,
+   *  stopped, the claim ended with the signal's reason. The default is the stop ladder's own
+   *  bound (R-BTN-145's 30 s); a test narrows it. */
+  signalGraceMs?: number;
 }
 
 /** The leg call in flight: its executor call, through which an abort line or a kill reaches it. */
@@ -323,6 +334,12 @@ export class Runner {
   private auditWindow: RefState | null = null;
   /** B-106 (R-BTN-178): this machine's locks, null when none were configured. */
   private readonly locks: MachineLocks | null;
+  /** B-234 (R-BTN-106, R-BTN-195): the running leg's channel — one socket per leg run, served
+   *  while the run's session is live, its address handed to the session as BATON_SOCKET. */
+  private legChannel: LegChannel | null = null;
+  /** B-234 (R-BTN-113): the running leg's session link, as its executor's handle names it —
+   *  reported on every beat and the raise check's word on whether the run holds a link. */
+  private legSessionUrl: string | null = null;
 
   constructor(options: RunnerOptions) {
     this.o = { beatEvery: BEAT_MS, ...options };
@@ -442,6 +459,9 @@ export class Runner {
       ...(this.o.testHarness ? { test_harness: true } : {}),
       lease_timeout_s: s.lease_timeout_s ?? 900,
       courses: this.o.courses.map((c) => ({ repository: this.o.repository, course: c.course, version: c.version })),
+      // R-BTN-113 (B-234): the running leg's session link, kept on its run's row (latest wins
+      // while it runs); Baton drops and logs one that fails the link rule.
+      ...(this.legSessionUrl ? { session_url: this.legSessionUrl } : {}),
       ...((s.worker_id == null || this.rekeySecret) ? { secret_hash: await sha256Hex(this.rekeySecret ?? s.secret), ...(this.rekeySecret ? { rekey: true } : {}) } : {}),
       ...(this.fenceToReport != null ? { fenced: { claim_id: this.fenceToReport, terminated: true } } : {}),
       transcripts: spool.transcripts,
@@ -751,10 +771,10 @@ export class Runner {
   private legSecrets: readonly string[] = [];
 
   /** Start a session of `kind` on the executor the host chose. */
-  private async startSession(kind: SessionKind, o: { session_id: string; run_id?: string; ticket?: string; leg?: string; snapshot_sha?: string; paths: string[]; env: Record<string, string> }): Promise<Handle> {
+  private async startSession(kind: SessionKind, o: { session_id: string; run_id?: string; ticket?: string; leg?: string; snapshot_sha?: string; paths: string[]; env: Record<string, string>; channel?: string | null; autonomous?: boolean }): Promise<Handle> {
     return await this.executor.start({
-      brief: { kind, ...o, checkout: this.o.home, wrapper: LEG_PROCESS },
-      executor: null, inputs: [], channel: null,
+      brief: { kind, ...o, checkout: this.o.home, wrapper: LEG_PROCESS, ...(o.autonomous ? { autonomous: true } : {}) },
+      executor: null, inputs: [], channel: o.channel ?? null,
     });
   }
 
@@ -1659,6 +1679,9 @@ export class Runner {
     } finally {
       for (const w of this.inflight?.waiters.splice(0) ?? []) w([]);
       await this.stopSession('claim-ended');
+      this.legChannel?.close();
+      this.legChannel = null;
+      this.legSessionUrl = null;
       this.inflight = null;
       this.pendingAbort = null;
       dropCourse(course!.scratch);
@@ -1731,6 +1754,26 @@ export class Runner {
     const script = course.scripts.get(leg);
     if (script == null) return { kind: 'missing' };
     const tag = randomBytes(4).toString('hex');
+    // R-BTN-107 (B-184): the session key — its run id's first session, or a tag when the advance
+    // named none.
+    const sessionId = typeof ctx.run_id === 'string' ? `${ctx.run_id}.r0` : `leg-${tag}`;
+    // B-234 (R-BTN-106, R-BTN-195): the leg run's channel — one Unix socket beside the state
+    // file, mode 0600, its address the session's BATON_SOCKET, where a raise is answered and a
+    // joinable session posts its ending. The previous run's channel, if it is still up (its
+    // session lives on for the close and hand-off), comes down first.
+    this.legChannel?.close();
+    this.legChannel = null;
+    this.legSessionUrl = null;
+    let channel: LegChannel | null = null;
+    try {
+      channel = await LegChannel.serve(channelPath(this.o.stateFile, sessionId));
+    } catch (e) {
+      this.log(`baton: the leg's channel could not serve (${msg(e)}) — the leg runs with no way to raise (R-BTN-106)`);
+    }
+    if (channel) {
+      this.legChannel = channel;
+      channel.listen((req) => this.onChannel(req, course, leg, ctx));
+    }
     // Detached: its own process group, so a lost lease kills the leg and everything it started
     // (§6.13) without touching the runner. The env names the parent every leg session checks
     // (BATON_PARENT — such a session never claims; BATON_STATE — the fence and the spool). B-97
@@ -1752,11 +1795,12 @@ export class Runner {
       // runs in the leg child. The close the RUNNER calls gets the same value through `ctx`
       // (`runLeg`'s context), which is the primary path (round 4).
       ...(typeof ctx.default_branch === 'string' && ctx.default_branch !== '' ? { BATON_DEFAULT_BRANCH: ctx.default_branch } : {}),
+      // B-234 (R-BTN-106): the leg's channel, its address as the session's CLI reads it.
+      ...(channel ? { BATON_SOCKET: channel.path } : {}),
     };
     // R-BTN-107 (B-184): the leg runs in a session of the executor the host chose, keyed by its
     // run id's first session; the previous leg's session goes first (its close and hand-off ran).
     await this.stopSession('next-leg');
-    const sessionId = typeof ctx.run_id === 'string' ? `${ctx.run_id}.r0` : `leg-${tag}`;
     const env = Object.fromEntries(Object.entries(childEnv).filter((e): e is [string, string] => typeof e[1] === 'string'));
     // R-BTN-144 class 7 (B-170): the leg's masked set is computed once, here, from the environment
     // the leg is given — every variable whose name says a secret, and every name `runner.json`
@@ -1780,11 +1824,23 @@ export class Runner {
       handle = await this.startSession('leg', {
         session_id: sessionId, ...(typeof ctx.run_id === 'string' ? { run_id: ctx.run_id } : {}), ticket: String((ctx.ticket as { id?: string })?.id ?? ''), leg,
         snapshot_sha: String((ctx.snapshot as { sha?: string })?.sha ?? ''), paths: [scratch, course.scratch], env,
+        channel: channel ? channel.path : null,
+        // R-BTN-107: the brief carries the leg's autonomy as a hint — the raise check below is
+        // what enforces it, whatever the executor does with the hint.
+        autonomous: course.graph?.legs.get(leg)?.autonomous === true,
       });
     } catch (e) {
       // The leg's own failure text leaves masked, whatever of it the executor quoted.
+      channel?.close();
+      if (this.legChannel === channel) this.legChannel = null;
       return { kind: 'crashed', error: maskLegOutput(`the executor could not start the leg's session (${msg(e)})`, legSecrets) };
     }
+    // R-BTN-113: an executor whose handle names its session's link — the runner reports it on
+    // every beat and the raise check reads it as the run's link.
+    if (typeof handle.link === 'string' && handle.link !== '') this.legSessionUrl = handle.link;
+    // R-BTN-195: the ending a joinable session posts on its channel — `end(handle)` resolves at
+    // it (R-BTN-107), so the runner hands it to the session.
+    handle.posted = channel ? channel.posted : null;
     this.session = { handle, checkout: this.o.home };
     if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} run ${basename(script)} (session ${sessionId}, executor ${this.executor.source})`);
     const running = this.wrapperCall(handle, 'run', script, [ctx], undefined, () => sink);
@@ -1804,6 +1860,24 @@ export class Runner {
       done = true;
       return r;
     });
+    // R-BTN-195: the posted ending of a joinable session — the agent done, the session not
+    // exited (a person still in it). `posted` holds the ending once the channel's `done` verb
+    // carries it; the box names which of the two won the race.
+    const postedBox: { ending?: { result: unknown } } = {};
+    const postedRace = channel ? channel.posted.then((ending) => { postedBox.ending = ending; }) : null;
+    // A signal that landed while the session ran on: a normal leg takes its release at the next
+    // safe point and the call exits by itself, so the race is only woken after a grace — a
+    // joinable session nobody ends (unjoined, unreleased-acknowledged) is the one left hanging,
+    // and the loop's release ends it (R-BTN-90's `leg-timeout` the unjoined ask's own end).
+    const signalled = new Promise<void>((resolve) => {
+      const timer = setInterval(() => {
+        if (this.pendingAbort == null) return;
+        clearInterval(timer);
+        setTimeout(resolve, this.o.signalGraceMs ?? SIGNAL_GRACE_MS).unref?.();
+      }, Math.min(100, this.o.beatEvery));
+      timer.unref?.();
+      void exited.then(() => clearInterval(timer));
+    });
     const lost = new Promise<void>((resolve) => {
       const timer = setInterval(() => {
         // R-BTN-26: the fence computes the lease itself from the state file — the wall clock
@@ -1816,7 +1890,30 @@ export class Runner {
       timer.unref?.();
       void exited.then(() => clearInterval(timer));
     });
-    await Promise.race([exited, lost]);
+    await Promise.race([exited, lost, ...(postedRace ? [postedRace] : []), signalled]);
+    if (postedBox.ending != null && !done && !this.lostLease) {
+      // R-BTN-107/R-BTN-195: a session that does not exit when its agent is done ends at the
+      // result posted on its channel — `end` resolves there — and the runner then stops it,
+      // whether or not a person is in it. The close and hand-off that follow run in a fresh
+      // session; what the agent left in git is its own evidence, checked as any result is.
+      await this.executor.end(handle).catch((e) => this.log(`baton: the executor's end failed (${msg(e)})`));
+      await this.stopSession('leg-result');
+      inflight.child = null;
+      release();
+      this.log(`baton: ${inflight.ticket}'s ${leg} ended at the result posted on its channel — the session is stopped (R-BTN-195)`);
+      return { kind: 'ok', result: postedBox.ending.result };
+    }
+    if (!done && this.abortSignal() != null && !this.lostLease) {
+      // A release (the claim's deadline among its reasons, R-BTN-90) reached a session that
+      // neither exited nor posted: kill it, stop its session, and let the loop's abort branch
+      // end the claim with the signal's reason — the unjoined ask's own end (R-BTN-195).
+      const signal = this.abortSignal()!;
+      this.killGroup(inflight.child);
+      await this.stopSession(`signal:${signal.signal}`);
+      inflight.child = null;
+      release();
+      return { kind: 'crashed', error: `the leg's session was asked to stop (${signal.reason ?? signal.signal}) and neither exited nor posted its result` };
+    }
     if (!done || this.lostLease) {
       // The lease went (or the runner stops): kill the leg at once, no hand-off — the resume
       // record covers it (R-BTN-24) — and stop its session.
@@ -1835,6 +1932,78 @@ export class Runner {
     // A crashed leg's error is its own text (the thrown message the wrapper printed), masked
     // here — where the set lives — so the log it reaches carries no literal of the leg's env.
     return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: maskLegOutput(out.error ?? 'the leg script failed', legSecrets) };
+  }
+
+  /**
+   * B-234 (R-BTN-160, R-BTN-195): one request off the leg run's channel. `raise` is checked as
+   * the runner checks a move — on the facts of the leg and its run, from the claim's snapshot —
+   * and a failing check is answered with the reason, nothing reaching Baton. A passing raise is
+   * reported once, with filter fields only: the subject and body are the leg's own text, logged
+   * masked (R-BTN-33, R-BTN-144) and never sent. An `interact` needs no answer the runner can
+   * give — the raise returns at once (R-BTN-116: nothing waits on it) — and an autonomous leg's
+   * substitute is `error.needs-person`, which it raises like any error. The suspend wait
+   * (R-BTN-162) is not built: a `suspend` raise records and returns, nothing waits.
+   */
+  private async onChannel(req: ChannelRequest, course: CourseLoad, leg: string, ctx: Record<string, unknown>): Promise<ChannelAnswer> {
+    if (req.op !== 'raise') return { ok: false, error: `the channel carries raise and done, nothing else (R-BTN-106)` };
+    const ticket = String((ctx.ticket as { id?: string })?.id ?? '');
+    const claimId = Number((ctx.claim as { id?: number } | undefined)?.id ?? 0);
+    const subject = typeof req.subject === 'string' ? req.subject : '';
+    if (subject.trim() === '') return { ok: false, error: 'a raise carries a subject (--subject, R-BTN-160)' };
+    const type = typeof req.type === 'string' ? req.type : '';
+    const def = course.graph?.legs.get(leg);
+    const declared: Map<string, ConditionDeclaration> = course.graph?.conditionTypes ?? new Map();
+    const verdict = checkRaise(type, declared, {
+      conditions: def?.conditionTypes ?? null,
+      autonomous: def?.autonomous === true,
+      deadlineS: def?.maxDuration ?? null,
+      sessionUrl: this.legSessionUrl,
+    });
+    if (!verdict.ok) {
+      this.log(`baton: ${ticket}'s ${leg} raise of ${type || '(none)'} was refused on the channel: ${verdict.reason}`);
+      return { ok: false, error: verdict.reason };
+    }
+    // The report's fields — the runner's resolution of what the course file declares, the
+    // severity checked here (R-BTN-125) and the restarts as given; `url` is never the leg's to
+    // choose: an `interact`'s is Baton's own and a `suspend`'s points into git (R-BTN-92).
+    const severity = req.severity === undefined || req.severity === null ? 'normal'
+      : SEVERITIES.includes(req.severity as never) ? req.severity : null;
+    if (severity == null) return { ok: false, error: `severity must be one of ${SEVERITIES.join(', ')} (R-BTN-125)` };
+    const restarts = req.restarts != null && typeof req.restarts === 'object' && !Array.isArray(req.restarts)
+      ? req.restarts as Record<string, string> : undefined;
+    if (restarts != null) {
+      for (const [id, text] of Object.entries(restarts)) {
+        if (typeof text !== 'string') return { ok: false, error: `restarts.${id}: a description is text (R-BTN-160)` };
+      }
+    }
+    const body = typeof req.body === 'string' ? req.body : null;
+    // R-BTN-33: the subject and body stay here — the runner's log, masked of the leg's own
+    // secrets — and nothing of them is reported. The raise's line is what an operator reads.
+    this.log(maskLegOutput(`baton: ${ticket}'s ${leg} raised ${type} — ${subject.slice(0, 200)}${body != null ? ` (body ${Buffer.byteLength(body, 'utf8')} bytes, kept in this log only)` : ''}`, this.legSecrets));
+    const disposition = dispositionOf(type, declared) ?? 'notify';
+    let answer: Record<string, any>;
+    try {
+      answer = await this.o.api.conditions(claimId, {
+        type,
+        disposition,
+        ...(restarts != null ? { restarts } : {}),
+        ...(typeof req.default === 'string' ? { default: req.default } : {}),
+        ...(severity !== 'normal' ? { severity } : {}),
+      });
+    } catch (e) {
+      const why = e instanceof BatonRefusal ? `${e.code}: ${e.message}` : msg(e);
+      this.log(`baton: ${ticket}'s ${leg} raise of ${type} was refused by Baton (${maskLegOutput(why, this.legSecrets)})`);
+      return { ok: false, error: `Baton refused the raise: ${why}` };
+    }
+    // R-BTN-160's dispositions, the runner's own two: an `interrupt` ends the leg
+    // `released:cannot-finish:<class>` (the class the type names, R-BTN-122), signalled here so
+    // the loop ends the claim at its next safe point with its hand-off written — the retry
+    // policy routes what follows. A `notify` — `interact` among them — returns at once and the
+    // leg goes on (R-BTN-116: nothing waits on it). A `suspend` records and returns too: its
+    // wait (R-BTN-162) is not built.
+    const end = disposition === 'interrupt' ? `released:cannot-finish:${errorClassOf(type, declared)}` : null;
+    if (end != null) this.signalLeg('release', end);
+    return { ok: true, condition_id: answer.condition_id, disposition: answer.disposition ?? disposition, ...(severity !== 'normal' ? { severity } : {}), ...(end != null ? { end } : {}) };
   }
 
   /** `close(ctx, result)`: the closing marker from the validated result (R-BTN-83), retried

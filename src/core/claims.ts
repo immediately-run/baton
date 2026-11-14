@@ -20,6 +20,7 @@ import { legStateOf } from './policy';
 import { briefMark, writtenBy, type LastWrittenBy } from './provenance';
 import type { Row, SqlValue, Store } from './ports';
 import type { Blocks } from './blocks';
+import type { Conditions } from './conditions';
 import type { History } from './history';
 const EXPEDITE_BOUND = 2; // §7.2 rule 2, advice
 /** §2e: a claim regressed this long is listed under Needs you. */
@@ -60,6 +61,9 @@ export interface Ctx {
   /** B-134: the leg scope audit — the claim answer's scope, and the reports an advance or an
    *  end carries. */
   scope?: import('./scope').Scope;
+  /** B-234 (R-BTN-160, R-BTN-195): the raised conditions — an open `interact` of a run closes
+   *  in the transactions that end the run (the advance that finishes it, the claim's end). */
+  conditions?: Conditions;
   /** The retired-fields window's one writer (B-168): a claim's `bills`. */
   deprecated: Deprecated;
 }
@@ -1091,6 +1095,9 @@ export class Claims {
     const n = this.handedOut(repo);
     if (run) {
       this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', at, now, b.evidence, claimId, run.seq);
+      // B-234 (R-BTN-195): the finished run's open `interact` closes with it — the ask was for
+      // that session, and the run is done.
+      if (run.run_id != null) this.c.conditions?.runEnded(claimId, run.run_id);
       const f = this.legFacts(claimId, run.leg, run.run_id);
       this.c.history?.record(f.ticket, { kind: 'leg-finished', ...f.row, reached: at, next_leg: leg, ...(b.evidence ? { detail: { evidence: b.evidence } } : {}) });
       // B-134: the finished leg's scope audit, reported on the advance that finishes it — the
@@ -1130,7 +1137,11 @@ export class Claims {
     const started = this.legFacts(claimId, leg, runId);
     this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}) } });
     // R-BTN-62: only a reading numbered above the counter now can judge the claim stale.
-    this.exec('UPDATE claims SET station = ?, leg = ?, claim_observation = ? WHERE id = ?', at, leg, n, claimId);
+    // R-BTN-90 (B-234): the advance that starts a run arms the claim's deadline when the leg
+    // carries one (`deadline_s`, the file's `max_duration`) and clears it when it does not —
+    // the next advance re-arms for its own run, and the claim's end clears it below.
+    const deadline = g.legs.get(leg)?.maxDuration ?? null;
+    this.exec('UPDATE claims SET station = ?, leg = ?, claim_observation = ?, deadline_at = ? WHERE id = ?', at, leg, n, deadline != null ? now + deadline * 1000 : null, claimId);
     // R-BTN-178: the seats of the leg this advance starts, rewritten in its transaction — an
     // advance into a leg not requiring a capability releases that seat.
     this.writeSeats(claimId, item, leg);
@@ -1297,15 +1308,18 @@ export class Claims {
       this.exec('UPDATE claim_legs SET abandoned_at = ? WHERE claim_id = ? AND seq = ?', now, claimId, run.seq);
     }
     if (run) {
+      // B-234 (R-BTN-195): the run ended, finished or given up — its open `interact` closes.
+      if (run.run_id != null) this.c.conditions?.runEnded(claimId, run.run_id);
       // R-BTN-81: the run's end, with the position the holder reported (B-38 makes it provisional).
       const f = this.legFacts(claimId, run.leg, run.run_id);
       this.c.history?.record(f.ticket, { kind: opts.finished ? 'leg-finished' : 'leg-abandoned', ...f.row, reached, next_leg: opts.next ?? null, detail: { end_reason: reason } });
     }
     // R-BTN-62: only a reading numbered above the counter's value now can confirm this end. §2e:
     // regressed_since clears with the end; a suspension made while regressed is confirmed by any
-    // later snapshot, which `ended_regressed` remembers.
+    // later snapshot, which `ended_regressed` remembers. R-BTN-90: the claim's deadline dies
+    // with it.
     this.exec(`UPDATE claims SET status = ?, ended_at = ?, end_reason = ?, end_detail = ?, ended_at_sha = ?, fence_pending = ?, fence_incarnation = ?, end_observation = ?,
-                 station = ?, leg = NULL, ended_regressed = ?, regressed_since = NULL WHERE id = ?`,
+                 station = ?, leg = NULL, ended_regressed = ?, regressed_since = NULL, deadline_at = NULL WHERE id = ?`,
       status, now, reason, opts.detail ?? null, status === 'completed' ? opts.ended_at_sha ?? '' : null, opts.fence ? 1 : 0, opts.fence?.incarnation ?? null,
       this.handedOut(repositoryOf(ticketId)), reached, c.regressed_since != null ? 1 : 0, claimId);
     this.exec(`UPDATE activities SET ended_at = ?, outcome = 'abandoned' WHERE claim_id = ? AND ended_at IS NULL`, now, claimId);
@@ -1631,8 +1645,8 @@ export class Claims {
    *  recorded it closed; `unknown` when the course file no longer has the claim's station or leg
    *  (R-BTN-64); null when no snapshot places it. */
   holderView(claimId: number) {
-    const c = this.rows<{ ticket_id: string; station: string; leg: string | null; course_id: string | null; regressed_since: number | null }>(
-      'SELECT ticket_id, station, leg, course_id, regressed_since FROM claims WHERE id = ?', claimId)[0];
+    const c = this.rows<{ ticket_id: string; station: string; leg: string | null; course_id: string | null; regressed_since: number | null; deadline_at: number | null }>(
+      'SELECT ticket_id, station, leg, course_id, regressed_since, deadline_at FROM claims WHERE id = ?', claimId)[0];
     if (!c) return {};
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
     const live = this.rows('SELECT 1 FROM tickets WHERE id = ?', c.ticket_id).length > 0;
@@ -1646,7 +1660,7 @@ export class Claims {
         next: this.rows<{ leg: string; state: string; waiting_on: string | null }>('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', c.ticket_id)
           .map((n) => (n.waiting_on ? n : { leg: n.leg, state: n.state })) };
     }
-    return { station: c.station, ...(c.leg ? { leg: c.leg } : {}), git };
+    return { station: c.station, ...(c.leg ? { leg: c.leg } : {}), ...(c.deadline_at != null ? { deadline_at: c.deadline_at } : {}), git };
   }
 
   /** The heartbeat's `fenced` report (R-BTN-19): clears the fence of a claim reaped while this
@@ -1720,6 +1734,34 @@ export class Claims {
   }
 
   // ── the sync's share (§6.7, R-BTN-35) ───────────────────────────────────────────────────
+
+  // ── the deadline in a claim (§7.5 R-BTN-90; B-234) ───────────────────────────────────────
+
+  /**
+   * R-BTN-90: the claims whose armed `deadline_at` has passed — each holder is queued a
+   * `release` with reason `leg-timeout` and the tick logs `leg-timeout`. The runner stops the
+   * leg at its next safe point, writes its hand-off and ends the claim `released:leg-timeout`,
+   * a failed attempt (§6.10); this only takes the claim back, it ends nothing itself. The
+   * caller's transaction (the alarm's).
+   */
+  deadlineDue(now: number): number {
+    const due = this.rows<{ id: number; ticket_id: string; worker_id: number; deadline_at: number }>(
+      `SELECT id, ticket_id, worker_id, deadline_at FROM claims WHERE status = 'active' AND deadline_at IS NOT NULL AND deadline_at <= ? ORDER BY deadline_at`, now);
+    for (const c of due) {
+      this.exec(`INSERT INTO messages (kind, payload_json, from_principal, to_worker_id, sent_at, status) VALUES ('release', ?, 'server', ?, ?, 'pending')`,
+        JSON.stringify({ ticket_id: c.ticket_id, reason: 'leg-timeout', deadline_at: c.deadline_at }), c.worker_id, now);
+      // The claim's deadline is spent: one release, never one a tick (the claim's end clears
+      // the column too, and a new run's advance arms its own).
+      this.exec('UPDATE claims SET deadline_at = NULL WHERE id = ?', c.id);
+      this.event('leg-timeout', 'alarm', { deadline_at: c.deadline_at }, c.ticket_id, c.id);
+    }
+    return due.length;
+  }
+
+  /** The earliest armed deadline the alarm can consume, for the alarm (§3). */
+  nextDeadline(): number | null {
+    return this.rows<{ d: number | null }>(`SELECT MIN(deadline_at) AS d FROM claims WHERE status = 'active' AND deadline_at IS NOT NULL`)[0]?.d ?? null;
+  }
 
   /** §7.1: whether a force post is the accepted rewritten history. Accepting a held history
    *  accepts the line, not one sha: main keeps moving while it is held, and the sync always
@@ -1966,6 +2008,11 @@ export class Claims {
       }
     };
     this.releaseBarHolders(now);
+    // R-BTN-90 (B-234): a claim whose armed deadline passed is told to stop — a `release` with
+    // reason `leg-timeout`, logged — and the runner's end of it (`released:leg-timeout`) is the
+    // failed attempt §6.10 counts. A claim whose deadline moved on (a newer advance re-armed it)
+    // is not due here; the alarm arms at the earliest standing instant.
+    this.deadlineDue(now);
     // Silent workers: reaped at exactly their clamped timeout (R-BTN-9), never by Date.now().
     const silent = this.rows<{ id: number; ticket_id: string; worker_id: number; kind: string }>(
       `SELECT c.id, c.ticket_id, c.worker_id, w.kind FROM claims c JOIN workers w ON w.id = c.worker_id

@@ -4,6 +4,7 @@
 import { BatonError } from './http';
 import { FREE_TEXT_MAX, isFreeText } from './text';
 import { COURSE_ID } from './course';
+import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES } from './conditionTypes';
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 
 /** §5: the harness's own session id, the rule `claim.sh --session` already applies. */
@@ -129,6 +130,10 @@ export interface Heartbeat {
   protection: { repository: string; matched: boolean; reading_hash: string }[];
   /** §12.8 (B-145, R-BTN-189): the policy hash pins a trusted runner reports per repository. */
   policy_pins: { repository: string; hash: string }[];
+  /** R-BTN-113 (B-234): the running leg's session link, as the runner holds it. Shape-checked
+   *  here only as a bounded string; the heartbeat drops one that fails the link rule (https, no
+   *  userinfo, an allowlisted host) and logs it, never refusing the beat. */
+  session_url?: string;
 }
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number }
@@ -179,6 +184,10 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   if (b.isolation !== undefined && !ISOLATIONS.includes(b.isolation as Heartbeat['isolation'])) bad('isolation', `must be one of ${ISOLATIONS.join(', ')}`);
   const transcripts = (b.transcripts ?? []) as unknown[];
   if (!Array.isArray(transcripts) || transcripts.length > 50) bad('transcripts', 'must be a list of at most 50');
+  // R-BTN-113: the link itself is judged at the heartbeat, which drops and logs one that fails
+  // the rule (https, no userinfo, an allowlisted host) rather than refusing the beat — so this
+  // only bounds the field's size, keeping a hostile megabyte out of the log that follows.
+  const session_url = typeof b.session_url === 'string' && b.session_url.length <= 4096 ? b.session_url : undefined;
   return {
     hostname,
     session_name,
@@ -200,6 +209,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     couriers: checkCouriers(b.couriers),
     protection: checkProtection(b.protection),
     policy_pins: checkPolicyPins(b.policy_pins),
+    session_url,
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
@@ -390,7 +400,7 @@ const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/;
 export const GIT_SHA = /^[0-9a-f]{40}$/;
 /** §6.5: the `released:` reasons, exactly. */
 export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output',
-  'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed'] as const;
+  'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed', 'leg-timeout'] as const;
 
 /** A claim's request (§6.2). `bills` is retired (B-168: a `prefer` entry bills no account once
  *  route choices are gone, R-BTN-100): a request carrying one is read as if it did not, the
@@ -738,6 +748,49 @@ export function checkAdvance(body: unknown): Advance {
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */
+/** `POST /v1/runner/claims/{id}/conditions` (R-BTN-160, R-BTN-195; B-234): the report a runner
+ * sends for each raise its channel check passed. Filter fields only (R-BTN-33): the subject and
+ * body stay with the runner, and `url` is the runner's own word — kept for none but an unbound
+ * `suspend`, and ignored for an `interact`, whose url Baton sets from the session link it holds.
+ * `handler` is accepted and unread: no handler ticket is filed (R-BTN-161 unbuilt), and a
+ * binding of `interact` is ignored anyway (R-BTN-195). */
+export interface ConditionReport {
+  type: string;
+  disposition: 'interrupt' | 'suspend' | 'notify' | null;
+  severity: 'critical' | 'high' | 'normal';
+  restarts: Record<string, string> | null;
+  default: string | null;
+  url: string | null;
+}
+
+export function checkConditionReport(body: unknown): ConditionReport {
+  if (!isObj(body)) bad('body', 'must be a JSON object');
+  const b = body as Record<string, unknown>;
+  const type = matches(CONDITION_TYPE, 'type')(b.type);
+  if ((type as string).length > CONDITION_TYPE_MAX) bad('type', `must be at most ${CONDITION_TYPE_MAX} characters`);
+  // The report may carry the disposition the runner's file reads; Baton's own word decides
+  // (R-BTN-50), so it is only shape-checked, never trusted.
+  if (b.disposition !== undefined && b.disposition !== null && !['interrupt', 'suspend', 'notify'].includes(b.disposition as string)) {
+    bad('disposition', 'must be interrupt, suspend or notify');
+  }
+  const severity = b.severity === undefined || b.severity === null ? 'normal' : SEVERITIES.includes(b.severity as never) ? (b.severity as ConditionReport['severity']) : bad('severity', `must be one of ${SEVERITIES.join(', ')}`);
+  let restarts: Record<string, string> | null = null;
+  if (b.restarts !== undefined && b.restarts !== null) {
+    if (!isObj(b.restarts) || Object.keys(b.restarts).length === 0 || Object.keys(b.restarts).length > 8) bad('restarts', 'must be 1–8 ids with one-line descriptions');
+    for (const [id, text] of Object.entries(b.restarts as Record<string, unknown>)) {
+      if (!RESTART_ID.test(id)) bad(`restarts.${id}`, 'a restart id matches ^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$ (§12.3)');
+      if (!isFreeText(text)) bad(`restarts.${id}`, 'must be §10.4 free text');
+    }
+    restarts = b.restarts as Record<string, string>;
+  }
+  const def = optional(b.default, matches(RESTART_ID, 'default')) ?? null;
+  if (def != null && (restarts == null || !Object.prototype.hasOwnProperty.call(restarts, def))) bad('default', 'names one of the raise\'s restarts');
+  const url = b.url === undefined || b.url === null ? null : isHttpsPointer(b.url) ? (b.url as string) : bad('url', 'must be an https URL of at most 1000 characters');
+  if (b.handler !== undefined && b.handler !== null && typeof b.handler !== 'string') bad('handler', 'must be a course id');
+  retiredFields(b);
+  return { type: type as string, disposition: (b.disposition as ConditionReport['disposition']) ?? null, severity, restarts, default: def, url };
+}
+
 export function checkConfirmations(v: unknown): { claim_id: number; sha: string }[] {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v) || v.length > 500) bad('confirmations', 'must be a list of at most 500');

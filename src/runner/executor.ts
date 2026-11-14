@@ -47,6 +47,9 @@ export interface Brief {
   /** The leg's environment as R-BTN-144 lists it — the executor decides what reaches the session. */
   env: Record<string, string>;
   reads_only?: boolean;
+  /** R-BTN-195 (B-234): the leg never asks for a person — a hint for the executor's brief, as
+   *  `reads_only` is: the runner's raise check enforces it, whatever the executor does with it. */
+  autonomous?: boolean;
 }
 
 export interface StartOptions {
@@ -85,6 +88,11 @@ export interface Handle {
   session_id: string;
   /** The session's link, reported as R-BTN-113 says. */
   link?: string | null;
+  /** R-BTN-195 (B-234): the ending posted on the leg's channel, as a promise the runner hands
+   *  the session — `end` resolves at it, so a session that does not exit when its agent is done
+   *  (one a person can join) ends at its posted result, after which the runner calls `stop`.
+   *  Absent on a session with no channel. */
+  posted?: Promise<{ result: unknown }> | null;
   [k: string]: unknown;
 }
 
@@ -195,9 +203,19 @@ export function builtinExecutor(): Executor {
     },
     async end(h) {
       const s = sessions.get(h.session_id);
-      if (s) await Promise.all([...s.running].map((r) => r.result));
-      sessions.delete(h.session_id);
-      return { status: 'ended', result: null };
+      // R-BTN-107/R-BTN-195: a session that does not exit when its agent is done — one a person
+      // can join — ends at the result posted on its channel: the runner hands that promise on
+      // the handle, and `end` resolves at it rather than at the calls, which a person inside
+      // the session keeps alive. The session itself stays for the `stop` that follows (the
+      // contract's ladder): the group dies there, whatever it still holds.
+      const posted = h.posted ?? null;
+      let endedBy = 'calls' as 'calls' | 'posted';
+      if (s) {
+        const calls = Promise.all([...s.running].map((r) => r.result)).then(() => 'calls' as const);
+        const ending = posted ? posted.then(() => 'posted' as const) : null;
+        endedBy = ending ? await Promise.race([calls, ending]) : await calls;
+      }
+      return { status: 'ended', result: endedBy === 'posted' ? (await posted)?.result ?? null : null };
     },
     async salvage() {
       return null; // B-186; `builtin`'s environment outlives the leg, so the runner may do it

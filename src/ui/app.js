@@ -303,6 +303,14 @@ function renderNeeds() {
   const n = state.needs_you;
   const list = document.getElementById('needs');
   list.replaceChildren();
+  // B-234 (R-BTN-195): an interaction request — a leg asked a person into its agent session.
+  // The entry carries the session link Baton set and nothing the leg wrote; the person joins
+  // the session in the harness's own UI, and the conversation never passes through Baton.
+  for (const c of n.conditions ?? []) {
+    const li = el('li', { text: `${c.ticket_id} — ${c.leg} asks a person into its session (${c.type}${c.severity && c.severity !== 'normal' ? `, ${c.severity}` : ''})` });
+    if (c.url) li.append(document.createTextNode(' '), httpsLink('join the session', c.url));
+    list.append(li);
+  }
   // B-133 (R-BTN-116): a person leg's question, each option with its computed action — where
   // the ticket lands and what queues there — beside the packet's words. Nothing is pre-selected;
   // the owner answers with `baton decision answer` naming the option.

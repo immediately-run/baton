@@ -6,6 +6,7 @@
 // Worker's other variables and secrets (OIDC_ISSUER, OIDC_JWKS_URL, BATON_REPOSITORIES — the
 // repositories to register, as a JSON string —, ACCESS_*, OWNER_EMAILS, TOKEN_HASHES,
 // CREDENTIALS, BATON_KEYS, BATON_GITHUB_WEBHOOK_SECRET, BATON_FORGE_SECRETS, BATON_SIGNING_KEY,
+// BATON_SESSION_HOSTS — the hosts whose session links the instance accepts, R-BTN-113 —,
 // GITHUB_DISPATCH_TOKEN). The test
 // bindings are refused: only the test harness, in-process, may set them.
 import { readFileSync } from 'node:fs';
@@ -54,6 +55,7 @@ export function localConfig(file: Record<string, unknown>, origin: string): Conf
     TOKEN_HASHES: opt('TOKEN_HASHES'),
     CREDENTIALS: opt('CREDENTIALS'),
     BATON_KEYS: opt('BATON_KEYS'),
+    BATON_SESSION_HOSTS: opt('BATON_SESSION_HOSTS'),
     BATON_GITHUB_WEBHOOK_SECRET: opt('BATON_GITHUB_WEBHOOK_SECRET'),
     BATON_FORGE_SECRETS: opt('BATON_FORGE_SECRETS'),
     BATON_SIGNING_KEY: opt('BATON_SIGNING_KEY'),

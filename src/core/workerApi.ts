@@ -9,7 +9,7 @@ import { BatonError } from './http';
 import { logEvent } from './db';
 import type { Deprecated } from './deprecated';
 import { NONCE_TTL_MS, parseSshKey } from './auth';
-import { isPullRequestUrl, transcriptUrl } from './links';
+import { SESSION_HOSTS, isPullRequestUrl, sessionLinkWhy, transcriptUrl } from './links';
 import { ticketRepositories } from './codeRepos';
 import { DEFAULT_TRANSCRIPT_REPOS, repositoryOf, transcriptReposOf } from './registry';
 
@@ -400,6 +400,20 @@ export class WorkerApi {
     // R-BTN-19: only a heartbeat with the secret (never the hash path) clears a fence.
     if (hb.fenced && secretSeen) this.c.fenced?.(w.id, fresh.incarnation, hb.fenced.claim_id);
     const claim = this.activeClaim(w.id);
+    // R-BTN-113 (B-234): the running leg's session link, stored on its `claim_legs` row (latest
+    // wins while the run is live). A link that fails the rule — https, no userinfo, an
+    // allowlisted host — is dropped and logged, never a refused beat.
+    let sessionUrlDropped: string | null = null;
+    if (hb.session_url !== undefined && claim) {
+      const why = sessionLinkWhy(hb.session_url, SESSION_HOSTS.of(this.c.config));
+      if (why != null) {
+        sessionUrlDropped = why;
+        this.event('discrepancy', `worker:${w.id}`, { sub: 'session-url', why, url: hb.session_url.slice(0, 120) }, claim.ticket_id, claim.id);
+      } else {
+        this.exec(`UPDATE claim_legs SET session_url = ? WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL`,
+          hb.session_url, claim.id);
+      }
+    }
     // B-86: the capabilities a runner with no `--capabilities` declares (see `grantCapabilities`).
     const grantCapabilities = this.grantCapabilities(cred, w.id);
     return {
@@ -421,6 +435,7 @@ export class WorkerApi {
       // map, for a worker's grants and courses reach several.
       ...(this.c.policies ? { policies: this.policyFacts(granted, hb) } : {}),
       ...(protectionRefused.length ? { protection_refused: protectionRefused } : {}),
+      ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}),
       ...(refused.length ? { transcripts_refused: refused } : {}),
       ...(refusedCouriers.length ? { refused_couriers: refusedCouriers } : {}),
       ...(unlinked.length ? { transcripts_unlinked: unlinked } : {}),

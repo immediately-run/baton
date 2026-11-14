@@ -51,6 +51,43 @@ export function parseTranscriptRepo(entry: string): { forge: Forge; webBase: str
   return isForgePath('github', entry) ? { forge: 'github', webBase: `https://github.com/${entry}` } : null;
 }
 
+/** R-BTN-113: a leg run's session link — `https`, at most 512 characters, no userinfo,
+ *  its host one the instance allowlists (`session_hosts`, an administrator's setting whose
+ *  default is `claude.ai`). The reason a link fails, for the drop's log; null when it passes. */
+export function sessionLinkWhy(url: string, hosts: readonly string[]): string | null {
+  if (url.length > 512) return 'over 512 characters';
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return 'not a URL';
+  }
+  if (u.protocol !== 'https:') return 'not https';
+  if (u.username !== '' || u.password !== '') return 'carries userinfo';
+  if (!hosts.includes(u.hostname)) return `its host ${u.hostname} is not among the instance's session_hosts (${hosts.join(', ')})`;
+  return null;
+}
+
+/** R-BTN-113's `session_hosts`: the hosts whose sessions an instance's people may be linked to,
+ *  `BATON_SESSION_HOSTS` as a comma- or JSON-separated list (an administrator's setting; the
+ *  default is `claude.ai` alone). */
+export const SESSION_HOSTS = {
+  default: ['claude.ai'] as const,
+  of(config: { BATON_SESSION_HOSTS?: string }): string[] {
+    const raw = config.BATON_SESSION_HOSTS;
+    if (raw == null || raw === '') return [...SESSION_HOSTS.default];
+    let list: string[] | null = null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.every((h) => typeof h === 'string')) list = parsed as string[];
+    } catch {
+      list = null; // a comma-separated list, below
+    }
+    const hosts = (list ?? raw.split(',')).map((h) => h.trim().toLowerCase()).filter((h) => h !== '');
+    return hosts.length ? [...new Set(hosts)] : [...SESSION_HOSTS.default];
+  },
+};
+
 /** §6.8: the dashboard's link to a transcript file — its repository's base and its forge's file
  *  path — or null when the entry or path does not pass. */
 export function transcriptUrl(entry: string, path: string): string | null {
