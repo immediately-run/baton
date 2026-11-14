@@ -2842,12 +2842,10 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   standard `notify` type `interact`, bound by default to `announce`, whose delivery runner sends
   the link. "The user may choose to end their interaction with the agent harness web ui, which
   leaves open a future interaction request invoked by the same leg during its execution": Baton
-  holds no state for an interaction, and the leg may raise again. Considered in the same
-  discussion and left out of the first version — answers and restarts for in-session
-  questions, keeping a waiting leg's sandbox alive past its claim, hibernation to a disk
-  snapshot with an expiry, a debug mode for infrastructure failures, takeover of a blocked leg,
-  mapping each harness's own ask tool onto a raise — are listed as later work in FIELDHOUSE_SPEC
-  §5, since each depends on the sandbox layer. Scenario S-BTN-221.
+  holds no state for an interaction, and the leg may raise again. Left out of the first version
+  and listed as possible later work in FIELDHOUSE_SPEC §5.1: a question with a menu that the
+  delivery runner delivers and the person answers without joining the session, and hibernating
+  a long-waiting leg, revived when the person loads the harness's UI or answers. Scenario S-BTN-221.
 
 ## Retired requirements
 
