@@ -78,6 +78,8 @@
     "test/integration/S-BTN-156.sync-key.test.ts",
     "test/integration/S-BTN-157.busy-sync.test.ts",
     "test/integration/S-BTN-207.ticket-versions-sync.test.ts",
+    "test/integration/S-BTN-48.replay.test.ts",
+    "test/unit/runner-replay.test.ts",
     "test/integration/S-BTN-214.local-home.test.ts",
     "test/integration/S-BTN-216.ids-decide.test.ts",
     "test/integration/S-BTN-217.cross-host-pushers.test.ts",

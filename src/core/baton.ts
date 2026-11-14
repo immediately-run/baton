@@ -18,7 +18,7 @@ import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, typ
 import { Claims } from './claims';
 import { Cutover } from './cutover';
 import { Mirror } from './mirror';
-import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkRepositoryId, GIT_BRANCH, GIT_REPO } from './validate';
+import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkRepositoryId, COURSE_ID, GIT_BRANCH, GIT_REPO } from './validate';
 import { Courses } from './courses';
 import { Observations } from './observations';
 import { Webhooks, type Delivery } from './webhook';
@@ -1138,15 +1138,18 @@ export class BatonCore {
     const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
     // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
     const history = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/history$/.exec(url.pathname);
+    // B-190 (R-BTN-84, §14): one leg's runs of a ticket, with the inputs replay reads — an
+    // owner's or an administrator's read (§11's command tree), never a worker's.
+    const runs = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/legs\/([^/]+)\/runs$/.exec(url.pathname);
     // R-BTN-194 (B-126): the ticket itself — its filter fields, where it is, who last pushed it
     // and its brief mark — for the same principals; `baton ticket show` prints the provenance first.
-    const show = !blocks && !history ? /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)$/.exec(url.pathname) : null;
+    const show = !blocks && !history && !runs ? /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)$/.exec(url.pathname) : null;
     // B-90: the dashboard's view of one repository, for the same principals — an administrator
     // sees any, an owner its own, a granted key the repositories it is granted on.
     const boardRead = /^\/v1\/repositories\/([^/]+)\/board$/.exec(url.pathname);
     // §12.8 (B-145, R-BTN-189): the signed policy read, for the same principals.
     const policyRead = /^\/v1\/repositories\/([^/]+)\/policy$/.exec(url.pathname);
-    if (req.method !== 'GET' || (!blocks && !blocked && !history && !show && !boardRead && !policyRead)) return null;
+    if (req.method !== 'GET' || (!blocks && !blocked && !history && !show && !boardRead && !policyRead && !runs)) return null;
     const seg = (raw: string) => {
       try {
         return decodeURIComponent(raw);
@@ -1154,7 +1157,7 @@ export class BatonCore {
         throw new BatonError('invalid-params', 'a malformed path segment');
       }
     };
-    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? show ?? boardRead ?? policyRead)![1]));
+    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? show ?? boardRead ?? policyRead ?? runs)![1]));
     if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
     let cred = req.headers.get('X-Baton-Credential');
     let role: 'admin' | 'owner' | 'worker' = 'worker';
@@ -1166,6 +1169,8 @@ export class BatonCore {
       if (role === 'owner' && !this.admin.owns(cred, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
     }
     if (!cred) throw new BatonError('unauthenticated', 'no principal');
+    // B-190 (§14): a leg's runs are what replay reads — an owner's or an administrator's read.
+    if (runs && role === 'worker') throw new BatonError('forbidden', `a leg's runs are an owner's or an administrator's read, not a worker's (R-BTN-84)`);
     // R-BTN-179 (B-90): a granted key's board names its grant on THIS repository — the same grant the
     // heartbeat's answer names for it (workerApi.grantedCapabilities), 'none' left out — and
     // null for a key no grant binds there (a bearer's or a seed key's reach is its own).
@@ -1202,6 +1207,14 @@ export class BatonCore {
       // B-129: the ended claims' branches and PRs ride with the path (R-BTN-24's records,
       // pruned) — the PR a ticket's frontmatter lost, so a claimant continues the change.
       return json({ ...this.history.list(id, b, n), resume: this.claims.resumeOf(id) });
+    }
+    if (runs) {
+      const raw = seg(runs[2]);
+      const id = raw.includes(':') ? raw : qualify(repo, raw);
+      if (!TICKET_ID.test(id) || repositoryOf(id) !== repo) throw new BatonError('invalid-params', `ticket: must be a ticket of ${repo}`);
+      const leg = seg(runs[3]);
+      if (!COURSE_ID.test(leg)) throw new BatonError('invalid-params', 'leg: must be a leg id');
+      return json(this.claims.runsOf(id, leg));
     }
     if (blocks) {
       const raw = seg(blocks[2]);

@@ -463,7 +463,7 @@ mean (R-BTN-50).
   - **One renderer per channel** in the shared library: `plain` (the CLI, a
     `forge-check` summary, a handler course's text), `html` (a handler course's mail: every value
     escaped, inline styles only, no script, image or remote resource) and `ui` (the dashboard,
-    through `textContent`). Courses never ship rendering code.
+    as §12.3's rendering rule states). Courses never ship rendering code.
   - **Fallback:** the value's own schema's view, else the nearest up its base chain, else a
     generic rendering of keys and values two levels deep, truncated.
   - Core events are rendered by core's templates, each with one slot for the course's view of

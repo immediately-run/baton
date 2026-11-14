@@ -98,7 +98,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose the course file to travel with every sync over a hash with the body only on change (2026-10-16; R-BTN-69).
 - Chose owner state exported and imported, not mirrored to git, where agents could change it (2026-10-15; R-BTN-88).
 - Chose one Baton per team at a stated, load-tested envelope over sharding (2026-10-15; R-BTN-87).
-- Chose to list B-129's `position-disagrees` only among the dashboard's discrepancies over listing it under Needs you as the ticket asked: the 2026-11-01 ruling keeps position discrepancies off Needs you (2026-11-03, the owner, "Keep your Decision"; R-BTN-85, R-BTN-39). Chose to let that discrepancy fire on every posted `available` past the start, a release that kept its PRs included, over telling the two apart by a field the ticket source posts for core or by core reading `prs` (R-BTN-50, R-BTN-33): the extra entries are a dashboard list that adopts nothing, and they end when R3-1266 moves the claim onto Baton (2026-11-03, the owner, "Accept the extra entries"; R-BTN-85). Chose two narrow exceptions to core reading nothing opaque, each written in its rule, over posting the git-lock status as a filter field and serving resume records whole for the CLI to prune: `display.status` for `position-disagrees` beside `display.project` (R-BTN-33), and a resume record's `branches` and `prs` for the history read (R-BTN-50, R-BTN-24) (2026-11-03, the owner, "Write narrow exceptions").
+- Chose to list B-129's `position-disagrees` only on the dashboard's Sync screen (§11.4) over listing it under Needs you as the ticket asked: the 2026-11-01 ruling keeps position discrepancies off Needs you (2026-11-03, the owner, "Keep your Decision"; R-BTN-85, R-BTN-39). Chose to let that discrepancy fire on every posted `available` past the start, a release that kept its PRs included, over telling the two apart by a field the ticket source posts for core or by core reading `prs` (R-BTN-50, R-BTN-33): the extra entries are a dashboard list that adopts nothing, and they end when R3-1266 moves the claim onto Baton (2026-11-03, the owner, "Accept the extra entries"; R-BTN-85). Chose two narrow exceptions to core reading nothing opaque, each written in its rule, over posting the git-lock status as a filter field and serving resume records whole for the CLI to prune: `display.status` for `position-disagrees` beside `display.project` (R-BTN-33), and a resume record's `branches` and `prs` for the history read (R-BTN-50, R-BTN-24) (2026-11-03, the owner, "Write narrow exceptions").
 
 **Conditions, calls, deadlines and cancellation**
 
@@ -211,4 +211,48 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   bound to loopback (B-182's decision, option (a)): slightly fiddly once — a second OS user for
   the runners' keys — and no spec change; a later ticket can loosen it if (a) proves too awkward
   in practice (2026-11-12, B-182; R-BTN-105, `docs/runbooks/local-home.mdx`).
+- Chose the V2 dashboard as a walk down the entity tree — sign in, pick a repository, one entity
+  per screen, its controls the registry actions `ui.view` places there — over standalone console
+  screens, so what a session sees and what it can do come from one definition (2026-11-09, the
+  owner, handing over the mockup; R-BTN-129, §11.4).
+- Chose React and TypeScript with a build step — one bundle built from this repository, loading
+  nothing from another origin — over the dashboard's dependency-free rule (2026-11-09, the
+  owner; §12.3, §11.4).
+- Chose Board, Tickets, Conditions and the overview strip over Running, Ready and Needs you as
+  screens: the task answers stay one glance away on the strip, and every screen is one entity
+  (2026-11-09, the owner; §11.4).
+- Chose V2 replacing V1 outright at `/`, no transition, over a gradual one: nobody uses the V1
+  dashboard (2026-11-09, the owner, "the transition doesn't need to be smooth"; §11.4).
+- Chose the timeline per runner on its page over a fleet-wide one (2026-11-09, the owner;
+  §11.4).
+- Chose runners grouped by hostname as R-BTN-3 says — the state each card's mark — over
+  grouped by state as the mockup draws them (2026-11-09, the owner; R-BTN-3, §11.4).
+- Chose to build none of the mockup's elements for which no fact exists: Schemas (no read
+  exists; B-54's renderers), Providers and Suspensions (B-142 retired their tables; availability
+  is a reading on `/instances`), Accept history (R-BTN-85 adopts git's value at once), Stream
+  stdout/stderr (R-BTN-128: a log is its directory), the runner's model (R-BTN-3 names none) and
+  "Workers" (B-68: runners) (2026-11-09, the owner; §11.4).
+- Chose the tenant screens read-only, each naming the CLI command that changes it, over the
+  brief's controls: nothing changes authority from a cookie, and the tenant's export stays the
+  CLI's alone (2026-11-09, the owner; R-BTN-155, §11.4).
+- Chose `ticket.route` and `ticket.adopt` to stay the CLI's, named as text on the ticket page,
+  over session actions for them (2026-11-09, the owner; R-BTN-83, R-BTN-39, §11.4).
+- Chose Stop as one click — the session's release message, no dialog, no code, `confirm: true`
+  staying the CLI's and the owner route's — over a confirm dialog (2026-11-09, the owner;
+  R-BTN-155, §11.4).
+- Chose to keep `GET /v1/admin/state`'s shape, built by one named core function with each
+  section equal to the matching entity read's first page at the same instant, over retiring it
+  with `ui.state`: a terminal keeps one request (2026-11-09, the owner; R-BTN-57, R-BTN-179,
+  S-BTN-170; B-216 builds it).
+- Chose to keep the held board post's Accept on Sync, unconfirmed — it accepts a post the sync
+  already made — over auto-accept alone (2026-11-09, the owner; §11.4; B-201 files its row).
+- Chose one unit test over `src/dashboard/**` refusing the markup-parsing APIs, over ESLint
+  scoped to the dashboard (2026-11-09, the owner; §12.3, G-BTN-13).
+- Chose no staging check in this project — B-216's post-merge check runs against production,
+  the only deployment anyone uses — over checking the deploy on staging or deploying staging
+  first: this project checks nothing on staging, and the staging instance itself goes with the
+  one-instance decision above (2026-11-09, the owner, "we don't need staging at all"; B-216).
+- Chose a per-tenant request counter with a 5-minute mean over amending R-BTN-87 to live counts
+  alone, so the envelope's figures are shown as stated (2026-11-09, the owner; R-BTN-87, §11.4;
+  B-202 builds it).
 - Chose, for the first factory, a person joining the leg's own agent session through its harness's UI, asked by an `interact` notice a delivery runner sends with the session's link, Baton holding nothing for the interaction, and autonomous legs that fail rather than ask, over answers, pauses and hibernation in Baton (2026-11-14, the owner: "we need to remove concepts"; R-BTN-195, R-BTN-69, R-BTN-107).

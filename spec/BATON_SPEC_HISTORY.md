@@ -2831,6 +2831,69 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   notice (`require_signed_control`) is the detection for a repository that wants it. Provenance
   is information only: nothing is refused, held or noticed. Scenario S-BTN-220.
 
+- **2026-11-09 — §11.4, R-BTN-129, R-BTN-155, R-BTN-163, R-BTN-16, §12.1, §12.3, §5.5, §15**
+  (B-191, the V2 dashboard, filed 2026-11-13).
+  Rules changed: R-BTN-129, R-BTN-155, R-BTN-163, R-BTN-16.
+  The owner handed the Claude Design mockup
+  ([`docs/design/baton-dashboard-v2.html`](../docs/design/baton-dashboard-v2.html), self-contained; its
+  overview in [`baton-dashboard-v2-overview.png`](../docs/design/baton-dashboard-v2-overview.png))
+  over on 2026-11-09: "I want the V2 API to be organized along the same concepts as the REST
+  API, CLI and MCP. Under that assumption the dashboard becomes a walk down the same tree the
+  URLs already draw — sign in, pick a repository, and every screen after that is one entity.
+  Every screen = one entity's REST reads, with its controls the registry actions placed there
+  by `ui.view` — so 'what I see' and 'what I can do' come from the same definition." §11.4's
+  view list becomes that tree — `/`, `/login`, the repository screens under
+  `/repositories/{repository}` and the administrator's tenant screens — each screen one
+  sentence carrying over the view it retires (Running and Ready to Board and Tickets, Needs you
+  to Conditions, Timeline to the runner page, Instances and Capacity to `/instances` and
+  `/capacities`, Discrepancies to Sync, the Courses view to the course screens and the ticket
+  page), and seven rules stated once there: the entity-reads-and-`ui.view` rule; the overview
+  strip (running now · ready · needs you, and the mode where not cut over); the 10-second
+  `If-None-Match` polling, paused while the page is hidden, the confirmation-code dialog alone
+  at 5 seconds for its two minutes; the refusal wording ("This repository is not yours or does
+  not exist" with a link to `/`; "No such ticket" — one component, one wording);
+  target-dependent controls drawn only on the read's `allowed` word, computed by `authorize`
+  with the session as principal, the app never reading the policy; the ticket state vocabulary —
+  `unconfirmed`, `running`, `waiting-person`, `held`, `blocked`, `backing-off`, `suspended`,
+  `ready`, `closed`, in that precedence — and the Tickets tabs (Blocked counting a held ticket,
+  Closed meaning the last 24 hours), the same words on the vocabulary page; and Stop as one
+  click, R-BTN-155's confirmed list unchanged. R-BTN-129's `ui` becomes
+  `{view: [<screen id>…], route?}` — a screen id being `root`, `tenant/<segment>` or
+  `repository/<segment>[/{param}]`, held in one data file (`src/core/screens.ts`) the front, the
+  client router and `check:actions` read, `view` set only on session-callable entries,
+  `check:actions` failing a `view` naming no screen or an entry no session can call and listing,
+  never failing, a screen no control names — and `GET /v1/actions` answers a session its entries
+  as the registry holds them, minus `delegated`, with `ui`, a delegated key staying
+  `unauthenticated` there. §12.3's rendering sentence is stated for the built React bundle:
+  every value a text node; a schema'd value through R-BTN-112's `ui` renderer, its schema
+  fetched from `GET …/schemas` (B-217); any other blob pretty-printed JSON; `src/dashboard/**`
+  using no markup-parsing API, React the only code that touches the DOM; one bundle, no script,
+  style, font or data from another origin; the client applying the server's own link rule from
+  `src/shared/links.mjs` with `web_base`, `link_hosts` and `session_hosts` from the read. §5.5's
+  `ui` renderer and §11.4 cite it. R-BTN-163's Resolve page moves to
+  `/repositories/{repository}/conditions/{condition}` — the `resolve_url` of
+  `GET …/conditions` — with `GET /conditions/{condition}` answered by a `302` when the core
+  finds the id among the session's repositories and the shell otherwise (sign-in signed out,
+  `not-found` for none and another repository's alike). R-BTN-16's Access paragraph lists the
+  tree's page paths and states that a session's reads outside `/v1/ui/*` are authenticated by
+  Baton alone (B-192); §12.1's dashboard-session row follows, and its public row names the
+  shell's three assets. §15: S-BTN-76's `ui` column reads "text node", G-BTN-13 reads "the
+  dashboard's source never uses a markup-parsing API", and S-BTN-221 — *the screen draws only
+  its caller's actions* — is new, its API half B-204's and its DOM half B-207's (in B-193's
+  `ui` project).
+  The nine choices B-191's Decision needed packet carried were the owner's, 2026-11-09 ("I take
+  your recommendations"; 7: "we don't need staging at all", 8 and 9: "your recommendations"),
+  each now a Decisions line: the tenant screens read-only naming the CLI command, the tenant's
+  export staying the CLI's; route and adopt the CLI's alone; Stop one click;
+  `GET /v1/admin/state` keeping its shape (B-216); the held post's Accept kept on Sync (B-201);
+  the markup-API source test over ESLint; no staging check in this project — B-216 checks
+  production, the only deployment, per the one-instance decision above; a per-tenant request
+  counter with a 5-minute mean (B-202), R-BTN-87 standing as written; runners grouped by
+  hostname, per R-BTN-3. The owner's choices beside them: React and TypeScript replace the
+  brief's dependency-free rule; V2 replaces V1 outright; the timeline is per runner; the
+  mockup's unbuilt elements are a Decisions line with their reasons. The old view names go to
+  the Migrations below; the brief (`docs/context/design-brief.mdx`) was checked against the
+  amended §11.4 and its drift fixed.
 - **2026-11-14 — R-BTN-195 added; R-BTN-69, R-BTN-107, R-BTN-113, R-BTN-160, R-BTN-161, R-BTN-169 amended: a person is asked into the leg's session.**
   Rules changed: R-BTN-195, R-BTN-69, R-BTN-107, R-BTN-113, R-BTN-160, R-BTN-161, R-BTN-169.
   The owner, on how a leg asks for human input: the native harnesses already handle a person
@@ -2850,7 +2913,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   The runner could then redirect or include the harness web ui via iframe"). Left out of the first version
   and listed as possible later work in FIELDHOUSE_SPEC §5.1: a question with a menu that the
   delivery runner delivers and the person answers without joining the session, and hibernating
-  a long-waiting leg, revived when the person loads the harness's UI or answers. Scenario S-BTN-221.
+  a long-waiting leg, revived when the person loads the harness's UI or answers. Scenario S-BTN-222.
 
 ## Retired requirements
 
@@ -3019,6 +3082,19 @@ refused).
 
 Each entry is a transition the specification no longer describes. The code keeps the old form
 working until the stated condition holds, then removes it.
+
+- **The V1 dashboard's views (B-191, 2026-11-09).** §11.4's screens replace its view list
+  outright; no view name is kept as an alias. The old names map — Runners to `/runners`,
+  Running and Ready to Board and Tickets, Needs you to Conditions, Timeline to the runner
+  page, Instances to `/instances`, Capacity to `/state`, Courses to the course screens and the
+  ticket page, Discrepancies to Sync, and the Resolve page to
+  `/repositories/{repository}/conditions/{condition}`, whose old address `GET
+  /conditions/{condition}` keeps answering with a `302` (R-BTN-163). V1 itself — `src/ui/`
+  (`index.html`, `app.css`, `app.js`), polling `GET /v1/ui/state` — is served until B-193's
+  shell lands and deleted with it, V2 replacing V1 outright at `/` (the owner's ruling); the
+  route and `ui.state`'s §14 row follow with B-203, `uiState()` staying as the one function
+  that builds `GET /v1/admin/state`'s kept shape (Decision 4a; B-216 renames it `stateView()`).
+  Stop when `src/ui/` and `GET /v1/ui/state` are gone.
 
 - **Part 4's retired fields (B-166, 2026-11-02).** The board post's `ontology` and course
   entries' `route_choices` and `report_horizon_h`, the heartbeat's `uses`, the claim's and a

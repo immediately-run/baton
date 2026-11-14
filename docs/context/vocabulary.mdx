@@ -87,10 +87,15 @@ stands from the moment Baton records it.
 **Block.** Why a leg cannot start — another ticket, a missing capability, an outside resource,
 a backoff, an open condition.
 
+**Ticket state.** The one word the dashboard draws a ticket under: `unconfirmed`, `running`,
+`waiting-person`, `held`, `blocked`, `backing-off`, `suspended`, `ready` or `closed`, in that
+precedence, every other that applies listed beside it as a reason; the Tickets screen's tabs —
+Ready, Running, Blocked, Unconfirmed, Closed today — group them (§11.4).
+
 **Person leg, question.** The one way a course waits on a person: a leg no runner runs, which
 arrives when a person answers it with a `std:decision@1`. Its question — the id, the link, the
-options — is what the ticket source posts for it, and Needs you lists it until it is answered or
-expires (R-BTN-116).
+options — is what the ticket source posts for it, and Needs you (the debugger's list; the
+dashboard's Conditions screen) holds it until it is answered or expires (R-BTN-116).
 
 **Autonomous leg, interaction request.** An autonomous leg never asks for a person and fails
 when it would need one. Any other leg may raise an **interaction request** (`interact`): a
@@ -111,6 +116,15 @@ its help comes from the registry (R-BTN-127, R-BTN-129).
 **Session.** A dashboard sign-in, minted by an administrator's or owner's key through a code the
 key holder confirms; one principal, carrying its key's role, an owner's reaching only the
 repositories the key still owns (R-BTN-155).
+
+**Screen.** One entity's page of the dashboard — sign in, pick a repository, one entity per
+screen — named `root`, `tenant/<segment>` or `repository/<segment>[/{param}]`; what it draws is
+that entity's REST reads, and its controls the registry actions whose `ui.view` names it
+(R-BTN-129, §11.4).
+
+**Overview strip.** The line every repository screen carries — running now · ready · needs you —
+linking to Board, Tickets and Conditions, with the repository's mode where it is not cut over
+(§11.4).
 
 **Delegated key.** An MCP key: a bearer an owner's tool holds, acting as an owner of one
 repository for the actions listed when it was minted. It may tighten (hold, bar, stop,

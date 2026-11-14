@@ -45,6 +45,7 @@ import part4Resources from './0043_part4_resources.sql';
 import part4Settings from './0044_part4_settings.sql';
 import checkConclusions from './0045_check_conclusions.sql';
 import ticketProvenance from './0046_ticket_provenance.sql';
+import legRunInputs from './0047_leg_run_inputs.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -145,4 +146,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 45, sql: checkConclusions },
   // 0046 is B-126's (ticket provenance), numbered behind B-169's 0045.
   { id: 46, sql: ticketProvenance },
+  // 0047 is B-190's (replay: each run's inputs, the ticket's version among them).
+  { id: 47, sql: legRunInputs },
 ];

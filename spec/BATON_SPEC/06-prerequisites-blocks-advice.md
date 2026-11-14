@@ -551,8 +551,8 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     a ticket in git and reopening it clears nothing. A ticket re-filed under a new id is a new
     ticket and carries no hold (only a renumbering at the same path does, R-BTN-147): a hold
     binds a ticket only as firmly as git keeps its id, and that residual risk is accepted.
-    Owners see it: the dashboard's **Courses** view lists every closed or dropped ticket that
-    keeps a hold, with its reason, beside the new ticket, and a drop raises
+    Owners see it: the dashboard's course screens (§11.4) list every closed or dropped ticket
+    that keeps a hold, with its reason, beside the new ticket, and a drop raises
     `baton.ticket-dropped`.
 
 ### 6.9 Messages
