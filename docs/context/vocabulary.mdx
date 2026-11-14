@@ -97,6 +97,12 @@ arrives when a person answers it with a `std:decision@1`. Its question — the i
 options — is what the ticket source posts for it, and Needs you (the debugger's list; the
 dashboard's Conditions screen) holds it until it is answered or expires (R-BTN-116).
 
+**Autonomous leg, interaction request.** An autonomous leg never asks for a person and fails
+when it would need one. Any other leg may raise an **interaction request** (`interact`): a
+condition carrying its run's session link, which a delivery runner sends to a person, who joins
+the session in its harness's own UI; what they say there never passes through Baton
+(R-BTN-195).
+
 **Cancel leg.** The ordinary leg a course names to undo its work outside git when a ticket is
 cancelled; Baton alone queues it, and the ticket is withdrawn when it ends (R-BTN-168).
 

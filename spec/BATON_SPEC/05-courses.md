@@ -139,6 +139,7 @@ mean (R-BTN-50).
   | `deadline_s` | leg | how long one run may take before Baton takes the claim back, 60 s–7 d | R-BTN-167, R-BTN-90 |
   | `stalled_s` | leg | how long the leg may be posted `waiting` before `baton.stalled` is raised; default 259,200 (72 h) | R-BTN-167 |
   | `conditions` | leg | narrows the condition types it may raise (`[]`: none) | R-BTN-160 |
+  | `autonomous` | leg | `true`: the leg never asks for a person | R-BTN-195 |
   | `spawns` | leg | the courses of the children it files (for a call leg, the courses it calls), their contract and their `lifetime` | R-BTN-111, R-BTN-165, R-BTN-168 |
   | `no_chain_from` | leg | legs whose credential may not take this one on the same ticket (for a credential `domains.per_run` lists, across claims only under another label) | R-BTN-106 |
   | `stream` | leg | `false`: its output is never written to a leg log | R-BTN-128 |
@@ -159,6 +160,8 @@ mean (R-BTN-50).
     `expires` sits only on a `kind: person` leg and names one of its outcomes, and `deadline_s`
     and `stalled_s` sit on no `kind: person` leg (R-BTN-167); `deadline_s`, `stalled_s` and
     `expires.after_s` are within their ranges (R-BTN-167, R-BTN-116);
+    `autonomous` sits on no `kind: person`, `call` or `arrives` leg, and never beside a `conditions`
+    list naming a type R-BTN-195 bars it;
     `renamed_from` passes R-BTN-142; every capability is typed (R-BTN-121) and `runner:leg-trees`
     is listed where R-BTN-133 needs it; its schemas pass R-BTN-108. It refuses the fields
     `error_types`, `max_duration`, `max_attempts_s` and `max_ready_s`, whose meanings are

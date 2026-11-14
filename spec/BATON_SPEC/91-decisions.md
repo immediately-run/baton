@@ -255,3 +255,4 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a per-tenant request counter with a 5-minute mean over amending R-BTN-87 to live counts
   alone, so the envelope's figures are shown as stated (2026-11-09, the owner; R-BTN-87, §11.4;
   B-202 builds it).
+- Chose a person joining the leg's own agent session in its harness's UI, asked by an `interact` condition carrying the run's session link and sent from Baton's list by a delivery runner, with autonomous legs that fail rather than ask, over pausing, hibernating or answering such requests in Baton (2026-11-14, the owner: "we need to remove concepts"; R-BTN-195, R-BTN-69, R-BTN-107).

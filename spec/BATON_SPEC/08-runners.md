@@ -342,7 +342,8 @@ the runner's credentials under any other executor is that executor's, never Bato
   - **The interface**, `executor_api: 1`:
     - `start({brief, executor, inputs, channel}) → handle` starts a leg session. `brief` holds the
       session's kind, the ticket, the leg, its input URIs, the hand-off document, the leg's
-      instructions and its agent command (R-BTN-131), and `reads_only` as a hint (R-BTN-183) —
+      instructions and its agent command (R-BTN-131), and, as hints,
+      whether the leg is `autonomous` (R-BTN-195) and `reads_only` (R-BTN-183) —
       never the claim id, the runner secret or a Baton credential; `executor` is the leg's
       executor data (below); `channel` is the address of the leg's channel (R-BTN-106). A
       handle may name the session's link, which the runner reports as R-BTN-113 says.
@@ -350,7 +351,9 @@ the runner's credentials under any other executor is that executor's, never Bato
       started gone within R-BTN-145's 30 s: the guarantee is the executor's to keep.
     - `end(handle) → {status, result}` waits for the session's end; `result` is its
       ```` ```baton-leg-result ```` block, holding the channel's JSON, or the agent's last line,
-      which the runner checks as R-BTN-106 checks a move.
+      which the runner checks as R-BTN-106 checks a move. A session that does not exit when its
+      agent is done, one a person can join, ends at the result posted on its channel, after
+      which the runner calls `stop` (R-BTN-195).
     - `exec(handle, argv, {cwd, timeout_s, stdin}) → {status, stdout, stderr}` runs a command
       where the session runs.
     - `salvage(handle) → {sha, ref} | null` captures the session's uncommitted work (B-186; it
@@ -460,7 +463,8 @@ the runner's credentials under any other executor is that executor's, never Bato
   administrator's setting, default `claude.ai`), else it is dropped and logged. Stored on
   `claim_legs.session_url` (latest wins while running) and shown on Board and the runner page
   (§11.4);
-  under an executor whose handle names its session's link (R-BTN-107), it is that link.
+  under an executor whose handle names its session's link (R-BTN-107), it is that link, or a
+  page the runner serves that leads a person to the session.
 
 ### 8.4 Where and how a leg runs
 

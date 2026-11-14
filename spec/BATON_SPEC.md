@@ -62,7 +62,7 @@ is stale. Never edit it by hand.
 | | 6.10 How a leg runs: the course's choice | — |
 | | 6.11 Capacity: exclusive use of a capability *(proposal — B-106)* | R-BTN-178 |
 | [`07-conditions.md`](BATON_SPEC/07-conditions.md) | **7. Conditions** | — |
-| | 7.1 Raising a condition | R-BTN-160, R-BTN-125 |
+| | 7.1 Raising a condition | R-BTN-160, R-BTN-125, R-BTN-195 |
 | | 7.2 Handlers | R-BTN-161, R-BTN-162 |
 | | 7.3 The debugger and Baton's own conditions | R-BTN-163 |
 | | 7.4 Retries | R-BTN-122, R-BTN-23 |
@@ -299,6 +299,7 @@ is stale. Never edit it by hand.
 | R-BTN-192 | the fact reader: forge facts a trusted runner attests, with no course code | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-193 | git is never a lock or a counter | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
 | R-BTN-194 | every ticket carries who last wrote it | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-195 | an interaction request asks a person into the leg's session | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 
 ## Scenarios
 
@@ -481,6 +482,7 @@ is stale. Never edit it by hand.
 | S-BTN-219 | require_signed_control (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-220 | ticket provenance (B-126) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-221 | the screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-222 | an interaction request | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

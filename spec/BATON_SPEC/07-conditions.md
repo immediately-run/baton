@@ -18,10 +18,11 @@ Limits that hold throughout:
 - Baton writes no git, sends no mail and calls no service but a forge's workflow dispatch
   (R-BTN-94). Every git write and every check run Baton intends goes through the outbox, which
   runners deliver (R-BTN-171).
-- Baton queues nothing for people. A person is reached one way, by a person's leg (R-BTN-116): a
-  `hitl` condition's handler course asks through one (R-BTN-169), and Baton's own conditions are
-  answered on their resolve page, which a delivery runner reads from Baton's own list
-  (R-BTN-163). No ticket file, outbox entry or deliverer stands between Baton and a person.
+- Baton queues nothing for people. A course waits on a person one way, by a person's leg
+  (R-BTN-116): a `hitl` condition's handler course asks through one (R-BTN-169), and Baton's own
+  conditions are answered on their resolve page, which a delivery runner reads from Baton's own
+  list (R-BTN-163). A leg asks a person into its session by `interact`, which nothing waits on
+  (R-BTN-195). No ticket file, outbox entry or deliverer stands between Baton and a person.
 - A ticket stays sequential (R-BTN-86). Everything below that runs in parallel is a child ticket.
 
 ### 7.1 Raising a condition
@@ -37,6 +38,7 @@ Limits that hold throughout:
     |---|---|---|
     | `hitl` | `suspend` | any leg |
     | `warning` | `notify` | any leg |
+    | `interact` | `notify` | a leg (R-BTN-195) |
     | `error` | `interrupt` | any leg; core's classes are `error.transient`, `error.capability`, `error.spec`, `error.contract-output`, `error.contract-input` |
     | `baton` | per sub (R-BTN-163) | core only |
 
@@ -60,6 +62,8 @@ Limits that hold throughout:
     - `LegError(type, message)` raises an `interrupt` type. The exception is a `LegError` naming a
       `prerequisite`, which ends the claim `released:blocked` (R-BTN-126).
     - The standard courses declare `error.no-answer` (`interrupt`, `retryable: false`).
+    - `error.needs-person` (`interrupt`, `retryable: false`) is standard: an autonomous leg raises
+      it when it cannot go on without a person (R-BTN-195).
   - **Signature.** A course's signature (R-BTN-111) lists the conditions its legs may raise: its
     own types and, unless a leg narrows them, the standard ones. `baton course test` prints the
     signature.
@@ -89,7 +93,8 @@ Limits that hold throughout:
     default?, severity?, url?}`.
     - The body holds filter fields only (R-BTN-33), never the subject or the body. `url` is sent
       only for an unbound `suspend` and points to where git holds the question (the leg's
-      evidence or its hand-off), under R-BTN-92's link rule.
+      evidence or its hand-off), under R-BTN-92's link rule. An `interact` condition's `url` is
+      Baton's own (R-BTN-195).
     - Baton answers with a `condition_id` and, when `handler` names a course, the handler's id
       `handler_id` (below), and stores the `conditions` row; the runner then writes the handler
       ticket under that id. It records an activity of kind `condition` on the leg run and a
@@ -103,6 +108,7 @@ Limits that hold throughout:
     |---|---|
     | `interrupt` | it is raised, or, if bound, when its handler ticket closes |
     | unbound leg-raised `notify` | it is raised (outcome `recorded`) |
+    | `interact` | its run ends, or the run raises `interact` again (R-BTN-195) |
     | bound `notify` | its handler ticket closes |
     | `suspend` | its handler ticket closes `done` or `withdrawn`, or an owner resolves it (R-BTN-163) |
     | core `baton.<sub>` | the cause the owning rule names ends |
@@ -117,6 +123,34 @@ Limits that hold throughout:
     - Core conditions are `normal`, except `baton.contract`, which is `high`.
   - **What it does.** Severity is data for the handler course and the order of the debugger's
     list (R-BTN-163). It routes nothing and gates nothing.
+- **R-BTN-195 (an interaction request asks a person into the leg's session).** A leg that wants
+  a person raises `interact`; the person joins the leg's agent session in its harness's own UI,
+  and everything they and the agent say passes there, never through Baton.
+  - **Autonomous legs.** A leg declared `"autonomous": true` (R-BTN-69) never asks for a person:
+    it may raise no `interact` and no `suspend` type, `hitl` and its subtypes included, and an
+    `error` it raises is routed by its retry policy, never by a `"replaces": "retry"` binding
+    (R-BTN-122). The validator refuses `autonomous` beside a `conditions` list naming any of
+    them. When it cannot go on without a person, it raises `error.needs-person` (R-BTN-160), its
+    trace in the leg log (R-BTN-128). The executor's brief carries the flag as a hint
+    (R-BTN-107).
+  - **The raise.** `interact` is checked as every raise is (R-BTN-160), and is refused on the
+    channel with the reason when the leg is autonomous, has no `deadline_s` (R-BTN-167), or its run
+    has no session link Baton holds (R-BTN-113). Baton sets the condition's `url` to that link,
+    `claim_legs.session_url`, and ignores any the runner sends. A run holds one open `interact`
+    at a time: a new raise closes the open one (outcome `superseded`). The subject and body the leg supplies stay
+    with the runner (R-BTN-33).
+  - **Delivery.** No binding applies (R-BTN-161) and no handler ticket is filed. The condition
+    is open until it closes (R-BTN-160), listed on Needs you with its link (R-BTN-163), and a delivery
+    runner sends it from Baton's list (R-BTN-163).
+  - **Baton tracks nothing of the interaction itself.** The raise returns at once and the leg
+    goes on. Baton does not learn when the person joins, answers or leaves. The person may close
+    the harness's UI at any time; the leg runs on, and may raise `interact` again later in the
+    same run, which a delivery runner sends as a new request. A refresh (R-BTN-123) starts a new session, whose link
+    the next heartbeat reports, and ends the person's conversation in the old one.
+  - **The leg ends by its result.** A joinable session does not exit when its agent is done:
+    the leg ends when the result is posted on its channel (R-BTN-106), and the runner then stops
+    the session (R-BTN-107), a person in it or not. At the run's `deadline_s` it ends as a failed
+    attempt (R-BTN-90).
 ### 7.2 Handlers
 
 - **R-BTN-161 (bindings choose a handler course; the handler is a ticket file).**
@@ -138,7 +172,8 @@ Limits that hold throughout:
       raise, the course it resolves to and the scope that supplied it.
   - **Who may bind.** Anyone who can push may bind (R-BTN-66). Only default-branch code runs
     (R-BTN-143), so a binding on an unmerged branch binds nothing. No owner setting gates a
-    binding. A binding of `baton` or `baton.*` is ignored: Baton's own conditions are delivered
+    binding. A binding of `interact` is ignored, as `interact` is delivered from Baton's list
+    (R-BTN-195), and so is a binding of `baton` or `baton.*`: Baton's own conditions are delivered
     from Baton's list, never through a ticket (R-BTN-163).
   - **The handler ticket.**
     - The runner writes the handler ticket git first, through the ticket source's `file(ticket)`
@@ -302,10 +337,11 @@ Limits that hold throughout:
     learns of it is a **delivery runner's**: any runner, or a process with a key granted on the
     repository, that polls `GET /v1/repositories/{repository}/conditions?open=1` — with `person=1` for
     what waits on a person (the list `baton decision list --watch` reads, below) and with
-    `type=baton` for Baton's notices, the `notify` conditions above — and sends each entry it has
-    not yet sent: for a `suspend` condition its type, severity, detail and resolve link; for a
+    `type=baton` for Baton's notices, the `notify` conditions above, and `type=interact` for
+    interaction requests (R-BTN-195) — and sends each entry it has not yet sent: for a `suspend` condition its type, severity, detail and resolve link; for a
     person leg its ticket, `asks`, options and question link; for a `notify` condition its type,
-    severity and detail — by whatever channel it has, a webhook or mail, outside Baton. Core names no channel and records no delivery; a runner that delivers twice
+    severity and detail; for an `interact` condition its ticket, leg and `url`, and nothing the
+    leg wrote — by whatever channel it has, a webhook or mail, outside Baton. Core names no channel and records no delivery; a runner that delivers twice
     does no harm, since the page answers once. A repository with no such runner has the dashboard
     and the CLI.
   - **The floor, which no binding removes.**
