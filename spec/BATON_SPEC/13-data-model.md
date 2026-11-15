@@ -202,7 +202,13 @@ by repository and by handler; `outbox_pending` `(repository_id, ticket_id, id)` 
 `needs_you` and `discrepancies` of `GET /v1/ui/state`) read in, by `at` then `seq`, so a window
 reads its own rows and not the log; `events_discrepancies`
 and `events_unsigned_control` (`at` where `kind` is theirs). A rebuild of `events` recreates every
-index on it.
+index on it. `claims_last_end` `(ticket_id, end_observation)` and `claims_holding` (`ticket_id`
+where active, completed and unconfirmed, or reaped with its fence pending), so the candidate
+query's two claim lookups (§7.2 rule 3, §6.7's sync since the last end) read one entry a ticket,
+not its every claim (B-237).
+
+**`state_version`** — one row, `v`: R-BTN-196's counter, moved in the commit of every write
+but liveness and request nonces.
 
 **Where the alarm's instants live** (§2 owns what each does): `ticket_timers.due_at`;
 `ticket_next_legs.not_before`; `ticket_blocks.until` of `retry` rows; `claims.deadline_at`;

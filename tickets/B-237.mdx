@@ -2,7 +2,7 @@
 title: B-237 — Recommendations and claim gate lazily and cache per-request values
 id: B-237
 project: baton
-status: available
+status: in-progress
 updated: 2026-11-15
 repos:
   - baton
@@ -47,3 +47,5 @@ No new input: indexes, tables and queries over data Baton already stores; no fie
 ## Status
 
 _filed 2026-11-15._
+
+2026-11-15: in review — lazy gating, per-request caching, one candidate reading per refusal, the claim indexes, and R-BTN-196's state version (B-242's counter) with the idle memo. On a production-sized gated state an idle beat's recommendations and refused claim read 9 and 8 rows on a repeat (from ~3.8k and ~7.5k); a reading that computes reads ~2.2k each.

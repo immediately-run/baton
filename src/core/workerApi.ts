@@ -21,6 +21,8 @@ import {
 import type { Policies } from './policy';
 
 import type { Config, Row, SqlValue, Store } from './ports';
+import { liveness } from './stateVersion';
+
 const CLOSE_GRACE_MS = 10 * 60_000; // §6.9: closing updates are accepted 10 minutes after a claim ends
 
 /** FNV-1a (32-bit), hex: a cheap synchronous change detector. */
@@ -226,10 +228,14 @@ export class WorkerApi {
 
   private authWorkerTx(credentialId: string, hash: string) {
     this.credential(credentialId);
-    const w = this.rows<{ id: number; reaped_at: number | null }>('SELECT id, reaped_at FROM workers WHERE credential_id = ? AND secret_hash = ?', credentialId, hash)[0];
+    const w = this.rows<{ id: number; reaped_at: number | null; secret_seen: number }>('SELECT id, reaped_at, secret_seen FROM workers WHERE credential_id = ? AND secret_hash = ?', credentialId, hash)[0];
     if (!w) throw new BatonError('unauthenticated', 'no worker holds this secret');
     if (w.reaped_at != null) throw new BatonError('worker-reaped', 'this worker was reaped; re-key with a heartbeat');
-    this.exec('UPDATE workers SET last_seen_at = ?, secret_seen = 1 WHERE id = ?', this.c.now(), w.id);
+    // B-237 (R-BTN-196): a call's `last_seen_at` is liveness — it does not move the state version;
+    // the first presentation of the secret does.
+    const seen = () => this.exec('UPDATE workers SET last_seen_at = ?, secret_seen = 1 WHERE id = ?', this.c.now(), w.id);
+    if (w.secret_seen) liveness(this.c.store, seen);
+    else seen();
     return w.id;
   }
 
@@ -368,10 +374,20 @@ export class WorkerApi {
 
     const current = rekeyed ? hb.secret_hash : w.secret_hash; // the hash stored now
     const secretSeen = presented != null && presented === current ? 1 : 0;
-    this.exec(`UPDATE workers SET last_seen_at = ?, secret_seen = MAX(secret_seen, ?), last_activity_at = COALESCE(?, last_activity_at), harness = ?, kind = ?,
+    // B-237 (R-BTN-196): a beat of a live worker that changes nothing but `last_seen_at` and
+    // `last_activity_at` is liveness, and does not move the state version — what those decide
+    // (live, stalled) is the clock's; any other field it sets that differs is a change.
+    const stored = this.rows<{ harness: string; kind: string; model_id: string | null; tier_ceiling: string; tier_ceilings: string; lease_timeout_ms: number; isolation: string | null; secret_seen: number }>(
+      'SELECT harness, kind, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms, isolation, secret_seen FROM workers WHERE id = ?', w.id)[0];
+    const beatOnly = !!was?.live && !rekeyed && stored != null && stored.harness === hb.harness && stored.kind === hb.kind
+      && stored.model_id === (hb.model_id ?? null) && stored.tier_ceiling === hb.tier_ceiling && stored.tier_ceilings === JSON.stringify(hb.tier_ceilings)
+      && stored.lease_timeout_ms === hb.lease_timeout_s * 1000 && stored.isolation === hb.isolation && stored.secret_seen >= secretSeen;
+    const beat = () => this.exec(`UPDATE workers SET last_seen_at = ?, secret_seen = MAX(secret_seen, ?), last_activity_at = COALESCE(?, last_activity_at), harness = ?, kind = ?,
                  model_id = ?, tier_ceiling = ?, tier_ceilings = ?, lease_timeout_ms = ?, isolation = ? WHERE id = ?`,
       now, secretSeen, hb.last_activity_at ?? null, hb.harness, hb.kind, hb.model_id ?? null, hb.tier_ceiling, JSON.stringify(hb.tier_ceilings),
       hb.lease_timeout_s * 1000, hb.isolation, w.id);
+    if (beatOnly) liveness(this.c.store, beat);
+    else beat();
     const rewrote = settingsHash !== w.settings_hash || rekeyed;
     if (rewrote) this.rewriteSettings(w.id, hb, settingsHash);
     const granted = this.grantedRepos(cred);
@@ -413,8 +429,9 @@ export class WorkerApi {
         sessionUrlDropped = why;
         this.event('discrepancy', `worker:${w.id}`, { sub: 'session-url', why, url: hb.session_url.slice(0, 120) }, claim.ticket_id, claim.id);
       } else {
-        this.exec(`UPDATE claim_legs SET session_url = ? WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL`,
-          hb.session_url, claim.id);
+        // The same link again changes no row (B-237: so a working runner's beat moves no version).
+        this.exec(`UPDATE claim_legs SET session_url = ? WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL AND session_url IS NOT ?`,
+          hb.session_url, claim.id, hb.session_url);
       }
     }
     // §7.5 R-BTN-90 (B-234): `leg_finished` is processed before this beat delivers its

@@ -6,6 +6,7 @@
 // reach it only through the front, which has verified the principal — all but a signed
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
 import { MIGRATIONS } from '../migrations';
+import { versionedStore, type VersionedStore } from './stateVersion';
 import { BatonError, errorResponse, json } from './http';
 import { checkPayload, DEFAULT_COURSE, retiredBoardFields, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
@@ -83,7 +84,8 @@ export class BatonCore {
   /** The retired-fields window (B-168, R-BTN-132): the day's logged fields, by field and actor —
    *  nothing else of it is held here (`deprecated.ts` writes the rows and the events). */
   readonly deprecated: Deprecated;
-  readonly store: Store;
+  /** The host's Store, counting writes into `state_version` (B-237, R-BTN-196). */
+  readonly store: VersionedStore;
   /** §12: workflows to dispatch once the current request or alarm has committed, one per
    *  repository and kind. */
   private pendingDispatch = new Map<string, Workflow>();
@@ -96,11 +98,11 @@ export class BatonCore {
   constructor(private readonly ports: Ports) {
     this.now = ports.clock ?? (() => Date.now());
     this.random = ports.random ?? systemRandom;
-    this.store = ports.store;
+    this.store = versionedStore(ports.store);
     this.dispatcher = (wf) => this.sendDispatch(wf);
-    this.deprecated = new Deprecated(ports.store);
+    this.deprecated = new Deprecated(this.store);
     this.outside = ports.gate ? (work) => ports.gate!.outside(work) : (work) => work();
-    const store = ports.store;
+    const store = this.store;
     this.registry = new Registry({ store, now: () => this.now(), ensurePolicy: (repository, forge) => this.policies.ensure(repository, forge) });
     // §12.8 (B-145): the policy store, before everything that reads a knob — the claims' floor
     // rule, the heartbeat's reports and pins, the owner routes' approver checks.
@@ -458,6 +460,14 @@ export class BatonCore {
         this.store.exec('INSERT INTO _baton_migrations (id, applied_at) VALUES (?, ?)', m.id, this.now());
       });
     }
+    // B-237 (R-BTN-196): every write from here on moves the state version — its table exists now.
+    this.store.track();
+  }
+
+  /** B-242's key (R-BTN-196): the state version — it moves with every write to Baton's state,
+   *  liveness and nonces excepted, so a reader showing clock-dependent facts adds the clock. */
+  stateVersion(): number {
+    return this.store.version();
   }
 
   async fetch(req: Request): Promise<Response> {

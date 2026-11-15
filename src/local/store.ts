@@ -5,9 +5,11 @@
 // a throw.
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import type { Cursor, Row, SqlValue, Store } from '../core/ports';
+import { statementKind } from '../core/stateVersion';
 
-function cursor<T>(rows: T[]): Cursor<T> {
+function cursor<T>(rows: T[], rowsWritten?: number): Cursor<T> & { rowsWritten?: number } {
   return {
+    rowsWritten,
     toArray: () => rows,
     one: () => {
       if (rows.length !== 1) throw new Error(`expected exactly one row, got ${rows.length}`);
@@ -26,6 +28,9 @@ function fromSqlite(v: unknown): SqlValue {
 export function sqliteStore(db: DatabaseSync): Store {
   const statements = new Map<string, StatementSync>();
   let depth = 0;
+  // B-237: a write's row count, as the Durable Object's cursor reports `rowsWritten`, so the
+  // state version (src/core/stateVersion.ts) moves only when a row changed.
+  let changes: StatementSync | null = null;
   return {
     exec<T = Row>(query: string, ...params: unknown[]): Cursor<T> {
       let stmt = statements.get(query);
@@ -40,7 +45,9 @@ export function sqliteStore(db: DatabaseSync): Store {
         for (const [k, v] of Object.entries(r)) out[k] = fromSqlite(v);
         return out as T;
       });
-      return cursor(rows);
+      if (!statementKind(query).write) return cursor(rows);
+      changes ??= db.prepare('SELECT changes() AS n');
+      return cursor(rows, Number((changes.get() as { n: number | bigint }).n));
     },
     script(sql: string): void {
       db.exec(sql);

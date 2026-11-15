@@ -228,6 +228,17 @@ process for development and CI. Nothing crosses a tenant.
     caps at twice it do. `npm run test:load` proves it (§15).
   - Beyond the envelope the answer is another Baton: repositories partition across Batons
     (R-BTN-56).
+- **R-BTN-196 (an idle runner's beat reads about nothing).** Every write to a tenant's state
+  moves one counter, `state_version`, in the write's own commit. Liveness does not: a runner's
+  `last_seen_at` and `last_activity_at`, which its calls and heartbeats set, and request nonces
+  (R-BTN-13) — what they decide (live, stalled) is the clock's, so a reader that shows it adds
+  the clock. A runner's recommendations or claim that find nothing eligible for it are
+  remembered, per runner and in memory only, while `state_version` stands and until the earliest
+  instant the clock alone could change the answer — a backoff's `retry_after` (rule 10), an owner
+  bar's `starts_at` or `ends_at` (R-BTN-67), an instance's `until` (R-BTN-76) — and at most
+  10 minutes; an idle beat then reads a handful of rows. The answer remembered is always the one
+  computing it gives (R-BTN-61, R-BTN-72): a heartbeat that changes what the runner declares is a
+  write.
 - **R-BTN-149 (hard caps per repository).** Safety limits at twice the envelope; none refuses
   lease upkeep.
 
