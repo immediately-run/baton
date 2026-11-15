@@ -65,6 +65,9 @@ export interface Ctx {
   held?: (ticketId: string) => void;
   /** The retired-fields window's one writer (B-168): a heartbeat's `uses`. */
   deprecated?: Deprecated;
+  /** B-4 (R-BTN-113): the instance's session-host allowlist, `instance_settings` first, else the
+   *  deploy's BATON_SESSION_HOSTS. Absent, the config's alone (a unit test's WorkerApi). */
+  sessionHosts?: () => string[];
 }
 
 export class WorkerApi {
@@ -291,6 +294,18 @@ export class WorkerApi {
       const ladder = JSON.parse(r.tiers) as string[];
       if (!ladder.includes(tier)) throw new BatonError('invalid-params', `tier_ceilings.${repo}: must be one of ${ladder.join(', ')}`);
     }
+    // R-BTN-47 (B-173): a course the heartbeat declares of a retired repository is dropped,
+    // never a refusal (R-BTN-3) — the old holder can still heartbeat and report its fence.
+    // Dropped before the settings hash, so what is hashed is what is stored; a course of an
+    // unknown repository is kept, as today (rule 9 reads it if it ever registers).
+    const coursesRetired: string[] = [];
+    hb.courses = hb.courses.filter((c) => {
+      if (this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NOT NULL', c.repository).length) {
+        coursesRetired.push(c.repository);
+        return false;
+      }
+      return true;
+    });
     // Every hash first; then every read and write in one synchronous transaction (§3).
     const presented = secretHeader ? await sha256Hex(secretHeader) : null;
     const settingsHash = await sha256Hex(JSON.stringify({
@@ -302,7 +317,11 @@ export class WorkerApi {
       tags: [...hb.tags].sort(),
     }));
     const answer = this.c.store.transaction(() => this.heartbeatTx(credentialId, presented, settingsHash, hb));
-    return ignoredCeilings.length ? { ...answer, tier_ceilings_unregistered: ignoredCeilings } : answer;
+    return {
+      ...answer,
+      ...(ignoredCeilings.length ? { tier_ceilings_unregistered: ignoredCeilings } : {}),
+      ...(coursesRetired.length ? { courses_retired: [...new Set(coursesRetired)] } : {}),
+    };
   }
 
   private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat) {
@@ -419,12 +438,14 @@ export class WorkerApi {
     // R-BTN-19: only a heartbeat with the secret (never the hash path) clears a fence.
     if (hb.fenced && secretSeen) this.c.fenced?.(w.id, fresh.incarnation, hb.fenced.claim_id);
     const claim = this.activeClaim(w.id);
-    // R-BTN-113 (B-234): the running leg's session link, stored on its `claim_legs` row (latest
+    // R-BTN-113 (B-234, B-4): the running leg's session link, stored on its `claim_legs` row (latest
     // wins while the run is live). A link that fails the rule — https, no userinfo, an
-    // allowlisted host — is dropped and logged, never a refused beat.
+    // allowlisted host — is dropped and logged, never a refused beat. The allowlist is the
+    // instance's setting (`instance_settings`), the deploy's config until an administrator
+    // sets one.
     let sessionUrlDropped: string | null = null;
     if (hb.session_url !== undefined && claim) {
-      const why = sessionLinkWhy(hb.session_url, SESSION_HOSTS.of(this.c.config));
+      const why = sessionLinkWhy(hb.session_url, this.c.sessionHosts?.() ?? SESSION_HOSTS.of(this.c.config));
       if (why != null) {
         sessionUrlDropped = why;
         this.event('discrepancy', `worker:${w.id}`, { sub: 'session-url', why, url: hb.session_url.slice(0, 120) }, claim.ticket_id, claim.id);

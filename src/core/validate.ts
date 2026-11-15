@@ -509,6 +509,8 @@ export interface End {
    *  their shape, and actions beyond the report's sixteen, are counted in `dropped`, so a
    *  report is never silently shortened. */
   scope_exceeded: ScopeReport;
+  /** R-BTN-113 (B-4): the session link of the leg this end finishes, as an advance carries one. */
+  session_url: string | null;
 }
 
 /** One action of a leg-end scope report (B-134): the kind of evidence and what it touched — a
@@ -631,7 +633,7 @@ export function checkEnd(body: unknown): End {
     prerequisite = { kind: 'capability', ref: (p as { ref: string }).ref };
   }
   retiredFields(b);
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), session_url: carriedSessionUrl(b.session_url) };
 }
 
 export interface Advance {
@@ -650,6 +652,10 @@ export interface Advance {
    *  input as a pointer, and the ticket's version with the digest of what its source's `read`
    *  returned for the run. Stored in `leg_run_inputs` for replay. */
   run_inputs: RunInputs;
+  /** R-BTN-113 (B-4): the session link of the leg this advance finishes, shape-checked as the
+   *  heartbeat's is; one that fails the link rule is dropped and logged, never a refused
+   *  advance. Null when the advance carries none. */
+  session_url: string | null;
 }
 
 /** B-190 (§5.5 R-BTN-82, §13.5): one resolved input of a run, as the envelope carries a pointer
@@ -738,6 +744,13 @@ export function checkRunInputs(v: unknown): RunInputs {
   return { ticket, inputs };
 }
 
+/** A `session_url` as the heartbeat, an advance or an end carries it (R-BTN-113, B-4): a bounded
+ *  string, or null when the call carries none — the link rule (https, no userinfo, an allowlisted
+ *  host) drops one that fails and logs it, never refusing the call. A non-string or an
+ *  over-4096-character value is taken as none, as the heartbeat's shape check reads it. */
+const carriedSessionUrl = (v: unknown): string | null =>
+  typeof v === 'string' && v.length <= 4096 ? v : null;
+
 /** `POST /v1/runner/claims/{id}/advance` (R-BTN-63, §11): the leg to start; `reached`, the
  *  outcome the running leg reached; a pointer to its evidence; the tags the holder bars from the
  *  new leg. `course` is opaque data for the course's hook (R3-1236): accepted, bounded, unread. */
@@ -752,7 +765,7 @@ export function checkAdvance(body: unknown): Advance {
   const head_sha = optional(b.head_sha, matches(GIT_SHA, 'head_sha')) ?? null;
   if (b.course !== undefined && JSON.stringify(b.course).length > 4096) bad('course', 'must be at most 4 KB');
   retiredFields(b);
-  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs) };
+  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs), session_url: carriedSessionUrl(b.session_url) };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */

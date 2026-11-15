@@ -1,0 +1,61 @@
+---
+title: "B-247 — [OP] Provider checks on bering and vltava2, and the zai coding plan as an account instance"
+id: B-247
+project: baton
+status: available
+updated: 2026-11-15
+repos:
+  - baton
+tags:
+  - OP
+  - roadmap-item
+tier: critical
+description: "The operator writes runner.json on bering and vltava2: a check per provider key testing its own quota, capability:code-generation-llm passing while any provider is usable, and key:zai bound to a registered zai coding-plan account instance; registers the resource and instance (R-BTN-121, R-BTN-76). Requires: B-245, B-246, human-operator."
+topics:
+  - baton
+  - infra
+owns: {}
+prs: []
+depends_on:
+  - B-245
+  - B-246
+---
+
+**Brief:** the owner, 2026-11-15: subscription limits often clear on their own; the runner needs a trusted verification of a spent provider and should tell Baton.
+**Spec:** [BATON_SPEC §5.6](../spec/BATON_SPEC/05-courses.md#sec-5-6) [R-BTN-121](../spec/BATON_SPEC/05-courses.md#sec-5-6) (`runner.json`, checks, `instance`, the worked example), [§6.3](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3) [R-BTN-76](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3) (account instances, who reports), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) [R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3) (`baton admin resource add`, `baton admin instance add`).
+**Depends on:** B-245 (the runner reads `instance` and confirms requests), B-246 (legs require `capability:code-generation-llm`).
+
+### Why
+
+The runners declare capabilities by `--capabilities` today, with no checks: nothing tells a runner its provider is spent, and nothing tells the fleet. The zai coding plan is shared by bering's two runners and vltava2's, so one account reading should stop all of them.
+
+### Steps
+
+1. **Checks.** For each provider key a host holds (bering: zai; vltava2: zai, deepinfra), a script under the host's own directory, outside every checkout, that asks the provider for the account's remaining quota or limit — not merely whether it answers — and exits non-zero when it is spent, printing `{available: false, until: <reset>}`. Each takes under 60 s and spends no meaningful quota.
+2. **Resource and instance.** `baton admin resource add llm:zai --scope account --schema <file>` and `baton admin instance add zai-coding-plan` serving it, listing `baton` and `docs`.
+3. **`runner.json`** on each host: `key:zai` with its check and `instance: zai-coding-plan`; `key:deepinfra` on vltava2 with its check; `capability:code-generation-llm` with a check passing while any of the host's provider checks passes, plus the harness. Start the runners with `--config` in place of `--capabilities` (`bin/start-runner.sh`).
+4. **Grants.** Confirm each host's grant admits `capability:code-generation-llm` (R-BTN-58); re-grant only if it does not, after asking the owner.
+5. **Verify.** With the zai quota spent (or the check forced to fail), an agent leg on bering ends `released:blocked`, the instance reads `unavailable` for every runner, and a passing check later restores both.
+
+### Trust
+
+- **New input: the check scripts and `runner.json`** on each host, written by the operator outside every checkout; they hold the provider keys and are never readable or writable by a leg.
+- **The resource and instance** are registered by an administrator (R-BTN-57); their readings are authenticated by the posting credential (R-BTN-76).
+
+### Invariants
+
+- R-BTN-121: a check bound to an instance tests that account's own quota, takes under 60 s, and runs outside any leg.
+- R-BTN-58: no grant is widened without the owner.
+
+### Exit criteria
+
+- [ ] both hosts run with checks and the instance registered
+- [ ] the verification in step 5 observed and noted in `docs/lessons.mdx`
+
+### Not in scope
+
+- A second provider for bering (the owner's decision; until then bering has no fallback).
+
+## Status
+
+_filed 2026-11-15._

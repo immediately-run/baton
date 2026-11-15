@@ -484,6 +484,8 @@ is stale. Never edit it by hand.
 | S-BTN-220 | ticket provenance (B-126) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-221 | the screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-222 | an interaction request | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-223 | a leg's capability request is confirmed by the runner | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-224 | a runner's readings of an account | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
@@ -635,3 +637,4 @@ is stale. Never edit it by hand.
 | G-BTN-166 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-167 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-168 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-169 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
