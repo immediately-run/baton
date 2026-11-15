@@ -26,7 +26,9 @@ depends_on: []
   ready set was emptied for this worker, from what the recommendation already computes: per gate, the count
   of the repository's ready legs it removed. Gates: tier cap (the declared ceiling and the grant's
   `max_tier`, named apart), `attempts-exhausted` holds (a `baton:retries` decision open), unconfirmed ends,
-  blocks, rule 4, rule 8 bars, backoff, `awaiting-sync`, a set that isn't current. Counts and up to five ticket
+  blocks, rule 4 (naming, for this runner, each required capability it stopped declaring after a failing
+  check, B-245), rule 8 bars, backoff, `awaiting-sync`, a `resource` block from an `unavailable` reading
+  (with its writer and `until`), a set that isn't current. Counts and up to five ticket
   ids per gate, only for tickets the worker's key may see ([BATON_SPEC §6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) [R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)). It's sent in the refusal's `detail`, and
   an older runner ignores it.
 - **The runner's idle line names it.** For example: `baton: idle — no ready ticket fits this worker: 37 above
