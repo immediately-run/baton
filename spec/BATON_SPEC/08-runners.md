@@ -310,7 +310,8 @@ the runner's credentials under any other executor is that executor's, never Bato
     leg, `next` a leg leaving it, each output valid against its schema, every entry requirement
     of `reached` met (R-BTN-109). A failing move is answered on the channel with the reason and
     may be corrected until the leg's deadline; nothing reaches Baton until it passes. Then
-    `close`, `handoff` where it suspends or releases, and `advance` or `end`.
+    `close`, `handoff` where it suspends or releases, and `advance` or `end`. A blocked release
+    on a capability or resource is a request the runner confirms with its own check (R-BTN-126).
   - **The leg-end scope audit** (B-134, §12.9): at each leg's end the runner reads, from its own
     git of the home checkout, the remote refs the leg's window moved — after the leg's close and
     hand-off have run, so their pushes are in the window — and names a push only where the

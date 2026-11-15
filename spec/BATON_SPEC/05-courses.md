@@ -550,11 +550,39 @@ mean (R-BTN-50).
     type two courses define differently.
   - **The runner declares what it has** in its configuration (`baton runner start --config`,
     default `~/.config/baton/runner.json`): `{origin, capabilities: [{name, check?: [<argv>…],
-    every_s?, lock?: <path>}]}`. A capability with a `check` is declared only while the command exits 0 (run at
-    start, before each claim, and every `every_s` seconds, default 300, while idle). Capabilities
-    are self-reported (R-BTN-66). A capability may stand for what several things the runner holds
-    amount to — `capability:code-generation-llm` for a provider key and an installed harness — and
-    the runner declares it when a check that tests them passes; Baton derives nothing (R-BTN-174).
+    every_s?, lock?: <path>, instance?: <instance>}]}`. Capabilities are self-reported
+    (R-BTN-66). A capability may stand for what several things the runner holds amount to —
+    `capability:code-generation-llm` for a provider key and an installed harness — and the runner
+    declares it when a check that tests them passes; Baton derives nothing (R-BTN-174).
+    - **A check** is declared only while its command exits 0. It runs at start, before each
+      claim, every `every_s` seconds (default 300) while idle, and to confirm a leg's request to
+      end blocked on the capability (R-BTN-126). One run per capability is in flight at a time,
+      and every request waiting on it shares its result. It runs with the runner's own
+      environment, in a directory the runner owns — never a checkout or a leg's working directory
+      — reading nothing a leg can write; how far that holds is the executor's isolation
+      (R-BTN-107, §12.8). A run past 60 seconds is a failure.
+    - **After a failure** the check keeps running every `every_s`, and the capability is
+      declared again at the first pass at least `every_s` after the failure.
+    - **Its line.** A failing check may print one JSON line `{available: false, until?,
+      valid_for?, detail?}` on stdout, read as `{available: false}` when it prints none; without
+      `instance` the line is only logged.
+    - **`instance`** names a registered account instance listing a repository the runner's key
+      is granted on (R-BTN-76), and binds only a check that tests that account's own
+      availability, its quota or limit, not merely that it answers. While that check fails, the
+      runner reports its line as a `state` reading of the instance within R-BTN-76's bounds for
+      a runner credential, its `until` the earlier of the line's and the reading's end, renewed at
+      each failing run and at least every half of its `valid_for` while the check keeps failing:
+      carried by the end it confirms (R-BTN-126), else posted itself. While it passes and no
+      administrator's or instrument key's `available: false` reading of the instance is in force,
+      and the latest reading in force is a runner credential's `available: false` (each reading's
+      writer as R-BTN-181 records it), the runner posts `{available: true}`, at most once an hour
+      for each runner whose reading it counters.
+    - **Example.** A leg requires `capability:code-generation-llm`. The runner declares it with
+      a check that passes while either provider it holds is usable, and declares `key:zai` with
+      `instance: zai-coding-plan` and a check that tests only that account's quota. When both
+      providers are spent, the leg's request names the capability it requires and that check
+      confirms it; the `key:zai` check, at its next run, posts the account's reading for every
+      runner.
     A capability with a `lock` is a thing one runner on the machine may use at a time: the runner
     declares it only while it holds, or can take, an exclusive lock on that file. It takes the
     lock before it claims, or sends the `advance` into, a leg requiring the capability, and sends
