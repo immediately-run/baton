@@ -30,6 +30,7 @@ import { Resources } from './resources';
 import { Notices, type Courier } from './notices';
 import { Queues } from './queues';
 import { History, HISTORY_PAGE_MAX } from './history';
+import { InstanceSettings } from './instanceSettings';
 import { Provenance, briefMark, writtenBy } from './provenance';
 import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
@@ -69,6 +70,9 @@ export class BatonCore {
   readonly notices: Notices;
   readonly queues: Queues;
   readonly history: History;
+  /** §13.1 (B-4, R-BTN-113): the administrators' instance settings — `link_hosts`,
+   *  `session_hosts` and `check_app_id` — behind `PUT /v1/admin/settings`. */
+  readonly instance: InstanceSettings;
   /** §4.4 (B-126, R-BTN-194): each ticket's provenance — who last pushed its body. */
   readonly provenance: Provenance;
   /** §6.4 (R-BTN-116): the person legs' questions, their answers and their expiry. */
@@ -122,6 +126,9 @@ export class BatonCore {
     // R-BTN-80, R-BTN-81: a decision's notices are queued and closed with it, and its history row written.
     this.notices = new Notices({ store, now: () => this.now() });
     this.history = new History({ store, now: () => this.now() });
+    // B-4 (§13.1, R-BTN-113): the instance settings, before the worker calls and the claims that
+    // read the session-host allowlist.
+    this.instance = new InstanceSettings({ store, now: () => this.now(), config: ports.config });
     // B-126 (R-BTN-194): ticket provenance, read from the push deliveries the webhooks record.
     this.provenance = new Provenance({ store });
     const decisionRows = (ticket: string, ids: string[], kind: 'decision-opened' | 'decision-answered') => {
@@ -158,13 +165,15 @@ export class BatonCore {
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
       policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated,
-      conditions: this.conditions });
+      conditions: this.conditions, sessionHosts: () => this.instance.sessionHosts() });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.workers = new WorkerApi({ store, config: ports.config, now: () => this.now(), fenced: (w, inc, id) => this.claims.fenced(w, inc, id),
       legFinished: (w, id, seq) => this.claims.legFinished(w, id, seq),
       deprecated: this.deprecated, fleetChanged: () => this.blocks.recount(),
+      // B-4 (R-BTN-113): the session-host allowlist the heartbeat's link rule reads.
+      sessionHosts: () => this.instance.sessionHosts(),
       // R-BTN-103: what it delivers as a worker courier.
       couriers: (w, granted, entries) => this.notices.declare(w, granted, entries),
       held: (ticket) => this.blocks.held(ticket, true),
@@ -1071,6 +1080,9 @@ export class BatonCore {
       // `baton admin capacity set` prints before it asks to confirm.
       if (m === 'PUT' && p === '/v1/admin/capacities') return json(this.resources.setCapacity(actor, await body()));
       if (m === 'GET' && p === '/v1/admin/capacities') return json(this.resources.capacities(url.searchParams.get('capability') ?? undefined));
+      // B-4 (R-BTN-113, §13.1): the instance settings — `link_hosts`, `session_hosts` and
+      // `check_app_id`, each given replacing its own whole.
+      if (m === 'PUT' && p === '/v1/admin/settings') return json(this.instance.set(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/grants') {
         const b = await body();
         const repo = checkRepositoryId((b as { repository?: unknown } | null)?.repository);
@@ -2037,6 +2049,9 @@ export class BatonCore {
       running: this.claims.running(now), timeline: this.claims.timeline(now),
       // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
       limits: this.admin.view(now),
+      // B-4 (§11.4's tenant settings, R-BTN-113): the instance settings — `session_hosts` the
+      // client's link gate checks against (§12.3).
+      instance: this.instance.view(),
       // R-BTN-69: a refused course file, the previous one staying in force.
       needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), keys: this.keysNotice(),
         // B-134: the open scope findings — a leg reported outside its ticket's scope, a worker

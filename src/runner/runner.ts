@@ -1741,7 +1741,9 @@ export class Runner {
           return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg }, await this.callHandoff(script, ctx) ?? handoffUrl);
         }
         this.auditLeg();
-        const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}), ...(this.pendingScope ? { scope_exceeded: { actions: this.pendingScope, dropped: this.scopeOverflow } } : {}), ...this.runInputsReport(versionCheck.read) }, verdict.reached);
+        // R-BTN-113 (B-4): the advance that finishes the leg carries its session link beside the
+        // beats — the last word for the finished run, as the end's is for a claim's last one.
+        const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}), ...(this.legSessionUrl != null ? { session_url: this.legSessionUrl } : {}), ...(this.pendingScope ? { scope_exceeded: { actions: this.pendingScope, dropped: this.scopeOverflow } } : {}), ...this.runInputsReport(versionCheck.read) }, verdict.reached);
         // The parked report is cleared only when the advance DELIVERED it: a refused advance
         // (§6.13, settled below) never reached the core's report handling, and the end that
         // settles the claim carries it instead — the report rides "the advance or end that
@@ -1798,7 +1800,7 @@ export class Runner {
   /** One `advance`, its refusal settled by §6.13: off-graph ends `released:course-changed`; an
    * `entry` refusal (R-BTN-109) ends `released:cannot-finish:contract-output`; every other
    * refusal suspends at the station the claim reached, never releasing. */
-  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number } | { settle: Record<string, unknown> }> {
+  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number } | { settle: Record<string, unknown> }> {
     try {
       return await this.o.api.advance(claimId, body) as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number };
     } catch (e) {
@@ -2164,6 +2166,10 @@ export class Runner {
     if (this.pendingScope != null && body.scope_exceeded === undefined) body = { ...body, scope_exceeded: { actions: this.pendingScope, dropped: this.scopeOverflow } };
     this.pendingScope = null;
     this.scopeOverflow = 0;
+    // R-BTN-113 (B-4): the end carries the finished leg's session link when this run holds one
+    // and the body names none — the belt-and-braces beside the beats, so a run whose landing
+    // beat never reached Baton still reports its link on the call that finishes it.
+    if (this.legSessionUrl != null && body.session_url === undefined) body = { ...body, session_url: this.legSessionUrl };
     try {
       await this.o.api.end(claimId, body);
     } catch (e) {
@@ -2189,6 +2195,9 @@ export class Runner {
     }
     for (const id of this.toAck.splice(0)) await this.o.api.ack(id).catch(() => {});
     this.state.set({ claim: null });
+    // R-BTN-113 (B-4): the run's link is spent with its claim — never carried into another.
+    this.legSessionUrl = null;
+    this.sessionLinkLanded = false;
     // B-106 (R-BTN-178): the claim ended — its locks release, and a beat takes them again if
     // they are free, so an idle runner does not hold the machine's singleton.
     this.locks?.releaseAll();
