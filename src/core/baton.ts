@@ -39,6 +39,7 @@ import { Policies, canonicalJson, sha256HexSync } from './policy';
 import { Scope } from './scope';
 import { logEvent, randomHex, systemRandom } from './db';
 import { Deprecated } from './deprecated';
+import { Retention } from './retention';
 import type { DispatchTarget, Ports, Row, SqlValue, Store, Workflow } from './ports';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
@@ -70,6 +71,8 @@ export class BatonCore {
   readonly notices: Notices;
   readonly queues: Queues;
   readonly history: History;
+  /** R-BTN-149 (B-238): the alarm's prunes. */
+  readonly retention: Retention;
   /** §13.1 (B-4, R-BTN-113): the administrators' instance settings — `link_hosts`,
    *  `session_hosts` and `check_app_id` — behind `PUT /v1/admin/settings`. */
   readonly instance: InstanceSettings;
@@ -126,6 +129,7 @@ export class BatonCore {
     // R-BTN-80, R-BTN-81: a decision's notices are queued and closed with it, and its history row written.
     this.notices = new Notices({ store, now: () => this.now() });
     this.history = new History({ store, now: () => this.now() });
+    this.retention = new Retention({ store, now: () => this.now() });
     // B-4 (§13.1, R-BTN-113): the instance settings, before the worker calls and the claims that
     // read the session-host allowlist.
     this.instance = new InstanceSettings({ store, now: () => this.now(), config: ports.config });
@@ -429,6 +433,10 @@ export class BatonCore {
         // R-BTN-81: the history of tickets closed 90 days ago goes.
         stage = 'history.purge';
         this.history.purge();
+        // R-BTN-149 (B-238): old events, snapshots and runner declarations, and the purged
+        // tickets' claims — a batch a tick, each step through its index.
+        stage = 'retention';
+        this.retention.prune();
         // §12.8 (B-145, R-BTN-189): a protection report that lapsed past its 24 hours stops
         // feeding `no-runner-lands` — every repository with floors is re-judged, and a newly
         // broken one stops offering claims and releases its running ones.
@@ -557,6 +565,8 @@ export class BatonCore {
           const after = Number(url.searchParams.get('after') ?? 0);
           const limit = Number(url.searchParams.get('limit') ?? 200);
           if (!Number.isInteger(after) || after < 0 || !Number.isInteger(limit)) throw new BatonError('invalid-params', 'after and limit must be integers');
+          // B-238: the read acknowledges the cursor it starts from (§12), for R-BTN-149's prune.
+          this.store.transaction(() => this.mirror.acknowledge(repo.id, after));
           return json(this.mirror.events(repo.id, after, limit));
         }
         if (req.method === 'POST' && url.pathname === '/v1/sync/foreign-claim') {

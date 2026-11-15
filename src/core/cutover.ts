@@ -171,7 +171,7 @@ export class Cutover {
     return this.rows(`SELECT a.ticket_id, a.claim_id, a.worker_id, a.requested_at, w.hostname, w.session_name, l.session_name AS legacy_session
                       FROM adoptions a JOIN workers w ON w.id = a.worker_id JOIN claims c ON c.id = a.claim_id
                       JOIN workers l ON l.id = c.worker_id
-                      WHERE c.status = 'active' AND l.kind = 'legacy' AND w.reaped_at IS NULL AND ? - w.last_seen_at < w.lease_timeout_ms
+                      WHERE c.status = 'active' AND l.kind = 'legacy' AND w.reaped_at IS NULL AND w.last_seen_at + w.lease_timeout_ms > ?
                       ORDER BY a.requested_at`, this.c.now());
   }
 }

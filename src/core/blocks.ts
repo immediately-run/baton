@@ -144,8 +144,12 @@ export const BLOCK_SQL = {
   page: 'SELECT id, blocked_since FROM tickets WHERE repository_id = ? AND blocked_since IS NOT NULL AND id > ? ORDER BY id LIMIT ?',
 } as const;
 
-/** The SQL test of a live worker (§5): alive, not reaped, its key in force. */
-const LIVE = `w.reaped_at IS NULL AND w.kind != 'legacy' AND :now - w.last_seen_at < w.lease_timeout_ms AND c.revoked_at IS NULL`;
+/** The SQL test of a live worker (§5): alive, not reaped, its key in force. B-236: the lease is
+ *  written `last_seen_at + lease_timeout_ms > now` — R-BTN-9's `now - last_seen_at < lease`,
+ *  rearranged — so the live set is a range of `workers_live` and never a read of every runner
+ *  session (R-BTN-3 keeps them all). A query ordering by `w.id` writes `+w.id`, which keeps
+ *  the planner from walking the whole table in id order to save a sort of the few live ones. */
+const LIVE = `w.reaped_at IS NULL AND w.kind != 'legacy' AND w.last_seen_at + w.lease_timeout_ms > :now AND c.revoked_at IS NULL`;
 
 export class Blocks {
   constructor(private readonly c: Ctx) {}
@@ -587,7 +591,7 @@ export class Blocks {
        WHERE ${LIVE}
          AND NOT EXISTS (SELECT 1 FROM claims k WHERE k.worker_id = w.id AND k.status = 'active')
          AND (NOT COALESCE(${grantedKeySql('c.created_by')}, 0) OR EXISTS (SELECT 1 FROM worker_grants g WHERE g.credential_id = w.credential_id AND g.repository_id = :repo AND g.revoked_at IS NULL))
-       ORDER BY w.id`, { now, repo })) {
+       ORDER BY +w.id`, { now, repo })) {
       if (!this.c.fits(w.id, ticket)) continue;
       const pending = this.rows<{ id: number; payload_json: string }>(`SELECT id, payload_json FROM messages WHERE to_worker_id = ? AND kind = 'unblocked' AND status = 'pending' ORDER BY id DESC LIMIT 1`, w.id)[0];
       if (pending) {
@@ -643,7 +647,7 @@ export class Blocks {
     const now = this.c.now();
     const all = this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL').map((r) => r.id);
     return this.named<{ id: number; credential_id: string; created_by: string | null }>(
-      `SELECT w.id, w.credential_id, c.created_by, c.allowed_capabilities FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} AND (:only IS NULL OR w.id = :only) ORDER BY w.id`, { now, only })
+      `SELECT w.id, w.credential_id, c.created_by, c.allowed_capabilities FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} AND (:only IS NULL OR w.id = :only) ORDER BY +w.id`, { now, only })
       .map((w) => {
         // R-BTN-58: a key an owner or administrator granted works where it is granted; another
         // (a bearer token, a BATON_KEYS seed key) is bounded by its allow-list on every
@@ -785,7 +789,7 @@ export class Blocks {
    *  workers, never of the board). */
   liveChanged(): boolean {
     const now = this.c.now();
-    const ids = this.named<{ id: number }>(`SELECT w.id FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} ORDER BY w.id`, { now }).map((w) => w.id);
+    const ids = this.named<{ id: number }>(`SELECT w.id FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} ORDER BY +w.id`, { now }).map((w) => w.id);
     return this.rows<{ value: string }>(`SELECT value FROM baton_settings WHERE key = 'fleet_live'`)[0]?.value !== JSON.stringify(ids);
   }
 
