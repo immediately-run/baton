@@ -22,6 +22,10 @@
 //   baton admin -i KEY capacity set <capability> <n> [--yes]                 (R-BTN-178)
 //   baton admin -i KEY capacity set <capability> --clear [--yes]             (R-BTN-178)
 //   baton admin -i KEY capacity list
+//   baton admin -i KEY settings set [--link-hosts a,b|none] [--session-hosts a,b|none] [--check-app-id ID|none]
+//                — the instance settings (B-4, R-BTN-113, §13.1): each flag replaces its own
+//                whole; none clears one to what stands without it (session_hosts: the deploy's
+//                BATON_SESSION_HOSTS, default claude.ai)
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
@@ -421,7 +425,22 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       parseArgs(rest.slice(1), [], [], 0);
       return { method: 'GET', path: '/v1/admin/capacities' };
     }
-    throw new Error('baton admin repos|repo|grant|probe|resource|instance|capacity|revoke|open');
+    // B-4 (R-BTN-113, §13.1): the instance settings, each flag replacing its own whole — `none`
+    // clears one back to what stands without it (the deploy's own default).
+    if (cmd === 'settings' && rest[0] === 'set') {
+      const { flags } = parseArgs(rest.slice(1), [], ['link-hosts', 'session-hosts', 'check-app-id'], 0);
+      const hosts = (v) => (v === 'none' ? null : list(v));
+      const body = {
+        ...(flags['link-hosts'] !== undefined ? { link_hosts: hosts(flags['link-hosts']) } : {}),
+        ...(flags['session-hosts'] !== undefined ? { session_hosts: hosts(flags['session-hosts']) } : {}),
+        ...(flags['check-app-id'] !== undefined ? { check_app_id: flags['check-app-id'] === 'none' ? null : flags['check-app-id'] } : {}),
+      };
+      if (!Object.keys(body).length) {
+        throw new Error('baton admin settings set names at least one setting (--link-hosts, --session-hosts, --check-app-id; none clears one)');
+      }
+      return { method: 'PUT', path: '/v1/admin/settings', body };
+    }
+    throw new Error('baton admin repos|repo|grant|probe|resource|instance|capacity|settings|revoke|open');
   }
   if (role === 'owner') {
     if (cmd === 'grants') {

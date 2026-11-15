@@ -47,6 +47,7 @@ import checkConclusions from './0045_check_conclusions.sql';
 import ticketProvenance from './0046_ticket_provenance.sql';
 import legRunInputs from './0047_leg_run_inputs.sql';
 import conditions from './0048_conditions.sql';
+import instanceSettings from './0049_instance_settings.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -151,4 +152,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 47, sql: legRunInputs },
   // 0048 is B-234's (R-BTN-195: raised conditions, and R-BTN-90's armed claim deadline).
   { id: 48, sql: conditions },
+  // 0049 is B-4's (R-BTN-113, §13.1: the administrators' instance settings).
+  { id: 49, sql: instanceSettings },
 ];

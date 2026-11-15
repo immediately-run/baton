@@ -59,6 +59,16 @@ describe('plan: one request per command', () => {
     expect(() => plan('admin', ['capacity', 'set', 'capability:rdp-lab', '65'], key)).toThrow('an integer 1 to 64');
     expect(() => plan('admin', ['capacity', 'set', 'capability:rdp-lab', '2', '--clear'], key)).toThrow('--clear');
     expect(() => plan('admin', ['capacity', 'raise', 'capability:rdp-lab', '2'], key)).toThrow('baton admin repos');
+    // B-4 (R-BTN-113, §13.1): the instance settings — each flag replaces its own whole, `none`
+    // clears one to what stands without it.
+    expect(plan('admin', ['settings', 'set', '--session-hosts', 'claude.ai,sessions.example', '--link-hosts', 'links.example', '--check-app-id', '123456'], key)).toEqual({
+      method: 'PUT', path: '/v1/admin/settings',
+      body: { session_hosts: ['claude.ai', 'sessions.example'], link_hosts: ['links.example'], check_app_id: '123456' },
+    });
+    expect(plan('admin', ['settings', 'set', '--session-hosts', 'none'], key).body).toEqual({ session_hosts: null });
+    expect(plan('admin', ['settings', 'set', '--check-app-id', 'abc'], key).body).toEqual({ check_app_id: 'abc' }); // Baton refuses the shape, not the CLI
+    expect(() => plan('admin', ['settings', 'set'], key)).toThrow('at least one setting');
+    expect(() => plan('admin', ['settings', 'set', '--sessions-hosts', 'a'], key)).toThrow('not a flag');
     expect(() => plan('admin', ['state', 'docs'], key)).toThrow('takes no further argument');
     expect(() => plan('admin', ['state', '--repository', 'docs'], key)).toThrow('not a flag');
     expect(() => plan('admin', ['repo', 'add', 'x/y'], key)).toThrow('--owner-key is required');

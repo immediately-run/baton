@@ -63,6 +63,9 @@ export interface Ctx {
   held?: (ticketId: string) => void;
   /** The retired-fields window's one writer (B-168): a heartbeat's `uses`. */
   deprecated?: Deprecated;
+  /** B-4 (R-BTN-113): the instance's session-host allowlist, `instance_settings` first, else the
+   *  deploy's BATON_SESSION_HOSTS. Absent, the config's alone (a unit test's WorkerApi). */
+  sessionHosts?: () => string[];
 }
 
 export class WorkerApi {
@@ -403,12 +406,14 @@ export class WorkerApi {
     // R-BTN-19: only a heartbeat with the secret (never the hash path) clears a fence.
     if (hb.fenced && secretSeen) this.c.fenced?.(w.id, fresh.incarnation, hb.fenced.claim_id);
     const claim = this.activeClaim(w.id);
-    // R-BTN-113 (B-234): the running leg's session link, stored on its `claim_legs` row (latest
+    // R-BTN-113 (B-234, B-4): the running leg's session link, stored on its `claim_legs` row (latest
     // wins while the run is live). A link that fails the rule — https, no userinfo, an
-    // allowlisted host — is dropped and logged, never a refused beat.
+    // allowlisted host — is dropped and logged, never a refused beat. The allowlist is the
+    // instance's setting (`instance_settings`), the deploy's config until an administrator
+    // sets one.
     let sessionUrlDropped: string | null = null;
     if (hb.session_url !== undefined && claim) {
-      const why = sessionLinkWhy(hb.session_url, SESSION_HOSTS.of(this.c.config));
+      const why = sessionLinkWhy(hb.session_url, this.c.sessionHosts?.() ?? SESSION_HOSTS.of(this.c.config));
       if (why != null) {
         sessionUrlDropped = why;
         this.event('discrepancy', `worker:${w.id}`, { sub: 'session-url', why, url: hb.session_url.slice(0, 120) }, claim.ticket_id, claim.id);

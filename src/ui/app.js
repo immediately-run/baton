@@ -167,6 +167,23 @@ const httpsLink = (text, href) => (typeof href === 'string' && href.startsWith('
   ? el('a', { text, attrs: { href, target: '_blank', rel: 'noopener' } })
   : el('span', { text }));
 
+/** R-BTN-113 (B-4): a session link is drawn only over https, without userinfo, on a host of the
+ *  instance's `session_hosts` — the state read carries the list (§12.3), and the server stored
+ *  the link only when it passed at the time; the allowlist may have narrowed since. */
+function sessionLink(text, href) {
+  if (typeof href !== 'string' || !href.startsWith('https://')) return el('span', { text });
+  const hosts = state?.instance?.session_hosts ?? ['claude.ai'];
+  try {
+    const u = new URL(href);
+    if (!u.username && !u.password && hosts.includes(u.hostname)) {
+      return el('a', { text, attrs: { href, target: '_blank', rel: 'noopener' } });
+    }
+  } catch {
+    // not a URL: text, never a link
+  }
+  return el('span', { text });
+}
+
 function renderWorkers() {
   const body = document.getElementById('workers');
   body.replaceChildren();
@@ -226,6 +243,8 @@ function renderRunning() {
   for (const c of state.running) {
     const item = el('td', {}, el('div', { text: c.ticket_id }), el('div', { text: c.title ?? '', cls: 'muted' }));
     if (c.stalled) item.append(el('div', { text: 'stalled: no activity for 2 h', cls: 'stalled' }));
+    // R-BTN-113 (B-4): the running leg's session link, as the run's row holds it.
+    if (c.session_url) item.append(el('div', {}, sessionLink(c.leg ? `session (${c.leg})` : 'session', c.session_url)));
     const worker = el('td', {}, el('div', { text: `${c.hostname} · #${c.worker_id}` }), el('div', { text: c.alive ? 'alive' : 'silent', cls: c.alive ? 'alive' : 'dead' }));
     const events = el('td', { cls: 'muted' });
     for (const e of c.events.slice(-3)) events.append(el('div', { text: `${fmtTime(e.at)} ${e.kind}` }));
@@ -250,11 +269,15 @@ const KIND_GROUP = {
   'ci-wait': 'wait',
 };
 
-/** The clicked segment's label, detail and transcript (§14), drawn as text. */
-function showActivity(a) {
+/** The clicked segment's label, detail and transcript (§14), drawn as text. B-4 (R-BTN-113): the
+ *  leg run the segment fell inside names its session link. */
+function showActivity(a, claim) {
   const box = document.getElementById('timeline-detail');
   box.replaceChildren(el('div', { text: `${a.kind}${a.seq != null ? ` #${a.seq}` : ''}${a.label ? ` — ${a.label}` : ''}` }),
     el('div', { text: `${fmtTime(a.started_at)} → ${a.ended_at ? fmtTime(a.ended_at) : 'running'}${a.outcome ? ` · ${a.outcome}` : ''}`, cls: 'muted' }));
+  // The last run that started at or before the activity is the one it fell inside.
+  const run = (claim?.runs ?? []).filter((r) => r.started_at <= a.started_at).at(-1);
+  if (run?.session_url) box.append(el('div', {}, sessionLink(`session (${run.leg})`, run.session_url)));
   if (a.detail_json) {
     try {
       for (const [k, v] of Object.entries(JSON.parse(a.detail_json))) {
@@ -290,7 +313,7 @@ function renderTimeline() {
         const seg = el('button', { cls, attrs: { type: 'button', title: `${a.kind}${a.label ? `: ${a.label}` : ''}${a.outcome ? ` · ${a.outcome}` : ''}`, 'aria-label': `${a.kind} ${a.label ?? ''}` } });
         seg.style.left = pct(a.started_at);
         seg.style.width = width(a.started_at, a.ended_at);
-        seg.addEventListener('click', () => showActivity(a));
+        seg.addEventListener('click', () => showActivity(a, c));
         track.append(seg);
       }
     }
@@ -487,6 +510,16 @@ function renderLimits() {
   list('Probes', (l.probes ?? []).map((p) => `${p.label}: ${p.fingerprint} · by ${p.created_by}`), 'No probe key.');
   // R-BTN-80: the personal couriers, by repository.
   list('Couriers', (l.couriers ?? []).map((c) => `${c.repository_id}: ${c.credential_id} delivers ${c.asks}`), 'No courier is registered.');
+  // B-4 (§11.4's tenant settings, R-BTN-113): the administrators' instance settings, read-only
+  // here — `baton admin settings set` changes them.
+  const inst = state.instance;
+  if (inst) {
+    list('Instance settings', [
+      `session hosts: ${inst.session_hosts.join(', ') || 'none'}`,
+      `link hosts: ${inst.link_hosts.join(', ') || 'none'}`,
+      `check app: ${inst.check_app_id ?? 'not set'}`,
+    ]);
+  }
   list('Owner bars', l.bars.map((b) => `#${b.id} ${b.repository_id}: ${b.tag} barred from ${b.course === '*' ? 'every course' : b.course}${b.legs.length ? ` (${b.legs.join(', ')})` : ''} at ${b.applies === 'claim' ? 'claims' : 'claims and advances'}, ${fmtTime(b.starts_at)} to ${b.ends_at == null ? 'lifted' : fmtTime(b.ends_at)}${b.release_holders ? ', releasing holders' : ''} — ${b.reason}`), 'No owner bar is in force or scheduled.');
   list('Settings', l.settings.map((s) => {
     const parts = [];
