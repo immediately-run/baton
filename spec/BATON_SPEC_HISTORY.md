@@ -2920,6 +2920,19 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   answers without joining the session, and hibernating a long-waiting leg, revived when the
   person loads the leg page or answers. Scenario S-BTN-222.
 
+- **2026-11-15 — §13's event indexes: the dashboard's event windows read through an index** (B-235).
+  Rules changed: none; §13's index list.
+  On 2026-11-14 production passed Cloudflare's free-tier limit of 5,000,000 Durable Object
+  `rows_read` a day at 21:41Z, and every runner call failed until the 00:00Z reset. Each
+  10-second poll of `GET /v1/ui/state` scanned the never-pruned event log three times for its
+  `bars-mismatch`, `unsigned-control` and `discrepancy` windows (≈ 3 × the events, ~9k of a
+  ~14.4k-row poll on a production-sized state). Migration 0049 adds `events_by_kind_at`
+  `(kind, at)` and the windows read in its order, `at` then `seq` — the log's order, since every
+  event is written at the core's clock. It also restores `events_unsigned_control`, made by 0040
+  and lost when 0043 rebuilt `events` with only its four other indexes (0048's rebuild repeated
+  the list); §13 now names the event indexes and says a rebuild recreates them all. One of
+  B-235–B-243, the owner's 2026-11-15 plan to bound what each read costs.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
