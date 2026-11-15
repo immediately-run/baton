@@ -338,8 +338,19 @@ export class Runner {
    *  while the run's session is live, its address handed to the session as BATON_SOCKET. */
   private legChannel: LegChannel | null = null;
   /** B-234 (R-BTN-113): the running leg's session link, as its executor's handle names it —
-   *  reported on every beat and the raise check's word on whether the run holds a link. */
+   *  reported on every beat, and the raise check's word on the run's link once a beat that
+   *  carried it has answered (`sessionLinkLanded`). */
   private legSessionUrl: string | null = null;
+  /** B-234 (R-BTN-113): the run whose link `legSessionUrl` names — bumped each time a run's
+   *  session names its link, so a beat built before this run's session named one answers for
+   *  the last run, never this. */
+  private sessionLinkSeq = 0;
+  /** B-234 (R-BTN-113, R-BTN-195): Baton holds the running leg's session link — a beat that
+   *  carried this run's link was answered and kept it. An `interact` is refused on the channel
+   *  until then: Baton sets the condition's `url` from the link it holds, so a raise that
+   *  reached it first would be refused there instead of here, its reason never reaching the
+   *  leg (R-BTN-195). */
+  private sessionLinkLanded = false;
 
   constructor(options: RunnerOptions) {
     this.o = { beatEvery: BEAT_MS, ...options };
@@ -431,6 +442,23 @@ export class Runner {
     }
   }
 
+  /** B-234 (R-BTN-113, R-BTN-195): Baton holds the running leg's session link — a heartbeat
+   *  carrying it answered. `tick()` joins whatever beat is out, and one built before this run's
+   *  session named its link carries the last run's, so at most two beats serve: the first
+   *  settles any beat already out, the second carries this run's. A beat that cannot land it
+   *  changes nothing here — the leg runs on, and the channel's raise check refuses an
+   *  `interact` until a later beat of the cadence lands the link. */
+  private async landSessionLink(): Promise<void> {
+    for (let beat = 0; beat < 2 && !this.sessionLinkLanded; beat++) {
+      try {
+        await this.tick();
+      } catch (e) {
+        this.log(`baton: the heartbeat that lands the session link failed (${msg(e)}) — an interact is refused until one lands it (R-BTN-113)`);
+        return;
+      }
+    }
+  }
+
   /** The declaration as it goes out on a beat or is compared before a claim (B-86, B-106): the
    *  settled list less every lock capability whose file this process does not hold — of the
    *  runners on one machine only the one holding the lock declares it (R-BTN-178). */
@@ -466,6 +494,12 @@ export class Runner {
       ...(this.fenceToReport != null ? { fenced: { claim_id: this.fenceToReport, terminated: true } } : {}),
       transcripts: spool.transcripts,
     };
+    // R-BTN-113 (B-234): the link this beat carried, and the run whose link it was — read at
+    // build time, for the answer's word on whether Baton now holds this run's link (a beat
+    // built before the run's session named one carried the last run's, and a refused beat
+    // carries nothing).
+    const linkCarried = typeof body.session_url === 'string' ? body.session_url : null;
+    const linkSeq = this.sessionLinkSeq;
     // §6.9: the spool's activity rows go up as their own call, before the beat; anything the
     // calls do not land comes back to the spool, so a leg session's record is never lost.
     const carry = [...spool.overflowTranscripts, ...spool.overflowActivities];
@@ -515,6 +549,10 @@ export class Runner {
       throw e;
     }
     rmSync(spool.taken, { force: true });
+    // R-BTN-113 (B-234): the answer's word on the link — Baton holds this run's session link
+    // when the beat carried it and the answer kept it (not dropped: a dropped link failed the
+    // rule and was stored nowhere). This is what the raise check reads (R-BTN-195).
+    this.sessionLinkLanded = linkCarried != null && linkSeq === this.sessionLinkSeq && answer.session_url_dropped == null;
     // What Baton recorded from this beat: `rewriteSettings` writes the rows of the list a beat
     // carried, so an answer to this beat leaves the server on `declaring` (B-86: `runOnce` reads
     // this to know whether the next claim would go out on a stale declaration).
@@ -1764,6 +1802,7 @@ export class Runner {
     this.legChannel?.close();
     this.legChannel = null;
     this.legSessionUrl = null;
+    this.sessionLinkLanded = false;
     let channel: LegChannel | null = null;
     try {
       channel = await LegChannel.serve(channelPath(this.o.stateFile, sessionId));
@@ -1837,11 +1876,20 @@ export class Runner {
     }
     // R-BTN-113: an executor whose handle names its session's link — the runner reports it on
     // every beat and the raise check reads it as the run's link.
-    if (typeof handle.link === 'string' && handle.link !== '') this.legSessionUrl = handle.link;
+    if (typeof handle.link === 'string' && handle.link !== '') {
+      this.legSessionUrl = handle.link;
+      this.sessionLinkSeq++;
+    }
     // R-BTN-195: the ending a joinable session posts on its channel — `end(handle)` resolves at
     // it (R-BTN-107), so the runner hands it to the session.
     handle.posted = channel ? channel.posted : null;
     this.session = { handle, checkout: this.o.home };
+    // R-BTN-113/R-BTN-195 (B-234): Baton holds the link before the leg can ask a person into
+    // its session — a beat carrying this run's link answers first, so the leg's first
+    // `interact` cannot race the beat that lands it. Raised before any beat carried the link,
+    // the report would reach Baton only to be refused there (`invalid-params`), its reason
+    // lost to the leg; the raise check refuses on the channel until the link has landed.
+    if (this.legSessionUrl != null) await this.landSessionLink();
     if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} run ${basename(script)} (session ${sessionId}, executor ${this.executor.source})`);
     const running = this.wrapperCall(handle, 'run', script, [ctx], undefined, () => sink);
     const inflight = this.inflight!;
@@ -1957,7 +2005,12 @@ export class Runner {
       conditions: def?.conditionTypes ?? null,
       autonomous: def?.autonomous === true,
       deadlineS: def?.maxDuration ?? null,
-      sessionUrl: this.legSessionUrl,
+      // R-BTN-113/R-BTN-195: the link BATON holds for this run — the handle's once a beat
+      // carrying it answered, never the handle's alone. Baton sets an `interact`'s url from
+      // the link it holds, so a raise reported before the beat landed it would be refused BY
+      // Baton (`invalid-params`) instead of on this channel, its reason never reaching the
+      // leg — the one refusal R-BTN-195 gives the channel.
+      sessionUrl: this.sessionLinkLanded ? this.legSessionUrl : null,
     });
     if (!verdict.ok) {
       this.log(`baton: ${ticket}'s ${leg} raise of ${type || '(none)'} was refused on the channel: ${verdict.reason}`);
