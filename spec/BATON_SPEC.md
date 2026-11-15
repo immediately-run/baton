@@ -24,7 +24,7 @@ is stale. Never edit it by hand.
 | [`02-deployments.md`](BATON_SPEC/02-deployments.md) | **2. Deployments: tenants, hosts and the service** | — |
 | | 2.1 The service | R-BTN-37, R-BTN-32, R-BTN-55, R-BTN-2 |
 | | 2.2 Tenants | R-BTN-135, R-BTN-136, R-BTN-137, R-BTN-56 |
-| | 2.3 Capacity and admission | R-BTN-87, R-BTN-149 |
+| | 2.3 Capacity and admission | R-BTN-87, R-BTN-196, R-BTN-149 |
 | [`03-repositories-and-forges.md`](BATON_SPEC/03-repositories-and-forges.md) | **3. Repositories and forges** | — |
 | | 3.1 The registry | R-BTN-47, R-BTN-92, R-BTN-138, R-BTN-61 |
 | | 3.2 Who may post a board | R-BTN-93, R-BTN-15, R-BTN-156 |
@@ -300,6 +300,7 @@ is stale. Never edit it by hand.
 | R-BTN-193 | git is never a lock or a counter | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
 | R-BTN-194 | every ticket carries who last wrote it | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-195 | an interaction request asks a person into the leg's session | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
+| R-BTN-196 | an idle runner's beat reads about nothing | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
 
 ## Scenarios
 

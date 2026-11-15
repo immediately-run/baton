@@ -50,6 +50,7 @@ import conditions from './0048_conditions.sql';
 import eventLookups from './0049_event_lookups.sql';
 import retirement from './0050_retirement.sql';
 import instanceSettings from './0051_instance_settings.sql';
+import stateVersion from './0054_state_version.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -161,4 +162,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 50, sql: retirement },
   // 0051 is B-4's (R-BTN-113, §13.1: the administrators' instance settings), renumbered at the merge behind 0049–0050.
   { id: 51, sql: instanceSettings },
+  // 0054 is B-237's (the state version, R-BTN-196); 0052–0053 are reserved for other branches.
+  { id: 54, sql: stateVersion },
 ];
