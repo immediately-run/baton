@@ -2198,7 +2198,8 @@ export class Claims {
       // R-BTN-67: a leg an owner's required bar covers that the sync posts without the prefix.
       policy: this.rows(`SELECT n.ticket_id, n.leg, n.waiting_since FROM ticket_next_legs n WHERE n.state = 'waiting' AND n.waiting_on = 'policy' ORDER BY n.ticket_id, n.leg`),
       // R-BTN-63: the holder and the sync read a leg's bars differently; the sync's reading binds.
-      bars_mismatch: this.rows(`SELECT e.claim_id, e.ticket_id, e.at, e.detail_json FROM events e WHERE e.kind = 'bars-mismatch' AND e.at > ? ORDER BY e.seq`, now - BARS_MISMATCH_LISTED_MS),
+      // By `at`, then `seq`: `events_by_kind_at`'s order (B-235), so the window reads only its rows.
+      bars_mismatch: this.rows(`SELECT e.claim_id, e.ticket_id, e.at, e.detail_json FROM events e WHERE e.kind = 'bars-mismatch' AND e.at > ? ORDER BY e.at, e.seq`, now - BARS_MISMATCH_LISTED_MS),
       held_items: this.rows<{ ticket_id: string; hold_reason: string | null; set_at: number }>(
         `SELECT ticket_id, hold_reason, set_at FROM ticket_overrides WHERE hold = 1 ORDER BY ticket_id`).map((h) => ({
         ...h,
