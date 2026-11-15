@@ -14,7 +14,7 @@ import type { Store } from './ports';
  *  R-BTN-116). */
 export const HISTORY_KINDS = ['leg-started', 'leg-finished', 'leg-abandoned', 'position-confirmed', 'position-replaced', 'git-moved', 'regressed',
   're-routed', 'blocked', 'unblocked', 'decision-opened', 'decision-answered', 'inputs', 'outputs', 'discrepancy', 'spawned',
-  'fact-arrival', 'arrival-unapplied', 'question-posted', 'question-answered', 'question-expired'] as const;
+  'fact-arrival', 'arrival-unapplied', 'question-posted', 'question-answered', 'question-expired', 'condition'] as const;
 export type HistoryKind = (typeof HISTORY_KINDS)[number];
 
 /** R-BTN-85: the cases a discrepancy names, exactly. `position-replaced` and `route-overridden`

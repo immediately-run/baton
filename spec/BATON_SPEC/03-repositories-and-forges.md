@@ -302,8 +302,9 @@ repository reachable over SSH is enough (R-BTN-105).
     `baton.mirror-late` (a mirror more than 30 minutes behind).
   - **The GitHub App** (§12.7) is GitHub's dispatch target and Baton's webhook source.
 - **R-BTN-73 / R-BTN-95 (forge notifications are only triggers).** A notification records a
-  want; it never computes or carries state. The one thing besides the want a delivery produces
-  is the scope cross-check (B-134, §12.9): a push by a worker pusher of the owners'
+  want; it never computes or carries state. Besides the want a delivery produces two things:
+  a GitHub push's record for ticket provenance (B-126, R-BTN-194, below), and the scope
+  cross-check (B-134, §12.9): a push by a worker pusher of the owners'
   `worker_pushers` setting to a repository no open claim's scope covers records an
   `unclaimed-write` finding from the delivery's own fields — no repository content is read
   (an open claim is one still holding its ticket, as rule 3 reads it: active, or completed
@@ -324,9 +325,18 @@ repository reachable over SSH is enough (R-BTN-105).
 
     | forge | events | fields |
     |---|---|---|
-    | GitHub | `push`, `pull_request`, `pull_request_review`, `issue_comment`, `workflow_run` | `X-GitHub-Event`, `X-GitHub-Delivery`, `repository.full_name`, `repository.id`, `workflow_run.path`; push: `pusher.name`, `head_commit.author.email`; pull_request: `pull_request.merged`, a boolean or null (B-89) |
+    | GitHub | `push`, `pull_request`, `pull_request_review`, `issue_comment`, `workflow_run` | `X-GitHub-Event`, `X-GitHub-Delivery`, `repository.full_name`, `repository.id`, `workflow_run.path`; push: `pusher.name`, `head_commit.author.email`, and for its record `sender.id`, `sender.login`, `ref`, `before`, `after`, `commits[].id`, `commits[].added`, `commits[].removed`, `commits[].modified` (B-126); pull_request: `pull_request.merged`, a boolean or null (B-89) |
     | GitLab | `Push Hook`, `Merge Request Hook`, `Note Hook` | `X-Gitlab-Event`, `X-Gitlab-Event-UUID`, `project.path_with_namespace`, `project.id`; push: `user_username`, head commit `author.email` |
     | Gitea | `push`, `pull_request`, `pull_request_review_*`, `issue_comment` | `X-Gitea-Event`, `X-Gitea-Delivery`, `repository.full_name`, `repository.id`, `repository.owner.id`; push: `pusher.login`, `head_commit.author.email` |
+
+    A GitHub push delivery to a branch is also **recorded** (B-126, R-BTN-194): `sender.id` (the
+    immutable pusher), `sender.login`, `ref`, `before`, `after` and each commit's `id` with its
+    `added`, `removed` and `modified` paths, bounded (30 commits, 600 paths) — a push past the
+    bounds is remembered `truncated` with no paths, and a shape that does not parse is not
+    recorded; either way what it changed reads as `pusher-unknown`, and the delivery still
+    triggers. The record lives 24 hours beside `webhook_deliveries` (§13), Baton's own work
+    included (a mirror push moves the branch too): provenance is computed at the post that
+    accepts the head and stored on the ticket, so a delivery is needed only until the next sync.
 
     No pipeline or job event is accepted from GitLab or Gitea.
   - **Dropped:** a delivery id seen in the last 24 hours (`webhook_deliveries`); a

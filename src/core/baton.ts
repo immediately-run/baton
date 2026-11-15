@@ -7,9 +7,10 @@
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
 import { MIGRATIONS } from '../migrations';
 import { BatonError, errorResponse, json } from './http';
-import { checkPayload, DEFAULT_COURSE, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
+import { checkPayload, DEFAULT_COURSE, retiredBoardFields, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
+import { Conditions } from './conditions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
 import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
@@ -18,7 +19,7 @@ import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, typ
 import { Claims } from './claims';
 import { Cutover } from './cutover';
 import { Mirror } from './mirror';
-import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkRepositoryId, GIT_BRANCH, GIT_REPO } from './validate';
+import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkRepositoryId, COURSE_ID, GIT_BRANCH, GIT_REPO } from './validate';
 import { Courses } from './courses';
 import { Observations } from './observations';
 import { Webhooks, type Delivery } from './webhook';
@@ -29,13 +30,15 @@ import { Resources } from './resources';
 import { Notices, type Courier } from './notices';
 import { Queues } from './queues';
 import { History, HISTORY_PAGE_MAX } from './history';
+import { Provenance, briefMark, writtenBy } from './provenance';
 import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import { codeReposOf, pushersOf } from './codeRepos';
 import { Policies, canonicalJson, sha256HexSync } from './policy';
 import { Scope } from './scope';
 import { logEvent, randomHex, systemRandom } from './db';
-import type { Ports, Row, SqlValue, Store, Workflow } from './ports';
+import { Deprecated } from './deprecated';
+import type { DispatchTarget, Ports, Row, SqlValue, Store, Workflow } from './ports';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
 const ALARM_EVERY_MS = 60_000; // §3: one alarm, every 60 seconds
@@ -66,12 +69,20 @@ export class BatonCore {
   readonly notices: Notices;
   readonly queues: Queues;
   readonly history: History;
+  /** §4.4 (B-126, R-BTN-194): each ticket's provenance — who last pushed its body. */
+  readonly provenance: Provenance;
   /** §6.4 (R-BTN-116): the person legs' questions, their answers and their expiry. */
   readonly questions: Questions;
+  /** §7.1 (R-BTN-160, R-BTN-195; B-234): the raised conditions — the report route, the
+   *  Needs-you list, and the run's end closing its open `interact`. */
+  readonly conditions: Conditions;
   /** §12.8 (B-145): the repository policies, their floors, their guarantees. */
   readonly policies: Policies;
   /** B-134: the leg scope audit — the claim answer's scope, the findings both halves raise. */
   readonly scope: Scope;
+  /** The retired-fields window (B-168, R-BTN-132): the day's logged fields, by field and actor —
+   *  nothing else of it is held here (`deprecated.ts` writes the rows and the events). */
+  readonly deprecated: Deprecated;
   readonly store: Store;
   /** §12: workflows to dispatch once the current request or alarm has committed, one per
    *  repository and kind. */
@@ -87,6 +98,7 @@ export class BatonCore {
     this.random = ports.random ?? systemRandom;
     this.store = ports.store;
     this.dispatcher = (wf) => this.sendDispatch(wf);
+    this.deprecated = new Deprecated(ports.store);
     this.outside = ports.gate ? (work) => ports.gate!.outside(work) : (work) => work();
     const store = ports.store;
     this.registry = new Registry({ store, now: () => this.now(), ensurePolicy: (repository, forge) => this.policies.ensure(repository, forge) });
@@ -110,6 +122,8 @@ export class BatonCore {
     // R-BTN-80, R-BTN-81: a decision's notices are queued and closed with it, and its history row written.
     this.notices = new Notices({ store, now: () => this.now() });
     this.history = new History({ store, now: () => this.now() });
+    // B-126 (R-BTN-194): ticket provenance, read from the push deliveries the webhooks record.
+    this.provenance = new Provenance({ store });
     const decisionRows = (ticket: string, ids: string[], kind: 'decision-opened' | 'decision-answered') => {
       for (const id of ids) this.history.record(ticket, { kind, detail: { decision: id } });
     };
@@ -122,10 +136,11 @@ export class BatonCore {
     // R-BTN-79: each leg's queue, counted where membership changes; a leg over its bound warns.
     this.queues = new Queues({ store, now: () => this.now(), held: (ticket) => this.blocks.isHeld(ticket),
       graph: (repo, course) => this.stations.graph(repo, course), notices: this.notices });
-    this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks });
+    this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks, deprecated: this.deprecated });
     this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(), origin: ports.config.BATON_ORIGIN,
       dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices,
-      policies: this.policies, humanBreakGlass: () => this.humanBreakGlass(), reapForRetire: (repository, actor) => this.claims.retireReaps(repository, actor) });
+      policies: this.policies, humanBreakGlass: () => this.humanBreakGlass(), reapForRetire: (repository, actor) => this.claims.retireReaps(repository, actor),
+      conditionsForRetire: (repository) => this.conditions.retired(repository) });
     this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo), history: this.history });
     // R-BTN-116: a person leg's question and answer. Its arrival moves the ticket as a claim's
     // does — the queues' membership follows (R-BTN-79), the blocks are re-evaluated (R-BTN-75),
@@ -134,16 +149,22 @@ export class BatonCore {
       queued: (ticket) => this.queues.touch(ticket), reevaluate: (ticket) => this.blocks.write([ticket]), isHeld: (ticket) => this.blocks.isHeld(ticket),
       linkBases: (ticket) => this.blocks.linkBases(ticket), answersFrom: (repo) => this.policies.current(repo)?.policy.inputs.answers ?? 'git',
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
+    // B-234 (R-BTN-160, R-BTN-195): the raised conditions — a course's own vocabulary decides a
+    // disposition (never the runner's word), a `suspend` url keeps only under R-BTN-92's link
+    // bases (as a question's), and the Needs-you and list reads a delivery runner polls.
+    this.conditions = new Conditions({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course), history: this.history,
+      linkBases: (ticket) => this.blocks.linkBases(ticket) });
     this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
-      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope });
+      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated,
+      conditions: this.conditions });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.workers = new WorkerApi({ store, config: ports.config, now: () => this.now(), fenced: (w, inc, id) => this.claims.fenced(w, inc, id),
-      // R-BTN-76: what a heartbeat declares it uses; the fleet's counts move with the worker.
-      uses: (w, repos, names) => this.resources.applyUses(w, repos, names), fleetChanged: () => this.blocks.recount(),
+      legFinished: (w, id, seq) => this.claims.legFinished(w, id, seq),
+      deprecated: this.deprecated, fleetChanged: () => this.blocks.recount(),
       // R-BTN-103: what it delivers as a worker courier.
       couriers: (w, granted, entries) => this.notices.declare(w, granted, entries),
       held: (ticket) => this.blocks.held(ticket, true),
@@ -179,6 +200,8 @@ export class BatonCore {
     await this.armBy(this.webhooks.nextDue());
     await this.armBy(this.blocks.nextDue());
     await this.armBy(this.resources.nextLapse());
+    // R-BTN-90 (B-234): a claim deadline armed before a restart still wakes the alarm.
+    await this.armBy(this.claims.nextDeadline());
   }
 
   /** The worker keys from BATON_KEYS (R3-1239). A list that cannot be seeded changes nothing
@@ -215,21 +238,37 @@ export class BatonCore {
   }
 
   /** §10.3: a repository's sync or mirror workflow, on its default branch. A repository with no
-   *  mirror has nothing to dispatch for it; a retired one has nothing at all (R-BTN-47, B-173). */
-  private sendDispatch(wf: Workflow): Promise<unknown> {
+   *  mirror has nothing to dispatch for it; a retired one has nothing at all (R-BTN-47, B-173). A
+   *  dispatch the forge refuses is logged with its reason (R-BTN-94): the want it answers stands
+   *  until a post answers it, so a refusal costs latency, never correctness. */
+  private async sendDispatch(wf: Workflow): Promise<unknown> {
     const repo = this.registry.live(wf.repository);
-    if (!repo) return Promise.resolve(false);
+    if (!repo) return false;
+    let target: DispatchTarget | null = null;
     if (wf.kind === 'unblocked') {
       // R-BTN-77: one input, `tickets`, JSON — every id and ref in it passed its rule (§10.4). Only
       // the GitHub App's dispatch is built here; GitLab's and Gitea's adapters are R3-1263's.
       const trigger = this.sql<{ t: string | null }>('SELECT unblocked_trigger AS t FROM repositories WHERE id = ?', wf.repository)[0]?.t;
       const t = trigger ? (JSON.parse(trigger) as { kind: string; workflow?: string }) : null;
-      if (t?.kind !== 'github-app' || !t.workflow) return Promise.resolve(false);
-      return this.ports.dispatch.send({ github: repo.github, workflow: t.workflow.slice(t.workflow.lastIndexOf('/') + 1), ref: repo.default_branch, inputs: { tickets: JSON.stringify(wf.tickets ?? []) } });
+      if (t?.kind !== 'github-app' || !t.workflow) return false;
+      // R-BTN-94 (B-168): Baton reads no workflow file — one declaring no manual dispatch, or no
+      // `tickets` input, is the forge's to refuse at dispatch, and the refusal is logged below.
+      target = { github: repo.github, workflow: t.workflow.slice(t.workflow.lastIndexOf('/') + 1), ref: repo.default_branch, inputs: { tickets: JSON.stringify(wf.tickets ?? []) } };
+    } else {
+      const path = wf.kind === 'sync' ? repo.sync_workflow : repo.mirror_workflow;
+      if (!path) return false;
+      target = { github: repo.github, workflow: path.slice(path.lastIndexOf('/') + 1), ref: repo.default_branch };
     }
-    const path = wf.kind === 'sync' ? repo.sync_workflow : repo.mirror_workflow;
-    if (!path) return Promise.resolve(false);
-    return this.ports.dispatch.send({ github: repo.github, workflow: path.slice(path.lastIndexOf('/') + 1), ref: repo.default_branch });
+    try {
+      return await this.ports.dispatch.send(target);
+    } catch (e) {
+      // R-BTN-94: the forge's refusal, with its reason — identifiers only, never a body (the
+      // refusal's message is the forge's own words, capped like a notice's).
+      this.store.transaction(() => logEvent(this.store, this.now(), 'discrepancy', 'baton',
+        { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason: (e instanceof Error ? e.message : String(e)).slice(0, 500) },
+        null, null, wf.repository));
+      return false;
+    }
   }
 
   /** R-BTN-93's one verifier: the repository a sync credential acts for in `role` — a sync key
@@ -397,6 +436,8 @@ export class BatonCore {
     await this.armBy(this.blocks.nextDue());
     // R-BTN-116: the earliest person expiry still pending, so the alarm wakes at the instant.
     await this.armBy(this.questions.nextDue());
+    // R-BTN-90 (B-234): the earliest armed claim deadline, so a run's clock wakes the alarm.
+    await this.armBy(this.claims.nextDeadline());
     // B-229: a reap that could not be written fails the tick only now, after its work: the
     // failure reaches the host's log naming each claim, and the next tick tries it again.
     if (unreaped.length) throw new Error(`the alarm could not reap ${unreaped.length} claim(s): ${unreaped.join('; ')}`);
@@ -418,8 +459,9 @@ export class BatonCore {
     for (const m of MIGRATIONS) {
       if (done.has(m.id)) continue;
       this.store.transaction(() => {
+        if (m.first) m.backfill?.(this.store, (n) => this.random(n), this.now);
         this.store.script(m.sql);
-        m.backfill?.(this.store, (n) => this.random(n));
+        if (!m.first) m.backfill?.(this.store, (n) => this.random(n), this.now);
         this.store.exec('INSERT INTO _baton_migrations (id, applied_at) VALUES (?, ?)', m.id, this.now());
       });
     }
@@ -483,6 +525,9 @@ export class BatonCore {
         if (req.method === 'POST' && url.pathname === '/v1/sync/board') {
           const { repo, req: signed } = await this.verifySync(req, 'sync');
           const body = await readJson(signed);
+          // B-168: the part-4 retired fields the post carries, read before `checkPayload` drops
+          // them from the body.
+          const retired = retiredBoardFields(body);
           let p: BoardPayload;
           try {
             p = checkPayload(body);
@@ -493,6 +538,9 @@ export class BatonCore {
             if (Number.isSafeInteger(n)) this.observations.release(repo.id, n as number);
             throw e;
           }
+          // …read as absent, and logged once per repository's sync credential, field and day
+          // (the history's Migrations entry).
+          if (retired.length) this.store.transaction(() => { for (const f of retired) this.deprecated.note(this.now(), `sync:${repo.id}`, f, 'board', repo.id); });
           return json(await this.board(repo, p));
         }
         if (req.method === 'GET' && url.pathname === '/v1/sync/events') {
@@ -763,6 +811,34 @@ export class BatonCore {
       if (!Number.isFinite(since) || since > now) throw new BatonError('invalid-params', 'since: must be an ISO time not in the future');
       return json({ ok: true, ...this.stats.of(repo, since, now) });
     }
+    // R-BTN-163 (B-234): the conditions list — what a delivery runner polls
+    // (`?open=1&type=interact`, R-BTN-195) and the dashboard's Conditions screen draws. Any key
+    // granted on the repository reads it, as it reads the stats.
+    const conditionsList = /^\/v1\/repositories\/([^/]+)\/conditions$/.exec(p);
+    if (m === 'GET' && conditionsList) {
+      if (!cred) throw new BatonError('unauthenticated', 'no worker principal');
+      let segment: string;
+      try {
+        segment = decodeURIComponent(conditionsList[1]);
+      } catch {
+        throw new BatonError('invalid-params', 'a malformed path segment');
+      }
+      const repo = checkRepositoryId(segment);
+      // R-BTN-47 (B-173): a retired repository is `not-found`, as one never registered.
+      if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
+      this.workers.credential(cred);
+      if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
+        throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
+      }
+      const open = url.searchParams.get('open');
+      if (open != null && open !== '1' && open !== 'true') throw new BatonError('invalid-params', 'open: 1, or nothing');
+      return json({ ok: true, ...this.conditions.list(repo, {
+        open: open === '1' || open === 'true' || undefined,
+        type: url.searchParams.get('type') ?? undefined,
+        ticket: url.searchParams.get('ticket') ?? undefined,
+        cursor: url.searchParams.get('cursor') ?? undefined,
+      }) });
+    }
     if (p.startsWith('/v1/runner/')) {
       if (!cred) throw new BatonError('unauthenticated', 'no worker principal');
       if (m === 'POST' && p === '/v1/runner/heartbeat') {
@@ -861,6 +937,15 @@ export class BatonCore {
           }
         }
         return json(tx(() => this.claims.end(workerId, Number(end[1]), body)));
+      }
+      // B-234 (R-BTN-160, R-BTN-195): the report a runner sends for each raise its channel
+      // check passed. One transaction, like the advance and the end: the condition's row, its
+      // event and its history row land together, and an `interact` closes the open one of the
+      // same run in it.
+      const conditions = /^\/v1\/runner\/claims\/(\d+)\/conditions$/.exec(p);
+      if (m === 'POST' && conditions) {
+        const body = await readJson(req);
+        return json(tx(() => this.conditions.report(workerId, Number(conditions[1]), body)));
       }
       if (m === 'POST' && p === '/v1/runner/readings') {
         // R-BTN-76, R-BTN-101: what a leg met — on its own worker instances and on any account
@@ -976,7 +1061,12 @@ export class BatonCore {
       // R-BTN-76: external resources, their account instances, and a reading by hand.
       if (m === 'POST' && p === '/v1/admin/resources') return json(this.resources.addResource(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/instances') return json(this.resources.addInstance(actor, await body()));
-      if (m === 'POST' && p === '/v1/admin/readings') return json(this.resources.post({ kind: 'admin', fingerprint: fp }, await body(), null));
+      if (m === 'POST' && p === '/v1/admin/readings') {
+        const b = await body();
+        // R-BTN-76, R-BTN-151: a reading, or `{instance, clear}` to end the readings in force there.
+        if (b && typeof b === 'object' && !Array.isArray(b) && (b as { clear?: unknown }).clear !== undefined) return json(this.resources.clear(actor, b));
+        return json(this.resources.post({ kind: 'admin', fingerprint: fp }, b, null));
+      }
       // R-BTN-178: a capability's capacity, and the courses whose legs require one — the read
       // `baton admin capacity set` prints before it asks to confirm.
       if (m === 'PUT' && p === '/v1/admin/capacities') return json(this.resources.setCapacity(actor, await body()));
@@ -1113,12 +1203,18 @@ export class BatonCore {
     const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
     // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
     const history = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/history$/.exec(url.pathname);
+    // B-190 (R-BTN-84, §14): one leg's runs of a ticket, with the inputs replay reads — an
+    // owner's or an administrator's read (§11's command tree), never a worker's.
+    const runs = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/legs\/([^/]+)\/runs$/.exec(url.pathname);
+    // R-BTN-194 (B-126): the ticket itself — its filter fields, where it is, who last pushed it
+    // and its brief mark — for the same principals; `baton ticket show` prints the provenance first.
+    const show = !blocks && !history && !runs ? /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)$/.exec(url.pathname) : null;
     // B-90: the dashboard's view of one repository, for the same principals — an administrator
     // sees any, an owner its own, a granted key the repositories it is granted on.
     const boardRead = /^\/v1\/repositories\/([^/]+)\/board$/.exec(url.pathname);
     // §12.8 (B-145, R-BTN-189): the signed policy read, for the same principals.
     const policyRead = /^\/v1\/repositories\/([^/]+)\/policy$/.exec(url.pathname);
-    if (req.method !== 'GET' || (!blocks && !blocked && !history && !boardRead && !policyRead)) return null;
+    if (req.method !== 'GET' || (!blocks && !blocked && !history && !show && !boardRead && !policyRead && !runs)) return null;
     const seg = (raw: string) => {
       try {
         return decodeURIComponent(raw);
@@ -1126,7 +1222,7 @@ export class BatonCore {
         throw new BatonError('invalid-params', 'a malformed path segment');
       }
     };
-    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? boardRead ?? policyRead)![1]));
+    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? show ?? boardRead ?? policyRead ?? runs)![1]));
     // R-BTN-47 (B-173): one check — a retired repository is `not-found` here as one never
     // registered.
     if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
@@ -1140,6 +1236,8 @@ export class BatonCore {
       if (role === 'owner' && !this.admin.owns(cred, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
     }
     if (!cred) throw new BatonError('unauthenticated', 'no principal');
+    // B-190 (§14): a leg's runs are what replay reads — an owner's or an administrator's read.
+    if (runs && role === 'worker') throw new BatonError('forbidden', `a leg's runs are an owner's or an administrator's read, not a worker's (R-BTN-84)`);
     // R-BTN-179 (B-90): a granted key's board names its grant on THIS repository — the same grant the
     // heartbeat's answer names for it (workerApi.grantedCapabilities), 'none' left out — and
     // null for a key no grant binds there (a bearer's or a seed key's reach is its own).
@@ -1155,6 +1253,14 @@ export class BatonCore {
     }
     if (boardRead) return json(this.boardView(repo, granted));
     if (policyRead) return await this.policyRead(repo);
+    if (show) {
+      const raw = seg(show[2]);
+      const id = raw.includes(':') ? raw : qualify(repo, raw);
+      if (!TICKET_ID.test(id) || repositoryOf(id) !== repo) throw new BatonError('invalid-params', `ticket: must be a ticket of ${repo}`);
+      const out = this.claims.ticketView(id);
+      if (!out) throw new BatonError('not-found', `${id} is not on the board`);
+      return json(out);
+    }
     if (history) {
       const raw = seg(history[2]);
       const id = raw.includes(':') ? raw : qualify(repo, raw);
@@ -1168,6 +1274,14 @@ export class BatonCore {
       // B-129: the ended claims' branches and PRs ride with the path (R-BTN-24's records,
       // pruned) — the PR a ticket's frontmatter lost, so a claimant continues the change.
       return json({ ...this.history.list(id, b, n), resume: this.claims.resumeOf(id) });
+    }
+    if (runs) {
+      const raw = seg(runs[2]);
+      const id = raw.includes(':') ? raw : qualify(repo, raw);
+      if (!TICKET_ID.test(id) || repositoryOf(id) !== repo) throw new BatonError('invalid-params', `ticket: must be a ticket of ${repo}`);
+      const leg = seg(runs[3]);
+      if (!COURSE_ID.test(leg)) throw new BatonError('invalid-params', 'leg: must be a leg id');
+      return json(this.claims.runsOf(id, leg));
     }
     if (blocks) {
       const raw = seg(blocks[2]);
@@ -1411,6 +1525,10 @@ export class BatonCore {
       // history stays in the events.
       this.store.exec('DELETE FROM held_snapshots WHERE repository_id = ? AND head_sha IS ?', r, head);
       this.event(r, 'snapshot-accepted', { sha: p.sha, parent_sha: p.parent_sha, ticket_count: ticketCount, ...changed, ...(accepted ? { held: true } : {}) }, at);
+      // B-126 (R-BTN-194): each ticket's `last_written_by`, read from the push deliveries of the
+      // range (never the post's own account of what changed). Information only: the post is
+      // accepted whatever it finds, and nothing is noticed.
+      this.provenance.advance(repo, head, p.sha, at, rows.map(({ row }) => row), new Set(upserted.map((id) => id.slice(r.length + 1))));
       this.observations.accept(r, n);
       const confirmed = this.claims.confirm(confirmations, n);
       // R-BTN-10, R-BTN-35, §2e: git confirms ends, takes tickets away and goes backwards.
@@ -1849,7 +1967,7 @@ export class BatonCore {
     const byId = new Map(repositories.map((r) => [r.id, r]));
     const items = this.sql<Record<string, SqlValue>>(
       `SELECT t.id, t.repository_id, t.local_id, t.path, t.title, t.project, t.status, t.node, t.queue, t.tags, t.tier, t.requires_clause, t.operator_only, t.ord, t.rank,
-              t.expedite, t.snapshot_sha, s.station, s.next_leg, s.to_end
+              t.expedite, t.snapshot_sha, t.last_written_by, t.brief, s.station, s.next_leg, s.to_end
        FROM tickets t JOIN repositories p ON p.id = t.repository_id
        JOIN ticket_stations s ON s.ticket_id = t.id
        JOIN ticket_next_legs a ON a.ticket_id = t.id AND a.leg = s.next_leg AND a.state = 'ready'
@@ -1869,6 +1987,11 @@ export class BatonCore {
       tier: r.tier,
       // The commit that last changed the ticket's row — a re-tier shows beside it (S-BTN-39).
       changed_in: r.snapshot_sha,
+      // B-126 (R-BTN-194): the pusher of the commit that last changed the ticket's file, and
+      // B-127's brief mark (signed, and by whom), so a privileged session can see whose words
+      // steer it before it reads them.
+      ...((w) => (w ? { last_written_by: w } : {}))(writtenBy(r.last_written_by)),
+      ...((b) => (b ? { brief: b } : {}))(briefMark(r.brief)),
       queue: r.queue,
       node: r.node,
       rank: r.rank,
@@ -1920,6 +2043,9 @@ export class BatonCore {
         scope: this.scope.needsYou(),
         // B-133: the person legs' questions with each option's computed action (R-BTN-116).
         questions: this.questions.needsYou(),
+        // B-234 (R-BTN-163, R-BTN-195): the open conditions, an `interact` with the session
+        // link Baton set — a person asked into the leg's session.
+        conditions: this.conditions.needsYou(),
         // B-127: the unsigned control changes a post moved the head onto while signed control is required.
         unsigned_control: this.unsignedControlView(now) },
       // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.

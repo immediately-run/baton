@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateCourse } from '../core/course';
 import { graphOf, onGraph, resolvePath, type Graph, type Step } from '../core/graph';
+import { signatureConditions } from '../core/conditionTypes';
 import { checkPayload, DEFAULT_COURSE } from '../core/board';
 import { builtIn } from '../defaults/courses';
 import { parseSource } from '../defaults/course-source';
@@ -360,6 +361,16 @@ export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
     rmSync(dir, { recursive: true, force: true });
     rmSync(origin, { recursive: true, force: true });
   }
+}
+
+/** B-234 (R-BTN-111, R-BTN-160): the course's signature, the lines `baton course test` prints —
+ *  the conditions its legs may raise: the course's own declared types and the standard ones
+ *  (less `baton`, core's alone), and each leg that narrows them with its own list. */
+export function signatureLines(k: KitInput): string[] {
+  const s = signatureConditions(k.proposed);
+  const out = [`signature: conditions ${[...s.standard, ...s.declared].join(', ')}`];
+  for (const n of s.narrowed) out.push(`signature: legs.${n.leg} conditions ${n.types.length ? n.types.join(', ') : '(none)'}`);
+  return out;
 }
 
 /** The whole kit over in-memory inputs. */

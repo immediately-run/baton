@@ -62,7 +62,7 @@ B-186 (below).
    - `stop(handle, reason)` — R-BTN-119's ladder (interrupt, terminate after 10 s, kill after
      25 s), every process the leg started gone (R-BTN-145's guarantee, the executor's to keep);
    - `end(handle) → {status, result}` — the `baton-leg-result` block or the agent's last line, which
-     the runner checks as R-BTN-106 says;
+     the runner checks as R-BTN-106 says; for a session a person can join, which does not exit by itself, `end` resolves at the result posted on the channel and the runner then calls `stop` (R-BTN-195);
    - `exec(handle, argv, {cwd, timeout_s, stdin}) → {status, stdout, stderr}` — runs a command
      where the leg runs (item 4);
    - `salvage(handle) → {sha, ref} | null` — B-186's capture (null until B-186 lands), run before the executor tears the
@@ -304,3 +304,5 @@ B-186 (below).
 _filed 2026-11-08._
 
 - 2026-11-09: the spec half is drafted on `claude/B-184-executor-spec` (R-BTN-107 rewritten as the executor rule). The owner settled two choices for it: check legs require `checks:withheld-credentials`, declared only from an executor's `provides` (R-BTN-114); and a leg's agent command is the first present of the home's `legs.<course>.<leg>.agent_command`, the course file's per-leg `agent_command`, the home's top-level `agent_command` (a permanent default) and the `--harness` fill (R-BTN-131) — item 6's "dual-read window" is superseded.
+
+_(2026-11-14: rules re-read: R-BTN-107. Its `end` now also resolves a joinable session at the result posted on the channel (R-BTN-195); the interface item says so.)_

@@ -1,4 +1,4 @@
--- 0043_retirement.sql — B-173 (BATON_SPEC §3.1 R-BTN-47's *Retirement*, §3.1 R-BTN-138's
+-- 0049_retirement.sql — B-173 (BATON_SPEC §3.1 R-BTN-47's *Retirement*, §3.1 R-BTN-138's
 -- tombstone): a retired repository's forge path moves to `former_paths` (latest 10, never
 -- read for authentication or links) and its row carries the tombstone `~retired/<id>` in its
 -- place, freeing the path among live rows. A former path reaches the fence alone — the

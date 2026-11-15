@@ -34,7 +34,7 @@ is stale. Never edit it by hand.
 | | 4.1 The `.baton/` folder and the registry | R-BTN-51, R-BTN-48 |
 | | 4.2 What a sync runs | R-BTN-74 |
 | | 4.3 The sync run and the head | R-BTN-62, R-BTN-150, R-BTN-11, R-BTN-147 |
-| | 4.4 The board post | — |
+| | 4.4 The board post | R-BTN-194 |
 | | 4.5 Reading the ticket | R-BTN-5, R-BTN-34 |
 | | 4.6 Children | R-BTN-86 |
 | | 4.7 History and discrepancies | R-BTN-81, R-BTN-85 |
@@ -62,7 +62,7 @@ is stale. Never edit it by hand.
 | | 6.10 How a leg runs: the course's choice | — |
 | | 6.11 Capacity: exclusive use of a capability *(proposal — B-106)* | R-BTN-178 |
 | [`07-conditions.md`](BATON_SPEC/07-conditions.md) | **7. Conditions** | — |
-| | 7.1 Raising a condition | R-BTN-160, R-BTN-125 |
+| | 7.1 Raising a condition | R-BTN-160, R-BTN-125, R-BTN-195 |
 | | 7.2 Handlers | R-BTN-161, R-BTN-162 |
 | | 7.3 The debugger and Baton's own conditions | R-BTN-163 |
 | | 7.4 Retries | R-BTN-122, R-BTN-23 |
@@ -298,6 +298,8 @@ is stale. Never edit it by hand.
 | R-BTN-191 | every statement Baton receives about the work is an attestation | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-192 | the fact reader: forge facts a trusted runner attests, with no course code | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-193 | git is never a lock or a counter | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
+| R-BTN-194 | every ticket carries who last wrote it | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-195 | an interaction request asks a person into the leg's session | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 
 ## Scenarios
 
@@ -478,6 +480,9 @@ is stale. Never edit it by hand.
 | S-BTN-217 | pushers across hosts | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-218 | owner-signed briefs and the control record (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-219 | require_signed_control (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-220 | ticket provenance (B-126) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-221 | the screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-222 | an interaction request | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

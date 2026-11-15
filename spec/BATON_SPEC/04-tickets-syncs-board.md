@@ -552,6 +552,31 @@ live solely in Baton, and both are exportable (R-BTN-88).
   `state.items[].dependsOn` is the same graph and is refused the same way (B-111, round 1): no
   ticket source can post a loop, whichever shape it posts.
 - Free text and identifiers are validated on write (§12.3).
+- **R-BTN-194 (every ticket carries who last wrote it).** Provenance, for the compromised-runner
+  hardening (B-126; the security model's reach 3, option 9): information, never a gate — nothing
+  is refused, held or noticed. In the transaction that accepts a post moving the head, Baton
+  reads its own record of the forge's push deliveries for the range — the deliveries that chain
+  `before` and `after` from the head left to the head accepted (R-BTN-73) — never the post's
+  account of what changed, and records on each ticket `last_written_by: {pusher, pusher_id?,
+  commit, at}`: the pusher of the newest recorded commit that changed the ticket's file —
+  `pusher_id` the delivery's immutable `sender.id`, `pusher` its login, never the commit author,
+  which anyone sets; `at` the delivery's arrival.
+  - **Unknown, never assumed.** A ticket whose row the post changed with no recorded commit
+    accounting for it — a delivery missing or pruned, a forge whose pushes Baton holds no record
+    of (today every forge but github.com through the App; a plain git remote, R-BTN-92, sends
+    nothing) — or whose newest recorded change is followed by a push past the recording bounds,
+    is `pusher-unknown` at the accepted head. A first snapshot has no range and records nothing.
+  - **The signer is the brief's mark.** Whether an owner key signed the ticket's brief, and
+    which, is B-127's `brief {signed, signer?, commit}` above; provenance does not repeat it.
+  - **Served.** `last_written_by` is Baton's own record, never the post's, and no input of
+    `row_hash`. It rides the ticket, beside its `brief`, in the board read (§11), the
+    dashboard's ready rows, the recommendations, the claim answer — whose runner prints both at
+    the claim — and the ticket read (`GET /v1/repositories/{repository}/tickets/{ticket}`;
+    `baton ticket show` prints them first), so a privileged session sees whose words steer the
+    ticket before it reads them.
+  - **No notice.** Under `cooperative` Baton carries no foreign-write notice (R-BTN-66, the
+    owner 2026-11-01); a repository wanting detection of control-input changes turns on B-127's
+    `require_signed_control`, whose `unsigned-control` notice is the one (the owner, 2026-11-13).
 
 ### 4.5 Reading the ticket
 
@@ -652,7 +677,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
   | sub | when |
   |---|---|
-  | `position-disagrees` | a posted ticket whose `status` is `available` while the same post places it past its course's start (R-BTN-74), core's witness being a non-empty path (B-129); judged on those two alone, since core reads no course field (R-BTN-50), so a release that kept its PRs logs it too; once per station; both values are positions, never a PR list (R-BTN-33): logged and listed among the dashboard's discrepancies, nothing adopted, never on Needs you |
+  | `position-disagrees` | a posted ticket whose `status` is `available` while the same post places it past its course's start (R-BTN-74), core's witness being a non-empty path (B-129); judged on those two alone, since core reads no course field (R-BTN-50), so a release that kept its PRs logs it too; once per station; both values are positions, never a PR list (R-BTN-33): logged and listed on the dashboard's Sync screen (§11.4), nothing adopted, never on Needs you |
   | `bars-mismatch` | posted bars lack a tag the holder declared (R-BTN-63) |
   | `closed-under-claim` | a ticket closed while a claim is active on it, a claim of its `cancel` leg excepted (R-BTN-168) |
   | `spawned-unposted` | a reported child the first snapshot after the end does not post (R-BTN-86) |

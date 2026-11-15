@@ -466,7 +466,7 @@ describe('migration 0038: run ids (B-185, S-BTN-204)', () => {
       const m38 = MIGRATIONS.find((x) => x.id === 38)!;
       sql.exec(m38.sql);
       let draw = 0;
-      m38.backfill!({ exec: (q: string, ...p: unknown[]) => sql.exec(q, ...p) } as unknown as Store, (n) => new Uint8Array(n).fill(++draw));
+      m38.backfill!({ exec: (q: string, ...p: unknown[]) => sql.exec(q, ...p) } as unknown as Store, (n) => new Uint8Array(n).fill(++draw), () => T);
 
       const all = (q: string) => sql.exec(q).toArray() as Record<string, unknown>[];
       expect(all(`SELECT id, claim_id, seq, leg, from_station, to_station, bars, started_at, started_observation, finished_at, abandoned_at, evidence, route_choices_json, taken_json
@@ -547,21 +547,21 @@ describe('migration 0042: the ontology and route choices retire (B-167)', () => 
   });
 });
 
-// B-173 — migration 0043 adds the retired row's `former_paths` and backfills the tombstone over
+// B-173 — migration 0049 adds the retired row's `former_paths` and backfills the tombstone over
 // rows retired before it: a retire that set `retired_at` alone left the forge path in `github`,
 // which would hold the path against `Registry.register`'s duplicate check (it matches over every
 // row) and never reach the former-path fence. Such a row comes to the tombstone the retiring
 // transaction writes — path to `former_paths`, `~retired/<id>` in its place, the same columns
 // cleared — and a live row, and one retired by the new code, are untouched.
-describe('migration 0043: the retirement tombstone (B-173)', () => {
+describe('migration 0049: the retirement tombstone (B-173)', () => {
   it('backfills rows retired before the deploy to the tombstone, leaving live rows alone', async () => {
-    const id = env.BATON.idFromName('migrations-0043');
+    const id = env.BATON.idFromName('migrations-0049');
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
       const objects = sql.exec("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table','index')").toArray() as { type: string; name: string }[];
       for (const o of objects.filter((x) => x.type === 'table')) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
-      for (const m of MIGRATIONS.filter((x) => x.id <= 42)) sql.exec(m.sql);
+      for (const m of MIGRATIONS.filter((x) => x.id <= 48)) sql.exec(m.sql);
       // A live repository, and one retired the old way — `retired_at` alone, its path still in
       // `github` and the columns the tombstone clears still set.
       sql.exec(`INSERT INTO repositories (id, github, default_branch, sync_workflow, web_base) VALUES ('docs', 'immediately-run/docs', 'main', '.github/workflows/baton-sync.yml', 'https://github.com/immediately-run/docs')`);
@@ -569,7 +569,7 @@ describe('migration 0043: the retirement tombstone (B-173)', () => {
                 VALUES ('ops', 'immediately-run/ops', 'main', '.github/workflows/baton-sync.yml', 'https://github.com/immediately-run/ops', '{"kind":"github-app"}', '{"kind":"github-app"}', 111, 222, 1000)`);
 
       sql.exec('PRAGMA foreign_keys = ON'); // as the host runs it
-      sql.exec(MIGRATIONS.find((x) => x.id === 43)!.sql);
+      sql.exec(MIGRATIONS.find((x) => x.id === 49)!.sql);
 
       const all = (q: string) => sql.exec(q).toArray() as Record<string, unknown>[];
       // The retired row: the tombstone, its path moved, the columns the retiring transaction

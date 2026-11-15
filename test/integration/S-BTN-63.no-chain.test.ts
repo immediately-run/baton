@@ -61,31 +61,43 @@ describe('S-BTN-63 no review by its author’s key', () => {
     expect((await advance('vm-b', b.secret, c.claim_id, { leg: 'review' })).status).toBe(200);
   });
 
-  it('the owners’ required_independence alone, with no list in the course file, refuses the first key', async () => {
-    // The course file in force has no list (the model's own file, so this case replays through
-    // the model whole: a refusal is no model action).
-    expect((await keyCall(owner, '/v1/owner/docs/settings', { required_independence: { review: ['implement'] } }, 'PUT')).status).toBe(200);
-    // The dashboard's Settings list reads it from the limits view.
-    const state = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as { limits: { settings: { repository_id: string; required_independence: string }[] } };
-    expect(state.limits.settings.find((s) => s.repository_id === 'docs')?.required_independence).toBe('{"review":["implement"]}');
-    const a = await implementAndSuspend();
-    expect(await claimItem('vm-a', a.secret, { ticket_id: 'docs:T-1' })).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 'chain' } });
-    const b = await register('vm-b');
-    expect((await claimItem('vm-b', b.secret, { ticket_id: 'docs:T-1' })).json).toMatchObject({ ticket_id: 'docs:T-1', legs: ['review'] });
+  it('the owners have no second statement of it: required_independence is refused, and the course file is the one', async () => {
+    // B-168 (§8.3, R-BTN-106): the owners' setting is gone — the file's `no_chain_from` alone holds.
+    // The settings route reads it as no setting at all, and the dashboard's Settings lists none.
+    expect((await keyCall(owner, '/v1/owner/docs/settings', { required_independence: { review: ['implement'] } }, 'PUT')).json).toMatchObject({ code: 'invalid-params' });
+    const state = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as { limits: { settings: Record<string, unknown>[] } };
+    expect(state.limits.settings.find((s) => s.repository_id === 'docs')).not.toHaveProperty('required_independence');
+    // With no list in the course file in force, the same key that implemented takes review: the
+    // file is the one statement of it, and it says nothing here.
+    const a = await register('vm-a');
+    const { json: c } = await claimItem('vm-a', a.secret, { ticket_id: 'docs:T-1' });
+    expect((await advance('vm-a', a.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
+    expect((await endClaim('vm-a', a.secret, c.claim_id, { end_reason: 'suspended:pr-open', reached: 'pr-open', next: 'review' })).status).toBe(200);
+    git.place('T-1', AT_PR_OPEN);
+    expect(await git.post()).toMatchObject({ confirmed: 1 });
+    const { json: again } = await claimItem('vm-a', a.secret, { ticket_id: 'docs:T-1' });
+    expect(again).toMatchObject({ ticket_id: 'docs:T-1', station: 'pr-open', legs: ['review'] });
   });
 
-  it('a course file that drops its list, or renames the leg the owners key on, loosens nothing', async () => {
-    expect((await keyCall(owner, '/v1/owner/docs/settings', { required_independence: { review: ['implement'] } }, 'PUT')).status).toBe(200);
+  it('a course file that renames the leg it keys on keeps the list, so the rename is no loosening', async () => {
     git.registry = [course(3, 3, { course: CHAINED })];
     await git.post();
-    // The file drops its list and renames review: the owners' key follows renamed_from.
+    // The file renames review and keeps its list on the renamed leg: a key that ran implement is
+    // refused peer-review as it was review — the rename loosens nothing.
     const { review, ...legs } = roadmapPr.legs;
-    git.registry = [course(4, 3, { course: { ...roadmapPr, legs: { ...legs, 'peer-review': { ...review, renamed_from: ['review'] } } } })];
+    git.registry = [course(4, 3, { course: { ...roadmapPr, legs: { ...legs, 'peer-review': { ...review, no_chain_from: ['implement'], renamed_from: ['review'] } } } })];
     await git.post();
     const a = await register('vm-a');
     const { json: c } = await claimItem('vm-a', a.secret, { ticket_id: 'docs:T-1' });
     expect((await advance('vm-a', a.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
-    expect(await advance('vm-a', a.secret, c.claim_id, { reached: 'pr-open', leg: 'peer-review' }))
-      .toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 'chain' } });
+    // The same key ends suspended at pr-open with the renamed leg queued; a later snapshot posts
+    // the ticket there, and the key is refused that leg — the refusal follows the rename.
+    expect((await endClaim('vm-a', a.secret, c.claim_id, { end_reason: 'suspended:pr-open', reached: 'pr-open', next: 'peer-review' })).status).toBe(200);
+    git.place('T-1', { ...placed('pr-open', [['implement', 'pr-open']], [['peer-review', 'ready']]) });
+    expect(await git.post()).toMatchObject({ confirmed: 1 });
+    // The key cannot even be offered the leg (R-BTN-106's read), and asking for it by id refuses
+    // it `chain`: the renamed leg's list names implement, and the rename is no loosening.
+    expect(await recommended(a.id)).toEqual([]);
+    expect((await claimItem('vm-a', a.secret, { ticket_id: 'docs:T-1' })).json).toMatchObject({ code: 'not-eligible', rule: 'chain' });
   });
 });

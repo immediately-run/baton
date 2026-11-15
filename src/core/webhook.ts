@@ -1,5 +1,7 @@
 // webhook.ts — GitHub App deliveries trigger repository syncs (BATON_SPEC §7.1 R-BTN-73, §10.1;
-// R3-1247). A delivery is only a trigger: the sync still computes everything from git.
+// R3-1247). A delivery is only a trigger: the sync still computes everything from git. A push
+// delivery is also recorded (`push_deliveries`, B-126): its immutable pusher and the commits it
+// brought, for §4.4's ticket provenance (R-BTN-194).
 //
 // The front verifies `X-Hub-Signature-256` with BATON_GITHUB_WEBHOOK_SECRET before anything else
 // is read, then `pickDelivery` — the only code that touches a payload — returns exactly the
@@ -15,8 +17,10 @@ import type { Store } from './ports';
 /** The events the App subscribes to (R-BTN-73; `check_suite` dropped after the sixth review). */
 export const WEBHOOK_EVENTS = ['push', 'pull_request', 'pull_request_review', 'issue_comment', 'workflow_run'] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
-/** GitHub caps a delivery's payload at 25 MB; nothing larger is a delivery. */
-export const MAX_DELIVERY = 25 << 20;
+/** R-BTN-73: a delivery's body is at most 26,214,400 bytes (25 MiB, above the largest GitHub
+ *  sends) on either route — `/v1/github/webhook` and `/v1/forges/{repository}/notify` — and one
+ *  larger is `too-large` before any digest is computed. */
+export const MAX_DELIVERY = 26_214_400;
 export const DISPATCH_WINDOW_MS = 30_000;
 export const DELIVERY_TTL_MS = 24 * 3_600_000;
 /** B-89: how stale a repository's last webhook-driven sync may be before the alarm sends
@@ -54,6 +58,27 @@ export interface Delivery {
    *  has no head commit, as a branch deletion has none). */
   pusher?: string;
   author_email?: string | null;
+  /** B-126 (R-BTN-194): a push's own record — the immutable pusher and the commits it brought,
+   * each with its changed paths — read only when every field of it parses; a push past the
+   * bounds is remembered `truncated` with no paths, and a shape that does not parse leaves the
+   * delivery unrecorded. Either way what it changed reads as `pusher-unknown` (§4.4) while the
+   * delivery still triggers its syncs. */
+  push?: PushDelivery;
+}
+
+/** A push delivery's recorded half (B-126, R-BTN-73): `sender.id` is the pusher — immutable,
+ *  unlike `pusher.name` or the commit author, which anyone sets; `before`/`after` chain the
+ *  deliveries into the range a board post accepts; each commit carries its changed paths, kind
+ *  undistinguished (a file is changed as much by a removal as by an addition). */
+export interface PushDelivery {
+  sender_id: number | null;
+  sender_login?: string;
+  /** `refs/heads/<branch>`; only branch pushes are recorded. */
+  ref: string;
+  before: string;
+  after: string;
+  commits: { sha: string; paths: string[] }[];
+  truncated?: boolean;
 }
 
 // Bounds on the fields forwarded in X-Baton-Webhook: generous for what GitHub sends, small
@@ -64,6 +89,16 @@ const MAX_PUSHER = 100; // a login, or `github-actions[bot]`
 const MAX_EMAIL = 320; // RFC 5321's limit
 const enc = new TextEncoder();
 
+// B-126: a push's recorded half is bounded by what the header and the row can carry — commits
+// and paths per delivery (GitHub sends a list already short of the pushes that would overflow
+// it; whatever exceeds the bounds is remembered as unrecordable, not silently cut short).
+export const PUSH_COMMITS_MAX = 30;
+export const PUSH_PATHS_MAX = 600;
+const SHA40 = /^[0-9a-f]{40}$/;
+const REF = /^refs\/heads\/[^\s~^:?*[\\]{1,180}$/;
+const MAX_PATH = 300;
+const MAX_LOGIN = 100;
+
 /** `X-Hub-Signature-256` of `body` under `secret`: `sha256=` and the HMAC's hex. */
 export async function deliverySignature(secret: string, body: Uint8Array): Promise<string> {
   const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
@@ -72,12 +107,14 @@ export async function deliverySignature(secret: string, body: Uint8Array): Promi
 }
 
 /** The delivery's body, once its signature is the App's — before a byte of it is parsed. An
- *  unconfigured secret refuses every delivery: nothing unsigned is ever accepted. */
+ *  unconfigured secret refuses every delivery: nothing unsigned is ever accepted. The size is
+ *  judged first (R-BTN-73): a body over the cap is `too-large` on its Content-Length or once
+ *  that many bytes are read, so no digest is computed over one. */
 export async function verifyDelivery(req: Request, secret: string | undefined): Promise<Uint8Array> {
+  const body = await readCapped(req, MAX_DELIVERY, 'too-large');
   if (!secret) throw new BatonError('forbidden', 'the GitHub App webhook secret is not configured');
   const presented = req.headers.get('X-Hub-Signature-256') ?? '';
   if (!/^sha256=[0-9a-f]{64}$/.test(presented)) throw new BatonError('unauthenticated', 'X-Hub-Signature-256 is required');
-  const body = await readCapped(req, MAX_DELIVERY);
   const want = await deliverySignature(secret, body);
   if (!equalBytes(enc.encode(presented), enc.encode(want))) throw new BatonError('unauthenticated', 'the delivery signature does not verify');
   return body;
@@ -93,7 +130,11 @@ const at = (o: unknown, k: string): unknown => (o !== null && typeof o === 'obje
  * outside the five, a missing or malformed field. It reads `repository.full_name`, and
  * `workflow_run.path` for a workflow_run, `pusher.name` and `head_commit.author.email` for a
  * push, or `pull_request.merged` for a pull_request (B-89), and touches nothing else in the
- * payload.
+ * payload. A push also carries its recorded half for R-BTN-194 (`push`: `sender.id`,
+ * `sender.login`, `ref`, `before`, `after` and each commit's `id` with its `added`, `removed`
+ * and `modified` paths) when every field of it parses: a shape that does not records nothing,
+ * and a push past the bounds a `truncated` record with no paths — either way what it changed
+ * reads as `pusher-unknown` (B-126), and the delivery still triggers its syncs.
  */
 export function pickDelivery(event: string | null, id: string | null, payload: unknown): Delivery | null {
   if (!event || !(WEBHOOK_EVENTS as readonly string[]).includes(event)) return null;
@@ -114,6 +155,10 @@ export function pickDelivery(event: string | null, id: string | null, payload: u
     const email = head === null ? null : str(at(at(head, 'author'), 'email'));
     if (email === undefined || (email !== null && email.length > MAX_EMAIL)) return null;
     d.author_email = email;
+    // B-126: the recorded half only when it parsed — an undefined assignment would still leave
+    // the key present, which the core's own `d.push` read would take for a record.
+    const push = pickPush(payload);
+    if (push !== undefined) d.push = push;
   }
   if (event === 'pull_request') {
     // B-89: a merge moves the default branch, and a push delivery for that merge is not
@@ -127,6 +172,46 @@ export function pickDelivery(event: string | null, id: string | null, payload: u
     d.merged = merged === true;
   }
   return d;
+}
+
+/** A push's recorded half (B-126, R-BTN-194): undefined when the payload carries none of it (a
+ *  delivery older than the App's push payload, a branch deletion's zero shas) — the range then
+ *  has no record and reads as `pusher-unknown`; `{truncated}` when the push is past the bounds. */
+function pickPush(payload: unknown): PushDelivery | undefined {
+  const ref = str(at(payload, 'ref'));
+  const before = str(at(payload, 'before'));
+  const after = str(at(payload, 'after'));
+  // A branch deletion's zero shas move nothing a board follows; a tag push is no branch.
+  if (ref === undefined || before === undefined || after === undefined) return undefined;
+  if (!SHA40.test(after) || /^0+$/.test(after) || !SHA40.test(before) || !REF.test(ref)) return undefined;
+  const sender = at(payload, 'sender');
+  const rawId = at(sender, 'id');
+  const login = str(at(sender, 'login'));
+  if (rawId !== undefined && rawId !== null && !(typeof rawId === 'number' && Number.isSafeInteger(rawId) && rawId > 0)) return undefined;
+  if (login !== undefined && (login.length === 0 || login.length > MAX_LOGIN)) return undefined;
+  const senderId = typeof rawId === 'number' ? rawId : null;
+  const commits = at(payload, 'commits');
+  if (commits !== undefined && !Array.isArray(commits)) return undefined;
+  const base = { sender_id: senderId, ...(login ? { sender_login: login } : {}), ref, before, after };
+  if (commits === undefined) return { ...base, commits: [] };
+  if ((commits as unknown[]).length > PUSH_COMMITS_MAX) return { ...base, commits: [], truncated: true };
+  const out: { sha: string; paths: string[] }[] = [];
+  let paths = 0;
+  for (const c of commits as unknown[]) {
+    const sha = str(at(c, 'id'));
+    if (!sha || !SHA40.test(sha)) return undefined;
+    const list: string[] = [];
+    for (const key of ['added', 'removed', 'modified'] as const) {
+      const v = at(c, key);
+      if (v === undefined || v === null) continue;
+      if (!Array.isArray(v) || !v.every((x) => typeof x === 'string' && x.length > 0 && x.length <= MAX_PATH)) return undefined;
+      list.push(...v as string[]);
+    }
+    paths += list.length;
+    if (paths > PUSH_PATHS_MAX) return { ...base, commits: [], truncated: true };
+    out.push({ sha, paths: [...new Set(list)] });
+  }
+  return { ...base, commits: out };
 }
 
 interface Registered { id: string; github: string; sync_workflow: string; mirror_workflow: string | null }
@@ -158,6 +243,19 @@ export class Webhooks {
     this.c.store.exec('DELETE FROM webhook_deliveries WHERE received_at < ?', now - DELIVERY_TTL_MS);
     if (this.rows('SELECT 1 FROM webhook_deliveries WHERE delivery_id = ?', d.id).length) return { outcome: 'duplicate' };
     this.c.store.exec('INSERT INTO webhook_deliveries (delivery_id, received_at) VALUES (?, ?)', d.id, now);
+    // B-126 (R-BTN-194): the push's own record, kept for the 24 hours a sync needs to accept the
+    // head it moved — before anything drops the delivery as a duplicate of Baton's own work: a
+    // mirror push moves the default branch too, and its pusher is recorded like any other.
+    if (d.push) {
+      this.c.store.exec('DELETE FROM push_deliveries WHERE received_at < ?', now - DELIVERY_TTL_MS);
+      this.c.store.exec(
+        `INSERT INTO push_deliveries (delivery_id, repository, ref, before_sha, after_sha, sender_id, sender_login, commits_json, truncated, received_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (delivery_id) DO UPDATE SET sender_id = excluded.sender_id, sender_login = excluded.sender_login,
+           commits_json = excluded.commits_json, truncated = excluded.truncated, received_at = excluded.received_at`,
+        d.id, d.repository.toLowerCase(), d.push.ref, d.push.before, d.push.after, d.push.sender_id, d.push.sender_login ?? null,
+        JSON.stringify(d.push.commits), d.push.truncated ? 1 : 0, now);
+    }
     const full = d.repository.toLowerCase();
     // The App serves github.com repositories alone (R-BTN-92, round 1 of R3-1262).
     const registered = this.rows<Registered>(`SELECT id, github, sync_workflow, mirror_workflow FROM repositories

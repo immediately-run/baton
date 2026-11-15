@@ -51,7 +51,11 @@ describe('the repository policy (R-BTN-188, R-BTN-189)', () => {
     expect(refuse({ ...COOPERATIVE, approvers: { ...COOPERATIVE.approvers, policy: ['delegated'] } })).toContain('approvers.policy');
     expect(refuse({ ...COOPERATIVE, merge: { ...COOPERATIVE.merge, reviews: { count: 2, distinct: ['hostname'] } } })).toContain('distinct');
     expect(refuse({ ...COOPERATIVE, attestations: { ...COOPERATIVE.attestations, 'std:review@1': ['runner'] } })).toContain('std:review@1');
-    expect(refuse({ ...COOPERATIVE, readings: { '*': { writers: ['owner'], signed: false } } })).toContain('readings.*');
+    expect(refuse({ ...COOPERATIVE, readings: { '*': { writers: ['owner'] } } })).toContain('readings.*');
+    // B-168: an old document's `signed` is tolerated and dropped (a reading carries no signature).
+    expect(validatePolicyDocument({ ...COOPERATIVE, readings: { '*': { writers: ['admin'], signed: true } } }, { forge: 'github' }).readings).toEqual({ '*': { writers: ['admin'] } });
+    // …and a version stored before B-168 with it differs in no knob from the same one without.
+    expect(diffPolicies({ ...COOPERATIVE, readings: { '*': { writers: ['admin', 'instrument', 'runner'], signed: false } } } as never, COOPERATIVE)).toEqual([]);
   });
 
   it("R-BTN-180: a policy whose writes could never land is refused — the three cases", () => {

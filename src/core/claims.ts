@@ -6,6 +6,7 @@
 import { BatonError } from './http';
 import { transcriptUrl } from './links';
 import { isUniqueViolation, logEvent, mintRunId, randomHex, type Random } from './db';
+import type { Deprecated } from './deprecated';
 import { fitsTier, capabilitiesOf, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
 import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
@@ -16,8 +17,10 @@ import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from
 import type { Seen, Stations } from './stations';
 import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
 import { legStateOf } from './policy';
+import { briefMark, writtenBy, type LastWrittenBy } from './provenance';
 import type { Row, SqlValue, Store } from './ports';
 import type { Blocks } from './blocks';
+import type { Conditions } from './conditions';
 import type { History } from './history';
 const EXPEDITE_BOUND = 2; // §7.2 rule 2, advice
 /** §2e: a claim regressed this long is listed under Needs you. */
@@ -27,6 +30,9 @@ const BARS_MISMATCH_LISTED_MS = 24 * 3_600_000;
 const RELEASE_ACK_MS = 2 * 3_600_000; // §9: a delivered release unacknowledged for 2 h reaps the claim
 export const UNCONFIRMED_FLAG_MS = 6 * 3_600_000; // §6.7
 const STALLED_MS = 2 * 3_600_000; // §14 Running: alive but no activity for 2 h
+/** §7.5 R-BTN-90: what a `leg_finished` heartbeat re-arms a still-armed deadline to — now plus
+ *  40 minutes, once per leg run, so finishing is never the end. */
+const LEG_FINISH_REARM_MS = 40 * 60_000;
 /** R-BTN-35: the git states that end an active claim `released:stale-board`. */
 const GIT_ENDS = new Set(['done', 'superseded', 'deferred', 'deprioritized']);
 
@@ -58,6 +64,11 @@ export interface Ctx {
   /** B-134: the leg scope audit — the claim answer's scope, and the reports an advance or an
    *  end carries. */
   scope?: import('./scope').Scope;
+  /** B-234 (R-BTN-160, R-BTN-195): the raised conditions — an open `interact` of a run closes
+   *  in the transactions that end the run (the advance that finishes it, the claim's end). */
+  conditions?: Conditions;
+  /** The retired-fields window's one writer (B-168): a claim's `bills`. */
+  deprecated: Deprecated;
 }
 
 interface WorkerFacts {
@@ -92,6 +103,10 @@ interface ItemFacts {
   operator_only: boolean;
   expedite: boolean;
   rank: number | null;
+  /** B-126 (R-BTN-194): who last pushed the ticket's body, when Baton has a record of it. */
+  last_written_by?: LastWrittenBy;
+  /** B-127 item 7: the brief's mark — whether an owner key signed it, and which. */
+  brief?: { signed: boolean; signer?: string; commit: string };
   /** Where the head snapshot places it, or null when it places it nowhere. */
   station: { station: string; path: Step[]; next_leg: string | null; to_end: number; handoff_url: string | null } | null;
 }
@@ -117,6 +132,10 @@ export interface Recommendation {
   reasons: string[];
   flags: string[];
   handoff_url: string | null;
+  /** B-126 (R-BTN-194): who last pushed the ticket's body, when Baton has a record of it. */
+  last_written_by?: LastWrittenBy;
+  /** B-127 item 7: the brief's mark, served beside it (the signer half of provenance). */
+  brief?: { signed: boolean; signer?: string; commit: string };
 }
 
 interface HeldClaim {
@@ -320,8 +339,8 @@ export class Claims {
 
   /** A ticket's filter fields and where the head snapshot places it (R-BTN-33, R-BTN-70). */
   private item(id: string): ItemFacts | null {
-    const r = this.rows<{ id: string; repository_id: string; course_id: string; path: string; tier: string | null; requires_clause: string; operator_only: number; rank: number | null; expedite: number }>(
-      'SELECT id, repository_id, course_id, path, tier, requires_clause, operator_only, rank, expedite FROM tickets WHERE id = ?', id)[0];
+    const r = this.rows<{ id: string; repository_id: string; course_id: string; path: string; tier: string | null; requires_clause: string; operator_only: number; rank: number | null; expedite: number; last_written_by: string | null; brief: string | null }>(
+      'SELECT id, repository_id, course_id, path, tier, requires_clause, operator_only, rank, expedite, last_written_by, brief FROM tickets WHERE id = ?', id)[0];
     if (!r) return null;
     const requires = r.requires_clause === 'listed'
       ? this.rows<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ? ORDER BY name', id).map((x) => x.name)
@@ -331,7 +350,28 @@ export class Claims {
     return {
       id: r.id, repository: r.repository_id, course: r.course_id, path: r.path, tier: r.tier, requires, operator_only: !!r.operator_only, rank: r.rank,
       expedite: !!r.expedite || !!this.override(id)?.expedite,
+      ...((w) => (w ? { last_written_by: w } : {}))(writtenBy(r.last_written_by)),
+      ...((b) => (b ? { brief: b } : {}))(briefMark(r.brief)),
       station: s ? { station: s.station, path: JSON.parse(s.path) as Step[], next_leg: s.next_leg, to_end: s.to_end, handoff_url: s.handoff_url } : null,
+    };
+  }
+
+  /** `GET /v1/repositories/{repository}/tickets/{ticket}` (§11, R-BTN-194): the ticket as Baton
+   *  holds it — its filter fields, where the head snapshot places it, who last pushed its body
+   *  and its brief mark (B-127) — for the principals that may read its blocks. Null when the ticket is not on the board. */
+  ticketView(id: string): Record<string, unknown> | null {
+    const item = this.item(id);
+    if (!item) return null;
+    const r = this.rows<{ title: string; project: string | null; expedite: number; snapshot_sha: string; course_id: string }>(
+      'SELECT title, project, expedite, snapshot_sha, course_id FROM tickets WHERE id = ?', id)[0];
+    return {
+      ticket_id: item.id, repository: item.repository, course_id: r?.course_id ?? item.course, title: r?.title ?? null,
+      path: item.path, tier: item.tier, requires: item.requires ?? [], operator_only: item.operator_only, expedite: item.expedite,
+      rank: item.rank, snapshot_sha: r?.snapshot_sha ?? null,
+      station: item.station ? { station: item.station.station, path: item.station.path, next_leg: item.station.next_leg, to_end: item.station.to_end,
+        ...(item.station.handoff_url ? { handoff_url: item.station.handoff_url } : {}) } : null,
+      ...(item.last_written_by ? { last_written_by: item.last_written_by } : {}),
+      ...(item.brief ? { brief: item.brief } : {}),
     };
   }
 
@@ -361,18 +401,15 @@ export class Claims {
   }
 
   /** The leg as the head snapshot posted it for the ticket, its barred tags (R-BTN-70), and what
-   *  the course file and the owners ask of whoever takes it (R-BTN-106, R-BTN-107). */
+   *  the course file asks of whoever takes it (R-BTN-106, R-BTN-107). */
   private postedLeg(item: ItemFacts, leg: string, phase: Phase): GateLeg {
     const n = this.rows<{ state: 'ready' | 'waiting' }>('SELECT state FROM ticket_next_legs WHERE ticket_id = ? AND leg = ?', item.id, leg)[0];
     const posted = this.rows<{ tag: string }>('SELECT tag FROM ticket_bars WHERE ticket_id = ? AND leg = ? ORDER BY tag', item.id, leg).map((r) => r.tag);
     const g = this.stations.graph(item.repository, item.course);
     const def = g?.legs.get(leg);
-    // The owners' list joins the file's, as required bars join posted ones (R-BTN-67): a file
-    // that drops its list loosens nothing the owners hold.
-    // Its keys are followed through `renamed_from` too, so renaming the leg loosens nothing.
-    const owners = Object.entries(this.c.admin.requiredIndependence(item.repository))
-      .filter(([key]) => (g ? resolveLeg(g, key) ?? key : key) === leg).flatMap(([, from]) => from);
-    const noChainFrom = [...new Set([...(def?.noChainFrom ?? []), ...owners].map((l) => (g ? resolveLeg(g, l) ?? l : l)))];
+    // R-BTN-106 (B-168): the course file's `no_chain_from` alone — the owners have no second
+    // statement of it. Each name is followed through `renamed_from`, as the leg itself is.
+    const noChainFrom = [...new Set((def?.noChainFrom ?? []).map((l) => (g ? resolveLeg(g, l) ?? l : l)))];
     // R-BTN-120: the file's own `requires.capabilities`, which rule 4 reads beside the clause.
     // R-BTN-116: whether the leg is a person's, which rule `person` refuses at a claim or an advance.
     return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...this.ownerBarTags(item, leg, phase)])], noChainFrom, isolation: def?.isolation ?? null, requires: def?.requires ?? [], person: def?.person ?? false };
@@ -640,6 +677,8 @@ export class Claims {
       reasons: [...(r.lane ? ['expedite lane'] : []), `${r.to_end} leg${r.to_end === 1 ? '' : 's'} to an end`, `rank ${r.item.rank ?? '—'} in ${r.repository_id}`],
       flags: r.waits ? ['expedite-bound'] : [],
       handoff_url: r.item.station!.handoff_url,
+      ...(r.item.last_written_by ? { last_written_by: r.item.last_written_by } : {}),
+      ...(r.item.brief ? { brief: r.item.brief } : {}),
     }));
   }
 
@@ -795,6 +834,7 @@ export class Claims {
     // R-BTN-47 (B-173): a wanted ticket of a repository not registered — retired, or never
     // there — is not-found before the cutover gate, which reads the live repositories alone.
     if (b.ticket_id) this.refuseUnregisteredTicket(b.ticket_id);
+    for (const field of b.retired) this.c.deprecated.note(this.c.now(), `worker:${workerId}`, `claim.${field}`, 'claim');
     if (!this.anyCutOver()) throw new BatonError('not-cut-over', 'claims go through git until cutover (R-BTN-28)');
     const prior = this.rows<{ id: number; worker_id: number }>('SELECT id, worker_id FROM claims WHERE request_id = ?', b.request_id)[0];
     if (prior) {
@@ -869,7 +909,7 @@ export class Claims {
     const courseVersion = c.course_id
       ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(c.ticket_id), c.course_id)[0]?.version ?? null
       : null;
-    const ticketRow = this.rows<{ path: string; version: string; key: string | null }>('SELECT path, version, key FROM tickets WHERE id = ?', c.ticket_id)[0] ?? null;
+    const ticketRow = this.rows<{ path: string; version: string; key: string | null; last_written_by: string | null }>('SELECT path, version, key, last_written_by FROM tickets WHERE id = ?', c.ticket_id)[0] ?? null;
     const path = ticketRow?.path ?? null;
     // B-183 (§4.5): the ticket's opaque `version` as the board holds it, and how its source
     // reads — pinned (at a version) or current (as it is now) — so the runner re-verifies the
@@ -913,6 +953,9 @@ export class Claims {
       // B-183 (§4.5): the ticket's version and the source's reading of it — `version` is `''`
       // when the source posts none, and `ticket_source` is null when the board declared none.
       version: ticketRow?.version ?? '', ...(source?.source_kind ? { ticket_source: { kind: source.source_kind, versions: source.source_versions } } : {}),
+      // B-126 (R-BTN-194): who last changed the ticket's body — beside the brief's mark (B-127),
+      // the first thing a privileged session should know of it, before it reads the body.
+      ...((w) => (w ? { last_written_by: w } : {}))(writtenBy(ticketRow?.last_written_by)),
       ...(defaultBranch ? { default_branch: defaultBranch } : {}),
       previous_attempts: previous.map((p) => ({
         claim_id: p.id, status: p.status, end_reason: p.end_reason, detail: p.end_detail, ended_at: p.ended_at,
@@ -926,6 +969,48 @@ export class Claims {
     return this.rows<{ seq: number; leg: string; run_id: string | null; from_station: string; to_station: string | null; finished_at: number | null; abandoned_at: number | null }>(
       'SELECT seq, leg, run_id, from_station, to_station, finished_at, abandoned_at FROM claim_legs WHERE claim_id = ? ORDER BY seq', claimId)
       .map((l) => ({ leg: l.leg, ...(l.run_id ? { run_id: l.run_id } : {}), from: l.from_station, reached: l.to_station, outcome: l.finished_at != null ? 'finished' : l.abandoned_at != null ? 'abandoned' : 'running' }));
+  }
+
+  /** B-190 (R-BTN-84, §14's `GET …/legs/{leg}/runs`): one leg's runs of a ticket, oldest first —
+   *  each with what replay needs: the claim's snapshot and course version, the head the holder
+   *  reported, and the run's recorded inputs (the ticket's version and its read's digest among
+   *  them, `leg_run_inputs`). `end` is the claim's end reason once the claim ended. */
+  runsOf(ticketId: string, leg: string) {
+    const runs = this.rows<{ claim_id: number; seq: number; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; worker_id: number }>(
+      `SELECT l.claim_id, l.seq, l.run_id, l.head_sha, l.from_station, l.started_at, l.finished_at, l.abandoned_at,
+              c.snapshot_sha, c.course_id, c.status, c.end_reason, c.ended_at, c.worker_id
+       FROM claim_legs l JOIN claims c ON c.id = l.claim_id
+       WHERE c.ticket_id = ? AND l.leg = ? ORDER BY l.claim_id, l.seq`, ticketId, leg);
+    const inputs = this.rows<{ claim_id: number; seq: number; name: string; from_leg: string | null; from_run: number | null; uri: string | null; digest: string | null; value_json: string | null; leg_version: number | null; ticket_version: string | null; read_digest: string | null }>(
+      'SELECT claim_id, seq, name, from_leg, from_run, uri, digest, value_json, leg_version, ticket_version, read_digest FROM leg_run_inputs WHERE ticket_id = ? ORDER BY claim_id, seq, name', ticketId);
+    const defaultBranch = this.rows<{ default_branch: string }>('SELECT default_branch FROM repositories WHERE id = ?', repositoryOf(ticketId))[0]?.default_branch ?? null;
+    const courseVersion = (run: typeof runs[number]): number | null => run.course_id
+      ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(ticketId), run.course_id)[0]?.version ?? null
+      : null;
+    return {
+      ...(defaultBranch ? { default_branch: defaultBranch } : {}),
+      runs: runs.map((r, ordinal) => {
+        const mine = inputs.filter((i) => i.claim_id === r.claim_id && i.seq === r.seq);
+        const ticket = mine.find((i) => i.name === '');
+        return {
+          run: ordinal + 1,
+          claim: r.claim_id, runner: r.worker_id, seq: r.seq, leg,
+          run_id: r.run_id, from: r.from_station, started_at: r.started_at,
+          ended_at: r.finished_at ?? r.abandoned_at ?? null,
+          end: r.status === 'active' ? null : r.end_reason,
+          snapshot_sha: r.snapshot_sha, head_sha: r.head_sha,
+          course: r.course_id, course_version: courseVersion(r),
+          ...(ticket?.ticket_version != null || ticket?.read_digest != null
+            ? { ticket: { ...(ticket.ticket_version != null ? { version: ticket.ticket_version } : {}), ...(ticket.read_digest != null ? { read_digest: ticket.read_digest } : {}) } }
+            : {}),
+          inputs: mine.filter((i) => i.name !== '').map((i) => ({
+            name: i.name, ...(i.from_leg != null ? { from_leg: i.from_leg } : {}), ...(i.from_run != null ? { from_run: i.from_run } : {}),
+            ...(i.uri != null ? { uri: i.uri } : {}), ...(i.digest != null ? { digest: i.digest } : {}),
+            ...(i.value_json != null ? { value: JSON.parse(i.value_json) as unknown } : {}), ...(i.leg_version != null ? { leg_version: i.leg_version } : {}),
+          })),
+        };
+      }),
+    };
   }
 
   /** The claim's running leg, if any: its last started leg not yet finished or given up. */
@@ -1026,6 +1111,9 @@ export class Claims {
     const n = this.handedOut(repo);
     if (run) {
       this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', at, now, b.evidence, claimId, run.seq);
+      // B-234 (R-BTN-195): the finished run's open `interact` closes with it — the ask was for
+      // that session, and the run is done.
+      if (run.run_id != null) this.c.conditions?.runEnded(claimId, run.run_id);
       const f = this.legFacts(claimId, run.leg, run.run_id);
       this.c.history?.record(f.ticket, { kind: 'leg-finished', ...f.row, reached: at, next_leg: leg, ...(b.evidence ? { detail: { evidence: b.evidence } } : {}) });
       // B-134: the finished leg's scope audit, reported on the advance that finishes it — the
@@ -1042,23 +1130,42 @@ export class Claims {
     for (let tries = 0; ; tries++) {
       runId = mintRunId(now, this.c.random);
       try {
-        this.exec(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          claimId, seq, runId, leg, at, JSON.stringify(b.bars), now, n);
+        this.exec(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation, head_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          claimId, seq, runId, leg, at, JSON.stringify(b.bars), now, n, b.head_sha);
         break;
       } catch (e) {
         if (!isUniqueViolation(e) || !/run_id/.test(String(e)) || tries >= 8) throw e;
       }
     }
+    // B-190 (R-BTN-82, R-BTN-84, §13.5): the run's inputs as the runner reported them at its
+    // start — pointers and digests only (R-BTN-33), the ticket's version and its read's digest
+    // on the row whose name is empty. Replay reads these rows; a retried advance that reached
+    // this far never runs twice (its claim-legs insert above is the transaction's own).
+    for (const i of b.run_inputs.inputs) {
+      this.exec(`INSERT INTO leg_run_inputs (claim_id, seq, name, ticket_id, from_leg, from_run, uri, digest, value_json, leg_version)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        claimId, seq, i.name, c.ticket_id, i.from_leg, i.from_run, i.hasValue ? null : i.uri, i.digest, i.hasValue ? JSON.stringify(i.value) : null, i.leg_version);
+    }
+    if (b.run_inputs.ticket) {
+      this.exec(`INSERT INTO leg_run_inputs (claim_id, seq, name, ticket_id, ticket_version, read_digest) VALUES (?, ?, '', ?, ?, ?)`,
+        claimId, seq, c.ticket_id, b.run_inputs.ticket.version, b.run_inputs.ticket.read_digest);
+    }
     const started = this.legFacts(claimId, leg, runId);
     this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}) } });
     // R-BTN-62: only a reading numbered above the counter now can judge the claim stale.
-    this.exec('UPDATE claims SET station = ?, leg = ?, claim_observation = ? WHERE id = ?', at, leg, n, claimId);
+    // R-BTN-90 (B-234): the advance that starts a run arms the claim's deadline when the leg
+    // carries one (`deadline_s`, the file's `max_duration`) and clears it when it does not —
+    // the next advance re-arms for its own run, and the claim's end clears it below.
+    const deadline = g.legs.get(leg)?.maxDuration ?? null;
+    this.exec('UPDATE claims SET station = ?, leg = ?, claim_observation = ?, deadline_at = ? WHERE id = ?', at, leg, n, deadline != null ? now + deadline * 1000 : null, claimId);
     // R-BTN-178: the seats of the leg this advance starts, rewritten in its transaction — an
     // advance into a leg not requiring a capability releases that seat.
     this.writeSeats(claimId, item, leg);
     this.event('advanced', `worker:${workerId}`, { from: station, reached: at, leg, ...(b.bars.length ? { bars: b.bars } : {}), ...(b.evidence ? { evidence: b.evidence } : {}) }, c.ticket_id, claimId);
     this.c.dispatch?.('sync', c.ticket_id); // R-BTN-73: after every advance
-    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId };
+    // R-BTN-90: the answer also names the run's `claim_legs.seq` — the runner's `leg_finished`
+    // heartbeat (§7.5's finishing half) carries it when the run's script returns.
+    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId, seq };
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
@@ -1219,15 +1326,18 @@ export class Claims {
       this.exec('UPDATE claim_legs SET abandoned_at = ? WHERE claim_id = ? AND seq = ?', now, claimId, run.seq);
     }
     if (run) {
+      // B-234 (R-BTN-195): the run ended, finished or given up — its open `interact` closes.
+      if (run.run_id != null) this.c.conditions?.runEnded(claimId, run.run_id);
       // R-BTN-81: the run's end, with the position the holder reported (B-38 makes it provisional).
       const f = this.legFacts(claimId, run.leg, run.run_id);
       this.c.history?.record(f.ticket, { kind: opts.finished ? 'leg-finished' : 'leg-abandoned', ...f.row, reached, next_leg: opts.next ?? null, detail: { end_reason: reason } });
     }
     // R-BTN-62: only a reading numbered above the counter's value now can confirm this end. §2e:
     // regressed_since clears with the end; a suspension made while regressed is confirmed by any
-    // later snapshot, which `ended_regressed` remembers.
+    // later snapshot, which `ended_regressed` remembers. R-BTN-90: the claim's deadline dies
+    // with it.
     this.exec(`UPDATE claims SET status = ?, ended_at = ?, end_reason = ?, end_detail = ?, ended_at_sha = ?, fence_pending = ?, fence_incarnation = ?, end_observation = ?,
-                 station = ?, leg = NULL, ended_regressed = ?, regressed_since = NULL WHERE id = ?`,
+                 station = ?, leg = NULL, ended_regressed = ?, regressed_since = NULL, deadline_at = NULL WHERE id = ?`,
       status, now, reason, opts.detail ?? null, status === 'completed' ? opts.ended_at_sha ?? '' : null, opts.fence ? 1 : 0, opts.fence?.incarnation ?? null,
       this.handedOut(repositoryOf(ticketId)), reached, c.regressed_since != null ? 1 : 0, claimId);
     this.exec(`UPDATE activities SET ended_at = ?, outcome = 'abandoned' WHERE claim_id = ? AND ended_at IS NULL`, now, claimId);
@@ -1563,8 +1673,8 @@ export class Claims {
    *  recorded it closed; `unknown` when the course file no longer has the claim's station or leg
    *  (R-BTN-64); null when no snapshot places it. */
   holderView(claimId: number) {
-    const c = this.rows<{ ticket_id: string; station: string; leg: string | null; course_id: string | null; regressed_since: number | null }>(
-      'SELECT ticket_id, station, leg, course_id, regressed_since FROM claims WHERE id = ?', claimId)[0];
+    const c = this.rows<{ ticket_id: string; station: string; leg: string | null; course_id: string | null; regressed_since: number | null; deadline_at: number | null }>(
+      'SELECT ticket_id, station, leg, course_id, regressed_since, deadline_at FROM claims WHERE id = ?', claimId)[0];
     if (!c) return {};
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
     const live = this.rows('SELECT 1 FROM tickets WHERE id = ?', c.ticket_id).length > 0;
@@ -1578,7 +1688,7 @@ export class Claims {
         next: this.rows<{ leg: string; state: string; waiting_on: string | null }>('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', c.ticket_id)
           .map((n) => (n.waiting_on ? n : { leg: n.leg, state: n.state })) };
     }
-    return { station: c.station, ...(c.leg ? { leg: c.leg } : {}), git };
+    return { station: c.station, ...(c.leg ? { leg: c.leg } : {}), ...(c.deadline_at != null ? { deadline_at: c.deadline_at } : {}), git };
   }
 
   /** The heartbeat's `fenced` report (R-BTN-19): clears the fence of a claim reaped while this
@@ -1669,6 +1779,75 @@ export class Claims {
   }
 
   // ── the sync's share (§6.7, R-BTN-35) ───────────────────────────────────────────────────
+
+  // ── the deadline in a claim (§7.5 R-BTN-90; B-234) ───────────────────────────────────────
+
+  /**
+   * R-BTN-90: the claims whose armed `deadline_at` has passed — each holder is queued a
+   * `release` with reason `leg-timeout` and the tick logs `leg-timeout`. The runner stops the
+   * leg at its next safe point, writes its hand-off and ends the claim `released:leg-timeout`,
+   * a failed attempt (§6.10); this only takes the claim back, it ends nothing itself. The
+   * caller's transaction (the alarm's).
+   */
+  deadlineDue(now: number): number {
+    const due = this.rows<{ id: number; ticket_id: string; worker_id: number; deadline_at: number }>(
+      `SELECT id, ticket_id, worker_id, deadline_at FROM claims WHERE status = 'active' AND deadline_at IS NOT NULL AND deadline_at <= ? ORDER BY deadline_at`, now);
+    for (const c of due) {
+      this.exec(`INSERT INTO messages (kind, payload_json, from_principal, to_worker_id, sent_at, status) VALUES ('release', ?, 'server', ?, ?, 'pending')`,
+        JSON.stringify({ ticket_id: c.ticket_id, reason: 'leg-timeout', deadline_at: c.deadline_at }), c.worker_id, now);
+      // The claim's deadline is spent: one release, never one a tick (the claim's end clears
+      // the column too, and a new run's advance arms its own).
+      this.exec('UPDATE claims SET deadline_at = NULL WHERE id = ?', c.id);
+      this.event('leg-timeout', 'alarm', { deadline_at: c.deadline_at }, c.ticket_id, c.id);
+    }
+    return due.length;
+  }
+
+  /** The earliest armed deadline the alarm can consume, for the alarm (§3). */
+  nextDeadline(): number | null {
+    return this.rows<{ d: number | null }>(`SELECT MIN(deadline_at) AS d FROM claims WHERE status = 'active' AND deadline_at IS NOT NULL`)[0]?.d ?? null;
+  }
+
+  /**
+   * §7.5 R-BTN-90's finishing half (B-234): the heartbeat that carries `leg_finished` for the
+   * claim's running run — sent by the runner out of its cadence the moment the script's `run`
+   * returns, before validation, `close` or any wait — processed before that beat delivers its
+   * messages. A `leg-timeout` release still pending for the claim is withdrawn (the message set
+   * `expired` with `withdrawn: 'leg-finished'`, a `leg-timeout` event logged `{withdrawn:
+   * true}`), so the finishing run is never failed at an instant it beat, nor the next leg
+   * stopped by a release its run had coming; one already delivered stands. A still-armed
+   * `deadline_at` re-arms to now plus 40 minutes, once per leg run — the run's row marks the
+   * re-arm — so a slow push or review of the result is never cut off. The caller's transaction
+   * (the heartbeat's). A seq that names no running run of this worker's active claim — a beat
+   * retried past the advance that finished the run — changes nothing.
+   */
+  legFinished(workerId: number, claimId: number, seq: number): void {
+    const now = this.c.now();
+    const c = this.rows<{ ticket_id: string; status: string; worker_id: number; deadline_at: number | null }>(
+      'SELECT ticket_id, status, worker_id, deadline_at FROM claims WHERE id = ?', claimId)[0];
+    if (!c || c.worker_id !== workerId || c.status !== 'active') return;
+    const run = this.rows<{ seq: number }>(
+      'SELECT seq FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0];
+    if (!run || run.seq !== seq) return;
+    // The withdrawal, before the beat's deliver: only a still-pending release (one delivered
+    // has already reached the runner, and stands).
+    const pending = this.rows<{ id: number }>(`SELECT id FROM messages WHERE to_worker_id = ? AND kind = 'release' AND status = 'pending'
+                   AND json_extract(payload_json, '$.ticket_id') = ? AND json_extract(payload_json, '$.reason') = 'leg-timeout'`, workerId, c.ticket_id);
+    for (const m of pending) {
+      this.exec(`UPDATE messages SET status = 'expired', withdrawn = 'leg-finished' WHERE id = ?`, m.id);
+      this.event('leg-timeout', 'alarm', { withdrawn: true, message: m.id }, c.ticket_id, claimId);
+    }
+    // The re-arm, once per leg run: a claim whose deadline the alarm already spent (its release
+    // pending or delivered above) holds none to re-arm; the next advance arms its own.
+    if (c.deadline_at != null) {
+      const rearm = this.rows<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM claim_legs WHERE claim_id = ? AND seq = ? AND deadline_rearmed_at IS NOT NULL', claimId, seq)[0].n;
+      if (!rearm) {
+        this.exec('UPDATE claims SET deadline_at = ? WHERE id = ?', now + LEG_FINISH_REARM_MS, claimId);
+        this.exec('UPDATE claim_legs SET deadline_rearmed_at = ? WHERE claim_id = ? AND seq = ?', now, claimId, seq);
+      }
+    }
+  }
 
   /** §7.1: whether a force post is the accepted rewritten history. Accepting a held history
    *  accepts the line, not one sha: main keeps moving while it is held, and the sync always
@@ -1915,6 +2094,11 @@ export class Claims {
       }
     };
     this.releaseBarHolders(now);
+    // R-BTN-90 (B-234): a claim whose armed deadline passed is told to stop — a `release` with
+    // reason `leg-timeout`, logged — and the runner's end of it (`released:leg-timeout`) is the
+    // failed attempt §6.10 counts. A claim whose deadline moved on (a newer advance re-armed it)
+    // is not due here; the alarm arms at the earliest standing instant.
+    this.deadlineDue(now);
     // Silent workers: reaped at exactly their clamped timeout (R-BTN-9), never by Date.now().
     const silent = this.rows<{ id: number; ticket_id: string; worker_id: number; kind: string }>(
       `SELECT c.id, c.ticket_id, c.worker_id, w.kind FROM claims c JOIN workers w ON w.id = c.worker_id

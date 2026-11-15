@@ -84,7 +84,7 @@ that predate Baton. What a cutover changes in docs' own text is in docs'
 
 | Step | What runs | Exit | Ticket |
 |---|---|---|---|
-| 1. Read-only view | board sync and dashboard at `https://baton.immediately.run`; no runners, no claims | for each tier, the Ready view's order equals the course's own claim order on the same snapshot | R3-1208, R3-1209 |
+| 1. Read-only view | board sync and dashboard at `https://baton.immediately.run`; no runners, no claims | for each tier, the ready order the Tickets screen shows equals the course's own claim order on the same snapshot | R3-1208, R3-1209 |
 | 2. Shadow | sidecars heartbeat; git claims are reported (§16.1) | one week in which every git claim has a Baton claim; `shadow-conflict` events and the reaps the alarm would have made are reviewed against the git-side reaper's; `locate` is recorded for every live ticket against what sessions did | R3-1216 |
 | 3. Cutover | §16.1 | verified | R3-1220, R3-1221 |
 | 4. Consumers | docs' git-side stale-claim sweep retires (the alarm reaps); its buffer and in-review sweeps stay, asking Baton's holder query (R-BTN-7) before acting | — | — |

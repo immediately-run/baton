@@ -5,6 +5,7 @@
 // shape. To core a station and a leg are names: nothing here reads what one means.
 
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
+import { declaredConditions, type ConditionDeclaration } from './conditionTypes';
 
 /** One step of a ticket's path: the leg run and the station it reached (R-BTN-70). */
 export interface Step {
@@ -35,6 +36,16 @@ export interface Leg {
   asks: string | null;
   /** R-BTN-116: a person leg's expiry — unanswered this long, it reaches `reached`; null with none. */
   expires: { afterS: number; reached: string } | null;
+  /** R-BTN-82/R-BTN-84: false when the leg has side effects outside git and its forge, so
+   *  `baton leg replay` refuses it. True unless the course file marks `"replay_safe": false`. */
+  replaySafe: boolean;
+  /** R-BTN-167: how long one run may take (the spec's `deadline_s`), null with none. */
+  maxDuration: number | null;
+  /** R-BTN-160: the condition types the leg may raise, when it narrows them; null when it
+   *  narrows nothing (every standard and declared type). */
+  conditionTypes: string[] | null;
+  /** R-BTN-195: the leg never asks for a person. */
+  autonomous: boolean;
 }
 
 export interface Graph {
@@ -49,6 +60,8 @@ export interface Graph {
   stationRenames: Map<string, string>;
   /** R-BTN-109: what a leg arriving at each station must have produced, by output and schema. */
   entry: Map<string, { output: string; schema: string }[]>;
+  /** R-BTN-160: the course's declared condition types, by type. */
+  conditionTypes: Map<string, ConditionDeclaration>;
   /** Legs on the shortest route from each station to an end (`to_end`, §2e). */
   toEnd: Map<string, number>;
 }
@@ -92,7 +105,7 @@ export function graphOf(json: unknown): Graph {
     capability_roles?: Record<string, string[]>;
     stations: Record<string, { renamed_from?: string | string[]; entry?: { output: string; schema: string }[] }>;
     legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session'; requires?: { capabilities?: string[] };
-      kind?: 'person'; asks?: string; expires?: { after_s: number; reached: string } }>;
+      kind?: 'person'; asks?: string; expires?: { after_s: number; reached: string }; replay_safe?: boolean; max_duration?: number; conditions?: string[]; autonomous?: boolean }>;
   };
   const legs = new Map<string, Leg>();
   const legRenames = new Map<string, string>();
@@ -100,7 +113,9 @@ export function graphOf(json: unknown): Graph {
   for (const [id, l] of Object.entries(f.legs)) {
     legs.set(id, { from: [...new Set(l.from)], to: [...new Set(names(l.to))], maxRuns: l.max_runs ?? null, maxQueue: l.max_queue ?? null,
       noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null, requires: legCapabilities(l.requires, f.capability_roles),
-      person: l.kind === 'person', asks: l.kind === 'person' ? l.asks ?? null : null, expires: l.kind === 'person' && l.expires ? { afterS: l.expires.after_s, reached: l.expires.reached } : null });
+      person: l.kind === 'person', asks: l.kind === 'person' ? l.asks ?? null : null, expires: l.kind === 'person' && l.expires ? { afterS: l.expires.after_s, reached: l.expires.reached } : null,
+      replaySafe: l.replay_safe !== false, maxDuration: l.max_duration ?? null,
+      conditionTypes: Array.isArray(l.conditions) ? [...new Set(l.conditions)] : null, autonomous: l.autonomous === true });
     for (const old of names(l.renamed_from)) legRenames.set(old, id);
   }
   const entry = new Map<string, { output: string; schema: string }[]>();
@@ -127,7 +142,7 @@ export function graphOf(json: unknown): Graph {
     }
     frontier = next;
   }
-  return { start: f.start, startLeg: f.start_leg, ends, shortWaits: f.short_waits ?? [], stations, legs, legRenames, stationRenames, toEnd, entry };
+  return { start: f.start, startLeg: f.start_leg, ends, shortWaits: f.short_waits ?? [], stations, legs, legRenames, stationRenames, toEnd, entry, conditionTypes: declaredConditions(json) };
 }
 
 /**

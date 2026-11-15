@@ -41,16 +41,24 @@ import crossHostCodeRepos from './0039_cross_host_code_repos.sql';
 import signedControl from './0040_signed_control.sql';
 import claimControl from './0041_claim_control.sql';
 import retireOntology from './0042_retire_ontology.sql';
-import retirement from './0043_retirement.sql';
-import { isUniqueViolation, mintRunId, type Random } from '../core/db';
+import part4Resources from './0043_part4_resources.sql';
+import part4Settings from './0044_part4_settings.sql';
+import checkConclusions from './0045_check_conclusions.sql';
+import ticketProvenance from './0046_ticket_provenance.sql';
+import legRunInputs from './0047_leg_run_inputs.sql';
+import conditions from './0048_conditions.sql';
+import retirement from './0049_retirement.sql';
+import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
 /** A migration: its SQL, and — when a step needs what SQL lacks, as a ULID needs the core's
- *  random source — a `backfill` run after the SQL in the same transaction. */
+ *  random source — a `backfill` run in the same transaction: after the SQL, or before it when
+ *  the SQL drops the rows it reads (`first`). */
 export interface Migration {
   id: number;
   sql: string;
-  backfill?: (store: Store, random: Random) => void;
+  backfill?: (store: Store, random: Random, now: () => number) => void;
+  first?: boolean;
 }
 
 /** 0038 (B-185, R-BTN-63): runs recorded before run ids get one, minted from each run's
@@ -67,6 +75,22 @@ function backfillRunIds(store: Store, random: Random) {
       }
     }
   }
+}
+
+/** 0043 (B-168, R-BTN-76): each `worker`-scope resource and each implicit instance the migration
+ *  drops is logged as an `admin` event naming what it was — the same act an administrator's own
+ *  registration logs — read before its SQL drops them (`first`). */
+function backfillPart4Resources(store: Store, _random: Random, now: () => number) {
+  const rows = store.exec<{ name: string; kind: 'resource' | 'instance' }>(
+    `SELECT name, 'resource' AS kind FROM external_resources WHERE scope = 'worker'
+     UNION
+     SELECT DISTINCT instance, 'instance' FROM instance_serves WHERE instance LIKE '%@worker:%'
+     UNION
+     SELECT DISTINCT instance, 'instance' FROM instance_readings WHERE instance LIKE '%@worker:%'
+     UNION
+     SELECT DISTINCT instance, 'instance' FROM instance_states WHERE instance LIKE '%@worker:%'
+     ORDER BY kind, name`).toArray();
+  for (const r of rows) logEvent(store, now(), 'admin', 'migration:0043', { act: 'resource-dropped', kind: r.kind, name: r.name }, null, null, null);
 }
 
 export const MIGRATIONS: Migration[] = [
@@ -101,7 +125,7 @@ export const MIGRATIONS: Migration[] = [
   { id: 30, sql: capacitySeats },
   { id: 31, sql: personLegs },
   { id: 32, sql: answerDeferred },
-  // 0033 is B-110's (owner runs), renumbered at the merge behind B-7's 0031/0032; 0028 stays reserved for B-107 (#149).
+  // 0033 is B-110's (owner runs), renumbered at the merge behind B-7's 0031/0032; 0028 was reserved for B-107 (#149), closed as superseded — it stays unused.
   { id: 33, sql: ownerRuns },
   { id: 34, sql: scopeAudit },
   { id: 35, sql: scopeEvents },
@@ -116,6 +140,19 @@ export const MIGRATIONS: Migration[] = [
   { id: 41, sql: claimControl },
   // 0042 is B-167's (the ontology and route choices leave core), renumbered at the merge behind main's 0039–0041.
   { id: 42, sql: retireOntology },
-  // 0043 is B-173's (a repository's retirement): the tombstone's `former_paths`.
-  { id: 43, sql: retirement },
+  // 0043 and 0044 are B-168's (the restructure's part 4: resources, readings, owner settings),
+  // renumbered at the merge behind main's 0039–0042.
+  { id: 43, sql: part4Resources, backfill: backfillPart4Resources, first: true },
+  { id: 44, sql: part4Settings },
+  // 0045 is B-169's (the owners' `checks` map), renumbered at the merge behind B-168's 0043–0044.
+  { id: 45, sql: checkConclusions },
+  // 0046 is B-126's (ticket provenance), numbered behind B-169's 0045.
+  { id: 46, sql: ticketProvenance },
+  // 0047 is B-190's (replay: each run's inputs, the ticket's version among them).
+  { id: 47, sql: legRunInputs },
+  // 0048 is B-234's (R-BTN-195: raised conditions, and R-BTN-90's armed claim deadline).
+  { id: 48, sql: conditions },
+  // 0049 is B-173's (a repository's retirement: the tombstone's `former_paths`), renumbered at
+  // the merge behind main's 0043–0048.
+  { id: 49, sql: retirement },
 ];

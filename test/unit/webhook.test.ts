@@ -3,7 +3,7 @@
 // S-BTN-42.
 import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:test';
-import { deliverySignature, pickDelivery, verifyDelivery, Webhooks } from '../../src/core/webhook';
+import { deliverySignature, pickDelivery, verifyDelivery, Webhooks, ACTIONS_BOT, MIRROR_EMAIL } from '../../src/core/webhook';
 import { front } from '../../src/core/front';
 import { armedAt, ORIGIN, withCore } from '../helpers';
 
@@ -75,7 +75,10 @@ describe('the one parser (R-BTN-73)', () => {
     pull_request: new Set([...COMMON, 'pull_request', 'pull_request.merged']),
     pull_request_review: new Set(COMMON),
     workflow_run: new Set([...COMMON, 'workflow_run', 'workflow_run.path']),
-    push: new Set([...COMMON, 'pusher', 'pusher.name', 'head_commit', 'head_commit.author', 'head_commit.author.email']),
+    push: new Set([...COMMON, 'pusher', 'pusher.name', 'head_commit', 'head_commit.author', 'head_commit.author.email',
+      // B-126 (R-BTN-194): the push's recorded half.
+      'sender', 'sender.id', 'sender.login', 'ref', 'before', 'after', 'commits', 'commits.length',
+      'commits.0', 'commits.0.id', 'commits.0.added', 'commits.0.removed', 'commits.0.modified']),
   };
 
   it.each([
@@ -105,6 +108,67 @@ describe('the one parser (R-BTN-73)', () => {
   it('drops a delivery with no id or a malformed one', () => {
     expect(pickDelivery('pull_request', null, { repository: { full_name: 'o/r' } })).toBeNull();
     expect(pickDelivery('pull_request', 'a b', { repository: { full_name: 'o/r' } })).toBeNull();
+  });
+
+  // B-126 (R-BTN-194): a push's recorded half — the immutable pusher and the commits it brought.
+  const B = '0'.repeat(39) + '1';
+  const A = 'f'.repeat(40);
+  const pushPayload = (over: Record<string, unknown> = {}) => ({
+    ref: 'refs/heads/main', before: B, after: A,
+    repository: { full_name: 'immediately-run/docs' }, pusher: { name: 'worker' },
+    sender: { id: 424242, login: 'immediately-run-worker' },
+    head_commit: { id: A, author: { email: 'w@x' } },
+    commits: [{ id: A, message: 'm', author: { name: 'Anyone' }, added: ['.baton/baton.json'], removed: [], modified: ['docs/readme.md'] }],
+    ...over,
+  });
+
+  it('records a push\u2019s pusher and its commits\u2019 paths; reads nothing else of them', () => {
+    const reads = new Set<string>();
+    expect(pickDelivery('push', 'p-1', recording(pushPayload(), reads))).toEqual({
+      event: 'push', id: 'p-1', repository: 'immediately-run/docs', pusher: 'worker', author_email: 'w@x',
+      push: { sender_id: 424242, sender_login: 'immediately-run-worker', ref: 'refs/heads/main', before: B, after: A,
+        commits: [{ sha: A, paths: ['.baton/baton.json', 'docs/readme.md'] }] },
+    });
+    expect([...reads].filter((r) => !ALLOWED.push.has(r) && !/^commits(\.\d+)?(\.(id|added|removed|modified)(\.\d+|\.length|\.every)?)?$/.test(r))).toEqual([]);
+  });
+
+  it.each([
+    ['a sender id that is not a positive integer', pushPayload({ sender: { id: '424242', login: 'x' } })],
+    ['a sender id of zero', pushPayload({ sender: { id: 0, login: 'x' } })],
+    ['a commit whose id is not a sha', pushPayload({ commits: [{ id: 'abc', added: [] }] })],
+    ['a path list that is not strings', pushPayload({ commits: [{ id: A, added: [1] }] })],
+    ['a commits list that is not an array', pushPayload({ commits: 'many' })],
+  ])('a push whose recorded half does not parse (%s) triggers without a record', (_what, payload) => {
+    const d = pickDelivery('push', 'p-2', payload)!;
+    expect(d.pusher).toBe('worker');
+    expect('push' in d).toBe(false);
+  });
+
+  it.each([
+    ['no sender at all', pushPayload({ sender: undefined })],
+    ['a sender login that is not a string (read as none)', pushPayload({ sender: { id: 1, login: 7 } })],
+  ])('a push with no pusher to name (%s) is recorded without one — its pusher unknown, its chain held', (_what, payload) => {
+    const d = pickDelivery('push', 'p-2b', payload)!;
+    expect(d.push).toMatchObject({ sender_id: payload.sender === undefined ? null : 1, ref: 'refs/heads/main', after: A, commits: [{ sha: A, paths: ['.baton/baton.json', 'docs/readme.md'] }] });
+  });
+
+  it.each([
+    ['a branch deletion (after is the zero sha)', pushPayload({ after: '0'.repeat(40), head_commit: null }), null],
+    ['a tag push', pushPayload({ ref: 'refs/tags/v1' }), null],
+    ['a payload with none of the fields', pushPayload({ ref: undefined, before: undefined, after: undefined, sender: undefined, commits: undefined }), null],
+  ])('a push Baton does not record (%s) triggers all the same', (_what, payload, _want) => {
+    const d = pickDelivery('push', 'p-3', payload)!;
+    expect(d.pusher).toBe('worker');
+    expect('push' in d).toBe(false);
+  });
+
+  it('a push past the bounds is remembered truncated, its paths not recordable', () => {
+    const many = Array.from({ length: 31 }, (_, i) => ({ id: `${i}`.padStart(40, '0').replace(/ /g, '0'), added: ['a'] }));
+    const d = pickDelivery('push', 'p-4', pushPayload({ commits: many }))!;
+    expect(d.push).toMatchObject({ sender_id: 424242, truncated: true, commits: [] });
+    const paths = Array.from({ length: 601 }, (_, i) => [`p${i}`]);
+    const wide = pickDelivery('push', 'p-5', pushPayload({ commits: [{ id: A, added: paths.flat() }] }))!;
+    expect(wide.push).toMatchObject({ truncated: true, commits: [] });
   });
 
   it('reads a pull_request\u2019s merge, and drops one whose `merged` is neither a boolean nor null (B-89, round 4 nit 4)', () => {
@@ -239,6 +303,35 @@ describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
       expect(at(0).receive(one)).toMatchObject({ outcome: 'dispatched' });
       expect(at(24 * 3_600_000).receive(one)).toEqual({ outcome: 'duplicate' });
       expect(at(24 * 3_600_000 + 1).receive(one)).toMatchObject({ outcome: 'dispatched' });
+    });
+  });
+
+  it('B-126: a push delivery\u2019s recorded half is stored once, pruned with the 24-hour ttl, and kept for Baton\u2019s own work', async () => {
+    await withCore((c) => {
+      const at = (now: number) => new Webhooks({ store: c.store, now: () => now });
+      const push = (id: string, over: Record<string, unknown> = {}, pushOver: Record<string, unknown> = {}) => d({
+        event: 'push', id, repository: 'immediately-run/docs',
+        push: { sender_id: 424242, sender_login: 'immediately-run-worker', ref: 'refs/heads/main', before: '0'.repeat(39) + '1', after: 'f'.repeat(40),
+          commits: [{ sha: 'f'.repeat(40), paths: ['.baton/baton.json'] }], ...pushOver },
+        ...over,
+      });
+      expect(at(0).receive(push('push-a'))).toMatchObject({ outcome: 'dispatched' });
+      // The mirror's own push (the Actions bot with the mirror's email) is dropped as a trigger
+      // and its record stands: a mirror push moves the default branch too (R-BTN-194).
+      expect(at(1_000).receive(push('push-b', { pusher: ACTIONS_BOT, author_email: MIRROR_EMAIL }, { sender_id: null, sender_login: null,
+        before: 'f'.repeat(40), after: 'e'.repeat(40), commits: [], truncated: 1 })))
+        .toMatchObject({ outcome: 'own-work' });
+      expect(c.store.exec('SELECT delivery_id, repository, ref, before_sha, after_sha, sender_id, sender_login, commits_json, truncated FROM push_deliveries ORDER BY delivery_id').toArray())
+        .toEqual([
+          { delivery_id: 'push-a', repository: 'immediately-run/docs', ref: 'refs/heads/main', before_sha: '0'.repeat(39) + '1', after_sha: 'f'.repeat(40),
+            sender_id: 424242, sender_login: 'immediately-run-worker', commits_json: JSON.stringify([{ sha: 'f'.repeat(40), paths: ['.baton/baton.json'] }]), truncated: 0 },
+          { delivery_id: 'push-b', repository: 'immediately-run/docs', ref: 'refs/heads/main', before_sha: 'f'.repeat(40), after_sha: 'e'.repeat(40),
+            sender_id: null, sender_login: null, commits_json: '[]', truncated: 1 },
+        ]);
+      // Pruned with the deliveries' own clock.
+      at(24 * 3_600_000 + 2).receive(push('push-c', {}, { before: 'e'.repeat(40), after: 'd'.repeat(40) }));
+      expect(c.store.exec('SELECT delivery_id FROM push_deliveries ORDER BY delivery_id').toArray())
+        .toEqual([{ delivery_id: 'push-b' }, { delivery_id: 'push-c' }]);
     });
   });
 });

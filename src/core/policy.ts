@@ -129,7 +129,10 @@ export interface PolicyDocument {
   outbox: { git: OutboxRoute; 'forge-check': OutboxRoute };
   inputs: { board: (typeof BOARD_INPUTS)[number][]; answers: 'git' | 'attestation' };
   attestations: Record<string, WriterClass[]>;
-  readings: Record<string, { writers: WriterClass[]; signed: boolean }>;
+  /** R-BTN-188 (§12.8, B-168): whose readings count for this repository — `writers` alone. An
+   *  old document's `signed` was retired with the restructure's part 4 (a reading carries no
+   *  signature, R-BTN-181): export writes none, and import tolerates and drops it. */
+  readings: Record<string, { writers: WriterClass[] }>;
 }
 
 /** Every knob's dotted name, in the table's order — `diff` reports these, the change log
@@ -310,24 +313,25 @@ export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): 
     }
     attestations[type] = list;
   }
-  const readings: Record<string, { writers: WriterClass[]; signed: boolean }> = {};
+  const readings: Record<string, { writers: WriterClass[] }> = {};
   const readObj: Record<string, unknown> = isObj(v.readings) ? v.readings : bad('policy.readings', 'must be an object');
   for (const [resource, rawEntry] of Object.entries(readObj)) {
     if (resource !== '*' && !RESOURCE_NAME.test(resource)) bad(`policy.readings.${resource}`, "must be a resource name or '*'");
-    const entry: Record<string, unknown> = isObj(rawEntry) ? rawEntry : bad(`policy.readings.${resource}`, 'must be {writers, signed}');
+    const entry: Record<string, unknown> = isObj(rawEntry) ? rawEntry : bad(`policy.readings.${resource}`, 'must be {writers}');
+    // B-168: `signed` is retired — a reading carries no signature of its own (R-BTN-181), so an
+    // old document's is read and dropped, never a refusal of the document.
     only(entry, ['writers', 'signed'], `policy.readings.${resource}`);
     // R-BTN-181/R-BTN-76: a reading's writers are the classes that may report one —
     // administrators, instrument keys and runners, beside one named `service:` key. Which of
-    // them count for a resource a trusted leg requires (instrument, admin and service: only,
-    // signed) is judged where a requirement names the resource, once B-146 builds them.
+    // them count for a resource a trusted leg requires (instrument, admin and service: keys) is
+    // judged where a requirement names the resource, once B-146 builds them.
     const list = checkWriters(entry.writers, `policy.readings.${resource}.writers`);
     for (const w of list) {
       if (w !== 'instrument' && w !== 'admin' && w !== 'runner' && !w.startsWith('service:')) {
         bad(`policy.readings.${resource}.writers`, `admits ${w}: a reading's writers are instrument, admin, runner and service: keys (R-BTN-76, R-BTN-181)`);
       }
     }
-    if (typeof entry.signed !== 'boolean') bad(`policy.readings.${resource}.signed`, 'must be true or false');
-    readings[resource] = { writers: list, signed: entry.signed as boolean };
+    readings[resource] = { writers: list };
   }
   return {
     approvers: {
@@ -351,9 +355,13 @@ export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): 
   };
 }
 
-/** One knob's value, read out of a document by its dotted path. */
+/** One knob's value, read out of a document by its dotted path. A version stored before B-168
+ *  carries `readings.*.signed`, retired and read nowhere: it is left out, so the first change
+ *  after it is not reported as one to `readings`. */
 function knobOf(doc: PolicyDocument, knob: Knob): unknown {
-  return knob.split('.').reduce<unknown>((v, seg) => (v && typeof v === 'object' ? (v as Record<string, unknown>)[seg] : undefined), doc);
+  const v = knob.split('.').reduce<unknown>((v, seg) => (v && typeof v === 'object' ? (v as Record<string, unknown>)[seg] : undefined), doc);
+  if (knob !== 'readings' || !v || typeof v !== 'object') return v;
+  return Object.fromEntries(Object.entries(v as Record<string, { writers?: unknown }>).map(([k, e]) => [k, e && typeof e === 'object' ? { writers: e.writers } : e]));
 }
 
 /** The knobs a change from `old` to `new` touches, in `KNOBS`'s order: the change log's
@@ -389,7 +397,7 @@ export const COOPERATIVE: PolicyDocument = {
   // R-BTN-181's standard writers, `std:checks@1` alone absent until the owner names the trusted
   // executor's `service:` key.
   attestations: { 'std:wrote@1': ['baton'], 'std:ran@1': ['baton'], 'std:review@1': ['baton'], 'std:approval@1': ['human'], 'std:branch-deletion@1': ['baton'] },
-  readings: { '*': { writers: ['admin', 'instrument', 'runner'], signed: false } },
+  readings: { '*': { writers: ['admin', 'instrument', 'runner'] } },
 };
 
 /** The `protected` column. */

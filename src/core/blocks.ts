@@ -4,8 +4,10 @@
 // instance changing state, a claim starting or ending — calls `write` (or `held`) inside its own
 // transaction, and nothing else writes either. The fleet counts (`fleet_capabilities`,
 // `resource_fleet`) are kept here too, rewritten only where they change, and only a crossing of
-// zero, or a flip of a resource's blocked condition, rewrites a ticket's rows. Asking reads the
-// rows: one index per question (G-BTN-70). No name a course gives a resource, an instance, a
+// zero, or a flip of a resource's blocked condition, rewrites a ticket's rows. A resource's
+// usable instances are the repository's — the `service` instance and the account instances that
+// serve it and list the repository — one set for every runner granted there (R-BTN-76, B-168).
+// Asking reads the rows: one index per question (G-BTN-70). No name a course gives a resource, an
 // capability or a decision means anything here: they are compared, never read.
 import { BatonError } from './http';
 import { logEvent } from './db';
@@ -109,19 +111,18 @@ export const BATON_WAITS = ['policy', 'course-changed', 'input-missing', 'input-
 export const HELD_CLAIMS_SQL = `(status = 'active' OR (status = 'completed' AND confirmed_at IS NULL) OR (status = 'reaped' AND fence_pending = 1))`;
 
 /** A live worker as the counts see it: the repositories its key works on, the capabilities it may
- *  use in each (null: all it declares), what it declares and the account instances it uses. */
+ *  use in each (null: all it declares) and what it declares. */
 interface FleetWorker {
   id: number;
   repos: Map<string, Set<string> | null>;
   caps: Set<string>;
-  uses: Set<string>;
 }
 
-/** A registered resource as the counts need it: its scope and who serves it, with each account
- *  instance's repositories. */
+/** A registered resource as the counts need it: its scope and who serves it, with each instance's
+ *  repositories — the `service` instance's own. */
 interface ResourceInfo {
-  scope: 'worker' | 'account' | 'service';
-  accounts: Map<string, string[]>;
+  scope: 'account' | 'service';
+  instances: Map<string, string[]>;
 }
 
 /** What the per-worker answer reads (R-BTN-75, R-BTN-76): rows as the fleet's would be, for one. */
@@ -288,7 +289,7 @@ export class Blocks {
    *  and the fleet's count for it says no live granted worker has a usable instance. */
   private lostAnswer(id: string, c: Cleared): boolean {
     return this.rows(`SELECT 1 FROM leg_needs l JOIN resource_fleet f ON f.repository_id = l.repository_id AND f.resource = l.resource
-                      WHERE l.ticket_id = ? AND l.leg = ? AND l.resource = ? AND f.usable_workers = 0`, id, c.leg ?? '', c.ref).length > 0;
+                      WHERE l.ticket_id = ? AND l.leg = ? AND l.resource = ? AND (f.live_runner = 0 OR f.usable_instances = 0)`, id, c.leg ?? '', c.ref).length > 0;
   }
 
   /** Settle what a ticket lost its answer for (R-BTN-77 as amended by R3-1251). A lost row is
@@ -330,10 +331,11 @@ export class Blocks {
          WHERE r.ticket_id = ? AND COALESCE(f.workers, 0) = 0`, repo, id).map((r) => ({ kind, ref: r.name, leg: '', until: null }));
     }
     if (kind === 'resource') {
-      // No row while no live worker has a usable instance: unanswerable, so `no-instance` (R-BTN-76).
+      // No row while the repository has no live runner or no usable instance: unanswerable, so
+      // `no-instance` (R-BTN-76).
       return this.rows<{ leg: string; resource: string }>(
         `SELECT l.leg, l.resource FROM leg_needs l JOIN resource_fleet f ON f.repository_id = l.repository_id AND f.resource = l.resource
-         WHERE l.ticket_id = ? AND f.usable_workers > 0 AND f.open_workers = 0`, id)
+         WHERE l.ticket_id = ? AND f.live_runner = 1 AND f.usable_instances > 0 AND f.open_instances = 0`, id)
         .map((n) => ({ kind, ref: n.resource, leg: n.leg, until: this.expectedBack(n.resource) }));
     }
     return this.rows<{ decision_id: string; leg: string }>('SELECT decision_id, leg FROM ticket_decisions WHERE ticket_id = ?', id)
@@ -346,8 +348,8 @@ export class Blocks {
     return this.rows<{ u: number | null }>(
       `SELECT MIN(s.until) AS u FROM instance_states s
        WHERE s.state = 'unavailable' AND s.until IS NOT NULL
-         AND (s.instance IN (SELECT instance FROM instance_serves WHERE resource = ?) OR substr(s.instance, 1, length(?) + 8) = ? || '@worker:')`,
-      resource, resource, resource)[0]?.u ?? null;
+         AND s.instance IN (SELECT instance FROM instance_serves WHERE resource = ?)`,
+      resource)[0]?.u ?? null;
   }
 
   /** The ticket's queued leg, or null when it has none (R-BTN-83). */
@@ -636,8 +638,7 @@ export class Blocks {
 
   // ── the fleet counts (R-BTN-75, R-BTN-76) ─────────────────────────────────────────────────
 
-  /** Every live worker — or only `only`, if it is live — with its repositories, capabilities and
-   *  instances. */
+  /** Every live worker — or only `only`, if it is live — with its repositories and capabilities. */
   private fleet(only: number | null = null): FleetWorker[] {
     const now = this.c.now();
     const all = this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL').map((r) => r.id);
@@ -665,17 +666,15 @@ export class Blocks {
           id: w.id,
           repos,
           caps: new Set(this.rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ?', w.id).map((r) => r.capability)),
-          uses: new Set(this.rows<{ instance: string }>('SELECT instance FROM worker_instances WHERE worker_id = ?', w.id).map((r) => r.instance)),
         };
       });
   }
 
   private resources(): Map<string, ResourceInfo> {
     const out = new Map<string, ResourceInfo>();
-    for (const r of this.rows<{ name: string; scope: ResourceInfo['scope'] }>('SELECT name, scope FROM external_resources')) out.set(r.name, { scope: r.scope, accounts: new Map() });
+    for (const r of this.rows<{ name: string; scope: ResourceInfo['scope'] }>('SELECT name, scope FROM external_resources')) out.set(r.name, { scope: r.scope, instances: new Map() });
     for (const s of this.rows<{ instance: string; resource: string; repositories: string }>(
-      `SELECT s.instance, s.resource, i.repositories FROM instance_serves s JOIN resource_instances i ON i.name = s.instance JOIN external_resources e ON e.name = s.resource
-       WHERE e.scope = 'account'`)) out.get(s.resource)?.accounts.set(s.instance, JSON.parse(s.repositories) as string[]);
+      `SELECT s.instance, s.resource, i.repositories FROM instance_serves s JOIN resource_instances i ON i.name = s.instance`)) out.get(s.resource)?.instances.set(s.instance, JSON.parse(s.repositories) as string[]);
     return out;
   }
 
@@ -683,23 +682,22 @@ export class Blocks {
     return new Map(this.rows<{ instance: string; state: string }>('SELECT instance, state FROM instance_states').map((s) => [s.instance, s.state]));
   }
 
-  /** A worker's usable instances of `resource` for `repo` (R-BTN-76): the service instance, its
-   *  own worker instance, and the account instances it uses that serve the resource and list the
-   *  repository. */
-  private usable(w: { id: number; uses: Set<string> }, repo: string, resource: string, info: ResourceInfo): string[] {
+  /** The repository's usable instances of `resource` (R-BTN-76): the `service` instance — its own —
+   *  and the account instances that serve the resource and list the repository. Every runner
+   *  granted there has the same ones, so this takes no worker. */
+  private usable(repo: string, resource: string, info: ResourceInfo): string[] {
     if (info.scope === 'service') return [resource];
-    if (info.scope === 'worker') return [`${resource}@worker:${w.id}`];
-    return [...info.accounts].filter(([name, repos]) => w.uses.has(name) && repos.includes(repo)).map(([name]) => name);
+    return [...info.instances].filter(([, repos]) => repos.includes(repo)).map(([name]) => name);
   }
 
   /**
    * Recount what changed: per (repository, capability) a ticket requires, the live workers granted
-   * there that declare it; per (repository, resource) a posted leg needs, the live granted workers
-   * with a usable instance and those with one not `unavailable`. Only a count crossing zero, or
-   * the resource condition (`usable > 0 AND open = 0`) flipping, rewrites the rows of exactly the
-   * tickets the indexes name. Cheap to call after anything that could move a count: a worker
-   * registering or changing what it declares or uses, liveness (the alarm), a reap, a grant, an
-   * instance's state, a resource or instance registered.
+   * there that declare it; per (repository, resource) a posted leg needs, the repository's usable
+   * instances, how many are not `unavailable`, and whether a live worker is granted there. Only a
+   * count crossing zero, or the resource condition (`live_runner AND usable > 0 AND open = 0`)
+   * flipping, rewrites the rows of exactly the tickets the indexes name. Cheap to call after
+   * anything that could move a count: a worker registering or changing what it declares, liveness
+   * (the alarm), a reap, a grant, an instance's state, a resource or instance registered.
    */
   recount() {
     // Both kinds' rows are rewritten before any ticket is evaluated (B-49).
@@ -744,32 +742,30 @@ export class Blocks {
     // Resources.
     const info = this.resources();
     const states = this.states();
+    const granted = new Set(fleet.flatMap((w) => [...w.repos.keys()]));
     const needs = this.rows<{ repository_id: string; resource: string }>(
       'SELECT DISTINCT l.repository_id, l.resource FROM leg_needs l JOIN external_resources e ON e.name = l.resource');
-    const haveRes = new Map(this.rows<{ repository_id: string; resource: string; usable_workers: number; open_workers: number }>('SELECT * FROM resource_fleet')
+    const haveRes = new Map(this.rows<{ repository_id: string; resource: string; usable_instances: number; open_instances: number; live_runner: number }>('SELECT * FROM resource_fleet')
       .map((f) => [`${f.repository_id}\u0000${f.resource}`, f]));
     const flipped = new Set<string>();
     for (const n of needs) {
       const key = `${n.repository_id}\u0000${n.resource}`;
-      let usable = 0;
-      let open = 0;
-      for (const w of fleet) {
-        if (!w.repos.has(n.repository_id)) continue;
-        const mine = this.usable(w, n.repository_id, n.resource, info.get(n.resource)!);
-        if (!mine.length) continue;
-        usable++;
-        if (mine.some((i) => (states.get(i) ?? 'unknown') !== 'unavailable')) open++;
-      }
+      const mine = this.usable(n.repository_id, n.resource, info.get(n.resource)!);
+      const live = granted.has(n.repository_id) ? 1 : 0;
+      const usable = mine.length;
+      const open = mine.filter((i) => (states.get(i) ?? 'unknown') !== 'unavailable').length;
       const before = haveRes.get(key);
       haveRes.delete(key);
-      if (before && before.usable_workers === usable && before.open_workers === open) continue;
-      this.exec(`INSERT INTO resource_fleet (repository_id, resource, usable_workers, open_workers) VALUES (?, ?, ?, ?)
-                 ON CONFLICT (repository_id, resource) DO UPDATE SET usable_workers = excluded.usable_workers, open_workers = excluded.open_workers`,
-        n.repository_id, n.resource, usable, open);
-      const was = !!before && before.usable_workers > 0 && before.open_workers === 0;
+      if (before && before.usable_instances === usable && before.open_instances === open && before.live_runner === live) continue;
+      this.exec(`INSERT INTO resource_fleet (repository_id, resource, usable_instances, open_instances, live_runner) VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT (repository_id, resource) DO UPDATE SET usable_instances = excluded.usable_instances, open_instances = excluded.open_instances,
+                   live_runner = excluded.live_runner`,
+        n.repository_id, n.resource, usable, open, live);
+      const blocked = (f: { usable_instances: number; open_instances: number; live_runner: number } | undefined) => !!f && f.live_runner === 1 && f.usable_instances > 0 && f.open_instances === 0;
+      const answers = (f: { usable_instances: number; live_runner: number } | undefined) => !!f && f.live_runner === 1 && f.usable_instances > 0;
       // The condition flipping rewrites the rows; the fleet becoming able to answer at all settles
       // what the tickets lost while it could not (`settleLost`).
-      if (!before || was !== (usable > 0 && open === 0) || (before.usable_workers > 0) !== (usable > 0)) flipped.add(key);
+      if (!before || blocked(before) !== blocked({ usable_instances: usable, open_instances: open, live_runner: live }) || answers(before) !== answers({ usable_instances: usable, live_runner: live })) flipped.add(key);
     }
     for (const key of haveRes.keys()) {
       const [repo, resource] = key.split('\u0000');
@@ -806,10 +802,6 @@ export class Blocks {
   private instancesRows(instances: string[]) {
     this.recountRows();
     const served = new Set(this.rows<{ resource: string }>('SELECT DISTINCT resource FROM instance_serves WHERE instance IN (SELECT value FROM json_each(?))', JSON.stringify(instances)).map((r) => r.resource));
-    for (const i of instances) {
-      const worker = /^(.+)@worker:\d+$/.exec(i);
-      if (worker) served.add(worker[1]);
-    }
     const ids = this.rows<{ ticket_id: string }>('SELECT DISTINCT ticket_id FROM leg_needs WHERE resource IN (SELECT value FROM json_each(?))', JSON.stringify([...served])).map((r) => r.ticket_id);
     if (ids.length) this.write(ids, ['resource']);
   }
@@ -825,10 +817,7 @@ export class Blocks {
   /** One worker's `capability` and `resource` answer for a ticket, computed on the spot: rule 4's
    *  comparison against what it declares and is granted, and its own usable instances. */
   forWorker(workerId: number, ticketId: string): WorkerAnswer {
-    const w = this.fleet(workerId)[0] ?? {
-      id: workerId, repos: new Map<string, Set<string> | null>(), caps: new Set<string>(),
-      uses: new Set(this.rows<{ instance: string }>('SELECT instance FROM worker_instances WHERE worker_id = ?', workerId).map((r) => r.instance)),
-    };
+    const w = this.fleet(workerId)[0] ?? { id: workerId, repos: new Map<string, Set<string> | null>(), caps: new Set<string>() };
     const repo = repositoryOf(ticketId);
     const now = this.c.now();
     const g = w.repos.get(repo);
@@ -844,7 +833,7 @@ export class Blocks {
     for (const n of this.rows<{ leg: string; resource: string }>('SELECT leg, resource FROM leg_needs WHERE ticket_id = ? ORDER BY leg, resource', ticketId)) {
       const r = info.get(n.resource);
       if (!r) continue; // an unregistered name blocks nothing (R-BTN-76)
-      const mine = this.usable(w, repo, n.resource, r);
+      const mine = this.usable(repo, n.resource, r);
       // Only this worker's usable instances' states are read.
       const stateOf = new Map(this.rows<{ instance: string; state: string; until: number | null }>(
         'SELECT instance, state, until FROM instance_states WHERE instance IN (SELECT value FROM json_each(?))', JSON.stringify(mine)).map((s) => [s.instance, s]));
@@ -904,7 +893,7 @@ export class Blocks {
       for (const n of this.rows<{ leg: string; resource: string }>(
         `SELECT l.leg, l.resource FROM leg_needs l JOIN external_resources e ON e.name = l.resource
          LEFT JOIN resource_fleet f ON f.repository_id = l.repository_id AND f.resource = l.resource
-         WHERE l.ticket_id = ? AND COALESCE(f.usable_workers, 0) = 0 ORDER BY l.leg, l.resource`, ticketId)) other.push({ kind: 'no-instance', detail: n });
+         WHERE l.ticket_id = ? AND (COALESCE(f.live_runner, 0) = 0 OR COALESCE(f.usable_instances, 0) = 0) ORDER BY l.leg, l.resource`, ticketId)) other.push({ kind: 'no-instance', detail: n });
     }
     return { blocked, ...(t.blocked_since != null && workerId == null ? { since: t.blocked_since } : {}), blocks, other };
   }

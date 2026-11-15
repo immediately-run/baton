@@ -255,4 +255,40 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     expect(lines.join('\n')).toContain('the claim is for course roadmap-pr, but this runner serves chore');
     expect(home.evidence()).toEqual([]);
   }, 60_000);
+
+  it('masks a credential a leg writes before a losing line reaches the log (B-169, R-BTN-144 class 5)', async () => {
+    // A leg that fails, its outcome carrying a credential the leg itself wrote: the runner's
+    // crash line quotes the outcome's `error`, and R-BTN-144 requires every byte leaving the
+    // runner — the log included — to carry no class-5 token. The unmasked flush is the path that
+    // a failing leg's whole stderr reaches (`ExecResult.error`, never the verbose `onStderr`
+    // drain), so this pins the masking at the one sink every line passes through: the `log`
+    // option the runner wraps, not the verbose drain alone.
+    const refresh = 'bmr_' + 'a'.repeat(32);
+    home.leg('chore', 'do', `process.stderr.write('the provider refused: ${refresh}\\n'); throw new Error('the leg failed with ${refresh}');`);
+    home.commit();
+    await home.post([ticket('C-1', { course_id: 'chore', path: 'content/chore/C-1.mdx' })], { 'C-1': placed('open', [], [['do', 'ready']]) });
+    const lines: string[] = [];
+    const runner = makeRunner(servedCourses(home.dir), { log: (l: string) => lines.push(l) });
+    const out = await runner.runOnce();
+    expect(out).toMatchObject({ end_reason: 'released:cannot-finish:transient' });
+    // The leg did fail and the runner said so — the line survives, its credential does not.
+    expect(lines.join('\n')).toContain('failed');
+    expect(lines.join('\n')).toContain('***');
+    expect(lines.join('\n')).not.toContain(refresh);
+  }, 60_000);
+
+  it('masks a private key a leg prints over several lines whole (B-169, R-BTN-144 class 6)', async () => {
+    // The verbose drain hands the sink one stderr line at a time, so a block held per line would
+    // pass its body on unmasked. R-BTN-144 class 6 holds from the `BEGIN` line until the `END`
+    // line and masks the run whole — the body never leaves the runner.
+    const body = 'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAAB';
+    home.leg('chore', 'do', `process.stderr.write('-----BEGIN OPENSSH PRIVATE KEY-----\\n${body}\\n${body}\\n-----END OPENSSH PRIVATE KEY-----\\n');`);
+    home.commit();
+    await home.post([ticket('C-1', { course_id: 'chore', path: 'content/chore/C-1.mdx' })], { 'C-1': placed('open', [], [['do', 'ready']]) });
+    const lines: string[] = [];
+    const runner = makeRunner(servedCourses(home.dir), { log: (l: string) => lines.push(l), verbose: true });
+    await runner.runOnce();
+    expect(lines.join('\n')).not.toContain(body);
+    expect(lines.join('\n')).toContain('***');
+  }, 60_000);
 });

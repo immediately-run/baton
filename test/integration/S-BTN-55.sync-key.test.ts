@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { HOST, ORIGIN, payload, rows, setClock, SSH_KEYS, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
+import { Deprecated } from '../../src/core/deprecated';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const PLAIN = { id: 'plain', github: 'server/plain', forge: 'git', remote: 'ssh://git@git.example/plain.git', default_branch: 'main' };
@@ -95,7 +96,7 @@ describe(`S-BTN-55 the sync key (${HOST})`, () => {
     await withCore(async (c) => {
       const { WorkerApi } = await import('../../src/core/workerApi');
       const config = (c as unknown as { ports: { config: object } }).ports.config;
-      const w = new WorkerApi({ store: c.store, config: { ...config, BATON_KEYS: JSON.stringify([{ key: sync.publicKey, name: 'x', allowed_capabilities: [] }]) } as never, now: () => T0 });
+      const w = new WorkerApi({ store: c.store, deprecated: new Deprecated(c.store), config: { ...config, BATON_KEYS: JSON.stringify([{ key: sync.publicKey, name: 'x', allowed_capabilities: [] }]) } as never, now: () => T0 });
       await expect(w.seedKeys()).rejects.toThrow(/sync key/);
     });
     const res = await hostCall(await signedRequest(sync, `${ORIGIN}/v1/runner/branch-holder?repo=server/plain&branch=main`, { created: T0 / 1000 }));

@@ -253,10 +253,13 @@ process for development and CI. Nothing crosses a tenant.
     `/v1/owner/*`, `/v1/admin/*`) with no or a malformed signature, a stale `created` or a
     foreign `@authority` is refused before the object; key and nonce checks run inside it.
     Other routes are checked first in the Worker too: `/v1/sync/*` a CI identity token or a
-    signature (a sync key's or a machine key's; key checks in the object, R-BTN-93); `/` and `/v1/ui/*` a dashboard session; `POST /v1/login` a
+    signature (a sync key's or a machine key's; key checks in the object, R-BTN-93); `/v1/ui/*` a
+    dashboard session; `POST /v1/login` a
     pending sign-in (R-BTN-155); `POST /v1/github/webhook` `X-Hub-Signature-256` (R-BTN-73);
-    `POST /v1/forges/{repository}/notify` its forge's verifier (R-BTN-95). The static pages
-    `/login` and `/oauth/authorize` need no session; `/.well-known/oauth-*` and `/v1/oauth/*`
+    `POST /v1/forges/{repository}/notify` its forge's verifier (R-BTN-95). The static pages —
+    `/login`, `/oauth/authorize` and the shell at `/`, every §11.4 screen path and the
+    redirect's own address `/conditions/{condition}` (R-BTN-163), which serves the shell to
+    the signed-out — need no session; `/.well-known/oauth-*` and `/v1/oauth/*`
     take no credential and fall under the per-IP rule, and `POST /v1/mcp`'s bearer is checked
     in the object (R-BTN-130, `BATON_MCP_OAUTH_SPEC` §13).
   - A per-IP rule (a Workers rate-limit binding keyed `<host>|<ip>`) applies only to

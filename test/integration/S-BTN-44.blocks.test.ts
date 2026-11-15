@@ -85,18 +85,21 @@ describe('S-BTN-44 blocks, resources and decisions', { timeout: 30_000 }, () => 
     // Both instances unknown: advice fails open, D is not blocked.
     expect(await blocksOf('D')).toMatchObject({ blocked: false, blocks: [] });
 
-    // W1's leg meets a rate limit: go_plus unavailable until +1 h.
+    // W1's leg meets a rate limit: go_plus unavailable until +1 h. The repository's usable
+    // instances are every runner's (R-BTN-76, B-168: what a runner uses is its repository's), so
+    // go_plus_2 — unknown, advice failing open — leaves D unblocked: for every runner alike.
     expect((await w1.call('/v1/runner/readings', { readings: [{ instance: GO, available: false, until: T0 + H }] })).json).toMatchObject({ ok: true, refused: [] });
-    // Only W1's own instances are all down: blocked for W1, not for W2, not for the fleet.
-    expect(await blocksOf('D', w1, true)).toMatchObject({ blocked: true, blocks: [{ kind: 'resource', leg: 'review', ref: R, until: T0 + H }] });
+    expect(await blocksOf('D', w1, true)).toMatchObject({ blocked: false, blocks: [] });
     expect(await blocksOf('D', w2, true)).toMatchObject({ blocked: false, blocks: [] });
     expect((await blocksOf('D')).blocked).toBe(false);
-    // …so D is recommended to W2 and not to W1.
+    // …so D is recommended to both.
     expect(await recommended(w2.id)).toContain('docs:D');
-    expect(await recommended(w1.id)).not.toContain('docs:D');
+    expect(await recommended(w1.id)).toContain('docs:D');
 
-    // A probe posts go_plus_2 unavailable with no `until`, for 10 minutes: blocked for the fleet.
+    // A probe posts go_plus_2 unavailable with no `until`, for 10 minutes: every usable instance is
+    // down, so blocked for every runner — the same answer for each.
     expect((await signed(probe, '/v1/probe/readings', { body: { readings: [{ instance: GO2, available: false, valid_for: 600 }] } })).json).toMatchObject({ ok: true, refused: [] });
+    expect(await blocksOf('D', w1, true)).toMatchObject({ blocked: true, blocks: [{ kind: 'resource', leg: 'review', ref: R, until: T0 + H }] });
     expect(await blocksOf('D')).toMatchObject({ blocked: true, blocks: [{ kind: 'resource', leg: 'review', ref: R }] });
     expect((await blockedOn(`resource:${R}`)).tickets.map((t: { ticket_id: string }) => t.ticket_id)).toEqual(['docs:D']);
     expect((await blockedOn('decision:*')).tickets.map((t: { ticket_id: string }) => t.ticket_id)).toEqual(['docs:E']);

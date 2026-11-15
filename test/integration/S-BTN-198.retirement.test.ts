@@ -9,8 +9,11 @@
 // query's filter — its CI identity and forge notifications are refused, and no want or dispatch
 // is recorded for it. The fence is the one thing still live: the holder queries answer for its
 // former path while a fence is pending, and the fence clears on the holder's report or at the
-// alarm. The stores later tickets build (owner sessions, MCP keys, OAuth, registration tokens,
-// check-runners, consents, ticket timers, the outbox) extend this file with their own cases.
+// alarm. Its still-open conditions close with it (R-BTN-160, B-234's store, landed first: this
+// PR carries the step by the lands-second rule) — the reaps end the runs, so their open
+// `interact`s close, and a `suspend`, which no run's end closes, closes `retired`. The stores
+// later tickets build (owner sessions, MCP keys, OAuth, registration tokens, check-runners,
+// consents, ticket timers, the outbox) extend this file with their own cases.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { adminSession, captureDispatches, claimItem, claimRow, course, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, setHumanKeys, setPolicySigningKey, sha256, syncCall, tick, ticket, withCore, webhookCall, workerCall } from '../helpers';
@@ -322,5 +325,39 @@ describe('S-BTN-198 retirement', () => {
     // registered (a disclosure of this change: the cutover gate used to answer for it).
     const ghost = await claimItem('vm-a', w.secret, { ticket_id: 'ghost:T-9' });
     expect(ghost.json.code).toBe('not-found');
+  });
+
+  it('its still-open conditions close with it, and its conditions route answers not-found (R-BTN-160, R-BTN-47)', async () => {
+    await aLiveRepository();
+    // The run holds two open conditions: an `interact` on its stored session link (R-BTN-195)
+    // and a `hitl` suspend of the standard table (R-BTN-160) — both on Needs you (R-BTN-163)
+    // and read by the granted key before the retire.
+    expect((await signed(runner, `/v1/runner/claims/${claimId}/advance`, { leg: 'implement' }, { 'X-Worker-Secret': secret })).status).toBe(200);
+    const link = 'https://claude.ai/s/r_0000000000000000000000000';
+    expect((await beat({ session_url: link })).status).toBe(200);
+    const interact = await signed(runner, `/v1/runner/claims/${claimId}/conditions`, { type: 'interact' }, { 'X-Worker-Secret': secret });
+    expect(interact.status, JSON.stringify(await interact.clone().json())).toBe(200);
+    const hitl = await signed(runner, `/v1/runner/claims/${claimId}/conditions`, { type: 'hitl' }, { 'X-Worker-Secret': secret });
+    expect(hitl.status, JSON.stringify(await hitl.clone().json())).toBe(200);
+    const hitlId = ((await hitl.json()) as { condition_id: number }).condition_id;
+    // Before: the granted key reads the repository's open conditions (R-BTN-163).
+    const list = await signed(runner, '/v1/repositories/ops/conditions?open=1');
+    expect(list.status, JSON.stringify(await list.clone().json())).toBe(200);
+    expect(((await list.json()) as { conditions: { type: string }[] }).conditions.map((c) => c.type)).toEqual(['interact', 'hitl']);
+    expect((await withCore((c) => c.conditions.needsYou())).map((n) => n.type)).toEqual(['interact', 'hitl']);
+    await retire();
+    // The reaps ended the run, so its open `interact` closed with it (`run-ended`); the
+    // `suspend` — which no run's end closes and nothing waits on yet (R-BTN-162 unbuilt) —
+    // closes with the repository (`retired`), or Needs you would carry it forever. The route
+    // answers `not-found` before the revoked grant (R-BTN-58) could refuse it.
+    expect(await rows(`SELECT type, outcome, closed_at, closed_how FROM conditions WHERE repository_id = 'ops' ORDER BY id`))
+      .toEqual([
+        { type: 'interact', outcome: 'closed', closed_at: T0, closed_how: 'run-ended' },
+        { type: 'hitl', outcome: 'closed', closed_at: T0, closed_how: 'retired' },
+      ]);
+    expect(await rows(`SELECT detail_json FROM events WHERE kind = 'condition' AND json_extract(detail_json, '$.closed') = 'retired'`))
+      .toEqual([{ detail_json: JSON.stringify({ ticket: 'ops:T-1', condition: hitlId, type: 'hitl', closed: 'retired' }) }]);
+    expect(await withCore((c) => c.conditions.needsYou())).toEqual([]);
+    expect(await code(await signed(runner, '/v1/repositories/ops/conditions?open=1'))).toBe('not-found');
   });
 });

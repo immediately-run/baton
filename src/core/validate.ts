@@ -4,6 +4,7 @@
 import { BatonError } from './http';
 import { FREE_TEXT_MAX, isFreeText } from './text';
 import { COURSE_ID } from './course';
+import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES } from './conditionTypes';
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 
 /** §5: the harness's own session id, the rule `claim.sh --session` already applies. */
@@ -121,8 +122,6 @@ export interface Heartbeat {
   fenced?: { claim_id: number };
   transcripts: TranscriptReport[];
   transcript_refusals: { index: number; code: string; message: string }[];
-  /** R-BTN-76: the account instances it uses (absent declares none), and the strings refused as names. */
-  uses: { names: string[]; refused: { instance: string; code: string }[] };
   /** R-BTN-103: the repositories and `asks` this session delivers notices for, as a worker courier,
    *  and the entries refused as malformed. */
   couriers: { entries: { repository: string; asks: string[] }[]; refused: { repository: string; code: string }[] };
@@ -131,6 +130,14 @@ export interface Heartbeat {
   protection: { repository: string; matched: boolean; reading_hash: string }[];
   /** §12.8 (B-145, R-BTN-189): the policy hash pins a trusted runner reports per repository. */
   policy_pins: { repository: string; hash: string }[];
+  /** R-BTN-113 (B-234): the running leg's session link, as the runner holds it. Shape-checked
+   *  here only as a bounded string; the heartbeat drops one that fails the link rule (https, no
+   *  userinfo, an allowlisted host) and logs it, never refusing the beat. */
+  session_url?: string;
+  /** §7.5 R-BTN-90: the `claim_legs.seq` of the run whose script just returned — the finishing
+   *  half's word, sent out of cadence before validation, `close` or any wait. Shape-checked
+   *  only as a positive integer; a heartbeat is never refused for it. */
+  leg_finished?: number;
 }
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number }
@@ -181,6 +188,13 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   if (b.isolation !== undefined && !ISOLATIONS.includes(b.isolation as Heartbeat['isolation'])) bad('isolation', `must be one of ${ISOLATIONS.join(', ')}`);
   const transcripts = (b.transcripts ?? []) as unknown[];
   if (!Array.isArray(transcripts) || transcripts.length > 50) bad('transcripts', 'must be a list of at most 50');
+  // R-BTN-113: the link itself is judged at the heartbeat, which drops and logs one that fails
+  // the rule (https, no userinfo, an allowlisted host) rather than refusing the beat — so this
+  // only bounds the field's size, keeping a hostile megabyte out of the log that follows.
+  const session_url = typeof b.session_url === 'string' && b.session_url.length <= 4096 ? b.session_url : undefined;
+  // R-BTN-90: the finished run's seq — read as absent when it is not one (a heartbeat is never
+  // refused for it, §6.8); the finishing half below judges it against the claim's running run.
+  const leg_finished = isInt(b.leg_finished) && (b.leg_finished as number) > 0 ? b.leg_finished as number : undefined;
   return {
     hostname,
     session_name,
@@ -199,10 +213,11 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     last_activity_at: b.last_activity_at as number | undefined,
     test_harness: b.test_harness === true,
     fenced: checkFenced(b.fenced),
-    uses: checkUses(b.uses),
     couriers: checkCouriers(b.couriers),
     protection: checkProtection(b.protection),
     policy_pins: checkPolicyPins(b.policy_pins),
+    session_url,
+    leg_finished,
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
@@ -392,15 +407,19 @@ export function checkShadowReport(body: unknown) {
 const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/;
 export const GIT_SHA = /^[0-9a-f]{40}$/;
 /** §6.5: the `released:` reasons, exactly. */
-export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output',
-  'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed'] as const;
+export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output', 'cannot-finish:contract-input',
+  'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed', 'leg-timeout'] as const;
 
-export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null } {
+/** A claim's request (§6.2). `bills` is retired (B-168: a `prefer` entry bills no account once
+ *  route choices are gone, R-BTN-100): a request carrying one is read as if it did not, the
+ *  caller logging `deprecated-field` while the history's Migrations entry lasts. */
+export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null; retired: string[] } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
   return {
     request_id: matches(REQUEST_ID, 'request_id')(b.request_id),
     ticket_id: optional(b.ticket_id, matches(TICKET_ID, 'ticket_id')) ?? null,
+    retired: b.bills !== undefined ? ['bills'] : [],
   };
 }
 
@@ -624,6 +643,99 @@ export interface Advance {
   outputs: Output[];
   /** B-134: the finished leg's scope audit, reported on the advance or end that finishes it. */
   scope_exceeded: ScopeReport;
+  /** B-190 (§13.5 `claim_legs.head_sha`): the branch head the holder's checkout stands at when
+   *  the run starts — where replay checks the ticket's code out. Null when unreported. */
+  head_sha: string | null;
+  /** B-190 (R-BTN-82, R-BTN-84): the run's own record, reported at its start — each resolved
+   *  input as a pointer, and the ticket's version with the digest of what its source's `read`
+   *  returned for the run. Stored in `leg_run_inputs` for replay. */
+  run_inputs: RunInputs;
+}
+
+/** B-190 (§5.5 R-BTN-82, §13.5): one resolved input of a run, as the envelope carries a pointer
+ *  or a bounded inline value — never content. */
+export interface RunInput {
+  name: string;
+  from_leg: string | null;
+  from_run: number | null;
+  uri: string;
+  digest: string | null;
+  value: unknown;
+  hasValue: boolean;
+  leg_version: number | null;
+}
+
+/** B-190: the run's ticket row — the source's posted `version` (B-183) and the digest of what
+ *  its `read` returned for the run, the two replay compares. */
+export interface RunTicket {
+  version: string;
+  read_digest: string;
+}
+
+export interface RunInputs {
+  ticket: RunTicket | null;
+  inputs: RunInput[];
+}
+
+/** B-190: an input name — the same grammar an output's is; the empty name is the run's ticket
+ *  row's, reserved. */
+const INPUT_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+/** B-183 (§4.2): a ticket version, 1–128 characters of the source's own opaque string. */
+export const TICKET_VERSION = /^[A-Za-z0-9._:+/=-]{1,128}$/;
+
+/** B-190: `run_inputs` as the advance carries it (§13.5 `leg_run_inputs`): pointers and digests
+ *  only, validated before SQL (R-BTN-33). */
+export function checkRunInputs(v: unknown): RunInputs {
+  if (v === undefined || v === null) return { ticket: null, inputs: [] };
+  if (!isObj(v)) bad('run_inputs', 'must be {ticket?, inputs: […]}');
+  const r = v as Record<string, unknown>;
+  for (const k of Object.keys(r)) if (!['ticket', 'inputs'].includes(k)) bad(`run_inputs.${k}`, 'is not a run_inputs field');
+  let ticket: RunTicket | null = null;
+  if (r.ticket !== undefined && r.ticket !== null) {
+    if (!isObj(r.ticket)) bad('run_inputs.ticket', 'must be {version, read_digest}');
+    const t = r.ticket as Record<string, unknown>;
+    ticket = { version: matches(TICKET_VERSION, 'run_inputs.ticket.version')(t.version), read_digest: matches(OUTPUT_DIGEST, 'run_inputs.ticket.read_digest')(t.read_digest) };
+  }
+  const raw = r.inputs ?? [];
+  if (!Array.isArray(raw) || raw.length > OUTPUTS_MAX) bad('run_inputs.inputs', `must be a list of at most ${OUTPUTS_MAX} inputs`);
+  const names = new Set<string>();
+  const inputs = (raw as unknown[]).map((e, i) => {
+    const at = `run_inputs.inputs[${i}]`;
+    if (!isObj(e)) bad(at, 'must be {name, uri, digest?} or {name, value}');
+    const o = e as Record<string, unknown>;
+    for (const k of Object.keys(o)) if (!['name', 'from_leg', 'from_run', 'uri', 'digest', 'value', 'leg_version'].includes(k)) bad(`${at}.${k}`, 'is not an input field');
+    const name = matches(INPUT_NAME, `${at}.name`)(o.name);
+    if (names.has(name)) bad(`${at}.name`, `repeats ${name}`);
+    names.add(name);
+    const from_leg = optional(o.from_leg, matches(COURSE_ID, `${at}.from_leg`)) ?? null;
+    // `optional`'s inference cannot carry a predicate, so the two bounded integers read directly.
+    const optionalInt = (v: unknown, field: string): number | null => {
+      if (v === undefined || v === null) return null;
+      if (!Number.isInteger(v) || (v as number) < 1) bad(field, 'must be an integer of at least 1');
+      return v as number;
+    };
+    const from_run = optionalInt(o.from_run, `${at}.from_run`);
+    const leg_version = optionalInt(o.leg_version, `${at}.leg_version`);
+    const hasValue = Object.prototype.hasOwnProperty.call(o, 'value');
+    if (hasValue === (o.uri !== undefined)) bad(at, 'gives exactly one of uri and value');
+    if (hasValue) {
+      if (o.digest !== undefined) bad(`${at}.digest`, 'an inline value carries no digest');
+      let n = Infinity;
+      try { n = new TextEncoder().encode(JSON.stringify(o.value)).length; } catch { /* not JSON */ }
+      if (n > VALUE_MAX_BYTES) bad(`${at}.value`, `must be at most ${VALUE_MAX_BYTES} bytes serialized`);
+      return { name, from_leg, from_run, uri: '', digest: null, value: o.value, hasValue: true, leg_version };
+    }
+    const uri = o.uri;
+    if (typeof uri !== 'string' || uri.length > 1000 || !(GIT_POINTER.test(uri) || S3_POINTER.test(uri) || isHttpsPointer(uri))) {
+      bad(`${at}.uri`, 'must be a git:, https:// or s3:// pointer of at most 1000 characters');
+    }
+    const digest = optional(o.digest, matches(OUTPUT_DIGEST, `${at}.digest`));
+    // Anything not content-addressed carries its digest (R-BTN-82) — a git pointer may name its
+    // bytes itself (a blob id), and replay checks the digest when one is recorded.
+    if (!(uri as string).startsWith('git:') && !digest) bad(`${at}.digest`, 'an https:// or s3:// input carries its sha256:<hex> digest');
+    return { name, from_leg, from_run, uri: uri as string, digest: digest ?? null, value: null, hasValue: false, leg_version };
+  });
+  return { ticket, inputs };
 }
 
 /** `POST /v1/runner/claims/{id}/advance` (R-BTN-63, §11): the leg to start; `reached`, the
@@ -637,12 +749,56 @@ export function checkAdvance(body: unknown): Advance {
   const evidence = b.evidence === undefined || b.evidence === null ? null : isPointer(b.evidence) ? (b.evidence as string) : bad('evidence', 'must be a commit sha or an https URL of at most 1000 characters');
   const raw = b.bars ?? [];
   if (!Array.isArray(raw) || raw.length > TAGS_MAX || !raw.every((t) => typeof t === 'string' && TAG.test(t))) bad('bars', `must be a list of at most ${TAGS_MAX} tags`);
+  const head_sha = optional(b.head_sha, matches(GIT_SHA, 'head_sha')) ?? null;
   if (b.course !== undefined && JSON.stringify(b.course).length > 4096) bad('course', 'must be at most 4 KB');
   retiredFields(b);
-  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded) };
+  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs) };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */
+/** `POST /v1/runner/claims/{id}/conditions` (R-BTN-160, R-BTN-195; B-234): the report a runner
+ * sends for each raise its channel check passed. Filter fields only (R-BTN-33): the subject and
+ * body stay with the runner, and `url` is the runner's own word — kept for none but an unbound
+ * `suspend`, and ignored for an `interact`, whose url Baton sets from the session link it holds.
+ * `handler` is accepted and unread: no handler ticket is filed (R-BTN-161 unbuilt), and a
+ * binding of `interact` is ignored anyway (R-BTN-195). */
+export interface ConditionReport {
+  type: string;
+  disposition: 'interrupt' | 'suspend' | 'notify' | null;
+  severity: 'critical' | 'high' | 'normal';
+  restarts: Record<string, string> | null;
+  default: string | null;
+  url: string | null;
+}
+
+export function checkConditionReport(body: unknown): ConditionReport {
+  if (!isObj(body)) bad('body', 'must be a JSON object');
+  const b = body as Record<string, unknown>;
+  const type = matches(CONDITION_TYPE, 'type')(b.type);
+  if ((type as string).length > CONDITION_TYPE_MAX) bad('type', `must be at most ${CONDITION_TYPE_MAX} characters`);
+  // The report may carry the disposition the runner's file reads; Baton's own word decides
+  // (R-BTN-50), so it is only shape-checked, never trusted.
+  if (b.disposition !== undefined && b.disposition !== null && !['interrupt', 'suspend', 'notify'].includes(b.disposition as string)) {
+    bad('disposition', 'must be interrupt, suspend or notify');
+  }
+  const severity = b.severity === undefined || b.severity === null ? 'normal' : SEVERITIES.includes(b.severity as never) ? (b.severity as ConditionReport['severity']) : bad('severity', `must be one of ${SEVERITIES.join(', ')}`);
+  let restarts: Record<string, string> | null = null;
+  if (b.restarts !== undefined && b.restarts !== null) {
+    if (!isObj(b.restarts) || Object.keys(b.restarts).length === 0 || Object.keys(b.restarts).length > 8) bad('restarts', 'must be 1–8 ids with one-line descriptions');
+    for (const [id, text] of Object.entries(b.restarts as Record<string, unknown>)) {
+      if (!RESTART_ID.test(id)) bad(`restarts.${id}`, 'a restart id matches ^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$ (§12.3)');
+      if (!isFreeText(text)) bad(`restarts.${id}`, 'must be §10.4 free text');
+    }
+    restarts = b.restarts as Record<string, string>;
+  }
+  const def = optional(b.default, matches(RESTART_ID, 'default')) ?? null;
+  if (def != null && (restarts == null || !Object.prototype.hasOwnProperty.call(restarts, def))) bad('default', 'names one of the raise\'s restarts');
+  const url = b.url === undefined || b.url === null ? null : isHttpsPointer(b.url) ? (b.url as string) : bad('url', 'must be an https URL of at most 1000 characters');
+  if (b.handler !== undefined && b.handler !== null && typeof b.handler !== 'string') bad('handler', 'must be a course id');
+  retiredFields(b);
+  return { type: type as string, disposition: (b.disposition as ConditionReport['disposition']) ?? null, severity, restarts, default: def, url };
+}
+
 export function checkConfirmations(v: unknown): { claim_id: number; sha: string }[] {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v) || v.length > 500) bad('confirmations', 'must be a list of at most 500');
@@ -754,18 +910,18 @@ export const DECISION_TYPE_NAME = 'std:decision@1';
 
 /** R-BTN-76: an external resource's name — opaque to core (`llm:<model>`, `github-api`). */
 export const RESOURCE_NAME = /^[a-z][a-z0-9:._/-]{0,79}$/;
-/** An account instance's name (`opencode-go:go_plus`): the resource rule with `_` (spec-silent,
- *  recorded on R3-1251 — the scenarios' own instances carry it). Never `@`: that is a worker's. */
+/** An instance's name (`opencode-go:go_plus`, a `service` resource's own): the resource rule with
+ *  `_` (spec-silent, recorded on R3-1251 — the scenarios' own instances carry it). */
 export const INSTANCE_NAME = /^[a-z][a-z0-9_:./-]{0,79}$/;
-/** A worker-scope resource's implicit instance per worker: `<resource>@worker:<workers.id>`. */
-export const WORKER_INSTANCE = /^([a-z][a-z0-9:._/-]{0,79})@worker:([1-9][0-9]{0,14})$/;
 /** R-BTN-78: a decision's id and its `asks` label. */
 export const DECISION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 export const ASKS = /^[a-z][a-z0-9-]{0,31}$/;
-export const RESOURCE_SCOPES = ['worker', 'account', 'service'] as const;
-/** Instances one heartbeat declares in `uses`, readings one post carries, resources one leg
- *  needs, decisions one ticket posts (spec-silent, recorded on R3-1251). */
-export const USES_MAX = 64;
+/** R-BTN-76 (§6.3): a resource's two scopes. A `service` resource is its own one instance; an
+ *  `account` one has a registered instance per account. What a runner uses is the repository's:
+ *  the `service` instance and the account instances that list it. */
+export const RESOURCE_SCOPES = ['account', 'service'] as const;
+/** Readings one post carries, resources one leg needs, decisions one ticket posts (spec-silent,
+ *  recorded on R3-1251). */
 export const READINGS_MAX = 50;
 export const NEEDS_MAX = 32;
 export const DECISIONS_MAX = 32;
@@ -776,8 +932,9 @@ export const DECISION_OPTIONS_MAX = 8;
 export const DECISION_GRANT_MAX = 10;
 /** B-110: a posted decision's question — one line of display text, rendered as text (§10.4). */
 export const DECISION_QUESTION = /^[^\u0000-\u001f\u007f]{1,200}$/;
-/** R-BTN-76, R-BTN-101: how long a reading may stay in force, in seconds, by who posts it. */
-export const VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600, admin_s: 7 * 24 * 3600 } as const;
+/** R-BTN-76, R-BTN-101: how long a reading may stay in force, in seconds, by who posts it. An
+ *  administrator's reading is one more instrument's, held to the same limits (R-BTN-181). */
+export const VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600 } as const;
 
 /** R-BTN-58: a key an owner or administrator registered works only where it is granted; any other
  *  (a bearer token, a BATON_KEYS seed key) keeps its interim reach on every repository. The one
@@ -785,21 +942,17 @@ export const VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 
 export const isGrantedKey = (createdBy: string | null | undefined): boolean => !!createdBy && /^(owner|admin):/.test(createdBy);
 export const grantedKeySql = (column: string) => `(${column} LIKE 'owner:%' OR ${column} LIKE 'admin:%')`;
 
-export const isInstanceName = (v: unknown): v is string => typeof v === 'string' && (INSTANCE_NAME.test(v) || WORKER_INSTANCE.test(v));
+export const isInstanceName = (v: unknown): v is string => typeof v === 'string' && INSTANCE_NAME.test(v);
 
-/** The heartbeat's `uses` (R-BTN-76): a list of at most 64 strings, or the heartbeat is refused;
- *  a string that is no instance name is returned refused, never refusing the heartbeat — a
- *  failed heartbeat would stop `last_seen_at` and get a live worker reaped. Whether each name may
- *  be used is the heartbeat's own check. */
-export function checkUses(v: unknown): { names: string[]; refused: { instance: string; code: string }[] } {
-  if (v === undefined) return { names: [], refused: [] };
-  if (!Array.isArray(v) || v.length > USES_MAX || !v.every((x) => typeof x === 'string')) bad('uses', `must be a list of at most ${USES_MAX} instance names`);
-  const names = [...new Set(v as string[])];
-  return { names: names.filter((n) => INSTANCE_NAME.test(n)), refused: names.filter((n) => !INSTANCE_NAME.test(n)).map((n) => ({ instance: n.slice(0, 100), code: 'invalid-params' })) };
-}
+/** A reading's `nonce` and `signature` (B-145) are its retired signature — R-BTN-181: a reading
+ *  is authenticated by the request that posts it and carries no signature of its own. They are
+ *  read and ignored while the history's Migrations entry "part 4's retired fields" lasts; the
+ *  caller logs each `deprecated-field` and drops it. */
+const RETIRED_READING = ['nonce', 'signature'] as const;
 
 /** One reading's envelope (R-BTN-76, R-BTN-101), checked before any write; `detail` against its
- *  resources' schema is the caller's, which knows them. `valid_for` is seconds. */
+ *  resources' schema is the caller's, which knows them. `valid_for` is seconds. `retired` names
+ *  the fields the post carried that the window still reads (never a refusal of the reading). */
 export interface Reading {
   instance: string;
   kind: 'state' | 'measure';
@@ -807,22 +960,14 @@ export interface Reading {
   until: number | null;
   valid_for_s: number;
   detail: unknown;
-  /** §12.8 (B-145 item 9, R-BTN-181): a reading may be signed — `nonce` and `signature` ride
-   *  beside it; which readings count for a repository is its policy's `readings` knob, read
-   *  once B-146 builds the requirements that gate on one. */
-  nonce?: string;
-  signature?: string;
+  retired: string[];
 }
 export function checkReading(v: unknown, field: string, maxStateS: number): Reading {
   if (!isObj(v)) bad(field, 'must be an object');
   const r = v as Record<string, unknown>;
-  for (const k of Object.keys(r)) if (!['instance', 'kind', 'available', 'until', 'valid_for', 'detail', 'nonce', 'signature'].includes(k)) bad(`${field}.${k}`, 'is not a reading field');
+  for (const k of Object.keys(r)) if (!['instance', 'kind', 'available', 'until', 'valid_for', 'detail', ...RETIRED_READING].includes(k)) bad(`${field}.${k}`, 'is not a reading field');
   if (!isInstanceName(r.instance)) bad(`${field}.instance`, 'must be an instance name');
-  // R-BTN-181 (B-145 item 9): a signed reading carries both a nonce and its signature.
-  if ((r.nonce === undefined) !== (r.signature === undefined)) bad(field, 'a signed reading carries both nonce and signature');
-  if (r.nonce !== undefined && (typeof r.nonce !== 'string' || !/^[A-Za-z0-9+/_=-]{8,128}$/.test(r.nonce))) bad(`${field}.nonce`, 'must be a short nonce');
-  if (r.signature !== undefined && (typeof r.signature !== 'string' || !/^[A-Za-z0-9+/=\s]{16,8192}$/.test(r.signature))) bad(`${field}.signature`, 'must be the reading’s signature');
-  const signed = r.nonce !== undefined ? { nonce: r.nonce as string, signature: r.signature as string } : {};
+  const retired = RETIRED_READING.filter((k) => r[k] !== undefined);
   const raw = r.kind ?? 'state';
   if (raw !== 'state' && raw !== 'measure') bad(`${field}.kind`, "must be 'state' or 'measure'");
   const kind = raw as Reading['kind'];
@@ -832,11 +977,11 @@ export function checkReading(v: unknown, field: string, maxStateS: number): Read
   if (kind === 'measure') {
     if (r.available !== undefined || r.until !== undefined) bad(field, 'a measure carries only detail and valid_for');
     if (r.detail === undefined) bad(`${field}.detail`, 'a measure carries a detail');
-    return { instance: r.instance as string, kind, available: null, until: null, valid_for_s: valid as number, detail: r.detail, ...signed };
+    return { instance: r.instance as string, kind, available: null, until: null, valid_for_s: valid as number, detail: r.detail, retired };
   }
   if (typeof r.available !== 'boolean') bad(`${field}.available`, 'must be a boolean');
   if (r.until !== undefined && (r.available || !isTime(r.until))) bad(`${field}.until`, 'is epoch ms, for an unavailable instance only');
-  return { instance: r.instance as string, kind, available: r.available as boolean, until: (r.until as number | undefined) ?? null, valid_for_s: valid as number, detail: r.detail, ...signed };
+  return { instance: r.instance as string, kind, available: r.available as boolean, until: (r.until as number | undefined) ?? null, valid_for_s: valid as number, detail: r.detail, retired };
 }
 
 /** A readings post: `{readings: [...]}`, each checked. */
@@ -845,18 +990,15 @@ export function checkReadings(body: unknown, maxStateS: number = VALID_FOR.state
   return ((body as { readings: unknown[] }).readings).map((r, i) => checkReading(r, `readings[${i}]`, maxStateS));
 }
 
-/** `POST /v1/admin/resources` (R-BTN-76): the schema itself is detailSchema.ts's to judge.
- *  B-167: `atoms_from` is a retired field — the restructure took route choices out of core — so
- *  it is accepted, shape-checked and read nowhere. */
-export function checkResource(body: unknown): { name: string; scope: (typeof RESOURCE_SCOPES)[number]; detail_schema: unknown; atoms_from: 'admin' | 'any' } {
+/** `POST /v1/admin/resources` (R-BTN-76): the schema itself is detailSchema.ts's to judge. */
+export function checkResource(body: unknown): { name: string; scope: (typeof RESOURCE_SCOPES)[number]; detail_schema: unknown } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
-  for (const k of Object.keys(b)) if (!['name', 'scope', 'detail_schema', 'atoms_from'].includes(k)) bad(`body.${k}`, 'is not a field of a resource');
+  for (const k of Object.keys(b)) if (!['name', 'scope', 'detail_schema'].includes(k)) bad(`body.${k}`, 'is not a field of a resource');
   if (typeof b.name !== 'string' || !RESOURCE_NAME.test(b.name)) bad('name', `must match ${RESOURCE_NAME}`);
-  if (!RESOURCE_SCOPES.includes(b.scope as never)) bad('scope', `must be one of ${RESOURCE_SCOPES.join(', ')}`);
-  if (b.atoms_from !== undefined && b.atoms_from !== 'admin' && b.atoms_from !== 'any') bad('atoms_from', "must be 'admin' or 'any'");
+  if (!RESOURCE_SCOPES.includes(b.scope as never)) bad('scope', `must be one of ${RESOURCE_SCOPES.join(', ')} (R-BTN-76)`);
   if (b.detail_schema === undefined) bad('detail_schema', 'is required');
-  return { name: b.name as string, scope: b.scope as (typeof RESOURCE_SCOPES)[number], detail_schema: b.detail_schema, atoms_from: (b.atoms_from as 'admin' | 'any') ?? 'admin' };
+  return { name: b.name as string, scope: b.scope as (typeof RESOURCE_SCOPES)[number], detail_schema: b.detail_schema };
 }
 
 /** `POST /v1/admin/instances` (R-BTN-76): an account instance, what it serves and who may use it. */
@@ -914,7 +1056,7 @@ export const CLAIM_MAX = 50;
 const CHANNEL = /^[A-Za-z0-9][A-Za-z0-9 ._:@/-]{0,63}$/;
 
 /** A heartbeat's `couriers` (R-BTN-103): `[{repository, asks: [<label>]}]`, absent for none. As
- *  with `uses`, a list that is not one, or is over its bound, refuses the heartbeat; an entry that
+ *  with `transcripts`, a list that is not one, or is over its bound, refuses the heartbeat; an entry that
  *  fails its own check — a repository id, a label, a repeat — is returned refused and reported,
  *  never refusing the heartbeat, which would stop `last_seen_at` and get a live worker reaped. */
 export function checkCouriers(v: unknown): { entries: { repository: string; asks: string[] }[]; refused: { repository: string; code: string }[] } {

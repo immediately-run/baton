@@ -17,7 +17,7 @@
 //   baton admin -i KEY repo retire ID [--yes]
 //   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T]
 //   baton admin -i KEY probe add --key PUB --label L
-//   baton admin -i KEY resource add NAME --scope worker|account|service --schema FILE|JSON [--atoms-from admin|any]    (R-BTN-76)
+//   baton admin -i KEY resource add NAME --scope account|service --schema FILE|JSON    (R-BTN-76)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
 //   baton admin -i KEY capacity set <capability> <n> [--yes]                 (R-BTN-178)
 //   baton admin -i KEY capacity set <capability> --clear [--yes]             (R-BTN-178)
@@ -55,7 +55,6 @@
 //                             [--pushers <forge user id>[@<host>],… | none]                                                          (B-182, R-BTN-139)
 //                [--retry 1h,4h --max-failed 3 | --retry default] [--transcript-repos a,b]
 //                [--unblocked-workflow .github/workflows/F.yml | --unblocked-workflow none] [--remind-after 24h]
-//                [--independence 'review=implement,fix;adjudicate=implement' | --independence none]
 //                [--require-signed-control | --no-require-signed-control]   (B-127: control inputs
 //                count only at commits an owner's human-only key signed; on tightens, off needs
 //                an approvers.policy approver)
@@ -68,7 +67,20 @@
 //   baton board -i KEY REPO                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
 //   baton run [--home <checkout>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
 //             [--harness opencode|claude-code] [--verbose]   (R-BTN-72: the worker loop)
+//   baton leg raise <type> --subject TEXT [--body <file>] [--restarts <json>] [--default <id>]
+//                [--severity critical|high|normal]   (R-BTN-160, R-BTN-195; B-234)
+//                 — raise a condition from the leg this runs in, on its channel: the runner
+//                   checks it and answers on the channel; `interact` asks a person into this
+//                   leg's agent session and returns at once; the subject and body never leave
+//                   the runner's log
+//   baton leg replay <repository>:<ticket> <leg> [--run <n> | --run-id <id>] [-i KEY]
+//                [--against <sha>] [--accept-moved] [--home DIR] [--env NAME]… [--report FILE]
+//                 — re-run one recorded leg run without a claim, writing nothing to Baton
+//                (R-BTN-84): the course's scripts at the recorded snapshot, the ticket's code at
+//                its recorded head, the inputs checked by digest, a masked local report
 //   baton ticket -i KEY history TICKET [--before ID] [--limit N]                    (R-BTN-81)
+//   baton ticket -i KEY show TICKET                        — the ticket as Baton holds it (B-126): who
+//                last pushed it and its brief's mark (B-127) printed first, then the ticket as JSON
 //   baton decision list -i KEY [--watch | --all]
 //                — the CLI courier (R-BTN-80): claims the key's notices, prints them as text and
 //                marks them sent; --watch asks once a minute; --all lists every open decision it delivers
@@ -269,14 +281,25 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
   }
   if (role === 'ticket') {
     // R-BTN-81: a ticket's history, newest first — signed by an owner, an administrator or a key
-    // granted on its repository, the principals of its blocks.
-    if (cmd !== 'history') throw new Error('baton ticket history TICKET [--before ID] [--limit N]');
-    const { flags, positional } = parseArgs(rest, [], ['before', 'limit'], 1);
-    const ticket = need(positional[0], 'the ticket, <repository>:<id>');
-    const i = ticket.indexOf(':');
-    if (i < 1) throw new Error('the ticket is <repository>:<id>');
-    const q = new URLSearchParams({ ...(flags.before ? { before: flags.before } : {}), ...(flags.limit ? { limit: flags.limit } : {}) });
-    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(ticket.slice(0, i))}/tickets/${encodeURIComponent(ticket.slice(i + 1))}/history${q.size ? `?${q}` : ''}` };
+    // granted on its repository, the principals of its blocks. B-126 (R-BTN-194): `show` reads
+    // the ticket itself, the same three ways.
+    const ticket = (t) => {
+      const i = String(t).indexOf(':');
+      if (i < 1) throw new Error('the ticket is <repository>:<id>');
+      return { repository: String(t).slice(0, i), local: String(t).slice(i + 1) };
+    };
+    if (cmd === 'history') {
+      const { flags, positional } = parseArgs(rest, [], ['before', 'limit'], 1);
+      const t = ticket(need(positional[0], 'the ticket, <repository>:<id>'));
+      const q = new URLSearchParams({ ...(flags.before ? { before: flags.before } : {}), ...(flags.limit ? { limit: flags.limit } : {}) });
+      return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(t.repository)}/tickets/${encodeURIComponent(t.local)}/history${q.size ? `?${q}` : ''}` };
+    }
+    if (cmd === 'show') {
+      const { positional } = parseArgs(rest, [], [], 1);
+      const t = ticket(need(positional[0], 'the ticket, <repository>:<id>'));
+      return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(t.repository)}/tickets/${encodeURIComponent(t.local)}` };
+    }
+    throw new Error('baton ticket history TICKET [--before ID] [--limit N] | baton ticket show TICKET');
   }
   if (role === 'board') {
     // B-90: the board of one repository, as the dashboard reads it — a GET any key granted on the
@@ -356,14 +379,16 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'GET', path: '/v1/admin/state' };
     }
     if (cmd === 'resource' && rest[0] === 'add') {
-      // B-167: --atoms-from is a retired field — shape-checked, read nowhere (the CLI sends it
-      // as Baton takes it, ignored).
-      const { flags, positional } = parseArgs(rest.slice(1), [], ['scope', 'schema', 'atoms-from'], 1);
-      if (flags['atoms-from'] != null && !['admin', 'any'].includes(flags['atoms-from'])) throw new Error('--atoms-from must be admin or any');
-      return { method: 'POST', path: '/v1/admin/resources', body: { name: need(positional[0], 'the resource name'), scope: need(flags.scope, '--scope'), detail_schema: jsonArg(need(flags.schema, '--schema'), readJson), ...(flags['atoms-from'] != null ? { atoms_from: flags['atoms-from'] } : {}) } };
+      // R-BTN-76 (B-168): two scopes — `account` and `service`; a runner's instances are its
+      // repository's, never one it declares.
+      const { flags, positional } = parseArgs(rest.slice(1), [], ['scope', 'schema'], 1);
+      if (!flags.scope) throw new Error('baton admin resource add NAME names its --scope (account or service, R-BTN-76)');
+      if (flags.scope === 'worker' || flags.scope === 'host') throw new Error(`--scope ${flags.scope} is retired: a resource is account or service, and a runner uses its repository's instances (R-BTN-76, B-168)`);
+      if (flags.scope !== 'account' && flags.scope !== 'service') throw new Error('--scope must be account or service (R-BTN-76)');
+      return { method: 'POST', path: '/v1/admin/resources', body: { name: need(positional[0], 'the resource name'), scope: flags.scope, detail_schema: jsonArg(need(flags.schema, '--schema'), readJson) } };
     }
     if (cmd === 'resource' && rest[0] === 'set') {
-      // R-BTN-76: an administrator's reading by hand, in force at most 7 days.
+      // R-BTN-76: an administrator's reading by hand — one more instrument's, in force at most 24 hours.
       const { flags, positional } = parseArgs(rest.slice(1), ['available', 'unavailable'], ['until', 'valid-for', 'detail'], 1);
       if (!!flags.available === !!flags.unavailable) throw new Error('baton admin resource set INSTANCE names one of --available or --unavailable');
       if (flags.until && !flags.unavailable) throw new Error('--until is for an --unavailable instance');
@@ -439,7 +464,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       } };
     }
     if (cmd === 'settings') {
-      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars', 'require-signed-control', 'no-require-signed-control'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'independence', 'code-repos', 'forge-ids', 'pushers'], 1);
+      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars', 'require-signed-control', 'no-require-signed-control'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'code-repos', 'forge-ids', 'pushers'], 1);
       const body = {};
       if (flags['no-required-bars']) {
         if (groups.length) throw new Error('--no-required-bars clears them: name no --required-bar beside it');
@@ -457,16 +482,6 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       else if (flags['unblocked-workflow']) body.unblocked_trigger = { kind: 'github-app', workflow: flags['unblocked-workflow'] };
       // R-BTN-80: how long a sent notice waits for its decision before it is queued again, in seconds.
       if (flags['remind-after']) body.remind_after = Math.round(duration(flags['remind-after']) / 1000);
-      // R-BTN-106: `leg=a,b;leg=c` — the legs a key that ran any of a,b on a ticket may not take
-      // leg; `none` clears them.
-      if (flags.independence === 'none') body.required_independence = {};
-      else if (flags.independence) {
-        body.required_independence = Object.fromEntries(flags.independence.split(';').filter(Boolean).map((pair) => {
-          const [leg, from, ...extra] = pair.split('=');
-          if (!leg || from === undefined || extra.length) throw new Error(`--independence takes leg=a,b;leg=c, not ${pair}`);
-          return [leg.trim(), list(from)];
-        }));
-      }
       // B-127 (R-BTN-66 as amended): control inputs count only at owner-signed commits. On
       // tightens — any owner may; off is a loosening an `approvers.policy` approver signs for.
       if (flags['require-signed-control'] && flags['no-require-signed-control']) throw new Error('--require-signed-control and --no-require-signed-control name one state, not both');
@@ -769,6 +784,9 @@ async function testCourse(argv) {
     input.legScripts ? `${input.legScripts.length} leg script(s)` : 'no legs/',
   ];
   process.stdout.write(`baton test-course: ${said.join('; ')}\n`);
+  // R-BTN-111 (B-234): the signature — the conditions the course's legs may raise, its own
+  // declared types and the standard ones; `baton course test` prints it.
+  for (const line of kit.signatureLines(input)) process.stdout.write(`${line}\n`);
   for (const v of violations) process.stdout.write(`✗ ${v.rule}: ${v.message}\n`);
   process.stdout.write(violations.length ? `${violations.length} violation(s)\n` : '✓ no violations\n');
   return violations.length ? 1 : 0;
@@ -1049,6 +1067,18 @@ export async function main(argv) {
     const { runMain } = await import('../scripts/baton-run.mjs');
     return runMain(argv.slice(1));
   }
+  if (argv[0] === 'leg' && argv[1] === 'replay') {
+    // §9.8 R-BTN-84: re-run one recorded leg run without a claim — the replay half of the
+    // runner-side bundle, read with the owner's or administrator's key the flags name.
+    const { replayMain } = await import('../scripts/baton-run.mjs');
+    return replayMain(argv.slice(2));
+  }
+  if (argv[0] === 'leg' && argv[1] === 'raise') {
+    // R-BTN-106, R-BTN-160, R-BTN-195 (B-234): raise a condition from the leg this command
+    // runs in, on its channel — the runner checks it, answers it, and reports what passes.
+    const { raiseMain } = await import('../scripts/baton-leg.mjs');
+    return raiseMain(argv.slice(2));
+  }
   if (argv[0] === 'repo' && (argv[1] === 'sync' || argv[1] === 'init' || argv[1] === 'migrate-markers')) {
     // §2f, R-BTN-127's names: the defaults are TypeScript under src/defaults, bundled the same way.
     const { parseSyncArgs, syncMain, initMain, migrateMarkersMain } = await import('../scripts/baton-cli.mjs');
@@ -1101,6 +1131,15 @@ export async function main(argv) {
     return 1;
   }
   if (role === 'admin' && args[0] === 'open' && json?.url) process.stdout.write(`${json.url}\n`);
+  else if (role === 'ticket' && args[0] === 'show' && json && status >= 200 && status < 300) {
+    // B-126 (R-BTN-194): the provenance first — a privileged session sees whose words steer the
+    // ticket before it reads anything else of it.
+    const lw = json.last_written_by ?? null;
+    const brief = json.brief ?? null;
+    process.stdout.write(`last written by ${lw ? `${lw.pusher}${lw.commit ? ` at ${String(lw.commit).slice(0, 8)}` : ''}${lw.at ? ` (${new Date(lw.at).toISOString()})` : ''}` : 'no one Baton could name'}`
+      + `${brief ? ` — brief ${brief.signed ? `owner-signed${brief.signer ? ` by ${brief.signer}` : ''}` : 'unsigned'}` : ''}\n`);
+    process.stdout.write(`${JSON.stringify(json)}\n`);
+  }
   else process.stdout.write(`${JSON.stringify(json)}\n`);
   return status >= 200 && status < 300 ? 0 : 1;
 }
