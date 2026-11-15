@@ -15,6 +15,7 @@ owns: {}
 prs: []
 depends_on: []
 ---
+**Used by:** B-243.
 
 **What:** eligibility is computed from JSON on every request: `candidates()` (claims.ts ~528-603) runs ~12 correlated subqueries per ready ticket including `json_each` over grants, allowed capabilities, `person_legs_json` and `leg_capabilities_json`.
 
