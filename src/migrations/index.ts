@@ -48,6 +48,7 @@ import ticketProvenance from './0046_ticket_provenance.sql';
 import legRunInputs from './0047_leg_run_inputs.sql';
 import conditions from './0048_conditions.sql';
 import eventLookups from './0049_event_lookups.sql';
+import retirement from './0050_retirement.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -154,4 +155,7 @@ export const MIGRATIONS: Migration[] = [
   { id: 48, sql: conditions },
   // 0049 is B-235's (the dashboard's event lookups by kind and time; 0040's lost `events_unsigned_control`).
   { id: 49, sql: eventLookups },
+  // 0050 is B-173's (a repository's retirement: the tombstone's `former_paths`), renumbered at
+  // the merge behind main's 0043–0049.
+  { id: 50, sql: retirement },
 ];
