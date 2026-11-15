@@ -589,7 +589,9 @@ is summarized in the principal table (§12.1).
   - **The strip.** Every repository screen carries running now · ready · needs you, linking to
     `/board`, `/tickets` and `/conditions`, and the repository's mode where it is not cut over.
   - **Polling.** Every screen polls its reads each 10 seconds with `If-None-Match`, paused while
-    the page is hidden, its freshness shown; the one exception is the confirmation-code dialog,
+    the page is hidden, its freshness shown; while the answers are unchanged the interval doubles,
+    to at most 60 seconds, and a changed answer or the page shown again brings it back to 10
+    (B-242: every poll costs reads); the one exception is the confirmation-code dialog,
     which polls its screen's reads every 5 seconds for the code's two minutes (R-BTN-155).
   - **Refusals.** On the repository and owner reads, a repository the caller cannot read — or
     none — answers `forbidden` for every principal (B-192 changes the reads that answer

@@ -221,8 +221,26 @@ export function branchMatches(pattern: string, branch: string, local: string, re
 /** B-110: the most rows of each kind `syncRecord` hands the sync. */
 const SYNC_RECORD_MAX = 2000;
 
+/** B-240: rows read for many parents at once, grouped by their parent's `key` and each without
+ *  it, in the order the query gave them. */
+function groupBy<T extends Row>(rows: T[], key = 'claim_id'): Map<SqlValue, Row[]> {
+  const out = new Map<SqlValue, Row[]>();
+  for (const { [key]: k, ...rest } of rows) {
+    const list = out.get(k);
+    if (list) list.push(rest);
+    else out.set(k, [rest]);
+  }
+  return out;
+}
+
 export class Claims {
   constructor(private readonly c: Ctx) {}
+
+  /** B-240: `q`'s rows for the ids (bound as the JSON array `ids` names), or none without a
+   *  query when there are no ids. */
+  private forIds<T = Row>(ids: string, q: string, ...p: unknown[]): T[] {
+    return ids === '[]' ? [] : this.rows<T>(q, ...p);
+  }
 
   /** B-237: the per-request reads while a recommendation or a claim decision runs. */
   private cache: RequestCache | null = null;
@@ -2198,10 +2216,19 @@ export class Claims {
     // a later, legitimate change of the bars (a seat substituted) says nothing about the run
     // (round 2, 2-A-2). The posted bars are under current names; a run started under an old one
     // reads them through `renamed_from` (2-A-3).
+    // B-241: the unjudged leg runs of every ticket the post placed, in one query through
+    // `claim_legs_unjudged` (0055; the CROSS JOIN reads it first), not one query per ticket.
+    const unjudged = new Map<string, { claim_id: number; seq: number; leg: string; bars: string; course_id: string | null }[]>();
+    for (const { ticket_id, ...l } of this.rows<{ ticket_id: string; claim_id: number; seq: number; leg: string; bars: string; course_id: string | null }>(
+      `SELECT c.ticket_id, l.claim_id, l.seq, l.leg, l.bars, c.course_id FROM claim_legs l CROSS JOIN claims c ON c.id = l.claim_id
+       WHERE l.bars != '[]' AND l.bars_judged = 0 AND l.started_observation < ? AND c.ticket_id IN (SELECT value FROM json_each(?))
+       ORDER BY c.ticket_id, c.claimed_at, c.id, l.seq`, observation, JSON.stringify([...seen.keys()]))) {
+      const list = unjudged.get(ticket_id);
+      if (list) list.push(l);
+      else unjudged.set(ticket_id, [l]);
+    }
     for (const [ticketId, s] of seen) {
-      for (const l of this.rows<{ claim_id: number; seq: number; leg: string; bars: string; course_id: string | null }>(
-        `SELECT l.claim_id, l.seq, l.leg, l.bars, c.course_id FROM claim_legs l JOIN claims c ON c.id = l.claim_id
-         WHERE c.ticket_id = ? AND l.bars != '[]' AND l.bars_judged = 0 AND l.started_observation < ?`, ticketId, observation)) {
+      for (const l of unjudged.get(ticketId) ?? []) {
         const g = l.course_id ? this.stations.graph(repo, l.course_id) : null;
         const name = (g && resolveLeg(g, l.leg)) ?? l.leg;
         // Own keys only: a leg named like an Object.prototype member is just a name (3-A-3).
@@ -2385,7 +2412,7 @@ export class Claims {
   // ── the dashboard (§14: Running, Timeline, Needs you) ───────────────────────────────────
 
   running(now: number) {
-    return this.rows<Row>(
+    const active = this.rows<Row>(
       `SELECT c.id, c.ticket_id, c.worker_id, c.claimed_at, c.nonce, w.hostname, w.session_name, w.last_seen_at, w.last_activity_at,
               w.lease_timeout_ms, w.kind, wi.title,
               (SELECT l.leg FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL
@@ -2393,43 +2420,78 @@ export class Claims {
               (SELECT l.session_url FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL
                 ORDER BY l.seq DESC LIMIT 1) AS session_url
        FROM claims c JOIN workers w ON w.id = c.worker_id LEFT JOIN tickets wi ON wi.id = c.ticket_id
-       WHERE c.status = 'active' ORDER BY c.claimed_at`).map((c) => {
+       WHERE c.status = 'active' ORDER BY c.claimed_at`);
+    // B-240: every active claim's events and activities in one query each, not two per claim —
+    // each list in the order the per-claim read served it (events by `seq`; activities by
+    // `started_at`, ties in `activities_by_claim`'s order, which is the rowid's).
+    const ids = JSON.stringify(active.map((c) => c.id));
+    const events = groupBy(this.forIds(ids,
+      `SELECT claim_id, at, kind, actor, detail_json FROM events WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, seq`, ids));
+    const activities = groupBy(this.forIds(ids,
+      `SELECT claim_id, id, kind, label, started_at, ended_at, outcome, parent_id FROM activities
+       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, rowid`, ids));
+    return active.map((c) => {
       const alive = c.kind !== 'legacy' && now - (c.last_seen_at as number) < (c.lease_timeout_ms as number);
       return {
         ...c,
         alive,
         reap_at: c.kind === 'legacy' ? null : (c.last_seen_at as number) + (c.lease_timeout_ms as number),
         stalled: alive && (c.last_activity_at == null ? now - (c.claimed_at as number) : now - (c.last_activity_at as number)) > STALLED_MS,
-        events: this.rows('SELECT at, kind, actor, detail_json FROM events WHERE claim_id = ? ORDER BY seq', c.id),
-        activities: this.rows('SELECT id, kind, label, started_at, ended_at, outcome, parent_id FROM activities WHERE claim_id = ? ORDER BY started_at', c.id),
+        events: events.get(c.id as number) ?? [],
+        activities: activities.get(c.id as number) ?? [],
       };
     });
   }
 
-  /** One lane per alive worker over the last 24 h: its claims as bars and their activities. */
+  /** One lane per alive worker over the last 24 h: its claims as bars, their leg runs and their
+   *  activities. B-240: five queries whatever the lanes, claims and activities — the lanes, their
+   *  claims in the window, those claims' leg runs, activities and transcripts — not one per lane,
+   *  per claim and per activity; every list keeps the order the per-row reads served. */
   timeline(now: number) {
     const from = now - 24 * 3_600_000;
     const lanes = this.rows<{ id: number; hostname: string; session_name: string }>(
       `SELECT id, hostname, session_name FROM workers WHERE reaped_at IS NULL AND ? - last_seen_at < lease_timeout_ms ORDER BY hostname, id`, now);
+    // The window's claims (`claims_by_ended`, B-240: the active ones and those ended since
+    // `from`), by `claimed_at`, ties by id.
+    const laneIds = JSON.stringify(lanes.map((l) => l.id));
+    const claims = groupBy(this.forIds(laneIds,
+      `SELECT worker_id, id, ticket_id, claimed_at, ended_at, status, end_reason FROM claims
+       WHERE (ended_at IS NULL OR ended_at >= ?) AND worker_id IN (SELECT value FROM json_each(?))
+       ORDER BY worker_id, claimed_at, id`, from, laneIds), 'worker_id');
+    const ids = JSON.stringify([...claims.values()].flat().map((c) => c.id));
+    const runs = groupBy(this.forIds(ids,
+      `SELECT claim_id, leg, started_at, finished_at, abandoned_at, session_url FROM claim_legs
+       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, seq`, ids));
+    const activities = groupBy(this.forIds(ids,
+      `SELECT claim_id, id, kind, seq, label, started_at, ended_at, outcome, parent_id, detail_json FROM activities
+       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, rowid`, ids));
+    // §6.8: a link built only from validated parts — the activity's own transcript, else the
+    // session's; of several, the first stored (lowest id).
+    const own = new Map<string, { repo: string; path: string }>();
+    const session = new Map<number, { repo: string; path: string }>();
+    for (const t of this.forIds<{ claim_id: number; activity_id: string | null; repo: string; path: string }>(ids,
+      `SELECT claim_id, activity_id, repo, path FROM transcripts WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY id`, ids)) {
+      if (t.activity_id == null) {
+        if (!session.has(t.claim_id)) session.set(t.claim_id, t);
+      } else {
+        const k = `${t.claim_id}\u0000${t.activity_id}`;
+        if (!own.has(k)) own.set(k, t);
+      }
+    }
     return {
       from,
       to: now,
       lanes: lanes.map((l) => ({
         ...l,
-        claims: this.rows<Row>(`SELECT id, ticket_id, claimed_at, ended_at, status, end_reason FROM claims
-                                WHERE worker_id = ? AND (ended_at IS NULL OR ended_at >= ?) ORDER BY claimed_at`, l.id, from).map((c) => ({
+        claims: (claims.get(l.id) ?? []).map((c) => ({
           ...c,
           // B-4 (R-BTN-113): the claim's leg runs, each with its session link — a segment's
           // detail names the run it fell inside.
-          runs: this.rows<Row>('SELECT leg, started_at, finished_at, abandoned_at, session_url FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id)
-            .map((r) => ({ leg: r.leg, started_at: r.started_at, ended_at: r.finished_at ?? r.abandoned_at ?? null, session_url: r.session_url })),
-          activities: this.rows<Row>('SELECT id, kind, seq, label, started_at, ended_at, outcome, parent_id, detail_json FROM activities WHERE claim_id = ? ORDER BY started_at', c.id)
-            .map((a) => {
-              // §6.8: a link built only from validated parts — the activity's own transcript, else the session's.
-              const t = this.rows<{ repo: string; path: string }>(
-                `SELECT repo, path FROM transcripts WHERE claim_id = ? AND (activity_id = ? OR activity_id IS NULL) ORDER BY activity_id IS NULL, id LIMIT 1`, c.id, a.id)[0];
-              return { ...a, transcript_url: t ? transcriptUrl(t.repo, t.path) : null };
-            }),
+          runs: (runs.get(c.id) ?? []).map((r) => ({ leg: r.leg, started_at: r.started_at, ended_at: r.finished_at ?? r.abandoned_at ?? null, session_url: r.session_url })),
+          activities: (activities.get(c.id) ?? []).map((a) => {
+            const t = own.get(`${c.id}\u0000${a.id}`) ?? session.get(c.id as number);
+            return { ...a, transcript_url: t ? transcriptUrl(t.repo, t.path) : null };
+          }),
         })),
       })),
     };
