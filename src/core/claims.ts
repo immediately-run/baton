@@ -4,7 +4,7 @@
 // stale claim (R-BTN-35). The lock is the two partial unique indexes: a claim inserts and lets
 // SQLite refuse a second holder, never check-then-insert without them (R-BTN-4).
 import { BatonError } from './http';
-import { transcriptUrl } from './links';
+import { SESSION_HOSTS, sessionLinkWhy, transcriptUrl } from './links';
 import { isUniqueViolation, logEvent, mintRunId, randomHex, type Random } from './db';
 import type { Deprecated } from './deprecated';
 import { fitsTier, capabilitiesOf, TIERS } from '../shared/vocabulary.mjs';
@@ -67,6 +67,9 @@ export interface Ctx {
   /** B-234 (R-BTN-160, R-BTN-195): the raised conditions — an open `interact` of a run closes
    *  in the transactions that end the run (the advance that finishes it, the claim's end). */
   conditions?: Conditions;
+  /** B-4 (R-BTN-113): the instance's session-host allowlist, `instance_settings` first, else the
+   *  deploy's BATON_SESSION_HOSTS. Absent, the default (claude.ai) — a unit test's Claims. */
+  sessionHosts?: () => string[];
   /** The retired-fields window's one writer (B-168): a claim's `bills`. */
   deprecated: Deprecated;
 }
@@ -203,6 +206,12 @@ function groupBy<T extends Row>(rows: T[], key = 'claim_id'): Map<SqlValue, Row[
 
 export class Claims {
   constructor(private readonly c: Ctx) {}
+
+  /** B-240: `q`'s rows for the ids (bound as the JSON array `ids` names), or none without a
+   *  query when there are no ids. */
+  private forIds<T = Row>(ids: string, q: string, ...p: unknown[]): T[] {
+    return ids === '[]' ? [] : this.rows<T>(q, ...p);
+  }
 
   private rows<T = Row>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec(q, ...p).toArray() as T[];
@@ -744,10 +753,20 @@ export class Claims {
     return new BatonError(code, `${ticketId}: ${v.code} at ${phase === 'claim' ? 'a claim' : 'an advance'}`, { rule: v.rule, rule_code: v.code });
   }
 
+  /** R-BTN-47 (B-173): a ticket of a repository not registered — retired, or never there — is
+   *  `not-found`, outside every rule that reads registered repositories, before any other
+   *  refusal a claim could meet (a ticket of it never reaches the cutover gate). */
+  private refuseUnregisteredTicket(ticketId: string): void {
+    if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NULL', repositoryOf(ticketId)).length) {
+      throw new BatonError('not-found', `${repositoryOf(ticketId)} is not registered`);
+    }
+  }
+
   /** The ticket a claim by `w` gets now (§6.2): the named one if it passes the gates, recommended
    *  or not, with the advice it went against; else the first recommendation. Throws the §11 refusal. */
   private decide(w: WorkerFacts, wanted: string | null): { item: ItemFacts; advice: Record<string, unknown> | null } {
     if (wanted) {
+      this.refuseUnregisteredTicket(wanted);
       if (!this.cutOver(wanted)) throw new BatonError('not-cut-over', `${repositoryOf(wanted)}'s claims go through git until its cutover (R-BTN-28)`);
       // §12.8 (B-145, R-BTN-189): a ticket that reaches a repository whose floored guarantee is
       // broken is not claimable — rule `floor`, `floor-broken`.
@@ -833,6 +852,9 @@ export class Claims {
   // @model claim sha256:2474e2bb5224
   claim(workerId: number, body: unknown) {
     const b = checkClaim(body);
+    // R-BTN-47 (B-173): a wanted ticket of a repository not registered — retired, or never
+    // there — is not-found before the cutover gate, which reads the live repositories alone.
+    if (b.ticket_id) this.refuseUnregisteredTicket(b.ticket_id);
     for (const field of b.retired) this.c.deprecated.note(this.c.now(), `worker:${workerId}`, `claim.${field}`, 'claim');
     if (!this.anyCutOver()) throw new BatonError('not-cut-over', 'claims go through git until cutover (R-BTN-28)');
     const prior = this.rows<{ id: number; worker_id: number }>('SELECT id, worker_id FROM claims WHERE request_id = ?', b.request_id)[0];
@@ -975,8 +997,8 @@ export class Claims {
    *  reported, and the run's recorded inputs (the ticket's version and its read's digest among
    *  them, `leg_run_inputs`). `end` is the claim's end reason once the claim ended. */
   runsOf(ticketId: string, leg: string) {
-    const runs = this.rows<{ claim_id: number; seq: number; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; worker_id: number }>(
-      `SELECT l.claim_id, l.seq, l.run_id, l.head_sha, l.from_station, l.started_at, l.finished_at, l.abandoned_at,
+    const runs = this.rows<{ claim_id: number; seq: number; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; session_url: string | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; worker_id: number }>(
+      `SELECT l.claim_id, l.seq, l.run_id, l.head_sha, l.from_station, l.started_at, l.finished_at, l.abandoned_at, l.session_url,
               c.snapshot_sha, c.course_id, c.status, c.end_reason, c.ended_at, c.worker_id
        FROM claim_legs l JOIN claims c ON c.id = l.claim_id
        WHERE c.ticket_id = ? AND l.leg = ? ORDER BY l.claim_id, l.seq`, ticketId, leg);
@@ -998,6 +1020,8 @@ export class Claims {
           ended_at: r.finished_at ?? r.abandoned_at ?? null,
           end: r.status === 'active' ? null : r.end_reason,
           snapshot_sha: r.snapshot_sha, head_sha: r.head_sha,
+          // R-BTN-113 (B-4): the run's session link, as the run list draws it (§11.4).
+          session_url: r.session_url,
           course: r.course_id, course_version: courseVersion(r),
           ...(ticket?.ticket_version != null || ticket?.read_digest != null
             ? { ticket: { ...(ticket.ticket_version != null ? { version: ticket.ticket_version } : {}), ...(ticket.read_digest != null ? { read_digest: ticket.read_digest } : {}) } }
@@ -1016,6 +1040,13 @@ export class Claims {
   private runningLeg(claimId: number) {
     return this.rows<{ seq: number; leg: string; from_station: string; run_id: string | null }>(
       'SELECT seq, leg, from_station, run_id FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
+  }
+
+  /** B-4 (R-BTN-113): the instance's session-host allowlist, as the worker calls' shared rule
+   *  reads it — `instance_settings` where an administrator set one, else the deploy's config,
+   *  else the default (claude.ai). */
+  private sessionHosts(): string[] {
+    return this.c.sessionHosts?.() ?? SESSION_HOSTS.of({});
   }
 
   /** R-BTN-81: what a leg row of the history carries — the leg's run number on the ticket (its
@@ -1108,13 +1139,30 @@ export class Claims {
 
     const now = this.c.now();
     const n = this.handedOut(repo);
+    // R-BTN-113 (B-4): the advance may carry the session link of the leg it finishes — stored on
+    // the finished run's row as a heartbeat's is. One that fails the rule, or one carried by the
+    // first advance (which finishes no leg), is dropped and logged, never a refused advance.
+    let sessionUrlDropped: string | null = null;
+    if (b.session_url != null) {
+      const why = run ? sessionLinkWhy(b.session_url, this.sessionHosts()) : 'the advance finishes no leg';
+      if (why != null) {
+        sessionUrlDropped = why;
+        this.event('discrepancy', `worker:${workerId}`, { sub: 'session-url', why, url: b.session_url.slice(0, 120) }, c.ticket_id, claimId);
+      } else {
+        this.exec('UPDATE claim_legs SET session_url = ? WHERE claim_id = ? AND seq = ?', b.session_url, claimId, run!.seq);
+      }
+    }
     if (run) {
       this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', at, now, b.evidence, claimId, run.seq);
       // B-234 (R-BTN-195): the finished run's open `interact` closes with it — the ask was for
       // that session, and the run is done.
       if (run.run_id != null) this.c.conditions?.runEnded(claimId, run.run_id);
       const f = this.legFacts(claimId, run.leg, run.run_id);
-      this.c.history?.record(f.ticket, { kind: 'leg-finished', ...f.row, reached: at, next_leg: leg, ...(b.evidence ? { detail: { evidence: b.evidence } } : {}) });
+      // R-BTN-113 (B-4): the finished run's session link rides its history row, wherever it
+      // landed from — this advance or an earlier beat.
+      const link = this.rows<{ session_url: string | null }>('SELECT session_url FROM claim_legs WHERE claim_id = ? AND seq = ?', claimId, run.seq)[0]?.session_url ?? null;
+      this.c.history?.record(f.ticket, { kind: 'leg-finished', ...f.row, reached: at, next_leg: leg,
+        ...(b.evidence || link ? { detail: { ...(b.evidence ? { evidence: b.evidence } : {}), ...(link ? { session_url: link } : {}) } } : {}) });
       // B-134: the finished leg's scope audit, reported on the advance that finishes it — the
       // actions outside the claim's ticket scope raise their findings (and their hold) here,
       // and the report's dropped count (entries that failed their shape, actions beyond its
@@ -1163,8 +1211,9 @@ export class Claims {
     this.event('advanced', `worker:${workerId}`, { from: station, reached: at, leg, ...(b.bars.length ? { bars: b.bars } : {}), ...(b.evidence ? { evidence: b.evidence } : {}) }, c.ticket_id, claimId);
     this.c.dispatch?.('sync', c.ticket_id); // R-BTN-73: after every advance
     // R-BTN-90: the answer also names the run's `claim_legs.seq` — the runner's `leg_finished`
-    // heartbeat (§7.5's finishing half) carries it when the run's script returns.
-    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId, seq };
+    // heartbeat (§7.5's finishing half) carries it when the run's script returns. R-BTN-113: a
+    // dropped link says so, as a beat's answer does.
+    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId, seq, ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
@@ -1195,6 +1244,20 @@ export class Claims {
       throw new BatonError('claim-ended', `the claim already ended (${c.status}: ${c.end_reason})`);
     }
     const { reached, finished } = this.restingAt(c, e);
+    // R-BTN-113 (B-4): the end may carry the session link of the leg it finishes — stored on the
+    // running run's row as a heartbeat's is; one that fails the rule, or one carried by an end
+    // that runs no leg, is dropped and logged, never a refused end.
+    let sessionUrlDropped: string | null = null;
+    if (e.session_url != null) {
+      const running = this.runningLeg(c.id);
+      const why = running ? sessionLinkWhy(e.session_url, this.sessionHosts()) : 'the claim runs no leg';
+      if (why != null) {
+        sessionUrlDropped = why;
+        this.event('discrepancy', `worker:${workerId}`, { sub: 'session-url', why, url: e.session_url.slice(0, 120) }, c.ticket_id, c.id);
+      } else {
+        this.exec('UPDATE claim_legs SET session_url = ? WHERE claim_id = ? AND seq = ?', e.session_url, c.id, running!.seq);
+      }
+    }
     // R-BTN-109: a completed end that finishes its leg arrives at `reached` and meets its entry. A
     // release is not checked: it is how the runner gives up a leg whose outputs fail (R-BTN-82).
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
@@ -1211,7 +1274,7 @@ export class Claims {
     // (the blocked-end work's rules). The transaction is the end's own; the delete is its shape.
     if (e.prerequisite?.kind === 'capability') this.exec('DELETE FROM worker_capabilities WHERE worker_id = ? AND capability = ?', workerId, e.prerequisite.ref);
     this.finish(c.id, c.ticket_id, e.status, e.end_reason, `worker:${workerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next });
-    return { ok: true };
+    return { ok: true, ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
   }
 
   /** R-BTN-126 (round 1, B9): the invalid blocked end, recorded in its own committed
@@ -1328,8 +1391,11 @@ export class Claims {
       // B-234 (R-BTN-195): the run ended, finished or given up — its open `interact` closes.
       if (run.run_id != null) this.c.conditions?.runEnded(claimId, run.run_id);
       // R-BTN-81: the run's end, with the position the holder reported (B-38 makes it provisional).
+      // R-BTN-113 (B-4): the run's session link rides the row — wherever it landed from, the end
+      // itself or an earlier beat.
+      const link = this.rows<{ session_url: string | null }>('SELECT session_url FROM claim_legs WHERE claim_id = ? AND seq = ?', claimId, run.seq)[0]?.session_url ?? null;
       const f = this.legFacts(claimId, run.leg, run.run_id);
-      this.c.history?.record(f.ticket, { kind: opts.finished ? 'leg-finished' : 'leg-abandoned', ...f.row, reached, next_leg: opts.next ?? null, detail: { end_reason: reason } });
+      this.c.history?.record(f.ticket, { kind: opts.finished ? 'leg-finished' : 'leg-abandoned', ...f.row, reached, next_leg: opts.next ?? null, detail: { end_reason: reason, ...(link ? { session_url: link } : {}) } });
     }
     // R-BTN-62: only a reading numbered above the counter's value now can confirm this end. §2e:
     // regressed_since clears with the end; a suspension made while regressed is confirmed by any
@@ -1636,20 +1702,30 @@ export class Claims {
    *  `{repository}` its repository's id, `*` anything — among the tickets whose home is that git
    *  repository or whose `repos` name it; and whether another live worker holds one of them or a
    *  reaped claim on one is fence-pending. Two repositories' tickets sharing a local id both map,
-   *  and the push is refused if either is held: a collision fails safe. */
+   *  and the push is refused if either is held: a collision fails safe. R-BTN-47 (B-173) with
+   *  R-BTN-138: a retired repository's former path still reaches the fence — its tickets map
+   *  while no live repository holds the path and a fence is pending on one of them, and never
+   *  for anything else. */
   branchHolder(callerId: number | null, gitRepo: string, branch: string) {
     const name = gitRepo.slice(gitRepo.indexOf('/') + 1).toLowerCase();
     const full = gitRepo.toLowerCase();
-    const live = this.rows<{ id: string; local_id: string; repository_id: string; repos: string; github: string; branch_pattern: string | null; previous_branch_pattern: string | null }>(
-      `SELECT t.id, t.local_id, t.repository_id, t.repos, p.github, k.branch_pattern, k.previous_branch_pattern
+    const rows = this.rows<{ id: string; local_id: string; repository_id: string; repos: string; github: string; former_paths: string | null; retired_at: number | null; branch_pattern: string | null; previous_branch_pattern: string | null }>(
+      `SELECT t.id, t.local_id, t.repository_id, t.repos, p.github, p.former_paths, p.retired_at, k.branch_pattern, k.previous_branch_pattern
        FROM tickets t JOIN repositories p ON p.id = t.repository_id
-       LEFT JOIN courses k ON k.repository_id = t.repository_id AND k.id = t.course_id
-       WHERE p.retired_at IS NULL`);
-    const tickets = live.filter((t) => {
+       LEFT JOIN courses k ON k.repository_id = t.repository_id AND k.id = t.course_id`);
+    const taken = this.rows('SELECT 1 FROM repositories WHERE retired_at IS NULL AND lower(github) = ?', full).length > 0;
+    const fencePending = (repository: string) => this.rows(
+      `SELECT 1 FROM claims c JOIN tickets t ON t.id = c.ticket_id
+       WHERE t.repository_id = ? AND c.status = 'reaped' AND c.fence_pending = 1`, repository).length > 0;
+    const tickets = rows.filter((t) => {
       // `repos` holds owner/name once the sync resolves them (§7.1); docs' interim post sends
       // short names, matched against the repository's own name.
       const repos = (JSON.parse(t.repos) as string[]).map((r) => r.toLowerCase());
-      if (t.github.toLowerCase() !== full && !repos.includes(full) && !repos.includes(name)) return false;
+      const named = t.retired_at == null
+        ? t.github.toLowerCase() === full || repos.includes(full) || repos.includes(name)
+        // A retired repository's former path, and only the fence (R-BTN-47, R-BTN-138).
+        : !taken && (JSON.parse(t.former_paths ?? '[]') as string[]).some((p) => p.toLowerCase() === full) && fencePending(t.repository_id);
+      if (!named) return false;
       return [t.branch_pattern ?? DEFAULT_BRANCH_PATTERN, t.previous_branch_pattern].some((pat) => pat != null && branchMatches(pat, branch, t.local_id, t.repository_id));
     }).map((t) => t.id).sort();
     // The same answer per ticket as the ticket holder query (R-BTN-7), any of them counting.
@@ -1714,6 +1790,23 @@ export class Claims {
     this.finish(c.id, c.ticket_id, 'reaped', 'reaped:owner', `owner:${owner}`, { fence: alive ? { incarnation: w.incarnation } : null });
     if (!alive) this.exec('UPDATE workers SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, w.id);
     return { ok: true, fence_pending: alive };
+  }
+
+  /** R-BTN-47 (B-173): retirement's reaps, inside the retiring transaction — each active claim
+   *  on the repository's tickets as an administrator's force-reap reaps one (§9.5), actor
+   *  `admin:<fingerprint>`, fence-pending where its runner is alive so the old holder can still
+   *  heartbeat and report the fence (R-BTN-19, R-BTN-3). The repository is already retired when
+   *  this runs, so the ends record no want (R-BTN-94). */
+  retireReaps(repository: string, actor: string) {
+    const now = this.c.now();
+    for (const c of this.rows<{ id: number; ticket_id: string; worker_id: number; kind: string; incarnation: number; last_seen_at: number; lease_timeout_ms: number }>(
+      `SELECT c.id, c.ticket_id, c.worker_id, w.kind, w.incarnation, w.last_seen_at, w.lease_timeout_ms FROM claims c
+       JOIN workers w ON w.id = c.worker_id
+       WHERE c.status = 'active' AND substr(c.ticket_id, 1, length(?) + 1) = ? || ':' ORDER BY c.id`, repository, repository)) {
+      const alive = c.kind !== 'legacy' && now - c.last_seen_at < c.lease_timeout_ms;
+      this.finish(c.id, c.ticket_id, 'reaped', 'reaped:owner', actor, { fence: alive ? { incarnation: c.incarnation } : null });
+      if (!alive) this.exec('UPDATE workers SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.worker_id);
+    }
   }
 
   /** `POST /v1/ui/claims/{id}/resolve` (§6.7): an unconfirmed completion is never confirmed
@@ -2153,16 +2246,20 @@ export class Claims {
   running(now: number) {
     const active = this.rows<Row>(
       `SELECT c.id, c.ticket_id, c.worker_id, c.claimed_at, c.nonce, w.hostname, w.session_name, w.last_seen_at, w.last_activity_at,
-              w.lease_timeout_ms, w.kind, wi.title
+              w.lease_timeout_ms, w.kind, wi.title,
+              (SELECT l.leg FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL
+                ORDER BY l.seq DESC LIMIT 1) AS leg,
+              (SELECT l.session_url FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL
+                ORDER BY l.seq DESC LIMIT 1) AS session_url
        FROM claims c JOIN workers w ON w.id = c.worker_id LEFT JOIN tickets wi ON wi.id = c.ticket_id
        WHERE c.status = 'active' ORDER BY c.claimed_at`);
     // B-240: every active claim's events and activities in one query each, not two per claim —
     // each list in the order the per-claim read served it (events by `seq`; activities by
     // `started_at`, ties in `activities_by_claim`'s order, which is the rowid's).
     const ids = JSON.stringify(active.map((c) => c.id));
-    const events = groupBy(this.rows(
+    const events = groupBy(this.forIds(ids,
       `SELECT claim_id, at, kind, actor, detail_json FROM events WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, seq`, ids));
-    const activities = groupBy(this.rows(
+    const activities = groupBy(this.forIds(ids,
       `SELECT claim_id, id, kind, label, started_at, ended_at, outcome, parent_id FROM activities
        WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, rowid`, ids));
     return active.map((c) => {
@@ -2178,29 +2275,33 @@ export class Claims {
     });
   }
 
-  /** One lane per alive worker over the last 24 h: its claims as bars and their activities.
-   *  B-240: four queries whatever the lanes, claims and activities — the lanes, their claims in
-   *  the window, those claims' activities and their transcripts — not one per lane, per claim
-   *  and per activity; every list keeps the order the per-row reads served. */
+  /** One lane per alive worker over the last 24 h: its claims as bars, their leg runs and their
+   *  activities. B-240: five queries whatever the lanes, claims and activities — the lanes, their
+   *  claims in the window, those claims' leg runs, activities and transcripts — not one per lane,
+   *  per claim and per activity; every list keeps the order the per-row reads served. */
   timeline(now: number) {
     const from = now - 24 * 3_600_000;
     const lanes = this.rows<{ id: number; hostname: string; session_name: string }>(
       `SELECT id, hostname, session_name FROM workers WHERE reaped_at IS NULL AND ? - last_seen_at < lease_timeout_ms ORDER BY hostname, id`, now);
     // The window's claims (`claims_by_ended`, B-240: the active ones and those ended since
     // `from`), by `claimed_at`, ties by id.
-    const claims = groupBy(this.rows(
+    const laneIds = JSON.stringify(lanes.map((l) => l.id));
+    const claims = groupBy(this.forIds(laneIds,
       `SELECT worker_id, id, ticket_id, claimed_at, ended_at, status, end_reason FROM claims
        WHERE (ended_at IS NULL OR ended_at >= ?) AND worker_id IN (SELECT value FROM json_each(?))
-       ORDER BY worker_id, claimed_at, id`, from, JSON.stringify(lanes.map((l) => l.id))), 'worker_id');
+       ORDER BY worker_id, claimed_at, id`, from, laneIds), 'worker_id');
     const ids = JSON.stringify([...claims.values()].flat().map((c) => c.id));
-    const activities = groupBy(this.rows(
+    const runs = groupBy(this.forIds(ids,
+      `SELECT claim_id, leg, started_at, finished_at, abandoned_at, session_url FROM claim_legs
+       WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, seq`, ids));
+    const activities = groupBy(this.forIds(ids,
       `SELECT claim_id, id, kind, seq, label, started_at, ended_at, outcome, parent_id, detail_json FROM activities
        WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, started_at, rowid`, ids));
     // §6.8: a link built only from validated parts — the activity's own transcript, else the
     // session's; of several, the first stored (lowest id).
     const own = new Map<string, { repo: string; path: string }>();
     const session = new Map<number, { repo: string; path: string }>();
-    for (const t of this.rows<{ claim_id: number; activity_id: string | null; repo: string; path: string }>(
+    for (const t of this.forIds<{ claim_id: number; activity_id: string | null; repo: string; path: string }>(ids,
       `SELECT claim_id, activity_id, repo, path FROM transcripts WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY id`, ids)) {
       if (t.activity_id == null) {
         if (!session.has(t.claim_id)) session.set(t.claim_id, t);
@@ -2216,6 +2317,9 @@ export class Claims {
         ...l,
         claims: (claims.get(l.id) ?? []).map((c) => ({
           ...c,
+          // B-4 (R-BTN-113): the claim's leg runs, each with its session link — a segment's
+          // detail names the run it fell inside.
+          runs: (runs.get(c.id) ?? []).map((r) => ({ leg: r.leg, started_at: r.started_at, ended_at: r.finished_at ?? r.abandoned_at ?? null, session_url: r.session_url })),
           activities: (activities.get(c.id) ?? []).map((a) => {
             const t = own.get(`${c.id}\u0000${a.id}`) ?? session.get(c.id as number);
             return { ...a, transcript_url: t ? transcriptUrl(t.repo, t.path) : null };
@@ -2251,7 +2355,8 @@ export class Claims {
       // R-BTN-67: a leg an owner's required bar covers that the sync posts without the prefix.
       policy: this.rows(`SELECT n.ticket_id, n.leg, n.waiting_since FROM ticket_next_legs n WHERE n.state = 'waiting' AND n.waiting_on = 'policy' ORDER BY n.ticket_id, n.leg`),
       // R-BTN-63: the holder and the sync read a leg's bars differently; the sync's reading binds.
-      bars_mismatch: this.rows(`SELECT e.claim_id, e.ticket_id, e.at, e.detail_json FROM events e WHERE e.kind = 'bars-mismatch' AND e.at > ? ORDER BY e.seq`, now - BARS_MISMATCH_LISTED_MS),
+      // By `at`, then `seq`: `events_by_kind_at`'s order (B-235), so the window reads only its rows.
+      bars_mismatch: this.rows(`SELECT e.claim_id, e.ticket_id, e.at, e.detail_json FROM events e WHERE e.kind = 'bars-mismatch' AND e.at > ? ORDER BY e.at, e.seq`, now - BARS_MISMATCH_LISTED_MS),
       held_items: this.rows<{ ticket_id: string; hold_reason: string | null; set_at: number }>(
         `SELECT ticket_id, hold_reason, set_at FROM ticket_overrides WHERE hold = 1 ORDER BY ticket_id`).map((h) => ({
         ...h,

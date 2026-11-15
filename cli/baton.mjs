@@ -14,7 +14,7 @@
 //   baton admin -i KEY repo set ID [--weight N] [--tiers a,b,c] [--remote URL] [--web-base URL]
 //                [--sync-workflow PATH|none] [--mirror-workflow PATH|none] [--ci-identity …]
 //                [--add-owner-key PUB[,…]] [--add-sync-key PUB[,…]] [--add-mirror-key PUB[,…]] [--remove-sync-key FP[,…]]
-//   baton admin -i KEY repo retire ID
+//   baton admin -i KEY repo retire ID [--yes]
 //   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T]
 //   baton admin -i KEY probe add --key PUB --label L
 //   baton admin -i KEY resource add NAME --scope account|service --schema FILE|JSON    (R-BTN-76)
@@ -22,6 +22,10 @@
 //   baton admin -i KEY capacity set <capability> <n> [--yes]                 (R-BTN-178)
 //   baton admin -i KEY capacity set <capability> --clear [--yes]             (R-BTN-178)
 //   baton admin -i KEY capacity list
+//   baton admin -i KEY settings set [--link-hosts a,b|none] [--session-hosts a,b|none] [--check-app-id ID|none]
+//                — the instance settings (B-4, R-BTN-113, §13.1): each flag replaces its own
+//                whole; none clears one to what stands without it (session_hosts: the deploy's
+//                BATON_SESSION_HOSTS, default claude.ai)
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
@@ -346,8 +350,14 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
         return { method: 'POST', path: '/v1/admin/repositories', body };
       }
       if (sub === 'retire') {
-        parseArgs(more, [], [], 0);
-        return { method: 'POST', path: '/v1/admin/repositories', body: { id: need(target, 'the repository id'), retire: true } };
+        const { flags } = parseArgs(more, ['yes'], [], 0);
+        // §12.2: `admin.repo.retire` is destructive — the most final action on the list — so
+        // the CLI asks or takes --yes, and the body carries confirm: true.
+        const id = need(target, 'the repository id');
+        return {
+          method: 'POST', path: '/v1/admin/repositories', body: { id, retire: true, confirm: true },
+          confirm: { question: `retire ${id}? everything scoped to it ends — sessions, keys, grants, claims — and its id is never registered again`, yes: !!flags.yes },
+        };
       }
       throw new Error('baton admin repos | baton admin repo add|set|retire');
     }
@@ -421,7 +431,22 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       parseArgs(rest.slice(1), [], [], 0);
       return { method: 'GET', path: '/v1/admin/capacities' };
     }
-    throw new Error('baton admin repos|repo|grant|probe|resource|instance|capacity|revoke|open');
+    // B-4 (R-BTN-113, §13.1): the instance settings, each flag replacing its own whole — `none`
+    // clears one back to what stands without it (the deploy's own default).
+    if (cmd === 'settings' && rest[0] === 'set') {
+      const { flags } = parseArgs(rest.slice(1), [], ['link-hosts', 'session-hosts', 'check-app-id'], 0);
+      const hosts = (v) => (v === 'none' ? null : list(v));
+      const body = {
+        ...(flags['link-hosts'] !== undefined ? { link_hosts: hosts(flags['link-hosts']) } : {}),
+        ...(flags['session-hosts'] !== undefined ? { session_hosts: hosts(flags['session-hosts']) } : {}),
+        ...(flags['check-app-id'] !== undefined ? { check_app_id: flags['check-app-id'] === 'none' ? null : flags['check-app-id'] } : {}),
+      };
+      if (!Object.keys(body).length) {
+        throw new Error('baton admin settings set names at least one setting (--link-hosts, --session-hosts, --check-app-id; none clears one)');
+      }
+      return { method: 'PUT', path: '/v1/admin/settings', body };
+    }
+    throw new Error('baton admin repos|repo|grant|probe|resource|instance|capacity|settings|revoke|open');
   }
   if (role === 'owner') {
     if (cmd === 'grants') {
@@ -523,6 +548,21 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
 
 const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier'];
 
+/** §12.2's ask under a destructive action: `--yes` answers the prompt beforehand; without a
+ *  TTY the command refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
+export async function confirmAsk(question, yes, out, input) {
+  if (yes) return true;
+  if (!input.isTTY) {
+    out.write('baton: not confirmed — answer the prompt on a terminal, or pass --yes\n');
+    return false;
+  }
+  out.write(`${question} [y/N] `);
+  const line = await new Promise((resolve) => {
+    input.once('data', (d) => resolve(String(d).trim().toLowerCase()));
+  });
+  return line === 'y' || line === 'yes';
+}
+
 /** R-BTN-178's confirm (B-106): print every course whose legs require the capability, with the
  *  type's definition in each, then ask. `--yes` answers beforehand; without a TTY the command
  *  refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
@@ -539,16 +579,7 @@ export async function confirmCapacity(answer, question, yes, out, input) {
   for (const c of Array.isArray(answer?.capacities) ? answer.capacities : []) {
     if (c.capacity != null) out.write(`${c.capability}: capacity ${c.capacity} (set ${new Date(c.set_at).toISOString()} by ${c.set_by})\n`);
   }
-  if (yes) return true;
-  if (!input.isTTY) {
-    out.write('baton: not confirmed — answer the prompt on a terminal, or pass --yes\n');
-    return false;
-  }
-  out.write(`${question} [y/N] `);
-  const line = await new Promise((resolve) => {
-    input.once('data', (d) => resolve(String(d).trim().toLowerCase()));
-  });
-  return line === 'y' || line === 'yes';
+  return confirmAsk(question, yes, out, input);
 }
 
 /** A JSON argument: inline (`{…}`), else a file holding it. */
@@ -1108,6 +1139,9 @@ export async function main(argv) {
     }
     if (!(await confirmCapacity(read.json, p.preflight.question, p.yes, process.stdout, process.stdin))) return 1;
   }
+  // §12.2: a destructive action with no preflight read — retiring a repository — asks the same
+  // way: --yes answers beforehand, a terminal decides, a pipe refuses.
+  if (p.confirm && !(await confirmAsk(p.confirm.question, p.confirm.yes, process.stdout, process.stdin))) return 1;
   const { status, json, text } = await send(url, p, keyFile);
   // A 2xx whose body is not JSON — an intermediary's login page, an HTML error, an empty body —
   // is a refusal, never success (B-80): the command fails, showing what arrived.

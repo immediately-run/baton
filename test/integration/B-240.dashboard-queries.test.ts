@@ -3,7 +3,7 @@
 // activities query per active claim, and per alive worker one claims query, per claim one
 // activities query and per activity one transcripts query — about 600 statements a poll on a
 // production-sized state, polled every 10 seconds (production passed Cloudflare's 5,000,000
-// rows_read/day on 2026-11-14). The answer is unchanged: the served `running` and `timeline`
+// rows_read/day on 2026-11-14). The answer is unchanged: the served `running` and `timeline` (B-4's leg runs included)
 // equal what the per-row reads built, re-run here as they were, across states that exercise
 // every tie and fallback (two claims claimed at one instant, activities started at one instant,
 // a claim's activity transcript before its session's, two session transcripts, a reaped worker,
@@ -53,7 +53,11 @@ async function oldRunning(now: number) {
   const out = [];
   for (const c of await rows<Record<string, any>>(
     `SELECT c.id, c.ticket_id, c.worker_id, c.claimed_at, c.nonce, w.hostname, w.session_name, w.last_seen_at, w.last_activity_at,
-            w.lease_timeout_ms, w.kind, wi.title
+            w.lease_timeout_ms, w.kind, wi.title,
+            (SELECT l.leg FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL
+              ORDER BY l.seq DESC LIMIT 1) AS leg,
+            (SELECT l.session_url FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL
+              ORDER BY l.seq DESC LIMIT 1) AS session_url
      FROM claims c JOIN workers w ON w.id = c.worker_id LEFT JOIN tickets wi ON wi.id = c.ticket_id
      WHERE c.status = 'active' ORDER BY c.claimed_at`)) {
     const alive = c.kind !== 'legacy' && now - c.last_seen_at < c.lease_timeout_ms;
@@ -83,7 +87,9 @@ async function oldTimeline(now: number) {
           `SELECT repo, path FROM transcripts WHERE claim_id = ? AND (activity_id = ? OR activity_id IS NULL) ORDER BY activity_id IS NULL, id LIMIT 1`, c.id, a.id))[0];
         activities.push({ ...a, transcript_url: t ? transcriptUrl(t.repo, t.path) : null });
       }
-      claims.push({ ...c, activities });
+      const runs = (await rows<Record<string, any>>('SELECT leg, started_at, finished_at, abandoned_at, session_url FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id))
+        .map((r) => ({ leg: r.leg, started_at: r.started_at, ended_at: r.finished_at ?? r.abandoned_at ?? null, session_url: r.session_url }));
+      claims.push({ ...c, runs, activities });
     }
     lanes.push({ ...l, claims });
   }
@@ -141,6 +147,10 @@ async function fill(worker: number, tickets: string[], { active = true } = {}) {
   await transcript(worker, a, `claude-code/s-${a}-2.jsonl`);
   await transcript(worker, b, `claude-code/sub-${b}.jsonl`, `a${b}-1`);
   await transcript(worker, b, `claude-code/s-${b}.jsonl`);
+  for (const [seq, leg, finished] of [[2, 'review', null], [1, 'implement', T0 - 4 * H]] as const) {
+    await rows(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, started_at, started_observation, finished_at, session_url)
+                VALUES (?, ?, ?, ?, 'filed', ?, 0, ?, ?)`, b, seq, `r-${b}-${seq}`, leg, T0 - 5 * H + seq, finished, seq === 1 ? 'https://claude.ai/code/s1' : null);
+  }
   if (!active) return;
   const c = await claim(worker, tickets[3], T0 - H, null);
   await activities(worker, c, T0 - H);
