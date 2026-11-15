@@ -1554,7 +1554,7 @@ export class BatonCore {
     // the witness: while the setting was off nothing was raised, and opting in must still
     // notice what stands; an unreadable event says nothing — the event fires.
     const seen = new Set<string>();
-    for (const prior of this.sql<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'unsigned-control' AND repository_id = ? AND at > ? ORDER BY seq DESC LIMIT 100`, r, at - 7 * 86_400_000)) {
+    for (const prior of this.sql<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'unsigned-control' AND repository_id = ? AND at > ? ORDER BY at DESC, seq DESC LIMIT 100`, r, at - 7 * 86_400_000)) {
       try {
         for (const u of (JSON.parse(prior.detail_json) as { changes?: { path: string; commits: string[] }[] }).changes ?? []) seen.add(`${u.path}\u0000${u.commits.join(',')}`);
       } catch {
@@ -1568,10 +1568,11 @@ export class BatonCore {
   }
 
   /** §14 Needs you, B-127: the unsigned control changes of the last 7 days, newest first, of
-   *  repositories that require their control inputs signed. */
+   *  repositories that require their control inputs signed — by `at`, then `seq`, the order
+   *  `events_by_kind_at` reads in (B-235), so the window reads only its rows. */
   unsignedControlView(now: number) {
     return this.sql<{ repository_id: string; at: number; detail_json: string }>(
-      `SELECT repository_id, at, detail_json FROM events WHERE kind = 'unsigned-control' AND at > ? ORDER BY seq DESC LIMIT 100`, now - 7 * 86_400_000)
+      `SELECT repository_id, at, detail_json FROM events WHERE kind = 'unsigned-control' AND at > ? ORDER BY at DESC, seq DESC LIMIT 100`, now - 7 * 86_400_000)
       .map((row) => {
         let detail: Record<string, unknown> = {};
         try {
