@@ -2920,6 +2920,50 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   answers without joining the session, and hibernating a long-waiting leg, revived when the
   person loads the leg page or answers. Scenario S-BTN-222.
 
+- **2026-11-15 — R-BTN-126, R-BTN-121, R-BTN-76: a leg's block is a request the runner confirms
+  (owner direction).** Found live: the zai coding plan's weekly limit ran out, every agent call
+  failed at once, and one runner spent an attempt on seven tickets in six minutes, each
+  `released:cannot-finish:transient`. The owner asked that the runner notice the provider's limit,
+  verify it by trusted means and tell Baton, because "the sandboxed implementation leg is the first
+  to notice that we are out of tokens, but we can't take its reading at face value (it's
+  sandboxed, potentially compromised code)". Before this change R-BTN-126 forwarded what the leg
+  said: a `capability` end was the runner's statement made on the leg's word, and a `resource`
+  end's `reading` came from the leg, so compromised leg code could post an `available: false`
+  reading of an account instance for up to 24 hours and block every repository it serves. Now a
+  leg's `capability` request ends blocked only when that capability's own `check`, run by the
+  runner after the leg stops, in a directory the runner owns and bounded to 60 seconds, fails; a
+  passing check or none is a counted failed attempt. A `resource` request still stands as a need,
+  as before, but carries a reading only from a runner check bound to the instance, and nothing a
+  leg sends is forwarded. `runner.json` gains `instance`: a check that tests one account alone
+  reports that account's `state` reading while it fails, at most an hour at a time and renewed,
+  and any runner whose bound check passes while the instance reads `unavailable` posts
+  `available: true` (never over an administrator's or an instrument's reading), so one
+  misconfigured runner cannot hold the fleet off for long. A failed check keeps running and its
+  capability is declared again at the first pass at least `every_s` later; one run per capability
+  is in flight at a time; a name the executor provides is blocked only by the executor's own end.
+  Blocked `capability` ends still count toward `max_blocked`: a runner whose check fails stops
+  claiming, so a ticket is bounced only by checks that pass while the provider is spent, which is
+  why a bound check must test the quota itself. Runners each holding their own subscription that
+  run out one after another can still hold a ticket `blocked-exhausted` after five such ends in a
+  day; that case was accepted. A runner reading's `until` is clamped to its one-hour end and
+  renewed while the check fails, so a weekly limit stays read as `unavailable` without a
+  reading that outlives its writer's evidence.
+  Considered and rejected: the owner's first sketch, a leg-raised condition whose bound
+  deterministic handler course verifies the claim and posts the reading. No disposition ends a leg
+  without spending an attempt (`interrupt` is `cannot-finish`, `notify` goes on, `suspend` is
+  closed to autonomous legs), and a handler is a ticket filed in git, synced and claimed, so other
+  runners would keep failing for as long as that takes. The owner's other two points needed no
+  new mechanism: a leg requires an ability (`capability:code-generation-llm`, R-BTN-174) and falls
+  back between providers within its run (§6.10, R-BTN-122); a capability block clears when the
+  check passes again, and a resource block when the reading lapses or a passing runner counters
+  it. An adversarial review before the PR found the first draft contradicting the rule's own
+  "never a retry" sentence, turning reading-less resource ends into counted failures, leaving the
+  check's working directory open to the leg, and letting one runner's failing check block the
+  fleet for a day; a second round found an unbounded exemption from `max_blocked`, counter-posts
+  overriding administrators, and an executor confirmation with no interface, and a third a
+  reading with a far reset that the one-hour bound would refuse; each is fixed above.
+  Scenarios S-BTN-223 and S-BTN-224, gate G-BTN-169.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
