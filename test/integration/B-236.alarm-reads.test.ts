@@ -135,7 +135,7 @@ describe('B-236 the alarm reads through indexes', () => {
       });
       expect(scans, `${sql}\n${detail.join('\n')}`).toEqual([]);
     }
-    for (const index of ['claims_fence_pending', 'claims_deadline', 'workers_live', 'next_legs_waiting', 'messages_by_status',
+    for (const index of ['claims_fence_pending', 'claims_deadline', 'workers_live', 'next_legs_waiting_since', 'messages_by_status',
       'events_retention', 'board_snapshots_received', 'workers_last_seen', 'closed_claims_due']) {
       expect([...used], index).toContain(index);
     }
@@ -164,9 +164,7 @@ describe('B-236 the alarm reads through indexes', () => {
     const cases: [string, unknown[], string, boolean?][] = [
       [`SELECT id, ticket_id, worker_id, ended_at FROM claims WHERE status = 'reaped' AND fence_pending = 1 ORDER BY ended_at`, [], 'claims_fence_pending'],
       [`SELECT id, ticket_id, worker_id, ended_at, end_reason, ended_at_sha FROM claims
-        WHERE status = 'completed' AND confirmed_at IS NULL AND ended_at <= ? ORDER BY ended_at`, [T0], 'claims_unconfirmed_ended'],
-      [`SELECT id, ticket_id, claimed_at, ended_at, status, end_reason FROM claims
-        WHERE worker_id = ? AND (ended_at IS NULL OR ended_at >= ?) ORDER BY claimed_at`, [worker.id, T0], 'claims_by_worker'],
+        WHERE status = 'completed' AND confirmed_at IS NULL AND ended_at <= ? ORDER BY ended_at`, [T0], 'claims_unconfirmed_by_end'],
       [`SELECT id, reaped_at FROM workers WHERE credential_id = ? AND secret_hash = ?`, ['x', 'y'], 'workers_by_secret'],
       [`SELECT id, hostname, session_name FROM workers WHERE reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? ORDER BY hostname, id`, [T0], 'workers_live', true],
     ];

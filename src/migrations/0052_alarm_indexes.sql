@@ -7,12 +7,10 @@
 -- Each partial index's WHERE is written exactly as the queries that use it write theirs, so
 -- SQLite's planner, which matches a partial index by its terms, finds it.
 
--- R-BTN-19: the alarm's lapsed fences and Needs you's fence_pending list.
-CREATE INDEX claims_fence_pending ON claims(ended_at) WHERE status = 'reaped' AND fence_pending = 1;
--- §6.7: Needs you's unconfirmed claims, by when they ended.
-CREATE INDEX claims_unconfirmed_ended ON claims(ended_at) WHERE status = 'completed' AND confirmed_at IS NULL;
--- §14's timeline: a lane's claims.
-CREATE INDEX claims_by_worker ON claims(worker_id, claimed_at);
+-- R-BTN-19's pending fences (the alarm's lapsed-fence check) and §6.7's unconfirmed claims are
+-- searched through 0055's `claims_fence_pending` and `claims_unconfirmed_by_end` (B-240), which
+-- this file does not repeat; so is §14's timeline (0055's `claims_by_ended`): B-236's
+-- `(worker_id, claimed_at)` would lead the planner to read a lane's every claim instead.
 -- R-BTN-90: the alarm's due claim deadlines and the earliest one it arms at.
 CREATE INDEX claims_deadline ON claims(deadline_at) WHERE status = 'active' AND deadline_at IS NOT NULL;
 
@@ -25,7 +23,7 @@ CREATE INDEX workers_live ON workers(last_seen_at + lease_timeout_ms) WHERE reap
 
 -- `baton:stalled`: the alarm's 72-hour stall reads only the legs posted waiting that long — and only
 -- this index for them, which carries every column the stall reads of the leg.
-CREATE INDEX next_legs_waiting ON ticket_next_legs(waiting_since, ticket_id, leg, waiting_on) WHERE state = 'waiting';
+CREATE INDEX next_legs_waiting_since ON ticket_next_legs(waiting_since, ticket_id, leg, waiting_on) WHERE state = 'waiting';
 -- Nearly every next leg is ready, so the ready-leg reads that searched this index (the
 -- recommendations, the board's ready rows) read an index row and a table row for almost every
 -- leg — more than the scan of the table they make without it.

@@ -2976,6 +2976,23 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   the list); §13 now names the event indexes and says a rebuild recreates them all. One of
   B-235–B-243, the owner's 2026-11-15 plan to bound what each read costs.
 
+- **2026-11-15 — §13's dashboard and sync indexes, §11.4's polling: the dashboard reads in joined queries, a sync post reads its tickets once, and a hidden dashboard does not poll** (B-240, B-241, B-242's UI half).
+  Rules changed: none; §13's index notes, §11.4's polling rule.
+  On 2026-11-14 production passed Cloudflare's free-tier limit of 5,000,000 Durable Object
+  `rows_read` a day. `GET /v1/ui/state` ran about 676 statements a poll on a production-sized
+  state — per active claim its events and activities, per alive worker its claims, per claim its
+  activities, per activity its transcript, per blocked ticket its blocks — and scanned the claims
+  for the timeline's window, the unconfirmed completions and the pending fences. It now runs
+  about 65, the same however many claims, activities and blocked tickets, each list in the order
+  it was served; migration 0055 adds `claims_by_ended`, `claims_unconfirmed_by_end`,
+  `claims_fence_pending`, `transcripts_by_claim` and `next_legs_waiting`. A board post read
+  each ticket's course, station, next legs, bars, needs, decisions and answers one query at a
+  time (3,165 statements for a 180-ticket refresh that wrote 4 rows); it reads them once per
+  repository and judges its unjudged leg runs through 0055's `claim_legs_unjudged`, so an
+  unchanged ticket costs no statement and writes nothing, as before. The dashboard polls only
+  while its page is visible, and backs off to 60 seconds while the answers are unchanged. One
+  of B-235–B-243, the owner's 2026-11-15 plan to bound what each read costs.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

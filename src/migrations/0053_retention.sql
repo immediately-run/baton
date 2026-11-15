@@ -22,7 +22,7 @@ ALTER TABLE closed_tickets ADD COLUMN claims_due_at INTEGER;
 UPDATE closed_tickets SET claims_due_at = purged_at WHERE purged_at IS NOT NULL;
 CREATE INDEX closed_claims_due ON closed_tickets(claims_due_at) WHERE claims_due_at IS NOT NULL;
 
--- A claim's rows found by the claim, for its prune.
-CREATE INDEX transcripts_by_claim ON transcripts(claim_id);
+-- A claim's rows found by the claim, for its prune (its transcripts through 0055's
+-- `transcripts_by_claim`).
 CREATE INDEX scope_findings_by_claim ON scope_findings(claim_id) WHERE claim_id IS NOT NULL;
 CREATE INDEX conditions_by_claim ON conditions(claim_id);
