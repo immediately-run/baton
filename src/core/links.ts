@@ -80,6 +80,11 @@ export const SESSION_HOSTS = {
     try {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.every((h) => typeof h === 'string')) list = parsed as string[];
+      // A JSON string — a quoted bare host ('"sessions.example"') or quoted comma-separated
+      // hosts — is the list it spells, not raw text to split (whose quotes no URL hostname
+      // matches, dropping every session link on such an instance); anything else a JSON value
+      // can be falls to the comma-separated reading below.
+      else if (typeof parsed === 'string') list = parsed.split(',');
     } catch {
       list = null; // a comma-separated list, below
     }

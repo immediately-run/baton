@@ -33,26 +33,28 @@ export interface StandardType {
 }
 
 /** R-BTN-122's class of an `interrupt` type, as the end it makes names it (R-BTN-160): core's
- *  error classes by name, a standard subtype by its table entry (`error.needs-person` is
- *  `spec`), and a course's own type `transient` when its declaration says `retryable`, `spec`
- *  otherwise — the nearest declared or standard ancestor deciding a subtype. */
+ *  error classes by name — §6.5's `cannot-finish` classes are the built-in `interrupt` types
+ *  `error.<class>`, the class a core type names being its own whatever a declaration beside it
+ *  says — with `error.needs-person` (R-BTN-195) classed `spec`, non-retryable with no class of
+ *  its own; then the type's own declaration (a course's own type is `transient` when its
+ *  declaration says `retryable`, `spec` otherwise), then the standard entry's own `retryable`
+ *  (a bare `error` and `error.transient` are `transient`); a subtype takes the nearest declared
+ *  or standard ancestor's class. */
 export function errorClassOf(type: string, declared: Map<string, ConditionDeclaration>): 'transient' | 'capability' | 'spec' | 'contract-input' | 'contract-output' {
+  if (type === 'error.capability') return 'capability';
+  if (type === 'error.contract-input') return 'contract-input';
+  if (type === 'error.contract-output') return 'contract-output';
+  if (type === 'error.spec' || type === 'error.needs-person') return 'spec';
+  const own = declared.get(type);
+  if (own != null) return own.retryable === true ? 'transient' : 'spec';
   const std = STANDARD_CONDITION_TYPES.get(type);
-  if (std != null) {
-    if (std.retryable === false) return 'spec';
-    if (type === 'error.capability') return 'capability';
-    if (type === 'error.contract-input') return 'contract-input';
-    if (type === 'error.contract-output') return 'contract-output';
-    if (type === 'error.spec') return 'spec';
-    return 'transient';
-  }
+  if (std != null) return std.retryable === false ? 'spec' : 'transient';
   for (const prefix of ancestorsOf(type)) {
     const inherited = declared.get(prefix);
     if (inherited != null) return inherited.retryable === true ? 'transient' : 'spec';
     if (STANDARD_CONDITION_TYPES.has(prefix)) return errorClassOf(prefix, declared);
   }
-  const own = declared.get(type);
-  return own != null && own.retryable === true ? 'transient' : 'spec';
+  return 'spec';
 }
 
 /** The standard types (R-BTN-160's table), a subtype inheriting its ancestor's disposition: a

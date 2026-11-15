@@ -44,6 +44,9 @@ export interface Ctx {
   now: () => number;
   /** R-BTN-19: a heartbeat's `fenced` report, handed to the claims (R3-1212). */
   fenced?: (workerId: number, incarnation: number, claimId: number) => boolean;
+  /** §7.5 R-BTN-90 (B-234): a heartbeat's `leg_finished` for its claim's running run, handed to
+   *  the claims — the re-arm and the withdrawal, before this beat delivers its messages. */
+  legFinished?: (workerId: number, claimId: number, seq: number) => void;
   /** §11: where the claim is and what git shows of its ticket (R3-1232), from the claims. */
   claimView?: (claimId: number) => Record<string, unknown>;
   /** R-BTN-67: the owner bars in force on the credential's repositories, for the heartbeat's `bars`. */
@@ -414,6 +417,10 @@ export class WorkerApi {
           hb.session_url, claim.id);
       }
     }
+    // §7.5 R-BTN-90 (B-234): `leg_finished` is processed before this beat delivers its
+    // messages — a `leg-timeout` release still pending for the finished run is withdrawn in
+    // there, so the answer below carries it never; one already delivered stands.
+    if (hb.leg_finished !== undefined && claim) this.c.legFinished?.(w.id, claim.id, hb.leg_finished);
     // B-86: the capabilities a runner with no `--capabilities` declares (see `grantCapabilities`).
     const grantCapabilities = this.grantCapabilities(cred, w.id);
     return {

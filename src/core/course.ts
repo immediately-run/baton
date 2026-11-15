@@ -342,13 +342,16 @@ export function validateCourse(json: unknown): CourseViolation[] {
         }
       }
     }
-    // R-BTN-195 (B-234): a leg declared `autonomous` never asks for a person. It sits on no
-    // `kind: person` leg (a person's leg is answered by a person, R-BTN-116), nor on any other
-    // kind the file refuses on its own (`call` and `arrives` are not built), and never beside a
-    // `conditions` list naming `interact`, a `suspend` type — `hitl` and its subtypes included —
-    // or a subtype of either: the leg would be promising not to ask while arming itself to.
+    // R-BTN-195 (B-234): a leg declared `autonomous` never asks for a person. The field sits on
+    // no `kind: person` leg (a person's leg is answered by a person, R-BTN-116), nor on any
+    // other kind the file refuses on its own (`call` and `arrives` are not built), and never
+    // beside a `conditions` list naming `interact`, a `suspend` type — `hitl` and its subtypes
+    // included — or a subtype of either: the leg would be promising not to ask while arming
+    // itself to. R-BTN-69's clause reads on the field's presence, `false` included: a leg that
+    // is not autonomous says nothing, so `autonomous: false` beside a barred type or on a
+    // person leg is the same broken promise, refused as such.
     if ('autonomous' in l && typeof l.autonomous !== 'boolean') add('bound', `${at}.autonomous`, 'autonomous is true or false (R-BTN-195)');
-    if (l.autonomous === true) {
+    if ('autonomous' in l) {
       if (person) {
         add('autonomous', `${at}.autonomous`, 'a person leg is answered by a person: autonomous sits on no kind: person leg (R-BTN-195, R-BTN-116)');
       } else if (l.kind != null && l.kind !== 'person') {

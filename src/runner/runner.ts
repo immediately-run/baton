@@ -351,6 +351,15 @@ export class Runner {
    *  reached it first would be refused there instead of here, its reason never reaching the
    *  leg (R-BTN-195). */
   private sessionLinkLanded = false;
+  /** §7.5 R-BTN-90 (B-234): the running run's `claim_legs.seq`, named by the advance that
+   *  started it — what the finishing heartbeat's `leg_finished` carries when the run's script
+   *  returns. */
+  private legSeq: number | null = null;
+  /** §7.5 R-BTN-90 (B-234): the run whose finish a beat still owes Baton — set when the
+   *  script's `run` returns, cleared by the beat that carried it; a beat that fails leaves it
+   *  for the cadence's next, which carries it before its own delivery (§7.5: a pending
+   *  `leg-timeout` release is withdrawn before it is delivered). */
+  private legFinishedSeq: number | null = null;
 
   constructor(options: RunnerOptions) {
     this.o = { beatEvery: BEAT_MS, ...options };
@@ -459,6 +468,28 @@ export class Runner {
     }
   }
 
+  /** §7.5 R-BTN-90 (B-234): finishing is not the end — the run's script returned, and an
+   *  immediate heartbeat out of the cadence says so (`leg_finished`) before validation,
+   *  `close`, hand-off or any wait: Baton withdraws a `leg-timeout` release still pending for
+   *  the run (so a finishing that crosses the instant is never cut off, nor the next leg
+   *  stopped by a release spent on this one) and re-arms a still-armed deadline to now + 40
+   *  minutes, once per run. `tick()` joins whatever beat is out, so at most two beats serve —
+   *  the first settles a beat built before the run returned, the second carries the finish. A
+   *  beat that cannot land it changes nothing here: the cadence's next beat carries it, before
+   *  its own delivery. */
+  private async reportLegFinished(): Promise<void> {
+    if (this.legSeq == null) return;
+    this.legFinishedSeq = this.legSeq;
+    for (let beat = 0; beat < 2 && this.legFinishedSeq != null; beat++) {
+      try {
+        await this.tick();
+      } catch (e) {
+        this.log(`baton: the heartbeat that reports the finished leg failed (${msg(e)}) — the next beat carries it (R-BTN-90)`);
+        return;
+      }
+    }
+  }
+
   /** The declaration as it goes out on a beat or is compared before a claim (B-86, B-106): the
    *  settled list less every lock capability whose file this process does not hold — of the
    *  runners on one machine only the one holding the lock declares it (R-BTN-178). */
@@ -490,6 +521,9 @@ export class Runner {
       // R-BTN-113 (B-234): the running leg's session link, kept on its run's row (latest wins
       // while it runs); Baton drops and logs one that fails the link rule.
       ...(this.legSessionUrl ? { session_url: this.legSessionUrl } : {}),
+      // §7.5 R-BTN-90 (B-234): the run whose script returned — the finishing half's word, read
+      // at build time so the answer below clears only what this beat carried.
+      ...(this.legFinishedSeq != null ? { leg_finished: this.legFinishedSeq } : {}),
       ...((s.worker_id == null || this.rekeySecret) ? { secret_hash: await sha256Hex(this.rekeySecret ?? s.secret), ...(this.rekeySecret ? { rekey: true } : {}) } : {}),
       ...(this.fenceToReport != null ? { fenced: { claim_id: this.fenceToReport, terminated: true } } : {}),
       transcripts: spool.transcripts,
@@ -500,6 +534,9 @@ export class Runner {
     // carries nothing).
     const linkCarried = typeof body.session_url === 'string' ? body.session_url : null;
     const linkSeq = this.sessionLinkSeq;
+    // §7.5 R-BTN-90 (B-234): the finish this beat carried, likewise — a beat built before the
+    // run returned owes nothing, and a beat that fails below leaves it owed to the next.
+    const finishedCarried = this.legFinishedSeq;
     // §6.9: the spool's activity rows go up as their own call, before the beat; anything the
     // calls do not land comes back to the spool, so a leg session's record is never lost.
     const carry = [...spool.overflowTranscripts, ...spool.overflowActivities];
@@ -553,6 +590,10 @@ export class Runner {
     // when the beat carried it and the answer kept it (not dropped: a dropped link failed the
     // rule and was stored nowhere). This is what the raise check reads (R-BTN-195).
     this.sessionLinkLanded = linkCarried != null && linkSeq === this.sessionLinkSeq && answer.session_url_dropped == null;
+    // §7.5 R-BTN-90 (B-234): the finish landed — nothing further owes Baton this run's return.
+    // (`leg_finished` is judged against the claim's running run, so a late or repeated answer
+    // changes nothing there; the pending report is spent either way once carried.)
+    if (finishedCarried != null && finishedCarried === this.legFinishedSeq) this.legFinishedSeq = null;
     // What Baton recorded from this beat: `rewriteSettings` writes the rows of the list a beat
     // carried, so an answer to this beat leaves the server on `declaring` (B-86: `runOnce` reads
     // this to know whether the next claim would go out on a stale declaration).
@@ -1538,6 +1579,9 @@ export class Runner {
       advice = firstAnswer.advice ?? advice;
       // R-BTN-63 (B-185): the run's id, minted by Baton at the advance that started it.
       let runId = typeof firstAnswer.run_id === 'string' ? firstAnswer.run_id : null;
+      // §7.5 R-BTN-90 (B-234): the run's `claim_legs.seq`, likewise — the finishing
+      // heartbeat's word when the script returns.
+      this.legSeq = typeof firstAnswer.seq === 'number' ? firstAnswer.seq : null;
       for (;;) {
         // A drain (2026-10-24): the leg that ran is complete; the claim ends here with its
         // hand-off and the runner exits without claiming again — SIGTERM's graceful path.
@@ -1607,6 +1651,13 @@ export class Runner {
           ranScript = script;
           ranCtx = ctx;
         }
+        // §7.5 R-BTN-90 (B-234): finishing is not the end — the script's `run` returned (a
+        // crash included), and the immediate `leg_finished` heartbeat goes out now, before the
+        // validation, `close`, hand-off or advance that follows, each of which can cross the
+        // deadline's instant. A lease lost or a missing script ran nothing to finish, and a leg
+        // a delivered release already stopped never returned: its release stands (§7.5), and
+        // the claim ends as the release says without a word from here.
+        if ((outcome.kind === 'ok' || outcome.kind === 'crashed') && !this.abortSignal()) await this.reportLegFinished();
         // B-134: the leg's end — its window's pushes are audited at the finish or the advance
         // below whatever the outcome was (a crashed or aborted leg can have pushed; a lost
         // lease still audits at its no-hand-off end; a `missing` leg never ran), and the read
@@ -1710,6 +1761,8 @@ export class Runner {
         nextLegs = (answer.next ?? nextLegs) as NextLegs;
         advice = answer.advice ?? advice;
         runId = typeof answer.run_id === 'string' ? answer.run_id : null;
+        // §7.5 R-BTN-90 (B-234): the next run's seq, as the first advance's above.
+        this.legSeq = typeof answer.seq === 'number' ? answer.seq : null;
         legName = verdict.leg;
         handoffUrl = null;
         resume = null;
@@ -1720,6 +1773,8 @@ export class Runner {
       this.legChannel?.close();
       this.legChannel = null;
       this.legSessionUrl = null;
+      this.legSeq = null;
+      this.legFinishedSeq = null;
       this.inflight = null;
       this.pendingAbort = null;
       dropCourse(course!.scratch);
@@ -1743,9 +1798,9 @@ export class Runner {
   /** One `advance`, its refusal settled by §6.13: off-graph ends `released:course-changed`; an
    * `entry` refusal (R-BTN-109) ends `released:cannot-finish:contract-output`; every other
    * refusal suspends at the station the claim reached, never releasing. */
-  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string } | { settle: Record<string, unknown> }> {
+  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number } | { settle: Record<string, unknown> }> {
     try {
-      return await this.o.api.advance(claimId, body) as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string };
+      return await this.o.api.advance(claimId, body) as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number };
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
       const kind = refusalKind(e.ruleCode);

@@ -134,6 +134,10 @@ export interface Heartbeat {
    *  here only as a bounded string; the heartbeat drops one that fails the link rule (https, no
    *  userinfo, an allowlisted host) and logs it, never refusing the beat. */
   session_url?: string;
+  /** §7.5 R-BTN-90: the `claim_legs.seq` of the run whose script just returned — the finishing
+   *  half's word, sent out of cadence before validation, `close` or any wait. Shape-checked
+   *  only as a positive integer; a heartbeat is never refused for it. */
+  leg_finished?: number;
 }
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number }
@@ -188,6 +192,9 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   // the rule (https, no userinfo, an allowlisted host) rather than refusing the beat — so this
   // only bounds the field's size, keeping a hostile megabyte out of the log that follows.
   const session_url = typeof b.session_url === 'string' && b.session_url.length <= 4096 ? b.session_url : undefined;
+  // R-BTN-90: the finished run's seq — read as absent when it is not one (a heartbeat is never
+  // refused for it, §6.8); the finishing half below judges it against the claim's running run.
+  const leg_finished = isInt(b.leg_finished) && (b.leg_finished as number) > 0 ? b.leg_finished as number : undefined;
   return {
     hostname,
     session_name,
@@ -210,6 +217,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     protection: checkProtection(b.protection),
     policy_pins: checkPolicyPins(b.policy_pins),
     session_url,
+    leg_finished,
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
@@ -399,7 +407,7 @@ export function checkShadowReport(body: unknown) {
 const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/;
 export const GIT_SHA = /^[0-9a-f]{40}$/;
 /** §6.5: the `released:` reasons, exactly. */
-export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output',
+export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output', 'cannot-finish:contract-input',
   'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed', 'leg-timeout'] as const;
 
 /** A claim's request (§6.2). `bills` is retired (B-168: a `prefer` entry bills no account once

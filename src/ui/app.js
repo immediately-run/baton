@@ -305,10 +305,18 @@ function renderNeeds() {
   list.replaceChildren();
   // B-234 (R-BTN-195): an interaction request — a leg asked a person into its agent session.
   // The entry carries the session link Baton set and nothing the leg wrote; the person joins
-  // the session in the harness's own UI, and the conversation never passes through Baton.
+  // the session in the harness's own UI, and the conversation never passes through Baton. The
+  // dots form the hierarchy (R-BTN-160): an `interact.<subtype>` entry is one of these. Another
+  // open condition — an unbound `hitl`/suspend, the debugger's floor until its handler is
+  // built (R-BTN-161, R-BTN-163) — is not: its `url`, where one is kept, is where git holds
+  // the question (R-BTN-92), labelled as that and never as a session to join.
   for (const c of n.conditions ?? []) {
-    const li = el('li', { text: `${c.ticket_id} — ${c.leg} asks a person into its session (${c.type}${c.severity && c.severity !== 'normal' ? `, ${c.severity}` : ''})` });
-    if (c.url) li.append(document.createTextNode(' '), httpsLink('join the session', c.url));
+    const isAsk = c.type === 'interact' || (typeof c.type === 'string' && c.type.startsWith('interact.'));
+    const sev = c.severity && c.severity !== 'normal' ? `, ${c.severity}` : '';
+    const li = isAsk
+      ? el('li', { text: `${c.ticket_id} — ${c.leg} asks a person into its session (${c.type}${sev})` })
+      : el('li', { text: `${c.ticket_id} — ${c.leg} raised ${c.type}${sev} — open, no handler bound` });
+    if (c.url) li.append(document.createTextNode(' '), httpsLink(isAsk ? 'join the session' : 'the question', c.url));
     list.append(li);
   }
   // B-133 (R-BTN-116): a person leg's question, each option with its computed action — where

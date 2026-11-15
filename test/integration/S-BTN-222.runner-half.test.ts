@@ -190,10 +190,14 @@ beforeEach(async () => {
   stateFile = join(tmpdir(), `baton-222-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
 });
 
-const newRunner = (home: string, log: (l: string) => void, over: Record<string, unknown> = {}) => new Runner({
+const newRunner = (home: string, log: (l: string) => void, over: Record<string, unknown> = {}, onBeat?: (body: Record<string, any>) => void) => new Runner({
   api: new BatonApi({
     url: 'https://baton.test',
-    transport: (req) => hostCall(req),
+    transport: async (req) => {
+      // §7.5 R-BTN-90 (B-234): the beats a run's finish went out on, for the assertions below.
+      if (onBeat && new URL(req.url).pathname === '/v1/runner/heartbeat') onBeat(await req.clone().json() as Record<string, any>);
+      return hostCall(req);
+    },
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
   }),
   home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', capabilities: ['key:zai'],
@@ -219,11 +223,18 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
     await register('vm-a');
     try {
       const lines: string[] = [];
-      const r = newRunner(home, (l) => lines.push(l));
+      const beats: Record<string, any>[] = [];
+      const r = newRunner(home, (l) => lines.push(l), {}, (b) => beats.push(b));
       r.start(); // the beats: what lands the session link (R-BTN-113) while the leg runs
       const outcome = await r.runOnce(); // implement → review → merge, merge joinable: ends done
       r.stop();
       expect(outcome).toMatchObject({ ticket: 'docs:A', end_reason: 'done', reached: 'merged' });
+
+      // §7.5 R-BTN-90 (B-234): each run's return went out on a beat of its own before the
+      // validation, close and advance that followed — implement (seq 1), review (2), the
+      // joinable merge (3, its posted result ended the session; the beat still says the script
+      // returned) — each once, and never one for a leg that did not run.
+      expect(beats.filter((b) => b.leg_finished !== undefined).map((b) => b.leg_finished)).toEqual([1, 2, 3]);
 
       // The channel's answers as the leg recorded them: two interacts and a hitl taken from the
       // deadlined leg; the undeadlined leg's interact refused naming the deadline, its hitl
@@ -305,7 +316,8 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
     await register('vm-a');
     try {
       const lines: string[] = [];
-      const r = newRunner(home, (l) => lines.push(l));
+      const beats: Record<string, any>[] = [];
+      const r = newRunner(home, (l) => lines.push(l), {}, (b) => beats.push(b));
       r.start(); // the beats: what lands the session link and delivers the deadline's release
       const once = r.runOnce();
       // The ask lands once a beat has carried the link; then the run waits, joined by no one.
@@ -325,6 +337,9 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       expect(await conditionRows('docs:C')).toEqual([
         { type: 'interact', disposition: 'notify', outcome: 'closed', url: LINK, closed_how: 'run-ended' },
       ]);
+      // §7.5 R-BTN-90: the script never returned, so no `leg_finished` went out — the ask
+      // nobody joined ends at its own deadline, exactly as R-BTN-195 says.
+      expect(beats.some((b) => b.leg_finished !== undefined)).toBe(false);
     } finally {
       cleanup(home);
     }

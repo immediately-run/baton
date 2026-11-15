@@ -30,6 +30,9 @@ const BARS_MISMATCH_LISTED_MS = 24 * 3_600_000;
 const RELEASE_ACK_MS = 2 * 3_600_000; // §9: a delivered release unacknowledged for 2 h reaps the claim
 export const UNCONFIRMED_FLAG_MS = 6 * 3_600_000; // §6.7
 const STALLED_MS = 2 * 3_600_000; // §14 Running: alive but no activity for 2 h
+/** §7.5 R-BTN-90: what a `leg_finished` heartbeat re-arms a still-armed deadline to — now plus
+ *  40 minutes, once per leg run, so finishing is never the end. */
+const LEG_FINISH_REARM_MS = 40 * 60_000;
 /** R-BTN-35: the git states that end an active claim `released:stale-board`. */
 const GIT_ENDS = new Set(['done', 'superseded', 'deferred', 'deprioritized']);
 
@@ -1147,7 +1150,9 @@ export class Claims {
     this.writeSeats(claimId, item, leg);
     this.event('advanced', `worker:${workerId}`, { from: station, reached: at, leg, ...(b.bars.length ? { bars: b.bars } : {}), ...(b.evidence ? { evidence: b.evidence } : {}) }, c.ticket_id, claimId);
     this.c.dispatch?.('sync', c.ticket_id); // R-BTN-73: after every advance
-    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId };
+    // R-BTN-90: the answer also names the run's `claim_legs.seq` — the runner's `leg_finished`
+    // heartbeat (§7.5's finishing half) carries it when the run's script returns.
+    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId, seq };
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
@@ -1761,6 +1766,47 @@ export class Claims {
   /** The earliest armed deadline the alarm can consume, for the alarm (§3). */
   nextDeadline(): number | null {
     return this.rows<{ d: number | null }>(`SELECT MIN(deadline_at) AS d FROM claims WHERE status = 'active' AND deadline_at IS NOT NULL`)[0]?.d ?? null;
+  }
+
+  /**
+   * §7.5 R-BTN-90's finishing half (B-234): the heartbeat that carries `leg_finished` for the
+   * claim's running run — sent by the runner out of its cadence the moment the script's `run`
+   * returns, before validation, `close` or any wait — processed before that beat delivers its
+   * messages. A `leg-timeout` release still pending for the claim is withdrawn (the message set
+   * `expired` with `withdrawn: 'leg-finished'`, a `leg-timeout` event logged `{withdrawn:
+   * true}`), so the finishing run is never failed at an instant it beat, nor the next leg
+   * stopped by a release its run had coming; one already delivered stands. A still-armed
+   * `deadline_at` re-arms to now plus 40 minutes, once per leg run — the run's row marks the
+   * re-arm — so a slow push or review of the result is never cut off. The caller's transaction
+   * (the heartbeat's). A seq that names no running run of this worker's active claim — a beat
+   * retried past the advance that finished the run — changes nothing.
+   */
+  legFinished(workerId: number, claimId: number, seq: number): void {
+    const now = this.c.now();
+    const c = this.rows<{ ticket_id: string; status: string; worker_id: number; deadline_at: number | null }>(
+      'SELECT ticket_id, status, worker_id, deadline_at FROM claims WHERE id = ?', claimId)[0];
+    if (!c || c.worker_id !== workerId || c.status !== 'active') return;
+    const run = this.rows<{ seq: number }>(
+      'SELECT seq FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0];
+    if (!run || run.seq !== seq) return;
+    // The withdrawal, before the beat's deliver: only a still-pending release (one delivered
+    // has already reached the runner, and stands).
+    const pending = this.rows<{ id: number }>(`SELECT id FROM messages WHERE to_worker_id = ? AND kind = 'release' AND status = 'pending'
+                   AND json_extract(payload_json, '$.ticket_id') = ? AND json_extract(payload_json, '$.reason') = 'leg-timeout'`, workerId, c.ticket_id);
+    for (const m of pending) {
+      this.exec(`UPDATE messages SET status = 'expired', withdrawn = 'leg-finished' WHERE id = ?`, m.id);
+      this.event('leg-timeout', 'alarm', { withdrawn: true, message: m.id }, c.ticket_id, claimId);
+    }
+    // The re-arm, once per leg run: a claim whose deadline the alarm already spent (its release
+    // pending or delivered above) holds none to re-arm; the next advance arms its own.
+    if (c.deadline_at != null) {
+      const rearm = this.rows<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM claim_legs WHERE claim_id = ? AND seq = ? AND deadline_rearmed_at IS NOT NULL', claimId, seq)[0].n;
+      if (!rearm) {
+        this.exec('UPDATE claims SET deadline_at = ? WHERE id = ?', now + LEG_FINISH_REARM_MS, claimId);
+        this.exec('UPDATE claim_legs SET deadline_rearmed_at = ? WHERE claim_id = ? AND seq = ?', now, claimId, seq);
+      }
+    }
   }
 
   /** §7.1: whether a force post is the accepted rewritten history. Accepting a held history

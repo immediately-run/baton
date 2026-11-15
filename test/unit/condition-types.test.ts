@@ -6,13 +6,15 @@
 import { describe, it, expect } from 'vitest';
 import { validateCourse } from '../../src/core/course';
 import { graphOf } from '../../src/core/graph';
-import { STANDARD_CONDITION_TYPES, checkRaise, dispositionOf, declaredConditions, signatureConditions } from '../../src/core/conditionTypes';
+import { STANDARD_CONDITION_TYPES, checkRaise, dispositionOf, declaredConditions, errorClassOf, signatureConditions } from '../../src/core/conditionTypes';
 
 const declared = declaredConditions({
   conditions: {
     'ask.owner': { disposition: 'suspend', restarts: { retry: 'again', park: 'hold' }, default: 'retry' },
     'ask.owner.deep': { disposition: 'notify' },
     note: { disposition: 'notify', wait_s: 60, retryable: false, description: 'a note' },
+    'error.db-down': { disposition: 'interrupt', retryable: true },
+    'error.licence': { disposition: 'interrupt', retryable: false },
   },
 });
 
@@ -36,6 +38,33 @@ describe('the standard condition types (R-BTN-160)', () => {
     expect(dispositionOf('error.transient', declared)).toBe('interrupt');
     expect(dispositionOf('unheard-of', declared)).toBeNull();
     expect(dispositionOf('unheard-of.deep', declared)).toBeNull();
+  });
+
+  it('errorClassOf names core\'s classes by their type (§6.5: `cannot-finish` classes are the `error.<class>` types), never as `spec`', () => {
+    expect(errorClassOf('error.capability', declared)).toBe('capability');
+    expect(errorClassOf('error.contract-input', declared)).toBe('contract-input');
+    expect(errorClassOf('error.contract-output', declared)).toBe('contract-output');
+    expect(errorClassOf('error.spec', declared)).toBe('spec');
+    expect(errorClassOf('error.needs-person', declared)).toBe('spec'); // non-retryable, no class of its own (R-BTN-195)
+    expect(errorClassOf('error.transient', declared)).toBe('transient');
+    expect(errorClassOf('error', declared)).toBe('transient'); // an untyped exception is error.transient (R-BTN-122)
+  });
+
+  it('errorClassOf: a subtype takes its ancestor\'s class; a course\'s own type follows its retryable; the end each forms is a §6.5 reason', () => {
+    expect(errorClassOf('error.capability.gate', declared)).toBe('capability');
+    expect(errorClassOf('error.spec.contradiction', declared)).toBe('spec');
+    expect(errorClassOf('error.db-down', declared)).toBe('transient'); // the course's own, retryable
+    expect(errorClassOf('error.licence', declared)).toBe('spec'); // the course's own, not retryable
+    expect(errorClassOf('error.licence.seat', declared)).toBe('spec'); // the nearest declared ancestor's
+    expect(errorClassOf('note', declared)).toBe('spec');
+    expect(errorClassOf('unheard-of', declared)).toBe('spec');
+  });
+
+  it('every class errorClassOf can name forms a released:cannot-finish:<class> reason §6.5 admits', async () => {
+    const { RELEASE_END_REASONS } = await import('../../src/core/validate');
+    for (const type of ['error.transient', 'error.capability', 'error.spec', 'error.contract-output', 'error.contract-input', 'error.needs-person', 'error.db-down', 'error.licence']) {
+      expect([type, RELEASE_END_REASONS.includes(`cannot-finish:${errorClassOf(type, declared)}` as never)]).toEqual([type, true]);
+    }
   });
 });
 
@@ -113,6 +142,20 @@ describe('the course file\'s new fields (R-BTN-69, R-BTN-160, R-BTN-195)', () =>
     expect(faults(file({ a: { from: ['filed'], to: 'done', autonomous: true, conditions: ['interact'] } })))
       .toContain('legs.a.autonomous: autonomous');
     expect(faults(file({ a: { from: ['filed'], to: 'done', autonomous: true, conditions: ['error.needs-person', 'warning'] } }))).toEqual([]);
+  });
+
+  it('R-BTN-69\'s clause reads on the field\'s presence: autonomous: false is refused the same beside a barred type or on a person leg', () => {
+    expect(faults(file({ a: { from: ['filed'], to: 'done', autonomous: false, conditions: ['hitl'] } })))
+      .toContain('legs.a.autonomous: autonomous');
+    expect(faults(file({ a: { from: ['filed'], to: 'done', autonomous: false, conditions: ['interact.x', 'warning'] } })))
+      .toContain('legs.a.autonomous: autonomous');
+    expect(faults(file({ person: { from: ['filed'], to: 'done', kind: 'person', asks: 'owner', autonomous: false } })))
+      .toContain('legs.person.autonomous: autonomous');
+    // A leg that is not autonomous says nothing: `false` alone, or beside what asks nothing, is
+    // the same silence, and the graph reads it as not autonomous.
+    expect(faults(file({ a: { from: ['filed'], to: 'done', autonomous: false } }))).toEqual([]);
+    expect(faults(file({ a: { from: ['filed'], to: 'done', autonomous: false, conditions: ['warning', 'error.needs-person'] } }))).toEqual([]);
+    expect(graphOf(file({ a: { from: ['filed'], to: 'done', autonomous: false } })).legs.get('a')).toMatchObject({ autonomous: false });
   });
 
   it('a leg\'s conditions name standard or declared types only', () => {

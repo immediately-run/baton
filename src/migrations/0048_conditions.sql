@@ -36,6 +36,15 @@ CREATE INDEX conditions_by_run ON conditions(run_id);
 -- R-BTN-90: the claim's armed deadline, one per claim; NULL when the running leg has none.
 ALTER TABLE claims ADD COLUMN deadline_at INTEGER;
 
+-- R-BTN-90's finishing half: the run's `leg_finished` heartbeat re-arms a still-armed deadline
+-- to now + 40 minutes, once per leg run — the row marks the run that already re-armed, so a
+-- repeated or retried beat never extends the clock again.
+ALTER TABLE claim_legs ADD COLUMN deadline_rearmed_at INTEGER;
+
+-- A release the heartbeat withdrew names why it expired ('leg-finished', R-BTN-90); NULL on
+-- every other expired row.
+ALTER TABLE messages ADD COLUMN withdrawn TEXT;
+
 -- The events this adds: `condition` (a raise recorded, R-BTN-81) and `leg-timeout` (the alarm
 -- taking a claim back at its deadline, R-BTN-90). Nothing references `events` beyond its
 -- indexes, so the table is rebuilt with the wider check as 0031 and 0043 did.

@@ -119,9 +119,11 @@ export class Conditions {
       if (run.session_url == null) throw new BatonError('invalid-params', 'the run holds no session link: Baton cannot address an interaction request (R-BTN-113, R-BTN-195)');
       url = run.session_url;
       // One open `interact` per run: the raise that supersedes closes the open one here, in the
-      // transaction that records the new one (R-BTN-195).
+      // transaction that records the new one (R-BTN-195). The dots form the hierarchy
+      // (R-BTN-160): an `interact.<subtype>` raise is an `interact`, so the predicate takes the
+      // subtypes on both sides — a subtype raise supersedes the open one, and is superseded.
       this.exec(`UPDATE conditions SET outcome = 'superseded', closed_at = ?, closed_how = 'superseded'
-                 WHERE run_id = ? AND type = 'interact' AND outcome = 'open'`, now, run.run_id);
+                 WHERE run_id = ? AND (type = 'interact' OR type LIKE 'interact.%') AND outcome = 'open'`, now, run.run_id);
     } else if (disposition === 'suspend' && b.url != null) {
       url = (this.c.linkBases?.(c.ticket_id) ?? []).some((base) => b.url!.startsWith(base)) ? b.url : null;
     }
@@ -156,10 +158,10 @@ export class Conditions {
   runEnded(claimId: number, runId: string): void {
     const now = this.c.now();
     const open = this.rows<{ id: number; ticket_id: string; repository_id: string }>(
-      `SELECT id, ticket_id, repository_id FROM conditions WHERE claim_id = ? AND run_id = ? AND type = 'interact' AND outcome = 'open'`, claimId, runId);
+      `SELECT id, ticket_id, repository_id FROM conditions WHERE claim_id = ? AND run_id = ? AND (type = 'interact' OR type LIKE 'interact.%') AND outcome = 'open'`, claimId, runId);
     if (!open.length) return;
     this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'run-ended'
-               WHERE claim_id = ? AND run_id = ? AND type = 'interact' AND outcome = 'open'`, now, claimId, runId);
+               WHERE claim_id = ? AND run_id = ? AND (type = 'interact' OR type LIKE 'interact.%') AND outcome = 'open'`, now, claimId, runId);
     for (const o of open) {
       logEvent(this.c.store, now, 'condition', 'baton', { ticket: o.ticket_id, condition: o.id, type: 'interact', closed: 'run-ended' }, o.ticket_id, claimId, o.repository_id);
     }

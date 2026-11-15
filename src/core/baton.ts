@@ -157,6 +157,7 @@ export class BatonCore {
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.workers = new WorkerApi({ store, config: ports.config, now: () => this.now(), fenced: (w, inc, id) => this.claims.fenced(w, inc, id),
+      legFinished: (w, id, seq) => this.claims.legFinished(w, id, seq),
       deprecated: this.deprecated, fleetChanged: () => this.blocks.recount(),
       // R-BTN-103: what it delivers as a worker courier.
       couriers: (w, granted, entries) => this.notices.declare(w, granted, entries),

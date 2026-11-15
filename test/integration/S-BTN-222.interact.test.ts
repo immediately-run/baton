@@ -8,8 +8,12 @@
 // session host allows is dropped, never refused; the claim's `deadline_s` arms
 // `claims.deadline_at`, the alarm releases the claim at it `leg-timeout` and the run's open
 // `interact` closes with it; a course file with `autonomous` beside a `conditions` list naming
-// `hitl.x` is refused naming the leg. The runner half — the channel's raise checks, the joinable
-// session's posted end and the unjoined one's `leg-timeout` — is S-BTN-222.runner-half.test.ts.
+// `hitl.x` is refused naming the leg. A subtype raise is an `interact` on both sides of the
+// one-open-per-run rule (R-BTN-160's hierarchy), and §7.5's finishing half holds here too:
+// `leg_finished` re-arms the armed deadline once per run, a still-pending `leg-timeout` release
+// is withdrawn before the beat delivers it, and one already delivered stands. The runner half —
+// the channel's raise checks, the joinable session's posted end, the finish beats and the
+// unjoined one's `leg-timeout` — is S-BTN-222.runner-half.test.ts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { advance, claimItem, course, cutover, endClaim, Git, keyCall, ORIGIN, placed, register, rows, setAdminKeys, setClock, tick, withCore, workerCall } from '../helpers';
@@ -152,8 +156,7 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     ]);
   });
 
-  it('the claim\'s deadline arms, clears, releases the holder at it (leg-timeout), and the run\'s open interact closes with the end', async () => {
-    const w = await register('vm-a');
+  it('the claim\'s deadline arms, clears, releases the holder at it (leg-timeout), and the run\'s open interact closes with the end', async () => {    const w = await register('vm-a');
     const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
     expect((await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' })).status).toBe(200); // max_duration 600
     expect(await rows<{ deadline_at: number | null }>('SELECT deadline_at FROM claims WHERE id = ?', c.claim_id)).toEqual([{ deadline_at: T0 + 600_000 }]);
@@ -179,6 +182,109 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     // A leg with no deadline leaves the claim unarmed; the next advance into one re-arms it.
     const second = await claimItem('vm-b', (await register('vm-b')).secret, { ticket_id: 'docs:A' });
     expect(second.status).toBe(409); // the backoff holds the ticket off (a failed attempt)
+  });
+
+  it('a subtype raise is an interact (R-BTN-160: the dots form the hierarchy): it supersedes the run\'s open one, is superseded, and closes at its run\'s end', async () => {
+    const w = await register('vm-a');
+    const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
+    expect((await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
+    expect((await beat('vm-a', w.secret, { session_url: LINK })).status).toBe(200);
+    // One open `interact` per run (R-BTN-195), whatever side of the dots the raises fall: each
+    // raise — subtype or plain — closes the open one before it records its own.
+    expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'interact', disposition: 'notify' })).status).toBe(200);
+    expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'interact.review', disposition: 'notify' })).status).toBe(200);
+    expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'interact', disposition: 'notify' })).status).toBe(200);
+    expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'interact.x', disposition: 'notify' })).status).toBe(200);
+    expect((await conditionRows()).map((x) => [x.type, x.outcome, x.closed_how])).toEqual([
+      ['interact', 'superseded', 'superseded'],
+      ['interact.review', 'superseded', 'superseded'], // the subtype raise closed the plain one…
+      ['interact', 'superseded', 'superseded'], // …and was closed by the plain raise after it
+      ['interact.x', 'open', null],
+    ]);
+    // The delivery runner's poll (type=interact) and Needs you carry the run's one open ask.
+    expect((await needsYou()).map((x) => x.type)).toEqual(['interact.x']);
+    expect((await readAs(reader, '/v1/repositories/docs/conditions?open=1&type=interact')).json.conditions).toEqual([
+      expect.objectContaining({ type: 'interact.x', url: LINK }),
+    ]);
+    // The run's end closes the open one, a subtype like any interact.
+    expect((await advance('vm-a', w.secret, c.claim_id, { reached: 'pr-open', leg: 'review' })).status).toBe(200);
+    expect((await conditionRows()).map((x) => x.outcome)).toEqual(['superseded', 'superseded', 'superseded', 'closed']);
+  });
+
+  it('§7.5 R-BTN-90: leg_finished re-arms the armed deadline once per run, and a still-pending leg-timeout release is withdrawn before the beat delivers it', async () => {
+    // The clock crosses 40 minutes while the run's finishing holds the claim: a lease wide
+    // enough that no alarm in that window reads the holder silent (the fake clock sits behind
+    // the real one on the Workers host, so a background alarm may tick at any moved instant).
+    const alive = { lease_timeout_s: 3600 };
+    const w = await register('vm-a', alive);
+    const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
+    const a = await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' });
+    expect(a.status).toBe(200);
+    expect(a.json.seq).toBe(1); // the advance names the run it started: its claim_legs.seq
+    expect(await rows<{ deadline_at: number | null }>('SELECT deadline_at FROM claims WHERE id = ?', c.claim_id)).toEqual([{ deadline_at: T0 + 600_000 }]);
+
+    // The script returned inside its deadline: the finish beat re-arms to now + 40 minutes,
+    // once per leg run — a repeated beat (a retry) and one naming no running run change nothing.
+    await setClock(T0 + 60_000);
+    expect((await beat('vm-a', w.secret, { ...alive,  leg_finished: 1 })).status).toBe(200);
+    expect(await rows<{ deadline_at: number | null }>('SELECT deadline_at FROM claims WHERE id = ?', c.claim_id)).toEqual([{ deadline_at: T0 + 60_000 + 40 * MIN }]);
+    expect((await beat('vm-a', w.secret, { ...alive,  leg_finished: 1 })).status).toBe(200);
+    expect((await beat('vm-a', w.secret, { ...alive,  leg_finished: 9 })).status).toBe(200);
+    expect(await rows<{ deadline_at: number | null }>('SELECT deadline_at FROM claims WHERE id = ?', c.claim_id)).toEqual([{ deadline_at: T0 + 60_000 + 40 * MIN }]);
+    expect(await rows<{ n: number }>('SELECT COUNT(*) AS n FROM claim_legs WHERE claim_id = ? AND seq = 1 AND deadline_rearmed_at IS NOT NULL', c.claim_id)).toEqual([{ n: 1 }]);
+
+    // The original instant passes while the close still runs (the runner beating on): no
+    // release — the run finished inside its own clock, and finishing is not the end.
+    await setClock(T0 + 601_000);
+    await tick();
+    expect((await rows(`SELECT 1 FROM events WHERE kind = 'leg-timeout'`)).length).toBe(0);
+    expect((await beat('vm-a', w.secret, { ...alive, })).json.messages).toEqual([]);
+
+    // The re-armed instant passes the same way: the release the alarm queues is still pending
+    // when the run's (late, retried) finish beat lands — withdrawn before that beat delivers
+    // anything, so the finishing run is never failed at an instant it beat.
+    await setClock(T0 + 60_000 + 40 * MIN - 500);
+    expect((await beat('vm-a', w.secret, { ...alive, })).status).toBe(200); // alive at the instant
+    await setClock(T0 + 60_000 + 40 * MIN + 1_000);
+    await tick();
+    const beat1 = await beat('vm-a', w.secret, { ...alive,  leg_finished: 1 });
+    expect(beat1.status).toBe(200);
+    expect(beat1.json.messages).toEqual([]); // withdrawn first, delivered never
+    expect(await rows<{ status: string; withdrawn: string | null }>(`SELECT status, withdrawn FROM messages WHERE kind = 'release' AND json_extract(payload_json, '$.ticket_id') = 'docs:A'`))
+      .toEqual([{ status: 'expired', withdrawn: 'leg-finished' }]);
+    const evs = await rows<{ d: string }>(`SELECT detail_json AS d FROM events WHERE kind = 'leg-timeout' AND claim_id = ? ORDER BY seq`, c.claim_id);
+    expect(evs.map((e) => (JSON.parse(e.d) as { withdrawn?: boolean }).withdrawn === true)).toEqual([false, true]);
+    expect(await rows<{ deadline_at: number | null }>('SELECT deadline_at FROM claims WHERE id = ?', c.claim_id)).toEqual([{ deadline_at: null }]); // spent, not re-armed
+
+    // The claim lives on: the advance that finishes the run starts the next leg free of the
+    // spent release — nothing stops it later — and the undeadlined review leaves the claim unarmed.
+    expect((await advance('vm-a', w.secret, c.claim_id, { reached: 'pr-open', leg: 'review' })).status).toBe(200);
+    expect((await beat('vm-a', w.secret, { ...alive, })).json.messages).toEqual([]);
+    expect(await rows<{ deadline_at: number | null }>('SELECT deadline_at FROM claims WHERE id = ?', c.claim_id)).toEqual([{ deadline_at: null }]);
+  });
+
+  it('§7.5 R-BTN-90: a leg-timeout release already delivered stands — leg_finished withdraws only what is still pending', async () => {
+    const alive = { lease_timeout_s: 3600 }; // as above: the clock crosses minutes at a leap
+    expect((await git.add('B').post()).status).toBe(200);
+    const w = await register('vm-a', alive);
+    const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:B' });
+    expect((await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
+    await setClock(T0 + 590_000);
+    expect((await beat('vm-a', w.secret, { ...alive, })).status).toBe(200); // alive at the instant
+    await setClock(T0 + 601_000);
+    await tick(); // the alarm queues the release
+    // A beat without the finish word delivers it; only then does the script return.
+    const beat1 = await beat('vm-a', w.secret, { ...alive, });
+    expect(beat1.json.messages).toEqual([expect.objectContaining({ kind: 'release', payload: { ticket_id: 'docs:B', reason: 'leg-timeout', deadline_at: T0 + 600_000 } })]);
+    const beat2 = await beat('vm-a', w.secret, { ...alive,  leg_finished: 1 });
+    expect(beat2.json.messages).toEqual([expect.objectContaining({ kind: 'release' })]); // still delivered, resent
+    expect(await rows<{ status: string; withdrawn: string | null }>(`SELECT status, withdrawn FROM messages WHERE kind = 'release' AND json_extract(payload_json, '$.ticket_id') = 'docs:B'`))
+      .toEqual([{ status: 'delivered', withdrawn: null }]);
+    expect(await rows<{ deadline_at: number | null }>('SELECT deadline_at FROM claims WHERE id = ?', c.claim_id)).toEqual([{ deadline_at: null }]);
+    expect((await rows(`SELECT 1 FROM events WHERE kind = 'leg-timeout' AND json_extract(detail_json, '$.withdrawn') = 1`)).length).toBe(0);
+    // The delivered release ends the claim as §6.5 says: a failed attempt.
+    expect((await endClaim('vm-a', w.secret, c.claim_id, { end_reason: 'released:leg-timeout', reached: 'filed', next: 'implement' })).status).toBe(200);
+    expect(await rows<{ failed_attempt: number }>('SELECT failed_attempt FROM claims WHERE id = ?', c.claim_id)).toEqual([{ failed_attempt: 1 }]);
   });
 
   it('past twenty open conditions on a claim the report is refused quota', async () => {
