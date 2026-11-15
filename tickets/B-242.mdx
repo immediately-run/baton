@@ -1,0 +1,49 @@
+---
+title: B-242 — ETag on /v1/ui/state, and the dashboard polls only while visible
+id: B-242
+project: baton
+status: available
+updated: 2026-11-15
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: A write-version ETag makes an unchanged poll cost about one row; hidden tabs stop polling (rows_read)
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**What:** an unchanged dashboard poll should cost ~nothing.
+
+- A `state_version` counter bumped inside `store.transaction` on any write; `/v1/ui/state` serves it as an ETag and answers 304 to a matching `If-None-Match`.
+- Clock-dependent fields (alive, stalled, reap_at, the time windows) must still refresh: include a coarse time bucket in the ETag, or have the UI recompute them.
+- The UI polls only while visible (`document.visibilityState`), and backs off when unchanged.
+
+**Target:** an unchanged poll ≈ 1 row.
+
+**Why:** on 2026-11-14 production exceeded Cloudflare's free-tier Durable Objects limit of
+5,000,000 `rows_read`/day at 21:41Z; every runner call returned 500 until the 00:00Z reset.
+Measured on a production-sized local state (180 tickets, 600 claims, ~3k events) with
+workerd's `SqlStorageCursor.rowsRead`: `GET /v1/ui/state` ≈ 14.4k rows per 10 s poll
+(≈ 3·events + 2–5k), recommendations ≈ 3.7k, claim ≈ 3.8–4k, alarm ≈ 0.8–1.3k per minute,
+`POST /v1/sync/board` 4–5k rows over ~2.5k statements. This ticket is one of B-235–B-243,
+the owner's 2026-11-15 plan to bound what each read costs.
+
+**Done when:** the named calls' rows_read, measured the same way in a test (cloudflare host),
+is at or below the target, `EXPLAIN QUERY PLAN` shows the intended index where one is named,
+and behaviour is unchanged (the existing scenarios pass).
+
+### Trust
+
+Input: the `If-None-Match` request header on `GET /v1/ui/state`. Anyone allowed to read the state may send it; it is only compared with the current version, and a mismatch serves the full state as today.
+
+### Invariants
+
+- The dashboard never shows stale clock-dependent state (alive, stalled, reap_at): the ETag carries a coarse time bucket.
+
+## Status
+
+_filed 2026-11-15._
