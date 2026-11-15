@@ -72,7 +72,8 @@ beforeEach(async () => {
   await setClock(T0);
 });
 
-describe('B-237 the lazy reading answers as gating every candidate does', () => {
+// Each case reads every limit three times over 130 tickets: more than the default 5 s on a busy host.
+describe('B-237 the lazy reading answers as gating every candidate does', { timeout: 60_000 }, () => {
   let git: Git;
   let w: { id: number; secret: string };
 
