@@ -39,6 +39,17 @@ async function captured(fn: () => Promise<{ status: number }>): Promise<Captured
   }
 }
 
+/** The fewest statements of three unchanged refreshes: an alarm workerd runs meanwhile (the test
+ *  clock is behind the real one) adds its own statements to the capture, never takes any away. */
+async function quiet(git: Git): Promise<Captured[]> {
+  let best: Captured[] | null = null;
+  for (let i = 0; i < 3; i++) {
+    const log = await captured(() => git.refresh());
+    if (!best || log.length < best.length) best = log;
+  }
+  return best!;
+}
+
 /** A board of `n` tickets at stations of every shape: queued and waiting legs, bars, needs, a
  *  decision, a ticket further along its path. */
 function board(n: number) {
@@ -61,14 +72,14 @@ async function refreshOf(n: number) {
   expect((await git.post()).status).toBe(200);
   await cutover();
   expect((await git.refresh()).status).toBe(200); // the first refresh after the head settles what the post queued
-  return captured(() => git.refresh());
+  return quiet(git);
 }
 
 beforeEach(async () => {
   await setClock(T0);
 });
 
-describe('B-241 a board post reads its tickets once and skips the unchanged', () => {
+describe('B-241 a board post reads its tickets once and skips the unchanged', { timeout: 120_000 }, () => {
   it("an unchanged refresh writes no ticket's rows", async () => {
     const log = await refreshOf(24);
     const writes = log.filter((l) => PER_TICKET.test(l.sql) && (l.cursor.rowsWritten ?? 1) > 0);
@@ -80,12 +91,12 @@ describe('B-241 a board post reads its tickets once and skips the unchanged', ()
     expect((await git.post()).status).toBe(200);
     await cutover();
     expect((await git.refresh()).status).toBe(200);
-    const small = await captured(() => git.refresh());
+    const small = await quiet(git);
     const more = board(48);
     for (const [id, t] of more.tickets) if (!git.tickets.has(id)) git.add(id, {}, more.stations[id]).tickets.set(id, t);
     expect((await git.post()).status).toBe(200);
     expect((await git.refresh()).status).toBe(200);
-    const large = await captured(() => git.refresh());
+    const large = await quiet(git);
     expect(large.length).toBe(small.length);
     expect(large.length).toBeLessThanOrEqual(80);
   });

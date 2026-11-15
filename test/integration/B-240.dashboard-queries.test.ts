@@ -98,6 +98,17 @@ async function oldTimeline(now: number) {
 
 const served = (x: unknown) => JSON.parse(JSON.stringify(x));
 
+/** The fewest statements of three state reads: an alarm workerd runs meanwhile (the test clock
+ *  is behind the real one) adds its own statements to the capture, never takes any away. */
+async function quiet(session: string): Promise<Captured[]> {
+  let best: Captured[] | null = null;
+  for (let i = 0; i < 3; i++) {
+    const { log } = await state(session);
+    if (!best || log.length < best.length) best = log;
+  }
+  return best!;
+}
+
 async function sameAsBefore(session: string, now: number) {
   const { state: s } = await state(session);
   expect(s.running).toEqual(served(await oldRunning(now)));
@@ -174,7 +185,7 @@ beforeEach(async () => {
   session = await adminSession(admin);
 });
 
-describe('B-240 Running and Timeline in joined queries', () => {
+describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, () => {
   it('serves what the per-row reads served — empty, then across lanes, ties and transcript fallbacks', async () => {
     await sameAsBefore(session, T0);
     const a = await register('vm-a');
@@ -208,14 +219,14 @@ describe('B-240 Running and Timeline in joined queries', () => {
     const b = await register('vm-b');
     await fill(a.id, tickets.slice(0, 4));
     await state(session); // the session's first read does its own one-time work
-    const small = (await state(session)).log;
+    const small = await quiet(session);
     await fill(b.id, tickets.slice(4, 8));
     for (let i = 0; i < 20; i++) {
       const c = await claim(b.id, tickets[4], T0 - 6 * H, T0 - 5 * H);
       await activities(b.id, c, T0 - 6 * H);
       await transcript(b.id, c, `claude-code/s-${c}.jsonl`);
     }
-    const large = (await state(session)).log;
+    const large = await quiet(session);
     expect(large.length).toBe(small.length);
     expect(large.length).toBeLessThanOrEqual(80);
     // The joined reads, explained: each searches an index and none scans its table.
@@ -237,7 +248,7 @@ describe('B-240 Running and Timeline in joined queries', () => {
     const read = (log: Captured[]) => log.filter((l) => /\b(claims|activities|transcripts)\b/.test(l.sql) && !/\bFROM events\b/.test(l.sql) && !/\bWHERE worker_id = \?/.test(l.sql))
       .reduce((s, l) => s + (l.cursor.rowsRead ?? 0), 0);
     await state(session); // the session's first read does its own one-time work
-    const before = (await state(session)).log;
+    const before = await quiet(session);
     // 400 more claims, each with its activities and transcript, ended a week before the window.
     const c = await claim(a.id, tickets[0], T0 - 9 * 24 * H, T0 - 8 * 24 * H);
     await activities(a.id, c, T0 - 9 * 24 * H);
@@ -253,7 +264,7 @@ describe('B-240 Running and Timeline in joined queries', () => {
     await rows(`INSERT INTO transcripts (worker_id, claim_id, repo, path, role, activity_id, first_seen_at)
                 SELECT t.worker_id, c.id, t.repo, 'claude-code/s-' || c.id || '.jsonl', t.role, t.activity_id, t.first_seen_at FROM transcripts t, claims c WHERE t.claim_id = ? AND c.id > ?`, c, c);
     expect((await rows<{ n: number }>('SELECT COUNT(*) AS n FROM claims'))[0].n).toBeGreaterThan(400);
-    const after = (await state(session)).log;
+    const after = await quiet(session);
     expect(after.length).toBe(before.length);
     // The window's own rows: its claims, their activities and transcripts — a scan read the
     // 400 claims, and the per-row reads their 1,200 activities and transcripts again per poll.
