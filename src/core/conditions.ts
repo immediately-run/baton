@@ -1,7 +1,8 @@
 // conditions.ts — the raised conditions Baton holds (BATON_SPEC §7.1 R-BTN-160, §7.1 R-BTN-195,
 // §7.3 R-BTN-163's list; B-234): the report a runner sends for each raise, the Needs-you and
-// list reads a delivery runner polls, and the one close this slice owns — an open `interact` of
-// a run closing `superseded` when the same run raises again, and `closed` when its run ends.
+// list reads a delivery runner polls, and the closes this slice owns — an open `interact` of
+// a run closing `superseded` when the same run raises again, `closed` when its run ends, and
+// a retired repository's still-open conditions closing with it (R-BTN-47, B-173).
 // Everything runs inside the caller's transaction, as questions.ts does.
 //
 // Not built here, by design (B-234 is R-BTN-195's slice): handler tickets and bindings
@@ -170,6 +171,26 @@ export class Conditions {
   /** Every condition of one run that is still open — the hook's answer, for the caller's log. */
   openOfRun(runId: string): number {
     return this.rows<{ n: number }>(`SELECT COUNT(*) AS n FROM conditions WHERE run_id = ? AND outcome = 'open'`, runId)[0].n;
+  }
+
+  /**
+   * R-BTN-47 (B-173): a retired repository's still-open conditions close with it — the last
+   * thing that could close them. The retirement's reaps have ended its claims first, so their
+   * open `interact`s are closed already (`runEnded`); what is still open is a `suspend` above
+   * all, which no run's end closes and nothing waits on yet (R-BTN-162 unbuilt) and would
+   * otherwise sit on the Needs-you list forever. Called from the retiring transaction, after
+   * the reaps.
+   */
+  retired(repository: string): void {
+    const now = this.c.now();
+    const open = this.rows<{ id: number; ticket_id: string; claim_id: number; type: string }>(
+      `SELECT id, ticket_id, claim_id, type FROM conditions WHERE repository_id = ? AND outcome = 'open'`, repository);
+    if (!open.length) return;
+    this.exec(`UPDATE conditions SET outcome = 'closed', closed_at = ?, closed_how = 'retired'
+               WHERE repository_id = ? AND outcome = 'open'`, now, repository);
+    for (const o of open) {
+      logEvent(this.c.store, now, 'condition', 'baton', { ticket: o.ticket_id, condition: o.id, type: o.type, closed: 'retired' }, o.ticket_id, o.claim_id, repository);
+    }
   }
 
   // ── the reads (R-BTN-163: Needs you, and the list a delivery runner polls) ───────────────

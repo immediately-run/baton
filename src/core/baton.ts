@@ -116,7 +116,12 @@ export class BatonCore {
     // reaches the claims, built later, through the closure.
     this.scope = new Scope({ store, now: () => this.now(), hold: (ticket, claimId) => this.claims.holdForScope(ticket, claimId) });
     this.webhooks = new Webhooks({ store, now: () => this.now(), scope: this.scope });
-    const want = (wf: Workflow) => this.pendingDispatch.set(`${wf.repository}:${wf.kind}`, wf);
+    // R-BTN-47 (B-173): a want is recorded only for a live repository — the one predicate
+    // (Registry.live) every rule that counts registered repositories reads.
+    const want = (wf: Workflow) => {
+      if (!this.registry.live(wf.repository)) return;
+      this.pendingDispatch.set(`${wf.repository}:${wf.kind}`, wf);
+    };
     // R-BTN-75: the blocks are written with their causes; `fits` is the claim gates' (R-BTN-77).
     // R-BTN-80, R-BTN-81: a decision's notices are queued and closed with it, and its history row written.
     this.notices = new Notices({ store, now: () => this.now() });
@@ -141,7 +146,8 @@ export class BatonCore {
     this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks, deprecated: this.deprecated });
     this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(), origin: ports.config.BATON_ORIGIN,
       dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices,
-      policies: this.policies, humanBreakGlass: () => this.humanBreakGlass() });
+      policies: this.policies, humanBreakGlass: () => this.humanBreakGlass(), reapForRetire: (repository, actor) => this.claims.retireReaps(repository, actor),
+      conditionsForRetire: (repository) => this.conditions.retired(repository) });
     this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo), history: this.history });
     // R-BTN-116: a person leg's question and answer. Its arrival moves the ticket as a claim's
     // does — the queues' membership follows (R-BTN-79), the blocks are re-evaluated (R-BTN-75),
@@ -241,24 +247,25 @@ export class BatonCore {
   }
 
   /** §10.3: a repository's sync or mirror workflow, on its default branch. A repository with no
-   *  mirror has nothing to dispatch for it. A dispatch the forge refuses is logged with its reason
-   *  (R-BTN-94): the want it answers stands until a post answers it, so a refusal costs latency,
-   *  never correctness. */
+   *  mirror has nothing to dispatch for it; a retired one has nothing at all (R-BTN-47, B-173). A
+   *  dispatch the forge refuses is logged with its reason (R-BTN-94): the want it answers stands
+   *  until a post answers it, so a refusal costs latency, never correctness. */
   private async sendDispatch(wf: Workflow): Promise<unknown> {
-    const repo = this.registry.get(wf.repository);
+    const repo = this.registry.live(wf.repository);
+    if (!repo) return false;
     let target: DispatchTarget | null = null;
     if (wf.kind === 'unblocked') {
       // R-BTN-77: one input, `tickets`, JSON — every id and ref in it passed its rule (§10.4). Only
       // the GitHub App's dispatch is built here; GitLab's and Gitea's adapters are R3-1263's.
       const trigger = this.sql<{ t: string | null }>('SELECT unblocked_trigger AS t FROM repositories WHERE id = ?', wf.repository)[0]?.t;
       const t = trigger ? (JSON.parse(trigger) as { kind: string; workflow?: string }) : null;
-      if (!repo || t?.kind !== 'github-app' || !t.workflow) return false;
+      if (t?.kind !== 'github-app' || !t.workflow) return false;
       // R-BTN-94 (B-168): Baton reads no workflow file — one declaring no manual dispatch, or no
       // `tickets` input, is the forge's to refuse at dispatch, and the refusal is logged below.
       target = { github: repo.github, workflow: t.workflow.slice(t.workflow.lastIndexOf('/') + 1), ref: repo.default_branch, inputs: { tickets: JSON.stringify(wf.tickets ?? []) } };
     } else {
-      const path = wf.kind === 'sync' ? repo?.sync_workflow : repo?.mirror_workflow;
-      if (!repo || !path) return false;
+      const path = wf.kind === 'sync' ? repo.sync_workflow : repo.mirror_workflow;
+      if (!path) return false;
       target = { github: repo.github, workflow: path.slice(path.lastIndexOf('/') + 1), ref: repo.default_branch };
     }
     try {
@@ -600,7 +607,8 @@ export class BatonCore {
           throw new BatonError('invalid-params', 'a malformed path segment');
         }
         const repo = checkRepositoryId(repoId);
-        if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
+        // R-BTN-47 (B-173): a retired repository is `not-found`, as one never registered.
+        if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
         if (!req.headers.has('X-Baton-Signed') && !req.headers.has('X-Baton-Api-Key')) {
           throw new BatonError('unauthenticated', 'sign with an owner key of the repository or a human-only key, or send its API key');
         }
@@ -798,7 +806,8 @@ export class BatonCore {
         throw new BatonError('invalid-params', 'a malformed path segment');
       }
       const repo = checkRepositoryId(segment);
-      if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
+      // R-BTN-47 (B-173): a retired repository is `not-found`, as one never registered.
+      if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
       // A grant on the repository, whatever the key (round 1, 1-A-0): a bearer or seed key has no
       // grant, so it reads no repository's stats — the item's "Do not".
       this.workers.credential(cred);
@@ -824,7 +833,8 @@ export class BatonCore {
         throw new BatonError('invalid-params', 'a malformed path segment');
       }
       const repo = checkRepositoryId(segment);
-      if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
+      // R-BTN-47 (B-173): a retired repository is `not-found`, as one never registered.
+      if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
       this.workers.credential(cred);
       if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
         throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
@@ -847,9 +857,10 @@ export class BatonCore {
       }
       if (m === 'GET' && p === '/v1/runner/mode') {
         await this.workers.authWorker(cred, secret);
-        // §11: `?repository=` — each repository cuts over on its own (R-BTN-28).
+        // §11: `?repository=` — each repository cuts over on its own (R-BTN-28). R-BTN-47
+        // (B-173): a retired one is as one never registered.
         const repo = checkRepositoryId(url.searchParams.get('repository'));
-        if (!this.registry.get(repo)) throw new BatonError('invalid-params', 'repository: must be a registered repository id');
+        if (!this.registry.live(repo)) throw new BatonError('invalid-params', 'repository: must be a registered repository id');
         return json(this.workers.mode(repo));
       }
       if (m === 'GET' && p === '/v1/runner/branch-holder') {
@@ -1085,6 +1096,9 @@ export class BatonCore {
     const o = /^\/v1\/owner\/([^/]+)\/(.+)$/.exec(p);
     if (!o) throw new BatonError('not-found', `no route ${m} ${p}`);
     const repo = checkRepositoryId(seg(o[1]));
+    // R-BTN-47 (B-173): one check for every route naming a repository — a retired one is
+    // `not-found`, as one never registered, whoever asks.
+    if (!this.registry.live(repo)) throw new BatonError('not-found', `${repo} is not registered`);
     // An administrator's key is no owner's, even one added as an owner before it was listed (R-BTN-57).
     if (admins.has(fp)) throw new BatonError('forbidden', 'an administrator key is never an owner key (R-BTN-57)');
     // Owning one repository confers nothing on another (R-BTN-58).
@@ -1221,7 +1235,9 @@ export class BatonCore {
       }
     };
     const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? show ?? boardRead ?? policyRead ?? runs)![1]));
-    if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
+    // R-BTN-47 (B-173): one check — a retired repository is `not-found` here as one never
+    // registered.
+    if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
     let cred = req.headers.get('X-Baton-Credential');
     let role: 'admin' | 'owner' | 'worker' = 'worker';
     if (req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key')) {
@@ -1566,7 +1582,7 @@ export class BatonCore {
     // the witness: while the setting was off nothing was raised, and opting in must still
     // notice what stands; an unreadable event says nothing — the event fires.
     const seen = new Set<string>();
-    for (const prior of this.sql<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'unsigned-control' AND repository_id = ? AND at > ? ORDER BY seq DESC LIMIT 100`, r, at - 7 * 86_400_000)) {
+    for (const prior of this.sql<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'unsigned-control' AND repository_id = ? AND at > ? ORDER BY at DESC, seq DESC LIMIT 100`, r, at - 7 * 86_400_000)) {
       try {
         for (const u of (JSON.parse(prior.detail_json) as { changes?: { path: string; commits: string[] }[] }).changes ?? []) seen.add(`${u.path}\u0000${u.commits.join(',')}`);
       } catch {
@@ -1580,10 +1596,11 @@ export class BatonCore {
   }
 
   /** §14 Needs you, B-127: the unsigned control changes of the last 7 days, newest first, of
-   *  repositories that require their control inputs signed. */
+   *  repositories that require their control inputs signed — by `at`, then `seq`, the order
+   *  `events_by_kind_at` reads in (B-235), so the window reads only its rows. */
   unsignedControlView(now: number) {
     return this.sql<{ repository_id: string; at: number; detail_json: string }>(
-      `SELECT repository_id, at, detail_json FROM events WHERE kind = 'unsigned-control' AND at > ? ORDER BY seq DESC LIMIT 100`, now - 7 * 86_400_000)
+      `SELECT repository_id, at, detail_json FROM events WHERE kind = 'unsigned-control' AND at > ? ORDER BY at DESC, seq DESC LIMIT 100`, now - 7 * 86_400_000)
       .map((row) => {
         let detail: Record<string, unknown> = {};
         try {

@@ -1,4 +1,4 @@
--- 0049_instance_settings.sql — B-4 (BATON_SPEC §13.1, R-BTN-113, R-BTN-57): the administrators'
+-- 0051_instance_settings.sql — B-4 (BATON_SPEC §13.1, R-BTN-113, R-BTN-57): the administrators'
 -- instance settings, one row, behind PUT /v1/admin/settings — `link_hosts` (R-BTN-112's hosts,
 -- whose links a view may draw; default empty) and `session_hosts` (R-BTN-113's allowlist, whose
 -- session links the instance keeps) as JSON lists, and `check_app_id` (§12.7, R-BTN-115: the
