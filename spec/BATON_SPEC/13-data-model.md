@@ -197,7 +197,12 @@ ends (R-BTN-126); `closed_unpurged`; `tickets_blocked`, `tickets_by_parent`, `ti
 `serves_by_resource`;
 `readings_lapse`; `timers_due` (`due_at` where not fired); `outbox_due`
 `(credential_id, state, not_before)` and `outbox_alarm` `(state, not_before)`; conditions open
-by repository and by handler; `outbox_pending` `(repository_id, ticket_id, id)` where not `confirmed` or `dropped`; `history_by_ticket`; `events_by_repository` `(repository_id, seq)`.
+by repository and by handler; `outbox_pending` `(repository_id, ticket_id, id)` where not `confirmed` or `dropped`; `history_by_ticket`; `events_by_repository` `(repository_id, seq)`;
+`events_by_kind_at` `(kind, at)`, the order the dashboard's event windows (§11.4; the
+`needs_you` and `discrepancies` of `GET /v1/ui/state`) read in, by `at` then `seq`, so a window
+reads its own rows and not the log; `events_discrepancies`
+and `events_unsigned_control` (`at` where `kind` is theirs). A rebuild of `events` recreates every
+index on it.
 
 **Where the alarm's instants live** (§2 owns what each does): `ticket_timers.due_at`;
 `ticket_next_legs.not_before`; `ticket_blocks.until` of `retry` rows; `claims.deadline_at`;
