@@ -3,11 +3,17 @@
 // `baton` CLI changes them, R-BTN-66), with the owner's actions (status request, release,
 // force-reap, accept a held history). At /login it trades the one-time token in
 // the URL's fragment for a session (R-BTN-57, R-BTN-16) and goes to /. It polls
-// GET /v1/ui/state every 10 seconds and renders with textContent only (§10.4): no markup is
-// ever built from server text. B-142: the model tables' views are gone — an unavailable
+// GET /v1/ui/state every 10 seconds while the page is visible — backing off to 60 seconds while
+// the answer is unchanged, and paused while the page is hidden (B-242) — and renders with
+// textContent only (§10.4): no markup is ever built from server text. B-142: the model tables' views are gone — an unavailable
 // provider is a reading and a peak preference a course rule (§6.3, §6.10), not a dashboard row.
 
+/** B-242: the poll's interval — 10 s after an answer that changed, doubling to at most 60 s
+ *  while the answers are the same, back to 10 s on a change or when the page is shown again. A
+ *  hidden page does not poll at all: each poll of a production-sized state reads thousands of
+ *  rows (Cloudflare's free tier allows 5,000,000 a day). */
 const POLL_MS = 10_000;
+const POLL_MAX_MS = 60_000;
 let state = null;
 
 /** An element with text, attributes and children; text always goes through textContent. */
@@ -520,8 +526,14 @@ function render() {
 
 let latest = 0;
 
+/** The last answer drawn, without the instants that only say when it was read (`server_time`,
+ *  the timeline's window): what says whether the next one changed. */
+let lastSeen = null;
+const sameness = (s) => JSON.stringify({ ...s, server_time: null, timeline: s.timeline && { ...s.timeline, from: null, to: null } });
+
 /** One poll, bounded by the poll interval. Only the newest poll's answer is drawn, so a slow
- *  response can never overwrite a newer one. */
+ *  response can never overwrite a newer one. Returns whether the answer changed — any field,
+ *  the clock-dependent ones (alive, stalled, reap_at) included, but not the read's own instants. */
 async function poll() {
   const mine = ++latest;
   try {
@@ -529,22 +541,63 @@ async function poll() {
     if (res.status === 401) {
       // A session question, not a load failure: say what to do and keep polling — the page
       // recovers on its own once a session cookie lands (R-BTN-57's one-time link).
-      if (mine !== latest) return;
+      if (mine !== latest) return false;
       document.getElementById('head').textContent =
         'This dashboard needs a session. Cloudflare Access alone does not open one while administrator keys are configured.';
       document.getElementById('status').textContent =
         'Run `baton admin open` and open its one-time link; this page recovers by itself.';
-      return;
+      return false;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const next = await res.json();
-    if (mine !== latest) return;
+    if (mine !== latest) return false;
+    const seen = sameness(next);
+    const changed = seen !== lastSeen;
+    lastSeen = seen;
     state = next;
     render();
+    return changed;
   } catch (e) {
-    if (mine !== latest) return;
+    if (mine !== latest) return false;
     document.getElementById('status').textContent = `Could not load the state: ${e.message}. Retrying.`;
+    return false;
   }
+}
+
+let delay = POLL_MS;
+let timer = null;
+let polling = false;
+
+/** The next poll, `delay` from now — only while the page is visible (B-242). */
+function schedule() {
+  clearTimeout(timer);
+  timer = null;
+  if (document.visibilityState === 'visible') timer = setTimeout(tick, delay);
+}
+
+/** Poll, then set the next interval: back to the fastest on a change, else doubled up to
+ *  POLL_MAX_MS. */
+async function tick() {
+  timer = null;
+  if (polling || document.visibilityState !== 'visible') return;
+  polling = true;
+  try {
+    delay = (await poll()) ? POLL_MS : Math.min(delay * 2, POLL_MAX_MS);
+  } finally {
+    polling = false;
+    schedule();
+  }
+}
+
+/** Hidden: no poll is pending. Shown again: poll now, at the fastest interval. */
+function onVisibility() {
+  if (document.visibilityState !== 'visible') {
+    clearTimeout(timer);
+    timer = null;
+    return;
+  }
+  delay = POLL_MS;
+  if (!polling) tick();
 }
 
 /** /login#<token>: the one-time link (R-BTN-57). The token is in the fragment, so it never
@@ -568,6 +621,6 @@ if (location.pathname === '/login') {
   });
 } else {
   document.getElementById('tier').addEventListener('change', () => state && renderReady());
-  poll();
-  setInterval(poll, POLL_MS);
+  document.addEventListener('visibilitychange', onVisibility);
+  tick();
 }

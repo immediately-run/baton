@@ -47,3 +47,5 @@ Input: the `If-None-Match` request header on `GET /v1/ui/state`. Anyone allowed 
 ## Status
 
 _filed 2026-11-15._
+
+_2026-11-15: the UI half — the dashboard polls only while visible and backs off from 10 to 60 seconds while the answers are unchanged (test/unit/dashboard-poll.test.ts). The `state_version` ETag waits on B-237's counter._
