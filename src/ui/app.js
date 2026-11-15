@@ -292,6 +292,15 @@ function showActivity(a, claim) {
   box.hidden = false;
 }
 
+/** The clicked claim's leg run (§11.4, R-BTN-113): its times and its session link. */
+function showLegRun(claim, run) {
+  const box = document.getElementById('timeline-detail');
+  box.replaceChildren(el('div', { text: `${run.leg} · ${claim.ticket_id}` }),
+    el('div', { text: `${fmtTime(run.started_at)} → ${run.ended_at != null ? fmtTime(run.ended_at) : 'running'}`, cls: 'muted' }));
+  if (run.session_url) box.append(el('div', {}, sessionLink('session', run.session_url)));
+  box.hidden = false;
+}
+
 function renderTimeline() {
   const box = document.getElementById('timeline');
   box.replaceChildren();
@@ -307,6 +316,16 @@ function renderTimeline() {
       bar.style.left = pct(c.claimed_at);
       bar.style.width = width(c.claimed_at, c.ended_at);
       track.append(bar);
+      // §11.4, R-BTN-113 (B-4): a leg run that carried its session's link is a marker on the
+      // claim's lower band; its detail shows the link.
+      for (const run of c.runs ?? []) {
+        if (!run.session_url) continue;
+        const seg = el('button', { cls: 'legseg', attrs: { type: 'button', 'aria-label': `${run.leg} session`, title: `${run.leg}: session link` } });
+        seg.style.left = pct(run.started_at);
+        seg.style.width = width(run.started_at, run.ended_at);
+        seg.addEventListener('click', () => showLegRun(c, run));
+        track.append(seg);
+      }
       // A review round's reviewers are nested: drawn on a lower band beneath their round.
       for (const a of c.activities) {
         const cls = ['seg', `k-${KIND_GROUP[a.kind] ?? 'other'}`, a.parent_id ? 'child' : '', a.outcome === 'failed' ? 'failed' : ''].filter(Boolean).join(' ');
