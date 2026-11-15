@@ -67,6 +67,12 @@
 //   baton board -i KEY REPO                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
 //   baton run [--home <checkout>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
 //             [--harness opencode|claude-code] [--verbose]   (R-BTN-72: the worker loop)
+//   baton leg raise <type> --subject TEXT [--body <file>] [--restarts <json>] [--default <id>]
+//                [--severity critical|high|normal]   (R-BTN-160, R-BTN-195; B-234)
+//                 — raise a condition from the leg this runs in, on its channel: the runner
+//                   checks it and answers on the channel; `interact` asks a person into this
+//                   leg's agent session and returns at once; the subject and body never leave
+//                   the runner's log
 //   baton leg replay <repository>:<ticket> <leg> [--run <n> | --run-id <id>] [-i KEY]
 //                [--against <sha>] [--accept-moved] [--home DIR] [--env NAME]… [--report FILE]
 //                 — re-run one recorded leg run without a claim, writing nothing to Baton
@@ -766,6 +772,9 @@ async function testCourse(argv) {
     input.legScripts ? `${input.legScripts.length} leg script(s)` : 'no legs/',
   ];
   process.stdout.write(`baton test-course: ${said.join('; ')}\n`);
+  // R-BTN-111 (B-234): the signature — the conditions the course's legs may raise, its own
+  // declared types and the standard ones; `baton course test` prints it.
+  for (const line of kit.signatureLines(input)) process.stdout.write(`${line}\n`);
   for (const v of violations) process.stdout.write(`✗ ${v.rule}: ${v.message}\n`);
   process.stdout.write(violations.length ? `${violations.length} violation(s)\n` : '✓ no violations\n');
   return violations.length ? 1 : 0;
@@ -1051,6 +1060,12 @@ export async function main(argv) {
     // runner-side bundle, read with the owner's or administrator's key the flags name.
     const { replayMain } = await import('../scripts/baton-run.mjs');
     return replayMain(argv.slice(2));
+  }
+  if (argv[0] === 'leg' && argv[1] === 'raise') {
+    // R-BTN-106, R-BTN-160, R-BTN-195 (B-234): raise a condition from the leg this command
+    // runs in, on its channel — the runner checks it, answers it, and reports what passes.
+    const { raiseMain } = await import('../scripts/baton-leg.mjs');
+    return raiseMain(argv.slice(2));
   }
   if (argv[0] === 'repo' && (argv[1] === 'sync' || argv[1] === 'init' || argv[1] === 'migrate-markers')) {
     // §2f, R-BTN-127's names: the defaults are TypeScript under src/defaults, bundled the same way.

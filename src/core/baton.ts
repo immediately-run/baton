@@ -10,6 +10,7 @@ import { BatonError, errorResponse, json } from './http';
 import { checkPayload, DEFAULT_COURSE, retiredBoardFields, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
+import { Conditions } from './conditions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
 import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
@@ -72,6 +73,9 @@ export class BatonCore {
   readonly provenance: Provenance;
   /** §6.4 (R-BTN-116): the person legs' questions, their answers and their expiry. */
   readonly questions: Questions;
+  /** §7.1 (R-BTN-160, R-BTN-195; B-234): the raised conditions — the report route, the
+   *  Needs-you list, and the run's end closing its open `interact`. */
+  readonly conditions: Conditions;
   /** §12.8 (B-145): the repository policies, their floors, their guarantees. */
   readonly policies: Policies;
   /** B-134: the leg scope audit — the claim answer's scope, the findings both halves raise. */
@@ -139,14 +143,21 @@ export class BatonCore {
       queued: (ticket) => this.queues.touch(ticket), reevaluate: (ticket) => this.blocks.write([ticket]), isHeld: (ticket) => this.blocks.isHeld(ticket),
       linkBases: (ticket) => this.blocks.linkBases(ticket), answersFrom: (repo) => this.policies.current(repo)?.policy.inputs.answers ?? 'git',
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
+    // B-234 (R-BTN-160, R-BTN-195): the raised conditions — a course's own vocabulary decides a
+    // disposition (never the runner's word), a `suspend` url keeps only under R-BTN-92's link
+    // bases (as a question's), and the Needs-you and list reads a delivery runner polls.
+    this.conditions = new Conditions({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course), history: this.history,
+      linkBases: (ticket) => this.blocks.linkBases(ticket) });
     this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
-      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated });
+      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated,
+      conditions: this.conditions });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.workers = new WorkerApi({ store, config: ports.config, now: () => this.now(), fenced: (w, inc, id) => this.claims.fenced(w, inc, id),
+      legFinished: (w, id, seq) => this.claims.legFinished(w, id, seq),
       deprecated: this.deprecated, fleetChanged: () => this.blocks.recount(),
       // R-BTN-103: what it delivers as a worker courier.
       couriers: (w, granted, entries) => this.notices.declare(w, granted, entries),
@@ -183,6 +194,8 @@ export class BatonCore {
     await this.armBy(this.webhooks.nextDue());
     await this.armBy(this.blocks.nextDue());
     await this.armBy(this.resources.nextLapse());
+    // R-BTN-90 (B-234): a claim deadline armed before a restart still wakes the alarm.
+    await this.armBy(this.claims.nextDeadline());
   }
 
   /** The worker keys from BATON_KEYS (R3-1239). A list that cannot be seeded changes nothing
@@ -416,6 +429,8 @@ export class BatonCore {
     await this.armBy(this.blocks.nextDue());
     // R-BTN-116: the earliest person expiry still pending, so the alarm wakes at the instant.
     await this.armBy(this.questions.nextDue());
+    // R-BTN-90 (B-234): the earliest armed claim deadline, so a run's clock wakes the alarm.
+    await this.armBy(this.claims.nextDeadline());
     // B-229: a reap that could not be written fails the tick only now, after its work: the
     // failure reaches the host's log naming each claim, and the next tick tries it again.
     if (unreaped.length) throw new Error(`the alarm could not reap ${unreaped.length} claim(s): ${unreaped.join('; ')}`);
@@ -787,6 +802,33 @@ export class BatonCore {
       if (!Number.isFinite(since) || since > now) throw new BatonError('invalid-params', 'since: must be an ISO time not in the future');
       return json({ ok: true, ...this.stats.of(repo, since, now) });
     }
+    // R-BTN-163 (B-234): the conditions list — what a delivery runner polls
+    // (`?open=1&type=interact`, R-BTN-195) and the dashboard's Conditions screen draws. Any key
+    // granted on the repository reads it, as it reads the stats.
+    const conditionsList = /^\/v1\/repositories\/([^/]+)\/conditions$/.exec(p);
+    if (m === 'GET' && conditionsList) {
+      if (!cred) throw new BatonError('unauthenticated', 'no worker principal');
+      let segment: string;
+      try {
+        segment = decodeURIComponent(conditionsList[1]);
+      } catch {
+        throw new BatonError('invalid-params', 'a malformed path segment');
+      }
+      const repo = checkRepositoryId(segment);
+      if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
+      this.workers.credential(cred);
+      if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
+        throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
+      }
+      const open = url.searchParams.get('open');
+      if (open != null && open !== '1' && open !== 'true') throw new BatonError('invalid-params', 'open: 1, or nothing');
+      return json({ ok: true, ...this.conditions.list(repo, {
+        open: open === '1' || open === 'true' || undefined,
+        type: url.searchParams.get('type') ?? undefined,
+        ticket: url.searchParams.get('ticket') ?? undefined,
+        cursor: url.searchParams.get('cursor') ?? undefined,
+      }) });
+    }
     if (p.startsWith('/v1/runner/')) {
       if (!cred) throw new BatonError('unauthenticated', 'no worker principal');
       if (m === 'POST' && p === '/v1/runner/heartbeat') {
@@ -884,6 +926,15 @@ export class BatonCore {
           }
         }
         return json(tx(() => this.claims.end(workerId, Number(end[1]), body)));
+      }
+      // B-234 (R-BTN-160, R-BTN-195): the report a runner sends for each raise its channel
+      // check passed. One transaction, like the advance and the end: the condition's row, its
+      // event and its history row land together, and an `interact` closes the open one of the
+      // same run in it.
+      const conditions = /^\/v1\/runner\/claims\/(\d+)\/conditions$/.exec(p);
+      if (m === 'POST' && conditions) {
+        const body = await readJson(req);
+        return json(tx(() => this.conditions.report(workerId, Number(conditions[1]), body)));
       }
       if (m === 'POST' && p === '/v1/runner/readings') {
         // R-BTN-76, R-BTN-101: what a leg met — on its own worker instances and on any account
@@ -1976,6 +2027,9 @@ export class BatonCore {
         scope: this.scope.needsYou(),
         // B-133: the person legs' questions with each option's computed action (R-BTN-116).
         questions: this.questions.needsYou(),
+        // B-234 (R-BTN-163, R-BTN-195): the open conditions, an `interact` with the session
+        // link Baton set — a person asked into the leg's session.
+        conditions: this.conditions.needsYou(),
         // B-127: the unsigned control changes a post moved the head onto while signed control is required.
         unsigned_control: this.unsignedControlView(now) },
       // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.

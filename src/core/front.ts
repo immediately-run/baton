@@ -193,7 +193,7 @@ async function route(req: Request, env: Config, to: Forward): Promise<Answer> {
   // B-126 (R-BTN-194): a ticket itself, `GET …/tickets/{ticket}`, read like its blocks.
   // B-190 (R-BTN-84): one leg's runs, `GET …/legs/{leg}/runs`, read the same three ways — the
   // core refuses a worker's (§14: an owner's or an administrator's read).
-  if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|board|policy|attestations|tickets\/[^/]+(\/(blocks|history|legs\/[^/]+\/runs))?)$/.test(pathname)) {
+  if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|board|policy|attestations|conditions|tickets\/[^/]+(\/(blocks|history|legs\/[^/]+\/runs))?)$/.test(pathname)) {
     return under('private', async () => {
       if (isSigned(req)) return forwardSigned(req, env, to);
       // R-BTN-159: a worker's (or, on the reads, an owner's or administrator's) API key.

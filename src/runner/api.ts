@@ -132,6 +132,11 @@ export class BatonApi {
   end(claimId: number, body: Record<string, unknown>): Promise<Record<string, any>> {
     return this.call('POST', `/v1/runner/claims/${claimId}/end`, body);
   }
+  /** §7.1 (R-BTN-160, R-BTN-195; B-234): the report for one raise — filter fields only, never
+   *  the subject or body, which stay in the runner's log (R-BTN-33). */
+  conditions(claimId: number, body: Record<string, unknown>): Promise<Record<string, any>> {
+    return this.call('POST', `/v1/runner/claims/${claimId}/conditions`, body);
+  }
   ack(messageId: number): Promise<Record<string, any>> {
     return this.call('POST', `/v1/runner/messages/${messageId}/ack`, {});
   }
