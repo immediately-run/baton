@@ -106,7 +106,9 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   `app.js` and `app.css` with `index.html` copied beside them, served as text by both hosts and
   embedded in the published CLI. `npm test`, `npm run typecheck`, `npm run dev`,
   `npm run start:local` and `npm run build:cli` build it first (their `pre*` scripts), so a clean
-  checkout works.
+  checkout works — and when `node_modules` does not hold what the lockfile locks for
+  `package.json` (a tree restored from an older lockfile), `build:ui` installs the lockfile first
+  (`npm ci --ignore-scripts`, B-132), so a stale one heals.
 - `npm run model:links`, `npm run traces` — the code against the formal model (R3-1244; `model/README.md`).
   `npm run test:full` runs both after the suite, and the model's own checks; `npm run model:pr` and
   `model:full` run `traces` too, on a fresh set.
