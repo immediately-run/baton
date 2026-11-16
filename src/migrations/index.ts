@@ -52,6 +52,7 @@ import alarmIndexes from './0052_alarm_indexes.sql';
 import retention from './0053_retention.sql';
 import retirement from './0050_retirement.sql';
 import instanceSettings from './0051_instance_settings.sql';
+import stateVersion from './0054_state_version.sql';
 import dashboardLookups from './0055_dashboard_lookups.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
@@ -168,6 +169,8 @@ export const MIGRATIONS: Migration[] = [
   // retention); their queries also search 0055's claim and transcript indexes.
   { id: 52, sql: alarmIndexes },
   { id: 53, sql: retention },
+  // 0054 is B-237's (the state version, R-BTN-196); 0052–0053 are reserved for other branches.
+  { id: 54, sql: stateVersion },
   // 0055 is B-240's (the dashboard's claim, transcript and waiting-leg lookups; 0049–0054 are other branches').
   { id: 55, sql: dashboardLookups },
 ];
