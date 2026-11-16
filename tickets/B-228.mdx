@@ -3,7 +3,7 @@ title: "B-228 — Legs start from the claim's snapshot: the runner fast-forwards
 id: B-228
 project: baton
 status: in-review
-updated: 2026-11-13
+updated: 2026-11-16
 repos:
   - baton
 tags:
@@ -65,3 +65,9 @@ finding at main 5367885 — `advanceHome`, the runner's call after `ensureSha` a
 (the failure and every leave-it reason logged, never a release), and the tests all present;
 `vitest run test/unit/runner-main.test.ts` (46 passed) and `npm run typecheck` green. Still no
 PR to open; this branch carries the record, and the ticket waits on a person.)_
+
+_(2026-11-16, a third: re-verified at main a1d51219 — every What-to-build item is still there
+(`advanceHome` in `src/runner/home.ts`; the runner's call after `ensureSha` and the course load,
+a failed fast-forward logged, never a release; the tests in `test/unit/runner-main.test.ts`).
+`vitest run test/unit/runner-main.test.ts` (46 passed) and `npm run typecheck` green at
+a1d51219. Nothing to build, no PR; the ticket waits on a person still.)_
