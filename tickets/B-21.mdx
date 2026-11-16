@@ -3,14 +3,14 @@ title: "B-21 — Baton blocked edges: a prerequisite that fails during a leg end
 id: B-21
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-16
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1124
 tier: critical
-description: "Build R-BTN-126: the released:blocked end and its validation, resource readings and end-sourced needs, capability removal, provisional ticket and decision rows, the max_blocked bound, the runner's LegError and channel forms, the legacy provider-exhausted mapping, and edges drawn with their state (BATON_SPEC §6.2; S-BTN-91–96). Requires: B-10, B-11."
+description: "Build Baton's half of R-BTN-126: the released:blocked end and its validation for every kind, a runner-checked resource reading and end-sourced needs, capability removal, provisional ticket and condition rows, the constant max_blocked bound and baton.blocked-ends, the end's wire form and the local channel's command, and edges drawn with their state (BATON_SPEC §6.2; S-BTN-91–96). The runner's confirmation of a leg's request is B-245. Requires: B-10, B-11."
 topics:
   - baton
 owns: {}
@@ -22,7 +22,7 @@ depends_on:
 
 **Brief:** the owner, 2026-10-17: a prerequisite may fail during a leg, as well as before it starts. That is a coloured edge in the course graph, not a new station. B-20 specified it (baton#44).
 **Spec:** [BATON_SPEC §6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2), [R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2), [R-BTN-77](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2)), [§6.3](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3) ([R-BTN-76](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3), [R-BTN-101](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3)),
-[§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4) R-BTN-78, [§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) [R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1), [§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4) [R-BTN-122](../spec/BATON_SPEC/07-conditions.md#sec-7-4) (`max_blocked`), [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3) (`baton.retries`),
+[§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) [R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1), [§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4) [R-BTN-122](../spec/BATON_SPEC/07-conditions.md#sec-7-4) (`max_blocked`, a constant), [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3) (`baton.retries`),
 [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3), [R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§9.7](../spec/BATON_SPEC/09-claims.md#sec-9-7) (attempts), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the **Courses** view), [§13.5](../spec/BATON_SPEC/13-data-model.md#sec-13-5)–[§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6); history,
 Migrations: `provider-exhausted`.
 
@@ -32,15 +32,56 @@ R-BTN-126 is specified. This ticket builds it.
 
 ### What to build
 
-1. **The end.** `POST /v1/runner/end` takes `released:blocked` with `prerequisite`, plus `reading` and `commit` where the kind needs them. Build the validation for each kind; an invalid prerequisite is recorded as a counted `cannot-finish:transient` in the refusing call. Readings are dropped (`reading-refused`) or the end found invalid exactly as R-BTN-126 splits them.
-2. **Resource.** Store the reading, add the `end`-sourced need, and write the ticket's row against R-BTN-76's counts, all in one transaction. Stamp `found_at`, and drop the need and its row at the leg's next end that is not blocked on it, or after 7 days.
-3. **Capability.** Remove the capability from the runner's declared set in the end's transaction, updating `fleet_capabilities`. A `ref` is any capability the runner declared — its own statement, never checked against a proof (R-BTN-126 as amended 2026-10-22); the runner declares it again once its `check` passes (R-BTN-121). When B-104 has landed, the same transaction also re-evaluates the runner's derived sets (R-BTN-174) — the capability may have been one a derivation rested on; whichever of the two tickets lands second adds that half.
-4. **Ticket and decision.** Write provisional rows that refuse a claim into the leg (rule 1) and stay outside `blocked_since`. Settle them at the first snapshot containing the end's commit, and drop them with `prerequisite-unconfirmed` after an hour.
-5. **Bounds.** Add `max_blocked` to the owners' `retry` bounds (the owners' alone; a course sets none). Count blocked ends per (ticket, leg) from `claims.blocked_kind` and `claims.blocked_ref`, `call` ends excepted (G-BTN-115); past `max_blocked` in 24 hours apply the `blocked-exhausted` hold and raise `baton.retries`, and raise `baton.blocked-ends` for a runner with more than 4 × `max_blocked` blocked ends across tickets in 24 hours (through today's listing for either if B-56 or B-57 has not landed).
-6. **The runner.** `LegError(type, message, {prerequisite, reading?, commit?})`. Add `baton leg release --blocked --kind … --ref …` and the runner's own checks. A block is never retried in the claim.
-7. **The legacy mapping.** Map `released:provider-exhausted` exactly as the history's Migrations entry states, never shortening a reading already in force.
-8. **Views.** The dashboard's **Courses** view and `baton leg why` draw each leg as an edge with a state, in colour and a text label, with `found`.
-9. **Migration.** Add `ticket_blocks.provisional` and `found`, `leg_needs.source`, `added_at` and `found_at`, `claims.blocked_kind` and `blocked_ref` with their index, and the `blocked-exhausted` hold reason.
+Baton's half of R-BTN-126 as amended 2026-11-15 (a leg's block is a request the runner
+confirms). The runner's half — running the capability's check after the leg stops, the bound
+account readings, `runner.json` `instance`, countering — is B-245, which requires this ticket.
+
+1. **The end.** `POST /v1/runner/end` takes `released:blocked` with `prerequisite: {kind, ref}`,
+   plus `commit` for a `ticket` end and, for a `resource` end, an optional
+   `reading: {instance, available: false, until?, valid_for?, detail?}` that is the runner's own
+   check's reading (R-BTN-121), never the leg's. Validate each kind as R-BTN-126's **Invalid**
+   bullet says: a bad kind or `ref`, a capability the `capability` bullet does not admit, or a
+   `ticket` end without `commit` records a counted `released:cannot-finish:transient` in the
+   same transaction and answers `invalid-prerequisite`. A reading failing its envelope, bounds
+   or one-a-minute limit, or naming an instance not serving `ref` or not reportable, is dropped
+   and logged `reading-refused`; the end stands. Route `released:blocked` before `checkEnd`'s
+   owner-bar branch (Status, 2026-10-19). The `capability` kind is already accepted
+   (`src/core/validate.ts:628`, B-104's branch): extend that path, do not add a second.
+2. **Resource.** Store the reading as the runner's (R-BTN-76), add the `end`-sourced need to
+   `leg_needs`, stamp `found_at`, then write the `resource` row against R-BTN-76's counts, all
+   in one transaction — the leg blocks once every usable instance of `ref` is `unavailable`, for
+   every runner alike. The need and its row go when the leg next ends other than `blocked` on
+   that resource, or after 7 days; posts never remove it.
+3. **Capability.** Remove the capability from the runner's declared set and update
+   `fleet_capabilities` in the end's transaction, so rule 4 refuses this runner at once. Baton
+   never checks the statement; the runner confirmed it before ending (B-245). The runner
+   declares it again when its check passes (R-BTN-121), or, for a name its executor `provides`,
+   when the executor states it again (R-BTN-107). Re-evaluate the runner's derived sets in the
+   same transaction (R-BTN-174) if B-104's derivations have landed.
+4. **Ticket, condition and call.** A `ticket` end writes a provisional row carrying its
+   `commit` (R-BTN-75): it refuses a claim and an advance into the leg and stays out of
+   `blocked_since`; the first accepted snapshot whose head contains the commit replaces it, and
+   one unconfirmed within an hour is dropped and logged `prerequisite-unconfirmed`. `condition`
+   and `call` ends follow R-BTN-162 and R-BTN-165 (B-59, B-62). There is no `decision` kind
+   (R-BTN-78 retired).
+5. **Bounds.** `max_blocked` is the constant **5** per (ticket, leg) in 24 hours (R-BTN-122), not
+   a setting. Count from `claims.blocked_kind` and `blocked_ref`, `call` ends excepted
+   (G-BTN-115). The sixth holds the ticket `blocked-exhausted` and raises `baton.retries` listing
+   each end's prerequisite; a runner with more than 20 blocked ends across tickets in 24 hours
+   raises `baton.blocked-ends`. A valid blocked end is not a failed attempt, not a run for
+   `max_runs` (R-BTN-69), and starts no backoff.
+6. **The wire and the channel.** The runner's `LegError(type, message, {prerequisite,
+   instance?, commit?})` and the local channel's `baton leg release --blocked --kind <kind>
+   --ref <ref> [--instance <i>] [--commit <sha>]` (R-BTN-106) carry the leg's request to the
+   runner. Build the CLI command and the channel message; what the runner does with the request
+   is B-245. A request is never retried in the claim.
+7. **Views.** The **Courses** view, a ticket's path and `baton leg why` draw each leg as an edge
+   in one state — `ready`, `running`, `blocked` (each prerequisite's kind, `since`, `until`,
+   `found`), `backing-off`, `not-queued` — in colour and a text label, from the blocks index and
+   `leg_needs`; never as a station.
+8. **Migration.** `ticket_blocks.provisional` and `found`, `leg_needs.source`, `added_at` and
+   `found_at`, `claims.blocked_kind` and `blocked_ref` with their index, and the
+   `blocked-exhausted` hold reason — skipping any an earlier migration added.
 
 ### Do not
 
@@ -49,7 +90,7 @@ R-BTN-126 is specified. This ticket builds it.
 
 ### Tests
 
-- S-BTN-91 to S-BTN-96 as integration scenarios on both hosts, with their traces replayed through the model.
+- S-BTN-91 to S-BTN-96 as integration scenarios on both hosts, with their traces replayed through the model (S-BTN-94 with the runner's confirmation stubbed until B-245; S-BTN-223 and S-BTN-224 are B-245's).
 - G-BTN-111 to G-BTN-116.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green.
 
@@ -77,3 +118,14 @@ holding (R-BTN-177) is B-105's channel, not this end's.)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): a `blocked` end names a `ticket` prerequisite, never a `decision` (retired, R-BTN-78); the bound on blocked ends is a constant, 5 a day per ticket and leg (R-BTN-122), not the owners' `max_blocked`.)_
 - 2026-11-02: the spec restructure's part 4 (B-166): the ontology and route choices left core (R-BTN-174; R-BTN-175 to R-BTN-177 retired, B-167), so a `capability` end's `ref` is any capability the runner declared and lost, and a route choice's reported `dead` holdings are gone; a resource end blocks the leg for every runner alike once every usable instance is `unavailable` (R-BTN-76, R-BTN-126).
+- 2026-11-16: the work list rewritten for R-BTN-126 as amended 2026-11-15 (a leg's block is a
+  request the runner confirms; spec PR #243). Dropped: a leg's reading forwarded
+  (`{prerequisite, reading?, commit?}` is now `{prerequisite, instance?, commit?}`, and nothing a
+  leg sends is forwarded); a capability `ref` taken on the leg's word (the runner's check
+  confirms it, B-245); `decision` rows (R-BTN-78 retired); `max_blocked` as an owners' bound (a
+  constant, 5) and "4 × `max_blocked`" (now 20); the legacy `provider-exhausted` mapping, which
+  the restructure dropped as transition machinery (History, plan item 17) — the code's
+  acceptance of the reason (`src/core/validate.ts:411`) is the History's "Migrations the
+  implementation still carries" entry, not this ticket's to build.
+
+_(2026-11-16: rules re-read: R-BTN-126, R-BTN-121, R-BTN-76)_
