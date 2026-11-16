@@ -3028,6 +3028,17 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   markdown with the markdown source's frontmatter keys. The markdown source's tickets carry a
   path and get no `file`.
 
+- **2026-11-16 — R-BTN-131 amended, S-BTN-227 added: the run-tests gate on PRs outside the home
+  (B-253).** Rules changed: R-BTN-131. The `create-pr` gate tested only the home repository's one
+  PR branch and asked the owner (`run-tests-unreachable`, `skip`) about any ticket with a PR
+  elsewhere — so a `git` home whose tickets all open PRs on a code repository (B-182) waited on
+  the owner after every `implement`, per ticket. A PR in a `repos:` repository is now gated by
+  its own CI, the checks the forge already reports on its head: green passes, a concluded red
+  queues `fix`, running or none reported waits on `ci`. A ticket with PRs at home and elsewhere
+  needs both the home marker and the other PRs' CI green. The run-tests stub with no home branch
+  and such a `repos:` suspends without a marker, and the fix stub's push check (B-231) skips such
+  a ticket. Several home PRs still ask the owner, and an earlier `skip` still waives the gate.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

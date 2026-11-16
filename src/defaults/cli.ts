@@ -1301,7 +1301,8 @@ import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
 import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
 import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
-import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};` : ''}
+import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};${verify ? '' : `
+import { ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};`}` : ''}
 // The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
 // repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the
 // checkout as its arguments and the leg's instructions in the file BATON_INSTRUCTIONS names. The
@@ -1394,7 +1395,11 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
     const wanted = matchPatterns([own.branch_pattern ?? DEFAULT_BRANCH_PATTERN, own.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '')).map((p) => p.replace(/\\{ticket\\}/g, id));
     return gitRun('git', ['-C', ctx.checkout, 'ls-remote', '--heads', 'origin']).split('\\n').filter((l) => { const r = l.split('\\t')[1] ?? ''; return r.startsWith('refs/heads/') && wanted.some((p) => branchMatches(p, r.slice('refs/heads/'.length))); }).sort().join('\\n');
   };
-  const headsBefore = redEdge ? prHeads() : '';
+  // B-253: a ticket whose repos: names other repositories has PRs this check cannot see — their
+  // CI gates them, and a fix of its red may rightly push there alone — so the check reads only a
+  // ticket whose PRs are all at home.
+  const pushTicket = (() => { try { return ctx.ticket?.file ? readFileSync(ctx.ticket.file, 'utf8') : ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), 'utf8') : null; } catch { return null; } })();
+  const headsBefore = redEdge && ticketRepositories(pushTicket, settings.repos).length === 0 ? prHeads() : '';
 ` : ''}  const courseSha = typeof ctx.signed_control?.course === 'string' && ctx.signed_control.course !== '' ? ctx.signed_control.course : sha;
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
   const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', courseSha, '--', rel]).trim() !== '';
@@ -1605,6 +1610,7 @@ import { pathToFileURL } from 'node:url';
 import { testsClose } from ${JSON.stringify(source('pr-close.ts'))};
 import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
 import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};
+import { ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};
 // B-94: the git this stub makes — the snapshot reads, the override load, the branch's fetch, the
 // scratch worktree and the marker commit — is bounded and non-interactive, the same bound and
 // environment the close uses. It runs in the leg's own process (legProcess.mjs), where it
@@ -1697,6 +1703,19 @@ async function standard(ctx) {
   const id = bareTicketId(ctx.ticket);
   const wanted = matchPatterns([entry.branch_pattern ?? DEFAULT_BRANCH_PATTERN, entry.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '')).map((p) => p.replace(/\\{ticket\\}/g, id));
   const branches = gitRun(['-C', ctx.checkout, 'ls-remote', '--heads', 'origin']).split('\\n').map((l) => l.split('\\t')[1] ?? '').filter((r) => r.startsWith('refs/heads/')).map((r) => r.slice('refs/heads/'.length)).filter((br) => wanted.some((p) => branchMatches(p, br)));
+  // B-253: no PR branch at home, and the ticket's repos: names other repositories — its PRs are
+  // there, gated by their own CI, which the sync reads from the forge. Nothing runs here and no
+  // marker is made: the claim suspends at its station, and the sync queues review once that CI
+  // is green, fix on its red, and waits on ci while it runs.
+  if (branches.length === 0) {
+    let ticketText = null;
+    try { ticketText = ctx.ticket?.file ? readFileSync(ctx.ticket.file, 'utf8') : ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), 'utf8') : null; } catch { /* no file: no repos: */ }
+    const siblings = ticketRepositories(ticketText, settings.repos);
+    if (siblings.length) {
+      if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': no PR branch at home; the gate is the CI of ' + siblings.join(', ') + '\\n');
+      return { reached: station, next: 'review', suspend: true, tests: 'ci', repositories: siblings };
+    }
+  }
   if (branches.length !== 1) {
     throw new Error(branches.length
       ? 'the run-tests gate tests one PR branch; ' + id + ' has ' + branches.join(', ') + ' in the home repository'
