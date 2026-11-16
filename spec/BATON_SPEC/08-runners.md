@@ -208,7 +208,8 @@ the runner's credentials under any other executor is that executor's, never Bato
     default export. The test kit fails a course whose file names a leg with no script, whose
     `legs/` holds a script for no leg, or whose script lacks one of the three. Marker and forge
     primitives come from `@immediately-run/baton/leg` (R-BTN-133).
-  - **`ctx`** carries: the ticket (id, path, home repository); the claim (id, nonce, the station
+  - **`ctx`** carries: the ticket (id, path, home repository, and a pathless ticket's `file`,
+    R-BTN-74); the claim (id, nonce, the station
     the leg leaves); the leg and its run number; resolved and validated `inputs` (R-BTN-82);
     `replay` (R-BTN-84); the newest hand-off document and the resume record (R-BTN-24); advice;
     Baton's position and the latest snapshot's readiness; `checkout` (working directory); `snapshot: {sha, tree}` and

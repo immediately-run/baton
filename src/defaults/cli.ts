@@ -1369,9 +1369,11 @@ async function standard(ctx) {
   // What this leg's verification looks for (B-81): the course's branch patterns, as the
   // snapshot's settings carry them, and the repositories the ticket's repos: names — the
   // ticket file is the checkout's own copy, the one the agent may have just added its PR to.
+  // B-252: a pathless ticket's file is the one the runner wrote from its source's read
+  // (ctx.ticket.file, R-BTN-74), when there is one.
   const entry = (settings.courses ?? []).find((c) => c && c.id === ${JSON.stringify(b.id)}) ?? {};
   const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '');
-  const ticketText = (() => { try { return ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), 'utf8') : null; } catch { return null; } })();
+  const ticketText = (() => { try { return ctx.ticket?.file ? readFileSync(ctx.ticket.file, 'utf8') : ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), 'utf8') : null; } catch { return null; } })();
   const legRun = (cmd, args, cwd) => { try { return gitRun(cmd, args, { cwd, maxBuffer: ${AGENT_OUTPUT_MAX} }).trim(); } catch (e) { const why = e && typeof e.stderr === 'string' && e.stderr.trim() !== '' ? e.stderr.trim().split('\\n')[0] : e && e.message ? e.message : String(e); throw new Error(\`\${cmd} \${args.join(' ')} failed: \${why}\`); } };` : ''}
   // The instructions, when the signed tree still has them; the repository owns them and may
   // delete them. B-127 (round 2, blocking): the .md files are the course group's paths, beside
@@ -1459,7 +1461,7 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout, stdio: ['ignore', 'pipe', 'pipe'],
       env: {
-        ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.path ?? '',${ask ? `
+        ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.file ?? ctx.ticket.path ?? '',${ask ? `
         BATON_ANSWER: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},${ask.name === 'verdict' ? ` BATON_VERDICT: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},` : ''}` : ''}
       },
     });
