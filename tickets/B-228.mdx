@@ -49,3 +49,10 @@ No new input: the sha is the claim's, already checked to be on the default branc
 ## Status
 
 _filed 2026-11-10._
+
+_(2026-11-16, the `create-pr` implement leg: already delivered — commit 8565aa7, the same commit
+that filed this ticket, landed the whole contract on `main`: `advanceHome(home, sha,
+defaultBranch)` in `src/runner/home.ts`, the runner's call right after `ensureSha` and the course
+load (`src/runner/runner.ts`, logged when the home stays, a failed fast-forward logged and never a
+release), and its tests (`test/unit/runner-main.test.ts` — re-run green: 47 passed, typecheck
+clean). No PR opened; a person looks.)_
