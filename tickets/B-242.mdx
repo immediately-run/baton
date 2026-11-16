@@ -49,3 +49,8 @@ Input: the `If-None-Match` request header on `GET /v1/ui/state`. Anyone allowed 
 _filed 2026-11-15._
 
 _2026-11-15: the UI half — the dashboard polls only while visible and backs off from 10 to 60 seconds while the answers are unchanged (test/unit/dashboard-poll.test.ts). The `state_version` ETag waits on B-237's counter._
+
+_2026-11-16: the remaining half serves V1's `GET /v1/ui/state`, which V2's cutover retires
+(B-203, B-216). The same mechanism — an ETag from `state_version`, the caller and a clock bucket,
+compared before the read runs — is B-205's for every V2 read; build it here as a helper B-205
+reuses (`src/core/stateVersion.ts`), not as code private to `/v1/ui/state`._

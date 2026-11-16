@@ -3,7 +3,7 @@ title: "B-211 — Runner screens: /runners draws the mockup's runner cards with 
 id: B-211
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-16
 repos:
   - baton
 tags:
@@ -58,7 +58,8 @@ an interactive SVG group carries its own accessible name.
    runner "lost its heartbeat at …; its claim on … was reaped" from `reaped_at` and the
    history, as text; `busy_elsewhere` as "working on another repository"; the newest
    `last_report` payload as text with its age under the card (the reply a Status request
-   produces), and `transcript_url` as a link where set. Controls by `ui.view` on
+   produces), `transcript_url` as a link where set, and the executor — source, digest and
+   `provides` from `executor`, as text (§11.4, R-BTN-107), or "sidecar" where it is null. Controls by `ui.view` on
    `repository/runners/{runner}` through B-207 with context `{repository, to_runner_id,
    ticket_id}`: **Status** (`runner.status-request`), **Wind down** (`runner.wind-down`), **Stop**
    on the claim (`leg.stop`, one click, Decision 3a), and **Open session** as a plain link only
@@ -70,7 +71,8 @@ an interactive SVG group carries its own accessible name.
    done, suspended — label first, colour second; the mockup's legend), activities nested under
    their claim by kind with failed outcomes marked by shape; each bar and segment a focusable
    `<g>` with `role="button"` and an accessible name, opening a panel with its label, detail
-   (text), session link under R-BTN-113 and `log_dir` as text; `?since=` as URL query (24 h
+   (text), session link under R-BTN-113, `log_dir`, and the run's `executor_digest`,
+   `environment` and `instance` as text (§11.4, R-BTN-107); `?since=` as URL query (24 h
    default, 7 d max). Under the drawing, the same claims and activities as a `<table>` for
    screen readers and phones. A pure layout helper in `src/dashboard/lib/timeline.ts`
    (time to x, nesting) is unit-tested.
@@ -117,3 +119,6 @@ _filed 2026-11-09, split from B-196 after review._
 _2026-11-09 — revised after the second review: grouped by hostname per R-BTN-3 (Decision 9a);
 the Status reply drawn from `last_report`; the sidebar count line dropped (`repo.list` is the
 one source)._
+
+_2026-11-16 — the executor fields §11.4 gained after this ticket was written (a2b0065) are drawn:
+the card's executor and each run's digest, environment and instance, as text; B-196 serves them._
