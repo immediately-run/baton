@@ -295,7 +295,7 @@ moves what Baton must trust (changed paths, signatures) to the server and the ru
 A machine key can take observation numbers and post boards repeatedly; an outstanding number
 blocks other syncs until it lapses after ten idle minutes (R-BTN-62), so one key can freeze a
 board. It can also claim every leg its grant allows and hold the leases. B-137 adds per-key
-limits; B-125's runbook starts by revoking the key.
+limits; [B-125's runbook](./runbooks/compromised-runner.mdx) starts by revoking the key.
 
 ### What a push cannot reach
 
@@ -435,7 +435,7 @@ The options, cheapest first; 9 to 13 cover a privileged session reading what a r
 |---|---|---|---|---|
 | 1 | No runner on an owner's machine serving a home the VMs can push (F) | a practice, but it removes local Claude Code runners from every home the VMs push | the only option that closes the upward crossing in reach 1 for code | practice |
 | 2 | Actions secrets in environments with human-only reviewers (F) | an hour per repository, plus rotation | closes reach 2 for secrets behind human-only reviewers now, and for agent branches once B-130 lands | FLDH-37 |
-| 3 | A compromised-runner runbook and drill: bar, revoke, find what changed, undo | half a day | shortens how long a compromise lasts; today revocation is improvised | B-125 |
+| 3 | A compromised-runner runbook and drill: bar, revoke, find what changed, undo | half a day | shortens how long a compromise lasts; today revocation is improvised | [B-125](./runbooks/compromised-runner.mdx) — the runbook, with its drill |
 | 4 | The VM fence and a fresh root disk at every launch | already planned | limits exfiltration and persistence | fieldhouse FLDH-16, FLDH-19 |
 | 5 | One GitHub identity and key per slot (F) | a day, then some administration | contains and attributes a compromise to one VM, revocable alone; prevents nothing by itself | fieldhouse FLDH-17 |
 | 6 | Detection: a notice when a non-owner's push changes a control input (G) | a small Baton ticket | after-the-fact visibility of default-branch control changes | dropped 2026-11-13 (the owner): under `cooperative` no foreign-write notice (R-BTN-66); B-127's opt-in `unsigned-control` notice is the detection. B-126 keeps option 9 |
