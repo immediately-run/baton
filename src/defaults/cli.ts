@@ -608,7 +608,7 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
  *  checkout's agent configuration was last changed in a commit no owner key signed. A privileged
  *  session that refuses to open is this command's exit code in the owner's settings; Baton's own
  *  part is the notice, which names the same paths for every reader of the board. */
-export async function verifyConfigMain(argv: string[], io: { keys: { public_key: string; fingerprint: string }[]; log?: (l: string) => void }): Promise<number> {
+export async function verifyConfigMain(argv: string[], io: { keys: { public_key: string; fingerprint: string }[]; repository?: string; log?: (l: string) => void }): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   const positional: string[] = [];
   let checkout = '.';
@@ -621,9 +621,12 @@ export async function verifyConfigMain(argv: string[], io: { keys: { public_key:
     } else if (a.startsWith('--')) throw new Error(`${a}: not a flag of this command`);
     else positional.push(a);
   }
-  if (!positional.length) throw new Error('baton owner -i KEY verify-config REPOSITORY [--checkout DIR]');
+  // B-121: the repository may be the home in force's, passed by the CLI when the REPOSITORY
+  // position was omitted — a named one (the positional) always wins over it.
+  const repository = positional[0] ?? io.repository;
+  if (repository == null) throw new Error('baton owner -i KEY verify-config REPOSITORY [--checkout DIR]');
   if (!io.keys.length) {
-    log(`baton: ${positional[0]} has no owner signing keys registered as human-only (BATON_HUMAN_KEYS or /v1/human-keys, then \`baton owner owners\`) — nothing can be owner-signed, and the check cannot pass (B-127)`);
+    log(`baton: ${repository} has no owner signing keys registered as human-only (BATON_HUMAN_KEYS or /v1/human-keys, then \`baton owner owners\`) — nothing can be owner-signed, and the check cannot pass (B-127)`);
     return 1;
   }
   const gitOf = (...a: string[]): string => gitRaw(checkout, ...a);

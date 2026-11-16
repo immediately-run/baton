@@ -13,7 +13,7 @@
 // listing them. `home *` is local: it calls no server (R-BTN-129's actions are not its), so a
 // refusal is thrown and the CLI prints it as one `baton: …` line, exit 2 — the same contract
 // the ticket commands keep (tickets.ts).
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { ORIGIN, REPOSITORY_ID } from '../core/validate';
 import { readSettingsJson } from './tickets-config';
@@ -91,9 +91,26 @@ export function writeHomes(path: string, file: HomesFile): void {
  *  (R-BTN-15), but a URL typed at a flag might. */
 export const sameOrigin = (a: string, b: string): boolean => a.replace(/\/+$/, '') === b.replace(/\/+$/, '');
 
-/** A `--home`/`BATON_HOME` value that names a checkout path rather than a home: it contains
- *  `/`, or it names an existing directory (B-121). Everything else is a name in homes.json. */
-export function looksLikePath(value: string, exists: (p: string) => boolean = existsSync): boolean {
+/** The origin a checkout's `.baton/baton.json` `baton_url` names, or the refusal naming the
+ *  checkout (round 1: `homeOfCheckout` and `home add --checkout` asked the same question twice,
+ *  word for word). R-BTN-56: a home checkout names its Baton; R-BTN-137: what it names is an
+ *  origin. */
+function batonUrlOf(checkout: string, settings: ReturnType<typeof readSettingsJson>): string {
+  if (!settings.baton_url) throw new Error(`${checkout}: no .baton/baton.json baton_url — a home checkout names its Baton (R-BTN-56)`);
+  if (!ORIGIN.test(settings.baton_url)) throw new Error(`${checkout}: baton_url (${settings.baton_url}) is not an origin: scheme and host, no path, no trailing slash (R-BTN-137)`);
+  return settings.baton_url;
+}
+
+/** A value naming an existing *directory* (B-121's word for a path), not merely any existing
+ *  file: `--home` names a checkout, and a checkout is a directory. */
+const namesDirectory = (p: string): boolean => {
+  try { return statSync(p).isDirectory(); } catch { return false; }
+};
+
+/** A `--home`/`BATON_HOME` value names a checkout path rather than a home when it contains `/`
+ *  or names an existing *directory* (B-121 — the spec's word; a regular file that exists is not
+ *  a checkout). Everything else is a name in homes.json. */
+export function looksLikePath(value: string, exists: (p: string) => boolean = namesDirectory): boolean {
   return value.includes('/') || exists(value);
 }
 
@@ -103,15 +120,14 @@ export function looksLikePath(value: string, exists: (p: string) => boolean = ex
  *  default id, the ticket commands' rule (tickets.ts's batonTarget). */
 export function homeOfCheckout(checkout: string): HomeEntry & { checkout: string } {
   const settings = readSettingsJson(checkout);
-  if (!settings.baton_url) throw new Error(`${checkout}: no .baton/baton.json baton_url — a home checkout names its Baton (R-BTN-56)`);
-  if (!ORIGIN.test(settings.baton_url)) throw new Error(`${checkout}: baton_url (${settings.baton_url}) is not an origin: scheme and host, no path, no trailing slash (R-BTN-137)`);
+  const origin = batonUrlOf(checkout, settings);
   const slug = remoteSlug(checkout)?.toLowerCase() ?? null;
   const short = slug != null ? Object.entries(settings.repos ?? {}).find(([, path]) => path.toLowerCase() === slug)?.[0] : undefined;
   const repository = short ?? (slug != null ? (slug.split('/').at(-1) ?? '') : '');
   if (!REPOSITORY_ID.test(repository)) {
     throw new Error(`${checkout}: its origin (${slug ?? 'none'}) names no repository id — name the repository yourself, or add the checkout as a home: baton home add <name> --repository <id> --checkout ${checkout}`);
   }
-  return { origin: settings.baton_url, repository, checkout };
+  return { origin, repository, checkout };
 }
 
 /** Where the home in force came from (B-121): the `--home` flag, `BATON_HOME`, or homes.json's
@@ -169,7 +185,7 @@ export function resolveHomes(opts: { flag?: string; env?: NodeJS.ProcessEnv; exp
  *  name resolving to its home's `checkout`, refused naming the home when the home has none. A
  *  path (a value containing `/` or naming an existing directory) is itself, as R-BTN-131 has
  *  always read it. */
-export function runnerHome(value: string, env: NodeJS.ProcessEnv = process.env, exists: (p: string) => boolean = existsSync): string {
+export function runnerHome(value: string, env: NodeJS.ProcessEnv = process.env, exists: (p: string) => boolean = namesDirectory): string {
   if (looksLikePath(value, exists)) return value;
   const homes = readHomes(homesPath(env));
   const home = homes?.homes[value];
@@ -190,7 +206,7 @@ export function homesHelp(): string[] {
     '                   read from its .baton/baton.json (baton_url) and an --origin that differs',
     '                   is refused; without one, --origin is required',
     'baton home remove <name>                                      remove the home (and the default, if it was)',
-    'baton home show                                               the home in force, and where it came from',
+    'baton home show [--home <name|path>]                          the home in force, and where it came from',
     '',
     `The homes live in ${homesPath()} — {default?: <name>, homes: {<name>: {origin,`,
     'repository, checkout?}}} — beside keys.json, origins.json and runner.json. A home is a',
@@ -241,8 +257,13 @@ export function homeMain(argv: string[], io: HomesIo = {}): number {
     return 0;
   }
   if (command === 'show') {
-    if (rest.length) throw new Error('baton home show takes no argument');
-    const { inForce } = resolveHomes({ env: io.env ?? process.env, homes });
+    // Round 1: `--home <name|path>` may name the home `show` prints, as it rides every API
+    // command — without it the ticket §2's `from --home` line is unreachable.
+    const at = rest.indexOf('--home');
+    if (at >= 0 && rest[at + 1] == null) throw new Error('--home needs a value');
+    const restSansHome = at >= 0 ? rest.filter((_, i) => i !== at && i !== at + 1) : rest;
+    if (restSansHome.length) throw new Error('baton home show takes no argument');
+    const { inForce } = resolveHomes({ ...(at >= 0 ? { flag: rest[at + 1] } : {}), env: io.env ?? process.env, homes });
     if (!inForce) {
       log(`no home in force — ${listing}`);
       return 0;
@@ -298,13 +319,11 @@ export function homeMain(argv: string[], io: HomesIo = {}): number {
     let checkout: string | undefined;
     if (flags.checkout != null) {
       checkout = resolve(io.cwd ?? process.cwd(), flags.checkout);
-      const settings = readSettingsJson(checkout);
-      if (!settings.baton_url) throw new Error(`${checkout}: no .baton/baton.json baton_url — a home checkout names its Baton (R-BTN-56)`);
-      if (!ORIGIN.test(settings.baton_url)) throw new Error(`${checkout}: baton_url (${settings.baton_url}) is not an origin: scheme and host, no path, no trailing slash (R-BTN-137)`);
-      if (origin != null && !sameOrigin(origin, settings.baton_url)) {
-        throw new Error(`--origin ${origin} differs from ${checkout}'s baton_url ${settings.baton_url} (R-BTN-56) — never guess across origins: drop --origin, or make them agree`);
+      const url = batonUrlOf(checkout, readSettingsJson(checkout));
+      if (origin != null && !sameOrigin(origin, url)) {
+        throw new Error(`--origin ${origin} differs from ${checkout}'s baton_url ${url} (R-BTN-56) — never guess across origins: drop --origin, or make them agree`);
       }
-      origin = settings.baton_url;
+      origin = url;
     }
     if (origin == null) throw new Error('--origin is required without --checkout (or name a checkout whose .baton/baton.json baton_url is its origin)');
     if (!ORIGIN.test(origin)) throw new Error(`--origin ${origin}: an origin (R-BTN-137): scheme and host, no path, no trailing slash, e.g. https://baton.immediately.run`);

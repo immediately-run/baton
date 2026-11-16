@@ -230,7 +230,11 @@ const ticketArg = (t, home) => {
   const s = String(t);
   const i = s.indexOf(':');
   if (i >= 1) return { repository: s.slice(0, i), local: s.slice(i + 1) };
+  // A colon at index 0 names no repository: a malformed qualified id keeps its parse refusal
+  // also with a home in force (round 1) — never a bogus request for a local id that begins `:`.
+  if (i === 0) throw new Error('the ticket is <repository>:<id>');
   if (home?.repository != null) return { repository: home.repository, local: s };
+  if (home?.names?.length) throw new Error(`no home in force and no repository named — name one, or baton home use one of: ${home.names.join(', ')} (B-121)`);
   throw new Error('the ticket is <repository>:<id>');
 };
 const time = (v, what) => {
@@ -509,12 +513,13 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       throw new Error('baton owner owners REPO --add PUB | --remove FINGERPRINT');
     }
     if (cmd === 'bar' && rest[0] === 'lift') {
-      // B-121: with a home in force the repository position may be omitted — rest[2] is the bar
-      // id in either shape (`bar lift REPO ID` and `bar lift ID`).
-      const idOnly = home?.repository != null && rest.length === 3;
+      // B-121: with a home in force the repository position may be omitted. The shapes are told
+      // apart by their length after `bar`: `lift REPO ID` is three words, `lift ID` two — a
+      // named REPO (the full shape) always wins over the home, never the other way round.
+      const idOnly = home?.repository != null && rest.length === 2;
       const repo = repoOrHome(idOnly ? undefined : rest[1], home);
-      const barId = need(rest[2], 'the bar id');
-      parseArgs(rest.slice(3), [], [], 0);
+      const barId = need(idOnly ? rest[1] : rest[2], 'the bar id');
+      parseArgs(rest.slice(idOnly ? 2 : 3), [], [], 0);
       return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/bars/${encodeURIComponent(barId)}/lift`, body: {} };
     }
     if (cmd === 'bar') {
@@ -560,26 +565,30 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
         else {
           const { entries, offline } = codeReposSpec(flags['code-repos'], flags['forge-ids']);
           body.code_repos = entries;
-          if (entries.some((e) => e.repo_id == null)) resolveCodeRepos = { repository: need(positional[0], 'the repository id'), offline };
+          // B-121: the repository the resolver reads is the PUT's own — the positional, or the
+          // home in force's when the position is omitted.
+          if (entries.some((e) => e.repo_id == null)) resolveCodeRepos = { repository: repoOrHome(positional[0], home), offline };
         }
       }
       // B-182 (R-BTN-139): the owners' pushers, host-qualified — `id[@host]`, a comma list, or
       // `none` to clear; a host-less entry is the home's host.
       if (flags.pushers !== undefined) body.pushers = flags.pushers === 'none' ? null : pushersSpec(flags.pushers);
       if (!Object.keys(body).length) throw new Error('baton owner settings REPO names at least one setting');
-      return { method: 'PUT', path: `/v1/owner/${need(positional[0], 'the repository id')}/settings`, body, ...(resolveCodeRepos ? { resolveCodeRepos } : {}) };
+      // B-121: the repository may come from the home in force when the position is omitted.
+      return { method: 'PUT', path: `/v1/owner/${repoOrHome(positional[0], home)}/settings`, body, ...(resolveCodeRepos ? { resolveCodeRepos } : {}) };
     }
     if (cmd === 'courier' && rest[0] === 'add') {
       const { flags, positional } = parseArgs(rest.slice(1), [], ['key', 'asks'], 1);
       return { method: 'POST', path: `/v1/owner/${repoOrHome(positional[0], home)}/couriers`, body: { public_key: readKey(need(flags.key, '--key')), asks: need(list(flags.asks), '--asks') } };
     }
     if (cmd === 'courier' && rest[0] === 'revoke') {
-      // B-121: with a home in force the repository position may be omitted — rest[2] is the
-      // fingerprint in either shape (`courier revoke REPO FP` and `courier revoke FP`).
-      const fpOnly = home?.repository != null && rest.length === 3;
+      // B-121: with a home in force the repository position may be omitted. The shapes are told
+      // apart by their length after `courier`: `revoke REPO FP` is three words, `revoke FP` two
+      // — a named REPO (the full shape) always wins over the home, never the other way round.
+      const fpOnly = home?.repository != null && rest.length === 2;
       const repo = repoOrHome(fpOnly ? undefined : rest[1], home);
-      const fp = need(rest[2], 'the key fingerprint');
-      parseArgs(rest.slice(3), [], [], 0);
+      const fp = need(fpOnly ? rest[1] : rest[2], 'the key fingerprint');
+      parseArgs(rest.slice(fpOnly ? 2 : 3), [], [], 0);
       return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/couriers`, body: { fingerprint: fp, revoke: true } };
     }
     if (cmd === 'resolve') {
@@ -971,7 +980,9 @@ async function policyMain(argv) {
   }
   if (sub === 'diff') {
     const { positional } = parseArgs(rest, [], ['identity', 'url'], 2);
-    const [repo, file] = positional;
+    // B-121: with a home in force the repository may be omitted — one positional is the file.
+    const fromHome = home?.repository != null && positional.length === 1;
+    const [repo, file] = fromHome ? [home.repository, positional[0]] : positional;
     const out = await request('GET', `/v1/repositories/${encodeURIComponent(repoOrHome(repo, home))}/policy`);
     if (out.status !== 200) return write(arrived(out.text)), 1;
     let next;
@@ -994,8 +1005,12 @@ async function policyMain(argv) {
   }
   if (sub === 'set' || sub === 'apply') {
     const { flags, positional } = parseArgs(rest, [], ['base', 'identity', 'url'], 2);
-    const what = need(positional[1], sub === 'set' ? 'the policy file' : 'the preset name');
-    const repo = repoOrHome(positional[0], home);
+    // B-121: with a home in force the repository may be omitted — one positional is the file or
+    // preset, the named repository (two positionals) always winning over the home.
+    const fromHome = home?.repository != null && positional.length === 1;
+    const [repoArg, whatArg] = fromHome ? [home.repository, positional[0]] : positional;
+    const what = need(whatArg, sub === 'set' ? 'the policy file' : 'the preset name');
+    const repo = repoOrHome(repoArg, home);
     // R-BTN-188: the change builds on the version the OPERATOR read — the one `show` printed —
     // so a concurrent change is a `conflict` the operator sees, never one this overwrites.
     const base = need(baseOf(flags.base), '--base N (the version your change builds on — `baton owner policy show` names it; a stale one answers conflict)');
@@ -1006,15 +1021,21 @@ async function policyMain(argv) {
   }
   if (sub === 'floor' && rest[0] === 'add') {
     const { flags, positional } = parseArgs(rest.slice(1), [], ['guarantees', 'remove-by', 'identity', 'url'], 2);
-    const out = await request('POST', `/v1/owner/${encodeURIComponent(repoOrHome(positional[0], home))}/policy/floors`,
-      { name: need(positional[1], 'the floor name'), guarantees: need(list(flags.guarantees), '--guarantees'), ...(flags['remove-by'] ? { remove_by: flags['remove-by'] } : {}) });
+    // B-121: with a home in force the repository may be omitted — one positional is the floor.
+    const fromHome = home?.repository != null && positional.length === 1;
+    const [repoArg, nameArg] = fromHome ? [home.repository, positional[0]] : positional;
+    const out = await request('POST', `/v1/owner/${encodeURIComponent(repoOrHome(repoArg, home))}/policy/floors`,
+      { name: need(nameArg, 'the floor name'), guarantees: need(list(flags.guarantees), '--guarantees'), ...(flags['remove-by'] ? { remove_by: flags['remove-by'] } : {}) });
     write(JSON.stringify(out.json));
     return out.status >= 200 && out.status < 300 ? 0 : 1;
   }
   if (sub === 'floor' && rest[0] === 'remove') {
     const { positional } = parseArgs(rest.slice(1), [], ['identity', 'url'], 2);
-    const out = await request('POST', `/v1/owner/${encodeURIComponent(repoOrHome(positional[0], home))}/policy/floors`,
-      { name: need(positional[1], 'the floor name'), remove: true, confirm: true });
+    // B-121: with a home in force the repository may be omitted — one positional is the floor.
+    const fromHome = home?.repository != null && positional.length === 1;
+    const [repoArg, nameArg] = fromHome ? [home.repository, positional[0]] : positional;
+    const out = await request('POST', `/v1/owner/${encodeURIComponent(repoOrHome(repoArg, home))}/policy/floors`,
+      { name: need(nameArg, 'the floor name'), remove: true, confirm: true });
     write(JSON.stringify(out.json));
     return out.status >= 200 && out.status < 300 ? 0 : 1;
   }
@@ -1038,8 +1059,9 @@ const arrived = (text) => (text.length > 300 ? `${text.slice(0, 300)}…` : text
  *  name, for the listing a command that needs a repository prints when none is. `--home` rides
  *  the API commands as `-i` and `--url` do; the origin check compares the home in force's origin
  *  with `explicitUrl` — the `--url` flag or `BATON_URL`, never a default. The bundle is loaded
- *  only when a home could be in force, so a command that names everything itself never waits
- *  on it; the fast path reads homesPath, spelled once above. */
+ *  whenever a home could be in force — the flag or env names one, or homes.json exists (its
+ *  default, and the origin it names, are read even by a command that names its repository
+ *  itself); the fast path reads homesPath, spelled once above. */
 async function homesContext(flag, explicitUrl = null) {
   if (flag === undefined && process.env.BATON_HOME == null && !existsSync(homesPath())) return { inForce: null, names: [] };
   const { resolveHomes } = await import('../scripts/baton-cli.mjs');
@@ -1090,8 +1112,12 @@ export async function main(argv) {
         throw new Error(`${rest[i]} needs a plain value — ${rest[i + 1]} is a flag of its own (quote a value that starts with a dash)`);
       }
     }
-    const clean = rest.filter((_, i, a) => !(a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
-    const flagsOf = () => parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'), [], ['identity', 'url'], 0).flags;
+    // B-121 round 1: the strip knows `--home` as it knows `-i`/`--url`, so `baton owner --home
+    // fieldhouse sign …` and `… verify-config …` dispatch on their own word (the flag's value
+    // would otherwise sit where the subcommand is looked for).
+    const flagPair = (_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url' || a[i] === '--home' || a[i - 1] === '--home';
+    const clean = rest.filter((_, i, a) => !flagPair(_, i, a));
+    const flagsOf = () => parseArgs(rest.filter((_, i, a) => flagPair(_, i, a)), [], ['identity', 'url', 'home'], 0).flags;
     // B-127 item 6: `baton owner -i KEY sign` — a commit signed the way `require_signed_control`
     // counts (git's `gpg.format ssh`, the SSHSIG namespace `git`), made with the key `-i` names.
     // Plain `git commit -S` with the same configuration is exactly as good (the runbook says so);
@@ -1131,7 +1157,12 @@ export async function main(argv) {
     // The keys come from Baton with the owner's key; the walk runs in the checkout.
     if (clean[0] === 'verify-config') {
       const flags = flagsOf();
-      const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+      // B-121: the home in force — resolved as every API command resolves it — supplies the
+      // repository the omitted REPOSITORY reads in and the origin a missing --url/BATON_URL
+      // calls, a named REPOSITORY still winning over it.
+      const homes = await homesContext(flags.home, flags.url ?? process.env.BATON_URL ?? null);
+      const home = homes.inForce ? { repository: homes.inForce.home.repository, names: homes.names } : (homes.names.length ? { repository: null, names: homes.names } : null);
+      const url = flags.url ?? process.env.BATON_URL ?? homes.inForce?.home.origin ?? DEFAULT_URL;
       const keyFile = need(flags.identity, '-i KEY (an owner key of the repository)');
       const args = clean.slice(1);
       const checkoutAt = args.indexOf('--checkout');
@@ -1139,14 +1170,17 @@ export async function main(argv) {
       // there was no --checkout, eating the REPOSITORY positional of the documented
       // no---checkout form, which then always hit the usage error).
       const positional = args.filter((_, i) => i !== checkoutAt && (checkoutAt < 0 || i !== checkoutAt + 1));
-      if (positional.length !== 1) throw new Error('baton owner -i KEY verify-config REPOSITORY [--checkout DIR]');
-      const read = await send(url, { method: 'GET', path: `/v1/owner/${encodeURIComponent(positional[0])}/signing-keys` }, keyFile);
+      if (positional.length > 1) throw new Error('baton owner -i KEY verify-config REPOSITORY [--checkout DIR]');
+      const repository = repoOrHome(positional[0], home);
+      const read = await send(url, { method: 'GET', path: `/v1/owner/${encodeURIComponent(repository)}/signing-keys` }, keyFile);
       if (!(read.status >= 200 && read.status < 300)) {
         process.stdout.write(`${JSON.stringify(read.json)}\n`);
         return 1;
       }
       const { verifyConfigMain } = await import('../scripts/baton-cli.mjs');
-      return await verifyConfigMain(args, { keys: read.json?.keys ?? [] });
+      // B-121: the resolved repository is passed with the keys, so the omitted-REPOSITORY form
+      // names the repository in its own refusal too (verifyConfigMain's word for it).
+      return await verifyConfigMain(args, { keys: read.json?.keys ?? [], ...(positional.length ? {} : { repository }) });
     }
     let cut = -1;
     for (let i = 0; i < rest.length; i++) {

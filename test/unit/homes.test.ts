@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { homesPath, main, plan } from '../../cli/baton.mjs';
-import { homeMain, homesHelp, parseHomes, readHomes, resolveHomes, runnerHome } from '../../src/defaults/homes';
+import { homeMain, homesHelp, looksLikePath, parseHomes, readHomes, resolveHomes, runnerHome } from '../../src/defaults/homes';
 
 const CLI = join(import.meta.dirname, '../../cli/baton.mjs');
 const URLS = {
@@ -188,6 +188,12 @@ describe('baton home: the local commands (B-121)', () => {
     expect(() => run(['remove', 'docs'])).toThrow('no home docs');
     // show reads --home and BATON_HOME through the same resolution the API commands use.
     expect(run(['show'], { env: { ...process.env, BATON_HOME: 'baton' } }).text).toContain('from BATON_HOME');
+    // Round 1: `--home` names the home show prints, so the ticket §2's `from --home` line is
+    // reachable — before, show refused any argument and the flag source was unreachable.
+    expect(run(['show', '--home', 'baton']).text).toContain('from --home');
+    expect(run(['show', '--home', 'baton']).lines[0]).toContain('home in force: baton');
+    expect(() => run(['show', '--home'])).toThrow('--home needs a value');
+    expect(() => run(['show', 'baton'])).toThrow('baton home show takes no argument');
   });
   it('an unknown subcommand, a stray flag and --help keep the CLI\'s own refusals', () => {
     expect(() => run(['teleport'])).toThrow('baton home list | use <name> | add');
@@ -237,6 +243,38 @@ describe('the home in force: --home, then BATON_HOME, then default (S-BTN-225\'s
     // With no home in force, the bare id keeps its old refusal.
     expect(() => plan('ticket', ['show', 'B-5'])).toThrow('the ticket is <repository>:<id>');
   });
+  it('round 1: the destructive owner verbs keep their shapes — a named REPO wins, the short shape reads the home', () => {
+    // Round 1 inverted the shape tests: `bar lift REPO ID` (three words) was read as the
+    // id-only shape, silently retargeting a destructive POST to the home's repository with
+    // the named one dropped; the advertised short shape threw instead.
+    const home = { repository: 'fieldhouse', names: [] };
+    expect(plan('owner', ['bar', 'lift', 'docs', 'B-7'], undefined, undefined, home)).toEqual({ method: 'POST', path: '/v1/owner/docs/bars/B-7/lift', body: {} });
+    expect(plan('owner', ['bar', 'lift', 'B-7'], undefined, undefined, home)).toEqual({ method: 'POST', path: '/v1/owner/fieldhouse/bars/B-7/lift', body: {} });
+    expect(plan('owner', ['courier', 'revoke', 'docs', 'SHA256:abc'], undefined, undefined, home))
+      .toEqual({ method: 'POST', path: '/v1/owner/docs/couriers', body: { fingerprint: 'SHA256:abc', revoke: true } });
+    expect(plan('owner', ['courier', 'revoke', 'SHA256:abc'], undefined, undefined, home))
+      .toEqual({ method: 'POST', path: '/v1/owner/fieldhouse/couriers', body: { fingerprint: 'SHA256:abc', revoke: true } });
+    // settings reads the home for the repository — the PUT path and the code-repos resolver
+    // one and the same repository (round 1 left both on need(positional[0])).
+    expect(plan('owner', ['settings', '--no-required-bars'], undefined, undefined, home)).toEqual({ method: 'PUT', path: '/v1/owner/fieldhouse/settings', body: { required_bars: [] } });
+    expect(plan('owner', ['settings', '--code-repos', 'a/b'], undefined, undefined, home).resolveCodeRepos).toEqual({ repository: 'fieldhouse', offline: null });
+    expect(plan('owner', ['settings', 'docs', '--code-repos', 'a/b'], undefined, undefined, home).resolveCodeRepos).toEqual({ repository: 'docs', offline: null });
+    // Without a home in force, the old refusals stand — the shapes are not re-read.
+    expect(() => plan('owner', ['bar', 'lift', 'B-7'])).toThrow('the bar id is required');
+    expect(() => plan('owner', ['courier', 'revoke', 'SHA256:abc'])).toThrow('the key fingerprint is required');
+    expect(() => plan('owner', ['settings', '--no-required-bars'])).toThrow('the repository id is required');
+  });
+  it('round 1: a leading-colon id keeps its parse refusal; a bare id with homes and none in force lists them', () => {
+    const home = { repository: 'fieldhouse', names: [] };
+    // A colon at index 0 names no repository: with a home in force it used to fall through to
+    // the bare-id branch and request local id `:B-5` against the home's repository.
+    expect(() => plan('ticket', ['show', ':B-5'], undefined, undefined, home)).toThrow('the ticket is <repository>:<id>');
+    expect(() => plan('ticket', ['show', ':B-5'])).toThrow('the ticket is <repository>:<id>');
+    // §5's rule, which the bare-id commands joined late: several homes, none in force — the
+    // refusal lists them, as the missing-REPO one always did.
+    expect(() => plan('ticket', ['show', 'B-5'], undefined, undefined, { repository: null, names: ['docs', 'fieldhouse'] }))
+      .toThrow('no home in force and no repository named — name one, or baton home use one of: docs, fieldhouse (B-121)');
+  });
   it('a home whose origin differs from --url/BATON_URL refuses, both named (R-BTN-56: never guess)', async () => {
     writeHomesFile({ default: 'fieldhouse', ...homesOf() });
     await expect(mainCapturing(['board', '-i', key, '--url', 'https://another.example'])).rejects.toThrow(
@@ -283,6 +321,19 @@ describe('the home in force: --home, then BATON_HOME, then default (S-BTN-225\'s
 });
 
 describe('resolveHomes and runnerHome: the pure halves', () => {
+  it('looksLikePath: a slash or an existing directory; a regular file is not a checkout (round 1)', () => {
+    const file = join(dir, 'a-file');
+    writeFileSync(file, 'x');
+    expect(looksLikePath('/an/absolute/path')).toBe(true);
+    expect(looksLikePath('rel/path')).toBe(true);
+    // The cwd of this suite is dir: 'a-file' exists there as a regular file — the spec's word
+    // is *directory*, so it reads as a home name (and then names no home), not a checkout.
+    expect(looksLikePath('a-file')).toBe(false);
+    const folder = join(dir, 'a-folder');
+    mkdirSync(folder);
+    expect(looksLikePath('a-folder')).toBe(true);
+    expect(looksLikePath('nothing-here')).toBe(false);
+  });
   it('resolveHomes: the source of each win, and the names for the none-in-force listing', () => {
     const homes = parseHomes(JSON.stringify({ default: 'fieldhouse', ...homesOf() }), 'x');
     expect(resolveHomes({ env: {}, homes })).toMatchObject({ inForce: { name: 'fieldhouse', source: 'default' }, names: ['docs', 'fieldhouse', 'baton'] });
