@@ -2993,6 +2993,30 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   while its page is visible, and backs off to 60 seconds while the answers are unchanged. One
   of B-235–B-243, the owner's 2026-11-15 plan to bound what each read costs.
 
+- **2026-11-16 — R-BTN-127 amended, S-BTN-225 added: the CLI's home in force (B-121).**
+  Rules changed: R-BTN-127.
+  The CLI switches between home repositories — docs, fieldhouse, baton — through
+  `~/.config/baton/homes.json`, beside `keys.json`, `origins.json` and `runner.json`:
+  `{default?: <name>, homes: {<name>: {origin, repository, checkout?}}}`, the name matching a
+  repository id's pattern and defaulting to the repository id. `baton home list | use <name> |
+  add [<name>] --repository <id> [--origin <url>] [--checkout <path>] | remove <name> | show`
+  manage it, local commands that call no server. The home in force — `--home <name|path>` (a
+  value containing `/` or naming an existing directory is a path, read as its checkout), then
+  `BATON_HOME`, then the file's `default` — supplies the repository a command's omitted
+  `<repository>` names and the one a bare ticket id is read in, and the origin a missing
+  `--url`/`BATON_URL` calls; a positional `<repository>` or a qualified ticket id always wins
+  over all three, and a bare ticket id resolves in the home in force (the owner's proposal of
+  2026-10-27, taken because "the default" should mean what it says), the
+  unique-among-the-key's-repositories reading applying only when no home is in force. A home
+  whose origin differs from `--url`/`BATON_URL` exits 2 naming both, never guessing across
+  origins (R-BTN-56); with homes and none in force, a command that needs a repository exits 2
+  listing them, never picking one. `baton run` and `baton runner start` keep their `--home`: a
+  name resolves to its home's `checkout`, and a home with no `checkout` exits 2 naming the
+  home. A home is a convenience, never a boundary: it grants nothing, and every request is
+  still signed and checked as without it. The ticket filed its scenario as S-BTN-171; that id
+  had been taken by the dependency-cycle refusal (B-166 part 3, 2026-11-02), so it lands as
+  S-BTN-225.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

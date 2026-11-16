@@ -156,6 +156,22 @@ describe('plan: one request per command', () => {
     expect(() => plan('owner', ['settings', 'docs', '--code-repos', 'a/b', '--forge-ids', 'seven,3'], key)).toThrow('decimal');
   });
 
+  it('a forge host with a port is a host: FORGE_HOST\'s port quantifier is {0,4} (B-121 round 1)', async () => {
+    // The B-121 edit corrupted the pre-existing pattern's `{0,4}` into `{0-4}` — literal
+    // characters to a JS regex, refusing every port-ful host at codeRepos.ts's and
+    // checkPushers's doors. No test had a port, which is how it slipped through.
+    const { FORGE_HOST } = await import('../../src/core/validate');
+    expect(FORGE_HOST.test('github.com:443')).toBe(true);
+    expect(FORGE_HOST.test('gitlab.example.com:8443')).toBe(true);
+    // The quantifier's own bounds stand: a port of six digits or a zero is not one.
+    expect(FORGE_HOST.test('github.com:999999')).toBe(false);
+    expect(FORGE_HOST.test('github.com:0')).toBe(false);
+    expect(FORGE_HOST.test('github.com')).toBe(true);
+    // The CLI hands a port-ful host to the settings PUT as it spells it.
+    expect(plan('owner', ['settings', 'docs', '--code-repos', 'a/b@github.com:443', '--forge-ids', '7,3'], key).body)
+      .toEqual({ code_repos: [{ path: 'a/b', host: 'github.com:443', repo_id: '7', owner_id: '3' }] });
+  });
+
   it('B-182: --code-repos ids are read from each entry\'s own forge with that host\'s token', async () => {
     const { codeReposSpec, pushersSpec, resolveCodeRepos } = await import('../../cli/baton.mjs');
     expect(pushersSpec('9')).toEqual([{ id: '9' }]);
@@ -708,6 +724,66 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
     // diff printed the one knob; show printed the read it verified the fields of.
     expect(outs.join('')).toContain('human_key');
   });
+
+  it('B-121 round 1: with a home in force, the five shapes that take a second positional read the home — and the origin it names', async () => {
+    // Round 1's finding: diff|set|apply|floor add|floor remove misindexed when the repository
+    // was omitted (`policy diff f.json` planned GET /v1/owner/f.json/policy, the filename as
+    // the repository). One home, ops, at the ORIGIN every request here calls — the default in
+    // force, so the omitted --url is the home's origin too.
+    const cfg = mkdtempSync(join(tmpdir(), 'baton-cli-policy-cfg-'));
+    mkdirSync(join(cfg, 'baton'), { recursive: true });
+    writeFileSync(join(cfg, 'baton', 'homes.json'), JSON.stringify({ default: 'ops', homes: { ops: { origin: ORIGIN, repository: 'ops' } } }));
+    const savedXdg = process.env.XDG_CONFIG_HOME;
+    const savedHome = process.env.BATON_HOME;
+    const savedUrl = process.env.BATON_URL;
+    process.env.XDG_CONFIG_HOME = cfg;
+    delete process.env.BATON_HOME;
+    delete process.env.BATON_URL;
+    const file = join(dir, 'owner.key');
+    createApiKey(file);
+    const policyFile = join(dir, 'policy.json');
+    writeFileSync(policyFile, JSON.stringify({ ...READ.policy, human_key: 'hardware' }));
+    const requests: { method: string; path: string; body: unknown }[] = [];
+    const was = globalThis.fetch;
+    const outWrite = process.stdout.write;
+    process.stdout.write = (() => true) as typeof process.stdout.write;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const u = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+      const body = init?.body == null ? undefined : JSON.parse(String(init.body));
+      requests.push({ method: (init?.method ?? 'GET') as string, path: new URL(u).pathname, body });
+      if (u.endsWith('/policy') && (init?.method ?? 'GET') === 'GET') return new Response(JSON.stringify(READ), { status: 200 });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      // No --url: the home in force's origin is the one called (B-121 §3).
+      const run = (args: string[]) => main(['owner', 'policy', ...args, '-i', file, '--dev']);
+      await expect(run(['diff', policyFile])).resolves.toBe(0);
+      await expect(run(['set', policyFile, '--base', '4'])).resolves.toBe(0);
+      await expect(run(['apply', 'protected', '--base', '5'])).resolves.toBe(0);
+      await expect(run(['floor', 'add', 'fieldhouse', '--guarantees', 'no-runner-lands'])).resolves.toBe(0);
+      await expect(run(['floor', 'remove', 'fieldhouse'])).resolves.toBe(0);
+      // A named repository (two positionals) still wins over the home.
+      await expect(run(['diff', 'docs', policyFile])).resolves.toBe(0);
+    } finally {
+      globalThis.fetch = was;
+      process.stdout.write = outWrite;
+      for (const [n, v] of [['XDG_CONFIG_HOME', savedXdg], ['BATON_HOME', savedHome], ['BATON_URL', savedUrl]] as const) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+      }
+      rmSync(cfg, { recursive: true, force: true });
+    }
+    expect(requests.map((r) => `${r.method} ${r.path}`)).toEqual([
+      'GET /v1/repositories/ops/policy',
+      'PUT /v1/owner/ops/policy',
+      'PUT /v1/owner/ops/policy',
+      'POST /v1/owner/ops/policy/floors',
+      'POST /v1/owner/ops/policy/floors',
+      'GET /v1/repositories/docs/policy',
+    ]);
+    // The one-positional `set` carried the file's policy, not a repository-shaped confusion.
+    expect(requests[1].body).toEqual({ base_version: 4, policy: { ...READ.policy, human_key: 'hardware' } });
+  });
 });
 
 describe('baton owner sign / verify-config (B-127 item 6, round 1: the command shipped untested)', () => {
@@ -804,6 +880,51 @@ describe('baton owner sign / verify-config (B-127 item 6, round 1: the command s
       globalThis.fetch = was;
       process.chdir(cwd);
     }
+  }, 60_000);
+
+  it('B-121 round 1: --home rides between owner and the word, and verify-config\'s REPOSITORY is optional in the home in force', async () => {
+    // Round 1: the clean/flagsOf strip knew only -i/--url, so `owner --home X verify-config …`
+    // never dispatched (the flag's value sat where the subcommand is looked for), and the
+    // REPOSITORY position never became optional. One home, docs, at ORIGIN — the default.
+    const cfg = mkdtempSync(join(tmpdir(), 'baton-owner-sign-cfg-'));
+    mkdirSync(join(cfg, 'baton'), { recursive: true });
+    writeFileSync(join(cfg, 'baton', 'homes.json'), JSON.stringify({ default: 'docs', homes: { docs: { origin: ORIGIN, repository: 'docs' }, fieldhouse: { origin: ORIGIN, repository: 'fieldhouse' } } }));
+    const saved: Record<string, string | undefined> = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, BATON_HOME: process.env.BATON_HOME, BATON_URL: process.env.BATON_URL };
+    process.env.XDG_CONFIG_HOME = cfg;
+    delete process.env.BATON_HOME;
+    delete process.env.BATON_URL;
+    mkdirSync(join(dir, '.claude'), { recursive: true });
+    writeFileSync(join(dir, '.claude', 'settings.json'), '{"hooks":{}}\n');
+    add('.claude/settings.json');
+    commit('-m', 'an unsigned agent config');
+    const calls: string[] = [];
+    const was = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const u = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+      calls.push(new URL(u).origin + new URL(u).pathname);
+      return new Response(JSON.stringify({ keys: [{ public_key: ownerPub, fingerprint: ownerFp }] }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      // --home riding, the repository still named: the named REPOSITORY wins over the home,
+      // and the origin called is the home in force's (no --url given).
+      await expect(run(['--home', 'fieldhouse', 'verify-config', 'docs', '--checkout', dir])).resolves.toBe(1);
+      expect(calls).toEqual([`${ORIGIN}/v1/owner/docs/signing-keys`]);
+      // The REPOSITORY omitted: the home in force's repository, its origin called.
+      calls.length = 0;
+      await expect(run(['verify-config', '--checkout', dir])).resolves.toBe(1);
+      expect(calls).toEqual([`${ORIGIN}/v1/owner/docs/signing-keys`]);
+      // --home riding before sign dispatches it (a local git command; the home names nothing
+      // to it) — round 1 left this on the generic owner usage error.
+      await expect(run(['--home', 'fieldhouse', 'sign', '-m', 'x', '--repo', dir])).rejects.toThrow(/names no path/);
+    } finally {
+      globalThis.fetch = was;
+      for (const [n, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+      }
+      rmSync(cfg, { recursive: true, force: true });
+    }
+    expect(outs.join('').match(/was last changed by unsigned commit/g)).toHaveLength(2);
   }, 60_000);
 });
 

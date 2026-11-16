@@ -277,12 +277,33 @@ is summarized in the principal table (§12.1).
     (R-BTN-137); a human-only key is mapped only where its custody allows (R-BTN-185),
     else given as `-i`. A command whose caller is an approver list tries the roles the list in
     force names (R-BTN-188). No key for the role exits 2, naming the role.
+  - **Homes.** `~/.config/baton/homes.json`, beside `keys.json` (R-BTN-137), names the CLI's
+    homes — `{default?: <name>, homes: {<name>: {origin, repository, checkout?}}}`, the name
+    matching a repository id's pattern (R-BTN-47) and defaulting to the repository id (B-121).
+    A home is a convenience, never a boundary: it grants nothing, and every request is still
+    signed and checked as without it. `baton home list | use <name> | add [<name>]
+    --repository <id> [--origin <url>] [--checkout <path>] | remove <name> | show` manage it —
+    local commands, no request (`add` with `--checkout` reads the origin from the checkout's
+    `.baton/baton.json` `baton_url`, R-BTN-56, and refuses an `--origin` that differs; without
+    one, `--origin` is required; `use` refuses an unknown name, listing the file's). The home
+    in force — `--home <name|path>` (a value containing `/` or naming an existing directory is
+    a path, read as its checkout), then `BATON_HOME`, then the file's `default` — supplies the
+    repository a command's omitted `<repository>` names and the one a bare ticket id is read
+    in, and the origin a missing `--url`/`BATON_URL` calls. A `<repository>` positional or a
+    qualified ticket id always wins over all three; a bare ticket id resolves in the home in
+    force, and the unique-among-the-key's-repositories reading applies only when none is. A
+    home in force whose origin differs from `--url`/`BATON_URL` exits 2, naming both — the CLI
+    never guesses across origins (R-BTN-56) — and with homes and none in force, a command that
+    needs a repository exits 2, listing them, never picking one. `baton run` and `baton runner
+    start` keep their `--home`: a name resolves to its home's `checkout`, and a home with no
+    `checkout` exits 2, naming the home.
   - **The tree.** `leg` and `ticket` act on work, with whatever key the caller holds;
     `decision` and `attestation` are a person's statements, and `human-key` the human-only
-    identity's (R-BTN-185); `repo`, `course`, `runner`, `key` and `server` run the repository's
-    and the machine's side; `owner` and `admin` manage a
+    identity's (R-BTN-185); `repo`, `course`, `runner`, `home`, `key` and `server` run the
+    repository's and the machine's side — `home` names the CLI's configuration, never a
+    request; `owner` and `admin` manage a
     repository and the instance. `<repository>` is omitted where the key file maps one
-    repository, or the ticket names it.
+    repository, the home in force names one (B-121), or the ticket names it.
 
     | Command | Calls | Signs as |
     |---|---|---|
@@ -314,6 +335,7 @@ is summarized in the principal table (§12.1).
     | `runner register --token <t> --name <name> [--key ssh\|api]` | `POST /v1/register` (R-BTN-117) | the token |
     | `runner accept-grant <repository> [--confirm]`, `runner decline-grant <repository>` | `runner.grant.accept`, `runner.grant.decline` (R-BTN-146) | runner, key alone |
     | `key create <file>` | local (R-BTN-159) | — |
+    | `home list`, `home use <name>`, `home add [<name>] --repository <id> [--origin <url>] [--checkout <path>]`, `home remove <name>`, `home show` | local: `~/.config/baton/homes.json`, the home in force (B-121) | — |
     | `server start --db <file> --admin-keys <file> […]` | local: starts the local host (R-BTN-56, R-BTN-158) | — |
     | `owner grant list <repository>` | `owner.grant.list`: `GET /v1/owner/{repository}/grants` (R-BTN-179, R-BTN-146) | owner |
     | `owner grant add <repository> --key <pub> --capabilities <a,b> [--hostname <h>] [--label <l>] [--max-tier <t>] [--confirm-span]`, or `--api-key --name <name>` | `owner.grant.add`: `POST /v1/owner/{repository}/grants` (R-BTN-58, R-BTN-146, R-BTN-159) | an approver on `approvers.members` |
