@@ -9,15 +9,17 @@ export const ATTEMPTS_HOLD_AT = 3;
 
 /**
  * §6.10: whether an end counts as a failed attempt. A reap by the alarm for silence, any
- * `cannot-finish`, and `lease-lost` once per distinct worker (`leaseLostBefore`: this worker
- * already has a counted lease-lost on the item since the last hold-lift). Nothing else — not an
- * owner's force-reap, the unacknowledged-release reap, a legacy reap, nor stale-board,
- * requested, owner-cancel, provider-suspended, provider-exhausted, course-changed or any
- * completion, suspensions included.
+ * `cannot-finish`, `lease-lost` once per distinct worker (`leaseLostBefore`: this worker
+ * already has a counted lease-lost on the item since the last hold-lift) and a run the claim's
+ * `deadline_s` took back (`leg-timeout`, R-BTN-90 — the ask of R-BTN-195 ends this way when
+ * nobody joins). Nothing else — not an owner's force-reap, the unacknowledged-release reap, a
+ * legacy reap, nor stale-board, requested, owner-cancel, provider-suspended,
+ * provider-exhausted, course-changed or any completion, suspensions included.
  */
 export function countsAsFailed(endReason: string, leaseLostBefore = false): boolean {
   if (endReason === 'reaped:silent') return true;
   if (endReason.startsWith('released:cannot-finish:')) return true;
+  if (endReason === 'released:leg-timeout') return true;
   if (endReason === 'released:lease-lost') return !leaseLostBefore;
   return false;
 }

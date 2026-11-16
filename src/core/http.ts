@@ -14,7 +14,8 @@ export type ErrorCode =
   | 'session-taken' | 'worker-reaped' | 'claim-ended' | 'not-holder'
   | 'not-eligible' | 'no-eligible-ticket' | 'provider-suspended' | 'stale-skills' | 'backing-off' | 'not-cut-over' | 'conflict' | 'barred-tag' | 'blocked' | 'closed' | 'invalid-prerequisite'
   | 'floor-violated' | 'unsatisfiable-approvers' | 'confirm-required' // §12.8 (B-145): the policy's refusals
-  | 'capacity-full';
+  | 'capacity-full'
+  | 'quota'; // §7.1 (R-BTN-160, B-234): past a raise's open-condition or daily quota
 
 const STATUS: Record<ErrorCode, number> = {
   unauthenticated: 401, forbidden: 403, 'invalid-params': 400, 'not-found': 404,
@@ -28,6 +29,7 @@ const STATUS: Record<ErrorCode, number> = {
   closed: 409, // a notice whose decision was answered (R-BTN-80)
   'floor-violated': 409, 'unsatisfiable-approvers': 409, // R-BTN-189's floor, R-BTN-188's unsatisfiable list
   'confirm-required': 428, // a destructive action without confirm: true (§14)
+  quota: 429, // §7.1 (R-BTN-160, B-234): past a raise's quota
 };
 
 /** Thrown anywhere below the router; the router turns it into the §11 error body. */

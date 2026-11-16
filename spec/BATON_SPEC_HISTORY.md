@@ -2894,6 +2894,104 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   mockup's unbuilt elements are a Decisions line with their reasons. The old view names go to
   the Migrations below; the brief (`docs/context/design-brief.mdx`) was checked against the
   amended §11.4 and its drift fixed.
+- **2026-11-14 — R-BTN-195 added; R-BTN-69, R-BTN-107, R-BTN-113, R-BTN-160, R-BTN-161, R-BTN-163 amended: a person is asked into the leg's session.**
+  Rules changed: R-BTN-195, R-BTN-69, R-BTN-107, R-BTN-113, R-BTN-160, R-BTN-161, R-BTN-163,
+  and the leads of §6.4 and §7.
+  The owner, on how a leg asks for human input: the native harnesses already handle a person
+  in the loop well, so Baton hands the person to the harness rather than mediating, and "we need
+  to remove concepts". A leg may be declared `autonomous` (deterministic code, or an agent that
+  succeeds or fails): it never asks, and fails with the new non-retryable `error.needs-person`;
+  live debugging is not an option. Any other leg may raise the new standard type `interact`
+  while its run has a session link and a `deadline_s`. Baton sets the condition's `url` from the
+  run's stored session link; no binding applies and no handler ticket is filed; the condition is
+  on Needs you and a delivery runner sends it from Baton's list with the ticket, leg and link and
+  none of the leg's text. "The user may choose to end their interaction with the agent harness
+  web ui, which leaves open a future interaction request invoked by the same leg during its
+  execution": Baton tracks nothing of the interaction, and a later raise in the run supersedes the
+  open one. A joinable session ends at the result posted on its channel, and the runner then stops
+  it. R-BTN-113 lets the session link be a page the runner serves that leads to the session (the
+  owner: "The link should point to a runner on the tailnet with the ticket, leg and run id in the
+  url. The runner could then redirect or include the harness web ui via iframe"). §6.4 and §7 now
+  say a course waits on a person one way, a person leg. Before the PR merged, an adversarial review
+  moved delivery from a handler ticket bound to `announce` to Baton's list: under
+  `tickets-approved` a handler ticket is only proposed and nothing would have sent it (the owner:
+  "read from Baton's list"). Left out of the first version and listed as possible later work in
+  FIELDHOUSE_SPEC §5.1: a question with a menu that the delivery runner delivers and the person
+  answers without joining the session, and hibernating a long-waiting leg, revived when the
+  person loads the leg page or answers. Scenario S-BTN-222.
+
+- **2026-11-15 — R-BTN-126, R-BTN-121, R-BTN-76: a leg's block is a request the runner confirms
+  (owner direction).** Found live: the zai coding plan's weekly limit ran out, every agent call
+  failed at once, and one runner spent an attempt on seven tickets in six minutes, each
+  `released:cannot-finish:transient`. The owner asked that the runner notice the provider's limit,
+  verify it by trusted means and tell Baton, because "the sandboxed implementation leg is the first
+  to notice that we are out of tokens, but we can't take its reading at face value (it's
+  sandboxed, potentially compromised code)". Before this change R-BTN-126 forwarded what the leg
+  said: a `capability` end was the runner's statement made on the leg's word, and a `resource`
+  end's `reading` came from the leg, so compromised leg code could post an `available: false`
+  reading of an account instance for up to 24 hours and block every repository it serves. Now a
+  leg's `capability` request ends blocked only when that capability's own `check`, run by the
+  runner after the leg stops, in a directory the runner owns and bounded to 60 seconds, fails; a
+  passing check or none is a counted failed attempt. A `resource` request still stands as a need,
+  as before, but carries a reading only from a runner check bound to the instance, and nothing a
+  leg sends is forwarded. `runner.json` gains `instance`: a check that tests one account alone
+  reports that account's `state` reading while it fails, at most an hour at a time and renewed,
+  and any runner whose bound check passes while the instance reads `unavailable` posts
+  `available: true` (never over an administrator's or an instrument's reading), so one
+  misconfigured runner cannot hold the fleet off for long. A failed check keeps running and its
+  capability is declared again at the first pass at least `every_s` later; one run per capability
+  is in flight at a time; a name the executor provides is blocked only by the executor's own end.
+  Blocked `capability` ends still count toward `max_blocked`: a runner whose check fails stops
+  claiming, so a ticket is bounced only by checks that pass while the provider is spent, which is
+  why a bound check must test the quota itself. Runners each holding their own subscription that
+  run out one after another can still hold a ticket `blocked-exhausted` after five such ends in a
+  day; that case was accepted. A runner reading's `until` is clamped to its one-hour end and
+  renewed while the check fails, so a weekly limit stays read as `unavailable` without a
+  reading that outlives its writer's evidence.
+  Considered and rejected: the owner's first sketch, a leg-raised condition whose bound
+  deterministic handler course verifies the claim and posts the reading. No disposition ends a leg
+  without spending an attempt (`interrupt` is `cannot-finish`, `notify` goes on, `suspend` is
+  closed to autonomous legs), and a handler is a ticket filed in git, synced and claimed, so other
+  runners would keep failing for as long as that takes. The owner's other two points needed no
+  new mechanism: a leg requires an ability (`capability:code-generation-llm`, R-BTN-174) and falls
+  back between providers within its run (§6.10, R-BTN-122); a capability block clears when the
+  check passes again, and a resource block when the reading lapses or a passing runner counters
+  it. An adversarial review before the PR found the first draft contradicting the rule's own
+  "never a retry" sentence, turning reading-less resource ends into counted failures, leaving the
+  check's working directory open to the leg, and letting one runner's failing check block the
+  fleet for a day; a second round found an unbounded exemption from `max_blocked`, counter-posts
+  overriding administrators, and an executor confirmation with no interface, and a third a
+  reading with a far reset that the one-hour bound would refuse; each is fixed above.
+  Scenarios S-BTN-223 and S-BTN-224, gate G-BTN-169.
+- **2026-11-15 — §13's event indexes: the dashboard's event windows read through an index** (B-235).
+  Rules changed: none; §13's index list.
+  On 2026-11-14 production passed Cloudflare's free-tier limit of 5,000,000 Durable Object
+  `rows_read` a day at 21:41Z, and every runner call failed until the 00:00Z reset. Each
+  10-second poll of `GET /v1/ui/state` scanned the never-pruned event log three times for its
+  `bars-mismatch`, `unsigned-control` and `discrepancy` windows (≈ 3 × the events, ~9k of a
+  ~14.4k-row poll on a production-sized state). Migration 0049 adds `events_by_kind_at`
+  `(kind, at)` and the windows read in its order, `at` then `seq` — the log's order, since every
+  event is written at the core's clock. It also restores `events_unsigned_control`, made by 0040
+  and lost when 0043 rebuilt `events` with only its four other indexes (0048's rebuild repeated
+  the list); §13 now names the event indexes and says a rebuild recreates them all. One of
+  B-235–B-243, the owner's 2026-11-15 plan to bound what each read costs.
+
+- **2026-11-15 — §13's dashboard and sync indexes, §11.4's polling: the dashboard reads in joined queries, a sync post reads its tickets once, and a hidden dashboard does not poll** (B-240, B-241, B-242's UI half).
+  Rules changed: none; §13's index notes, §11.4's polling rule.
+  On 2026-11-14 production passed Cloudflare's free-tier limit of 5,000,000 Durable Object
+  `rows_read` a day. `GET /v1/ui/state` ran about 676 statements a poll on a production-sized
+  state — per active claim its events and activities, per alive worker its claims, per claim its
+  activities, per activity its transcript, per blocked ticket its blocks — and scanned the claims
+  for the timeline's window, the unconfirmed completions and the pending fences. It now runs
+  about 65, the same however many claims, activities and blocked tickets, each list in the order
+  it was served; migration 0055 adds `claims_by_ended`, `claims_unconfirmed_by_end`,
+  `claims_fence_pending`, `transcripts_by_claim` and `next_legs_waiting`. A board post read
+  each ticket's course, station, next legs, bars, needs, decisions and answers one query at a
+  time (3,165 statements for a 180-ticket refresh that wrote 4 rows); it reads them once per
+  repository and judges its unjudged leg runs through 0055's `claim_legs_unjudged`, so an
+  unchanged ticket costs no statement and writes nothing, as before. The dashboard polls only
+  while its page is visible, and backs off to 60 seconds while the answers are unchanged. One
+  of B-235–B-243, the owner's 2026-11-15 plan to bound what each read costs.
 
 ## Retired requirements
 

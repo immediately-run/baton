@@ -24,7 +24,7 @@ is stale. Never edit it by hand.
 | [`02-deployments.md`](BATON_SPEC/02-deployments.md) | **2. Deployments: tenants, hosts and the service** | — |
 | | 2.1 The service | R-BTN-37, R-BTN-32, R-BTN-55, R-BTN-2 |
 | | 2.2 Tenants | R-BTN-135, R-BTN-136, R-BTN-137, R-BTN-56 |
-| | 2.3 Capacity and admission | R-BTN-87, R-BTN-149 |
+| | 2.3 Capacity and admission | R-BTN-87, R-BTN-196, R-BTN-149 |
 | [`03-repositories-and-forges.md`](BATON_SPEC/03-repositories-and-forges.md) | **3. Repositories and forges** | — |
 | | 3.1 The registry | R-BTN-47, R-BTN-92, R-BTN-138, R-BTN-61 |
 | | 3.2 Who may post a board | R-BTN-93, R-BTN-15, R-BTN-156 |
@@ -62,7 +62,7 @@ is stale. Never edit it by hand.
 | | 6.10 How a leg runs: the course's choice | — |
 | | 6.11 Capacity: exclusive use of a capability *(proposal — B-106)* | R-BTN-178 |
 | [`07-conditions.md`](BATON_SPEC/07-conditions.md) | **7. Conditions** | — |
-| | 7.1 Raising a condition | R-BTN-160, R-BTN-125 |
+| | 7.1 Raising a condition | R-BTN-160, R-BTN-125, R-BTN-195 |
 | | 7.2 Handlers | R-BTN-161, R-BTN-162 |
 | | 7.3 The debugger and Baton's own conditions | R-BTN-163 |
 | | 7.4 Retries | R-BTN-122, R-BTN-23 |
@@ -299,6 +299,8 @@ is stale. Never edit it by hand.
 | R-BTN-192 | the fact reader: forge facts a trusted runner attests, with no course code | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-193 | git is never a lock or a counter | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
 | R-BTN-194 | every ticket carries who last wrote it | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-195 | an interaction request asks a person into the leg's session | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
+| R-BTN-196 | an idle runner's beat reads about nothing | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
 
 ## Scenarios
 
@@ -481,6 +483,9 @@ is stale. Never edit it by hand.
 | S-BTN-219 | require_signed_control (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-220 | ticket provenance (B-126) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-221 | the screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-222 | an interaction request | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-223 | a leg's capability request is confirmed by the runner | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-224 | a runner's readings of an account | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
@@ -632,3 +637,4 @@ is stale. Never edit it by hand.
 | G-BTN-166 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-167 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-168 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-169 | [`15-verification.md`](BATON_SPEC/15-verification.md) |

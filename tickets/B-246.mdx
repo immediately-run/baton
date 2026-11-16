@@ -1,0 +1,68 @@
+---
+title: "B-246 — create-pr's agent legs require an ability, fall back between providers, and ask to block when none is usable"
+id: B-246
+project: baton
+status: available
+updated: 2026-11-15
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "The create-pr course's agent legs (implement, fix, review) require capability:code-generation-llm, the course declares the type, the agent wrapper falls back from one provider to the next within the run on a provider-limit error, and a leg with no usable provider asks to end released:blocked on the capability instead of failing (§6.10, R-BTN-121, R-BTN-126, R-BTN-174). Requires: B-245."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-245
+---
+
+**Brief:** the owner, 2026-11-15: noticing that GLM is depleted should not necessarily block the implementation leg; the runner's capability may be a provider, but the leg should require the abstract "coding agent".
+**Spec:** [BATON_SPEC §6.10](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-10) (which model and key a leg uses is the course's; in-run fallback, then a blocked request), [§5.6](../spec/BATON_SPEC/05-courses.md#sec-5-6) [R-BTN-121](../spec/BATON_SPEC/05-courses.md#sec-5-6) (`capability_types`, the worked example), [§5.9](../spec/BATON_SPEC/05-courses.md#sec-5-9) [R-BTN-174](../spec/BATON_SPEC/05-courses.md#sec-5-9) (a leg may require an ability), [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) [R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) (how a leg asks), [§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4) [R-BTN-122](../spec/BATON_SPEC/07-conditions.md#sec-7-4) (a leg retrying inside its own run counts nothing).
+**Depends on:** B-245 (the runner confirms the request; without it a request is forwarded unchecked).
+
+### Why
+
+Today the course's agent legs require nothing, and `.baton/baton.json`'s `agent_command` names one provider and model. When that provider's limit runs out, every agent leg exits 1 and is counted `released:cannot-finish:transient`: on 2026-11-15 seven tickets lost an attempt in six minutes. A capability block on a provider would match no leg, since none requires one.
+
+### What to build
+
+1. **The requirement.** `capability_types` gains `capability` (values pattern covering `code-generation-llm`); `implement`, `fix` and `review` gain `requires.capabilities: ["capability:code-generation-llm"]`. Check every live ticket's queued leg against the new file (R-BTN-64) and bump the course `version` under R-BTN-22's rule.
+2. **Detection.** The leg scripts classify the agent harness's exit: a provider-limit error (the harness's own message, e.g. GLM's `Weekly/Monthly Limit Exhausted`, an HTTP 429 with a quota body) is a limit, distinct from any other failure. The patterns live in the course, one list per harness, with a test per pattern.
+3. **Fallback within the run.** The agent wrapper runs the agent with the first provider; on a limit it runs it again with the next provider the leg's environment offers, and so on. A non-limit failure ends the leg as today.
+4. **Asking to block.** When every provider is at its limit, the leg throws `LegError(type, message, {prerequisite: {kind: "capability", ref: "capability:code-generation-llm"}})` — no reading — and the runner confirms it (B-245).
+5. **The instructions.** The legs' instruction files say nothing to the agent about providers; detection and fallback are the scripts' and the wrapper's.
+
+### Do not
+
+- Put a reading, `until` or `detail` in the leg's request.
+- Retry a non-limit failure inside the run.
+- Name a provider in `requires`.
+
+### Trust
+
+- **No new input to Baton.** The leg's blocked request carries only `kind` and `ref` (no reading), and B-245's runner confirms it with its own check.
+- **The limit patterns** are course code in git, reviewed like any leg script; a harness message matching one only chooses between fallback and a blocked request inside the leg, never a statement Baton acts on.
+
+### Invariants
+
+- R-BTN-64 / R-BTN-22: the new `requires` keeps every live ticket's station and queued leg valid; the course `version` is bumped.
+- R-BTN-126: the leg names the capability it requires and sends no reading.
+- R-BTN-122: in-run fallback is the leg's own loop; Baton counts nothing for it.
+
+### Tests
+
+- A replayed harness transcript per limit pattern: classified as a limit; a generic exit 1 is not.
+- A run whose first provider is at its limit and second is not finishes on the second, with no attempt spent.
+- A run with every provider at its limit ends with the blocked request; with B-245 in place, S-BTN-223's confirmed and unconfirmed outcomes.
+- `baton course test` on the new course file against every live ticket.
+
+### Exit criteria
+
+- [ ] the tests above pass
+- [ ] merged under the review gate
+
+## Status
+
+_filed 2026-11-15._

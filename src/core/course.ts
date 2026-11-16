@@ -11,7 +11,8 @@
 export type CourseRule =
   | 'shape' | 'unknown-key' | 'id' | 'unknown-station' | 'start-leg' | 'unreachable' | 'no-end' | 'terminal'
   | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar' | 'no-chain-from' | 'entry' | 'schema' | 'role-in-roles' | 'starts-from'
-  | 'policy'; // §12.8 (B-145, R-BTN-181): the repository policy the snapshot is judged against
+  | 'policy' // §12.8 (B-145, R-BTN-181): the repository policy the snapshot is judged against
+  | 'conditions' | 'autonomous'; // R-BTN-160 (B-234): declared condition types, and a leg's `autonomous`
 
 export interface CourseViolation {
   rule: CourseRule;
@@ -23,6 +24,7 @@ export interface CourseViolation {
 import { isFreeText } from './text';
 import { parseSchemaId } from '../shared/schema.mjs';
 import { ROLES } from '../shared/vocabulary.mjs';
+import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, barredFromAutonomous, dispositionOf, type ConditionDeclaration, type Disposition } from './conditionTypes';
 
 /** R-BTN-121, R-BTN-157: the names a vocabulary expansion already means — a vocabulary role, the
  *  built-in literal `human-operator`, and `none`, which every runner holds. Review round 7,
@@ -52,7 +54,8 @@ const COURSE_LIST_MAX = 64;
  *  you entry (spec-silent, recorded on R3-1231). The list is kept to this while it fills, so a
  *  hostile file's thousand faults cost no more memory than a hundred. */
 const COURSE_VIOLATIONS_MAX = 100;
-const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs', 'capability_roles', 'capability_types', 'starts_from', 'test_script']);
+const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs', 'capability_roles', 'capability_types', 'starts_from', 'test_script',
+  'conditions']);
 /** R-BTN-131 (B-98): the one way a course is entered that is not a hand-filed ticket —
  *  `starts_from: request`, which `baton request` reads before it files the ticket that starts the
  *  course. A closed set: anything else is a file Baton would record and never act on. */
@@ -60,7 +63,7 @@ const STARTS_FROM = new Set(['request']);
 const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
 const ENTRY_KEYS = new Set(['output', 'schema']);
 const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
-  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires']);
+  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires', 'conditions', 'autonomous']);
 /** R-BTN-116: the one kind a leg may be today — `person`, a leg a person answers by a
  *  `std:decision@1`. A `call` leg (R-BTN-165) is not built, so a file carrying one is refused
  *  rather than kept unread. */
@@ -86,6 +89,15 @@ const OUTPUT_KEYS = new Set(['schema']);
  *  a name — none empty, `.` or `..` (as §10.4 asks of a `git:` path). */
 const isSchemaPath = (v: unknown) =>
   typeof v === 'string' && v.length <= 200 && v.split('/').every((seg) => /^[A-Za-z0-9._-]+$/.test(seg) && seg !== '.' && seg !== '..');
+
+/** R-BTN-160 (B-234): what a course's declaration of one condition type holds. Only
+ * `disposition` is required; a restart id matches §12.3's decision-id pattern. */
+const CONDITION_KEYS = new Set(['disposition', 'restarts', 'default', 'wait_s', 'retryable', 'description']);
+const DISPOSITIONS = new Set(['interrupt', 'suspend', 'notify']);
+/** R-BTN-162: a declared wait is never more than 900 s. */
+const WAIT_S_MAX = 900;
+/** A declaration's restarts: ids with one-line descriptions — a question's options. */
+const RESTARTS_MAX = 8;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
@@ -158,6 +170,52 @@ export function validateCourse(json: unknown): CourseViolation[] {
         }
       }
       capabilityList(caps, `capability_roles.${role}`, role);
+    }
+  }
+
+  // R-BTN-160 (B-234): the course's declared condition types — `{<type>: {disposition, …}}`,
+  // only `disposition` required. `baton` and `baton.*` are core's alone: the validator refuses
+  // a course declaring them. What a declaration means for a raise (bindings, waits, restarts)
+  // is not built here; the table is what the raise check and the signature read.
+  const declared = new Map<string, ConditionDeclaration>();
+  if ('conditions' in json) {
+    const conditions = json.conditions;
+    if (!isObject(conditions)) add('shape', 'conditions', 'conditions is an object of declared condition types (R-BTN-160)');
+    else if (Object.keys(conditions).length > COURSE_LIST_MAX) add('shape', 'conditions', `at most ${COURSE_LIST_MAX} declared condition types`);
+    else for (const [type, def] of Object.entries(conditions)) {
+      const at = `conditions.${type}`;
+      if (!CONDITION_TYPE.test(type) || type.length > CONDITION_TYPE_MAX) {
+        add('id', at, `type "${type}" must be a dotted ^[a-z][a-z0-9-]* name of at most ${CONDITION_TYPE_MAX} characters (R-BTN-160)`);
+        continue;
+      }
+      if (type === 'baton' || type.startsWith('baton.')) {
+        add('conditions', at, 'baton and baton.* are core\'s alone: a course declares none of them (R-BTN-160)');
+        continue;
+      }
+      if (!isObject(def)) { add('shape', at, 'a declaration is {disposition, restarts?, default?, wait_s?, retryable?, description?} (R-BTN-160)'); continue; }
+      for (const k of Object.keys(def)) if (!CONDITION_KEYS.has(k)) add('unknown-key', `${at}.${k}`, `unknown key "${k}"`);
+      if (typeof def.disposition !== 'string' || !DISPOSITIONS.has(def.disposition)) {
+        add('shape', `${at}.disposition`, `disposition is required: one of ${[...DISPOSITIONS].join(', ')} (R-BTN-160)`);
+        continue;
+      }
+      declared.set(type, { disposition: def.disposition as Disposition });
+      if ('restarts' in def) {
+        const restarts = def.restarts;
+        if (!isObject(restarts) || Object.keys(restarts).length === 0 || Object.keys(restarts).length > RESTARTS_MAX) {
+          add('shape', `${at}.restarts`, `restarts is 1–${RESTARTS_MAX} ids with one-line descriptions (R-BTN-160)`);
+        } else for (const [id, text] of Object.entries(restarts)) {
+          if (!RESTART_ID.test(id) || id.startsWith('baton.')) add('id', `${at}.restarts.${id}`, `restart id "${id}" matches ^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$ and never starts baton. (§12.3)`);
+          if (!isFreeText(text)) add('bound', `${at}.restarts.${id}`, 'a restart description is §10.4 free text');
+        }
+      }
+      if ('default' in def && (typeof def.default !== 'string' || !RESTART_ID.test(def.default) || !isObject(def.restarts) || !own(def.restarts, def.default))) {
+        add('shape', `${at}.default`, 'default names one of the declaration\'s restarts (R-BTN-160)');
+      }
+      if ('wait_s' in def && !(isInt(def.wait_s) && def.wait_s >= 0 && def.wait_s <= WAIT_S_MAX)) {
+        add('bound', `${at}.wait_s`, `wait_s is an integer from 0 to ${WAIT_S_MAX} seconds (R-BTN-162)`);
+      }
+      if ('retryable' in def && typeof def.retryable !== 'boolean') add('bound', `${at}.retryable`, 'retryable is true or false (R-BTN-122)');
+      if ('description' in def && !isFreeText(def.description)) add('bound', `${at}.description`, 'a description is §10.4 free text');
     }
   }
 
@@ -263,6 +321,49 @@ export function validateCourse(json: unknown): CourseViolation[] {
     // R-BTN-167: a person leg has no deadline — its clock is its `expires`, and no claim ever
     // runs it to time out.
     if (person && 'max_duration' in l) add('bound', `${at}.max_duration`, 'a person leg carries no deadline: its clock is its expires (R-BTN-167, R-BTN-116)');
+    // R-BTN-160 (B-234): a leg may narrow the condition types it may raise — a list of the
+    // course's declared types and the standard ones (`[]`: none). Each name must be one a leg
+    // may raise at all: standard, or declared by this course.
+    if ('conditions' in l) {
+      const list = l.conditions;
+      if (!Array.isArray(list) || list.length > COURSE_LIST_MAX || !list.every((t) => typeof t === 'string')) {
+        add('shape', `${at}.conditions`, `conditions is a list of at most ${COURSE_LIST_MAX} condition types ([] allows none, R-BTN-160)`);
+      } else {
+        for (const [i, t] of (list as string[]).entries()) {
+          if (!CONDITION_TYPE.test(t) || t.length > CONDITION_TYPE_MAX) {
+            add('id', `${at}.conditions.${i}`, `type "${t}" must be a dotted ^[a-z][a-z0-9-]* name of at most ${CONDITION_TYPE_MAX} characters (R-BTN-160)`);
+            continue;
+          }
+          if (t === 'baton' || t.startsWith('baton.')) {
+            add('conditions', `${at}.conditions.${i}`, 'baton and baton.* are core\'s alone: a leg raises none of them (R-BTN-160)');
+            continue;
+          }
+          if (dispositionOf(t, declared) == null) add('conditions', `${at}.conditions.${i}`, `"${t}" is neither a standard type nor one this course declares (R-BTN-160)`);
+        }
+      }
+    }
+    // R-BTN-195 (B-234): a leg declared `autonomous` never asks for a person. The field sits on
+    // no `kind: person` leg (a person's leg is answered by a person, R-BTN-116), nor on any
+    // other kind the file refuses on its own (`call` and `arrives` are not built), and never
+    // beside a `conditions` list naming `interact`, a `suspend` type — `hitl` and its subtypes
+    // included — or a subtype of either: the leg would be promising not to ask while arming
+    // itself to. R-BTN-69's clause reads on the field's presence, `false` included: a leg that
+    // is not autonomous says nothing, so `autonomous: false` beside a barred type or on a
+    // person leg is the same broken promise, refused as such.
+    if ('autonomous' in l && typeof l.autonomous !== 'boolean') add('bound', `${at}.autonomous`, 'autonomous is true or false (R-BTN-195)');
+    if ('autonomous' in l) {
+      if (person) {
+        add('autonomous', `${at}.autonomous`, 'a person leg is answered by a person: autonomous sits on no kind: person leg (R-BTN-195, R-BTN-116)');
+      } else if (l.kind != null && l.kind !== 'person') {
+        add('autonomous', `${at}.autonomous`, `autonomous sits on no kind: ${String(l.kind)} leg (R-BTN-195)`);
+      }
+      if (Array.isArray(l.conditions)) {
+        const barred = (l.conditions as string[]).filter((t) => barredFromAutonomous(t, declared));
+        for (const t of barred) {
+          add('autonomous', `${at}.autonomous`, `"${t}" is beside autonomous: an autonomous leg never asks for a person — take it out of the leg's conditions, or the leg's autonomous (R-BTN-195)`);
+        }
+      }
+    }
     if ('label' in l && !isFreeText(l.label)) add('bound', `${at}.label`, 'a label is §10.4 free text: 1–500 characters, no control characters, none of < > { }');
     if ('outputs' in l) {
       if (!isObject(l.outputs)) add('shape', `${at}.outputs`, 'outputs is an object of output names');
