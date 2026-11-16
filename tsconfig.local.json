@@ -35,6 +35,7 @@
     "test/unit/cli.test.ts",
     "test/unit/homes.test.ts",
     "test/integration/S-BTN-225.homes.test.ts",
+    "test/integration/S-BTN-226.pathless-ticket-file.test.ts",
     "test/unit/sign.test.ts",
     "test/unit/runner-main.test.ts",
     "test/unit/runner-bundle.test.ts",

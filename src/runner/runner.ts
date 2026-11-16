@@ -1232,8 +1232,9 @@ export class Runner {
    *  rather than run with no re-verification (round 1).
    *
    *  B-190 (R-BTN-84): a read that succeeded is also the claim's recorded read — its digest
-   *  joins the run's inputs (`leg_run_inputs`), so replay re-reads the same way and compares. */
-  private async verifyTicketVersion(claim: Record<string, any>, scratch: string): Promise<{ why: string | null; read: { version: string; read_digest: string } | null }> {
+   *  joins the run's inputs (`leg_run_inputs`), so replay re-reads the same way and compares.
+   *  B-252: the read's `ticket` rides back too, for a pathless ticket's leg file (below). */
+  private async verifyTicketVersion(claim: Record<string, any>, scratch: string): Promise<{ why: string | null; read: { version: string; read_digest: string } | null; ticket?: unknown }> {
     const version = typeof claim.version === 'string' ? claim.version : '';
     const how = (claim.ticket_source ?? null) as { versions?: string | null } | null;
     if (version === '' || how?.versions == null) return { why: null, read: null };
@@ -1252,12 +1253,12 @@ export class Runner {
       if (src.versions === 'pinned') {
         const out = await read(id, { version, checkout: this.o.home });
         if (out == null || out.ticket == null) return { why: `the ticket cannot be read at its version ${version.slice(0, 16)}`, read: null };
-        return { why: null, read: { version, read_digest: digestOfRead(out.ticket) } };
+        return { why: null, read: { version, read_digest: digestOfRead(out.ticket) }, ticket: out.ticket };
       }
       const out = await read(id, { checkout: this.o.home });
       if (out == null) return { why: 'the ticket source no longer reads the ticket', read: null };
       if (out.version !== version) return { why: `the ticket's version is ${typeof out.version === 'string' && out.version !== '' ? out.version.slice(0, 16) : '(none)'}, the claim's ${version.slice(0, 16)}`, read: null };
-      return { why: null, read: { version, read_digest: digestOfRead(out.ticket) } };
+      return { why: null, read: { version, read_digest: digestOfRead(out.ticket) }, ticket: out.ticket };
     } catch (e) {
       return { why: `the ticket source's read failed (${msg(e)})`, read: null };
     }
@@ -1265,7 +1266,7 @@ export class Runner {
 
   /** §4.5 (R-BTN-74) through the executor: the source's `versions` and `read`, each a wrapper call
    *  in one `source` session, stopped when the check ends. Same answers as the in-process check. */
-  private async verifyBySource(file: string, claim: Record<string, any>, version: string, scratch: string): Promise<{ why: string | null; read: { version: string; read_digest: string } | null }> {
+  private async verifyBySource(file: string, claim: Record<string, any>, version: string, scratch: string): Promise<{ why: string | null; read: { version: string; read_digest: string } | null; ticket?: unknown }> {
     let handle: Handle;
     try {
       handle = await this.startSession('source', { session_id: `source-${randomBytes(6).toString('hex')}`, snapshot_sha: String(claim.snapshot_sha ?? ''), paths: [scratch], env: this.baseEnv() });
@@ -1293,12 +1294,12 @@ export class Runner {
         if (v.versions === 'pinned') {
           const out = await call('read', [id, { version, checkout: this.o.home }]) as { ticket?: unknown } | null;
           if (out == null || out.ticket == null) return { why: `the ticket cannot be read at its version ${version.slice(0, 16)}`, read: null };
-          return { why: null, read: { version, read_digest: digestOfRead(out.ticket) } };
+          return { why: null, read: { version, read_digest: digestOfRead(out.ticket) }, ticket: out.ticket };
         }
         const out = await call('read', [id, { checkout: this.o.home }]) as { version?: unknown; ticket?: unknown } | null;
         if (out == null) return { why: 'the ticket source no longer reads the ticket', read: null };
         if (out.version !== version) return { why: `the ticket's version is ${typeof out.version === 'string' && out.version !== '' ? out.version.slice(0, 16) : '(none)'}, the claim's ${version.slice(0, 16)}`, read: null };
-        return { why: null, read: { version, read_digest: digestOfRead(out.ticket) } };
+        return { why: null, read: { version, read_digest: digestOfRead(out.ticket) }, ticket: out.ticket };
       } catch (e) {
         return { why: `the ticket source's read failed (${msg(e)})`, read: null };
       }
@@ -1539,6 +1540,17 @@ export class Runner {
       rmSync(scratch, { recursive: true, force: true });
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
+    // B-252 (R-BTN-74): a ticket with no `path` has no file in the checkout for the legs to read.
+    // When the source's read handed its ticket back as text — the markdown a pathless source
+    // returns, its frontmatter the markdown source's keys — that text is the legs' ticket file:
+    // written once, mode 0600, into the claim's scratch (every leg session's path, removed at
+    // the claim's end) and named to each leg as `ctx.ticket.file`. A ticket with a path, the
+    // markdown source's every ticket, gets no file and its ctx is unchanged.
+    let ticketFile: string | null = null;
+    if ((claim.path == null || claim.path === '') && typeof versionCheck.ticket === 'string') {
+      ticketFile = join(scratch, 'ticket.md');
+      writeFileSync(ticketFile, versionCheck.ticket, { mode: 0o600 });
+    }
     this.inflight = { claimId, ticket, course, leg: null, legAt: this.now(), child: null, waiters: [] };
     this.closedDone = false;
     // §2e/R-BTN-63: the legs git evidences are every earlier attempt's, flattened; the claim's
@@ -1627,7 +1639,7 @@ export class Runner {
         const run = runNumber(course.graph, gitPath, legName, own);
         own.push(legName);
         const ctx = {
-          ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}) },
+          ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}), ...(ticketFile != null ? { file: ticketFile } : {}) },
           claim: { id: claimId, nonce: claim.nonce, station: at },
           leg: legName, run, ...(runId ? { run_id: runId } : {}),
           snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },

@@ -3017,6 +3017,17 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   had been taken by the dependency-cycle refusal (B-166 part 3, 2026-11-02), so it lands as
   S-BTN-225.
 
+- **2026-11-16 — R-BTN-74 amended, S-BTN-226 added: a pathless ticket's file for its legs (B-252).**
+  Rules changed: R-BTN-74. B-183 let a `custom` source post tickets with no `path`, but the legs
+  still read the ticket from `ctx.ticket.path` in the checkout: a pathless ticket's `repos:` was
+  lost to the implement stub's PR verification, which then looked only in the home, and its
+  agent got an empty `BATON_TICKET_FILE`. When the claim's re-verification read returns the
+  ticket as a string, the runner now writes it, mode 0600, into the claim's scratch directory
+  and hands legs its path as `ctx.ticket.file`, which the CLI's stubs read for `repos:` and name
+  in `BATON_TICKET_FILE`; a pathless source's `read` should therefore return the ticket as
+  markdown with the markdown source's frontmatter keys. The markdown source's tickets carry a
+  path and get no `file`.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
