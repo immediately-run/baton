@@ -101,7 +101,7 @@ The model checks the design; three checks hold the code to it.
   `// @impl pending — <what is not built, and the ticket that builds it>` — alone when nothing of
   the action is built, beside its `@impl` functions when part is. A pending-only action
   (`endBlocked`, `retryElapse`, `provisionalLapses` today) is held to no code until its ticket
-  (B-10, B-11, B-21, B-26) lands, so a change to it fails nothing; a partly built one's functions
+  (B-10, B-11, B-21) lands, so a change to it fails nothing; a partly built one's functions
   keep their stamps, which attest the part that is built. Every run of `npm run model:links`
   lists them, `not built` or `partly built`.
 - **Scenario traces** (`npm run traces`, `scripts/check-traces.mjs`, in `npm test`). Every S-BTN
@@ -287,7 +287,7 @@ Brought up to §2m (R3-1254), it found a second on its first run: a claim's end 
 `blocked_since` silently (R-BTN-75), so a failed attempt's backoff (R-BTN-122) blocked the
 ticket with no event, and the backoff's `unblocked` was then logged with no `blocked` before it
 (`unblockedFollowsBlocked`). The owner chose (2026-10-17) to log `blocked` when an end leaves
-the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
+the ticket blocked; R-BTN-75 is amended, B-26 built it in core, and
 `endLeavingTheTicketBlockedLogsBlockedTest` and `backoffThenHoldTest` keep it.
 
 **Mutation checks** — each mutant fails the run or probe that names its defect:

@@ -1586,8 +1586,10 @@ export class Claims {
     // §13 step 3: a legacy claim that ends takes its adoption request with it.
     this.exec('DELETE FROM adoptions WHERE claim_id = ?', claimId);
     this.writeResume(claimId, reason, now, opts.next ?? null);
-    // R-BTN-77: an end changes whether the ticket is blocked silently — it is not an unblocking.
-    this.c.blocks?.held(ticketId, true);
+    // R-BTN-75 as amended by R3-1254 (B-26): an end is never an unblocking — the claim held the
+    // ticket, so nothing clears here — but one that leaves the ticket blocked (a backoff
+    // started, a decision posted while held) logs `blocked`, which wakes no one.
+    this.c.blocks?.held(ticketId, false);
     if (status === 'completed') this.confirmByClosure(claimId);
     else this.applyRetryPolicy(claimId, ticketId, reason);
   }
@@ -1994,7 +1996,11 @@ export class Claims {
       this.c.dispatch?.('mirror', c.ticket_id);
       this.event('released', `owner:${owner}`, { by: 'owner', unconfirmed: { end_reason: c.end_reason, ended_at_sha: c.ended_at_sha } }, c.ticket_id, claimId);
     }
-    this.c.blocks?.held(c.ticket_id, action !== 'confirm');
+    // Both resolutions end the hold the unconfirmed completion kept — a confirm and a release
+    // alike can only set or leave `blocked_since` (the ticket was held, so nothing clears),
+    // never an unblocking, and one that leaves the ticket blocked logs `blocked` (R-BTN-75 as
+    // amended by R3-1254, B-26).
+    this.c.blocks?.held(c.ticket_id, false);
     return { ok: true };
   }
 
