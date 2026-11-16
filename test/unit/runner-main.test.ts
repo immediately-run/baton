@@ -1205,3 +1205,58 @@ describe('advanceHome — legs start from the claim\'s snapshot (B-228, R-BTN-34
     }
   });
 });
+
+// B-121: `baton run --home <name|path>` — a name resolves to its home's checkout (refused,
+// naming the home, when the home has none); a path keeps R-BTN-131's meaning. The proof a name
+// reached its checkout is the checkout's own settings: the named home declares the no-op `echo`
+// agent_command, which the runner refuses only when it reads that file.
+describe('baton run --home: a name resolves to its checkout (B-121)', () => {
+  const ENV = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE', 'XDG_CONFIG_HOME'];
+  const clear = (): Record<string, string | undefined> => {
+    const saved: Record<string, string | undefined> = {};
+    for (const n of ENV) {
+      saved[n] = process.env[n];
+      delete process.env[n];
+    }
+    return saved;
+  };
+  const restore = (saved: Record<string, string | undefined>): void => {
+    for (const [n, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[n];
+      else process.env[n] = v;
+    }
+  };
+
+  it('a name works its home\'s checkout as a path does; a home with no checkout refuses naming it', async () => {
+    const dir = home();
+    writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ agent_command: 'echo', courses: [{ id: 'relay', version: 1 }] }));
+    const config = mkdtempSync(join(tmpdir(), 'baton-run-homes-'));
+    mkdirSync(join(config, 'baton'), { recursive: true });
+    writeFileSync(join(config, 'baton', 'homes.json'), JSON.stringify({
+      homes: {
+        relay: { origin: 'https://baton.example', repository: 'docs', checkout: dir },
+        bare: { origin: 'https://baton.example', repository: 'docs' },
+      },
+    }));
+    const saved = clear();
+    process.env.XDG_CONFIG_HOME = config;
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      // The name reaches the checkout the path names: both refuse its no-op agent_command (B-83).
+      expect(await runMain(['--home', 'relay'])).toBe(1);
+      expect(err.mock.calls.map((c) => String(c[0])).join('')).toContain('names agent_command "echo"');
+      err.mockClear();
+      expect(await runMain(['--home', dir])).toBe(1);
+      expect(err.mock.calls.map((c) => String(c[0])).join('')).toContain('names agent_command "echo"');
+      // A home with no checkout refuses naming the home, before any credential; an unknown name
+      // lists the homes.
+      await expect(runMain(['--home', 'bare'])).rejects.toThrow('the home bare names no checkout — baton run works a checkout');
+      await expect(runMain(['--home', 'nope'])).rejects.toThrow('--home names no home nope — homes: relay, bare (baton home list, B-121)');
+    } finally {
+      err.mockRestore();
+      restore(saved);
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(config, { recursive: true, force: true });
+    }
+  });
+});

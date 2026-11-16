@@ -12,7 +12,11 @@ export const SESSION_NAME = /^[A-Za-z0-9_.:-]{1,128}$/;
 export const HOSTNAME = /^[A-Za-z0-9.-]{1,253}$/;
 /** A forge host as B-182's `code_repos` names it: a lowercased DNS name with an optional port,
  *  validated as a `web_base`'s authority is (R-BTN-92) — no userinfo, no path, no dot-run. */
-export const FORGE_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[1-9][0-9]{0,4})?$/;
+export const FORGE_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[1-9][0-9]{0-4})?$/;
+/** An origin as the CLI's configuration names one (R-BTN-137, B-121): a Baton deployment's URL
+ *  — scheme and authority, no path, query or fragment, no trailing slash. The OIDC `aud` is the
+ *  origin verbatim (R-BTN-15), and `baton_url` (R-BTN-56) and homes.json's `origin` are one. */
+export const ORIGIN = /^https?:\/\/[A-Za-z0-9.-]+(?::[1-9][0-9]{0,4})?$/;
 /** R-BTN-138's id kind, as a `code_repos` entry stores it: a decimal string. */
 export const FORGE_ID = /^[1-9][0-9]{0,19}$/;
 export const SHA256_HEX = /^[0-9a-f]{64}$/;

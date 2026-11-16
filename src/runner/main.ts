@@ -19,6 +19,7 @@ import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 import { Runner, stampLine, withTimestamps } from './runner';
 import { loadExecutor } from './executor';
 import { readMaskEnv, runnerConfigPath, underBatonDirectory } from './mask';
+import { runnerHome } from '../defaults/homes';
 import { fileURLToPath } from 'node:url';
 
 /** The CLI's wrapper (R-BTN-133), which every executor runs. */
@@ -56,11 +57,13 @@ export interface RunArgs {
   executor: string;
 }
 
-/** `baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]
+/** `baton run [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]
  * [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b] [--beat-every <ms>]
  * [--course <id>] [--lock <capability>=<path>]… [--test-harness] [--verbose]`.
  * Unknown flags are refused, never dropped. `--capabilities` narrows the grant: without it the
- * runner declares what the grant allows (B-86). `--help` prints this, before any credential. */
+ * runner declares what the grant allows (B-86). `--home` keeps R-BTN-131's meaning for a
+ * checkout path; a name resolves to its home's `checkout` (B-121). `--help` prints this,
+ * before any credential. */
 export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): RunArgs {
   const out: RunArgs = {
     harness: 'opencode', home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
@@ -116,12 +119,13 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
  * the courses served, and absent it the runner serves every course its home declares (B-103).
  * Printed before any credential or network work, and the exit is 0. */
 export const RUN_USAGE = [
-  'usage: baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]',
+  'usage: baton run [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]',
   '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
   '                 [--beat-every <ms>] [--course <id>] [--executor <source>] [--test-harness] [--verbose]',
   '',
   'Runs this machine\'s worker: it heartbeats, claims a ticket of a course its home checkout',
-  'declares and runs each leg — one leg at a time.',
+  'declares and runs each leg — one leg at a time. --home names a checkout, or a home of',
+  '~/.config/baton/homes.json, whose checkout it works (B-121).',
   '',
   '  --capabilities a,b  narrows what the grant allows; it never enables what the grant does not.',
   '                      Absent, the runner declares what the grant allows — no flag is needed to',
@@ -304,13 +308,17 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     return 0;
   }
   const a = parseRunArgs(argv);
+  // B-121: `--home`/`BATON_HOME` may name a home of ~/.config/baton/homes.json rather than a
+  // checkout path — a name resolves to its checkout, refused naming the home when the home has
+  // none. A path (a value with `/` or naming an existing directory) keeps R-BTN-131's meaning.
+  const home = runnerHome(a.home);
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   // Verbose (the owner, 2026-10-23): every line carries the time it was written.
   const say = a.verbose ? withTimestamps(log) : log;
   // B-83: a settings file whose `agent_command` is exactly `echo` is the no-op stub — the agent
   // whose every leg "succeeds" while nothing happens. The runner refuses it (only a test
   // harness, which declares itself on its heartbeat, may run the stub), naming the fix.
-  const named = namedAgentCommand(a.home);
+  const named = namedAgentCommand(home);
   if (named === 'echo' && !a.testHarness) {
     process.stderr.write(`baton: .baton/baton.json names agent_command "echo" — a no-op agent: every leg takes its exit 0 and returns its position, so the claim "succeeds" while nothing happens. Run \`baton repo init --agent opencode\` (or --agent claude-code, or --agent-command <cmd>), or pass --test-harness for the test stub\n`);
     return 1;
@@ -329,7 +337,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   });
   // Every course the home declares, or the one `--course` narrows to (B-103): refused at startup,
   // loudly, when the flag names one the home does not declare — not per claim.
-  const courses = servedCourses(a.home, a.course);
+  const courses = servedCourses(home, a.course);
   // R-BTN-144 class 7 (B-170): the names this host's `runner.json` `mask_env` lists are masked
   // with the ones that say a secret by their ending. A repository's own settings file is never
   // read for it: only the runner host's configuration names what its legs must not print. The
@@ -346,12 +354,12 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // historical log this week began with no hint of what code produced it. B-103: the courses
   // field names every course the heartbeat declares (`--course` narrowed it, or the home's list).
   try {
-    const head = execFileSync('git', ['-C', a.home, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
-    say(`baton: runner starting: home ${a.home} @ ${head}, capabilities ${declared}, course${courses.length === 1 ? '' : 's'} ${courses.map((c) => `${c.course}@${c.version}`).join(', ')}, host ${a.hostname}, session ${a.session}`);
+    const head = execFileSync('git', ['-C', home, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+    say(`baton: runner starting: home ${home} @ ${head}, capabilities ${declared}, course${courses.length === 1 ? '' : 's'} ${courses.map((c) => `${c.course}@${c.version}`).join(', ')}, host ${a.hostname}, session ${a.session}`);
   } catch { /* a home with no git yet: the rest of the banner still names the run */ }
   // One runner per home checkout: its legs run in the working tree (R-BTN-131). Node's default
   // SIGINT/SIGTERM exit skips \`finally\`, so the lock is released on those signals too.
-  const release = holdHome(a.home);
+  const release = holdHome(home);
   let runner: Runner | null = null;
   let draining = false;
   let exitCode = 0;
@@ -415,7 +423,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     api: new BatonApi({ url: a.url, transport, auth }, say),
     // B-229: the earlier sessions' claims are ended through an API of their own worker's.
     apiFor: (secret: string) => { const other = new BatonApi({ url: a.url, transport, auth }, say); other.setSecret(secret); return other; },
-    home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
+    home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     courses,
     // B-106 (R-BTN-178): one machine's singleton — the lock files this runner was configured
@@ -424,7 +432,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     // B-86: the legs the runner's courses require, from the home checkout's working tree — what
     // a never-eligible runner says it lacks at startup. B-103: every served course's legs, as each
     // of them must declare by its own version (rule 9 per course).
-    legNeeds: () => courses.flatMap((c) => legNeeds(a.home, readHead(a.home), c.course)),
+    legNeeds: () => courses.flatMap((c) => legNeeds(home, readHead(home), c.course)),
     stateFile: join(cacheDir(), `${a.session}.json`),
     beatEvery: a.beatEvery, log, verbose: a.verbose, // the Runner stamps its own lines under verbose
     fetch: io.fetch ?? ((home) => fetchMain(home, say)),

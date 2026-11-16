@@ -37,6 +37,7 @@ import { clampUnsignedList, marksOf, signedControlOf, unsignedAgentConfig } from
 import { nodeKeygen } from '../shared/commitSign.mjs';
 import type { PostedControl } from '../core/board';
 import { readTicketSettings } from './tickets-config';
+import { remoteSlug } from './remote-slug';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 
 // LC_ALL=C on every git call (B-93, round 4): git translates its messages, and the two shapes
@@ -92,29 +93,10 @@ export function plainGitRemote(url: string): boolean {
   return false;
 }
 
-export function remoteSlug(root: string): string | null {
-  try {
-    // The proxy's `…/git/owner/name` form drops its `git/` — only when `owner/name` follows, so an
-    // owner named `git` keeps its name.
-    return git(root, 'remote', 'get-url', 'origin').replace(/^git@[^:]+:/, '').replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '').replace(/^git\/(?=[^/]+\/[^/]+$)/, '');
-  } catch (e) {
-    const { status, stderr } = (e ?? {}) as GitFailure;
-    const said = typeof stderr === 'string' ? stderr : stderr ? new TextDecoder().decode(stderr) : (e instanceof Error ? e.message : '');
-    // Quiet only the two shapes a repository without an origin can answer with, matched by git's
-    // own words under the C catalog (its exit codes are shared — 128 is every fatal error,
-    // `dubious ownership` and a corrupt config among them, so the code alone would quiet those
-    // too, round 3, 3-r0-1): `git remote get-url`'s "No such remote" (exit 2), and "not a git
-    // repository (" — anchored to the parenthesised continuation, so a broken worktree link
-    // ("not a git repository: /gone/…", no parenthesis) stays loud (round 4, 4-r1-3).
-    const noRemote = status === 2 || /No such remote 'origin'/.test(said);
-    const noRepository = /not a git repository \(/.test(said);
-    if (noRemote || noRepository) return null;
-    // Any other failure is the operator's to see, with git's own words (git is not installed, the
-    // ownership check refused the checkout, the repository is corrupt): rethrown as an Error
-    // carrying the captured stderr, never a quiet null.
-    throw new Error(`git remote get-url origin failed in ${root}${status != null ? ` (exit ${status})` : ''}: ${said.trim() || 'no stderr'}`);
-  }
-}
+// remoteSlug lives in remote-slug.ts (a leaf, so the runner's bundle can resolve a named home
+// without this file's whole graph, B-121); re-exported here, where it has always been imported
+// from (tickets.ts, the sync and `--pin`'s self-resolution below). The doc comment above is its.
+export { remoteSlug };
 
 /** The baton package's root: the nearest directory above this module whose package.json is
  * `@immediately-run/baton`. Found by walking up, because this module runs both as source

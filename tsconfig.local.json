@@ -33,6 +33,8 @@
     "test/unit/local-queue.test.ts",
     "test/unit/boundary-host.test.ts",
     "test/unit/cli.test.ts",
+    "test/unit/homes.test.ts",
+    "test/integration/S-BTN-225.homes.test.ts",
     "test/unit/sign.test.ts",
     "test/unit/runner-main.test.ts",
     "test/unit/runner-bundle.test.ts",
