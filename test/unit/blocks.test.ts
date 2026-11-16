@@ -85,25 +85,65 @@ describe('R-BTN-75: each cause written with its diff', () => {
   });
 });
 
-describe('R-BTN-75: held versus blocked', () => {
-  it('a claim starting or ending changes blocked_since silently', async () => {
+describe('R-BTN-75 as amended by R3-1254, B-26: held versus blocked', () => {
+  // A claim's start stays silent (R-BTN-77); its end is never an unblocking, and one that leaves
+  // the ticket blocked logs `blocked` — which wakes no one: only `unblocked` sends a message or
+  // a trigger. Every later `unblocked` then follows a `blocked`.
+  it('an end that leaves the ticket blocked logs blocked; the claim that started it logged nothing', async () => {
     git.add('B').add('A', { blocked_by: ['B'] });
     await git.post();
     await cutover(T0);
     const w = await register('vm-a');
-    // Clear the dependency while A is claimed: no event, since a claimed ticket is not waiting.
+    git.tickets.get('A')!.blocked_by = [];
+    await git.post();
+    const c = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
+    expect(c.status).toBe(200);
+    // The dependency returns while A is held: the row is written, but a claimed ticket is not
+    // waiting, so nothing is logged and blocked_since stays null.
+    git.tickets.get('A')!.blocked_by = ['B'];
+    await git.post();
+    expect(await blockRows('A')).toHaveLength(1);
+    expect(await since('A')).toBeNull(); // held
+    expect(await kinds('blocked')).toEqual(['docs:A']); // neither the claim nor the post logged
+    await endClaim('vm-a', w.secret, c.json.claim_id, { end_reason: 'released:cannot-finish:transient' });
+    expect(await since('A')).not.toBeNull(); // the end: blocked again
+    expect(await kinds('blocked')).toEqual(['docs:A', 'docs:A']); // …and logged (B-26)
+  });
+
+  it('an end that does not leave the ticket blocked logs nothing', async () => {
+    git.add('B').add('A', { blocked_by: ['B'] });
+    await git.post();
+    await cutover(T0);
+    const w = await register('vm-a');
+    git.tickets.get('A')!.blocked_by = [];
+    await git.post();
+    const c = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
+    expect(c.status).toBe(200);
+    const events = await rows<{ kind: string }>(`SELECT kind FROM events WHERE kind IN ('blocked', 'unblocked') ORDER BY seq`);
+    await endClaim('vm-a', w.secret, c.json.claim_id, { end_reason: 'released:cannot-finish:transient' });
+    expect(await since('A')).toBeNull();
+    expect(await rows<{ kind: string }>(`SELECT kind FROM events WHERE kind IN ('blocked', 'unblocked') ORDER BY seq`)).toEqual(events);
+  });
+
+  it('the unblocked that clears an end’s block follows its blocked', async () => {
+    git.add('B').add('A', { blocked_by: ['B'] });
+    await git.post();
+    await cutover(T0);
+    const w = await register('vm-a');
     git.tickets.get('A')!.blocked_by = [];
     await git.post();
     const c = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
     expect(c.status).toBe(200);
     git.tickets.get('A')!.blocked_by = ['B'];
     await git.post();
-    expect(await blockRows('A')).toHaveLength(1);
-    expect(await since('A')).toBeNull(); // held
-    const events = await kinds('blocked');
     await endClaim('vm-a', w.secret, c.json.claim_id, { end_reason: 'released:cannot-finish:transient' });
-    expect(await since('A')).not.toBeNull(); // the end: blocked again, silently
-    expect(await kinds('blocked')).toEqual(events);
+    expect(await kinds('blocked')).toEqual(['docs:A', 'docs:A']);
+    // The dependency closes: the unblocked that clears the end’s block follows its blocked.
+    git.tickets.get('A')!.blocked_by = [];
+    await git.post();
+    expect(await since('A')).toBeNull();
+    const log = await rows<{ kind: string }>(`SELECT kind FROM events WHERE kind IN ('blocked', 'unblocked') ORDER BY seq`);
+    expect(log.map((e) => e.kind)).toEqual(['blocked', 'unblocked', 'blocked', 'unblocked']);
   });
 });
 

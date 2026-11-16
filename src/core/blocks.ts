@@ -191,7 +191,8 @@ export class Blocks {
    * its last row change (R-BTN-75; B-49): a fleet coming back to a ticket that needs a capability
    * and an unavailable resource clears one row and writes the other, and the ticket was blocked
    * throughout. A batch inside a batch joins it. `held` is not deferred: a claim's start or end
-   * is its own silent transition (R-BTN-77).
+   * is its own transition — a start silent, an end an event that wakes no one (R-BTN-77;
+   * R-BTN-75 as amended by R3-1254, B-26).
    */
   batch<T>(fn: () => T): T {
     if (this.pending) return fn();
@@ -313,7 +314,9 @@ export class Blocks {
   }
 
   /** A claim started, ended, was confirmed or its fence cleared: whether the ticket is held
-   *  changed, and only that (R-BTN-75). A start or an end is silent (R-BTN-77). */
+   *  changed, and only that (R-BTN-75). A start is silent (R-BTN-77); an end, a confirmation and
+   *  a fence clear are events — an end is never an unblocking, and one that leaves the ticket
+   *  blocked logs `blocked` (R-BTN-75 as amended by R3-1254, B-26). */
   held(ticketId: string, silent: boolean) {
     this.evaluate(ticketId, [], silent);
   }
