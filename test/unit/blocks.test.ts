@@ -4,7 +4,7 @@
 // reading's `until` passing on the fake clock; `transitive=1` over a chain; and the query plans
 // G-BTN-70's cost claim rests on.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, armedAt, cutover, keyCall, placed, register, beat, claimItem, endClaim, rows, seedClaim, setAdminKeys, setClock, tick, withCore } from '../helpers';
+import { Git, armedAt, cutover, keyCall, placed, register, beat, claimItem, endClaim, rows, seedClaim, setAdminKeys, setClock, tick, withCore, workerCall, adminSession, sessionCall } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { grantedWorker, signed, SCHEMA } from '../lib/fleet';
 import type { Workflow } from '../../src/core/ports';
@@ -30,6 +30,10 @@ const blockRows = (local: string) => rows<{ kind: string; ref: string; leg: stri
   'SELECT kind, ref, leg, since FROM ticket_blocks WHERE ticket_id = ? ORDER BY kind, ref, leg', `docs:${local}`);
 const since = async (local: string) => (await rows<{ b: number | null }>('SELECT blocked_since AS b FROM tickets WHERE id = ?', `docs:${local}`))[0]?.b ?? null;
 const kinds = async (kind: string) => (await rows<{ ticket_id: string }>('SELECT ticket_id FROM events WHERE kind = ? ORDER BY seq', kind)).map((e) => e.ticket_id);
+/** A state-changing `/v1/ui/*` call under an administrator's session (R-BTN-16: with
+ *  `BATON_ADMIN_KEYS` configured, Access alone is no principal — this file sets admin keys). */
+const ownerPost = (path: string, body: unknown) =>
+  adminSession(admin).then((cookie) => sessionCall(cookie, path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
 
 beforeEach(async () => {
   await setClock(T0);
@@ -139,6 +143,66 @@ describe('R-BTN-75 as amended by R3-1254, B-26: held versus blocked', () => {
     await endClaim('vm-a', w.secret, c.json.claim_id, { end_reason: 'released:cannot-finish:transient' });
     expect(await kinds('blocked')).toEqual(['docs:A', 'docs:A']);
     // The dependency closes: the unblocked that clears the end’s block follows its blocked.
+    git.tickets.get('A')!.blocked_by = [];
+    await git.post();
+    expect(await since('A')).toBeNull();
+    const log = await rows<{ kind: string }>(`SELECT kind FROM events WHERE kind IN ('blocked', 'unblocked') ORDER BY seq`);
+    expect(log.map((e) => e.kind)).toEqual(['blocked', 'unblocked', 'blocked', 'unblocked']);
+  });
+
+  it('the owner’s release of an unconfirmed completion is an end: it logs blocked the same', async () => {
+    git.add('B').add('A', { blocked_by: ['B'] });
+    await git.post();
+    await cutover(T0);
+    const w = await register('vm-a');
+    git.tickets.get('A')!.blocked_by = [];
+    await git.post();
+    const c = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
+    expect(c.status).toBe(200);
+    // A done end whose evidence is nowhere on the board: an unconfirmed completion, which still
+    // holds A (rule 3) — the end logged nothing because the hold did not end.
+    expect((await endClaim('vm-a', w.secret, c.json.claim_id, { end_reason: 'done', ended_at_sha: 'c'.repeat(40) })).status).toBe(200);
+    expect(await since('A')).toBeNull();
+    // The dependency returns while the completion is unconfirmed: the row is written, nothing
+    // logged — a held ticket is not waiting.
+    git.tickets.get('A')!.blocked_by = ['B'];
+    await git.post();
+    expect(await blockRows('A')).toHaveLength(1);
+    expect(await kinds('blocked')).toEqual(['docs:A']);
+    // The owner releases the completion: that ends the hold, and the end logs its blocked (B-26).
+    expect((await ownerPost(`/v1/ui/claims/${c.json.claim_id}/resolve`, { action: 'release', confirm: true })).status).toBe(200);
+    expect(await since('A')).not.toBeNull();
+    expect(await kinds('blocked')).toEqual(['docs:A', 'docs:A']);
+    // The dependency closes: the unblocked follows the blocked the release logged.
+    git.tickets.get('A')!.blocked_by = [];
+    await git.post();
+    expect(await since('A')).toBeNull();
+    const log = await rows<{ kind: string }>(`SELECT kind FROM events WHERE kind IN ('blocked', 'unblocked') ORDER BY seq`);
+    expect(log.map((e) => e.kind)).toEqual(['blocked', 'unblocked', 'blocked', 'unblocked']);
+  });
+
+  it('a shadow claim’s end is an end: it logs blocked; the claim that started it logged nothing', async () => {
+    git.add('B').add('A', { blocked_by: ['B'] });
+    await git.post();
+    // No cutover: the repository takes shadow reports (§13 step 2).
+    const w = await register('vm-a');
+    git.tickets.get('A')!.blocked_by = [];
+    await git.post();
+    const report = (body: unknown) => workerCall('/v1/runner/shadow-report', { cred: 'vm-a', secret: w.secret, body });
+    // A shadow claim is a claim’s start: silent (R-BTN-77).
+    expect((await report({ transition: 'claim', ticket_id: 'docs:A', status: 'in-progress', nonce: 'aaaaaa', at: T0 })).status).toBe(200);
+    // The dependency returns while A is shadow-held: the row is written, nothing logged.
+    git.tickets.get('A')!.blocked_by = ['B'];
+    await git.post();
+    expect(await blockRows('A')).toHaveLength(1);
+    expect(await since('A')).toBeNull(); // held
+    expect(await kinds('blocked')).toEqual(['docs:A']); // neither the shadow claim nor the post logged
+    // The shadow claim ends (a releasing status): the end leaves A blocked — and logs it (B-26).
+    expect((await report({ transition: 'set', ticket_id: 'docs:A', status: 'available', at: T0 + 1 })).status).toBe(200);
+    expect(await rows<{ status: string; end_reason: string }>('SELECT status, end_reason FROM claims')).toEqual([{ status: 'released', end_reason: 'shadow:available' }]);
+    expect(await since('A')).not.toBeNull(); // the end: blocked again
+    expect(await kinds('blocked')).toEqual(['docs:A', 'docs:A']); // …and logged (B-26)
+    // The dependency closes: the unblocked follows the blocked the shadow end logged.
     git.tickets.get('A')!.blocked_by = [];
     await git.post();
     expect(await since('A')).toBeNull();

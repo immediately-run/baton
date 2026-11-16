@@ -178,7 +178,8 @@ export class BatonCore {
       sessionHosts: () => this.instance.sessionHosts(),
       // R-BTN-103: what it delivers as a worker courier.
       couriers: (w, granted, entries) => this.notices.declare(w, granted, entries),
-      held: (ticket) => this.blocks.held(ticket, true),
+      // R-BTN-75 as amended by R3-1254 (B-26): a shadow claim's start is silent, its end an event.
+      held: (ticket, silent) => this.blocks.held(ticket, silent),
       claimView: (id) => this.claims.holderView(id),
       // §12.8 (B-145): the protection reports and policy pins a heartbeat carries (R-BTN-180,
       // R-BTN-189), and the policy hashes the answer carries for its repositories.

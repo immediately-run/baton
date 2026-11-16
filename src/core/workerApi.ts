@@ -61,8 +61,10 @@ export interface Ctx {
   policies?: Policies;
   /** R-BTN-75: a worker became live or changed what it declares. */
   fleetChanged?: () => void;
-  /** R-BTN-75: a shadow report's claim holds its ticket, or no longer does. */
-  held?: (ticketId: string) => void;
+  /** R-BTN-75: a shadow report's claim holds its ticket, or no longer does — the claim's start
+   *  is silent (R-BTN-77), its end an event that wakes no one (R-BTN-75 as amended by R3-1254,
+   *  B-26). */
+  held?: (ticketId: string, silent: boolean) => void;
   /** The retired-fields window's one writer (B-168): a heartbeat's `uses`. */
   deprecated?: Deprecated;
   /** B-4 (R-BTN-113): the instance's session-host allowlist, `instance_settings` first, else the
@@ -783,7 +785,7 @@ export class WorkerApi {
         r.ticket_id, workerId, `shadow:${workerId}:${r.ticket_id}:${r.nonce}`, r.nonce!, head, r.at, repo, r.ticket_id, r.ticket_id, r.ticket_id);
       const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
       this.event('claimed', actor, { shadow: true, nonce: r.nonce }, r.ticket_id, id);
-      this.c.held?.(r.ticket_id);
+      this.c.held?.(r.ticket_id, true); // a claim's start is silent (R-BTN-77)
       return { ok: true, claim_id: id };
     }
     // `set`: in-progress and in-review keep the claim — in-review is an activity of an active
@@ -797,7 +799,9 @@ export class WorkerApi {
                  end_observation = COALESCE((SELECT last_handed_out FROM board_head WHERE repository_id = ?), 0) WHERE id = ?`,
       r.at, `shadow:${r.status}`, repo, holder.id);
     this.event('released', actor, { shadow: true, status: r.status }, r.ticket_id, holder.id);
-    this.c.held?.(r.ticket_id);
+    // The end leaves the ticket unheld: like every end it is never an unblocking, and one that
+    // leaves the ticket blocked logs `blocked`, which wakes no one (R3-1254, B-26).
+    this.c.held?.(r.ticket_id, false);
     return { ok: true, claim_id: holder.id };
   }
 
