@@ -312,7 +312,7 @@ is summarized in the principal table (§12.1).
     | `leg runs <ticket> [<leg>]` | `leg.runs`: `GET …/legs/{leg}/runs` | owner, or administrator |
     | `leg replay <ticket> <leg> [--run <n>] [--against <sha>]` | `leg.runs`, then local (R-BTN-84) | owner, or administrator |
     | `leg stop <ticket>` | `leg.stop`: `POST /v1/owner/{repository}/tickets/{ticket}/release` `{reason: "requested", confirm: true}` (R-BTN-119) | owner |
-    | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise`, `await` | the local channel (R-BTN-106, R-BTN-160, R-BTN-162) | the runner |
+    | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise`, `await`, `events`, `ticket` | the local channel (R-BTN-106, R-BTN-160, R-BTN-162, R-BTN-198) | the runner |
     | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | `ticket.blocked`, `repo.blocked`: the blocks routes (R-BTN-75) | owner, or runner granted on the repository |
     | `ticket history <ticket>` | `ticket.history`: `GET …/tickets/{ticket}/history` (R-BTN-81) | owner, or runner granted on the repository |
     | `ticket hold <ticket>`, `ticket unhold <ticket>`, `ticket expedite <ticket> [--clear]`, `ticket cancel <ticket>` | `ticket.hold`, `ticket.unhold`, `ticket.expedite`, `ticket.cancel`: `POST /v1/owner/{repository}/overrides/{ticket}` (R-BTN-12, §6.8) | owner; `unhold` an approver on `approvers.policy` (R-BTN-186) |

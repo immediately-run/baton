@@ -140,6 +140,7 @@ mean (R-BTN-50).
   | `stalled_s` | leg | how long the leg may be posted `waiting` before `baton.stalled` is raised; default 259,200 (72 h) | R-BTN-167 |
   | `conditions` | leg | narrows the condition types it may raise (`[]`: none) | R-BTN-160 |
   | `autonomous` | leg | `true`: the leg never asks for a person | R-BTN-195 |
+  | `on_ticket_changed` | leg | what a running leg does when its ticket's version moves: `continue` (the default) or `restart` | R-BTN-198 |
   | `spawns` | leg | the courses of the children it files (for a call leg, the courses it calls), their contract and their `lifetime` | R-BTN-111, R-BTN-165, R-BTN-168 |
   | `no_chain_from` | leg | legs whose credential may not take this one on the same ticket (for a credential `domains.per_run` lists, across claims only under another label) | R-BTN-106 |
   | `stream` | leg | `false`: its output is never written to a leg log | R-BTN-128 |
@@ -152,7 +153,7 @@ mean (R-BTN-50).
     least one; no leg's `from` names an end; every `from`, `to` and completion-table key names
     a station; every station is reachable from `start` through any outcome, and an end is
     reachable from every station, the `cancel` leg not counted; every cycle contains a leg with
-    `max_runs`; `start_leg` names a leg whose `from` includes `start`; every `inputs.from` names
+    `max_runs`; every leg with `on_ticket_changed: "restart"` has `max_runs` (R-BTN-198); `start_leg` names a leg whose `from` includes `start`; every `inputs.from` names
     a leg and one of its outputs; `cancel`, if present, names a leg with no `kind`, whose `to` is
     one end station and which no `next`, `exhausted` or completion `next` names (it is queued by
     Baton alone, R-BTN-168); every `kind: call` leg has `spawns` and a completion table
