@@ -177,3 +177,23 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   change as one decision, with the patch, as soon as the PR opens — instead of three review
   rounds that cannot pass. A fix leg merges main into its branch whenever the PR conflicts,
   before review. *No ticket yet.*
+
+## 2026-11-17 19:30 — B-176's scenario id taken while it waited for review
+
+- **Host:** bering
+- **Tickets:** B-176 (PR #236), B-256
+- **Why it was needed:** B-176's review round 2 had one blocking finding: its new scenario
+  **S-BTN-231** collided with B-256's, which merged to main (#266) five minutes after B-176's
+  branch last merged main. The course then suspended B-176 at `reviewed` for the owner's
+  adjudication — a mechanical renumber held a ticket for a person. S-BTN-233 was already
+  claimed by another open branch (`claude/cool-carson-pqkr9b`), which the scan of open
+  branches showed.
+- **Resolution:** at the owner's word the supervisor merged main into the branch, renumbered
+  B-176's scenario to S-BTN-234 (the §15 row, its history entry, the test file and its
+  `describe`s, the tsconfig lists), regenerated the spec index, and pushed (b8ad29e); 0059 now also
+  rebuilds main's `events_retention` index, which the merge exposed; `check:spec`,
+  `check:wiki`, `check:tickets` and typecheck green.
+- **Autonomous handling:** B-176 itself — Baton handing out scenario, rule, gate and
+  migration numbers (R-BTN-198) — removes the collision once it lands. Until then, a fix leg
+  should renumber an identifier that main has taken, and a collision a fix leg can resolve
+  should send the ticket to `fix`, not to the owner. *No ticket yet* for the second part.
