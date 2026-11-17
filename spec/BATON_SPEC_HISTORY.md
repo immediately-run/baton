@@ -3471,9 +3471,6 @@ working until the stated condition holds, then removes it.
   and a grant's type-less legacy capability (`agent-venue`) satisfies it. A course leaves the
   window when an accepted snapshot first carries its file with types. Stop when no registered
   course reads through `ROLES` (the **Courses** view shows it): remove `ROLES`.
-- **Legacy schema forms (R-BTN-108).** A contract output whose `schema` is a file path is read
-  as `<course>:<leg>.<output>@<contract version>` with no base. Stop when no registered course
-  file uses a path.
 - **Bearer-key migration (R-BTN-117).** The bearer tokens and `BATON_KEYS` seed keys the code
   accepted become API-key credentials, granted on each repository they heartbeated or claimed on
   in the 30 days before, with the capabilities they declared there and `accepted_at` set to the

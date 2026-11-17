@@ -24,7 +24,7 @@ describe('validateCourse (R-BTN-69)', () => {
     const c = copy();
     c.stations['changes-requested'] = { label: 'Changes requested' };
     c.stations.approved = { label: 'Approved', renamed_from: 'okayed' };
-    c.legs.review = { from: ['pr-open', 'fixed'], to: ['changes-requested', 'approved'], max_runs: 3, max_duration: 3600, max_queue: 50, version: 2, outputs: { findings: { schema: 'schemas/findings.json' } } };
+    c.legs.review = { from: ['pr-open', 'fixed'], to: ['changes-requested', 'approved'], max_runs: 3, max_duration: 3600, max_queue: 50, version: 2, outputs: { findings: { schema: 'roadmap-pr:findings@2' } } };
     c.legs.fix = { from: ['changes-requested'], to: 'fixed', max_runs: 2, inputs: { findings: { from: 'review.findings', accepts: [2], required: true } }, renamed_from: ['patch'] };
     c.legs.merge = { from: ['approved', 'adjudicated'], to: 'merged', replay_safe: false };
     c.legs.adjudicate = { from: ['changes-requested'], to: 'adjudicated' };
@@ -120,15 +120,46 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(validateCourse(c)).toEqual([]);
   });
 
-  it('a station names its entry outputs by name and schema id; an output may name an id or a legacy path (R-BTN-108, R-BTN-109)', () => {
+  it('a station names its entry outputs by name and schema id; a legacy path-form output schema is refused shape, the window closed (R-BTN-108, R-BTN-109)', () => {
     const c = copy();
     c.stations.reviewed.entry = [{ output: 'findings', schema: 'roadmap-pr:findings@2' }, { output: 'change', schema: 'std:forge.change@1' }];
-    c.legs.review.outputs = { findings: { schema: 'roadmap-pr:findings@2' }, notes: { schema: 'schemas/notes.json' } };
+    c.legs.review.outputs = { findings: { schema: 'roadmap-pr:findings@2' }, notes: { schema: 'roadmap-pr:notes@1' } };
     expect(validateCourse(c)).toEqual([]);
+    // The legacy relative-path form is gone: a path is a shape violation like any other non-id
+    // string (history, Migrations: Legacy schema forms, deleted with the close).
+    c.legs.review.outputs = { findings: { schema: 'schemas/notes.json' } };
+    expect(rules(c)).toEqual(['shape legs.review.outputs.findings.schema']);
     c.stations.reviewed.entry = [{ output: 'findings', schema: 'findings.json' }, { output: 'findings', schema: 'std:url@1' }, { output: 'x', schema: 'std:url@1', why: 1 }, 'x'];
-    expect(rules(c)).toEqual(['entry stations.reviewed.entry.0.schema', 'entry stations.reviewed.entry.1.output', 'unknown-key stations.reviewed.entry.2.why', 'entry stations.reviewed.entry.3']);
+    expect(rules(c)).toEqual(['shape legs.review.outputs.findings.schema', 'entry stations.reviewed.entry.0.schema', 'entry stations.reviewed.entry.1.output', 'unknown-key stations.reviewed.entry.2.why', 'entry stations.reviewed.entry.3']);
     c.stations.reviewed.entry = 'findings';
-    expect(rules(c)).toEqual(['entry stations.reviewed.entry']);
+    expect(rules(c)).toEqual(['shape legs.review.outputs.findings.schema', 'entry stations.reviewed.entry']);
+  });
+
+  it('a leg declares the children it files: spawns, with what it provides and their lifetime (R-BTN-111, R-BTN-168)', () => {
+    const c = copy();
+    c.legs.implement.spawns = { course: 'spec-to-tickets', provides: ['brief', 'evidence'], lifetime: 'parent' };
+    expect(validateCourse(c)).toEqual([]);
+    c.legs.implement.spawns = { course: ['spec-to-tickets', 'epic'], provides: [] };
+    expect(validateCourse(c)).toEqual([]);
+    c.legs.implement.spawns = { course: '*', provides: ['brief'] };
+    expect(validateCourse(c)).toEqual([]);
+    // lifetime is validated, never acted on (B-65's): one of parent or station.
+    c.legs.implement.spawns = { course: '*', provides: [], lifetime: 'forever' };
+    expect(rules(c)).toEqual(['spawns legs.implement.spawns.lifetime']);
+    // one id or a list of distinct ones, never empty, never "*" beside others
+    for (const bad of [null, 7, [], ['spec-to-tickets', 'spec-to-tickets'], ['spec-to-tickets', 'Not-An-Id'], '', ['*']]) {
+      c.legs.implement.spawns = { course: bad, provides: [] };
+      expect([JSON.stringify(bad), rules(c)]).toEqual([JSON.stringify(bad), ['spawns legs.implement.spawns.course']]);
+    }
+    // provides is a list of output names
+    for (const bad of ['brief', [1], ['ok', 'not a name!'], Array.from({ length: 65 }, () => 'brief')]) {
+      c.legs.implement.spawns = { course: 'epic', provides: bad };
+      expect([JSON.stringify(bad), rules(c)]).toEqual([JSON.stringify(bad), ['spawns legs.implement.spawns.provides']]);
+    }
+    c.legs.implement.spawns = 'spec-to-tickets';
+    expect(rules(c)).toEqual(['spawns legs.implement.spawns']);
+    c.legs.implement.spawns = { course: 'epic', provides: [], unknown: 1 };
+    expect(rules(c)).toEqual(['unknown-key legs.implement.spawns.unknown']);
   });
 
   it('a station no leg reaches is unreachable', () => {
@@ -196,13 +227,14 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(validateCourse(c)[0].message).toContain('"ghost" is not a leg');
     c.legs.fix.inputs = { findings: { from: 'findings' } };
     expect(rules(c)).toEqual(['input legs.fix.inputs.findings.from']);
-    // A schema is a file in the course directory: no empty, . or .. segment (review gate 2-A-3).
+    // A schema is a named id (R-BTN-108); the legacy path window is closed, so a path — or any
+    // non-id string — is a shape violation (review gate 2-A-3's cases, kept as they were).
     const s = copy();
-    for (const bad of ['.', '..', '...x/..', 'a//b', 'a/./b', 'a/', '/a', '']) {
+    for (const bad of ['.', '..', '...x/..', 'a//b', 'a/./b', 'a/', '/a', '', 'schemas/findings.v2.json']) {
       s.legs.review.outputs = { findings: { schema: bad } };
       expect([bad, rules(s)]).toEqual([bad, ['shape legs.review.outputs.findings.schema']]);
     }
-    s.legs.review.outputs = { findings: { schema: 'schemas/findings.v2.json' } };
+    s.legs.review.outputs = { findings: { schema: 'roadmap-pr:findings.v2@2' } };
     expect(validateCourse(s)).toEqual([]);
     // An inherited property is no declared output (review gate 1-A-0, 1-B-0).
     for (const name of ['toString', 'constructor', 'hasOwnProperty', '__proto__', 'valueOf']) {
