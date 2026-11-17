@@ -22,7 +22,7 @@
 //                [--sync-workflow PATH|none] [--mirror-workflow PATH|none] [--ci-identity …]
 //                [--add-owner-key PUB[,…]] [--add-sync-key PUB[,…]] [--add-mirror-key PUB[,…]] [--remove-sync-key FP[,…]]
 //   baton admin -i KEY repo retire ID [--yes]
-//   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T]
+//   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T] [--max-claims N]
 //   baton admin -i KEY probe add --key PUB --label L
 //   baton admin -i KEY resource add NAME --scope account|service --schema FILE|JSON    (R-BTN-76)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
@@ -41,7 +41,7 @@
 //                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
 //   baton admin -i KEY revoke FINGERPRINT                          baton admin -i KEY open
 //   baton admin -i KEY state      — what the dashboard draws, as JSON, read with the key (B-118)
-//   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T]
+//   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T] [--max-claims N]
 //   baton owner -i KEY revoke REPO FINGERPRINT
 //   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
 //   baton owner -i KEY sign [--message TEXT] [--repo DIR] -- <paths>…   (B-127: a commit signed
@@ -594,7 +594,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
   throw new Error('baton admin … | baton owner … | baton board REPO');
 }
 
-const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier'];
+const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier', 'max-claims'];
 
 /** §12.2's ask under a destructive action: `--yes` answers the prompt beforehand; without a
  *  TTY the command refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
@@ -762,6 +762,8 @@ function grantBody(flags, readKey, extra) {
   return {
     ...extra, public_key: readKey(need(flags.key, '--key')), ...(flags.hostname ? { hostname: flags.hostname } : {}), ...(flags.label ? { label: flags.label } : {}),
     capabilities: list(flags.capabilities) ?? [], ...(flags['max-tier'] ? { max_tier: flags['max-tier'] } : {}),
+    // R-BTN-4 (B-188): how many claims the key's runner may hold at once while claiming here.
+    ...(flags['max-claims'] ? { max_claims: Number(flags['max-claims']) } : {}),
   };
 }
 

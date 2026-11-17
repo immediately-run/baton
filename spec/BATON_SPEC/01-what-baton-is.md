@@ -18,7 +18,7 @@ runners to work on. Nothing else supervises a leg's process. One Baton is one te
 **Names.** A **ticket** is the unit Baton hands out, `<repository id>:<local id>` to Baton
 (R-BTN-47). A **course** is the process it follows: **stations**, where a ticket rests and a
 hand-off is written, joined by **legs**, one step each (§5). A **claim** is a runner's lease
-on one ticket, running its legs one at a time (§9); a **suspension** ends a claim
+on one ticket, running its legs one at a time; a runner may hold several (§9, R-BTN-4); a **suspension** ends a claim
 `suspended:<station>` (R-BTN-71), unlike a condition's `suspend` disposition, which waits
 inside the claim (R-BTN-162). A **runner** is a process that claims and runs legs: an agent
 harness session through its sidecar, or a CLI runner (§8). The **sync** reads git and posts the repository's **board** (§4).

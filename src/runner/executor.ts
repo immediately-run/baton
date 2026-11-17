@@ -107,6 +107,12 @@ export interface Executor {
   stop(h: Handle, reason: string): Promise<void>;
   end(h: Handle): Promise<{ status: string; result: unknown }>;
   salvage(h: Handle): Promise<{ sha: string; ref: string } | null>;
+  /** R-BTN-72 (B-188), optional: reconnect to a session a runner started before it restarted,
+   *  from the handle data its state file kept — the live handle, or null when the session cannot
+   *  be reached. An executor without it cannot be reattached to: the runner ends such a claim
+   *  `released:cannot-finish:transient`. `builtin` does not offer it (its sessions are the dead
+   *  runner's children). */
+  reattach?(saved: Record<string, unknown>): Promise<Handle | null>;
 }
 
 /** Context a pinned bundle's factory receives from the runner. */
@@ -297,5 +303,6 @@ export async function loadExecutor(source: string, host: ExecutorHost): Promise<
   for (const p of ex.provides ?? []) {
     if (typeof p !== 'string' || p.startsWith('runner:')) throw new Error(`the executor provides ${JSON.stringify(p)}: a provides name is a capability name and never starts runner: (R-BTN-107)`);
   }
-  return { ...ex, source: 'pinned', digest, provides: [...(ex.provides ?? [])], start: ex.start.bind(ex), exec: ex.exec.bind(ex), stop: ex.stop.bind(ex), end: ex.end.bind(ex), salvage: (ex.salvage ?? (async () => null)).bind(ex) };
+  return { ...ex, source: 'pinned', digest, provides: [...(ex.provides ?? [])], start: ex.start.bind(ex), exec: ex.exec.bind(ex), stop: ex.stop.bind(ex), end: ex.end.bind(ex), salvage: (ex.salvage ?? (async () => null)).bind(ex),
+    ...(typeof ex.reattach === 'function' ? { reattach: ex.reattach.bind(ex) } : {}) };
 }

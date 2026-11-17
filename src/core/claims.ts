@@ -94,7 +94,11 @@ interface WorkerFacts {
   /** R-BTN-107: the isolation its last heartbeat declared. */
   isolation: 'attached' | 'process' | 'session';
   /** R-BTN-58: its key's grants by repository, or null for a key no owner granted (gates.ts). */
-  grants: Record<string, { capabilities: string[]; max_tier: number | null }> | null;
+  grants: Record<string, { capabilities: string[]; max_tier: number | null; max_claims: number }> | null;
+  /** R-BTN-4 (B-188): what its last heartbeat declared it can run at once, and the active claims
+   *  it holds now. */
+  concurrency: number;
+  held: number;
 }
 
 interface ItemFacts {
@@ -370,7 +374,8 @@ export class Claims {
 
   private worker(id: number): WorkerFacts {
     const w = this.rows<Omit<WorkerFacts, 'declared' | 'courses' | 'tier_ceilings' | 'tags' | 'grants'> & { tier_ceilings: string; created_by: string | null }>(
-      `SELECT w.id, w.kind, w.incarnation, w.tier_ceiling, w.tier_ceilings, w.lease_timeout_ms, w.last_seen_at, w.last_activity_at, w.credential_id, w.isolation, c.created_by
+      `SELECT w.id, w.kind, w.incarnation, w.tier_ceiling, w.tier_ceilings, w.lease_timeout_ms, w.last_seen_at, w.last_activity_at, w.credential_id, w.isolation, w.concurrency,
+              (SELECT COUNT(*) FROM claims k WHERE k.worker_id = w.id AND k.status = 'active') AS held, c.created_by
        FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE w.id = ?`, id)[0];
     if (!w) throw new BatonError('unauthenticated', 'no such worker');
     const declared = this.rows<{ declared: string }>('SELECT DISTINCT declared FROM worker_capabilities WHERE worker_id = ? ORDER BY declared', id).map((r) => r.declared);
@@ -406,11 +411,28 @@ export class Claims {
       }
       const capabilities = [...set];
       return Object.fromEntries(this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL')
-        .map((r) => [r.id, { capabilities, max_tier: null }]));
+        .map((r) => [r.id, { capabilities, max_tier: null, max_claims: 1 }]));
     }
-    return Object.fromEntries(this.rows<{ repository_id: string; capabilities: string; max_tier: number | null }>(
-      'SELECT repository_id, capabilities, max_tier FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', credential)
-      .map((g) => [g.repository_id, { capabilities: JSON.parse(g.capabilities) as string[], max_tier: g.max_tier }]));
+    return Object.fromEntries(this.rows<{ repository_id: string; capabilities: string; max_tier: number | null; max_claims: number }>(
+      'SELECT repository_id, capabilities, max_tier, max_claims FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', credential)
+      .map((g) => [g.repository_id, { capabilities: JSON.parse(g.capabilities) as string[], max_tier: g.max_tier, max_claims: g.max_claims }]));
+  }
+
+  /** R-BTN-4 (B-188): the most claims the worker may hold while claiming in `repository` — the
+   *  lower of its declared `concurrency` and that repository's grant's `max_claims` (1 for a key
+   *  no grant binds). */
+  private claimBound(w: WorkerFacts, repository: string): number {
+    return Math.min(w.concurrency, w.grants?.[repository]?.max_claims ?? 1);
+  }
+
+  /** R-BTN-4: refuse a claim past the worker's bound, naming both numbers. */
+  private refuseFull(w: WorkerFacts, repository: string | null): void {
+    const bound = repository == null ? w.concurrency : this.claimBound(w, repository);
+    if (w.held < bound) return;
+    const grant = repository == null ? null : w.grants?.[repository]?.max_claims ?? 1;
+    throw new BatonError('not-eligible',
+      `this runner holds ${w.held} claim(s), its bound${repository ? ` on ${repository}` : ''}: concurrency ${w.concurrency}${grant != null ? `, the grant's max_claims ${grant}` : ''} (R-BTN-4)`,
+      { rule: 'max-claims', rule_code: 'max-claims', held: w.held, concurrency: w.concurrency, ...(grant != null ? { max_claims: grant } : {}) });
   }
 
   /** A ticket's filter fields and where the head snapshot places it (R-BTN-33, R-BTN-70). */
@@ -752,6 +774,8 @@ export class Claims {
         const key = `${c.repository_id}\u0000${c.course_id}`;
         if (wanted && !wanted.includes(key)) continue;
         if (unsignedBlocked.has(c.repository_id)) continue;
+        // R-BTN-4 (B-188): a repository where the worker already holds its bound offers nothing more.
+        if (w.held >= this.claimBound(w, c.repository_id)) continue;
         counts.set(key, (counts.get(key) ?? 0) + 1);
         const g = groups.get(key) ?? { rows: [], done: false, passed: [0, 0], cut: false };
         groups.set(key, g);
@@ -868,6 +892,7 @@ export class Claims {
     if (wanted) {
       this.refuseUnregisteredTicket(wanted);
       if (!this.cutOver(wanted)) throw new BatonError('not-cut-over', `${repositoryOf(wanted)}'s claims go through git until its cutover (R-BTN-28)`);
+      this.refuseFull(w, repositoryOf(wanted));
       // §12.8 (B-145, R-BTN-189): a ticket that reaches a repository whose floored guarantee is
       // broken is not claimable — rule `floor`, `floor-broken`.
       this.refuseStopped(wanted, w);
@@ -916,6 +941,11 @@ export class Claims {
     })) {
       throw new BatonError('stale-skills', 'this worker does not declare the ready tickets’ courses at their min_worker_version — it declares an older version or none (R-BTN-22, R-BTN-65)', { rule: 9 });
     }
+    // R-BTN-4 (B-188): when every repository the worker serves is at its bound, say so — the
+    // runner has no room, which is not the same as nothing to do.
+    const served = [...new Set(w.courses.map((k) => k.repository))];
+    const full = served.filter((r) => w.held >= this.claimBound(w, r));
+    if (w.held > 0 && served.length && full.length === served.length) this.refuseFull(w, full[0]);
     throw new BatonError('no-eligible-ticket', 'no ready ticket fits this worker');
   }
 
@@ -1028,8 +1058,9 @@ export class Claims {
       return this.claimResponse(prior.id);
     }
     const now = this.c.now();
-    const mine = this.rows<{ ticket_id: string }>(`SELECT ticket_id FROM claims WHERE worker_id = ? AND status = 'active'`, workerId)[0];
-    if (mine) throw new BatonError('not-eligible', `this worker holds ${mine.ticket_id}; end it before claiming another (R-BTN-4)`, { rule: 'one-claim-per-worker' });
+    // R-BTN-4 (B-188): up to the worker's bound — its `concurrency` here, each repository's grant
+    // in `decide` — never one claim per worker.
+    this.refuseFull(this.worker(workerId), null);
     // B-237 (R-BTN-196): an idle worker asking again with nothing changed gets the same refusal.
     const idle = b.ticket_id ? null : this.idleHit(workerId);
     if (idle?.refusal) throw idle.refusal;
