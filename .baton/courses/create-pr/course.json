@@ -46,8 +46,7 @@
         "fixed"
       ],
       "max_runs": 30,
-      "label": "Run the deterministic tests",
-      "autonomous": true
+      "label": "Run the deterministic tests"
     },
     "review": {
       "from": [
@@ -57,8 +56,7 @@
       ],
       "to": "reviewed",
       "max_runs": 3,
-      "label": "Review round",
-      "autonomous": true
+      "label": "Review round"
     },
     "fix": {
       "from": [
@@ -83,8 +81,7 @@
         "adjudicated"
       ],
       "to": "merged",
-      "label": "Merge and close the ticket",
-      "autonomous": true
+      "label": "Merge and close the ticket"
     }
   }
 }

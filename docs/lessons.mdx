@@ -308,3 +308,21 @@ have opened it.
   the only way back.** What changed: [the owner-key-loss runbook](runbooks/owner-key-loss.mdx)
   writes the path down; `wrangler.toml` names the new owner key. *Still true until a second owner
   key or an offline copy exists for each role.*
+
+## 2026-11-17 — a sourced course edited in place stopped the sync, and the runners idled
+
+[#255](https://github.com/immediately-run/baton/pull/255) added `"autonomous": true` to three legs
+of `.baton/courses/create-pr/course.json`. `baton test-course . create-pr` passed it, but
+`.baton/baton.json` sources that course from `835056e` (B-139), and the sync refuses a home copy
+whose graph differs from its source's: every `baton sync` run from the merge on failed
+([43942329238](https://github.com/immediately-run/baton/actions/runs/43942329238),
+[43988120498](https://github.com/immediately-run/baton/actions/runs/43988120498)). With the board
+frozen at `342bc8f`, the claim query's §6.7 condition (a sync since the ticket's last end) kept
+B-253 unoffered, the other tickets the bering grant reaches were held on `baton:retries`, and both
+bering runners idled for eleven hours. They logged nothing about it, since an idle runner does not
+log `no-eligible-ticket` (B-244).
+
+- **A sourced course's `course.json` changes at its source, then the home moves its `source` pin;
+  `test-course` does not compare the copy with its source, so only a failing sync says so.** What
+  changed: #255 was reverted. *Still true: a change to a sourced course passes `test-course` and
+  fails only at the sync.*
