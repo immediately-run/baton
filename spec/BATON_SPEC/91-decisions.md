@@ -59,7 +59,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose one validated `course.json` per course, a closed graph Baton validates but never interprets, with advances checked as edges, over vouches, guards or YAML. Deadlines, expiries and completion tables are not guards: they read Baton's own clock and child stations, not git (2026-10-14; R-BTN-69, R-BTN-70).
 - Chose a `version` per course, with `min_runner_version` and a test kit, over a fleet-wide skills version (2026-10-14; R-BTN-22, R-BTN-65).
 - Chose a runner that runs one script per leg in a worktree at the claim's commit, with the graph as the course logic, over one per-course runner module (2026-10-14, 2026-10-19; R-BTN-72, R-BTN-133).
-- Chose one runner per checkout serving every course it declares — its heartbeat carries them all, the claim answer's `course_id` chooses what it loads — with one leg at a time as its only limit, at least for now, over one runner and one clone per course (2026-10-22; B-103, R-BTN-72).
+- Chose one runner per checkout serving every course it declares — its heartbeat carries them all, the claim answer's `course_id` chooses what it loads — its claims each running one leg at a time, over one runner and one clone per course (2026-10-22; B-103, R-BTN-72).
 - Chose a leg that names the station it reached and the leg it queues, recorded by Baton after its evidence is pushed, over inferring the next leg (2026-10-15, 2026-10-31; R-BTN-81, R-BTN-83).
 - Chose pointers and digests of leg inputs and outputs, validated by the runner, over Baton storing or validating content (2026-10-15; R-BTN-82, R-BTN-84).
 - Chose validation against both a schema and its base, with a conservative static refinement check, over full JSON Schema: refinement would be undecidable (2026-10-17; R-BTN-108).
@@ -75,7 +75,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 **Tickets, time and parallelism**
 
 - Chose child tickets as the only parallelism over several positions in one ticket (BPMN tokens, an OR-join): one holder, the fence and git-first records depend on one position (2026-10-15, 2026-10-20; R-BTN-4, R-BTN-86, R-BTN-165).
-- Chose one active claim per runner and per ticket (2026-10-13; R-BTN-4).
+- Chose one active claim per ticket, and per runner up to the lower of its declared `concurrency` and its grant's `max_claims`, each claim in a clone of its own under the runner's one lease, over one claim per runner and over lanes (several runner identities inside one process), so a waiting leg holds only its own claim and one runner per host owns the host's queue, resources and sandboxes (2026-11-08 and 2026-11-17, the owner: "I don't want lanes"; R-BTN-4, R-BTN-58, R-BTN-72). Reversed 2026-10-13's one claim per runner.
 - Chose a runner-declared lease timeout, clamped to 15 minutes – 24 hours, over a per-claim duration (2026-10-13; R-BTN-9).
 - Chose sidecar heartbeats with fencing over heartbeats from the agent thread (2026-10-13; R-BTN-6, R-BTN-7, R-BTN-19).
 - Chose reaping (the alarm for a silent runner, a force-reap for a hung one) over a release message to a dead runner (2026-10-13; R-BTN-19).
@@ -258,3 +258,4 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   alone, so the envelope's figures are shown as stated (2026-11-09, the owner; R-BTN-87, §11.4;
   B-202 builds it).
 - Chose a person joining the leg's own agent session in its harness's UI, asked by an `interact` condition carrying the run's session link and sent from Baton's list by a delivery runner, with autonomous legs that fail rather than ask, over pausing, hibernating or answering such requests in Baton (2026-11-14, the owner: "we need to remove concepts"; R-BTN-195, R-BTN-69, R-BTN-107).
+- Chose a floor and a recommendation of client versions, stated by Baton on every response and set by the deploy, with a floor that rises only after 14 days' notice and clients that never update themselves, over a single required version or an auto-updating CLI, so runners and people update at their own pace (2026-11-17, the owner: "would allow runners and users interacting with the server using the CLI to update at their own pace"; R-BTN-197).

@@ -955,7 +955,7 @@ mean (R-BTN-50).
     (the runner refuses one before `close`). The kit fails an override naming no leg, exporting
     no `run`, or beside a leg script that does not load it from this course's path. An override
     keeps the leg's contract `version`; `snapshot_sha` names the bytes that ran.
-  - **A runner serves every course its capabilities serve, one leg at a time.** `baton runner start`
+  - **A runner serves every course its capabilities serve, one leg at a time per claim.** `baton runner start`
     declares every course its home checkout declares (`--home`) — each at its version, rule 9 per
     course — and `--course <id>` narrows that to one, a machine serving a subset; a `--course`
     naming a course the home does not declare is refused at startup, and so is a home held by
@@ -963,8 +963,8 @@ mean (R-BTN-50).
     `course_id` names the ticket's course, which the runner loads from the claim's
     `snapshot_sha`: consecutive claims of one runner — a `create-spec` `converse` and the next
     claim's `create-pr` `implement` — run their own course's graph and scripts with no restart
-    and no second clone. Its only parallelism limit is one leg at a time, at least for now (rule
-    3, one claim per worker).
+    and no second clone. Its parallelism is its claims, up to R-BTN-4's bound, each in a clone of
+    its own (R-BTN-72) and running one leg at a time.
 - **R-BTN-190 (leg state: in the forge's conversation, or on a side branch where there is no
   forge).** State one leg hands the next that must never reach the default branch — review rounds
   and their answers (B-101) — goes where the PRs the course reads live; every claim response

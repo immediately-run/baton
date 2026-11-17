@@ -648,7 +648,10 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   if (!existsSync(batonJsonPath)) throw new Error(`${root} has no .baton/baton.json — run \`baton repo init\` first`);
   const url = args.url ?? (JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson).baton_url ?? DEFAULT_URL;
   const auth = args.auth ?? (args.syncKey ? syncKeyAuth(args.syncKey) : bearerAuth(args.token ?? process.env.BATON_SYNC_TOKEN ?? (await actionsToken(url))));
-  const api = new BatonApi({ url, transport: args.transport ?? ((req) => fetch(req)), auth }, log);
+  // R-BTN-197 (B-254): the sync is a client of the API in its own right (the rule lists a
+  // person's command, a runner and a sync), so its calls say their version and its warning
+  // names it a sync, never a runner.
+  const api = new BatonApi({ url, transport: args.transport ?? ((req) => fetch(req)), auth, kind: 'sync' }, log);
   let board: Board | null = null;
   let record: BatonRecord | undefined;
   // B-89: `busy` is another run's reading, not this run's post, and R-BTN-62 lets no number this
@@ -1395,7 +1398,7 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
     const wanted = matchPatterns([own.branch_pattern ?? DEFAULT_BRANCH_PATTERN, own.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '')).map((p) => p.replace(/\\{ticket\\}/g, id));
     return gitRun('git', ['-C', ctx.checkout, 'ls-remote', '--heads', 'origin']).split('\\n').filter((l) => { const r = l.split('\\t')[1] ?? ''; return r.startsWith('refs/heads/') && wanted.some((p) => branchMatches(p, r.slice('refs/heads/'.length))); }).sort().join('\\n');
   };
-  // B-253: a ticket whose repos: names other repositories has PRs this check cannot see — their
+  // B-255: a ticket whose repos: names other repositories has PRs this check cannot see — their
   // CI gates them, and a fix of its red may rightly push there alone — so the check reads only a
   // ticket whose PRs are all at home.
   const pushTicket = (() => { try { return ctx.ticket?.file ? readFileSync(ctx.ticket.file, 'utf8') : ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), 'utf8') : null; } catch { return null; } })();
@@ -1703,7 +1706,7 @@ async function standard(ctx) {
   const id = bareTicketId(ctx.ticket);
   const wanted = matchPatterns([entry.branch_pattern ?? DEFAULT_BRANCH_PATTERN, entry.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '')).map((p) => p.replace(/\\{ticket\\}/g, id));
   const branches = gitRun(['-C', ctx.checkout, 'ls-remote', '--heads', 'origin']).split('\\n').map((l) => l.split('\\t')[1] ?? '').filter((r) => r.startsWith('refs/heads/')).map((r) => r.slice('refs/heads/'.length)).filter((br) => wanted.some((p) => branchMatches(p, br)));
-  // B-253: no PR branch at home, and the ticket's repos: names other repositories — its PRs are
+  // B-255: no PR branch at home, and the ticket's repos: names other repositories — its PRs are
   // there, gated by their own CI, which the sync reads from the forge. Nothing runs here and no
   // marker is made: the claim suspends at its station, and the sync queues review once that CI
   // is green, fix on its red, and waits on ci while it runs.

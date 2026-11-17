@@ -3,7 +3,7 @@
 // home (docs) gets no PR — syncs against a recorded GitHub. Must hold: the sync reads the home
 // and the two repositories the live ticket names, and no other; the ticket is placed from their
 // PRs; the run-tests gate, which cannot test PRs outside the home itself, is decided by their own
-// CI — green queues the round with nothing asked of the owner (B-253, S-BTN-227); a verdict
+// CI — green queues the round with nothing asked of the owner (B-255, S-BTN-230); a verdict
 // written on one PR moves the whole change to `reviewed`; one PR merged leaves it
 // short of `merged`; both merged ends it. Node only: it writes a real repository and runs git.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -76,7 +76,7 @@ describe('S-BTN-106 a ticket\'s PRs in other repositories', () => {
     // Each owned PR's detail is one GraphQL query for its repository, never four REST reads (B-35).
     expect(asked.filter((k) => k.startsWith('graphql ')).sort()).toEqual(['graphql o/sdk 3', 'graphql o/site 3']);
     expect(asked.filter((k) => /\/(pulls|issues)\/3\/|\/check-runs/.test(k))).toEqual([]);
-    // B-253 (S-BTN-227): the run-tests gate tests the home repository's PR branch, and A-1's PRs
+    // B-255 (S-BTN-230): the run-tests gate tests the home repository's PR branch, and A-1's PRs
     // are all elsewhere — so their own CI is the gate: every check green on both heads, the round
     // queues, and the owner is asked nothing.
     expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'review' });

@@ -204,6 +204,12 @@ function renderWorkers() {
     // R-BTN-48: the courses its checkouts run, flagged where below the course's minimum.
     const runs = (w.courses ?? []).map((c) => `${c.repository}:${c.course} v${c.version}${c.min_worker_version != null && c.version < c.min_worker_version ? ` (below ${c.min_worker_version})` : ''}`).join(', ') || 'declares no course';
     who.append(el('div', { text: runs, cls: 'muted' }));
+    // B-253: the CLI the runner runs, as its profile states it — an unpinned runner (a branch
+    // its code follows) shows at a glance.
+    if (w.profile?.cli) {
+      const c = w.profile.cli;
+      who.append(el('div', { text: `cli ${[c.ref, c.commit != null ? String(c.commit).slice(0, 10) : null].filter(Boolean).join('@') || 'unknown'}${c.pinned ? '' : ' — not a pinned commit'}`, cls: 'muted' }));
+    }
     if (w.transcript_url) who.append(el('div', {}, httpsLink('transcript', w.transcript_url)));
     const st = w.reaped_at != null ? 'reaped' : w.alive ? 'alive' : 'lease lapsed';
     const stateCell = el('td', {}, el('div', { text: st, cls: w.alive ? 'alive' : 'dead' }), el('div', { text: `seen ${fmtTime(w.last_seen_at)}`, cls: 'muted' }), el('div', { text: `active ${fmtTime(w.last_activity_at)}`, cls: 'muted' }));
@@ -400,6 +406,11 @@ function renderNeeds() {
   for (const w of n.stale_skills) {
     const what = w.course_id == null ? 'declares no course' : `${w.repository_id}:${w.course_id} version ${w.version}, below its minimum ${w.min_worker_version}`;
     list.append(el('li', { text: `${w.hostname} · ${w.session_name}: ${what} — restart it from a pulled checkout` }));
+  }
+  // R-BTN-197 (B-254): a live runner whose own version statement is below the recommended client.
+  // The version is the runner's statement; updating it is the operator's act, never the runner's own.
+  for (const r of n.stale_clients ?? []) {
+    list.append(el('li', { text: `${r.hostname} · ${r.session_name}: client ${r.client_version}, below the recommended ${r.recommended} — update this runner; nothing updates itself` }));
   }
   // §2e: git has shown a claim's path going backwards for 30 minutes; the holder re-reads git.
   for (const c of n.regressed ?? []) {

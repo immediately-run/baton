@@ -315,7 +315,7 @@ describe('create-pr: the run-tests gate (B-110)', () => {
     expect(out.markers).toEqual([{ ticket: 'A', leg: 'run-tests', ref: sha(2), claim_nonce: 'n2' }]);
   });
 
-  it('S-BTN-227: a PR outside the home is gated by its own CI, never the owner (B-253); skip still waives', () => {
+  it('S-BTN-230: a PR outside the home is gated by its own CI, never the owner (B-255); skip still waives', () => {
     // The ticket's PR is in a code repository (B-182's plain-git home): the stub tests the home
     // repository's branch, so the forge's checks on the PR's head are its gate.
     const elsewhere = { repository: 'o/code', url: 'https://github.com/o/code/pull/1' };
@@ -345,7 +345,7 @@ describe('create-pr: the run-tests gate (B-110)', () => {
     expect(two.decisions?.[0]).toMatchObject({ id: 'run-tests-unreachable', question: 'The test gate cannot run on o/home#1, o/home#2 — skip it for this ticket?', options: [{ id: 'skip' }] });
   });
 
-  it('S-BTN-227: a home PR beside a sibling PR passes only when the home marker and the sibling CI are both green (B-253)', () => {
+  it('S-BTN-230: a home PR beside a sibling PR passes only when the home marker and the sibling CI are both green (B-255)', () => {
     const sib = (checks: (string | null)[]) => pr({ number: 7, head: 'claude/A-7', repository: 'o/code', checks, url: 'https://github.com/o/code/pull/7' });
     const mixed = (homeCommits: BranchCommit[], legs: RecordedLeg[], checks: (string | null)[]) => stationsPr({
       tickets: [ticket('A', { repos: ['o/code'] })],
@@ -369,7 +369,7 @@ describe('create-pr: the run-tests gate (B-110)', () => {
     expect(both.decisions).toBeUndefined();
   });
 
-  it('a home PR alone reads exactly as before: its own checks never route to fix (B-253 leaves it be)', () => {
+  it('a home PR alone reads exactly as before: its own checks never route to fix (B-255 leaves it be)', () => {
     const commits = [...head, marker(2, T0, 1, 'green')];
     expect(place(commits, [recorded(2)], { checks: ['failure'] }).next).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
     expect(place(commits, [recorded(2)], { checks: [] }).next).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);

@@ -2,8 +2,8 @@
 title: "B-188 — A runner holds several claims: up to k tickets at once, each leg in its own executor session, each claim fenced alone"
 id: B-188
 project: baton
-status: available
-updated: 2026-11-08
+status: done
+updated: 2026-11-17
 repos:
   - baton
 tags:
@@ -14,7 +14,8 @@ description: "R-BTN-72's runner claims one ticket and runs its legs one at a tim
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/262
 depends_on:
   - B-184
   - B-185
@@ -25,15 +26,27 @@ legs, each runner executing several tickets' legs in parallel (but each ticket i
 station or undergoing the execution of a single leg, so there is no parallelization within a
 ticket)" (FIELDHOUSE_SPEC §5, R-FH-79).
 
-This is a proposal: the spec half lands first, as its own spec PR, with the owner's approval.
+The owner returned to it on 2026-11-17: a leg blocked by an interaction request or a rate limit
+should not stop the runner's other work; one runner per host should own one pending-leg queue and
+one view of the host's resources for the sandbox lifecycle to come; and a team running every
+sandbox in the cloud should need one runner talking to E2B. Asked whether lanes (several runner
+identities inside one process) were essential: "I don't want lanes."
 
-**Spec:** [BATON_SPEC §9.1](../spec/BATON_SPEC/09-claims.md#sec-9-1) ([R-BTN-4](../spec/BATON_SPEC/09-claims.md#sec-9-1), the lock: "at most one `active` claim per ticket and per runner"),
-[§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3),
-[R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1)
-([R-BTN-3](../spec/BATON_SPEC/08-runners.md#sec-8-1), [R-BTN-9](../spec/BATON_SPEC/08-runners.md#sec-8-1), the heartbeat),
-[§9.2](../spec/BATON_SPEC/09-claims.md#sec-9-2) (the lease and the fence), [§9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5)
-(reaping), [§5.9](../spec/BATON_SPEC/05-courses.md#sec-5-9) ([R-BTN-174](../spec/BATON_SPEC/05-courses.md#sec-5-9)),
-[§6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6) ([R-BTN-178](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-11), seats), [R-BTN-14](../spec/BATON_SPEC/08-runners.md#sec-8-1) (the runner secret);
+The spec half is written: [R-BTN-4](../../spec/BATON_SPEC/09-claims.md#sec-9-1),
+[R-BTN-72](../../spec/BATON_SPEC/08-runners.md#sec-8-3) (a checkout per claim, reattachment),
+[R-BTN-113](../../spec/BATON_SPEC/08-runners.md#sec-8-3) (`session_urls` by claim),
+[R-BTN-58](../../spec/BATON_SPEC/11-people.md#sec-11-2) (`max_claims` on the grant, set with it — R-BTN-180's role route is not built), the heartbeat
+and its `fenced` list ([§8.1](../../spec/BATON_SPEC/08-runners.md#sec-8-1), [§14](../../spec/BATON_SPEC/14-api.md#sec-14)), [S-BTN-229](../../spec/BATON_SPEC/15-verification.md#scenarios), and `docs/context/architecture.mdx`. Build them as
+they say; where this ticket's items and the rules differ, the rules win. The heartbeat also
+answers `claims[]` in place of `claim`, and `max_claims` is capped at 32.
+
+**Spec:** [BATON_SPEC §9.1](../../spec/BATON_SPEC/09-claims.md#sec-9-1) ([R-BTN-4](../../spec/BATON_SPEC/09-claims.md#sec-9-1), the lock: "at most one `active` claim per ticket and per runner"),
+[§8.3](../../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../../spec/BATON_SPEC/08-runners.md#sec-8-3),
+[R-BTN-107](../../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§8.1](../../spec/BATON_SPEC/08-runners.md#sec-8-1)
+([R-BTN-3](../../spec/BATON_SPEC/08-runners.md#sec-8-1), [R-BTN-9](../../spec/BATON_SPEC/08-runners.md#sec-8-1), the heartbeat),
+[§9.2](../../spec/BATON_SPEC/09-claims.md#sec-9-2) (the lease and the fence), [§9.5](../../spec/BATON_SPEC/09-claims.md#sec-9-5)
+(reaping), [§5.9](../../spec/BATON_SPEC/05-courses.md#sec-5-9) ([R-BTN-174](../../spec/BATON_SPEC/05-courses.md#sec-5-9)),
+[§6](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6) ([R-BTN-178](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-11), seats), [R-BTN-14](../../spec/BATON_SPEC/08-runners.md#sec-8-1) (the runner secret);
 `docs/context/architecture.mdx` (*Parallelism is horizontal*).
 **Depends on:** B-184 (legs in executor sessions, not the runner's process), B-185 (run ids key
 each running leg).
@@ -123,4 +136,4 @@ each running leg).
 
 ## Status
 
-_filed 2026-11-08._
+_filed 2026-11-08._ 2026-11-17: the spec half written (R-BTN-4 and its neighbours, S-BTN-229); the owner rejected lanes.

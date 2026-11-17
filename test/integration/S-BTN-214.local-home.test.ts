@@ -5,7 +5,7 @@
 // the code repository (verifying its ids at every read, under that host's budget), the ticket
 // walks `filed` → `pr-open` → `reviewed` → `merged` from fixture GitHub facts with its rounds
 // in the PR's conversation and its run-tests gate decided by the code repository's own CI
-// (B-253, S-BTN-227) — the claim answer carries `leg_state: forge` — and a ticket on a
+// (B-255, S-BTN-230) — the claim answer carries `leg_state: forge` — and a ticket on a
 // course that reads no PR facts keeps `leg_state: branch`; the registry carries each course's
 // `facts` (R-BTN-134) and the claim's scope resolves `repos:` through the list. Node only: it
 // writes a real repository and runs git.
@@ -125,7 +125,7 @@ describe('S-BTN-214 a plain-git home on a GitHub code repository', () => {
     expect(asked.filter((k) => k.startsWith('graphql '))).toEqual(['graphql acme/monorepo 7']);
     expect(asked.filter((k) => k.startsWith('/repos/') && !k.startsWith('/repos/acme/monorepo'))).toEqual([]);
     expect(await stationOf('LIN-1')).toMatchObject({ station: 'pr-open' });
-    // B-253 (S-BTN-227): the run-tests gate cannot test a PR outside the home itself, so the
+    // B-255 (S-BTN-230): the run-tests gate cannot test a PR outside the home itself, so the
     // code repository's own CI on the PR's head is its gate — never the owner. Green on every
     // check: the round queues and nothing is asked.
     expect(await nextOf('LIN-1')).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);

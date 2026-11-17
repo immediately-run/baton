@@ -125,7 +125,7 @@ export function testsClose(
   result: { reached?: string; next?: string | null; tests?: unknown; branch?: unknown; tested?: unknown; marker?: unknown },
   run: Exec = exec,
 ): string | null {
-  // B-253: the gate deferred to the CI of the ticket's PRs in other repositories (no PR branch at
+  // B-255: the gate deferred to the CI of the ticket's PRs in other repositories (no PR branch at
   // home): nothing was tested here, so there is no marker to push and no evidence — the claim
   // suspends at its station and the sync reads that CI.
   if (result?.tests === 'ci') {
