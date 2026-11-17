@@ -501,6 +501,30 @@ describe('G-BTN-14: a force-reaped live worker’s item waits for its fence', ()
     await alarmAt(T0 + 2 * 3_600_000);
     expect(await claimRow(c.claim_id)).toMatchObject({ status: 'reaped', end_reason: 'reaped:release-unacknowledged', fence_pending: 1 });
   });
+
+  it('§9.5: an administrator clears a pending fence at once; a claim not fence-pending is conflict', async () => {
+    const a = await register('vm-a');
+    const b = await register('vm-b');
+    const { json: c } = await claimItem('vm-a', a.secret);
+    await owner(`/v1/ui/claims/${c.claim_id}/reap`, { confirm: true });
+    expect((await claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9001' })).json.rule).toBe(3);
+    // §12.2: destructive, so it names its confirmation.
+    expect((await owner(`/v1/ui/claims/${c.claim_id}/fence-clear`, {})).status).toBe(400);
+    expect(await (await owner(`/v1/ui/claims/${c.claim_id}/fence-clear`, { confirm: true })).json()).toEqual({ ok: true });
+    expect((await claimRow(c.claim_id)).fence_pending).toBe(0);
+    // The clear is logged naming the administrator (§9.5), the third way a fence ends.
+    expect(await rows(`SELECT actor, json_extract(detail_json, '$.by') AS by, json_extract(detail_json, '$.admin') AS admin
+                       FROM events WHERE kind = 'fence-cleared'`)).toEqual([{ actor: 'admin:owner@example.com', by: 'admin', admin: 'owner@example.com' }]);
+    // The ticket stops being held; §6.7 still asks a reading since the reap, so the next
+    // claimant re-reads git (R-BTN-25) — the dialog's only protection, as the spec says.
+    expect((await claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9001' })).json).toMatchObject({ rule: 1, rule_code: 'awaiting-sync' });
+    await refresh();
+    expect((await claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9001' })).status).toBe(200);
+    // The clear is never a condition restart (`ticket.resolve` clears no fence): a claim whose
+    // fence is not pending is conflict, and no claim at all is not-found.
+    expect(await code(await owner(`/v1/ui/claims/${c.claim_id}/fence-clear`, { confirm: true }))).toBe('conflict');
+    expect(await code(await owner('/v1/ui/claims/999/fence-clear', { confirm: true }))).toBe('not-found');
+  });
 });
 
 describe('G-BTN-40: the matching query and gatesFor agree; git overtaking a claim ends it', () => {

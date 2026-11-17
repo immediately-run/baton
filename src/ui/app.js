@@ -1,7 +1,7 @@
 // app.js — the dashboard (BATON_SPEC §14): Needs you, Running, Timeline, Ready,
 // Workers and Limits (owners, grants, owner bars and settings — read-only: the
 // `baton` CLI changes them, R-BTN-66), with the owner's actions (status request, release,
-// force-reap, accept a held history). At /login it trades the one-time token in
+// force-reap, clear a fence, accept a held history). At /login it trades the one-time token in
 // the URL's fragment for a session (R-BTN-57, R-BTN-16) and goes to /. It polls
 // GET /v1/ui/state every 10 seconds while the page is visible — backing off to 60 seconds while
 // the answer is unchanged, and paused while the page is hidden (B-242) — and renders with
@@ -402,7 +402,26 @@ function renderNeeds() {
     }
     list.append(el('li', { text: `Release of ${item} to worker #${m.to_worker_id}: ${m.delivered_at ? `delivered ${fmtTime(m.delivered_at)}` : 'not yet delivered'}, unacknowledged` }));
   }
-  for (const c of n.fence_pending) list.append(el('li', { text: `${c.ticket_id}: reaped ${fmtTime(c.ended_at)}, waiting for worker #${c.worker_id} to confirm its fence` }));
+  // R-BTN-19 (B-171): the fence-pending claim, with the administrator's clear — its own action,
+  // never a condition restart. The dialog names the runner's last-seen and what the clear gives
+  // up (§9.5): a process the old incarnation still runs can push until its own lease check fails
+  // — under `session` isolation, which may make no checks of its own, until the executor's stop
+  // returns (R-BTN-107) — and the next claimant's re-read of git (R-BTN-25) is then the only
+  // protection. Drawn on every dashboard: a session's minting key is an administrator's, the
+  // only kind there is (R-BTN-57).
+  for (const c of n.fence_pending) {
+    const deadline = c.ended_at + c.lease_timeout_ms;
+    const li = el('li', { text: `${c.ticket_id}: reaped ${fmtTime(c.ended_at)}, waiting for ${c.hostname} · #${c.worker_id} to confirm its fence (deadline ${fmtTime(deadline)})` });
+    li.append(document.createTextNode(' '), button('Clear fence', () => {
+      const msg = `Clear ${c.ticket_id}'s fence now, without waiting for ${c.hostname} (#${c.worker_id}, last seen ${fmtTime(c.last_seen_at)}) or the deadline ${fmtTime(deadline)}?` +
+        '\nThe item becomes claimable at once and its seats free.' +
+        `\nWhat the clear gives up: a process ${c.hostname} still runs can push until its own lease check fails (${minutes(c.lease_timeout_ms)} from its last check, less 4 min)` +
+        (c.isolation === 'session' ? ' — this runner keeps legs in session isolation, which may make no lease checks of its own until its executor\'s stop returns' : '') +
+        '.\nThe next claimant\'s re-read of git is then the only protection.';
+      if (confirm(msg)) act(`/v1/ui/claims/${c.id}/fence-clear`, { confirm: true });
+    }));
+    list.append(li);
+  }
   for (const w of n.stale_skills) {
     const what = w.course_id == null ? 'declares no course' : `${w.repository_id}:${w.course_id} version ${w.version}, below its minimum ${w.min_worker_version}`;
     list.append(el('li', { text: `${w.hostname} · ${w.session_name}: ${what} — restart it from a pulled checkout` }));
