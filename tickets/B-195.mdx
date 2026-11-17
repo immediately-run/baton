@@ -3,7 +3,7 @@ title: "B-195 — The condition reads and the session's answer: GET …/conditio
 id: B-195
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-16
 repos:
   - baton
 tags:
@@ -58,8 +58,12 @@ The §14 rows first, then the code.
    [{id, reached}], url?, answerable}` — `answerable` true when `authorize` says this caller
    may write the `std:decision@1` under the policy in force (R-BTN-181, R-BTN-116). `not-found`
    for another repository's id, the same as for none.
-2. **The list read** (`GET …/conditions`, B-55's): `?open=1` answers in severity then age order
-   (R-BTN-163); each `questions` row carries `answerable`; `resolve_url` is the tree path
+2. **The list read** (`GET …/conditions`, built by B-234 at `src/core/baton.ts:836` for keys —
+   extend that route for sessions, do not add a second): `?open=1` answers in severity then age
+   order (R-BTN-163); a `needs=1` view (named in the §14 row this item changes) answers
+   R-BTN-163's whole Needs-you list in one ordered answer — every open condition with no handler
+   ticket (unhandled `notify` conditions and `interact` requests with their `url` included), every
+   queued person leg, and the floor — which `person=1` does not, and B-219 draws from it; each `questions` row carries `answerable`; `resolve_url` is the tree path
    `/repositories/{r}/conditions/{id}` (B-191) — three §14 row changes.
 3. **The redirect** (`src/core/front.ts` and one core lookup): `GET /conditions/{id}` with a
    session whose repositories hold the id answers `302` to
@@ -125,3 +129,10 @@ front; B-56 added as the owner of the session's resolve route._
 _2026-11-09 — revised after the second review: the screens split out to B-219; the session's
 path onto `POST …/attestations` built here (nothing built it); the sidebar count item dropped
 (B-208's `repo.list` is the one source)._
+
+_2026-11-16 — the list route exists: B-234 (done 2026-11-14) built the `conditions` table
+(migration 0048), the raise path and `GET …/conditions` with `?type=interact`; this ticket
+extends it for sessions and adds the Needs-you view B-219 needs. B-55's remaining scope should be
+re-read against B-234 before either is claimed._
+
+_(2026-11-16: rules re-read: R-BTN-163)_

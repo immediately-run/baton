@@ -43,5 +43,20 @@ await build({
   logLevel: 'warning',
 });
 
+// B-234 (R-BTN-106, R-BTN-195): `baton leg raise` — the leg session's CLI on its channel, in
+// its own bundle (never beside the runner's), so a raise pays for one small build.
+await build({
+  entryPoints: [join(ROOT, 'src/runner/leg.ts')],
+  outfile: join(OUT, `baton-leg-${process.pid}.mjs`),
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node22',
+  packages: 'external',
+  loader: { '.json': 'json' },
+  logLevel: 'warning',
+});
+
 export const { runMain } = await import(pathToFileURL(join(OUT, 'baton-run.mjs')).href);
 export const { replayMain } = await import(pathToFileURL(join(OUT, `baton-replay-${process.pid}.mjs`)).href);
+export const { raiseMain } = await import(pathToFileURL(join(OUT, `baton-leg-${process.pid}.mjs`)).href);

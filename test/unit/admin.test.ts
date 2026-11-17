@@ -125,12 +125,15 @@ describe('R-BTN-58: owners', () => {
     expect(await code(own('/owners', { public_key: admin.publicKey }))).toBe('conflict');
   });
 
-  it('a grant on a retired repository is not-found; revoking a grant that is not there is not-found', async () => {
+  it('a grant on a retired repository is not-found; a key whose only repository it was owns none (B-173)', async () => {
     expect(await code(own(`/grants/${encodeURIComponent(worker.fingerprint)}/revoke`, {}))).toBe('not-found');
     const opsOwner = await makeKey('ssh-ed25519', 'ops-owner');
     await adm('/repositories', { ...REGISTER, owner_keys: [opsOwner.publicKey] });
-    await adm('/repositories', { id: 'ops', retire: true });
-    expect(await code(keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: [] }))).toBe('not-found');
+    await adm('/repositories', { id: 'ops', retire: true, confirm: true });
+    // R-BTN-47 with R-BTN-155: an authenticated principal naming it is told not-found; a key
+    // whose only repositories are retired owns nothing, so it is no principal at all.
+    expect(await code(keyCall(admin, '/v1/owner/ops/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: [] }))).toBe('not-found');
+    expect(await code(keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: [] }))).toBe('unauthenticated');
   });
 
   it('owners: never the last; removing a non-owner is not-found', async () => {

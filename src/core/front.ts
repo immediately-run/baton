@@ -3,8 +3,9 @@
 // forwards the API to the core — through the Durable Object on Cloudflare, through the request
 // queue locally (R-BTN-55). Every response leaves with the security headers.
 import { API_KEY, readCapped, verifyOwner, verifyRequest, verifySyncCredential, verifyWorker, checkStateChanging, withBody } from './auth';
-import { BatonError, NO_STORE, SESSION_COOKIE, errorResponse, noStore, withSecurityHeaders } from './http';
+import { BatonError, CLIENT_HEADER, NO_STORE, SESSION_COOKIE, VERSIONS_HEADER, clientTooOld, errorResponse, noStore, servedClientVersions, withClientVersions, withSecurityHeaders } from './http';
 import { MAX_DELIVERY, pickDelivery, verifyDelivery } from './webhook';
+import { clientVersionOf, compareVersions, maxVersion, parseClientVersions } from '../shared/versions.mjs';
 import type { Config } from './ports';
 import { ID_SEGMENT, isScreenPath } from './screens';
 import page from '../dashboard/dist/index.html';
@@ -201,7 +202,7 @@ async function route(req: Request, env: Config, to: Forward): Promise<Answer> {
   // B-126 (R-BTN-194): a ticket itself, `GET …/tickets/{ticket}`, read like its blocks.
   // B-190 (R-BTN-84): one leg's runs, `GET …/legs/{leg}/runs`, read the same three ways — the
   // core refuses a worker's (§14: an owner's or an administrator's read).
-  if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|board|policy|attestations|tickets\/[^/]+(\/(blocks|history|legs\/[^/]+\/runs))?)$/.test(pathname)) {
+  if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|board|policy|attestations|conditions|tickets\/[^/]+(\/(blocks|history|legs\/[^/]+\/runs))?)$/.test(pathname)) {
     return under('private', async () => {
       if (isSigned(req)) return forwardSigned(req, env, to);
       // R-BTN-159: a worker's (or, on the reads, an owner's or administrator's) API key.
@@ -259,11 +260,39 @@ function forward(req: Request, to: Forward, principal: Record<string, string>): 
   return to(new Request(req, { headers }));
 }
 
+/** The `recommended` the core last stated on an answer that passed through here (R-BTN-197,
+ *  B-254). The front reads nothing of the store — on the Worker the instance's settings live in
+ *  the object, a subrequest away — so it learns the instance's raised `recommended` from the
+ *  core's own answers, which read it, and states what it learned on the responses it builds
+ *  itself: the `client-too-old` refusal and its own refusals, front-level answers an old client
+ *  or a stranger reads. Until the first answer teaches it, the code's own default — the raise
+ *  reaches every isolate with the first request it forwards. `min` it never learns: the floor
+ *  is the code's constant (the env's own word under the test bindings), never the store's. */
+let learnedRecommended: string | null = null;
+
 /** A request from outside, answered: both hosts' entry point. Every answer leaves with the
  *  security headers and, when its route decided so, `Cache-Control: no-store` (R-BTN-16). */
 export async function front(req: Request, env: Config, to: Forward): Promise<Response> {
   let res: Response;
   let cache: Answer['cache'] = 'public';
+  // R-BTN-197: the one check that comes before every other — the client's own statement of its
+  // version, read before the request's signature is checked and before anything of it is read or
+  // written, so an old client gets this one answer and never a failure of a request shape it no
+  // longer matches. A request without the header compares as `0.0.0`. The floor is the code's
+  // constant (a test binding raises it for the suite, §13a); `recommended` is what the front has
+  // learned of the instance's raise, the code's default until an answer teaches it, never below
+  // the floor.
+  const floor = servedClientVersions(env);
+  const served = { min: floor.min, recommended: maxVersion(learnedRecommended ?? floor.recommended, floor.min) };
+  const api = new URL(req.url).pathname.startsWith('/v1/');
+  if (api) {
+    const client = clientVersionOf(req.headers.get(CLIENT_HEADER)) ?? '0.0.0';
+    if (compareVersions(client, served.min) < 0) {
+      if (req.body && !req.bodyUsed) req.body.cancel().catch(() => {});
+      const e = clientTooOld(client, served.min, served.recommended);
+      return withSecurityHeaders(noStore(withClientVersions(errorResponse(e.code, e.message, e.extra), served)));
+    }
+  }
   try {
     ({ res, cache } = await route(req, env, to));
   } catch (e) {
@@ -271,6 +300,15 @@ export async function front(req: Request, env: Config, to: Forward): Promise<Res
     if (req.body && !req.bodyUsed) req.body.cancel().catch(() => {});
     cache = classOf(e) ?? 'public';
     res = e instanceof BatonError ? errorResponse(e.code, e.message, e.extra) : errorResponse('internal', 'internal error');
+  }
+  // R-BTN-197: every response under /v1 carries the versions Baton serves, a refusal included.
+  // A forwarded answer carries the core's own — which read the instance's raised `recommended`
+  // — and teaches this front its value; what the front built itself is filled, set-if-absent,
+  // from what it serves.
+  if (api) {
+    const stated = parseClientVersions(res.headers.get(VERSIONS_HEADER));
+    if (stated) learnedRecommended = stated.recommended;
+    res = withClientVersions(res, served);
   }
   return withSecurityHeaders(cache === 'private' ? noStore(res) : res);
 }

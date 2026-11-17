@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { asksHelp, declareCourses, fetchMain, hostMaskEnv, parseRunArgs, runMain, servedCourses } from '../../src/runner/main';
 import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
@@ -472,6 +472,23 @@ describe('the courses a runner serves (R-BTN-131, B-103)', () => {
     } finally {
       rmSync(config, { recursive: true, force: true });
     }
+  }, 30_000);
+  it('every heartbeat carries the CLI\'s pinning as profile.cli, beside the start line that says it (B-253)', async () => {
+    const dir = declaring({ skills_version: 3, courses: [{ id: 'create-pr', version: 1 }], agent_command: 'true' });
+    const { lines, seen } = await probe(dir);
+    // What this checkout's own git says — computed independently of the runner — is what the
+    // profile restates: the commit, the ref that names it (a branch, or the commit when
+    // detached), and pinned false exactly on a branch. A CI checkout sits detached at its
+    // merge commit; a developer's rides a branch: both must read true.
+    const root = resolve(import.meta.dirname, '../..');
+    const g = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8' }).trim();
+    const commit = g('rev-parse', 'HEAD');
+    const branch = (() => { try { return g('symbolic-ref', '--short', '-q', 'HEAD'); } catch { return ''; } })();
+    expect(seen.heartbeats[0].profile).toEqual({ cli: { commit, ref: branch || commit, pinned: !branch } });
+    // The start line names the commit, and a branch adds the owner's warning verbatim
+    // (R-BTN-72); before the credential, so a refused start still says what the code is.
+    expect(lines.join('\n')).toContain(`baton: cli at ${commit.slice(0, 10)}`);
+    if (branch) expect(lines.join('\n')).toContain(`baton: running from branch ${branch} at ${commit} — not a pinned commit`);
   }, 30_000);
 });
 
@@ -1202,6 +1219,61 @@ describe('advanceHome — legs start from the claim\'s snapshot (B-228, R-BTN-34
       expect(g('rev-parse', 'HEAD')).toBe(two);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// B-121: `baton run --home <name|path>` — a name resolves to its home's checkout (refused,
+// naming the home, when the home has none); a path keeps R-BTN-131's meaning. The proof a name
+// reached its checkout is the checkout's own settings: the named home declares the no-op `echo`
+// agent_command, which the runner refuses only when it reads that file.
+describe('baton run --home: a name resolves to its checkout (B-121)', () => {
+  const ENV = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE', 'XDG_CONFIG_HOME'];
+  const clear = (): Record<string, string | undefined> => {
+    const saved: Record<string, string | undefined> = {};
+    for (const n of ENV) {
+      saved[n] = process.env[n];
+      delete process.env[n];
+    }
+    return saved;
+  };
+  const restore = (saved: Record<string, string | undefined>): void => {
+    for (const [n, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[n];
+      else process.env[n] = v;
+    }
+  };
+
+  it('a name works its home\'s checkout as a path does; a home with no checkout refuses naming it', async () => {
+    const dir = home();
+    writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ agent_command: 'echo', courses: [{ id: 'relay', version: 1 }] }));
+    const config = mkdtempSync(join(tmpdir(), 'baton-run-homes-'));
+    mkdirSync(join(config, 'baton'), { recursive: true });
+    writeFileSync(join(config, 'baton', 'homes.json'), JSON.stringify({
+      homes: {
+        relay: { origin: 'https://baton.example', repository: 'docs', checkout: dir },
+        bare: { origin: 'https://baton.example', repository: 'docs' },
+      },
+    }));
+    const saved = clear();
+    process.env.XDG_CONFIG_HOME = config;
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      // The name reaches the checkout the path names: both refuse its no-op agent_command (B-83).
+      expect(await runMain(['--home', 'relay'])).toBe(1);
+      expect(err.mock.calls.map((c) => String(c[0])).join('')).toContain('names agent_command "echo"');
+      err.mockClear();
+      expect(await runMain(['--home', dir])).toBe(1);
+      expect(err.mock.calls.map((c) => String(c[0])).join('')).toContain('names agent_command "echo"');
+      // A home with no checkout refuses naming the home, before any credential; an unknown name
+      // lists the homes.
+      await expect(runMain(['--home', 'bare'])).rejects.toThrow('the home bare names no checkout — baton run works a checkout');
+      await expect(runMain(['--home', 'nope'])).rejects.toThrow('--home names no home nope — homes: relay, bare (baton home list, B-121)');
+    } finally {
+      err.mockRestore();
+      restore(saved);
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(config, { recursive: true, force: true });
     }
   });
 });

@@ -46,6 +46,15 @@ import part4Settings from './0044_part4_settings.sql';
 import checkConclusions from './0045_check_conclusions.sql';
 import ticketProvenance from './0046_ticket_provenance.sql';
 import legRunInputs from './0047_leg_run_inputs.sql';
+import conditions from './0048_conditions.sql';
+import eventLookups from './0049_event_lookups.sql';
+import retirement from './0050_retirement.sql';
+import instanceSettings from './0051_instance_settings.sql';
+import stateVersion from './0054_state_version.sql';
+import dashboardLookups from './0055_dashboard_lookups.sql';
+import workerProfile from './0056_worker_profile.sql';
+import severalClaims from './0057_several_claims.sql';
+import clientVersions from './0058_client_versions.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -148,4 +157,24 @@ export const MIGRATIONS: Migration[] = [
   { id: 46, sql: ticketProvenance },
   // 0047 is B-190's (replay: each run's inputs, the ticket's version among them).
   { id: 47, sql: legRunInputs },
+  // 0048 is B-234's (R-BTN-195: raised conditions, and R-BTN-90's armed claim deadline).
+  { id: 48, sql: conditions },
+  // 0049 is B-235's (the dashboard's event lookups by kind and time; 0040's lost `events_unsigned_control`).
+  { id: 49, sql: eventLookups },
+  // 0050 is B-173's (a repository's retirement: the tombstone's `former_paths`), renumbered at
+  // the merge behind main's 0043–0049.
+  { id: 50, sql: retirement },
+  // 0051 is B-4's (R-BTN-113, §13.1: the administrators' instance settings), renumbered at the merge behind 0049–0050.
+  { id: 51, sql: instanceSettings },
+  // 0054 is B-237's (the state version, R-BTN-196); 0052–0053 are reserved for other branches.
+  { id: 54, sql: stateVersion },
+  // 0055 is B-240's (the dashboard's claim, transcript and waiting-leg lookups; 0049–0054 are other branches').
+  { id: 55, sql: dashboardLookups },
+  // 0056 is B-253's (the runner's opaque profile, §13.3's `profile_json`; R-BTN-72's `cli` key).
+  { id: 56, sql: workerProfile },
+  // 0057 is B-188's (0056 is B-253's) (R-BTN-4: several claims per runner; `concurrency` and the grant's `max_claims`).
+  { id: 57, sql: severalClaims },
+  // 0058 is B-254's (R-BTN-197: the recommended client an administrator may raise, and each
+  // runner's own statement of its version), renumbered at the merge behind B-188's 0057.
+  { id: 58, sql: clientVersions },
 ];

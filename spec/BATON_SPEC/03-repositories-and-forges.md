@@ -180,8 +180,10 @@ repository reachable over SSH is enough (R-BTN-105).
   candidate's place in its own group; (4) fewer legs to an end; (5) `ready_since`, oldest
   first; (6) ticket id. The matching query reads at most 50 candidates per group after posted
   bars; when owner bars or readiness leave a group short it reads the group's next page, at
-  most 4 pages per group per request, later pages' survivors after earlier ones'. `?limit=`
-  applies after the merge. A ticket is offered only for its queued leg (R-BTN-83), named in
+  most 4 pages per group per request, later pages' survivors after earlier ones'. A group stops
+  checking its candidates once `limit` have passed (under a full expedite lane, `limit` of its
+  expedited and `limit` of its others), since no later one can reach the first `limit`: the
+  answer is the one checking every candidate gives. `?limit=` applies after the merge. A ticket is offered only for its queued leg (R-BTN-83), named in
   `legs`, a list of one.
 
 ### 3.2 Who may post a board

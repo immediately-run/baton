@@ -3,7 +3,7 @@ title: "B-196 — The runner reads: GET …/runners is the fleet granted on a re
 id: B-196
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-16
 repos:
   - baton
 tags:
@@ -52,14 +52,17 @@ The two §14 rows first, then the code, reusing `workerApi.ts`'s `workersView` a
    accepted (R-BTN-146) — Baton prunes no runner row, so a dead one stays until its key is
    revoked — each `{runner_id, hostname, session_name, alive, last_seen_at, last_activity_at,
    reaped_at, harness, kind, isolation, tier_ceilings, capabilities, granted, tags, courses,
-   lease_timeout_s, credential: {kind, token_id?, role, domain?}, last_report, transcript_url,
-   claim, busy_elsewhere}`:
+   lease_timeout_s, credential: {kind, token_id?, role, domain?}, executor, last_report,
+   transcript_url, claim, busy_elsewhere}`:
+   `executor` the runner's `executor_json` — `{source, digest, provides}` from its last
+   heartbeat (R-BTN-107), null for a sidecar — as §11.4's runner card shows it;
    `alive` is `reaped_at` null and `last_seen_at` within `lease_timeout` (as `workersView`
    computes it); `granted` the repository's grant capabilities (R-BTN-174); `courses` the
    runner's course versions for this repository; `claim` null or this repository's claim it
    holds — `{claim_id, ticket_id, station, leg, run_id, claimed_at, lease_ends_at,
-   deadline_at, attempt, max_runs, next_backoff_until, session_url, log_dir, activity: {kind,
-   label, started_at} | null}`; `last_report` the newest `status_report` message's `{payload,
+   deadline_at, attempt, max_runs, next_backoff_until, session_url, log_dir, executor_digest,
+   environment, instance, activity: {kind, label, started_at} | null}` (the running leg's
+   `claim_legs` columns, R-BTN-107); `last_report` the newest `status_report` message's `{payload,
    sent_at}` or null (what `workersView` serves today — the reply to a Status request);
    `transcript_url` the newest transcript's link built from validated parts as today, or null
    (§11.4's "transcript link"); `busy_elsewhere` true when it holds a claim on another
@@ -70,10 +73,19 @@ The two §14 rows first, then the code, reusing `workerApi.ts`'s `workersView` a
    the row above plus `profile` (the opaque blob, §12.3), `attempts` (earlier attempts on its
    live ticket's current leg: run, started, ended, end reason, detail), and `window: {since,
    claims: [{claim_id, ticket_id, leg, started_at, ended_at, end: released | silent | reaped |
-   done | suspended | running, session_url, log_dir, activities: [{id, parent_id, kind, label,
+   done | suspended | running, session_url, log_dir, executor_digest, environment, instance,
+   activities: [{id, parent_id, kind, label,
    source, started_at, ended_at, outcome, detail}]}]}` for `?since=` (default 24 hours, at most
    7 days, else `invalid-params`), from `claims.timeline`. `{runner}` is the integer `runner_id`;
    a runner with no accepted grant on the repository is `not-found`, the same as none.
+
+3. **What a poll costs.** Both reads run a constant number of statements however many runner
+   rows the repository has ever had: one joined or window-function query per list (the newest
+   transcript, the newest `status_report`, capabilities), as B-240 did for Running and Timeline
+   and B-250 does for V1's Workers view — never a query per runner row. Reaped runners and runners
+   unseen past the window are listed from their own columns only, with no per-row lookups.
+   Both answer B-205's `state_version` ETag. **Target**, measured as B-250 measures it: the same
+   statement count for 10 and 300 runner rows, and under 500 rows read on that harness.
 
 ### What not to do
 
@@ -104,6 +116,9 @@ two activities, one dead after a reap), one granted elsewhere and one busy elsew
 - `repo.runners` lists the two granted with `alive`, `granted`, the claim's lease and activity,
   the dead one's `reaped_at`; the third is absent; the busy one is `busy_elsewhere` with no
   claim;
+- each runner's `executor` and each claim's `executor_digest`, `environment` and `instance`
+  are served as stored, null where absent;
+- the statement count of `repo.runners` is the same with 10 and 300 runner rows;
 - `runner.show` returns the window's claims with nested activities, `profile` and `attempts`;
   `?since=` over 7 days is `invalid-params`; a runner not granted here is `not-found`.
 
@@ -122,3 +137,9 @@ _2026-11-09 — revised after review: the screens split out to B-211; the URL ke
 
 _2026-11-09 — revised after the second review: `last_report` and `transcript_url` added so the
 Status request has a visible reply; the order follows R-BTN-3's grouping by hostname._
+
+_2026-11-16 — revised against the spec as it stands: §11.4's executor fields (added by a2b0065,
+after this ticket was written) are served — the card's `executor`, each run's
+`executor_digest`, `environment` and `instance`; and the reads' cost is bounded (item 3) after
+the 2026-11-14 and 2026-11-15 `rows_read` outages and B-250's finding that a per-runner loop
+grows with every runner ever registered._

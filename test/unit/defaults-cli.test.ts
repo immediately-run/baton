@@ -811,6 +811,14 @@ describe('baton repo init, through the built CLI', () => {
       await expect(stub.run(ctx('reviewed'))).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not "reviewed"');
       await expect(stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot: { sha: main } })).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not null');
       await expect(stub.run({ ...ctx('pr-open'), ticket: { id: 'A-2' } })).rejects.toThrow('no branch matching claude/A-2-* in the home repository');
+      // B-255 (S-BTN-230): no PR branch at home and a ticket whose repos: names another
+      // repository — its PRs are there, gated by their own CI: nothing runs, no marker, the claim
+      // suspends at its station with the round queued, and the close pushes nothing.
+      const ticketFile = join(bin, 'A-2.md');
+      writeFileSync(ticketFile, '---\nid: A-2\ntitle: In the monorepo\nrepos: [acme/monorepo]\n---\n');
+      const deferred = await stub.run({ ...ctx('fixed'), ticket: { id: 'A-2', file: ticketFile } });
+      expect(deferred).toEqual({ reached: 'fixed', next: 'review', suspend: true, tests: 'ci', repositories: ['acme/monorepo'] });
+      expect(stub.close(ctx('fixed'), deferred)).toBeNull();
       // No worktree is left behind.
       expect(g('worktree', 'list').split('\n')).toHaveLength(1);
     } finally {
@@ -856,6 +864,11 @@ describe('baton repo init, through the built CLI', () => {
       // A fix that pushed reaches fixed.
       expect(await stub.run(ctx('fixed', pushing))).toEqual({ reached: 'fixed', next: 'run-tests' });
       expect(execFileSync('git', ['-C', origin, 'rev-parse', 'refs/heads/claude/A-1-fix'], { encoding: 'utf8' }).trim()).not.toBe(head);
+      // B-255: a ticket whose repos: names another repository may be red on that repository's
+      // CI, and its fix may push there alone — where this check cannot see — so it is not made.
+      const ticketFile = join(scratch, 'A-1.md');
+      writeFileSync(ticketFile, '---\nid: A-1\ntitle: Also in the monorepo\nrepos: [acme/monorepo]\n---\n');
+      expect(await stub.run({ ...ctx('fixed', quiet), ticket: { id: 'A-1', file: ticketFile } })).toEqual({ reached: 'fixed', next: 'run-tests' });
     } finally {
       g('reset', '-q', '--hard', main);
       g('remote', 'remove', 'origin');

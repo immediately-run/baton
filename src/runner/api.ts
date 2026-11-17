@@ -2,16 +2,23 @@
 // every call signed with the machine's SSH key (ssh-keygen -Y sign, the one verifier shape), or
 // with its API key as a bearer (R-BTN-159), or — through R3-1239's transition — a bearer token, and after the first heartbeat the worker
 // secret. A call Baton refuses comes back as a `BatonRefusal` (never thrown past the loop); a
-// call that cannot reach Baton throws.
+// call that cannot reach Baton throws. R-BTN-197 (B-254): every call says which client it is
+// (`Baton-Client`), and the served versions each answer names are warned on — once at start and
+// again whenever they change.
 import { readFileSync } from 'node:fs';
 import { API_KEY, signHeaders, signingKey } from '../../cli/sign.mjs';
+import { clientVersion } from '../../cli/version.mjs';
+import { compareVersions, parseClientVersions } from '../shared/versions.mjs';
 
 /** §6.3: every heartbeat request — and every call a fence depends on — has a 30-second timeout. */
 export const CALL_TIMEOUT_MS = 30_000;
 
-/** A refusal Baton answered: its `code`, `rule_code` when the §11 body carries one, and message. */
+/** A refusal Baton answered: its `code`, `rule_code` when the §11 body carries one, and message.
+ *  R-BTN-197: a `client-too-old` refusal carries the versions it names — this client's, the
+ *  served `min` and `recommended` — for the runner to log before it exits. */
 export class BatonRefusal extends Error {
-  constructor(readonly code: string, readonly ruleCode: string | undefined, message: string, readonly status: number) {
+  constructor(readonly code: string, readonly ruleCode: string | undefined, message: string, readonly status: number,
+    readonly versions: { client: string; min: string; recommended: string } | undefined = undefined) {
     super(message);
   }
 }
@@ -26,6 +33,13 @@ export interface ApiOptions {
   url: string;
   transport: Transport;
   auth: Auth;
+  /** R-BTN-197 (B-254): the `Baton-Client` value every call carries — `clientVersion()`'s by
+   *  default (`baton/<version>`, `+dev` from a working tree). A test names another version to
+   *  play a runner this code never shipped as. */
+  client?: string;
+  /** R-BTN-197: what this client is called in its own warning line — a runner, or the sync that
+   *  shares this API (the rule lists each as its own kind of client). Defaults to `runner`. */
+  kind?: string;
 }
 
 // The SSHSIG signing itself is cli/sign.mjs's (the one `baton admin` uses — the same verifier
@@ -62,9 +76,13 @@ export function envAuth(env: NodeJS.ProcessEnv, keyWriter?: (material: string) =
 }
 
 /** The runner's calls; one instance per runner. `secret` joins every call once the first
- * heartbeat returned it (R-BTN-14: the hash registers, the secret authenticates). */
+ * heartbeat returned it (R-BTN-14: the hash registers, the secret authenticates). R-BTN-197
+ * (B-254): every call carries the runner's `Baton-Client` (`client`, `clientVersion()`'s by
+ * default), and each answer's `Baton-Client-Versions` is warned on — at start and when it
+ * changes. */
 export class BatonApi {
   private secret: string | null = null;
+  private saidVersions: string | null = null;
   constructor(private readonly o: ApiOptions, private readonly log: (line: string) => void = () => {}) {}
 
   setSecret(s: string | null) {
@@ -76,6 +94,7 @@ export class BatonApi {
     const text = body === undefined ? '' : JSON.stringify(body);
     const headers = new Headers(this.o.auth(method, url, text, this.secret));
     headers.set('Content-Type', 'application/json');
+    headers.set('Baton-Client', this.o.client ?? clientVersion());
     let res: Response;
     try {
       res = await this.o.transport(new Request(url, { method, headers, body: text === '' && method === 'GET' ? undefined : text, signal: AbortSignal.timeout(CALL_TIMEOUT_MS) }));
@@ -83,6 +102,7 @@ export class BatonApi {
       this.log(`baton: ${method} ${path} did not reach Baton (${e instanceof Error ? e.message : String(e)})`);
       throw e;
     }
+    this.warnVersions(res.headers.get('Baton-Client-Versions'));
     let json: Record<string, any> | null = null;
     try {
       json = (await res.json()) as Record<string, any>;
@@ -91,10 +111,31 @@ export class BatonApi {
     }
     if (!res.ok) {
       const code = typeof json?.code === 'string' ? json.code : 'unavailable';
+      // R-BTN-197: the one refusal a client below min gets names the versions it compares.
+      const versions = [json?.client, json?.min, json?.recommended].every((v) => typeof v === 'string')
+        ? { client: json!.client as string, min: json!.min as string, recommended: json!.recommended as string }
+        : undefined;
       throw new BatonRefusal(code, typeof json?.rule_code === 'string' ? json.rule_code : undefined,
-        typeof json?.message === 'string' ? json.message : `${method} ${path}: ${res.status}`, res.status);
+        typeof json?.message === 'string' ? json.message : `${method} ${path}: ${res.status}`, res.status, versions);
     }
     return json ?? {};
+  }
+
+  /** R-BTN-197: `baton: this <kind> is <version>; Baton recommends <recommended> and refuses
+   *  below <min>` — at start (the first answer that names the versions) and again whenever the
+   *  values change, only while this client's version is below the recommendation (semver
+   *  precedence, `+dev` no part; the version printed as the header writes it, `baton/<version>`
+   *  — one form in every line, the warning's and a refusal's alike). Nothing installs or
+   *  switches anything: the header carries version numbers only, and the operator updates the
+   *  client at their own pace. */
+  private warnVersions(headerValue: string | null): void {
+    if (headerValue == null || headerValue === this.saidVersions) return;
+    this.saidVersions = headerValue;
+    const served = parseClientVersions(headerValue);
+    const own = this.o.client ?? clientVersion();
+    if (served && compareVersions(own.replace(/^baton\//, ''), served.recommended) < 0) {
+      this.log(`baton: this ${this.o.kind ?? 'runner'} is ${own}; Baton recommends ${served.recommended} and refuses below ${served.min}`);
+    }
   }
 
   heartbeat(body: Record<string, unknown>): Promise<Record<string, any>> {
@@ -126,11 +167,16 @@ export class BatonApi {
   claim(body: { request_id: string; ticket_id?: string }): Promise<Record<string, any>> {
     return this.call('POST', '/v1/runner/claim', body);
   }
-  advance(claimId: number, body: { reached?: string; leg: string; bars?: string[]; evidence?: string; outputs?: unknown[]; taken?: { choice: string; alternative: string; dead: string[] }[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null }): Promise<Record<string, any>> {
+  advance(claimId: number, body: { reached?: string; leg: string; bars?: string[]; evidence?: string; outputs?: unknown[]; taken?: { choice: string; alternative: string; dead: string[] }[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string }): Promise<Record<string, any>> {
     return this.call('POST', `/v1/runner/claims/${claimId}/advance`, body);
   }
   end(claimId: number, body: Record<string, unknown>): Promise<Record<string, any>> {
     return this.call('POST', `/v1/runner/claims/${claimId}/end`, body);
+  }
+  /** §7.1 (R-BTN-160, R-BTN-195; B-234): the report for one raise — filter fields only, never
+   *  the subject or body, which stay in the runner's log (R-BTN-33). */
+  conditions(claimId: number, body: Record<string, unknown>): Promise<Record<string, any>> {
+    return this.call('POST', `/v1/runner/claims/${claimId}/conditions`, body);
   }
   ack(messageId: number): Promise<Record<string, any>> {
     return this.call('POST', `/v1/runner/messages/${messageId}/ack`, {});

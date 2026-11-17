@@ -181,11 +181,13 @@ describe('B-169 the security review’s corrections', () => {
     expect([anonymous.status, anonymous.headers.get('Cache-Control')]).toEqual([401, 'no-store']);
     const signedIn = await hostCall(new Request(`${ORIGIN}/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ token: (await keyCall(admin, '/v1/admin/login-links', {})).json.url.split('#')[1] }) }));
     expect([signedIn.status, signedIn.headers.get('Set-Cookie')?.startsWith('__Host-baton_session='), signedIn.headers.get('Cache-Control')]).toEqual([200, true, 'no-store']);
-    // A signed owner read, its refusal, and the delivery route.
+    // A signed owner read, its refusal, and the delivery route. A repository-naming route answers
+    // `not-found` for an id that is not registered — retired or never there (R-BTN-47, B-173) —
+    // so the owner route's refusal for `nope` is that one; the header this pins is unchanged.
     const read = await as(owner, '/v1/owner/ops/grants');
     expect([read.status, read.headers.get('Cache-Control')]).toEqual([200, 'no-store']);
     const refused = await as(owner, '/v1/owner/nope/grants');
-    expect([refused.status, refused.headers.get('Cache-Control')]).toEqual([403, 'no-store']);
+    expect([refused.status, refused.headers.get('Cache-Control')]).toEqual([404, 'no-store']);
     const delivery = await hostCall(new Request(ORIGIN + '/v1/github/webhook', { method: 'POST', headers: { 'X-Hub-Signature-256': 'sha256=' + '0'.repeat(64) }, body: '{}' }));
     expect([delivery.status, delivery.headers.get('Cache-Control')]).toEqual([401, 'no-store']);
     // A public asset holds no data, and is served by the public branch, not the withheld one: the

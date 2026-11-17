@@ -124,7 +124,14 @@ export function testsClose(
   ctx: CloseCtx,
   result: { reached?: string; next?: string | null; tests?: unknown; branch?: unknown; tested?: unknown; marker?: unknown },
   run: Exec = exec,
-): string {
+): string | null {
+  // B-255: the gate deferred to the CI of the ticket's PRs in other repositories (no PR branch at
+  // home): nothing was tested here, so there is no marker to push and no evidence — the claim
+  // suspends at its station and the sync reads that CI.
+  if (result?.tests === 'ci') {
+    if (result.next !== 'review' || typeof result.reached !== 'string' || result.reached === '') throw new Error('the run-tests gate deferred to CI without suspending at its station');
+    return null;
+  }
   if (result?.tests !== 'green' && result?.tests !== 'red') {
     throw new Error(`the run-tests gate returned neither green nor red, got ${JSON.stringify(result?.tests)}`);
   }

@@ -1,0 +1,50 @@
+---
+title: "B-240 — The dashboard's timeline and active claims in joined queries"
+id: B-240
+project: baton
+status: available
+updated: 2026-11-15
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: Remove the per-claim and per-activity queries behind /v1/ui/state (about 600 statements per poll) (rows_read)
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**What:** the dashboard's N+1 loops.
+
+- Timeline (claims.ts ~2009-2022): one activities query per claim and one transcripts query per activity (~615 statements per poll) → joined queries; optionally store `transcript_url` on activities when written.
+- Active claims (claims.ts ~1996-1997): one events and one activities query per claim → joined.
+
+**Target:** ui/state < 1k rows and tens of statements.
+
+**Why:** on 2026-11-14 production exceeded Cloudflare's free-tier Durable Objects limit of
+5,000,000 `rows_read`/day at 21:41Z; every runner call returned 500 until the 00:00Z reset.
+Measured on a production-sized local state (180 tickets, 600 claims, ~3k events) with
+workerd's `SqlStorageCursor.rowsRead`: `GET /v1/ui/state` ≈ 14.4k rows per 10 s poll
+(≈ 3·events + 2–5k), recommendations ≈ 3.7k, claim ≈ 3.8–4k, alarm ≈ 0.8–1.3k per minute,
+`POST /v1/sync/board` 4–5k rows over ~2.5k statements. This ticket is one of B-235–B-243,
+the owner's 2026-11-15 plan to bound what each read costs.
+
+**Done when:** the named calls' rows_read, measured the same way in a test (cloudflare host),
+is at or below the target, `EXPLAIN QUERY PLAN` shows the intended index where one is named,
+and behaviour is unchanged (the existing scenarios pass).
+
+### Trust
+
+No new input: indexes, tables and queries over data Baton already stores; no field, file, commit trailer or request is added.
+
+### Invariants
+
+- R-BTN-81 and the dashboard's served shape: the same JSON; only the queries are joined.
+
+## Status
+
+_filed 2026-11-15._
+
+_2026-11-15: Running, Timeline and the blocked view in joined queries (one query per list, not per claim, activity or ticket); migration 0055's claim, transcript and waiting-leg indexes; test/integration/B-240.dashboard-queries.test.ts compares the served lists with the per-row reads._
