@@ -32,11 +32,8 @@ declaring a capability you no longer hold.
   exit criteria. Those sections are the contract. Where the ticket prescribes a decision, take
   it; if you take another, say so under "Deviations" in the PR body.
 - **Check it is not already delivered.** Search the code for what the ticket asks for. If it is
-  done, open no PR: raise it and stop, so a person looks — `baton leg raise error.needs-person
-  --subject "<id> is already delivered: <where>"`, which ends the leg without spending another
-  attempt on it (R-BTN-160, R-BTN-195); where the raise is refused or the command answers "not
-  inside a leg", your last lines say the same instead. If part of it is done, build the remainder and say which
-  part you found.
+  done, open no PR: say so in the ticket and stop with an error, so a person looks. If part of it
+  is done, build the remainder and say which part you found.
 - Find the code you will touch by name: the helpers, the tests next to it, the repository's own
   checks (lint, typecheck, tests — whatever a contributor runs).
 

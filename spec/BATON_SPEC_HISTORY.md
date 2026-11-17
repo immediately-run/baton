@@ -3109,9 +3109,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   holds it, stored and shown, never read, as every `detail` is. Rejected: parsing the output
   for a provider's refusal to choose the end (the output is the agent's, never read for
   decisions beyond the answer line); a provider's exhaustion stays R-BTN-126's confirmed blocked
-  end (B-21, B-245). The standard `implement` instructions now say to raise
-  `error.needs-person` for a ticket already delivered and to say why in the last lines whenever
-  the leg stops without a PR.
+  end (B-21, B-245). The standard `implement` instructions now say why in the last lines
+  whenever the leg stops without a PR; an "already delivered" answer that spends no attempt is
+  B-257's.
 
 ## Retired requirements
 

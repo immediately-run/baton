@@ -90,11 +90,11 @@ _filed 2026-11-17._
     for an agent stub.
   - `verifyPrOpen` no longer reads or names the home twice.
   - The standard `implement` instructions (`src/defaults/courses/create-pr/implement.md`) now
-    say to raise `error.needs-person` for an already-delivered ticket. That end is
-    non-retryable, so the ticket is held for a person at once, not after three spent attempts.
-    The instructions also say that whatever stops the leg without a PR is to be said in its last
-    lines. This repository's own copy, `.baton/courses/create-pr/legs/implement.md`, is
-    owner-signed control (B-127) and is not changed here; the owner carries the same words over.
+    say that whatever stops the leg without a PR is to be said in its last lines. A proper answer
+    for "already delivered", one that spends no attempt and goes to a person, is B-257's, filed
+    the same day; this PR leaves that bullet to it. This repository's own copy,
+    `.baton/courses/create-pr/legs/implement.md`, is owner-signed control (B-127) and is not
+    changed here; the owner carries the same words over.
   - Spec: R-BTN-131 and §9.4 amended, S-BTN-231, history and decisions entries.
 - 2026-11-17 — **Not done here: a provider's exhaustion not spending the attempt.** R-BTN-122
   already says "A provider at capacity is a blocked prerequisite (R-BTN-126), never a retry".
