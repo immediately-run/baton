@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { asksHelp, declareCourses, fetchMain, hostMaskEnv, parseRunArgs, runMain, servedCourses } from '../../src/runner/main';
 import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
@@ -472,6 +472,23 @@ describe('the courses a runner serves (R-BTN-131, B-103)', () => {
     } finally {
       rmSync(config, { recursive: true, force: true });
     }
+  }, 30_000);
+  it('every heartbeat carries the CLI\'s pinning as profile.cli, beside the start line that says it (B-253)', async () => {
+    const dir = declaring({ skills_version: 3, courses: [{ id: 'create-pr', version: 1 }], agent_command: 'true' });
+    const { lines, seen } = await probe(dir);
+    // What this checkout's own git says — computed independently of the runner — is what the
+    // profile restates: the commit, the ref that names it (a branch, or the commit when
+    // detached), and pinned false exactly on a branch. A CI checkout sits detached at its
+    // merge commit; a developer's rides a branch: both must read true.
+    const root = resolve(import.meta.dirname, '../..');
+    const g = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8' }).trim();
+    const commit = g('rev-parse', 'HEAD');
+    const branch = (() => { try { return g('symbolic-ref', '--short', '-q', 'HEAD'); } catch { return ''; } })();
+    expect(seen.heartbeats[0].profile).toEqual({ cli: { commit, ref: branch || commit, pinned: !branch } });
+    // The start line names the commit, and a branch adds the owner's warning verbatim
+    // (R-BTN-72); before the credential, so a refused start still says what the code is.
+    expect(lines.join('\n')).toContain(`baton: cli at ${commit.slice(0, 10)}`);
+    if (branch) expect(lines.join('\n')).toContain(`baton: running from branch ${branch} at ${commit} — not a pinned commit`);
   }, 30_000);
 });
 
