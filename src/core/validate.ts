@@ -123,7 +123,10 @@ export interface Heartbeat {
   courses: { repository: string; course: string; version: number }[];
   last_activity_at?: number;
   test_harness: boolean;
-  fenced?: { claim_id: number };
+  /** R-BTN-19 (B-188): the reaped claims the sidecar has fenced — one entry per claim. */
+  fenced: { claim_id: number }[];
+  /** R-BTN-4 (B-188): how many claims the runner can run at once, clamped to [1, 32]. */
+  concurrency: number;
   transcripts: TranscriptReport[];
   transcript_refusals: { index: number; code: string; message: string }[];
   /** R-BTN-103: the repositories and `asks` this session delivers notices for, as a worker courier,
@@ -138,16 +141,28 @@ export interface Heartbeat {
    *  here only as a bounded string; the heartbeat drops one that fails the link rule (https, no
    *  userinfo, an allowlisted host) and logs it, never refusing the beat. */
   session_url?: string;
+  /** R-BTN-113 (B-188): each claim's running leg's session link, by claim — a runner holding
+   *  several claims names which. Malformed entries are skipped, never a refused beat. */
+  session_urls: { claim_id: number; url: string }[];
   /** §7.5 R-BTN-90: the `claim_legs.seq` of the run whose script just returned — the finishing
    *  half's word, sent out of cadence before validation, `close` or any wait. Shape-checked
    *  only as a positive integer; a heartbeat is never refused for it. */
   leg_finished?: number;
+  /** R-BTN-90 (B-188): `leg_finished` by claim — a run's seq is numbered within its claim, so a
+   *  runner holding several names which. Malformed entries are skipped, never a refused beat. */
+  legs_finished: { claim_id: number; seq: number }[];
 }
 
-export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number }
+export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number; claim_id?: number }
 
 /** §6.6 R-BTN-9: the worker declares its lease timeout, clamped to [900, 86400] s, default 900. */
 export const clampLease = (s: unknown) => (typeof s === 'number' && Number.isFinite(s) ? Math.min(86400, Math.max(900, Math.round(s))) : 900);
+
+/** R-BTN-4 (B-188): the most claims a runner may declare it runs at once, and a grant allow. */
+export const MAX_CLAIMS_CAP = 32;
+/** R-BTN-4: the runner's declared `concurrency`, clamped to [1, 32], default 1 — clamped, never
+ *  refused, since a refused heartbeat would stop `last_seen_at` and get a live runner reaped. */
+export const clampConcurrency = (n: unknown) => (isInt(n) ? Math.min(MAX_CLAIMS_CAP, Math.max(1, n as number)) : 1);
 
 /** R-BTN-107: the isolation modes a heartbeat may declare. */
 export const ISOLATIONS: readonly Heartbeat['isolation'][] = ['attached', 'process', 'session'];
@@ -199,6 +214,11 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   // R-BTN-90: the finished run's seq — read as absent when it is not one (a heartbeat is never
   // refused for it, §6.8); the finishing half below judges it against the claim's running run.
   const leg_finished = isInt(b.leg_finished) && (b.leg_finished as number) > 0 ? b.leg_finished as number : undefined;
+  // R-BTN-113 (B-188): one link per claim; the same bounds as `session_url`, a malformed entry skipped.
+  const session_urls = (Array.isArray(b.session_urls) ? (b.session_urls as unknown[]).slice(0, MAX_CLAIMS_CAP) : [])
+    .filter((e): e is { claim_id: number; url: string } => isObj(e) && isInt((e as Record<string, unknown>).claim_id)
+      && typeof (e as Record<string, unknown>).url === 'string' && ((e as Record<string, unknown>).url as string).length <= 4096)
+    .map((e) => ({ claim_id: e.claim_id, url: e.url }));
   return {
     hostname,
     session_name,
@@ -221,7 +241,13 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     protection: checkProtection(b.protection),
     policy_pins: checkPolicyPins(b.policy_pins),
     session_url,
+    session_urls,
+    concurrency: clampConcurrency(b.concurrency),
     leg_finished,
+    legs_finished: (Array.isArray(b.legs_finished) ? (b.legs_finished as unknown[]).slice(0, MAX_CLAIMS_CAP) : [])
+      .filter((e): e is { claim_id: number; seq: number } => isObj(e) && isInt((e as Record<string, unknown>).claim_id)
+        && isInt((e as Record<string, unknown>).seq) && ((e as Record<string, unknown>).seq as number) > 0)
+      .map((e) => ({ claim_id: e.claim_id, seq: e.seq })),
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
@@ -277,7 +303,9 @@ export function checkTranscript(t: unknown, field: string, allowed: string[]): T
   const role = x.role ?? 'session';
   if (role !== 'session' && role !== 'subagent') bad(`${field}.role`, "must be 'session' or 'subagent'");
   if (x.pushed_at !== undefined && !isTime(x.pushed_at)) bad(`${field}.pushed_at`, 'must be epoch ms');
-  return { repo: x.repo as string, path: x.path as string, role: role as TranscriptReport['role'], activity_id: optional(x.activity_id, matches(ACTIVITY_ID, `${field}.activity_id`)), pushed_at: x.pushed_at as number | undefined };
+  if (x.claim_id !== undefined && !isInt(x.claim_id)) bad(`${field}.claim_id`, 'must be a claim id');
+  return { repo: x.repo as string, path: x.path as string, role: role as TranscriptReport['role'], activity_id: optional(x.activity_id, matches(ACTIVITY_ID, `${field}.activity_id`)), pushed_at: x.pushed_at as number | undefined,
+    ...(x.claim_id !== undefined ? { claim_id: x.claim_id as number } : {}) };
 }
 
 // ── activities (§6.9) ────────────────────────────────────────────────────────────────────
@@ -825,11 +853,16 @@ export function checkConfirmations(v: unknown): { claim_id: number; sha: string 
   });
 }
 
-/** R-BTN-19: the heartbeat's report that the sidecar has fenced a reaped claim. */
-export function checkFenced(v: unknown): { claim_id: number } | undefined {
-  if (v === undefined || v === null) return undefined;
-  if (!isObj(v) || !isInt(v.claim_id) || v.terminated !== true) bad('fenced', 'must be {claim_id, terminated: true}');
-  return { claim_id: (v as Record<string, unknown>).claim_id as number };
+/** R-BTN-19: the heartbeat's report that the sidecar has fenced reaped claims — a list, one
+ *  entry per claim (B-188); a single object, as runners before B-188 send it, is one entry. */
+export function checkFenced(v: unknown): { claim_id: number }[] {
+  if (v === undefined || v === null) return [];
+  const list = Array.isArray(v) ? v : [v];
+  if (list.length > MAX_CLAIMS_CAP) bad('fenced', `must list at most ${MAX_CLAIMS_CAP} claims`);
+  return list.map((x, i) => {
+    if (!isObj(x) || !isInt(x.claim_id) || x.terminated !== true) bad(Array.isArray(v) ? `fenced[${i}]` : 'fenced', 'must be {claim_id, terminated: true}');
+    return { claim_id: (x as Record<string, unknown>).claim_id as number };
+  });
 }
 
 /** An owner action that names its own confirmation (§14: force-reap). */
