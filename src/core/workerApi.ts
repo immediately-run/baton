@@ -364,7 +364,7 @@ export class WorkerApi {
 
     let rekeyed = false;
     // R-BTN-75: a worker that was not live before this heartbeat joins the fleet's counts.
-    const was = w ? this.rows<{ live: number }>(`SELECT reaped_at IS NULL AND ? - last_seen_at < lease_timeout_ms AS live FROM workers WHERE id = ?`, now, w.id)[0] : null;
+    const was = w ? this.rows<{ live: number }>(`SELECT reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? AS live FROM workers WHERE id = ?`, now, w.id)[0] : null;
     if (!w) {
       if (!hb.secret_hash) bad('secret_hash', 'the first heartbeat of a session carries its SHA-256');
       this.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, model_id,
@@ -780,8 +780,10 @@ export class WorkerApi {
   /** The expiry of a reaped worker's open messages (§9). R3-1212 adds reaping. */
   alarm() {
     const now = this.c.now();
+    // B-236: driven from the open messages (`messages_by_status`), each worker read by its key —
+    // never from the reaped workers, whose rows are kept forever (R-BTN-3).
     this.exec(`UPDATE messages SET status = 'expired' WHERE status IN ('pending','delivered')
-               AND to_worker_id IN (SELECT id FROM workers WHERE reaped_at IS NOT NULL)`);
+               AND EXISTS (SELECT 1 FROM workers w WHERE w.id = messages.to_worker_id AND w.reaped_at IS NOT NULL)`);
   }
 
   // ── mode and shadow reports (R-BTN-28, §13 step 2) ──────────────────────────────────────

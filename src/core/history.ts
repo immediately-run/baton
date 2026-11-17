@@ -106,7 +106,8 @@ export class History {
     const due = this.rows<{ ticket_id: string }>(`SELECT ticket_id FROM closed_tickets WHERE purged_at IS NULL AND closed_at <= ? ORDER BY closed_at LIMIT ?`, cutoff, PURGE_BATCH);
     for (const t of due) {
       this.c.store.exec('DELETE FROM ticket_history WHERE ticket_id = ?', t.ticket_id);
-      this.c.store.exec('UPDATE closed_tickets SET purged_at = ? WHERE ticket_id = ?', this.c.now(), t.ticket_id);
+      // B-238 (R-BTN-149): the ticket's claims are due to go next (`Retention`).
+      this.c.store.exec('UPDATE closed_tickets SET purged_at = ?, claims_due_at = ? WHERE ticket_id = ?', this.c.now(), this.c.now(), t.ticket_id);
     }
     return due.length;
   }
