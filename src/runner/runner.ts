@@ -2224,6 +2224,7 @@ export class Runner {
           return await this.finish(claimId, {
             end_reason: reason, reached: verdict.reached, next: verdict.next,
             ...(verdict.kind === 'suspend' && verdict.outputs ? { outputs: verdict.outputs } : {}),
+            ...(verdict.kind === 'suspend' && verdict.detail ? { detail: verdict.detail } : {}),
             ...(verdict.kind === 'suspend' && closed ? { ended_at_sha: closed } : {}),
           }, await this.callHandoff(script, ctx));
         }
