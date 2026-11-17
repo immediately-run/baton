@@ -5,6 +5,7 @@
 // repository. Aggregates and ids only: no worker, no profile, no report (G-BTN-64).
 import type { Row, Store } from './ports';
 import type { Queues } from './queues';
+import { signatureOf, type EntryRequirement } from './graph';
 
 /** Seconds, summarised: how many, the median and the longest. */
 export interface Durations {
@@ -18,6 +19,10 @@ export interface CourseStats {
   since: number;
   until: number;
   courses: Record<string, {
+    /** R-BTN-111 (B-52): the course's signature — its input (its `start` station's `entry`) and
+     *  its output (each end station's), as the registered file declares them. Carried for every
+     *  registered course, activity or none: it is a contract, not a count. */
+    signature?: { input: EntryRequirement[]; output: { station: string; entry: EntryRequirement[] }[] };
     /** Per leg: runs started in the window; how long each waited at its `from` station before it
      *  started (from the previous leg's finish in the claim, or the previous claim's end on the
      *  ticket), and how long it ran; and the tickets whose leg is ready and unclaimed now. */
@@ -146,6 +151,15 @@ export class Stats {
     for (const q of this.queues?.all(repository) ?? []) {
       leg(q.course, q.leg).queue = { depth: q.depth, max_queue: q.max_queue };
       course(q.course).intake = this.queues!.intake(repository, q.course);
+    }
+
+    // R-BTN-111 (B-52): each registered course's signature, its input and its output — carried
+    // whether or not the course ran in the window, so a reader composing against it need not
+    // guess from silence. The row holds the file as last accepted, which is the one in force.
+    for (const r of this.rows<{ id: string; course_json: string }>('SELECT id, course_json FROM courses WHERE repository_id = ?', repository)) {
+      let signature: CourseStats['courses'][string]['signature'];
+      try { signature = signatureOf(JSON.parse(r.course_json)); } catch { continue; }
+      course(r.id).signature = signature;
     }
 
     // Ends in the window, by reason and the course's detail; suspensions by station.

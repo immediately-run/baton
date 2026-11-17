@@ -5,10 +5,12 @@
 // the local host.
 import { describe, it, expect, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkCourse, legExports, readInputs, removed, shortestRoute, staticViolations, type KitInput } from '../../src/local/testCourse';
+import { checkCourse, entryViolations, legExports, readInputs, removed, shortestRoute, signatureLines, spawnsViolations, staticViolations, type KitInput } from '../../src/local/testCourse';
+import { courseSchemas } from '../../src/defaults/cli';
+import { parseSchemaId } from '../../src/shared/schema.mjs';
 import { graphOf } from '../../src/core/graph';
 import { BUG_REPORT_COURSE } from '../../src/defaults/courses';
 
@@ -215,5 +217,185 @@ describe('baton test-course', () => {
     // a base that resolves but lacks the course is a new course
     const empty = execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit-tree', '4b825dc642cb6eb9a060e54bf8d69288fbee4904', '-m', 'empty'], { encoding: 'utf8' }).trim();
     expect(await readInputs(root, 'roadmap-pr', { base: empty })).toMatchObject({ base: null, baseVersions: null });
+  });
+});
+
+// B-52's kit half: the refinement report (R-BTN-108, S-BTN-65), entry against contracts
+// (R-BTN-109), signatures and spawns (R-BTN-111, S-BTN-80), and the closed legacy path window —
+// over fixture courses whose schemas sit in `schemas/` of the course directory, the one place
+// both the sync's post and the kit read them (R-BTN-134).
+const writeCourse = (root: string, id: string, file: unknown, schemas: Record<string, string> = {}) => {
+  const dir = join(root, '.baton', 'courses', id);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'course.json'), JSON.stringify(file));
+  const names = Object.keys(schemas);
+  if (names.length) {
+    mkdirSync(join(dir, 'schemas'), { recursive: true });
+    for (const [name, text] of Object.entries(schemas)) writeFileSync(join(dir, 'schemas', name), text);
+  }
+};
+const writeBaton = (root: string, courses: string[]) => writeFileSync(join(root, '.baton', 'baton.json'),
+  JSON.stringify({ courses: courses.map((id) => ({ id, version: 1, min_worker_version: 1 })) }));
+
+/** S-BTN-80's spawned course: a start that requires `brief`, ends `done` (which requires
+ *  `result`) and `abandoned` (which requires nothing). */
+const SPEC = {
+  start: 'requested', start_leg: 'write', end: ['done', 'abandoned'],
+  stations: {
+    requested: { entry: [{ output: 'brief', schema: 'std:object@1' }] },
+    done: { entry: [{ output: 'result', schema: 'spec:result@1' }] },
+    abandoned: {},
+  },
+  legs: { write: { from: ['requested'], to: ['done', 'abandoned'], outputs: { result: { schema: 'spec:result@1' } } } },
+};
+const RESULT = JSON.stringify({ type: 'object', additionalProperties: false, required: ['uri', 'digest'], properties: { uri: { type: 'string', maxLength: 128 }, digest: { type: 'string', maxLength: 80 } } });
+/** S-BTN-80's spawner: one leg that files a child of `spec`, providing its input. */
+const BUILD = {
+  start: 'requested', start_leg: 'plan', end: ['shipped'],
+  stations: { requested: {}, shipped: {} },
+  legs: { plan: { from: ['requested'], to: 'shipped', spawns: { course: 'spec', provides: ['brief'], lifetime: 'station' } } },
+};
+
+describe('the kit\'s schema half (B-52)', () => {
+  it('reads the same schemas from the same path the sync\'s post reads, and its core post carries them: the run is green over a course whose ends name them', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'baton-kit-schemas-'));
+    dirs.push(root);
+    writeCourse(root, 'spec', SPEC, { 'result@1.json': RESULT });
+    writeBaton(root, ['spec']);
+    const k = await readInputs(root, 'spec', { base: null });
+    // One reader, one path: the kit's inputs are the sync's own post's schemas, byte for byte.
+    expect(k.schemas).toEqual(courseSchemas(root, 'spec').schemas);
+    expect(k.others).toEqual([]);
+    // The generic run ends at `done`, whose entry the arrival check reads against the posted
+    // `spec:result@1` — a post without the schemas would be refused (spec:result@1 unposted).
+    expect(await checkCourse(k)).toEqual([]);
+  }, 60_000);
+
+  it('reports every refinement gap with its keyword: a refinement dropping head_sha from required is reported, naming required (S-BTN-65\'s kit half, R-BTN-108)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'baton-kit-refine-'));
+    dirs.push(root);
+    const base = JSON.stringify({ type: 'object', additionalProperties: false, required: ['head_sha'], properties: { head_sha: { type: 'string', maxLength: 40 } } });
+    const drops = JSON.stringify({ 'x-baton-base': 'refine:report@1', type: 'object', additionalProperties: false, properties: { head_sha: { type: 'string', maxLength: 40 } } });
+    writeCourse(root, 'refine', {
+      start: 'requested', start_leg: 'write', end: ['done'],
+      stations: { requested: {}, done: { entry: [{ output: 'report', schema: 'refine:report@1' }] } },
+      legs: { write: { from: ['requested'], to: 'done', outputs: { report: { schema: 'refine:report@2' } } } },
+    }, { 'report@1.json': base, 'report@2.json': drops });
+    writeBaton(root, ['refine']);
+    const v = await checkCourse(await readInputs(root, 'refine', { base: null }));
+    expect(v).toEqual([expect.objectContaining({ rule: 'schema', message: expect.stringMatching(/refine:report@2 does not refine refine:report@1 — "head_sha" is required by the base \(keyword: required\)/) })]);
+  }, 60_000);
+
+  it('checks every entry schema is posted or std:, and every arriving leg\'s contract can meet it (R-BTN-109)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'baton-kit-entry-'));
+    dirs.push(root);
+    const at = async (file: unknown, schemas: Record<string, string> = { 'result@1.json': RESULT }) => {
+      rmSync(join(root, '.baton'), { recursive: true, force: true });
+      writeCourse(root, 'spec', file, schemas);
+      writeBaton(root, ['spec']);
+      return readInputs(root, 'spec', { base: null });
+    };
+    // A leg arriving with no output of the required name.
+    const missing = { ...SPEC, legs: { write: { from: ['requested'], to: ['done', 'abandoned'], outputs: { effect: { schema: 'std:effect@1' } } } } };
+    expect(entryViolations(await at(missing))).toEqual([
+      { rule: 'entry', message: expect.stringMatching(/legs\.write arrives at done, whose entry requires the output result \(spec:result@1\); it declares no such output/) },
+    ]);
+    // One of a wider schema: the arrival check reads the posted base chains.
+    const wide = { ...SPEC, legs: { write: { from: ['requested'], to: ['done', 'abandoned'], outputs: { result: { schema: 'std:object@1' } } } } };
+    expect(entryViolations(await at(wide))).toEqual([
+      { rule: 'entry', message: expect.stringMatching(/legs\.write's output result is std:object@1, which is not spec:result@1 or a refinement of it/) },
+    ]);
+    // A refinement of the requirement meets it, by its declared base chain: a tighter bound on
+    // one field, every base requirement restated.
+    const tight = JSON.stringify({ 'x-baton-base': 'spec:result@1', type: 'object', additionalProperties: false, required: ['uri', 'digest'],
+      properties: { uri: { type: 'string', maxLength: 100 }, digest: { type: 'string', maxLength: 80 } } });
+    const narrows = { ...SPEC, legs: { write: { from: ['requested'], to: ['done', 'abandoned'], outputs: { result: { schema: 'spec:tight@1' } } } } };
+    expect(await checkCourse(await at(narrows, { 'result@1.json': RESULT, 'tight@1.json': tight }))).toEqual([]);
+    // An entry schema nothing posts is the kit's to name (the core's refusal names it too), and
+    // no arriving leg's contract can meet a requirement nothing resolves.
+    const unposted = { ...SPEC, stations: { ...SPEC.stations, done: { entry: [{ output: 'result', schema: 'spec:missing@1' }] } } };
+    const unmet = await at(unposted);
+    expect(entryViolations(unmet).map((v) => v.message)).toEqual([
+      'stations.done.entry.0.schema: spec:missing@1 is not posted or in the std: library',
+      `legs.write's output result is spec:result@1, which is not spec:missing@1 or a refinement of it, as done's entry requires (R-BTN-109)`,
+    ]);
+    // The core's own refusal names it too: a new course refused at its first post fails the post.
+    expect((await checkCourse(unmet)).some((v) => v.rule !== 'course' && /spec:missing@1 is not posted/.test(v.message))).toBe(true);
+  }, 60_000);
+
+  it('prints the course\'s signature — its input, its output — and each spawned course\'s beside it (S-BTN-80\'s signatures half, R-BTN-111)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'baton-kit-signature-'));
+    dirs.push(root);
+    writeCourse(root, 'build', BUILD);
+    writeCourse(root, 'spec', SPEC, { 'result@1.json': RESULT });
+    writeBaton(root, ['build', 'spec']);
+    const k = await readInputs(root, 'build', { base: null });
+    // Both signatures: the course under test's and the course its leg spawns.
+    const lines = signatureLines(k);
+    expect(lines.filter((l) => !l.includes(' conditions'))).toEqual([
+      'signature: build input (none)',
+      'signature: build output shipped (none)',
+      'signature: spec input brief=std:object@1',
+      'signature: spec output abandoned (none)',
+      'signature: spec output done result=spec:result@1',
+    ]);
+    // The conditions half stands as B-234 wrote it, for each printed course.
+    expect(lines.some((l) => l.startsWith('signature: build conditions '))).toBe(true);
+    expect(lines.some((l) => l.startsWith('signature: spec conditions '))).toBe(true);
+    expect(await checkCourse(k)).toEqual([]);
+    // readInputs carried the other course, its schemas and its versions for the checks.
+    expect(k.others).toEqual([expect.objectContaining({ id: 'spec', file: SPEC, schemas: [expect.objectContaining({ id: 'spec:result@1' })], versions: { version: 1, min_worker_version: 1 } })]);
+  }, 60_000);
+
+  it('checks a leg\'s spawns against each course it names, and "*" against every other listed course (R-BTN-111)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'baton-kit-spawns-'));
+    dirs.push(root);
+    writeCourse(root, 'spec', SPEC, { 'result@1.json': RESULT });
+    writeBaton(root, ['spec']);
+    const build = (spawns: unknown) => ({
+      start: 'requested', start_leg: 'plan', end: ['shipped'],
+      stations: { requested: {}, shipped: {} },
+      legs: { plan: { from: ['requested'], to: 'shipped', spawns } },
+    });
+    const at = async (spawns: unknown, listed: string[] = ['build', 'spec']) => {
+      rmSync(join(root, '.baton', 'courses', 'build'), { recursive: true, force: true });
+      writeCourse(root, 'build', build(spawns));
+      writeBaton(root, listed);
+      return readInputs(root, 'build', { base: null });
+    };
+    // provides meets the named course's input; lifetime is accepted and read no further (B-65's).
+    expect(await checkCourse(await at({ course: 'spec', provides: ['brief'], lifetime: 'parent' }))).toEqual([]);
+    // what it provides does not meet the input
+    expect(spawnsViolations(await at({ course: 'spec', provides: [] }))).toEqual([
+      { rule: 'spawns', message: 'legs.plan.spawns provides no brief, which spec\'s input requires (std:object@1) (R-BTN-111)' },
+    ]);
+    // a list of courses, each checked
+    expect(spawnsViolations(await at({ course: ['spec', 'build'], provides: ['brief'] }))).toEqual([]);
+    expect(spawnsViolations(await at({ course: ['spec', 'build'], provides: ['brief'] }, ['build']))).toEqual([
+      { rule: 'spawns', message: 'legs.plan.spawns names the course spec, which .baton/baton.json does not list (R-BTN-111)' },
+    ]);
+    // "*": every course the repository lists other than its own — build's own input asks nothing,
+    // so nothing is required of it; spec's requires brief.
+    expect(spawnsViolations(await at({ course: '*', provides: ['brief'] }))).toEqual([]);
+    expect(spawnsViolations(await at({ course: '*', provides: [] }))).toEqual([
+      { rule: 'spawns', message: 'legs.plan.spawns provides no brief, which spec\'s input requires (std:object@1) (R-BTN-111)' },
+    ]);
+  }, 60_000);
+
+  it('reports a legacy path-form output schema beside its shape refusal, naming the id to write in its place; no fixture course uses a path', () => {
+    const legacy = { ...roadmapPr, legs: { ...roadmapPr.legs, review: { ...roadmapPr.legs.review, version: 4, outputs: { findings: { schema: 'schemas/findings.json' } } } } };
+    expect(staticViolations(input({ proposed: legacy }))).toEqual([
+      expect.objectContaining({ rule: 'course', message: expect.stringContaining('legs.review.outputs.findings.schema: a schema is <id>@<version> (R-BTN-108) (shape)') }),
+      expect.objectContaining({ rule: 'schema', message: expect.stringContaining('write "roadmap-pr:review.findings@4" in its place, posting the schema at schemas/review.findings@4.json') }),
+    ]);
+    // The window is closed behind it: every schema the fixtures' course files name is an id.
+    for (const f of readdirSync(join(import.meta.dirname, '../fixtures/courses'))) {
+      const file = JSON.parse(readFileSync(join(import.meta.dirname, '../fixtures/courses', f, 'course.json'), 'utf8')) as { legs?: Record<string, { outputs?: Record<string, { schema?: string }> }> };
+      for (const [leg, l] of Object.entries(file.legs ?? {})) {
+        for (const [name, o] of Object.entries(l.outputs ?? {})) {
+          expect([f, leg, name, o.schema == null || parseSchemaId(o.schema) != null]).toEqual([f, leg, name, true]);
+        }
+      }
+    }
   });
 });
