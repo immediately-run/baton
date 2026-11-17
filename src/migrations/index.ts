@@ -52,6 +52,7 @@ import retirement from './0050_retirement.sql';
 import instanceSettings from './0051_instance_settings.sql';
 import stateVersion from './0054_state_version.sql';
 import dashboardLookups from './0055_dashboard_lookups.sql';
+import workerProfile from './0056_worker_profile.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -167,4 +168,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 54, sql: stateVersion },
   // 0055 is B-240's (the dashboard's claim, transcript and waiting-leg lookups; 0049–0054 are other branches').
   { id: 55, sql: dashboardLookups },
+  // 0056 is B-253's (the runner's opaque profile, §13.3's `profile_json`; R-BTN-72's `cli` key).
+  { id: 56, sql: workerProfile },
 ];

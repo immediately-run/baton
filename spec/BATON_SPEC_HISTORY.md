@@ -3028,6 +3028,19 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   markdown with the markdown source's frontmatter keys. The markdown source's tickets carry a
   path and get no `file`.
 
+- **2026-11-17 — R-BTN-72 amended, S-BTN-227 added: the runner says when its CLI is not a pinned
+  commit (B-253).**
+  Rules changed: R-BTN-72. The owner, on bumping bering's runner to a newer CLI: "I think pinning
+  to a branch should be possible during active development (perhaps baton should issue a
+  warning)." A runner's start now says how its own CLI is pinned — the checkout's commit, and
+  whether a tagged release, a detached commit or a branch tip — warning on a branch with
+  `baton: running from branch <name> at <sha> — not a pinned commit`, and every heartbeat
+  carries the same as its `profile`'s `cli: {commit, ref, pinned}`: stored opaque on the runner
+  (§13.3's `profile_json`, this change's migration), shown on the Workers view, and gated on by
+  nothing — reported, never refused, so a runner never stops for what its CLI runs from. A
+  released copy reads the commit `dist/build.json` names and is unpinned only when that build
+  was dirty. Fieldhouse's R-FH-3 keeps the host side's development exception.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
