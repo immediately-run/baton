@@ -37,6 +37,9 @@ export interface ApiOptions {
    *  default (`baton/<version>`, `+dev` from a working tree). A test names another version to
    *  play a runner this code never shipped as. */
   client?: string;
+  /** R-BTN-197: what this client is called in its own warning line — a runner, or the sync that
+   *  shares this API (the rule lists each as its own kind of client). Defaults to `runner`. */
+  kind?: string;
 }
 
 // The SSHSIG signing itself is cli/sign.mjs's (the one `baton admin` uses — the same verifier
@@ -118,18 +121,20 @@ export class BatonApi {
     return json ?? {};
   }
 
-  /** R-BTN-197: `baton: this runner is <version>; Baton recommends <recommended> and refuses
+  /** R-BTN-197: `baton: this <kind> is <version>; Baton recommends <recommended> and refuses
    *  below <min>` — at start (the first answer that names the versions) and again whenever the
-   *  values change, only while this runner's version is below the recommendation (semver
-   *  precedence, `+dev` no part). Nothing installs or switches anything: the header carries
-   *  version numbers only, and the operator updates the runner at their own pace. */
+   *  values change, only while this client's version is below the recommendation (semver
+   *  precedence, `+dev` no part; the version printed as the header writes it, `baton/<version>`
+   *  — one form in every line, the warning's and a refusal's alike). Nothing installs or
+   *  switches anything: the header carries version numbers only, and the operator updates the
+   *  client at their own pace. */
   private warnVersions(headerValue: string | null): void {
     if (headerValue == null || headerValue === this.saidVersions) return;
     this.saidVersions = headerValue;
     const served = parseClientVersions(headerValue);
-    const own = (this.o.client ?? clientVersion()).replace(/^baton\//, '');
-    if (served && compareVersions(own, served.recommended) < 0) {
-      this.log(`baton: this runner is ${this.o.client ?? clientVersion()}; Baton recommends ${served.recommended} and refuses below ${served.min}`);
+    const own = this.o.client ?? clientVersion();
+    if (served && compareVersions(own.replace(/^baton\//, ''), served.recommended) < 0) {
+      this.log(`baton: this ${this.o.kind ?? 'runner'} is ${own}; Baton recommends ${served.recommended} and refuses below ${served.min}`);
     }
   }
 

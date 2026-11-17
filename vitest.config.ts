@@ -103,11 +103,12 @@ const sshKeys = await Promise.all([
 const keys = await testKeys();
 const bindings = {
   BATON_TEST_BINDINGS: 'true',
-  // B-254 (R-BTN-197, S-BTN-227): the run's Baton serves `min` 0.1.4 — a Baton whose code has
-  // dropped what 0.1.3 sends — so the scenario's old clients are refused and the suite's own
-  // requests (the hosts' `call` names baton/0.1.5) are served. Production sets no value: the
-  // code's MIN_CLIENT (0.0.0) stands and nothing in the field is refused.
-  BATON_MIN_CLIENT: '0.1.4',
+  // B-254 (R-BTN-197, S-BTN-227): under the test bindings this run's Baton plays one whose code
+  // serves `min` 0.1.4 — a Baton that has dropped what 0.1.3 sends — so the scenario's old
+  // clients are refused and the suite's own requests (the hosts' `call` names baton/0.1.5) are
+  // served. The code's MIN_CLIENT is a constant no deploy or setting raises; a test binding
+  // (§13a, like BATON_TEST_BINDINGS itself) is the only word for it, and no deploy sets it.
+  TEST_MIN_CLIENT: '0.1.4',
   TEST_OIDC_JWKS: keys.jwks,
   TEST_ACCESS_JWKS: keys.jwks,
   TEST_SIGNING_JWK: keys.priv,

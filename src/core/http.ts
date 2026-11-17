@@ -1,6 +1,6 @@
 // http.ts — responses, errors and the R-BTN-16 headers (BATON_SPEC §10.5, §11), and the client
 // versions Baton states on every /v1 response (R-BTN-197, B-254).
-import { clientVersionsValue, parseVersion } from '../shared/versions.mjs';
+import { clientVersionsValue, maxVersion, parseVersion } from '../shared/versions.mjs';
 
 /** Every response carries these (R-BTN-16): no framing, nothing loaded from elsewhere. */
 export const SECURITY_HEADERS: Record<string, string> = {
@@ -23,9 +23,9 @@ export const VERSIONS_HEADER = 'Baton-Client-Versions';
 
 /** R-BTN-197: the oldest client whose requests this code still reads. A constant of the code —
  *  raised only in the change that drops what an older client sends, 14 days after `recommended`
- *  reached the new value — so the deploy sets it and no setting does; `BATON_MIN_CLIENT` is the
- *  deploy's own word for it (a broken value falls back to this constant, never bricking the
- *  instance). `0.0.0` at first (B-254): nothing in the field is refused by this change. */
+ *  reached the new value — and by nothing else: no deploy variable and no administrator setting
+ *  touches it, so the code alone decides and `recommended` alone is raisable at runtime.
+ *  `0.0.0` at first (B-254): nothing in the field is refused by this change. */
 export const MIN_CLIENT = '0.0.0';
 
 /** R-BTN-197: the version this code recommends its clients run — the release this change ships
@@ -33,13 +33,17 @@ export const MIN_CLIENT = '0.0.0';
  *  an administrator may raise it, never below this. */
 export const RECOMMENDED_CLIENT = '0.1.5';
 
-/** The versions this deployment serves, as the front states them (R-BTN-197): `min` the deploy's
- *  — its `BATON_MIN_CLIENT` when that parses as a version, else the code's `MIN_CLIENT` — and
- *  `recommended` the code's, which `instance_settings` may raise above (the core's responses
- *  carry the raised one; the front, which reads nothing, keeps naming this default). */
-export function servedClientVersions(config: { BATON_MIN_CLIENT?: string }): { min: string; recommended: string } {
-  const configured = config.BATON_MIN_CLIENT;
-  return { min: configured != null && configured !== '' && parseVersion(configured) ? configured : MIN_CLIENT, recommended: RECOMMENDED_CLIENT };
+/** The versions this deployment serves, as the front and the core state them (R-BTN-197): `min`
+ *  is the code's `MIN_CLIENT` — a constant, with no deploy word for it — except under the test
+ *  bindings (§13a), where `TEST_MIN_CLIENT` plays a Baton whose code has dropped what an older
+ *  client sends, so S-BTN-227's old clients are refused (a broken value falls back to the
+ *  constant). `recommended` is the caller's — the code's default, or the instance's raised one —
+ *  clamped at or above `min` (R-BTN-197: `recommended` is at or above `min`), so a raised `min`
+ *  can never name a window narrower than the code recommends. */
+export function servedClientVersions(config: { BATON_TEST_BINDINGS?: string; TEST_MIN_CLIENT?: string }, recommended: string = RECOMMENDED_CLIENT): { min: string; recommended: string } {
+  const raised = config.BATON_TEST_BINDINGS === 'true' ? config.TEST_MIN_CLIENT : undefined;
+  const min = raised != null && raised !== '' && parseVersion(raised) ? raised : MIN_CLIENT;
+  return { min, recommended: maxVersion(recommended, min) };
 }
 
 export type ErrorCode =
@@ -85,8 +89,8 @@ export function clientTooOld(client: string, min: string, recommended: string): 
 }
 
 /** `res` with the served versions set on it unless a value is already there — the core sets the
- *  header with the instance's raised `recommended`; the front's copy names the code's default
- *  (R-BTN-197). Built like `noStore`: a copy, never a mutation. */
+ *  header with the instance's raised `recommended`; the front fills what it builds itself with
+ *  what it serves (R-BTN-197). Built like `noStore`: a copy, never a mutation. */
 export function withClientVersions(res: Response, versions: { min: string; recommended: string }): Response {
   if (res.headers.get(VERSIONS_HEADER) != null) return res;
   const headers = new Headers();

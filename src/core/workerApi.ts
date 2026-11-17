@@ -861,24 +861,11 @@ export class WorkerApi {
     return declared.filter((d) => d.min_worker_version != null && (d.version as number) < d.min_worker_version);
   }
 
-  /** R-BTN-197 (B-254): Needs you's runners below the recommended client — each live runner whose
-   *  own statement (`client_version`, its last call's `Baton-Client`) is below `recommended`,
-   *  with its version. A runner that named no version said nothing to compare and is not listed;
-   *  liveness is the Workers view's own rule (`reaped_at` clear and the lease un-lapsed). */
-  staleClients(now: number, recommended: string) {
-    return this.rows<{ hostname: string; session_name: string; client_version: string }>(
-      `SELECT hostname, session_name, client_version FROM workers
-       WHERE reaped_at IS NULL AND kind != 'legacy' AND ? - last_seen_at < lease_timeout_ms AND client_version IS NOT NULL
-       ORDER BY hostname, session_name`, now)
-      .filter((w) => compareVersions(w.client_version, recommended) < 0)
-      .map((w) => ({ ...w, recommended }));
-  }
-
   // ── the dashboard's Workers view (§14) ──────────────────────────────────────────────────
 
   workersView(now: number) {
     const workers = this.rows<Row>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
-                                       first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json FROM workers ORDER BY hostname, id`);
+                                       first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version FROM workers ORDER BY hostname, id`);
     return workers.map((w) => {
       const id = w.id as number;
       const alive = w.reaped_at == null && now - (w.last_seen_at as number) < (w.lease_timeout_ms as number);
@@ -903,6 +890,18 @@ export class WorkerApi {
         last_report: this.rows(`SELECT payload_json, sent_at FROM messages WHERE from_worker_id = ? AND kind = 'status_report' ORDER BY id DESC LIMIT 1`, id)[0] ?? null,
       };
     });
+  }
+
+  /** R-BTN-197 (B-254): Needs you's runners below the recommended client — each live runner
+   *  whose own statement (`client_version`, its last call's `Baton-Client`) is below
+   *  `recommended`, with its version, folded out of the Workers view's own read so the state
+   *  read costs no statement of its own for it (B-240's budget). A runner that named no version
+   *  said nothing to compare and is not listed; liveness is the Workers view's own rule
+   *  (`reaped_at` clear and the lease un-lapsed). */
+  staleClients(workers: ({ alive: boolean } & Record<string, unknown>)[], recommended: string) {
+    return workers
+      .filter((w) => w.client_version != null && w.kind !== 'legacy' && w.alive && compareVersions(w.client_version as string, recommended) < 0)
+      .map((w) => ({ hostname: w.hostname, session_name: w.session_name, client_version: w.client_version, recommended }));
   }
 }
 

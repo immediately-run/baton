@@ -3,9 +3,9 @@
 // forwards the API to the core — through the Durable Object on Cloudflare, through the request
 // queue locally (R-BTN-55). Every response leaves with the security headers.
 import { API_KEY, readCapped, verifyOwner, verifyRequest, verifySyncCredential, verifyWorker, checkStateChanging, withBody } from './auth';
-import { BatonError, CLIENT_HEADER, NO_STORE, SESSION_COOKIE, clientTooOld, errorResponse, noStore, servedClientVersions, withClientVersions, withSecurityHeaders } from './http';
+import { BatonError, CLIENT_HEADER, NO_STORE, SESSION_COOKIE, VERSIONS_HEADER, clientTooOld, errorResponse, noStore, servedClientVersions, withClientVersions, withSecurityHeaders } from './http';
 import { MAX_DELIVERY, pickDelivery, verifyDelivery } from './webhook';
-import { clientVersionOf, compareVersions } from '../shared/versions.mjs';
+import { clientVersionOf, compareVersions, maxVersion, parseClientVersions } from '../shared/versions.mjs';
 import type { Config } from './ports';
 import page from '../ui/index.html';
 import style from '../ui/app.css';
@@ -256,6 +256,16 @@ function forward(req: Request, to: Forward, principal: Record<string, string>): 
   return to(new Request(req, { headers }));
 }
 
+/** The `recommended` the core last stated on an answer that passed through here (R-BTN-197,
+ *  B-254). The front reads nothing of the store — on the Worker the instance's settings live in
+ *  the object, a subrequest away — so it learns the instance's raised `recommended` from the
+ *  core's own answers, which read it, and states what it learned on the responses it builds
+ *  itself: the `client-too-old` refusal and its own refusals, front-level answers an old client
+ *  or a stranger reads. Until the first answer teaches it, the code's own default — the raise
+ *  reaches every isolate with the first request it forwards. `min` it never learns: the floor
+ *  is the code's constant (the env's own word under the test bindings), never the store's. */
+let learnedRecommended: string | null = null;
+
 /** A request from outside, answered: both hosts' entry point. Every answer leaves with the
  *  security headers and, when its route decided so, `Cache-Control: no-store` (R-BTN-16). */
 export async function front(req: Request, env: Config, to: Forward): Promise<Response> {
@@ -264,10 +274,12 @@ export async function front(req: Request, env: Config, to: Forward): Promise<Res
   // R-BTN-197: the one check that comes before every other — the client's own statement of its
   // version, read before the request's signature is checked and before anything of it is read or
   // written, so an old client gets this one answer and never a failure of a request shape it no
-  // longer matches. A request without the header compares as `0.0.0`. The front reads nothing:
-  // the served `min` is the deploy's word (the code's constant by default) and its `recommended`
-  // the code's — the core's responses carry the setting an administrator raised above it.
-  const served = servedClientVersions(env);
+  // longer matches. A request without the header compares as `0.0.0`. The floor is the code's
+  // constant (a test binding raises it for the suite, §13a); `recommended` is what the front has
+  // learned of the instance's raise, the code's default until an answer teaches it, never below
+  // the floor.
+  const floor = servedClientVersions(env);
+  const served = { min: floor.min, recommended: maxVersion(learnedRecommended ?? floor.recommended, floor.min) };
   const api = new URL(req.url).pathname.startsWith('/v1/');
   if (api) {
     const client = clientVersionOf(req.headers.get(CLIENT_HEADER)) ?? '0.0.0';
@@ -285,9 +297,14 @@ export async function front(req: Request, env: Config, to: Forward): Promise<Res
     cache = classOf(e) ?? 'public';
     res = e instanceof BatonError ? errorResponse(e.code, e.message, e.extra) : errorResponse('internal', 'internal error');
   }
-  // R-BTN-197: every response under /v1 carries the versions Baton serves, a refusal included —
-  // set here from the deploy's own values when the core (which names the raised `recommended`)
-  // has not set its own.
-  if (api) res = withClientVersions(res, served);
+  // R-BTN-197: every response under /v1 carries the versions Baton serves, a refusal included.
+  // A forwarded answer carries the core's own — which read the instance's raised `recommended`
+  // — and teaches this front its value; what the front built itself is filled, set-if-absent,
+  // from what it serves.
+  if (api) {
+    const stated = parseClientVersions(res.headers.get(VERSIONS_HEADER));
+    if (stated) learnedRecommended = stated.recommended;
+    res = withClientVersions(res, served);
+  }
   return withSecurityHeaders(cache === 'private' ? noStore(res) : res);
 }

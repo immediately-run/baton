@@ -648,7 +648,10 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   if (!existsSync(batonJsonPath)) throw new Error(`${root} has no .baton/baton.json — run \`baton repo init\` first`);
   const url = args.url ?? (JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson).baton_url ?? DEFAULT_URL;
   const auth = args.auth ?? (args.syncKey ? syncKeyAuth(args.syncKey) : bearerAuth(args.token ?? process.env.BATON_SYNC_TOKEN ?? (await actionsToken(url))));
-  const api = new BatonApi({ url, transport: args.transport ?? ((req) => fetch(req)), auth }, log);
+  // R-BTN-197 (B-254): the sync is a client of the API in its own right (the rule lists a
+  // person's command, a runner and a sync), so its calls say their version and its warning
+  // names it a sync, never a runner.
+  const api = new BatonApi({ url, transport: args.transport ?? ((req) => fetch(req)), auth, kind: 'sync' }, log);
   let board: Board | null = null;
   let record: BatonRecord | undefined;
   // B-89: `busy` is another run's reading, not this run's post, and R-BTN-62 lets no number this

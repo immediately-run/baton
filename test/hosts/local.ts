@@ -41,21 +41,23 @@ export function withClient(req: Request): Request {
   return new Request(req, { headers });
 }
 
-/** A request to the local front — each commit it makes a step of the scenario's trace (R3-1244). */
+/** A request to the local front, as the harness's client: `withClient` names the recommended
+ *  client version (B-254, R-BTN-197), so the suite's own requests run inside the served
+ *  window. */
 export async function call(req: Request): Promise<Response> {
-  const sent = withClient(req);
-  const url = new URL(sent.url);
-  const origin: Origin = { kind: 'request', method: sent.method, path: url.pathname + url.search, body: parse(sent.body ? await sent.clone().text() : undefined) };
-  const res = await origins.run(origin, () => host.handle(sent));
-  origin.status = res.status;
-  origin.response = parse(await res.clone().text());
-  return res;
+  return raw(withClient(req));
 }
 
 /** A request to the local front exactly as built — S-BTN-227's old and versionless clients, and
- *  a runner's own `Baton-Client`, reach Baton as they are. */
+ *  a runner's own `Baton-Client`, reach Baton as they are. A step of the scenario's trace like
+ *  any other (R3-1244): `raw` changes what is sent, never that it was. */
 export async function raw(req: Request): Promise<Response> {
-  return host.handle(req);
+  const url = new URL(req.url);
+  const origin: Origin = { kind: 'request', method: req.method, path: url.pathname + url.search, body: parse(req.body ? await req.clone().text() : undefined) };
+  const res = await origins.run(origin, () => host.handle(req));
+  origin.status = res.status;
+  origin.response = parse(await res.clone().text());
+  return res;
 }
 
 function parse(text: string | undefined): unknown {

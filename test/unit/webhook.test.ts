@@ -4,10 +4,10 @@
 import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:test';
 
-/** B-254 (R-BTN-197): the run's bindings raise the served `min` for S-BTN-227's old clients;
- *  this file's own drives of the front stay at the code's floor, which is what a deploy without
- *  the raise serves — the floor is not what they exercise. */
-const envAtCodesFloor = { ...env, BATON_MIN_CLIENT: undefined } as typeof env;
+/** B-254 (R-BTN-197): the run's test bindings raise the served `min` for S-BTN-227's old
+ *  clients; this file's own drives of the front stay at the code's floor, which is what a deploy
+ *  without the raise serves — the floor is not what they exercise. */
+const envAtCodesFloor = { ...env, TEST_MIN_CLIENT: undefined } as typeof env;
 import { deliverySignature, pickDelivery, verifyDelivery, Webhooks, ACTIONS_BOT, MIRROR_EMAIL } from '../../src/core/webhook';
 import { front } from '../../src/core/front';
 import { armedAt, ORIGIN, withCore } from '../helpers';

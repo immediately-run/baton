@@ -82,6 +82,22 @@ describe('S-BTN-227 the runner half', () => {
     lines.length = 0;
     await api('baton/0.1.6').heartbeat(hbBody('vm-a', { session_name: 's-quite-new', secret_hash: await sha256('s-new') }));
     expect(lines).toEqual([]);
+    // The raise was this test's own act: clear it back to the code's default for the tests that
+    // follow — the clear's own answer teaches the front the served value again (R-BTN-197).
+    expect((await keyCall(adminKey, '/v1/admin/settings', { recommended_client: null }, 'PUT')).status).toBe(200);
+  });
+
+  it('a sync — the API\'s other client, sharing BatonApi — is warned as itself, never as a runner (R-BTN-197)', async () => {
+    const answered = new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Baton-Client-Versions': `min=${MIN}, recommended=${RECOMMENDED}` } });
+    const sync = new BatonApi({
+      url: ORIGIN,
+      transport: () => Promise.resolve(answered),
+      auth: () => ({}),
+      client: 'baton/0.1.4',
+      kind: 'sync',
+    }, (line) => lines.push(line));
+    await sync.releaseObservation(1).catch(() => {});
+    expect(lines).toEqual([`baton: this sync is baton/0.1.4; Baton recommends ${RECOMMENDED} and refuses below ${MIN}`]);
   });
 
   it('a runner below min is refused naming the versions, takes no claim, and the loop exits non-zero', async () => {
@@ -102,6 +118,6 @@ describe('S-BTN-227 the runner half', () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('exited'); }) as never);
     await expect(runner.work()).rejects.toThrow('exited');
     expect(exit).toHaveBeenCalledWith(1);
-    expect(lines.some((l) => l.includes('this runner is 0.1.3') && l.includes(`min ${MIN}`) && l.includes(`recommended ${RECOMMENDED}`))).toBe(true);
+    expect(lines.some((l) => l.includes('this runner is baton/0.1.3') && l.includes(`min ${MIN}`) && l.includes(`recommended ${RECOMMENDED}`))).toBe(true);
   });
 });

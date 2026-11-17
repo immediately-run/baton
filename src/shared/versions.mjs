@@ -51,14 +51,22 @@ export function maxVersion(a, b) {
   return compareVersions(a, b) < 0 ? b : a;
 }
 
+/** The longest version a `Baton-Client` may name (R-BTN-197 with §13.3's R-BTN-33:
+ *  `client_version` is a filter field, a short validated string, bounded like `session_name`'s
+ *  1–128 — this one 64, the whole version including its `-prerelease` and `+build`). A longer
+ *  claim is not a statement Baton reads: it compares as no header, is stored as NULL and echoes
+ *  back as nothing, so no unbounded string reaches `workers.client_version`, a refusal's body or
+ *  the Needs-you row. */
+export const CLIENT_VERSION_MAX = 64;
+
 /** The `Baton-Client` header's version (`baton/0.1.4+dev` → `0.1.4+dev`), or null for a header
- *  that does not say — absent, malformed or another product's. The caller's `0.0.0` default for
- *  a request without the header (R-BTN-197) is its own decision, made where the served floor is
- *  known. */
+ *  that does not say — absent, malformed, another product's or over `CLIENT_VERSION_MAX`. The
+ *  caller's `0.0.0` default for a request without the header (R-BTN-197) is its own decision,
+ *  made where the served floor is known. */
 export function clientVersionOf(header) {
   if (typeof header !== 'string') return null;
   const m = /^baton\/(\S+)$/.exec(header.trim());
-  return m && parseVersion(m[1]) ? m[1] : null;
+  return m && parseVersion(m[1]) && m[1].length <= CLIENT_VERSION_MAX ? m[1] : null;
 }
 
 /** `Baton-Client-Versions` as Baton writes it: version numbers only (R-BTN-197). */

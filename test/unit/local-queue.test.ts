@@ -132,8 +132,9 @@ describe('the local host', () => {
     const host = current();
     const origin = 'http://127.0.0.1';
     const server = serve(host, 'https://baton.immediately.run');
-    // B-254 (R-BTN-197): this run's deploy serves min 0.1.4, so an HTTP client names its version
-    // as every served client must; the front's own answer to one that does not is S-BTN-227's.
+    // B-254 (R-BTN-197): this run's test bindings serve min 0.1.4, so an HTTP client names its
+    // version as every served client must; the front's own answer to one that does not is
+    // S-BTN-227's.
     const client = { 'Baton-Client': `baton/${RECOMMENDED_CLIENT}` };
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
     try {

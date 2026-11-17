@@ -3,10 +3,10 @@
 import { describe, it, expect, inject } from 'vitest';
 import { env } from 'cloudflare:test';
 
-/** B-254 (R-BTN-197): the run's bindings raise the served `min` for S-BTN-227's old clients;
- *  this file's own drives of the front stay at the code's floor, which is what a deploy without
- *  the raise serves — the floor is not what they exercise. */
-const envAtCodesFloor = { ...env, BATON_MIN_CLIENT: undefined } as typeof env;
+/** B-254 (R-BTN-197): the run's test bindings raise the served `min` for S-BTN-227's old
+ *  clients; this file's own drives of the front stay at the code's floor, which is what a deploy
+ *  without the raise serves — the floor is not what they exercise. */
+const envAtCodesFloor = { ...env, TEST_MIN_CLIENT: undefined } as typeof env;
 import { errors, generateKeyPair, SignJWT } from 'jose';
 import { authorityOf, contentDigest, KEY_TYPES, parseAdminKeys, parseSshKey, verifyFailure, verifyRequest, verifySyncToken } from '../../src/core/auth';
 import { front } from '../../src/core/front';
@@ -121,7 +121,7 @@ describe('every response carries the R-BTN-16 headers', () => {
 describe('the test key exists only in the test bindings (§13a)', () => {
   it('wrangler.toml defines none of them', () => {
     const toml = inject('wranglerToml');
-    for (const name of ['BATON_TEST_BINDINGS', 'TEST_OIDC_JWKS', 'TEST_ACCESS_JWKS', 'TEST_SIGNING_JWK']) expect(toml).not.toContain(name);
+    for (const name of ['BATON_TEST_BINDINGS', 'TEST_OIDC_JWKS', 'TEST_ACCESS_JWKS', 'TEST_SIGNING_JWK', 'TEST_MIN_CLIENT']) expect(toml).not.toContain(name);
   });
 
   it('without BATON_TEST_BINDINGS the test key set is ignored: verification goes to the remote key set', async () => {

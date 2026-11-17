@@ -949,7 +949,7 @@ describe('baton decision answer (R-BTN-116, R-BTN-127)', () => {
 // every request says its version (`Baton-Client`, `+dev` from this working tree), the first
 // answer above it draws the warning once per command, and `admin settings set` gains the
 // recommendation flag. The server half is S-BTN-227 on both hosts.
-import { clientVersionOf, compareVersions, parseClientVersions } from '../../src/shared/versions.mjs';
+import { CLIENT_VERSION_MAX, clientVersionOf, compareVersions, parseClientVersions } from '../../src/shared/versions.mjs';
 import { clientVersion } from '../../cli/baton.mjs';
 
 describe('the client versions the CLI states and answers (R-BTN-197, B-254)', () => {
@@ -966,6 +966,9 @@ describe('the client versions the CLI states and answers (R-BTN-197, B-254)', ()
     expect(clientVersionOf('baton/0.1.4')).toBe('0.1.4');
     expect(clientVersionOf('other/1.0.0')).toBeNull();
     expect(clientVersionOf(undefined)).toBeNull();
+    // R-BTN-33: a short validated string — a claim past the bound is no statement at all.
+    expect(clientVersionOf(`baton/0.1.4-${'a'.repeat(CLIENT_VERSION_MAX)}`)).toBeNull();
+    expect(clientVersionOf(`baton/0.1.4-${'a'.repeat(CLIENT_VERSION_MAX - '0.1.4-'.length)}`)).toBe(`0.1.4-${'a'.repeat(CLIENT_VERSION_MAX - '0.1.4-'.length)}`);
     expect(parseClientVersions('min=0.1.4, recommended=0.1.5')).toEqual({ min: '0.1.4', recommended: '0.1.5' });
     expect(parseClientVersions('an intermediary wrote this')).toBeNull();
   });
@@ -983,20 +986,27 @@ describe('the client versions the CLI states and answers (R-BTN-197, B-254)', ()
       const file = join(tmpdir(), `baton-key-${process.pid}-${Date.now()}`);
       createApiKey(file, 'admin');
       let named: unknown;
-      const fetchImpl = (_url: string, init: RequestInit) => {
+      // The stand-in answers with the versions the test names, not ones tied to the checkout's
+      // package version: the release commit that bumps it (the very release RECOMMENDED_CLIENT
+      // names) must leave this test deciding for itself which client is old.
+      const answering = (recommended: string) => (_url: string, init: RequestInit) => {
         named = (init.headers as Record<string, string>)['Baton-Client'];
         return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
-          status: 200, headers: { 'Content-Type': 'application/json', 'Baton-Client-Versions': 'min=0.1.4, recommended=0.1.5' },
+          status: 200, headers: { 'Content-Type': 'application/json', 'Baton-Client-Versions': `min=0.1.4, recommended=${recommended}` },
         }));
       };
-      // A command at 0.1.4 (the package version): the recommendation is above it, the warning
-      // prints once, and the command's own answer is untouched.
-      const out = await fresh.send(ORIGIN, { method: 'GET', path: '/v1/admin/state' }, file, fetchImpl as typeof fetch);
+      // A command's own request names the checkout's version (B-138's `+dev` here) — whatever
+      // the package says, an answer at or below it says nothing.
+      const out = await fresh.send(ORIGIN, { method: 'GET', path: '/v1/admin/state' }, file, answering('0.1.4') as typeof fetch);
       expect([out.status, out.json]).toEqual([200, { ok: true }]);
-      expect(String(named)).toMatch(/^baton\/\d+\.\d+\.\d+\+dev$/);
-      expect(wrote.filter((w) => w.includes('this CLI is baton/') && w.includes('recommends 0.1.5 and refuses below 0.1.4'))).toHaveLength(1);
+      expect(String(named)).toMatch(/^baton\/\d+\.\d+\.\d+/);
+      expect(wrote).toEqual([]);
+      // A client the test names through send's own seam — a CLI this code never shipped as —
+      // below the recommendation: the warning prints once, and the command's answer is untouched.
+      await fresh.send(ORIGIN, { method: 'GET', path: '/v1/admin/state' }, file, answering('0.1.5') as typeof fetch, 'baton/0.1.3');
+      expect(wrote.filter((w) => w.includes('this CLI is baton/0.1.3') && w.includes('recommends 0.1.5 and refuses below 0.1.4'))).toHaveLength(1);
       // The next answer of the same command says nothing more.
-      await fresh.send(ORIGIN, { method: 'GET', path: '/v1/admin/state' }, file, fetchImpl as typeof fetch);
+      await fresh.send(ORIGIN, { method: 'GET', path: '/v1/admin/state' }, file, answering('0.1.5') as typeof fetch, 'baton/0.1.3');
       expect(wrote.filter((w) => w.includes('this CLI is baton/'))).toHaveLength(1);
     } finally {
       err.mockRestore();

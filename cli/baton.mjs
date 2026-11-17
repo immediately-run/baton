@@ -793,15 +793,16 @@ const redirectAnswered = (target, status, to) => new Error(
  *  Baton is not Baton's answer. R-BTN-197 (B-254): every request says which client it is
  *  (`Baton-Client`, `clientVersion`'s one place), and the first answer that names a
  *  `recommended` above it draws the warning — once per command, on stderr, so a script's
- *  stdout stays its own. */
+ *  stdout stays its own. `client` names the version for a test (a CLI this code never shipped
+ *  as); a command's own requests are always `clientVersion()`'s. */
 let saidClientVersions = false;
-export async function send(url, p, keyFile, fetchImpl = fetch) {
+export async function send(url, p, keyFile, fetchImpl = fetch, client = clientVersion()) {
   const cred = requestCredential(keyFile);
   const target = new URL(p.path, url).toString();
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
   const auth = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
-  const headers = { 'Baton-Client': clientVersion(), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
+  const headers = { 'Baton-Client': client, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
   let res;
   try {
@@ -815,7 +816,7 @@ export async function send(url, p, keyFile, fetchImpl = fetch) {
   }
   // A fetch stand-in may hand the 3xx back instead of throwing: the same refusal (B-80).
   if (res.status >= 300 && res.status < 400) throw redirectAnswered(target, res.status, res.headers.get('location'));
-  warnClientVersions(res.headers.get('Baton-Client-Versions'));
+  warnClientVersions(res.headers.get('Baton-Client-Versions'), client);
   const raw = await res.text();
   let json = null;
   try {
@@ -827,19 +828,19 @@ export async function send(url, p, keyFile, fetchImpl = fetch) {
 }
 
 /** R-BTN-197: `baton: this CLI is <version>; Baton recommends <recommended> and refuses below
- *  <min>`, said once per command (one command is one process), only when the recommendation is
- *  above this CLI's version — compared by semver precedence, `+dev` taking no part. Nothing
- *  installs or switches anything: the header carries version numbers only, and updating stays
- *  the operator's act. */
-function warnClientVersions(headerValue) {
+ *  <min>`, said at most once per command (one command is one process), only when the
+ *  recommendation is above this CLI's version — compared by semver precedence, `+dev` taking no
+ *  part. An answer that recommends nothing above it says nothing and spends nothing: a later
+ *  answer of the same command that does (an administrator raised it mid-run) still gets its
+ *  line. Nothing installs or switches anything: the header carries version numbers only, and
+ *  updating stays the operator's act. */
+function warnClientVersions(headerValue, client) {
   if (saidClientVersions || headerValue == null) return;
   const served = parseClientVersions(headerValue);
   if (!served) return;
+  if (compareVersions(client.replace(/^baton\//, ''), served.recommended) >= 0) return;
   saidClientVersions = true;
-  const own = clientVersion().replace(/^baton\//, '');
-  if (compareVersions(own, served.recommended) < 0) {
-    process.stderr.write(`baton: this CLI is ${clientVersion()}; Baton recommends ${served.recommended} and refuses below ${served.min}\n`);
-  }
+  process.stderr.write(`baton: this CLI is ${client}; Baton recommends ${served.recommended} and refuses below ${served.min}\n`);
 }
 
 /** The base a course change is judged against: `--base`, else the remote's default branch. */

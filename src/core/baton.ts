@@ -503,11 +503,11 @@ export class BatonCore {
         await this.armBy(this.resources.nextLapse());
       } else this.pendingDispatch.clear();
       // R-BTN-197 (B-254): the versions this instance serves, on every response under /v1 — the
-      // deploy's `min` and the recommended as the instance serves it, an administrator's raise
-      // (instance_settings) included. The front sets its own copy on what it builds itself, so
-      // its set-if-absent keeps this value, which read the store.
+      // code's `min` (never a setting's) and the recommended as this instance serves it, an
+      // administrator's raise (instance_settings) included, clamped at or above `min`. The front
+      // learns this value from these answers, for the responses it builds itself.
       return url.pathname.startsWith('/v1/')
-        ? withClientVersions(res, { min: servedClientVersions(this.ports.config).min, recommended: this.instance.recommendedClient() })
+        ? withClientVersions(res, servedClientVersions(this.ports.config, this.instance.recommendedClient()))
         : res;
     } catch (e) {
       this.pendingDispatch.clear(); // the transaction rolled back: nothing changed to mirror
@@ -2058,6 +2058,9 @@ export class BatonCore {
     const repositories = this.adminView().repositories;
     const ready = this.readyRows(repositories);
     const byTier = this.readyByTier(ready);
+    // The Workers view, read once for both the rows it serves and Needs you's stale clients
+    // (R-BTN-197, B-254) — one read, B-240's statement budget kept.
+    const workers = this.workers.workersView(now);
 
     const held = this.sql(
       `SELECT repository_id, sha, parent_sha, head_sha, ticket_count, received_at, auto_accept_at FROM held_snapshots
@@ -2066,7 +2069,7 @@ export class BatonCore {
     // gone; an unavailable provider is a reading (§6.3, R-BTN-76) and a peak preference a rule
     // in the course (§6.10), never a dashboard row.
     return {
-      server_time: now, repositories, ready, ready_by_tier: byTier, held, workers: this.workers.workersView(now),
+      server_time: now, repositories, ready, ready_by_tier: byTier, held, workers,
       running: this.claims.running(now), timeline: this.claims.timeline(now),
       // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
       limits: this.admin.view(now),
@@ -2077,7 +2080,7 @@ export class BatonCore {
       needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), keys: this.keysNotice(),
         // R-BTN-197 (B-254): each live runner whose own version statement is below the
         // recommended client, with its version — update it at your own pace; nothing self-updates.
-        stale_clients: this.workers.staleClients(now, this.instance.recommendedClient()),
+        stale_clients: this.workers.staleClients(workers, this.instance.recommendedClient()),
         // B-134: the open scope findings — a leg reported outside its ticket's scope, a worker
         // push no open claim covers — until an owner resolves each.
         scope: this.scope.needsYou(),
