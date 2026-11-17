@@ -1,4 +1,4 @@
--- 0048_sequences.sql — B-176 (BATON_SPEC §4.3 R-BTN-195, §13.4 `sequences`): the per-repository,
+-- 0059_sequences.sql — B-176 (BATON_SPEC §4.3 R-BTN-198, §13.4 `sequences`): the per-repository,
 -- per-kind sequence table behind `POST /v1/repositories/{repository}/sequences/{kind}/next`.
 -- Every identifier a concurrent branch writes to git — a ticket id from any filer, a rule,
 -- scenario or gate id, a migration number — is one Baton hands out, so two branches open at once
@@ -10,16 +10,18 @@
 -- fresh Baton, seeded by the floor the caller read from git, never reissues a number git holds
 -- (value 1: lost state fails closed). The events table is rebuilt beside it with the `sequence`
 -- kind — each issue is an event naming the caller and, when given, the ticket it is for.
+-- Renumbered from this branch's 0048 at the merge behind main's 0048–0058; the rebuilt CHECK
+-- keeps every kind main's 0048 added (`condition`, `leg-timeout`) beside `sequence`.
 CREATE TABLE sequences (
   repository_id TEXT NOT NULL,
-  kind          TEXT NOT NULL,                -- opaque to core (R-BTN-195): the CLI names kinds
+  kind          TEXT NOT NULL,                -- opaque to core (R-BTN-198): the CLI names kinds
   last_number   INTEGER NOT NULL,             -- the last number issued; a kind with no row starts at 0
   PRIMARY KEY (repository_id, kind)
 );
 
 -- The events table rebuilt with the `sequence` kind beside it, its indexes restored, as 0035,
--- 0037, 0040, 0042 and 0043 did: nothing references the table beyond its indexes.
-CREATE TABLE events_0048 (
+-- 0037, 0040, 0042, 0043 and main's 0048 did: nothing references the table beyond its indexes.
+CREATE TABLE events_0059 (
   seq           INTEGER PRIMARY KEY,
   at            INTEGER NOT NULL,
   kind          TEXT NOT NULL CHECK (kind IN ('claimed','completed','confirmed',
@@ -32,6 +34,7 @@ CREATE TABLE events_0048 (
                   'question-posted','question-dropped','question-answered','question-expired',
                   'answer-invalid','arrival-unapplied','scope-exceeded','unclaimed-write',
                   'scope-invalid','scope-resolved','renumbered','unsigned-control','deprecated-field',
+                  'condition','leg-timeout',
                   'sequence')),
   ticket_id     TEXT,
   claim_id      INTEGER REFERENCES claims(id),
@@ -39,7 +42,7 @@ CREATE TABLE events_0048 (
   detail_json   TEXT,
   repository_id TEXT
 );
-INSERT INTO events_0048 (seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id)
+INSERT INTO events_0059 (seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id)
   SELECT seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id FROM events;
 DROP INDEX IF EXISTS events_by_ticket;
 DROP INDEX IF EXISTS events_by_claim;

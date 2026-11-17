@@ -1,0 +1,82 @@
+---
+title: "B-255 — the run-tests gate on PRs outside the home: their own CI decides, not the owner"
+id: B-255
+project: baton
+status: done
+updated: 2026-11-16
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "create-pr's run-tests gate (B-110) tests only the home repository's one PR branch and asks the owner (run-tests-unreachable, skip) about every ticket with a PR elsewhere — so a plain-git home whose tickets all open PRs on a code repository (B-182) waits on the owner after every implement, per ticket. A PR in a repos: repository is now gated by its own CI, the checks the forge reports on its head: green passes, a concluded red queues fix, running or none reported waits on ci. A home PR beside sibling PRs needs both the home marker and their CI green. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner's home is plain git and every ticket's PR opens on a sibling GitHub repository
+(B-182's setup). The `run-tests` gate (B-110) tests only the home repository's one PR branch, so
+each such ticket reaches `gate: 'unreachable'` after `implement` and waits on the owner for a
+`skip`, per ticket — the gate is pure friction there. The owner approved the direction: when the
+gate cannot run the test script itself because the ticket's open PRs are in sibling repositories,
+the gate is decided by those PRs' own CI — the checks the PR facts already carry — instead of
+asking the owner: all green → review; any concluded red → fix, like a red marker; still running or
+none reported yet → wait on `ci` (a short wait). The home-PR path stays as it is, and the owner's
+`skip` keeps working.
+
+**Spec:** [BATON_SPEC §5.8](../../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-131](../../spec/BATON_SPEC/05-courses.md#sec-5-8)), [§3.4](../../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-96](../../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), [R-BTN-140](../../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)), §15 S-BTN-230.
+
+**Depends on:** none (B-110 and B-182 are built).
+
+### What was built
+
+1. **The station function** (`stationsPr`, `src/defaults/course-pr.ts`). The ticket's open PRs
+   split into the home's and the others'. The home half is read exactly as before (the counted
+   `Baton-Tests` marker on its head). The others are read by `siblingCiOf`: any check concluded
+   other than `success`, `neutral` or `skipped` is `red`; else one still running, or a PR with no
+   check reported yet, is `running`; else `green`. The gate: an earlier `skip` → green; several
+   open PRs at home → `run-tests-unreachable` (unchanged — the stub cannot choose a branch);
+   red on either half → `fix`; an untested home head → `run-tests`; the others' CI running →
+   `review` waiting on `ci`; else green → `review`, ci-waited on the home PR's checks as today.
+2. **The run-tests stub.** With no PR branch at home and a ticket whose `repos:` names another
+   repository, it runs nothing and makes no marker: it returns
+   `{reached: <station>, next: 'review', suspend: true, tests: 'ci'}`, `testsClose` pushes
+   nothing, and the claim suspends — rather than failing the leg after every `implement` and
+   `fix` walking into it. The sync then places the ticket from that CI.
+3. **The fix stub's push check** (B-231) is made only for a ticket whose `repos:` names no other
+   repository: a fix of a sibling's red may rightly push there alone, where `git ls-remote
+   origin` cannot see.
+4. **The spec** (R-BTN-131), S-BTN-230, the history entry, `docs/standard-courses.mdx` and the
+   shipped `run-tests.md` / `fix.md` instructions.
+
+### Decisions made here (the owner may overrule)
+
+- **A home PR beside sibling PRs needs both halves green** — the home marker and every sibling's
+  CI. Red on either routes to `fix` (a sibling's red does not wait for the home tests to run);
+  an untested home head runs `run-tests` first otherwise.
+- **"Required" checks are every check the forge reports.** The PR facts carry each check's
+  conclusion only, not whether branch protection requires it; reading required-ness would need a
+  new forge read. `neutral` and `skipped` pass; `cancelled`, `stale` and the rest are red.
+- **No check reported yet waits on `ci`.** A repository with no CI at all therefore waits until
+  `baton:stalled` (72 hours) raises it to the owner; the owner can no longer `skip` such a ticket
+  through `run-tests-unreachable`, which is not posted for it. An earlier `skip` still waives.
+- **Wait on `review`, not `run-tests`.** The waiting leg is `review`, waiting on `ci` — the same
+  queue a green home gate posts while checks run — so no runner is offered a gate it cannot run.
+- **The posted path does not show a fix that answered a sibling's red.** The timeline walk places
+  a fix step after a red *marker*; CI has no history in the facts, so a fix at `pr-open` landing
+  on a sibling leaves the posted path at `pr-open`. Baton's traversal record (§4) still counts it.
+
+### Exit criteria
+
+- [x] a ticket whose PRs are all in `repos:` repositories never waits on the owner for the gate:
+      green CI queues review, red queues fix, running waits on `ci`
+- [x] a home PR alone reads byte-for-byte as before, and `skip` still waives
+- [x] the run-tests stub suspends without a marker for such a ticket; the fix stub does not fail it
+- [x] R-BTN-131 amended, S-BTN-230 in §15, `npm run spec:index` current
+
+## Status
+
+- 2026-11-16: built (filed done: an `available` ticket would be picked up by the owner's runners).

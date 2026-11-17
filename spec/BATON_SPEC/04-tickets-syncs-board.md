@@ -100,7 +100,15 @@ live solely in Baton, and both are exportable (R-BTN-88).
     staleness protection, so the CLI refuses at load a source that declares `versions` without
     exporting `read`, rather than run its claims with no re-verification at all. A source that
     declares neither is read as declaring nothing: its tickets keep `path` required
-    and no claim is re-verified by version. `tickets(ctx)` reads its store after the observation
+    and no claim is re-verified by version. A ticket posted with no `path` has no file in the checkout,
+    so its source's `read` should return `ticket` as markdown text — a frontmatter block with the
+    keys the markdown source reads (`id`, `title`, `repos`, `prs`, … — the table below), then the
+    body — because the legs read it as the ticket file: when the claim's re-verification read
+    returns a string for a pathless ticket, the runner writes it, mode 0600, into the claim's
+    scratch directory, removed at the claim's end, and hands its absolute path to every leg as
+    `ctx.ticket.file`; the CLI's stubs read the ticket's `repos:` from it and name it in
+    `BATON_TICKET_FILE` (B-252). A `ticket` of any other shape, or a ticket with a `path`, gives
+    the legs no `file`. `tickets(ctx)` reads its store after the observation
     number was handed out and sees every write made before it (§4.3, R-BTN-62); `ctx.versions`
     carries each live ticket's last accepted version as the observation returned it, and a
     source whose store can tell a stale read — a lagging replica — refuses to post a ticket whose

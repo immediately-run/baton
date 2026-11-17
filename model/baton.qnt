@@ -590,7 +590,7 @@ module baton {
   // confirms a done only by an end station or a closure (R-BTN-10, G-BTN-44). (R3-1244: the
   // scenario traces found the model narrower than the spec here; it required an end station.)
   // @impl src/core/claims.ts#end
-  // @impl pending — attempts and backoff per leg (R-BTN-122, B-11); `blocked` logged when an end leaves the ticket blocked (R-BTN-75 as amended by R3-1254, B-26)
+  // @impl pending — attempts and backoff per leg (R-BTN-122, B-11)
   action endClaim(w: str, kind: str, reached: bool): bool = all {
     workerCanAct(w), workerClaim(w).size() == 1,
     val c = theClaim(w)
@@ -771,7 +771,7 @@ module baton {
   // R-BTN-4, §6.6: the alarm reaps a claim whose lease ran out — its worker dead or silent; a
   // failed attempt on the claim's leg (§7.4, R-BTN-122), and an end (R-BTN-75).
   // @impl src/core/claims.ts#alarm
-  // @impl pending — the attempt counted per leg (R-BTN-122, B-11); `blocked` logged when the reap leaves the ticket blocked (R-BTN-75 as amended by R3-1254, B-26)
+  // @impl pending — the attempt counted per leg (R-BTN-122, B-11)
   action alarmReap(i: int): bool = all {
     st.claims.keys().contains(i),
     val c = st.claims.get(i)

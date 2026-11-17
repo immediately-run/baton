@@ -1,10 +1,12 @@
 // validate.ts — every rule for untrusted worker and owner input (BATON_SPEC §10.4, §6.8, §6.9,
 // §5). One module, called by every endpoint before any write (R3-1211); a value that fails is
 // refused with `invalid-params` naming the field, never trimmed into shape.
-import { BatonError } from './http';
+import { BatonError, RECOMMENDED_CLIENT } from './http';
 import { FREE_TEXT_MAX, isFreeText } from './text';
 import { COURSE_ID } from './course';
+import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES } from './conditionTypes';
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
+import { CLIENT_VERSION_MAX, compareVersions, parseVersion } from '../shared/versions.mjs';
 
 /** §5: the harness's own session id, the rule `claim.sh --session` already applies. */
 export const SESSION_NAME = /^[A-Za-z0-9_.:-]{1,128}$/;
@@ -12,6 +14,10 @@ export const HOSTNAME = /^[A-Za-z0-9.-]{1,253}$/;
 /** A forge host as B-182's `code_repos` names it: a lowercased DNS name with an optional port,
  *  validated as a `web_base`'s authority is (R-BTN-92) — no userinfo, no path, no dot-run. */
 export const FORGE_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[1-9][0-9]{0,4})?$/;
+/** An origin as the CLI's configuration names one (R-BTN-137, B-121): a Baton deployment's URL
+ *  — scheme and authority, no path, query or fragment, no trailing slash. The OIDC `aud` is the
+ *  origin verbatim (R-BTN-15), and `baton_url` (R-BTN-56) and homes.json's `origin` are one. */
+export const ORIGIN = /^https?:\/\/[A-Za-z0-9.-]+(?::[1-9][0-9]{0,4})?$/;
 /** R-BTN-138's id kind, as a `code_repos` entry stores it: a decimal string. */
 export const FORGE_ID = /^[1-9][0-9]{0,19}$/;
 export const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -92,6 +98,21 @@ export function freeText(v: unknown, field: string, max = FREE_TEXT_MAX): string
 const optional = <T>(v: unknown, check: (v: unknown) => T): T | undefined => (v === undefined || v === null ? undefined : check(v));
 const matches = (re: RegExp, field: string) => (v: unknown) => (typeof v === 'string' && re.test(v) ? v : bad(field, `must match ${re}`));
 
+/** §11.3 R-BTN-197 (B-254): `admin settings set --recommended-client` — null to clear back to
+ *  the code's `RECOMMENDED_CLIENT`, else a semver at or above it, and short as a client's own
+ *  statement is (§13.3 R-BTN-33: the header echoes it, so it is bounded like the client's). An
+ *  administrator may raise the recommendation, never lower it below what the deployed code
+ *  itself recommends. */
+export function checkRecommendedClient(v: unknown): string | null {
+  if (v === null) return null;
+  if (typeof v !== 'string' || parseVersion(v) == null) bad('recommended_client', 'must be null or a semver, like 0.1.6');
+  if ((v as string).length > CLIENT_VERSION_MAX) bad('recommended_client', `must be at most ${CLIENT_VERSION_MAX} characters`);
+  if (compareVersions(v as string, RECOMMENDED_CLIENT) < 0) {
+    bad('recommended_client', `must be at or above the code's recommended ${RECOMMENDED_CLIENT} — an administrator may raise the recommendation, never lower it`);
+  }
+  return v as string;
+}
+
 // ── the heartbeat (§11) ──────────────────────────────────────────────────────────────────
 
 export interface Heartbeat {
@@ -118,7 +139,10 @@ export interface Heartbeat {
   courses: { repository: string; course: string; version: number }[];
   last_activity_at?: number;
   test_harness: boolean;
-  fenced?: { claim_id: number };
+  /** R-BTN-19 (B-188): the reaped claims the sidecar has fenced — one entry per claim. */
+  fenced: { claim_id: number }[];
+  /** R-BTN-4 (B-188): how many claims the runner can run at once, clamped to [1, 32]. */
+  concurrency: number;
   transcripts: TranscriptReport[];
   transcript_refusals: { index: number; code: string; message: string }[];
   /** R-BTN-103: the repositories and `asks` this session delivers notices for, as a worker courier,
@@ -129,12 +153,36 @@ export interface Heartbeat {
   protection: { repository: string; matched: boolean; reading_hash: string }[];
   /** §12.8 (B-145, R-BTN-189): the policy hash pins a trusted runner reports per repository. */
   policy_pins: { repository: string; hash: string }[];
+  /** R-BTN-113 (B-234): the running leg's session link, as the runner holds it. Shape-checked
+   *  here only as a bounded string; the heartbeat drops one that fails the link rule (https, no
+   *  userinfo, an allowlisted host) and logs it, never refusing the beat. */
+  session_url?: string;
+  /** R-BTN-113 (B-188): each claim's running leg's session link, by claim — a runner holding
+   *  several claims names which. Malformed entries are skipped, never a refused beat. */
+  session_urls: { claim_id: number; url: string }[];
+  /** §7.5 R-BTN-90: the `claim_legs.seq` of the run whose script just returned — the finishing
+   *  half's word, sent out of cadence before validation, `close` or any wait. Shape-checked
+   *  only as a positive integer; a heartbeat is never refused for it. */
+  leg_finished?: number;
+  /** R-BTN-90 (B-188): `leg_finished` by claim — a run's seq is numbered within its claim, so a
+   *  runner holding several names which. Malformed entries are skipped, never a refused beat. */
+  legs_finished: { claim_id: number; seq: number }[];
+  /** B-253 (R-BTN-72): the runner's own statement about itself — its `cli` key names the CLI's
+   *  pinning. Opaque to Baton beyond its size: shape-checked here, stored as received, and
+   *  gated on by nothing. */
+  profile?: Record<string, unknown>;
 }
 
-export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number }
+export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number; claim_id?: number }
 
 /** §6.6 R-BTN-9: the worker declares its lease timeout, clamped to [900, 86400] s, default 900. */
 export const clampLease = (s: unknown) => (typeof s === 'number' && Number.isFinite(s) ? Math.min(86400, Math.max(900, Math.round(s))) : 900);
+
+/** R-BTN-4 (B-188): the most claims a runner may declare it runs at once, and a grant allow. */
+export const MAX_CLAIMS_CAP = 32;
+/** R-BTN-4: the runner's declared `concurrency`, clamped to [1, 32], default 1 — clamped, never
+ *  refused, since a refused heartbeat would stop `last_seen_at` and get a live runner reaped. */
+export const clampConcurrency = (n: unknown) => (isInt(n) ? Math.min(MAX_CLAIMS_CAP, Math.max(1, n as number)) : 1);
 
 /** R-BTN-107: the isolation modes a heartbeat may declare. */
 export const ISOLATIONS: readonly Heartbeat['isolation'][] = ['attached', 'process', 'session'];
@@ -179,6 +227,27 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   if (b.isolation !== undefined && !ISOLATIONS.includes(b.isolation as Heartbeat['isolation'])) bad('isolation', `must be one of ${ISOLATIONS.join(', ')}`);
   const transcripts = (b.transcripts ?? []) as unknown[];
   if (!Array.isArray(transcripts) || transcripts.length > 50) bad('transcripts', 'must be a list of at most 50');
+  // R-BTN-113: the link itself is judged at the heartbeat, which drops and logs one that fails
+  // the rule (https, no userinfo, an allowlisted host) rather than refusing the beat — so this
+  // only bounds the field's size, keeping a hostile megabyte out of the log that follows.
+  const session_url = typeof b.session_url === 'string' && b.session_url.length <= 4096 ? b.session_url : undefined;
+  // R-BTN-90: the finished run's seq — read as absent when it is not one (a heartbeat is never
+  // refused for it, §6.8); the finishing half below judges it against the claim's running run.
+  const leg_finished = isInt(b.leg_finished) && (b.leg_finished as number) > 0 ? b.leg_finished as number : undefined;
+  // R-BTN-113 (B-188): one link per claim; the same bounds as `session_url`, a malformed entry skipped.
+  const session_urls = (Array.isArray(b.session_urls) ? (b.session_urls as unknown[]).slice(0, MAX_CLAIMS_CAP) : [])
+    .filter((e): e is { claim_id: number; url: string } => isObj(e) && isInt((e as Record<string, unknown>).claim_id)
+      && typeof (e as Record<string, unknown>).url === 'string' && ((e as Record<string, unknown>).url as string).length <= 4096)
+    .map((e) => ({ claim_id: e.claim_id, url: e.url }));
+  // B-253 (R-BTN-72): the profile is the runner's own statement, opaque — bounded only, so a
+  // hostile megabyte stays out of the row it is stored in. The pinning it reports is never a
+  // refusal: an unpinned runner is warned about, not stopped.
+  let profile: Record<string, unknown> | undefined;
+  if (b.profile !== undefined) {
+    if (!isObj(b.profile)) bad('profile', 'must be a JSON object');
+    else if (JSON.stringify(b.profile).length > 4096) bad('profile', 'must serialize to at most 4096 characters');
+    else profile = b.profile;
+  }
   return {
     hostname,
     session_name,
@@ -200,6 +269,15 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     couriers: checkCouriers(b.couriers),
     protection: checkProtection(b.protection),
     policy_pins: checkPolicyPins(b.policy_pins),
+    session_url,
+    session_urls,
+    concurrency: clampConcurrency(b.concurrency),
+    leg_finished,
+    legs_finished: (Array.isArray(b.legs_finished) ? (b.legs_finished as unknown[]).slice(0, MAX_CLAIMS_CAP) : [])
+      .filter((e): e is { claim_id: number; seq: number } => isObj(e) && isInt((e as Record<string, unknown>).claim_id)
+        && isInt((e as Record<string, unknown>).seq) && ((e as Record<string, unknown>).seq as number) > 0)
+      .map((e) => ({ claim_id: e.claim_id, seq: e.seq })),
+    profile,
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
@@ -255,7 +333,9 @@ export function checkTranscript(t: unknown, field: string, allowed: string[]): T
   const role = x.role ?? 'session';
   if (role !== 'session' && role !== 'subagent') bad(`${field}.role`, "must be 'session' or 'subagent'");
   if (x.pushed_at !== undefined && !isTime(x.pushed_at)) bad(`${field}.pushed_at`, 'must be epoch ms');
-  return { repo: x.repo as string, path: x.path as string, role: role as TranscriptReport['role'], activity_id: optional(x.activity_id, matches(ACTIVITY_ID, `${field}.activity_id`)), pushed_at: x.pushed_at as number | undefined };
+  if (x.claim_id !== undefined && !isInt(x.claim_id)) bad(`${field}.claim_id`, 'must be a claim id');
+  return { repo: x.repo as string, path: x.path as string, role: role as TranscriptReport['role'], activity_id: optional(x.activity_id, matches(ACTIVITY_ID, `${field}.activity_id`)), pushed_at: x.pushed_at as number | undefined,
+    ...(x.claim_id !== undefined ? { claim_id: x.claim_id as number } : {}) };
 }
 
 // ── activities (§6.9) ────────────────────────────────────────────────────────────────────
@@ -389,8 +469,8 @@ export function checkShadowReport(body: unknown) {
 const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/;
 export const GIT_SHA = /^[0-9a-f]{40}$/;
 /** §6.5: the `released:` reasons, exactly. */
-export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output',
-  'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed'] as const;
+export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output', 'cannot-finish:contract-input',
+  'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed', 'leg-timeout'] as const;
 
 /** A claim's request (§6.2). `bills` is retired (B-168: a `prefer` entry bills no account once
  *  route choices are gone, R-BTN-100): a request carrying one is read as if it did not, the
@@ -491,6 +571,8 @@ export interface End {
    *  their shape, and actions beyond the report's sixteen, are counted in `dropped`, so a
    *  report is never silently shortened. */
   scope_exceeded: ScopeReport;
+  /** R-BTN-113 (B-4): the session link of the leg this end finishes, as an advance carries one. */
+  session_url: string | null;
 }
 
 /** One action of a leg-end scope report (B-134): the kind of evidence and what it touched — a
@@ -613,7 +695,7 @@ export function checkEnd(body: unknown): End {
     prerequisite = { kind: 'capability', ref: (p as { ref: string }).ref };
   }
   retiredFields(b);
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), session_url: carriedSessionUrl(b.session_url) };
 }
 
 export interface Advance {
@@ -632,6 +714,10 @@ export interface Advance {
    *  input as a pointer, and the ticket's version with the digest of what its source's `read`
    *  returned for the run. Stored in `leg_run_inputs` for replay. */
   run_inputs: RunInputs;
+  /** R-BTN-113 (B-4): the session link of the leg this advance finishes, shape-checked as the
+   *  heartbeat's is; one that fails the link rule is dropped and logged, never a refused
+   *  advance. Null when the advance carries none. */
+  session_url: string | null;
 }
 
 /** B-190 (§5.5 R-BTN-82, §13.5): one resolved input of a run, as the envelope carries a pointer
@@ -747,6 +833,13 @@ export function checkRunInputs(v: unknown): RunInputs {
   return { ticket, inputs };
 }
 
+/** A `session_url` as the heartbeat, an advance or an end carries it (R-BTN-113, B-4): a bounded
+ *  string, or null when the call carries none — the link rule (https, no userinfo, an allowlisted
+ *  host) drops one that fails and logs it, never refusing the call. A non-string or an
+ *  over-4096-character value is taken as none, as the heartbeat's shape check reads it. */
+const carriedSessionUrl = (v: unknown): string | null =>
+  typeof v === 'string' && v.length <= 4096 ? v : null;
+
 /** `POST /v1/runner/claims/{id}/advance` (R-BTN-63, §11): the leg to start; `reached`, the
  *  outcome the running leg reached; a pointer to its evidence; the tags the holder bars from the
  *  new leg. `course` is opaque data for the course's hook (R3-1236): accepted, bounded, unread. */
@@ -761,10 +854,53 @@ export function checkAdvance(body: unknown): Advance {
   const head_sha = optional(b.head_sha, matches(GIT_SHA, 'head_sha')) ?? null;
   if (b.course !== undefined && JSON.stringify(b.course).length > 4096) bad('course', 'must be at most 4 KB');
   retiredFields(b);
-  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs) };
+  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs), session_url: carriedSessionUrl(b.session_url) };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */
+/** `POST /v1/runner/claims/{id}/conditions` (R-BTN-160, R-BTN-195; B-234): the report a runner
+ * sends for each raise its channel check passed. Filter fields only (R-BTN-33): the subject and
+ * body stay with the runner, and `url` is the runner's own word — kept for none but an unbound
+ * `suspend`, and ignored for an `interact`, whose url Baton sets from the session link it holds.
+ * `handler` is accepted and unread: no handler ticket is filed (R-BTN-161 unbuilt), and a
+ * binding of `interact` is ignored anyway (R-BTN-195). */
+export interface ConditionReport {
+  type: string;
+  disposition: 'interrupt' | 'suspend' | 'notify' | null;
+  severity: 'critical' | 'high' | 'normal';
+  restarts: Record<string, string> | null;
+  default: string | null;
+  url: string | null;
+}
+
+export function checkConditionReport(body: unknown): ConditionReport {
+  if (!isObj(body)) bad('body', 'must be a JSON object');
+  const b = body as Record<string, unknown>;
+  const type = matches(CONDITION_TYPE, 'type')(b.type);
+  if ((type as string).length > CONDITION_TYPE_MAX) bad('type', `must be at most ${CONDITION_TYPE_MAX} characters`);
+  // The report may carry the disposition the runner's file reads; Baton's own word decides
+  // (R-BTN-50), so it is only shape-checked, never trusted.
+  if (b.disposition !== undefined && b.disposition !== null && !['interrupt', 'suspend', 'notify'].includes(b.disposition as string)) {
+    bad('disposition', 'must be interrupt, suspend or notify');
+  }
+  const severity = b.severity === undefined || b.severity === null ? 'normal' : SEVERITIES.includes(b.severity as never) ? (b.severity as ConditionReport['severity']) : bad('severity', `must be one of ${SEVERITIES.join(', ')}`);
+  let restarts: Record<string, string> | null = null;
+  if (b.restarts !== undefined && b.restarts !== null) {
+    if (!isObj(b.restarts) || Object.keys(b.restarts).length === 0 || Object.keys(b.restarts).length > 8) bad('restarts', 'must be 1–8 ids with one-line descriptions');
+    for (const [id, text] of Object.entries(b.restarts as Record<string, unknown>)) {
+      if (!RESTART_ID.test(id)) bad(`restarts.${id}`, 'a restart id matches ^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$ (§12.3)');
+      if (!isFreeText(text)) bad(`restarts.${id}`, 'must be §10.4 free text');
+    }
+    restarts = b.restarts as Record<string, string>;
+  }
+  const def = optional(b.default, matches(RESTART_ID, 'default')) ?? null;
+  if (def != null && (restarts == null || !Object.prototype.hasOwnProperty.call(restarts, def))) bad('default', 'names one of the raise\'s restarts');
+  const url = b.url === undefined || b.url === null ? null : isHttpsPointer(b.url) ? (b.url as string) : bad('url', 'must be an https URL of at most 1000 characters');
+  if (b.handler !== undefined && b.handler !== null && typeof b.handler !== 'string') bad('handler', 'must be a course id');
+  retiredFields(b);
+  return { type: type as string, disposition: (b.disposition as ConditionReport['disposition']) ?? null, severity, restarts, default: def, url };
+}
+
 export function checkConfirmations(v: unknown): { claim_id: number; sha: string }[] {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v) || v.length > 500) bad('confirmations', 'must be a list of at most 500');
@@ -774,11 +910,16 @@ export function checkConfirmations(v: unknown): { claim_id: number; sha: string 
   });
 }
 
-/** R-BTN-19: the heartbeat's report that the sidecar has fenced a reaped claim. */
-export function checkFenced(v: unknown): { claim_id: number } | undefined {
-  if (v === undefined || v === null) return undefined;
-  if (!isObj(v) || !isInt(v.claim_id) || v.terminated !== true) bad('fenced', 'must be {claim_id, terminated: true}');
-  return { claim_id: (v as Record<string, unknown>).claim_id as number };
+/** R-BTN-19: the heartbeat's report that the sidecar has fenced reaped claims — a list, one
+ *  entry per claim (B-188); a single object, as runners before B-188 send it, is one entry. */
+export function checkFenced(v: unknown): { claim_id: number }[] {
+  if (v === undefined || v === null) return [];
+  const list = Array.isArray(v) ? v : [v];
+  if (list.length > MAX_CLAIMS_CAP) bad('fenced', `must list at most ${MAX_CLAIMS_CAP} claims`);
+  return list.map((x, i) => {
+    if (!isObj(x) || !isInt(x.claim_id) || x.terminated !== true) bad(Array.isArray(v) ? `fenced[${i}]` : 'fenced', 'must be {claim_id, terminated: true}');
+    return { claim_id: (x as Record<string, unknown>).claim_id as number };
+  });
 }
 
 /** An owner action that names its own confirmation (§14: force-reap). */

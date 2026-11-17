@@ -7,7 +7,9 @@
 // to the default branch from a throwaway worktree at the freshly fetched head, so the caller's
 // branch and working tree are never touched; a push refused because the branch moved is fetched
 // again and retried; `claim` refuses a ticket that is not available or whose dependencies are not
-// done; `new` takes the next free id on the head it pushes to. What is new is that all of it is
+// done; `new` takes the next free id on the head it pushes to. Every commit carries the provenance
+// trailers `TICKET_TRAILERS` holds, after a blank line (B-16) — docs' `CLAIM_TRAILERS`' shape —
+// and `TICKET_REQUIRE_TRAILERS=1` refuses a command without them. What is new is that all of it is
 // CONFIGURED — the items folder, the id prefix, the legacy patterns still accepted, the default
 // project and the tags come from `.baton/baton.json` (tickets-config.ts) — that `new` writes the
 // conventional body rather than a placeholder, that it judges what it wrote before pushing, and
@@ -81,6 +83,11 @@ export interface TicketsIo {
   direct?: boolean;
   /** The fetch the reads use, for a test's stand-in. */
   fetchImpl?: typeof fetch;
+  /** The provenance trailers every commit's message carries (B-16): a stand-in for
+   *  `TICKET_TRAILERS`. */
+  trailers?: string;
+  /** `TICKET_REQUIRE_TRAILERS=1` (B-16): a stand-in for the flag — refuse empty trailers. */
+  requireTrailers?: boolean;
 }
 
 /** What one try of a command does in the worktree, and the commit's subject it lands with. */
@@ -93,6 +100,23 @@ interface Change {
   move: { from: string; to: string }[];
 }
 
+/** The message a ticket command's commit lands with (B-16): the command's own message, then the
+ *  provenance trailers `TICKET_TRAILERS` holds, after a blank line — the one shape git reads as
+ *  trailers, the shape docs' `claim.sh` appends `CLAIM_TRAILERS` in, and the handoff's commit
+ *  rule: the agent-provenance trailers, then `Claude-Session` and `Co-Authored-By`. The value is
+ *  taken whole — baton computes no trailers of its own and calls nothing to default them
+ *  (R3-1268: no `agent-provenance.mjs`, no docs dependency). With `TICKET_REQUIRE_TRAILERS=1` and
+ *  the value empty, the message is refused: the agent workflow sets the variable, and a commit
+ *  that cannot be attributed is not made. */
+export function ticketCommitMessage(message: string, trailers: string, requireTrailers = false): string {
+  const lines = trailers.trim();
+  if (!lines) {
+    if (requireTrailers) throw new Error("TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty — set it to the session's provenance lines (the agent-provenance trailers, then Claude-Session and Co-Authored-By), or unset TICKET_REQUIRE_TRAILERS to commit without them");
+    return message;
+  }
+  return `${message}\n\n${lines}`;
+}
+
 /** Run `change(worktree)` on a fresh head and push its commit, retrying on a lost race. The
  *  worktree is the mechanism request.ts's `fileRequest` uses, for the reason it uses it: the
  *  caller's branch, HEAD and working tree are never written, a command that fails leaves the
@@ -103,6 +127,10 @@ function transact(root: string, io: TicketsIo, describe: string, change: (dir: s
   const warn = io.warn ?? ((l: string) => process.stderr.write(`${l}\n`));
   const remote = io.remote ?? 'origin';
   const branch = io.branch ?? defaultBranch(root);
+  // B-16: the trailers every commit this command lands carry, read once before the loop; the
+  // refusal — required and empty — comes of ticketCommitMessage, at the commit itself.
+  const trailers = (io.trailers ?? process.env.TICKET_TRAILERS ?? '').trim();
+  const requireTrailers = io.requireTrailers ?? process.env.TICKET_REQUIRE_TRAILERS === '1';
   for (let attempt = 1; attempt <= TICKET_TRIES; attempt++) {
     git(root, 'fetch', '-q', remote, branch);
     const dir = mkdtempSync(join(tmpdir(), 'baton-tickets-'));
@@ -144,7 +172,9 @@ function transact(root: string, io: TicketsIo, describe: string, change: (dir: s
         warn(`… ${describe}: nothing to commit — a peer landed the same change; retrying (${attempt}/${TICKET_TRIES})`);
         continue;
       }
-      git(dir, 'commit', '-q', '-m', message);
+      // The message git commits is the command's with its trailers (B-16); the success line
+      // below prints the command's own subject, which the trailers never touch.
+      git(dir, 'commit', '-q', '-m', ticketCommitMessage(message, trailers, requireTrailers));
       try {
         git(dir, 'push', '-q', remote, `HEAD:refs/heads/${branch}`);
         if (!io.quiet) log(`✓ ${message.split('\n')[0]} — pushed as ${git(dir, 'rev-parse', '--short', 'HEAD')}`);
@@ -982,6 +1012,11 @@ export function ticketsHelp(): string[] {
     'check:tickets has run; --direct keeps the push, and falls back to the PR when the forge',
     'refuses it as protected. A PR filing carries the ticket alone, so the dependencies\'',
     '**Used by:** lines are written only by --direct.',
+    '',
+    'Every commit carries the provenance lines TICKET_TRAILERS holds, after a blank line (B-16) —',
+    'the agent-provenance trailers, then Claude-Session and Co-Authored-By, as docs claim.sh takes',
+    'CLAIM_TRAILERS; baton computes none itself. With TICKET_REQUIRE_TRAILERS=1, a command without',
+    'them refuses rather than push a commit that cannot be attributed.',
     '',
     'claim asks Baton first (B-129): before it writes, it reads the ticket from Baton with the',
     'key -i names (or BATON_KEY_FILE) — the board for the station and ready leg, the history for',

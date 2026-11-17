@@ -14,7 +14,7 @@ import type { Store } from './ports';
  *  R-BTN-116). */
 export const HISTORY_KINDS = ['leg-started', 'leg-finished', 'leg-abandoned', 'position-confirmed', 'position-replaced', 'git-moved', 'regressed',
   're-routed', 'blocked', 'unblocked', 'decision-opened', 'decision-answered', 'inputs', 'outputs', 'discrepancy', 'spawned',
-  'fact-arrival', 'arrival-unapplied', 'question-posted', 'question-answered', 'question-expired'] as const;
+  'fact-arrival', 'arrival-unapplied', 'question-posted', 'question-answered', 'question-expired', 'condition'] as const;
 export type HistoryKind = (typeof HISTORY_KINDS)[number];
 
 /** R-BTN-85: the cases a discrepancy names, exactly. `position-replaced` and `route-overridden`
@@ -111,10 +111,13 @@ export class History {
     return due.length;
   }
 
-  /** §14 Discrepancies: the last 7 days', newest first, with a count per kind. */
+  /** §14 Discrepancies: the last 7 days', newest first, with a count per kind.
+   *  Newest is `at`, then `seq` (B-235): the order `events_by_kind_at` reads in, so the window
+   *  costs its own rows, not the whole log; events are written at the core's clock, so it is
+   *  the log's order. */
   view(now: number) {
     const rows = this.rows<{ ticket_id: string; claim_id: number | null; at: number; detail_json: string }>(
-      `SELECT ticket_id, claim_id, at, detail_json FROM events WHERE kind = 'discrepancy' AND at > ? ORDER BY seq DESC LIMIT ?`, now - DISCREPANCY_WINDOW_MS, DISCREPANCY_LIST_MAX)
+      `SELECT ticket_id, claim_id, at, detail_json FROM events WHERE kind = 'discrepancy' AND at > ? ORDER BY at DESC, seq DESC LIMIT ?`, now - DISCREPANCY_WINDOW_MS, DISCREPANCY_LIST_MAX)
       .map((r) => ({ ticket_id: r.ticket_id, claim_id: r.claim_id, at: r.at, ...(JSON.parse(r.detail_json) as { sub: string } & Record<string, unknown>) }));
     // Counted over the whole window, not the capped list.
     const by = Object.fromEntries(this.rows<{ sub: string; n: number }>(

@@ -5,7 +5,9 @@
 // is not available or whose dependencies are not done; done archives; new takes the next free id
 // from the configured prefix with a legacy pattern present; --tags, --project (an unknown or
 // unconfigured project refused), the written skeleton and its **Depends on:** line, a --body-file
-// that disagrees with the flag refused, and a filing the check would refuse left unpushed.
+// that disagrees with the flag refused, and a filing the check would refuse left unpushed; every
+// commit carries the TICKET_TRAILERS provenance trailers it was given, after a blank line (B-16),
+// and TICKET_REQUIRE_TRAILERS=1 refuses a command without them.
 // Node only: it writes real repositories and runs git.
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -16,7 +18,7 @@ import { dirname, join, resolve } from 'node:path';
 import { checkTickets } from '../../src/defaults/tickets-check';
 import { accepts, readTicketSettings, requiresFrom } from '../../src/defaults/tickets-config';
 import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
-import { courseStart, moveTicket, reverseMention, skeletonBody } from '../../src/defaults/tickets';
+import { courseStart, moveTicket, reverseMention, skeletonBody, ticketCommitMessage } from '../../src/defaults/tickets';
 // @ts-expect-error a plain .mjs script, no types
 import { unnamedEntries } from '../../scripts/check-spec.mjs';
 import { appendStatus, entryIds, filingDate, firstCommit, firstCommits, historyEntries, missingSections, rereadNote, rereads, ruleIds, rulesConfig, sectionGaps, sectionsDate, staleRules } from '../../src/defaults/tickets-rules';
@@ -106,10 +108,12 @@ function repo(opts: { settings?: Record<string, unknown>; existing?: Record<stri
 }
 
 /** The environment a spawned CLI sees: this harness's own Baton variables (BATON_KEY_FILE, a
- *  live runner key, above) scrubbed, so a test's command reads the stand-in Baton its test
- *  names — or none — never the instance this suite happens to run under. */
+ *  live runner key, above) and trailer variables (TICKET_TRAILERS, TICKET_REQUIRE_TRAILERS — B-16,
+ *  set by the agent workflow this suite may run under) scrubbed, so a test's command reads the
+ *  stand-in Baton its test names — or none — never the instance this suite happens to run under,
+ *  and no test's commit grows trailers the harness left in the environment. */
 const childEnv = (dir: string): NodeJS.ProcessEnv => {
-  const { BATON_KEY_FILE: _k, BATON_URL: _u, BATON_HOME: _h, ...rest } = process.env;
+  const { BATON_KEY_FILE: _k, BATON_URL: _u, BATON_HOME: _h, TICKET_TRAILERS: _t, TICKET_REQUIRE_TRAILERS: _r, ...rest } = process.env;
   return { ...rest, BATON_HOME: dir };
 };
 
@@ -397,6 +401,49 @@ describe('baton tickets claim | set | done (B-112)', () => {
     expect(run(f.dir, 'archive', 'B-1').err).toBe('baton: archive: baton tickets new|claim|set|done|check (baton tickets --help)\n');
     expect(run(f.dir, 'claim', 'B-1', '--bogus', 'x').err).toBe('baton: --bogus: not a flag of baton tickets claim\n');
     expect(run(f.dir, 'new').err).toBe('baton: new needs --title\n');
+  }, 60_000);
+});
+
+describe('the ticket commands’ commits: provenance trailers (B-16)', () => {
+  it('the builder appends TICKET_TRAILERS after a blank line, keeps a message without them, and refuses an empty one under TICKET_REQUIRE_TRAILERS=1', () => {
+    const trailers = 'Agent-Role: implement\nClaude-Session: ses-1\nCo-Authored-By: Claude <noreply@anthropic.com>';
+    // With trailers: the command's message, a blank line, then the value whole.
+    expect(ticketCommitMessage('tickets: claim B-1 (in progress)', trailers)).toBe(`tickets: claim B-1 (in progress)\n\n${trailers}`);
+    // A message that already carries a body (a PR, a hand-off) takes them after it: the trailers
+    // are the last paragraph, where git reads them.
+    const done = 'tickets: B-1 done (archived)\n\nhttps://github.com/immediately-run/baton/pull/9';
+    expect(ticketCommitMessage(done, trailers)).toBe(`${done}\n\n${trailers}`);
+    // Without trailers — unset, empty or whitespace — the message is the command's own.
+    expect(ticketCommitMessage('tickets: file B-2 — x', '')).toBe('tickets: file B-2 — x');
+    expect(ticketCommitMessage('tickets: file B-2 — x', '  \n')).toBe('tickets: file B-2 — x');
+    expect(ticketCommitMessage('tickets: file B-2 — x', '', false)).toBe('tickets: file B-2 — x');
+    // Required and empty: refused, naming both variables and the rule.
+    expect(() => ticketCommitMessage('tickets: file B-2 — x', '', true)).toThrow("TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty — set it to the session's provenance lines (the agent-provenance trailers, then Claude-Session and Co-Authored-By), or unset TICKET_REQUIRE_TRAILERS to commit without them");
+  }, 30_000);
+
+  it('a command given trailers lands them on its commit, and one required without them refuses and pushes nothing', () => {
+    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/B-2.mdx': ticket('B-2') } });
+    const trailers = 'Claude-Session: ses-9\nCo-Authored-By: Claude <noreply@anthropic.com>';
+    // The environment's value, through the CLI as an operator sets it.
+    const r = spawnSync(process.execPath, [CLI, 'tickets', 'claim', 'B-1', '--offline'], { cwd: f.dir, encoding: 'utf8', env: { ...childEnv(f.dir), TICKET_TRAILERS: trailers } });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('--offline');
+    expect(git(f.origin, 'log', '-1', '--format=%B', 'main')).toBe(`tickets: claim B-1 (in progress)\n\n${trailers}`);
+    // git reads the lines as trailers, not just as text.
+    expect(git(f.origin, 'log', '-1', '--format=%(trailers:key=Claude-Session,valueonly)', 'main')).toBe('ses-9');
+    // The io's stand-in lands the same way on another command.
+    moveTicket(f.dir, { trailers }, 'B-2', 'in-review');
+    expect(git(f.origin, 'log', '-1', '--format=%B', 'main')).toBe(`tickets: B-2 → in-review\n\n${trailers}`);
+    // Required and empty: refused, nothing pushed — the environment's flag and the io's stand-in.
+    const head = f.head().sha;
+    const refused = spawnSync(process.execPath, [CLI, 'tickets', 'set', 'B-2', 'deferred'], { cwd: f.dir, encoding: 'utf8', env: { ...childEnv(f.dir), TICKET_REQUIRE_TRAILERS: '1' } });
+    expect(refused.status).toBe(2);
+    expect(refused.stderr).toBe("baton: TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty — set it to the session's provenance lines (the agent-provenance trailers, then Claude-Session and Co-Authored-By), or unset TICKET_REQUIRE_TRAILERS to commit without them\n");
+    expect(() => moveTicket(f.dir, { trailers: '', requireTrailers: true }, 'B-2', 'deferred')).toThrow('TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty');
+    expect(f.head().sha).toBe(head);
+    // Required with trailers: the commit lands, carrying them.
+    moveTicket(f.dir, { trailers, requireTrailers: true }, 'B-2', 'deferred');
+    expect(git(f.origin, 'log', '-1', '--format=%B', 'main')).toBe(`tickets: B-2 → deferred\n\n${trailers}`);
   }, 60_000);
 });
 
