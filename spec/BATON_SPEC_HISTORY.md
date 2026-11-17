@@ -3121,9 +3121,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   running agent; the answer keeps that safety by having the runner re-verify the version (source
   read, closure, tier) before the leg may read it, and handing the leg no ticket text unasked; a
   leg's own push to its ticket raises nothing, proven only for the markdown source ("ok"); and
-  `release` changes nothing about the stop ("ok"). Readiness is not re-checked for a mid-leg
-  read, since the leg's own pushes move it and the position is Baton's; it is re-checked before
-  the next leg in the claim. Rejected: reusing condition rows and bindings inbound; pushing the
+  `release` changes nothing about the stop ("ok"). Readiness is not re-checked when a moved
+  version is read, mid-leg or before the next leg, since the leg's own pushes move it and
+  R-BTN-63 leaves it to the holder. Rejected: reusing condition rows and bindings inbound; pushing the
   new body to the agent; releasing every claim whose ticket changed; and a validator reservation
   of the event types, unneeded since leg events are never condition types. Not in this change: how
   quickly a tracker's edit reaches Baton (no want is recorded for it, R-BTN-94). The rule id,
@@ -3176,6 +3176,28 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - R-BTN-5's pointer moved to the end of its bullet, where it no longer reads as adding
     readiness;
   - B-258 lost its bar migration and agent hook, which the spec does not hold.
+  Review round 3, the last: one fresh reviewer. Its findings, checked against the text:
+  - Baton logged a change only for a post observed after the claim, while the runner reacted to
+    every heartbeat version. And a change logged just before an `advance` could be handed to the
+    next leg. Either way a correct `released:ticket-changed` end was refused. Now Baton logs
+    every accepted post that moves a held ticket's version. The `advance` that starts a run
+    names its `ticket_version`, and the end is accepted against that.
+  - The end body had no field for the version it must name; `ticket_version` was added to §9.4
+    and §14.
+  - A version closed `done` defers to R-BTN-72's `done` end, mid-leg and before a leg.
+  - `off-branch` is a named refusal.
+  - The order with R-BTN-5 is stated: its check at the claim's version, then R-BTN-198.
+  - R-BTN-194's list of where provenance is served includes the heartbeat and `baton leg
+    ticket`.
+  - The exemption of `cancel`-leg and `changes` claims covers Baton's half too.
+  - An end answering a `release` Baton sent with the reason `ticket-changed` (an owner bar set
+    before the reason was closed) is accepted as that release. R-BTN-67 checks bar reasons when
+    a bar is written.
+  - Versions may reach an agent. The "never a version" clause was dropped: a version is an
+    opaque §12.3 string from the same writer as the ticket's body, which the leg may read
+    anyway, so it carries nothing the body does not.
+
+  Three rounds is the most the review takes, so nothing ran after these fixes.
   Kept after review: a `restart` run counts toward `max_runs`, which every `restart` leg must
   now declare. A reviewer called that bound the damage, since forged versions or an editor
   flipping a ticket can spend it, and proposed a named condition at exhaustion. Not taken: the

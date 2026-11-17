@@ -96,7 +96,7 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   - **Progress is not staleness.** Facts lagging the holder, readiness the latest snapshot has
     not caught up with, or a station or leg the course file lacks (R-BTN-64) leave the claim
     alone. A new version of a held ticket leaves the claim alone too: R-BTN-198 says what the
-    runner does with it, and R-BTN-5's check decides the first leg.
+    runner does with it, after R-BTN-5's check at the claim's version.
   - A ticket gone from git loses its `tickets` row; its claims, events and course history stay.
 - **R-BTN-39 (where a ticket is: Baton's course history).** Baton is the one authority on a
   ticket's course history (R-BTN-81) and on its position: its station, its path (the legs run,

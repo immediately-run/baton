@@ -579,7 +579,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
   - **Served.** `last_written_by` is Baton's own record, never the post's, and no input of
     `row_hash`. It rides the ticket, beside its `brief`, in the board read (§11), the
     dashboard's ready rows, the recommendations, the claim answer — whose runner prints both at
-    the claim — and the ticket read (`GET /v1/repositories/{repository}/tickets/{ticket}`;
+    the claim — each heartbeat's claims and `baton leg ticket` (R-BTN-198), and the ticket read (`GET /v1/repositories/{repository}/tickets/{ticket}`;
     `baton ticket show` prints them first), so a privileged session sees whose words steer the
     ticket before it reads them.
   - **No notice.** Under `cooperative` Baton carries no foreign-write notice (R-BTN-66, the
@@ -624,8 +624,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
     never against git: a ticket with no file — a `changes` check ticket (R-BTN-114) — and a claim
     of the `cancel` leg Baton queued (R-BTN-168), whose ticket may already be withdrawn or closed
     in git.
-  - **A version that moves under a running claim** is read again as R-BTN-198 says, which
-    checks the version, closure and tier but not readiness.
+  - **After this check**, a version that moves under the claim is read again as R-BTN-198 says:
+    the version, closure and tier, not readiness.
   - **A ticket Baton has not seen cannot be claimed.** A claim naming it is `not-eligible`
     (`unknown-ticket`, §9.1). It is claimable after the first accepted post that names it, which
     the forge's notification (R-BTN-73, R-BTN-95) or a runner's `ls-remote` poll (R-BTN-105) make

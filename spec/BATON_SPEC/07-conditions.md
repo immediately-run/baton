@@ -767,15 +767,16 @@ Limits that hold throughout:
     when the run has one.
   - **Sessions poll.** The executor interface (R-BTN-107) pushes nothing into a session: a
     session learns of its events only by `baton leg events`, which its brief tells it to call. A
-    leg script that runs an agent may pass its events on to it as text naming the event's type
-    and the verbs below, never a version or ticket text.
+    leg script that runs an agent may pass its events on to it as text naming the event's type,
+    its versions and the verbs below, never ticket text.
   - **`ticket.changed {from_version, to_version, snapshot_sha}`: the ticket moved under the
     claim.**
     - **Which claims.** Every claim with a ticket, except the two R-BTN-5 re-verifies against
-      Baton's record (a `changes` check ticket and a claim of the `cancel` leg): those are handed
-      no `ticket.changed`, and their legs' `on_ticket_changed` is ignored.
-    - **Baton's half.** In the transaction that accepts a snapshot observed after the claim was
-      made (R-BTN-62), for each ticket an active claim holds whose posted `version` (§4.2) differs
+      Baton's record (a `changes` check ticket and a claim of the `cancel` leg): for those Baton
+      logs and rings nothing below, the runner hands no `ticket.changed`, and their legs'
+      `on_ticket_changed` is ignored.
+    - **Baton's half.** In the transaction that accepts a snapshot (R-BTN-62), whatever its
+      observation, for each ticket an active claim holds whose posted `version` (§4.2) differs
       from the one Baton held, and which the snapshot leaves held (R-BTN-35), Baton logs
       `ticket-changed {from_version, to_version}` with the claim (R-BTN-81), and rings the holder
       `ticket` after the commit (R-BTN-91). A snapshot that ends the claim is told as that claim's
@@ -792,13 +793,15 @@ Limits that hold throughout:
       legs pushed, as the leg-end scope audit reads pushes (R-BTN-106). Like that audit, the test
       is cooperative. Every other change, on every source and under every executor whose pushes
       the runner cannot read, is handed, a forge merge of the leg's own branch included; a course
-      whose legs change their own ticket keeps `continue`.
+      whose legs change their own ticket keeps `continue`. A heartbeat whose `git` view says
+      `closed: 'done'` hands nothing: the claim ends `done` after its leg, as R-BTN-72 says.
     - **Verifying a version.** The runner verifies a version as R-BTN-5's re-verification by
       version reads it, at that version and `snapshot_sha`: the sha checked on the default branch
       first (R-BTN-143), the source's code loaded from the claim's commit (R-BTN-133), the ticket
       read where R-BTN-5 reads it (the branch's head for a course that keeps its record there),
       and, on the markdown source, the version required to be the blob at the ticket's path at
       `snapshot_sha`. It refuses, with these reasons:
+      - `off-branch`: `snapshot_sha` is not on the default branch (R-BTN-143);
       - `closed`: the version is closed or archived, or its tier is above the runner's ceiling;
       - `bounds-changed`: its `repos`, `course` or `requires` differ from the claim's, since they
         bound the claim's scope, course and runner (§12.9, R-BTN-121);
@@ -809,11 +812,14 @@ Limits that hold throughout:
 
       Readiness is not checked: the leg's own progress moves it, and the holder judges it
       (R-BTN-63). The runner keeps each result for the claim.
-    - **Before a leg starts.** When the latest heartbeat's `version` differs from the last
-      verified — a change while no leg ran, preparation included — the runner verifies it before
+    - **Before a leg starts.** R-BTN-5's check comes first, at the claim's version. After it,
+      when the latest heartbeat's `version` differs from the last verified (a change while no leg
+      ran, or during preparation after R-BTN-5's read), the runner verifies that version before
       the leg starts. A version that passes becomes the last seen and the last verified, and the
-      leg reads it. `closed`, `bounds-changed` and `moved` release `stale-board`; `unreadable`
-      ends the claim `released:cannot-finish:transient` (R-BTN-122).
+      leg reads it. `off-branch` ends the claim `released:off-branch`; a version closed `done`
+      ends it `done` (R-BTN-72); the other `closed` cases, `bounds-changed` and `moved` release
+      `stale-board`; `unreadable` ends it `released:cannot-finish:transient` (R-BTN-122). The
+      `advance` that starts a leg names the version the leg starts on (`ticket_version`, §14).
     - **What the leg does** is its course's choice, the leg field `on_ticket_changed`
       (R-BTN-69):
       - **`continue`** (the default): the leg goes on. It may read a version handed to it by
@@ -827,16 +833,19 @@ Limits that hold throughout:
         ticket. A leg handed a `ticket.changed` in this run may end itself with the release
         reason `ticket-changed`, on the channel or in its result; the runner refuses that reason
         from a run it handed none.
-      - **`restart`**: when `to_version` differs from the last verified, the runner stops the leg
-        at once, as R-BTN-119 stops a `requested` release (`close` and `handoff` included), and
-        ends the claim `released:ticket-changed`. The validator refuses `restart` on a leg with
+      - **`restart`**: when `to_version` differs from the version the leg started on, the runner
+        stops the leg at once, as R-BTN-119 stops a `requested` release (`close` and `handoff`
+        included), and ends the claim `released:ticket-changed`. The validator refuses `restart` on a leg with
         no `max_runs` (R-BTN-69). A leg waiting on an open `suspend` condition ends as R-BTN-162
         says of any release, blocked on that condition.
-    - **The end.** A `released:ticket-changed` end names the `to_version` the runner handed, and
-      Baton accepts it only when a `ticket-changed` row of the claim, logged after its running leg
-      started, carries that version; it refuses the end otherwise `invalid-params`. It is not a
-      failed attempt. The run counts toward the leg's `max_runs` as every run does (R-BTN-63). The
-      next claim reads the ticket under R-BTN-5.
+    - **The end.** A `released:ticket-changed` end names the `to_version` the runner handed in
+      its `ticket_version` (§9.4). Baton accepts it only when a `ticket-changed` row of the claim
+      carries that version and it differs from the `ticket_version` the running leg's `advance`
+      named; it refuses the end otherwise `invalid-params`. A claim ending for a `release` Baton
+      sent with the reason `ticket-changed` (an owner bar set before that reason was closed,
+      R-BTN-67) ends as that release, and this check does not apply. It is not a failed attempt.
+      The run counts toward the leg's `max_runs` as every run does (R-BTN-63). The next claim
+      reads the ticket under R-BTN-5.
   - **`release {reason}`: why the leg is stopped.** When a `release` message reaches the runner
     (§6.9), whatever its reason, R-BTN-35's staleness and R-BTN-90's deadline included, the
     runner hands `release` with that reason to the claim's running leg, then acts on the message

@@ -35,7 +35,7 @@ depends_on:
 [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) ([R-BTN-91](../spec/BATON_SPEC/08-runners.md#sec-8-1), the heartbeat),
 [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3), [R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3)),
 [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-119](../spec/BATON_SPEC/08-runners.md#sec-8-4)),
-[§9.4](../spec/BATON_SPEC/09-claims.md#sec-9-4), §13's `ticket_history.kind`, §14's heartbeat.
+[§9.4](../spec/BATON_SPEC/09-claims.md#sec-9-4), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13)'s `ticket_history.kind`, [§14](../spec/BATON_SPEC/14-api.md#sec-14)'s heartbeat.
 
 ### What to build
 
@@ -46,24 +46,30 @@ rule wins.
    defaulting to `continue`. The validator refuses any other value, and `restart` on a leg with
    no `max_runs`, naming the leg.
 2. **The core (R-BTN-198, §8.1, §14, R-BTN-91, R-BTN-81, §9.4).**
-   - In the transaction that accepts a snapshot observed after the claim: for each held ticket
-     whose posted `version` moved and which the snapshot leaves held, log `ticket-changed
-     {from_version, to_version}` with the claim, and ring the holder `ticket` after the commit.
+   - In the transaction that accepts a snapshot, whatever its observation: for each held ticket
+     (not a `cancel`-leg claim or a `changes` ticket) whose posted `version` moved and which the
+     snapshot leaves held, log `ticket-changed {from_version, to_version}` with the claim, and
+     ring the holder `ticket` after the commit.
    - Each heartbeat claim carries `version`, `snapshot_sha`, `brief` and `last_written_by`.
-   - Accept `released:ticket-changed` only when its named `to_version` matches a `ticket-changed`
-     row of the claim logged after its running leg started; refuse it otherwise
-     `invalid-params`. Not a failed attempt.
+   - `ticket_version` on the `advance` that starts a run and on the end (§9.4, §14).
+   - Accept `released:ticket-changed` only when a `ticket-changed` row of the claim carries the
+     end's `ticket_version` and it differs from the running leg's `advance`'s; refuse it
+     otherwise `invalid-params`, except an end answering a `release` Baton sent with that reason.
+     Not a failed attempt.
 3. **The runner (R-BTN-198).**
    - Per claim: the last seen and last verified versions, each with its snapshot sha.
    - Hand `ticket.changed` while a leg runs, collapsing several changes into one, none when the
      newest is the last seen.
    - The own-change test: markdown source only, every commit to the ticket's file in the range
      pushed by this claim's legs, from the same reflog reading as the leg-end scope audit.
-   - Verification with the four refusals. A source or executor that cannot answer is
+   - Verification with the five refusals. A source or executor that cannot answer is
      `unreadable`, never a moved ticket (B-232's lesson); before a leg it ends the claim
-     `cannot-finish:transient`, and the other three release `stale-board`.
-   - `restart`: stop at once through R-BTN-119's path for `requested`, then end
-     `released:ticket-changed` naming the version.
+     `cannot-finish:transient`; `off-branch` ends it `released:off-branch`; a version closed
+     `done` ends it `done`; the rest release `stale-board`.
+   - A heartbeat whose `git` view is `closed: 'done'` hands nothing (R-BTN-72 ends `done`).
+   - `restart`, when `to_version` differs from the version the leg started on: stop at once
+     through R-BTN-119's path for `requested`, then end `released:ticket-changed` naming the
+     version.
    - Refuse the release reason `ticket-changed` from a run that was handed no `ticket.changed`.
    - On every `release` message, hand `release {reason}` first, then act exactly as today; hand
      only `release` when a heartbeat brings both. Stops made with no message hand nothing.
@@ -148,3 +154,6 @@ the plan holds no decision the spec does not._
 _2026-11-17 — rewritten again after review round 2: the bar migration and the agent hook were
 cut (the stubs poll), and the plan follows R-BTN-198's closure check, refusal handling,
 self-release check and `max_runs` requirement._
+
+_2026-11-17 — updated after review round 3: logging on every accepted post, `ticket_version` on
+the advance and the end, the `off-branch` refusal, and `closed: done` ending `done`._
