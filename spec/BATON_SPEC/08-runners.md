@@ -263,6 +263,12 @@ the runner's credentials under any other executor is that executor's, never Bato
     The identity banner `baton runner start` logs at startup names the declaration this way: the granted
     name (`grant`, or `grant:*` read as the grant) where no flag was given, the flag's own list
     where one was, beside the home checkout's HEAD, course, host and session.
+  - **The CLI says what it is (B-253).** At start the runner prints its own CLI checkout's
+    commit and whether it is a tagged release, a detached commit or a branch tip — on a branch,
+    the warning `baton: running from branch <name> at <sha> — not a pinned commit` — and every
+    heartbeat's `profile` carries the same as `cli: {commit, ref, pinned}` (a released copy:
+    the commit `dist/build.json` names, unpinned when that build was dirty): the runner's own
+    statement, reported and never gated on.
   - **A wedged git never holds a claim (B-94).** Every git call the runner and a standard course's
     `close` make is bounded and non-interactive: `GIT_TERMINAL_PROMPT=0`, ssh in `BatchMode=yes`
     with a connect timeout, and a timeout that kills the process; the stubs a standard course
