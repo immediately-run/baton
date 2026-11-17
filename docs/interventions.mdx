@@ -250,3 +250,49 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   ticket-text change.
 - **Resolution:** the supervisor re-ran the failed job; it passed and #269 merged at 18:30.
 - **Autonomous handling:** as in that entry. *No ticket yet.*
+
+## 2026-11-17 20:18 — joinable legs ran without their instructions
+
+- **Host:** bering
+- **Tickets:** B-171, B-193, B-52 (every leg on bering since the leg pages went live)
+- **Why it was needed:** the supervisor read the leg pages' sessions. In the B-171 review and
+  the B-193 merge, the agent's first shell call found `BATON_INSTRUCTIONS`, `BATON_COURSE`,
+  `BATON_LEG`, `BATON_TICKET_FILE` and `BATON_ANSWER` empty, so it guessed its leg from the
+  prompt's arguments. The fieldhouse E2B executor (FLDH-57, fieldhouse #30) starts the leg's
+  `opencode serve` in `start()` with the brief's env only (`executor.mjs` lines 169 and 257). The
+  per-leg `BATON_*` values go only to the `opencode run` client (line 288), and the agent's tools
+  run inside the server. B-52 (#272) and B-193 (#235) were reviewed and merged this way. Their
+  CI was green, but no leg instructions shaped those reviews. Nothing in the runner's log
+  showed it.
+- **Resolution:** pending the owner. The proposed fix starts the server with the leg's full env
+  (`{...s.envs, ...o.env}`), then bumps the executor pin and restarts the runners.
+- **Autonomous handling:** the agent shim refuses to start a leg whose instructions file is
+  missing from the environment the agent's tools will see, and it ends the leg with an error
+  that names the missing variable. An executor test also runs a tool inside a joinable leg and
+  checks that the `BATON_*` env reaches it. *No ticket yet.*
+
+## 2026-11-17 20:18 — B-193's merge leg waits on an npm release approval
+
+- **Host:** bering (runner-2)
+- **Tickets:** B-193 (PR #235)
+- **Why it was needed:** #235 merged at 19:49, and c9343a3's deploy succeeded. The merge agent
+  then ran `gh run watch --exit-status` on main's newest `ci` run (44163621619). That run's
+  `release` job waits for the `npm` environment's required reviewer. The watch cannot end until
+  the owner approves or rejects the release, so runner-2 is held until the leg's 300-minute
+  ceiling. The agent had no instructions to tell it what to wait for (see the entry above).
+- **Resolution:** pending the owner (approve or reject the release).
+- **Autonomous handling:** the merge leg confirms its own delivery (the merge commit's deploy)
+  and never waits on a job gated on a person. A leg with no activity on its leg page for a set
+  time is released with a hand-off. *No ticket yet.*
+
+## 2026-11-17 20:09 — S-BTN-229 failed main's deploy again
+
+- **Host:** GitHub Actions
+- **Tickets:** none (main at 61633c8, #274)
+- **Why it was needed:** this is the third occurrence of *a flaky test failed the production
+  deploy* (2026-11-17 ≈10:45). The same runner-half test timed out at 120 s in `baton-deploy`
+  on a commit that changes only docs.
+- **Resolution:** none needed. Production already runs c9343a3's code (deploy success), and
+  61633c8 changes only docs. Main's deploy status stays red until the next push.
+- **Autonomous handling:** as in the first entry. *No ticket yet.* Three occurrences in one day
+  are reason to file one.

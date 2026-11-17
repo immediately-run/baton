@@ -326,3 +326,17 @@ log `no-eligible-ticket` (B-244).
   `test-course` does not compare the copy with its source, so only a failing sync says so.** What
   changed: #255 was reverted. *Still true: a change to a sourced course passes `test-course` and
   fails only at the sync.*
+
+## 2026-11-17 — joinable legs lost their instructions to the server's environment
+
+Since the leg pages went live (fieldhouse #30, FLDH-57), a leg's agent runs inside the
+sandbox's `opencode serve`, which `start()` launches with the brief's env alone. The per-leg
+`BATON_INSTRUCTIONS`, `BATON_COURSE`, `BATON_LEG`, `BATON_TICKET_FILE` and `BATON_ANSWER` reach
+only the `opencode run` client, so the agent's shell never sees them. The B-171 review and the
+B-193 merge sessions show the agent finding them empty and guessing its leg. B-52 (#272) and
+B-193 (#235) merged this way.
+
+- **When an agent runs inside a server, the server's environment is the agent's environment;
+  the client's env does not travel with the prompt.** What changed: recorded in
+  [interventions](interventions.mdx) (2026-11-17 20:18). *Still true until the executor starts
+  the server with the leg's env.*
