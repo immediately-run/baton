@@ -151,6 +151,10 @@ export interface Heartbeat {
   /** R-BTN-90 (B-188): `leg_finished` by claim — a run's seq is numbered within its claim, so a
    *  runner holding several names which. Malformed entries are skipped, never a refused beat. */
   legs_finished: { claim_id: number; seq: number }[];
+  /** B-253 (R-BTN-72): the runner's own statement about itself — its `cli` key names the CLI's
+   *  pinning. Opaque to Baton beyond its size: shape-checked here, stored as received, and
+   *  gated on by nothing. */
+  profile?: Record<string, unknown>;
 }
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number; claim_id?: number }
@@ -219,6 +223,15 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     .filter((e): e is { claim_id: number; url: string } => isObj(e) && isInt((e as Record<string, unknown>).claim_id)
       && typeof (e as Record<string, unknown>).url === 'string' && ((e as Record<string, unknown>).url as string).length <= 4096)
     .map((e) => ({ claim_id: e.claim_id, url: e.url }));
+  // B-253 (R-BTN-72): the profile is the runner's own statement, opaque — bounded only, so a
+  // hostile megabyte stays out of the row it is stored in. The pinning it reports is never a
+  // refusal: an unpinned runner is warned about, not stopped.
+  let profile: Record<string, unknown> | undefined;
+  if (b.profile !== undefined) {
+    if (!isObj(b.profile)) bad('profile', 'must be a JSON object');
+    else if (JSON.stringify(b.profile).length > 4096) bad('profile', 'must serialize to at most 4096 characters');
+    else profile = b.profile;
+  }
   return {
     hostname,
     session_name,
@@ -248,6 +261,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
       .filter((e): e is { claim_id: number; seq: number } => isObj(e) && isInt((e as Record<string, unknown>).claim_id)
         && isInt((e as Record<string, unknown>).seq) && ((e as Record<string, unknown>).seq as number) > 0)
       .map((e) => ({ claim_id: e.claim_id, seq: e.seq })),
+    profile,
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),

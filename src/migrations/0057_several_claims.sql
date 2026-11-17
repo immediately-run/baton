@@ -1,4 +1,4 @@
--- 0056_several_claims.sql — B-188 (BATON_SPEC R-BTN-4): a runner holds several claims at once.
+-- 0057_several_claims.sql — B-188 (BATON_SPEC R-BTN-4): a runner holds several claims at once.
 -- One active claim per ticket stays a unique index (0005's `one_active_claim_per_ticket`); the
 -- per-runner bound — the lower of the runner's declared `concurrency` and its grant's
 -- `max_claims` — is checked in the claim's own transaction, so 0001's per-worker unique index

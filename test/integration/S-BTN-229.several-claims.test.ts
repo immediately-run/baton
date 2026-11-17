@@ -1,4 +1,4 @@
-// S-BTN-228 several claims per runner (B-188), the server half: R-BTN-4's bound — the lower of the
+// S-BTN-229 several claims per runner (B-188), the server half: R-BTN-4's bound — the lower of the
 // runner's declared `concurrency` and its grant's `max_claims` — the heartbeat's `claims`, its
 // claim-named `session_urls`, `legs_finished` and `fenced` list, and per-claim reaps and fences.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
@@ -28,7 +28,7 @@ async function grant(workerId: number, maxClaims: number) {
               ON CONFLICT (credential_id, repository_id) DO UPDATE SET max_claims = excluded.max_claims`, credential_id, JSON.stringify(caps), maxClaims);
 }
 
-describe('S-BTN-228: a runner holds several claims, up to R-BTN-4\'s bound', () => {
+describe('S-BTN-229: a runner holds several claims, up to R-BTN-4\'s bound', () => {
   it('the lower of concurrency and the grant\'s max_claims; the heartbeat answers every claim; raising the grant admits one more', async () => {
     const a = await register('vm-a', { concurrency: 3, capabilities: CAPS });
     expect(await rows('SELECT concurrency FROM workers WHERE id = ?', a.id)).toEqual([{ concurrency: 3 }]);

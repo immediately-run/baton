@@ -15,6 +15,7 @@ import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { BatonApi, envAuth } from './api';
 import { HARNESS_AGENTS, type Harness } from './harness';
 import { holdHome, legNeeds, readHead } from './home';
+import { cliPinLines, cliProfile, readCliPin } from './cliPin';
 import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 import { Runner, stampLine, withTimestamps } from './runner';
 import { loadExecutor } from './executor';
@@ -342,6 +343,12 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // stub prefers them, and BATON_AGENT_COMMAND only ever fills an absence).
   const agentCommand = named === '' && !a.testHarness ? HARNESS_AGENTS[a.harness] : undefined;
   if (agentCommand) say(`baton: .baton/baton.json names no agent_command — the legs will run the ${a.harness} command (--harness); \`baton repo init --agent ${a.harness}\` names it in the settings`);
+  // B-253 (R-BTN-72): the CLI says what its own code is — its commit, and whether a push moves
+  // it — before any credential is read, so an operator starting a runner whose key is missing
+  // still learns the code is unpinned. The same statement rides every heartbeat as
+  // `profile.cli`: reported, never a refusal.
+  const cli = readCliPin(fileURLToPath(import.meta.url));
+  for (const line of cliPinLines(cli)) say(line);
   const auth = envAuth(process.env, (material) => {
     const file = join(cacheDir(), 'key');
     const text = `${material.replace(/\r\n/g, '\n').trim()}\n`;
@@ -440,6 +447,9 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     courses,
+    // B-253 (R-BTN-72): the runner's own statement about its CLI — the start line's subject,
+    // carried on every heartbeat as `profile.cli`.
+    profile: cliProfile(cli),
     // B-106 (R-BTN-178): one machine's singleton — the lock files this runner was configured
     // with, empty when none.
     ...(Object.keys(a.locks).length ? { locks: a.locks } : {}),

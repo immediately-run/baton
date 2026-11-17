@@ -97,6 +97,10 @@ export interface RunnerOptions {
    *  taken before a claim for, or the advance into, a leg requiring it and held until the claim
    *  ends or a leg not requiring it starts. Absent, no lock governs anything. */
   locks?: Record<string, string>;
+  /** B-253 (R-BTN-72): the runner's own opaque statement, carried on every heartbeat as
+   *  `profile` — `baton run` puts its CLI's pinning under `cli`. Absent (a caller that is not
+   *  the CLI), the heartbeat sends none. */
+  profile?: Record<string, unknown>;
   /** B-134: one read of the home checkout's remote refs — the runner's evidence for its leg-end
    *  scope audit. The default reads it with the runner's bounded git; a test replaces it. A read
    *  that fails skips the audit (logged), never the leg. */
@@ -697,6 +701,9 @@ export class Runner {
     const body: Record<string, unknown> = {
       hostname: this.o.hostname, session_name: this.o.session, harness: this.o.harness, kind: 'vm',
       capabilities: declaring, tier_ceiling: this.o.tierCeiling ?? 'critical',
+      // B-253 (R-BTN-72): the runner's own statement about itself, opaque — the CLI's pinning
+      // under `cli`, on every beat.
+      ...(this.o.profile ? { profile: this.o.profile } : {}),
       ...(this.o.testHarness ? { test_harness: true } : {}),
       lease_timeout_s: s.lease_timeout_s ?? 900,
       // R-BTN-4 (B-188): how many claims this runner holds at once.

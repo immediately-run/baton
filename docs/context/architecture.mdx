@@ -97,13 +97,15 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
   [`docs/review/parallel-collaboration-2026-10-22.mdx`](../review/parallel-collaboration-2026-10-22.mdx).
 - **Several dozen parallel workers** — humans and agents — are the load the architecture
   is for, provided they work separate tickets.
-- **Parallelism is horizontal: more runners, not bigger runners.** A runner works one
-  leg at a time by design, and scale comes from many concurrent legs, wherever the deployment
-  runs them. Where runners are placed, how they are packed onto machines and how a leg is kept
+- **Parallelism is horizontal: many legs, each in its own session.** A runner may hold several
+  claims, each running its ticket's legs one at a time in an executor session of its own and a
+  checkout of its own, up to the lower of what it declares and what its grant allows (BATON_SPEC
+  [R-BTN-4](../../spec/BATON_SPEC/09-claims.md#sec-9-1)); one ticket is never worked twice at once.
+  Scale comes from many concurrent legs, wherever the deployment runs them. Where runners are placed, how they are packed onto machines and how a leg is kept
   apart from its runner are the deployment's (Fieldhouse's, FLDH-52): a runner hands each leg to
   the executor its host chose, and Baton records what the runner declares and prescribes no
-  placement (BATON_SPEC [R-BTN-107](../../spec/BATON_SPEC/08-runners.md#sec-8-3)). A single
-  process multiplexing legs is a possible later evolution, not the plan.
+  placement (BATON_SPEC [R-BTN-107](../../spec/BATON_SPEC/08-runners.md#sec-8-3)). A runner is
+  one identity per process: there are no lanes, several identities inside one process.
 
 ## Where code lives
 
