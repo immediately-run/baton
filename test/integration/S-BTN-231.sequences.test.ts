@@ -1,4 +1,4 @@
-// S-BTN-222 Baton hands out the identifiers (BATON_SPEC §15 S-BTN-222, §4.3 R-BTN-195; B-176):
+// S-BTN-231 Baton hands out the identifiers (BATON_SPEC §15 S-BTN-231, §4.3 R-BTN-198; B-176):
 // every id a concurrent branch writes to git — a ticket id from any filer, a rule, scenario,
 // gate or migration number — is one Baton's per-repository, per-kind sequence hands out, and
 // `baton tickets new` files through a PR on `baton-ticket/<id>` by default. Must hold: two
@@ -19,8 +19,9 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { call as hostCall, HOST } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
+import { nextMain } from '../../src/defaults/sequences';
 import { ticketsMain } from '../../src/defaults/tickets';
-import { keyCall, ORIGIN, rows, setAdminKeys, setClock, syncToken, withCore } from '../helpers';
+import { keyCall, makeApiKey, ORIGIN, rows, setAdminKeys, setClock, syncToken, TOKENS, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-13T12:00:00Z');
@@ -65,7 +66,7 @@ beforeEach(async () => {
   expect(await withCore((c) => c.registry.addSyncKey('ops', syncKey.publicKey, 'sync', 'admin:test', []))).toBeTruthy();
 });
 
-describe('S-BTN-222 Baton hands out the identifiers (B-176)', () => {
+describe('S-BTN-231 Baton hands out the identifiers (B-176)', () => {
   it('two filers racing get distinct ids; a floor seeds a fresh Baton above what git holds, and a number is never reissued', async () => {
     // A fresh Baton, seeded by the floor the filer read from git: the first number is above it.
     expect(await take(opsOwner, 'ops', 'ticket-b', { floor: 5 })).toMatchObject({ status: 200, json: { kind: 'ticket-b', number: 6 } });
@@ -132,6 +133,52 @@ describe('S-BTN-222 Baton hands out the identifiers (B-176)', () => {
     // An unknown field is refused; `for` is a local ticket id.
     expect(await take(opsOwner, 'ops', 'rule', { number: 9 })).toMatchObject({ status: 400, json: { code: 'invalid-params' } });
     expect(await take(opsOwner, 'ops', 'rule', { for: 'not an id' })).toMatchObject({ status: 400, json: { code: 'invalid-params' } });
+  });
+
+  it('a worker bearer token takes a number only where R-BTN-58 grants it — the bearer path checks the grant as the signed one does', async () => {
+    // The transition's live-worker bearer (front.ts's verifyWorker): no signature, no API key,
+    // the credential the token hashes name. Round 1, finding 1: this take was 200 whatever
+    // the grants said, and its event logged a bare `runner` naming no caller.
+    const bearerTake = () => hostCall(new Request(`${ORIGIN}/v1/repositories/ops/sequences/ticket-b/next`, {
+      method: 'POST', headers: { Authorization: `Bearer ${TOKENS['vm-a']}`, 'Content-Type': 'application/json' }, body: '{}',
+    }));
+    const refused = await bearerTake();
+    expect(refused.status).toBe(403);
+    expect(await (refused.json() as Promise<Record<string, any>>)).toMatchObject({ code: 'forbidden' });
+    expect(await rows('SELECT 1 FROM sequences')).toEqual([]);
+    expect(await rows(`SELECT 1 FROM events WHERE kind = 'sequence'`)).toEqual([]);
+    // A delegated bearer — an API key the owner granted on the repository (R-BTN-159; B-124's
+    // MCP keys will ride the same rule once they exist) — takes a number: a number is not
+    // authority, and issuing one more than needed only leaves a gap.
+    const delegated = await makeApiKey('delegated');
+    expect((await keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: delegated.line, hostname: 'delegated-host', capabilities: ['agent-venue'] })).status).toBe(200);
+    const took = await hostCall(new Request(`${ORIGIN}/v1/repositories/ops/sequences/ticket-b/next`, {
+      method: 'POST', headers: { Authorization: `Bearer ${delegated.key}`, 'Content-Type': 'application/json' }, body: '{}',
+    }));
+    expect(took.status).toBe(200);
+    expect(await (took.json() as Promise<Record<string, any>>)).toMatchObject({ kind: 'ticket-b', number: 1 });
+    const events = await rows<{ actor: string; detail: string }>(`SELECT actor, detail_json AS detail FROM events WHERE kind = 'sequence'`);
+    expect(events).toEqual([{ actor: `runner:${delegated.fingerprint}`, detail: JSON.stringify({ kind: 'ticket-b', number: 1 }) }]);
+  });
+
+  it('a body that is not JSON is refused, and a refused floor leaves its trace in the log', async () => {
+    // An empty body legitimately carries neither field; garbage is the caller's error, never
+    // "no floor, no for" that still takes a number (round 1, nit 2).
+    const delegated = await makeApiKey('garbage');
+    expect((await keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: delegated.line, hostname: 'garbage-host', capabilities: ['agent-venue'] })).status).toBe(200);
+    const raw = (body: string) => hostCall(new Request(`${ORIGIN}/v1/repositories/ops/sequences/rule/next`, {
+      method: 'POST', headers: { Authorization: `Bearer ${delegated.key}`, 'Content-Type': 'application/json' }, body,
+    }));
+    expect((await raw('')).status).toBe(200);
+    expect((await raw('not json at all')).status).toBe(400);
+    expect(await rows('SELECT last_number FROM sequences WHERE kind = ?', 'rule')).toEqual([{ last_number: 1 }]);
+    // The refused floor is logged — refused, with no number — and nothing was issued (round 1,
+    // should-fix 2).
+    const cap = await take(opsOwner, 'ops', 'rule', { floor: 1 + 10_001 });
+    expect(cap).toMatchObject({ status: 400, json: { code: 'invalid-params' } });
+    expect(await rows<{ detail: string }>(`SELECT detail_json AS detail FROM events WHERE kind = 'sequence' ORDER BY seq`))
+      .toEqual([{ detail: JSON.stringify({ kind: 'rule', number: 1 }) }, { detail: JSON.stringify({ kind: 'rule', floor: 10_002, refused: 'floor-cap' }) }]);
+    expect(await rows('SELECT last_number FROM sequences WHERE kind = ?', 'rule')).toEqual([{ last_number: 1 }]);
   });
 
   it('each take is an event naming the caller and, when given, the ticket it is for', async () => {
@@ -222,7 +269,7 @@ afterEach(() => {
   rmSync(repo.bare, { recursive: true, force: true });
 });
 
-describe('S-BTN-222 the CLI half: new asks Baton first and files through a PR (B-176)', () => {
+describe('S-BTN-231 the CLI half: new asks Baton first and files through a PR (B-176)', () => {
   it.runIf(HOST === 'local')('new takes its id from the sequence and files the ticket alone on baton-ticket/<id>; the ticket boards only when the branch merges', async () => {
     if (repo === null) return;
     expect(await initMain(['--course', 'create-pr'], { root: repo.dir, log: () => {} })).toBe(0);
@@ -260,6 +307,41 @@ describe('S-BTN-222 the CLI half: new asks Baton first and files through a PR (B
     await later();
     await repo.sync();
     expect(await rows('SELECT id, course_id FROM tickets WHERE id = ?', 'ops:B-1')).toEqual([{ id: 'ops:B-1', course_id: 'create-pr' }]);
+  }, 120_000);
+
+  it.runIf(HOST === 'local')('baton tickets next takes its number from the real core, with the floor this checkout sees', async () => {
+    if (repo === null) return;
+    expect(await initMain(['--course', 'create-pr'], { root: repo.dir, log: () => {} })).toBe(0);
+    const settings = JSON.parse(execFileSync('cat', [join(repo.dir, '.baton', 'baton.json')], { encoding: 'utf8' })) as Record<string, unknown>;
+    settings.repos = { ops: repo.bare };
+    writeFileSync(join(repo.dir, '.baton', 'baton.json'), `${JSON.stringify(settings, null, 2)}\n`);
+    mkdirSync(join(repo.dir, 'tickets', 'projects'), { recursive: true });
+    writeFileSync(join(repo.dir, 'tickets', 'projects', 'baton.mdx'), '---\ntitle: baton\nid: baton\nstatus: active\nkind: project\ntags:\n  - project\ndescription: the project\n---\n\nProse.\n');
+    repo.publish();
+    // A peer's filing branch holds B-3: the floor reads it (the unit half walks the kinds; this
+    // walk is the CLI against the real core).
+    execFileSync('git', ['-C', repo.dir, 'checkout', '-q', '-b', 'peer'], { stdio: 'ignore' });
+    writeFileSync(join(repo.dir, 'tickets', 'B-3.mdx'), '---\ntitle: "B-3 — t"\nid: B-3\nstatus: available\ntags: [roadmap-item]\n---\n\nBody.\n');
+    execFileSync('git', ['-C', repo.dir, 'add', '-A'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', repo.dir, 'commit', '-qm', 'peer files B-3'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', repo.dir, 'push', '-q', 'origin', 'HEAD:refs/heads/baton-ticket/B-3'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', repo.dir, 'checkout', '-q', 'main'], { stdio: 'ignore' });
+
+    await setClock(Date.now());
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await nextMain(['ticket', '-i', keyFile, '--url', ORIGIN], {
+      root: repo.dir, log: (l) => out.push(l), warn: (l) => err.push(l), fetchImpl: (input, init) => hostCall(new Request(input, init)),
+    });
+    expect(code).toBe(0);
+    expect(err).toEqual([]);
+    // The floor saw the open branch's B-3; Baton's answer is above it.
+    expect(out).toEqual(["✓ ticket-b: B-4 (Baton's sequence, floor 3)"]);
+    expect(await rows('SELECT repository_id, kind, last_number FROM sequences')).toEqual([{ repository_id: 'ops', kind: 'ticket-b', last_number: 4 }]);
+    const events = await rows<{ actor: string; detail: string }>(`SELECT actor, detail_json AS detail FROM events WHERE kind = 'sequence'`);
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0].detail)).toEqual({ kind: 'ticket-b', number: 4, floor: 3 });
+    expect(events[0].actor).toMatch(/^owner:/);
   }, 120_000);
 
   it.runIf(HOST === 'local')('two concurrent baton tickets new runs against one Baton file two distinct ids', async () => {

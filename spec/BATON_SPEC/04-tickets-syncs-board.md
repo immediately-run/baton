@@ -212,9 +212,9 @@ live solely in Baton, and both are exportable (R-BTN-88).
   - **The ticket commands** (B-112, R-BTN-127): `baton ticket new | claim | set | done`, whose behaviour is
     the git-lock commands docs' `claim.sh` and the repositories' `scripts/ticket.mjs` had, kept
     once in the CLI. `claim`, `set` and `done`'s push-retry as the mutex is legacy, to be
-    retired (R-BTN-193); `new` itself stays, its id now Baton's to give (R-BTN-195) and its
+    retired (R-BTN-193); `new` itself stays, its id now Baton's to give (R-BTN-198) and its
     landing a PR by default; `baton ticket next <kind> [--for <ticket>]` stands beside them
-    (R-BTN-195). `claim`, `set` and `done` are each one commit pushed straight to the default branch from a throwaway
+    (R-BTN-198). `claim`, `set` and `done` are each one commit pushed straight to the default branch from a throwaway
     worktree at the freshly fetched head (`--branch`, else the checkout's `origin/HEAD`, else
     `main`), so the caller's branch, HEAD and working tree are never written; a push refused
     because the branch moved is fetched again and retried, up to six tries, and a refusal for any
@@ -222,7 +222,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
     - `new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y] [--tier T]
       [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]
       [--direct] [-i KEY] [--url URL] [--offline]` takes `<prefix>-<n>` from the repository's
-      `ticket-<prefix>` sequence (R-BTN-195) — the number unique before any push — and with no
+      `ticket-<prefix>` sequence (R-BTN-198) — the number unique before any push — and with no
       key, no configured Baton, an unreachable Baton or `--offline`, the next free `<prefix>-<n>`
       on the head it files on (across the items folder at any depth, `archive/` included, among
       files whose frontmatter carries an `id`), said in the output, the sync's duplicate-id
@@ -479,7 +479,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
       `path` (B-183): a tracker that renumbers its issues keeps the key, and Baton reads the
       move; a path was the git source's key all along.
 
-- **R-BTN-195 (Baton hands out every identifier that concurrent branches write to git).** A
+- **R-BTN-198 (Baton hands out every identifier that concurrent branches write to git).** A
   number that must be unique across concurrent branches is one Baton hands out (R-BTN-193): a
   per-repository, per-kind sequence, the observation counter's shape (R-BTN-62) for identifiers.
   One route serves them all: `POST /v1/repositories/{repository}/sequences/{kind}/next` →
@@ -493,9 +493,12 @@ live solely in Baton, and both are exportable (R-BTN-88).
   `max(stored, floor) + 1`: the caller's `floor` is the highest number it sees in git — the
   default branch and every open branch's head, the one scan left (R-BTN-131: the CLI's floor
   computation is its single reader of git for numbers) — so a lost or fresh Baton never issues a
-  number git holds (value 1: lost state fails closed). A floor more than 10 000 above the stored
-  number is refused `invalid-params`: gaps are harmless, and a bigger floor only burns numbers.
-  `for` names the ticket a number is for, recorded and never trusted. Each take is one
+  number git holds (value 1: lost state fails closed). A remote the floor cannot read is an
+  error, never a floor of 0: "cannot see git" is not "git holds nothing", and no number is
+  printed or filed. A floor more than 10 000 above the stored
+  number is refused `invalid-params`, and the refusal is logged as a `sequence` event of its
+  own — the kind, the floor, and no number: gaps are harmless, and a bigger floor only burns
+  numbers. `for` names the ticket a number is for, recorded and never trusted. Each take is one
   `sequence` event naming the caller, the kind, the number and the floor (§13.4 `sequences`).
   - **What git still is.** The identifiers themselves are git's (R-BTN-1): the CLI writes the
     number into git and never reads it back from Baton as the record of the work. A number a

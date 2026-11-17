@@ -48,9 +48,15 @@ DROP INDEX IF EXISTS events_by_ticket;
 DROP INDEX IF EXISTS events_by_claim;
 DROP INDEX IF EXISTS events_by_repository;
 DROP INDEX IF EXISTS events_discrepancies;
+DROP INDEX IF EXISTS events_by_kind_at;
+DROP INDEX IF EXISTS events_unsigned_control;
 DROP TABLE events;
-ALTER TABLE events_0048 RENAME TO events;
+ALTER TABLE events_0059 RENAME TO events;
 CREATE INDEX events_by_ticket ON events(ticket_id, kind, seq);
 CREATE INDEX events_by_claim ON events(claim_id, kind, seq);
 CREATE INDEX events_by_repository ON events(repository_id, seq);
 CREATE INDEX events_discrepancies ON events(at) WHERE kind = 'discrepancy';
+-- 0049's indexes restored beside the classic four, as its own file could not (the events table
+-- had not been rebuilt since): the lookups they serve (B-235) keep their windows.
+CREATE INDEX events_by_kind_at ON events(kind, at);
+CREATE INDEX events_unsigned_control ON events(at) WHERE kind = 'unsigned-control';

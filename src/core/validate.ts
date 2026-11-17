@@ -750,11 +750,11 @@ export interface RunInputs {
 const INPUT_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 /** B-183 (§4.2): a ticket version, 1–128 characters of the source's own opaque string. */
 export const TICKET_VERSION = /^[A-Za-z0-9._:+/=-]{1,128}$/;
-/** B-176 (§4.3 R-BTN-195): a sequence kind — opaque to core (value 3); the CLI names kinds
+/** B-176 (§4.3 R-BTN-198): a sequence kind — opaque to core (value 3); the CLI names kinds
  *  (`ticket-b`, `rule`, `scenario`, `gate`, `migration`). */
 export const SEQUENCE_KIND = /^[a-z][a-z0-9-]{0,31}$/;
 
-/** B-176 (§4.3 R-BTN-195): what `POST …/sequences/{kind}/next` carries — a `floor`, the highest
+/** B-176 (§4.3 R-BTN-198): what `POST …/sequences/{kind}/next` carries — a `floor`, the highest
  *  number the caller sees in git, and `for`, a ticket the number is for. `for` is recorded,
  *  never trusted: it names a ticket for the event, and decides nothing. */
 export interface SequenceTake {

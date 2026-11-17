@@ -1,5 +1,5 @@
-// sequences.test.ts — the CLI's half of Baton's identifier sequences (B-176, R-BTN-195, §4.6;
-// S-BTN-222's unit half): the floor each kind's number is seeded by — the highest number on the
+// sequences.test.ts — the CLI's half of Baton's identifier sequences (B-176, R-BTN-198, §4.6;
+// S-BTN-231's unit half): the floor each kind's number is seeded by — the highest number on the
 // default branch and every open branch's head, so a fresh Baton never reissues a number git holds
 // — the fallback that says itself (no key, no answer, --offline), `new`'s PR-first landing with
 // the forge asked through `gh`, `--direct`'s protected-refusal fallback, and R-BTN-190's reserved
@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { floorFor, nextMain, parseKind, printOf } from '../../src/defaults/sequences';
-import { ticketsMain } from '../../src/defaults/tickets';
+import { protectedPush, ticketsMain } from '../../src/defaults/tickets';
 import { checkRegistry } from '../../src/core/courses';
 
 const git = (root: string, ...a: string[]): string =>
@@ -111,6 +111,16 @@ describe('the floor: the highest number the default branch and every open branch
     expect(floorFor(withArchive, 'origin', parseKind('ticket-R3', withArchive))).toBe(40);
   });
 
+  it('a remote that cannot be read has no floor — "cannot see git" is never read as "git holds nothing" (value 1)', () => {
+    // A checkout whose origin nothing serves, holding numbers git would count: the floor is
+    // refused, not 0 — a fresh Baton seeded by 0 would answer below every number git holds
+    // (round 1, should-fix 1), and the scan has nothing to count either.
+    const dir = repo({ 'tickets/B-200.mdx': ticket('B-200'), 'src/migrations/0047_x.sql': '-- 47\n' });
+    git(dir, 'remote', 'set-url', 'origin', join(mkdtempSync(join(tmpdir(), 'baton-seq-dead-')), 'nothing'));
+    expect(() => floorFor(dir, 'origin', parseKind('ticket', dir))).toThrow(/cannot read origin's branches/);
+    expect(() => floorFor(dir, 'origin', parseKind('migration', dir))).toThrow(/cannot read origin's branches/);
+  });
+
   it('a migration number and a rule id on an open branch\'s head only raise their kinds\' floors', () => {
     const dir = repo({
       'src/migrations/0047_x.sql': '-- 47\n',
@@ -118,14 +128,14 @@ describe('the floor: the highest number the default branch and every open branch
     });
     git(dir, 'checkout', '-q', '-b', 'claude/B-110-next');
     writeFileSync(join(dir, 'src', 'migrations', '0048_y.sql'), '-- 48\n');
-    writeFileSync(join(dir, 'spec', 'BATON_SPEC', '13-data-model.md'), '- **R-BTN-195 (sequences).** S-BTN-222 … G-BTN-3\n');
+    writeFileSync(join(dir, 'spec', 'BATON_SPEC', '13-data-model.md'), '- **R-BTN-198 (sequences).** S-BTN-231 … G-BTN-3\n');
     git(dir, 'add', '-A');
-    git(dir, 'commit', '-qm', 'peer takes 0048 and R-BTN-195');
+    git(dir, 'commit', '-qm', 'peer takes 0048 and R-BTN-198');
     git(dir, 'push', '-q', 'origin', 'HEAD:refs/heads/claude/B-110-next');
     git(dir, 'checkout', '-q', 'main');
     expect(floorFor(dir, 'origin', parseKind('migration', dir))).toBe(48);
-    expect(floorFor(dir, 'origin', parseKind('rule', dir))).toBe(195);
-    expect(floorFor(dir, 'origin', parseKind('scenario', dir))).toBe(222);
+    expect(floorFor(dir, 'origin', parseKind('rule', dir))).toBe(198);
+    expect(floorFor(dir, 'origin', parseKind('scenario', dir))).toBe(231);
     expect(floorFor(dir, 'origin', parseKind('gate', dir))).toBe(3);
     // The printed forms: the migrations' four digits, the spec ids' own prefixes.
     expect(printOf(parseKind('migration', dir), 49)).toBe('0049');
@@ -307,18 +317,78 @@ describe('baton tickets new: the PR-first landing and --direct (B-176)', () => {
     expect(again.code).toBe(2);
     expect(again.err.join('\n')).toMatch(/B-4: the filing branch baton-ticket\/B-4 was refused: .*the branch exists, so the scanned id is taken/);
   });
+
+  it('a refused filing-branch push is named for the id\'s source and the refusal\'s own shape — never one wrong instruction', async () => {
+    const dir = repo({ 'tickets/B-3.mdx': ticket('B-3') });
+    const baton = await standIn();
+    try {
+      // An id from Baton that collides with a branch already on the remote: a leftover filing
+      // branch, or a reissue after lost state — not "the scanned id is taken" (round 1,
+      // should-fix 4). The leftover holds no ticket itself, so the floor still reads 3 and
+      // Baton's id is B-4.
+      git(dir, 'checkout', '-q', '-b', 'leftover');
+      writeFileSync(join(dir, 'README.md'), 'a leftover filing branch\n');
+      git(dir, 'add', '-A');
+      git(dir, 'commit', '-qm', 'a leftover filing branch');
+      git(dir, 'push', '-q', 'origin', 'HEAD:refs/heads/baton-ticket/B-4');
+      git(dir, 'checkout', '-q', 'main');
+      const leftover = await run(dir, { url: baton.url, identity: keyFile() }, '--title', 'Fourth', '--project', 'baton');
+      expect(leftover.code).toBe(2);
+      expect(leftover.err.join('\n')).toMatch(/B-4: the filing branch baton-ticket\/B-4 was refused: .*the branch exists, and Baton gave this id: a leftover filing branch/);
+      // A refusal that is not the branch's existence — a hook's — is git's own words, never a
+      // collision claim: no instruction to take the next id from a refusal that says nothing
+      // about the id.
+      const bare = bareOf(dir);
+      mkdirSync(join(bare, 'hooks'), { recursive: true });
+      writeFileSync(join(bare, 'hooks', 'pre-receive'), [
+        '#!/bin/sh',
+        'while read old new ref; do',
+        '  case "$ref" in refs/heads/baton-ticket/*) echo "error: the baton-ticket namespace is frozen" >&2; exit 1;; esac',
+        'done',
+        '',
+      ].join('\n'));
+      execFileSync('chmod', ['+x', join(bare, 'hooks', 'pre-receive')], { stdio: 'ignore' });
+      const frozen = await run(dir, { url: baton.url, identity: keyFile() }, '--title', 'Fifth', '--project', 'baton');
+      expect(frozen.code).toBe(2);
+      const said = frozen.err.join('\n');
+      expect(said).toMatch(/B-5: the filing branch baton-ticket\/B-5 was refused:/);
+      expect(said).toMatch(/the baton-ticket namespace is frozen/);
+      expect(said).toMatch(/— nothing was pushed/);
+      expect(said).not.toMatch(/the scanned id is taken|Baton gave this id/);
+    } finally {
+      baton.close();
+    }
+  });
 });
 
 describe('R-BTN-190: no branch_pattern matches the reserved namespaces (B-176)', () => {
   const entry = (branch_pattern: string): unknown => ({
     id: 'c', version: 1, min_worker_version: 1, skill: 'next-ticket', step_kinds: ['implement'], course: {}, branch_pattern,
   });
-  it('a pattern matching baton-ticket/*, baton-request/* or baton-legs/* is refused', () => {
+  it('a pattern matching baton-ticket/*, baton-request/* or baton-legs/* is refused — the exact shape too', () => {
     expect(() => checkRegistry([entry('baton-ticket/{ticket}-*')])).toThrow(/branch_pattern: must not match the reserved namespace baton-ticket\//);
+    // The exact-collision pattern `baton-ticket/{ticket}` — the shape `new` itself pushes
+    // (`baton-ticket/<id>`): the probe is that shape (round 1, finding 2).
+    expect(() => checkRegistry([entry('baton-ticket/{ticket}')])).toThrow(/branch_pattern: must not match the reserved namespace baton-ticket\//);
     expect(() => checkRegistry([entry('baton-request/{ticket}')])).toThrow(/reserved namespace baton-request/);
     expect(() => checkRegistry([entry('baton-legs/{ticket}-*')])).toThrow(/reserved namespace baton-legs/);
     // A pattern that cannot reach a reserved namespace stands.
     expect(checkRegistry([entry('claude/{ticket}-*')])).toHaveLength(1);
     expect(checkRegistry([entry('ticket/{ticket}-*')])).toHaveLength(1);
+  });
+});
+
+describe('the forge\'s protected-refusal words (R-BTN-74: a GH013 naming a pull-request or update rule, never secret push protection)', () => {
+  it('GH006 and the protected-branch words are protected; a GH013 is, only while its words name the rule', () => {
+    expect(protectedPush('error: GH006: Protected branch update failed for refs/heads/main.')).toBe(true);
+    expect(protectedPush('remote: Not allowed to push to protected branch')).toBe(true);
+    expect(protectedPush('remote: not allowed to push code to protected branches')).toBe(true);
+    // A ruleset refusal naming its rule — the refusals whose other landing is a PR.
+    expect(protectedPush('remote: GH013: Error: ruleset violations found: "Require a pull request before merging"')).toBe(true);
+    expect(protectedPush('remote: GH013: Error: cannot update a protected ref: the update rule requires review')).toBe(true);
+    // GitHub's secret push protection answers GH013 too: its refusal is not a protected
+    // branch's — the same content would be refused on the PR branch (§5.8).
+    expect(protectedPush('remote: GH013: Secret push protection: a secret was detected in this push')).toBe(false);
+    expect(protectedPush('remote: GH013: push protection has blocked this push: remove the secret')).toBe(false);
   });
 });

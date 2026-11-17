@@ -33,7 +33,7 @@ is stale. Never edit it by hand.
 | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) | **4. Tickets, syncs and the board** | — |
 | | 4.1 The `.baton/` folder and the registry | R-BTN-51, R-BTN-48 |
 | | 4.2 What a sync runs | R-BTN-74 |
-| | 4.3 The sync run and the head | R-BTN-62, R-BTN-150, R-BTN-11, R-BTN-147, R-BTN-195 |
+| | 4.3 The sync run and the head | R-BTN-62, R-BTN-150, R-BTN-11, R-BTN-147, R-BTN-198 |
 | | 4.4 The board post | R-BTN-194 |
 | | 4.5 Reading the ticket | R-BTN-5, R-BTN-34 |
 | | 4.6 Children | R-BTN-86 |
@@ -485,6 +485,14 @@ is stale. Never edit it by hand.
 | S-BTN-219 | require_signed_control (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-220 | ticket provenance (B-126) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-221 | the screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-222 | an interaction request | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-223 | a leg's capability request is confirmed by the runner | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-224 | a runner's readings of an account | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-225 | the home in force (B-121) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-226 | a pathless ticket's file for its legs (B-252) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-227 | the client versions Baton serves (B-254) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-228 | the runner says when its CLI is not a pinned commit (B-253) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-229 | several claims per runner (B-188) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-230 | the run-tests gate on PRs outside the home (B-255) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-231 | Baton hands out the identifiers (B-176) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 

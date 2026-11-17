@@ -48,7 +48,7 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 
 - **Migration and scenario numbers come from Baton.** `node cli/baton.mjs tickets next migration`
   and `node cli/baton.mjs tickets next scenario` print the next number of each sequence (B-176,
-  R-BTN-195) — take them that way, with `--for <ticket>` naming the ticket the number is for.
+  R-BTN-198) — take them that way, with `--for <ticket>` naming the ticket the number is for.
   With `--offline`, or when Baton does not answer, the command prints the next free number by
   the scan and says so: merge `origin/main` right before merging and, if main took the number,
   renumber the branch's and every reference it added — that fallback is the old race (B-110 and

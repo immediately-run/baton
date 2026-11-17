@@ -36,7 +36,7 @@ description: "BATON_SPEC — 15. Verification: the model, the harness, scenarios
   implementation must establish, proved by the scenarios or tests its row names.
 - **R-BTN-31 (scenarios are part of drafting).** Every ticket that changes Baton's behaviour
   names, under **Tests**, the scenarios it adds or makes pass; a new scenario's number comes
-  from `baton ticket next scenario` (R-BTN-195), taken before the branch names it anywhere. A
+  from `baton ticket next scenario` (R-BTN-198), taken before the branch names it anywhere. A
   session without Baton takes the next free number at merge — the branch merges main before it
   merges, and renumbers if main took the number — the legacy path (R-BTN-193). Either way a row
   lands here in the same change, and the ticket's exit criteria require `npm test` green with

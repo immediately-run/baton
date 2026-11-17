@@ -7,6 +7,7 @@ import { validateCourse, type CourseViolation } from './course';
 import { graphOf, legNeedsOf, personLegsOf, resolveLeg } from './graph';
 import { BatonError } from './http';
 import { FREE_TEXT_MAX } from './text';
+import { branchMatches } from './claims';
 import type { Policies } from './policy';
 import type { Store } from './ports';
 import { COURSE_ID, COURSE_VERSION_MAX, COURSES_MAX } from './validate';
@@ -78,8 +79,6 @@ const bad = (field: string, why: string): never => {
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const int = (v: unknown, lo: number, hi: number) => Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi;
 
-import { branchMatches } from './claims';
-
 /** Stars per branch pattern (spec-silent, recorded on R3-1231): a pattern is a name, not a glob. */
 const PATTERN_STARS_MAX = 4;
 
@@ -88,8 +87,11 @@ const PATTERN_STARS_MAX = 4;
  *  — so no reader of a pattern (a station function, R-BTN-25's continuation, the PR courses'
  *  mapping, the branch-holder query) ever sees them, and no work branch's name collides with
  *  one. Judged by the same wildcard walk the branch-holder query uses, over a branch each
- *  namespace could hold. */
-const RESERVED_NAMESPACES = ['baton-legs/B-1-r2', 'baton-request/B-1', 'baton-ticket/B-1-x'];
+ *  namespace could hold — each probe the exact shape its writer pushes (`baton-ticket/B-1`,
+ *  src/defaults/tickets.ts's `baton-ticket/${id}`) beside its starred reading
+ *  (`baton-ticket/B-1-x`), so the exact-collision pattern `baton-ticket/{ticket}` is refused
+ *  as the starred one is (review round 1, finding 2). */
+const RESERVED_NAMESPACES = ['baton-legs/B-1-r2', 'baton-request/B-1', 'baton-ticket/B-1', 'baton-ticket/B-1-x'];
 
 function pattern(v: unknown, field: string): string {
   if (typeof v !== 'string' || !BRANCH_PATTERN.test(v) || !v.includes('{ticket}')) bad(field, 'must be a branch pattern containing {ticket}');

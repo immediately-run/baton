@@ -63,6 +63,8 @@
     "test/unit/pr-markers.test.ts",
     "test/unit/tickets.test.ts",
     "test/integration/S-BTN-189.ticket-commands.test.ts",
+    "test/integration/S-BTN-231.sequences.test.ts",
+    "test/unit/sequences.test.ts",
     "test/unit/request.test.ts",
     "test/unit/request-round2.test.ts",
     "test/unit/request-round4.test.ts",

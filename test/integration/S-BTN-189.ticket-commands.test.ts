@@ -76,7 +76,7 @@ describe('S-BTN-189 the ticket commands', () => {
 
     // A request-style filing: the flag's dependency, tags and project, and the skeleton. `new`
     // lands through a PR by default (B-176); these are `--direct`, the landing this scenario
-    // has always walked — S-BTN-222 walks the PR one.
+    // has always walked — S-BTN-231 walks the PR one.
     const first = repo.tickets('new', '--direct', '--title', 'First', '--tags', 'EXPEDITE');
     expect(first).toMatchObject({ status: 0 });
     expect(first.stdout).toBe('✓ tickets: file B-1 — First\n');

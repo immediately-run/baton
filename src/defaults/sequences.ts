@@ -1,5 +1,5 @@
 // sequences.ts — the CLI's half of Baton's identifier sequences (B-176, BATON_SPEC §4.3
-// R-BTN-195): the kinds the CLI names (`ticket-b`, `rule`, `scenario`, `gate`, `migration`), the
+// R-BTN-198): the kinds the CLI names (`ticket-b`, `rule`, `scenario`, `gate`, `migration`), the
 // `floor` each kind's is seeded by, and `baton tickets next <kind>`, the command a PR author
 // (and an agent) takes a number from. Baton hands the number out (R-BTN-193: git is never a
 // counter); git keeps the work, and the one thing the CLI still reads git for is the floor — the
@@ -79,15 +79,17 @@ export function parseKind(word: string, root: string): NamedKind {
 }
 
 /** The highest number the `kind`'s identifiers reach across the default branch's and every open
- *  branch's head — the floor a fresh Baton is seeded by (R-BTN-195). A head the checkout cannot
- *  read is skipped, never guessed: a floor too low only risks a number git already holds, and
- *  the backstop catches it at merge. */
+ *  branch's head — the floor a fresh Baton is seeded by (R-BTN-198). A checkout that cannot see
+ *  the remote has no floor and says so (value 1: lost state fails closed — reading "cannot see
+ *  git" as "git holds nothing" would seed a fresh Baton below every number git holds); a head
+ *  the checkout cannot read is skipped, never guessed: a floor too low only risks a number git
+ *  already holds, and the backstop catches it at merge. */
 export function floorFor(root: string, remote: string, k: NamedKind): number {
-  let open: Head[] = [];
+  let open: Head[];
   try {
     open = heads(root, remote);
-  } catch {
-    return 0;
+  } catch (e) {
+    throw new Error(`cannot read ${remote}'s branches (${e instanceof Error ? e.message.split('\n').at(-1) ?? e.message : String(e)}): no floor — the scan has nothing to count either; fix the remote and retry`);
   }
   // One plain fetch of the remote's heads — the same fetch every clone makes, never a
   // by-sha want a server may refuse — then each head read once from the object store,
@@ -137,7 +139,7 @@ export function floorFor(root: string, remote: string, k: NamedKind): number {
   return floor;
 }
 
-/** `POST /v1/repositories/{repository}/sequences/{kind}/next` (R-BTN-195) with the floor this
+/** `POST /v1/repositories/{repository}/sequences/{kind}/next` (R-BTN-198) with the floor this
  *  checkout sees: the next number, Baton's to give. Throws whatever kept Baton from answering —
  *  the caller falls back to the scan and says so. */
 export async function takeNumber(o: {
@@ -189,14 +191,16 @@ export function batonTarget(root: string, io: { url?: string; identity?: string 
 export const fallbackNote = (why: string): string => `id by the next-free scan — Baton did not answer (${why}); the number may collide with a branch's, and the duplicate check at merge is the backstop`;
 
 /**
- * `baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--offline] [--repo DIR]`
- * (B-176, R-BTN-195): the next number of one of the repository's sequences — `rule`, `scenario`,
+ * `baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--remote R] [--offline]`
+ * (B-176, R-BTN-198): the next number of one of the repository's sequences — `rule`, `scenario`,
  * `gate`, `migration`, `ticket[-<prefix>]` — for a PR author (and an agent) to use, taken from
  * Baton with the floor this checkout sees. With `--offline`, or when Baton does not answer, the
  * next free number by the scan is printed with the fallback's note. Exit 0 either way: a number
- * printed with its source named is the command's whole answer.
+ * printed with its source named is the command's whole answer. A remote that cannot be read
+ * throws instead (value 1: no floor means no number worth printing, from Baton or the scan
+ * alike).
  */
-export async function nextMain(argv: string[], io: { root?: string; log?: (line: string) => void; warn?: (line: string) => void; identity?: string; url?: string; offline?: boolean; fetchImpl?: typeof fetch } = {}): Promise<number> {
+export async function nextMain(argv: string[], io: { root?: string; log?: (line: string) => void; warn?: (line: string) => void; identity?: string; url?: string; offline?: boolean; remote?: string; fetchImpl?: typeof fetch } = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   const warn = io.warn ?? ((l: string) => process.stderr.write(`${l}\n`));
   let root = io.root ?? process.env.BATON_HOME ?? process.cwd();
@@ -213,13 +217,15 @@ export async function nextMain(argv: string[], io: { root?: string; log?: (line:
     else if (a === '-i') io.identity = value();
     else if (a === '--url') io.url = value();
     else if (a === '--offline') io.offline = true;
+    else if (a === '--remote') io.remote = value();
     else if (a === '--for') forTicket = value();
     else if (a === '--help' || a === '-h') {
-      log('baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--offline]');
+      log('baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--remote R] [--offline]');
       log('  rule | scenario | gate | migration | ticket[-<prefix>] — the next number of that');
       log('  sequence, taken from Baton with the floor this checkout sees (the default branch and');
       log('  every open branch). --offline and an unanswered Baton print the next free number by');
       log('  the scan and say so. --for names the ticket the number is for, recorded with the take.');
+      log('  A remote that cannot be read is refused: no floor means no number worth printing.');
       return 0;
     } else if (a.startsWith('-')) throw new Error(`${a}: not a flag of baton tickets next`);
     else if (kind === '') kind = a;
@@ -228,13 +234,16 @@ export async function nextMain(argv: string[], io: { root?: string; log?: (line:
   if (kind === '') throw new Error('baton tickets next <kind> — rule, scenario, gate, migration, ticket[-<prefix>]');
   if (forTicket != null && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(forTicket)) throw new Error(`--for ${forTicket}: not a ticket id of this repository`);
   const parsed = parseKind(kind, root);
-  const remote = 'origin';
+  const remote = io.remote ?? 'origin';
+  // A dead or unreachable origin throws here: no floor means no number worth printing, from
+  // Baton or the scan alike (value 1: the scan scanned nothing, and a fresh Baton seeded by 0
+  // would answer below every number git holds).
   const floor = floorFor(root, remote, parsed);
   if (!io.offline) {
     const target = batonTarget(root, io);
     if (target.keyFile != null && target.repository != null) {
       try {
-        const took = await takeNumber({ url: target.url, keyFile: target.keyFile, repository: target.repository, kind: parsed.kind, floor, ...(forTicket != null ? { forTicket } : {}) });
+        const took = await takeNumber({ url: target.url, keyFile: target.keyFile, repository: target.repository, kind: parsed.kind, floor, ...(forTicket != null ? { forTicket } : {}), ...(io.fetchImpl ? { fetchImpl: io.fetchImpl } : {}) });
         log(`✓ ${parsed.kind}: ${printOf(parsed, took.number)} (Baton's sequence, floor ${floor})`);
         return 0;
       } catch (e) {

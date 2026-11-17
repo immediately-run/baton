@@ -52,8 +52,13 @@ const movedOnPush = (detail: string): boolean => /non-fast-forward|fetch first|s
 /** The forge's own words for a push refused because the branch is protected (R-BTN-74, the
  *  B-174 Decision's list): GitHub's `GH006` and a `GH013` ruleset refusal, GitLab's and Gitea's
  *  messages, and the protected-branch hook's. Read from the forge's answer, never from the
- *  policy — the one refusal whose answer is another landing. */
-export const protectedPush = (detail: string): boolean => /GH006|GH013|protected branch/i.test(detail);
+ *  policy — the one refusal whose answer is another landing. A `GH013` counts only while its
+ *  words name a pull-request or update rule (§5.8): GitHub's secret push protection answers
+ *  `GH013` too, and its refusal is not a protected branch's — the same content would be refused
+ *  on the PR branch just the same. */
+export const protectedPush = (detail: string): boolean =>
+  /GH006|protected branch/i.test(detail) ||
+  (/GH013/.test(detail) && /pull request|update rule/i.test(detail) && !/secret/i.test(detail));
 
 const detailOf = (e: unknown): string => {
   const err = e as { status?: unknown; stderr?: string | Uint8Array; message?: string };
@@ -505,7 +510,7 @@ export function skeletonBody(o: { description: string; deps: readonly string[]; 
 }
 
 /** `baton tickets new …` (B-112, B-176): file one ticket — an id from Baton's sequence
- *  (`ticket-<prefix>`, R-BTN-195) under `.baton/baton.json`'s prefix, its conventional body,
+ *  (`ticket-<prefix>`, R-BTN-198) under `.baton/baton.json`'s prefix, its conventional body,
  *  `roadmap-item` unless `--tags` says otherwise — unique before any push, so two filers at once
  *  never take one number. With no key, no configured Baton, an unreachable Baton or `--offline`,
  *  the id is today's next-free scan at the head it files on, and the output says so
@@ -531,7 +536,7 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
   let filed: string | null = null;
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   const warn = io.warn ?? ((l: string) => process.stderr.write(`${l}\n`));
-  // B-176: the id is Baton's to give (R-BTN-195), asked before any git runs. The floor is the
+  // B-176: the id is Baton's to give (R-BTN-198), asked before any git runs. The floor is the
   // highest number this checkout sees — the default branch and every open branch's head — so a
   // lost or fresh Baton never reissues a number git holds. A Baton that cannot answer leaves
   // today's scan at the head the filing lands on, and says so.
@@ -609,8 +614,10 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
   };
   /** Land one commit on `baton-ticket/<id>`, cut from the freshly fetched default head — the PR
    *  landing: the ticket file alone, never the reverse mentions, so two open filings never
-   *  share a write target. A push refused because the branch exists is the scan-path's
-   *  collision, the backstop's own moment. */
+   *  share a write target. A push refused because the branch exists is the collision
+   *  backstop's own moment — named for the id's source, since an id from Baton colliding is a
+   *  leftover branch or a reissue after lost state, not a scan that never ran (round 1,
+   *  should-fix 4); any other refusal is git's own words, never a collision claim. */
   const landThroughPr = (): { id: string; branch: string; message: string } => {
     git(root, 'fetch', '-q', remote, branch);
     const dir = mkdtempSync(join(tmpdir(), 'baton-tickets-'));
@@ -628,7 +635,17 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
         git(dir, 'push', '-q', remote, `HEAD:refs/heads/${sideBranch}`);
       } catch (e) {
         const detail = detailOf(e);
-        throw new Error(`${id}: the filing branch ${sideBranch} was refused: ${detail.trim().split('\n').filter(Boolean).at(-1) ?? 'no reason given'} — the branch exists, so the scanned id is taken (Baton did not answer): take the next id and file again`);
+        // The refusal's own words, whole: git's summary lines say nothing a person can act on.
+        const why = detail.trim().split('\n').map((l) => l.trim()).filter((l) => l !== '' && !/^To /.test(l) && !/failed to push some refs/.test(l)).join('; ') || 'no reason given';
+        const exists = /already exists|non-fast-forward|fetch first|stale info|cannot lock ref/i.test(detail);
+        // Only the branch-exists refusal says "taken": a hook's or a permissions' refusal is
+        // the operator's to read in git's own words, not evidence about the id.
+        if (!exists) {
+          throw new Error(`${id}: the filing branch ${sideBranch} was refused: ${why} — nothing was pushed; the refusal's own words above say whose`);
+        }
+        throw new Error(id === given
+          ? `${id}: the filing branch ${sideBranch} was refused: ${why} — the branch exists, and Baton gave this id: a leftover filing branch (its PR may already carry ${id}) or a reissue after lost state — look at ${sideBranch}, delete it if it is a leftover, or take the next id and file again`
+          : `${id}: the filing branch ${sideBranch} was refused: ${why} — the branch exists, so the scanned id is taken (Baton did not answer): take the next id and file again`);
       }
       return { id, branch: sideBranch, message };
     } finally {
@@ -983,9 +1000,9 @@ export function ticketsHelp(): string[] {
     'baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]',
     '                   [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]',
     '                   [--trust T] [--invariants I] [--direct] [-i KEY] [--url URL] [--offline]',
-    'baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--offline]',
+    'baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--remote R] [--offline]',
     '                   rule | scenario | gate | migration | ticket[-<prefix>]: the next number of',
-    '                   that sequence, taken from Baton (R-BTN-195) — what a PR takes a migration',
+    '                   that sequence, taken from Baton (R-BTN-198) — what a PR takes a migration',
     '                   number or a scenario id from; --offline prints the next free by the scan',
     'baton tickets claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]   available → in-progress;',
     '                   a ticket Baton holds past its start is taken over where Baton holds it;',
@@ -1044,7 +1061,7 @@ export function ticketsHelp(): string[] {
     '### Trust, ### Invariants, ### Tests, ### Exit criteria, **Requires:**, ## Status — and judges it as `baton tickets',
     'check` would before pushing, so a filing introduces no cycle and no undeclared dependency.',
     '',
-    'The id new takes is Baton\'s to give (R-BTN-195): the next number of the repository\'s',
+    'The id new takes is Baton\'s to give (R-BTN-198): the next number of the repository\'s',
     'ticket-<prefix> sequence, asked with a floor this checkout sees (the default branch and every',
     'open branch\'s head), so two filers at once never take one number. With no key, no configured',
     'Baton, an unreachable Baton or --offline, the id is today\'s next-free scan and the output',
@@ -1074,7 +1091,7 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   }
   const [command, ...rest] = argv;
   if (command === 'check') return ticketsCheckMain(rest, io);
-  // B-176 (R-BTN-195): the sequence numbers, for a PR author and an agent.
+  // B-176 (R-BTN-198): the sequence numbers, for a PR author and an agent.
   if (command === 'next') return nextMain(rest, io);
   const COMMON = ['repo', 'branch', 'remote'];
   const allowed: Record<string, string[]> = {

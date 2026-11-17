@@ -240,7 +240,7 @@ export interface RequestOptions {
   warn?: (line: string) => void;
   /** The clock's date for `updated:`, for a test's fixed day. */
   date?: string;
-  /** B-176 (R-BTN-195): an id Baton's `ticket-<prefix>` sequence already gave — unique before
+  /** B-176 (R-BTN-198): an id Baton's `ticket-<prefix>` sequence already gave — unique before
    *  any push, so every try files the same one. */
   allocated?: string;
 }
@@ -326,7 +326,7 @@ const topOf = (root: string): string | null => {
  * [--remote R] [-i KEY] [--url URL] [--offline]` (B-98): files ONE request ticket on a course
  * that opts in, as one commit pushed straight to the repository's default branch — the push
  * triggers the sync, the board places the ticket, the next claim starts the course. The id is
- * Baton's to give (B-176, R-BTN-195): the next number of the `ticket-<prefix>` sequence, asked
+ * Baton's to give (B-176, R-BTN-198): the next number of the `ticket-<prefix>` sequence, asked
  * with a floor this checkout sees; a Baton that cannot answer — no key, none configured,
  * unreachable, `--offline` — leaves today's next-free scan, and the output says so. Prints the
  * id and the course's first station.
@@ -365,7 +365,7 @@ export async function requestMain(
       log('  files one request ticket on a course whose course.json says starts_from: request, commits');
       log('  it to the default branch and pushes it: the push starts the sync, the board places the');
       log('  ticket, the next claim starts the course. -- ends the flags: a sentence may start with -.');
-      log("  The id is Baton's to give (R-BTN-195); with --offline, or a Baton that does not answer,");
+      log("  The id is Baton's to give (R-BTN-198); with --offline, or a Baton that does not answer,");
       log("  it is today's next-free scan and the output says so.");
       return 0;
     }
@@ -395,7 +395,7 @@ export async function requestMain(
   // (round 1, 1-A-2; round 2, 2-r0-1: judging them here both duplicated the check and refused
   // requests the target would have accepted).
   const plan = { root: top, sentence: said, course, items: 'tickets', prefix: 'B', start: '', startLeg: '' };
-  // B-176 (R-BTN-195): the id is Baton's to give, asked before any git runs — the request id IS
+  // B-176 (R-BTN-198): the id is Baton's to give, asked before any git runs — the request id IS
   // the request ticket's id (the build-app legs write `product/<request id>/`), so the kind is
   // the ticket sequence under the checkout's prefix; the landing tree's own prefix is re-read
   // per try, and a mismatch falls back to its scan. A Baton that cannot answer leaves the scan
