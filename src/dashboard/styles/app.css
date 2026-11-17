@@ -1,0 +1,46 @@
+/* app.css — the dashboard's one stylesheet (BATON-UI-V2, B-193): calm, dense and factual, close
+   to a status board than a product page. Light and dark follow the system setting; every colour
+   is a system one. No font, script, style or image from another origin (§12.3). */
+:root {
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0 auto;
+  padding: 0 1rem 2rem;
+  max-width: 72rem;
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: Canvas;
+  color: CanvasText;
+}
+
+.shell-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+main {
+  padding: 1rem 0;
+}
+
+.placeholder {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+}
+
+.muted {
+  margin: 0;
+  opacity: 0.7;
+}

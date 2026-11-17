@@ -10,11 +10,11 @@ import { pathToFileURL } from 'node:url';
 const ROOT = resolve(import.meta.dirname, '..');
 const OUT = join(ROOT, '.local');
 
-/** The dashboard's ES module is served to the browser, never run here: load it as text. */
-export const uiScriptAsText = {
-  name: 'ui-script-as-text',
+/** The dashboard's built ES module is served to the browser, never run here: load it as text. */
+export const dashboardScriptAsText = {
+  name: 'dashboard-script-as-text',
   setup(b) {
-    b.onLoad({ filter: /[\\/]ui[\\/]app\.js$/ }, async (args) => ({ contents: await readFile(args.path, 'utf8'), loader: 'text' }));
+    b.onLoad({ filter: /[\\/]dashboard[\\/]dist[\\/]app\.js$/ }, async (args) => ({ contents: await readFile(args.path, 'utf8'), loader: 'text' }));
   },
 };
 
@@ -34,7 +34,7 @@ export async function bundleLocal(entry, name) {
     target: 'node22',
     packages: 'external',
     loader: LOCAL_LOADERS,
-    plugins: [uiScriptAsText],
+    plugins: [dashboardScriptAsText],
     logLevel: 'warning',
   });
   return import(pathToFileURL(outfile).href);

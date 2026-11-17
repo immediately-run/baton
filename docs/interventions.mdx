@@ -177,3 +177,76 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   change as one decision, with the patch, as soon as the PR opens — instead of three review
   rounds that cannot pass. A fix leg merges main into its branch whenever the PR conflicts,
   before review. *No ticket yet.*
+
+## 2026-11-15 14:12 — Baton down: the Durable Object read quota spent by idle runners
+
+- **Host:** vltava2 (supervisor), bering
+- **Tickets:** B-235, B-236, B-237, B-238, B-240, B-241, B-242 (PRs #240, #245, #246, #247)
+- **Why it was needed:** Cloudflare stopped serving Baton for the rest of the UTC day: the
+  free tier's 5M `rows_read` per day was spent. Two idle runners alone cost more than that —
+  each idle beat read about 6–11k rows recomputing eligibility, and the alarm read about
+  1,245 rows per tick. With Baton down no runner could claim, so the fix could not go through
+  the runners.
+- **Resolution:** at the owner's word the supervisor built the schema changes directly in
+  three worktree agents and merged them by hand: #240 (2026-11-15 15:53), #245 (state_version
+  memo, idle beat ≈50 rows, 18:34), #247 (joined dashboard queries, sync skips unchanged,
+  18:43) and #246 (alarm indexes, retention; the alarm tick from 1,245 to 76 rows, 2026-11-17
+  17:38). B-237, B-240 and B-241 went back to `available` with their PRs, short of their
+  targets. Deploying is the owner's.
+- **Autonomous handling:** Baton counts its own reads against the plan's daily budget and
+  tells the owner before the quota runs out — *no ticket yet*; the remaining read cuts are
+  B-239, B-243 and B-250. A runner keeps working on local orders while Baton is unreachable —
+  B-248 — and Baton's downtime does not count against a lease — B-249.
+
+## 2026-11-15 ≈18:00 — parallel PRs took the same identifiers
+
+- **Host:** vltava2
+- **Tickets:** B-235–B-242 (#230, #240, #242, #245, #246, #247); B-256, B-257 (#266, #268)
+- **Why it was needed:** three PRs written in parallel each added migration `0049`; on
+  2026-11-17 #266 and #268 both added scenario S-BTN-231 and edited the same block of
+  `src/defaults/cli.ts`. Whichever merged second would have broken main.
+- **Resolution:** the supervisor renumbered by hand — #230 to `0050`, #242 to `0051`, and
+  handed out `0052`–`0055` to the open PRs — had B-257 take S-BTN-232, and resolved #268's
+  conflict with #266 by hand (B-257's local renamed so both wrappers stay).
+- **Autonomous handling:** B-176 — Baton hands out identifiers, so two branches cannot take
+  the same migration or scenario number; until then, PR CI fails a branch whose migration or
+  scenario id is already on main. *No ticket yet* for the CI check.
+
+## 2026-11-16 10:25 — DeepInfra's balance ran out
+
+- **Host:** vltava2
+- **Tickets:** B-193 (and every leg after it that asked for `key:deepinfra`)
+- **Why it was needed:** B-193's review failed with no verdict: its last line was the agent
+  saying a reviewer's DeepInfra model "failed for lack of balance". The failure spent one of
+  the ticket's attempts and fed the holds of 2026-11-16 (see *false idle again*). Nothing told
+  the owner the balance was empty; the supervisor found it reading the runner's journal.
+- **Resolution:** the owner topped the balance up on 2026-11-17.
+- **Autonomous handling:** a provider's exhaustion does not spend an attempt and is reported
+  as such — B-245 (moved there from B-256 by #269). A provider balance check that warns the
+  owner before it reaches zero — *no ticket yet*.
+
+## 2026-11-17 ≈19:00 — vltava2's grant still capped at `judgement`
+
+- **Host:** vltava2
+- **Tickets:** B-237, B-239–B-244, B-248–B-251, B-258, B-259 (untiered) and every critical
+  ticket
+- **Why it was needed:** the second occurrence of the tier half of *runners idle with work on
+  the board* (2026-11-15 10:51): vltava2's grant had `max_tier: judgement`, so untiered and
+  critical tickets — including everything filed this week — were out of its reach.
+- **Resolution:** the owner ran `~/baton-owner-2026-11-17.sh` (written by the supervisor, run
+  by the owner with the owner key): a re-grant of vltava2's runner with the same capabilities
+  and `--max-tier critical`, then `retry` on B-52, B-150, B-174, B-253, B-193 and B-176 where
+  still held.
+- **Autonomous handling:** an idle runner logs the refusal it idles on and the gates that
+  empty its reachable work — B-244. A ticket filed with no tier is reachable by the default
+  grant, or the filing names a tier — *no ticket yet*.
+
+## 2026-11-17 18:20 — S-BTN-229 flaked again, on #269's CI
+
+- **Host:** GitHub Actions
+- **Tickets:** none (PR #269)
+- **Why it was needed:** the second occurrence of *a flaky test failed the production deploy*
+  (2026-11-17 ≈10:45): the same runner-half S-BTN-229 test timed out at 120 s on #269, a
+  ticket-text change.
+- **Resolution:** the supervisor re-ran the failed job; it passed and #269 merged at 18:30.
+- **Autonomous handling:** as in that entry. *No ticket yet.*

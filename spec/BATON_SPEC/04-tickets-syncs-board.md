@@ -88,8 +88,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
     orders two versions and never reads one as a time (values 4). The **version contract**: a
     ticket's version changes exactly when something a runner reads of it changes — its body, exit
     criteria, filter fields, closure. A source that bumps it for anything else (a comment, a
-    watcher) stales claims for nothing; one that misses a change lets a runner work a ticket that
-    moved. A digest of what `read` returns, optionally prefixed by the store's own stamp
+    watcher) stales claims, and tells running legs their ticket changed (R-BTN-198), for nothing;
+    one that misses a change lets a runner work a ticket that moved. A digest of what `read` returns, optionally prefixed by the store's own stamp
     (`<updatedAt>:<digest>`), is recommended over a timestamp alone, which collides within its
     resolution.
   - **How the source reads** (B-183). The default export may declare `versions` — `"pinned"`
@@ -582,7 +582,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
   - **Served.** `last_written_by` is Baton's own record, never the post's, and no input of
     `row_hash`. It rides the ticket, beside its `brief`, in the board read (§11), the
     dashboard's ready rows, the recommendations, the claim answer — whose runner prints both at
-    the claim — and the ticket read (`GET /v1/repositories/{repository}/tickets/{ticket}`;
+    the claim — each heartbeat's claims and `baton leg ticket` (R-BTN-198), and the ticket read (`GET /v1/repositories/{repository}/tickets/{ticket}`;
     `baton ticket show` prints them first), so a privileged session sees whose words steer the
     ticket before it reads them.
   - **No notice.** Under `cooperative` Baton carries no foreign-write notice (R-BTN-66, the
@@ -627,6 +627,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
     never against git: a ticket with no file — a `changes` check ticket (R-BTN-114) — and a claim
     of the `cancel` leg Baton queued (R-BTN-168), whose ticket may already be withdrawn or closed
     in git.
+  - **After this check**, a version that moves under the claim is read again as R-BTN-198 says:
+    the version, closure and tier, not readiness.
   - **A ticket Baton has not seen cannot be claimed.** A claim naming it is `not-eligible`
     (`unknown-ticket`, §9.1). It is claimable after the first accepted post that names it, which
     the forge's notification (R-BTN-73, R-BTN-95) or a runner's `ls-remote` poll (R-BTN-105) make
@@ -668,7 +670,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
   block or unblocking; a condition opened or closed; a person leg's question posted, answered or
   expired (R-BTN-116); a call settled; a supersession; an outbox entry queued, delivered or
   confirmed (R-BTN-171); inputs given and outputs reported (an `inputs` row names its
-  `leg_run_inputs` rows); `spawned`; `discrepancy`.
+  `leg_run_inputs` rows); `spawned`; a held ticket's version changed (`ticket-changed`,
+  R-BTN-198); `discrepancy`.
   - Rows hold names, ids, versions, pointers and digests only (R-BTN-33); `detail_json` at most
     2 KB.
   - It is the ticket's course history (R-BTN-39): the position Baton holds is its latest
