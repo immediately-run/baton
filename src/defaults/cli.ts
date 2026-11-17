@@ -1464,6 +1464,10 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
       storePaths.push(join(process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== '' ? process.env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude'), 'projects', dashed));
     }
   }
+  // The agent's last output (2026-10-24; B-256): the last lines of both streams, bounded — what a
+  // failed leg's error carries, so the runner's log alone can diagnose it, whether the agent
+  // exited non-zero or exited 0 and the checks after it failed.
+  const lastOutput = (so, se) => (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
   const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === '1';
     const child = spawn(argv[0], argv.slice(1), {
@@ -1512,7 +1516,7 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
       if (watch != null) clearInterval(watch);
       child.kill('SIGKILL');
       process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the agent ' + conclusion.cause + (conclusion.cause === 'agent_concluded_idle' ? ' — quiet past ' + Math.round(AGENT_IDLE_MS / 60000) + ' minutes on ' + conclusion.quiet_signals.join(', ') : ' — the leg\\'s ceiling of ' + Math.round(LEG_CEILING_MS / 60000) + ' minutes') + '; the stdout it received is its output\\n');
-      resolve({ text: so, conclusion });
+      resolve({ text: so, stderr: se, conclusion });
     };
     watch = setInterval(() => {
       if (stopped != null || conclusion != null) return;
@@ -1537,11 +1541,9 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
       if (ctx.signal) ctx.signal.removeEventListener('abort', onAbort);
       if (stopped != null) { reject(new Error('the agent was stopped: ' + stopped)); return; }
       if (conclusion != null) return; // a bound concluded; the kill's own close changes nothing
-      if (code === 0) { resolve({ text: so, conclusion: null }); return; }
-      // The failure names its cause with a tail, not a single line (2026-10-24): the last
-      // lines of both streams, bounded, so the log alone can diagnose the death.
-      const tail = (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
-      reject(new Error('the agent exited ' + (code != null ? 'with code ' + code : 'on signal ' + sig) + '; its last output:\\n  ' + tail));
+      if (code === 0) { resolve({ text: so, stderr: se, conclusion: null }); return; }
+      // The failure names its cause with a tail, not a single line (2026-10-24).
+      reject(new Error('the agent exited ' + (code != null ? 'with code ' + code : 'on signal ' + sig) + '; its last output:\\n  ' + lastOutput(so, se)));
     });
     // B-84's root cause, closed here: an open stdin pipe is one no agent can wait on — the pipe
     // is closed the moment it exists, so a reader sees EOF at once, never a wait (stdin is
@@ -1552,26 +1554,31 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   });
   // B-108: an exit resolves the text with no conclusion; a bound resolves the conclusion it
   // reached, and the received text is the agent's output either way.
-  const { text: out, conclusion } = received;${pushes ? `
+  const { text: out, stderr: errOut, conclusion } = received;
+  // B-256: a leg whose agent exited 0 and whose checks below then fail keeps what the agent
+  // last said, as a non-zero exit's does — on 2026-11-16 seven implement legs ended "exited 0,
+  // but no open PR" with nothing to say why, their sandboxes gone with the claim.
+  const said = lastOutput(out, errOut);
+  const failed = (e) => new Error((e instanceof Error ? e.message : String(e)) + (said !== '' ? '; the agent\\'s last output:\\n  ' + said : '; the agent printed nothing'));${pushes ? `
   if (headsBefore !== '' && prHeads() === headsBefore) {
-    throw new Error('the ${leg} leg pushed nothing: ' + headsBefore.split('\\n').map((l) => l.split('\\t')[1].slice('refs/heads/'.length) + ' at ' + l.slice(0, 10)).join(', ') + ' is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)');
+    throw failed('the ${leg} leg pushed nothing: ' + headsBefore.split('\\n').map((l) => l.split('\\t')[1].slice('refs/heads/'.length) + ' at ' + l.slice(0, 10)).join(', ') + ' is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)');
   }` : ''}${names ? `
   // The answer (B-85): the last line that opens with the leg's value word, wherever it sits —
   // prose before or after it is the agent's, not a lost round — and, on that line, the PR its
   // line goes on. A leg with no answer names its PR by a last line that is a PR URL alone; any
   // other last line names none. A missing or misspelled verdict still fails, naming what was read.${ask ? `
-  const { answer, pr } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});
+  const { answer, pr } = (() => { try { return requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)}); } catch (e) { throw failed(e); } })();
   const on = pr;` : `
   const last = (out.trim().split('\\n').at(-1) ?? '').trim();
   const on = ${PR_URL}.test(last) ? last : null;`}
-${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
 ` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}), ...(conclusion ? { conclusion } : {}) };` : `${ask ? `
   // The answer (B-85): the last line that opens with the leg's value word, backwards past any
   // prose after it; a missing or misspelled verdict still fails, naming what it read.
-  const { answer } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});` : `
+  const { answer } = (() => { try { return requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)}); } catch (e) { throw failed(e); } })();` : `
   void out;`}
-${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
 ` : ''}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}
 }

@@ -36,3 +36,73 @@ Input: the agent's own output (its last lines, and the transcript where kept) is
 ## Status
 
 _filed 2026-11-17._
+
+- 2026-11-17 — **Investigation.** No transcript survives (the E2B sandbox dies with the claim),
+  so the cause of each failure cannot be named for certain. What the evidence does show:
+  - **Scope.** The failure is older and wider than the five legs above. vltava2's
+    `journalctl --user -u baton-runner` shows the same line for B-174 and B-228 on 2026-11-13,
+    and for B-16, B-121 and B-150 early on 2026-11-16. That makes nine on 2026-11-16 alone,
+    counting B-228 at 12:12–12:18Z and B-26 at 12:18–12:46Z. Implement legs on the same runner
+    also succeeded in that window (B-175 on 2026-11-13, B-234 on 2026-11-14, B-125 on
+    2026-11-16 at 04:21Z). The failures began before the 10:25Z review that reported DeepInfra
+    out of balance.
+  - **Candidate 1: the agent stopped on purpose and said so only in output nobody kept.**
+    Confirmed for B-228. Its legs pushed `claude/B-228-already-delivered` (12:17:57Z, the commit
+    "a third implement leg re-verified it delivered at main a1d51219 — still no PR") and
+    `claude/B-228-already-on-main` (13:17Z), and B-228 had been delivered by PR #207 on
+    2026-11-10. The implement instructions said "If it is done, open no PR: say so in the
+    ticket and stop with an error". An agent cannot do that: `opencode run` exits 0 whatever
+    the model concludes, so the leg ended `cannot-finish:transient` and spent an attempt. B-150
+    is likely the same case: its `PATCH_NOTES_ALLOWED` had been empty since B-166 (2026-11-02),
+    so an agent checking whether it was already delivered could judge it done. B-52 and B-174
+    need things an agent is told to stop on: B-52 checks the deployed Baton's
+    `courses.course_json`, and B-174 opens a PR "with the caller's forge credential". Both legs
+    ran 34–67 minutes and pushed no branch. That fits an agent that read, worked, hit a stop or
+    checks it could not get green ("Push only once they pass"), and exited.
+  - **Candidate 2: a provider failing in a sub-agent.** Possible, unproven. In `opencode run`
+    (v2.2.5, `packages/cli/src/run/noninteractive.ts`), a failed step or execution of the main
+    session (`session.step.failed`, `session.execution.failed`, a non-user interruption) sets
+    `process.exitCode = 1`. A main-session provider error (balance, quota, 429, auth) therefore
+    exits non-zero and the stub already kept its tail, as with B-52, B-121 and B-174's exit-1
+    failures on 2026-11-15. A sub-agent's (task tool's) provider error is different: it reaches
+    the main model as a tool error, and the main session can go on and end normally with exit 0.
+    B-193's review shows exactly that ("Reviewer B's model (deepinfra) failed for lack of
+    balance — restarting the second blind reviewer on a different available model"). The
+    `review` instructions ask for two blind reviewers "ideally on two different models". The
+    `implement` instructions name no sub-agent and no model, and nothing under `.baton/` or the
+    instructions names `key:deepinfra`. DeepInfra was out of balance in the window (the owner
+    topped it up 2026-11-17), so an implement agent that chose a deepinfra sub-agent of its own
+    accord would hit it. But the failures before 10:25Z and on 2026-11-13 make DeepInfra
+    unlikely as the common cause. The sandbox's opencode version is not visible from the host.
+  - **Candidate 3: a push or `gh pr create` failing in the sandbox.** No evidence for or against.
+    The same runner pushed B-228's branches, B-125's PR and B-16/B-121's PRs in the window, so
+    the sandbox's push and forge credentials worked.
+  - Also seen: the failure read "exists in immediately-run/baton or immediately-run/baton"
+    because a ticket's `repos: [baton]` resolved to the home itself and was read twice.
+- 2026-11-17 — **What changed (this PR).**
+  - Every stub failure after the agent ran now quotes the last 20 lines of the agent's two
+    streams, or "the agent printed nothing", as a non-zero exit's always did. That covers an
+    exit 0 whose PR check, answer line or push check then fails (`src/defaults/cli.ts`). The
+    runner logs it masked, on the existing path.
+  - A claim the runner releases `cannot-finish:transient` for a failed leg now carries the
+    failure's last line as the end's `detail` (`failureDetail`, `src/runner/mask.ts`): masked
+    the same way, §10.4 free text, at most 200 characters. That is the agent's own last line
+    for an agent stub.
+  - `verifyPrOpen` no longer reads or names the home twice.
+  - The standard `implement` instructions (`src/defaults/courses/create-pr/implement.md`) now
+    say that whatever stops the leg without a PR is to be said in its last lines. A proper answer
+    for "already delivered", one that spends no attempt and goes to a person, is B-257's, filed
+    the same day; this PR leaves that bullet to it. This repository's own copy,
+    `.baton/courses/create-pr/legs/implement.md`, is owner-signed control (B-127) and is not
+    changed here; the owner carries the same words over.
+  - Spec: R-BTN-131 and §9.4 amended, S-BTN-231, history and decisions entries.
+- 2026-11-17 — **Not done here: a provider's exhaustion not spending the attempt.** R-BTN-122
+  already says "A provider at capacity is a blocked prerequisite (R-BTN-126), never a retry".
+  The mechanism belongs to other tickets: the `released:blocked` end with a `capability`
+  prerequisite (`key:deepinfra`), requested by the leg (`baton leg release --blocked`) and
+  confirmed by the runner's own check. That end is B-21 (Baton's half and the channel command),
+  B-245 (the runner's confirmation) and B-247 (the hosts' key checks). Building it here would
+  share their write targets. Recognising it from the agent's output would break this ticket's
+  own Trust rule (output is never parsed for decisions). This ticket's third bullet and its
+  provider test should move to B-245, or this ticket should depend on it. That is the owner's
+  call.

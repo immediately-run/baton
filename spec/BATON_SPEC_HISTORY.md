@@ -3094,6 +3094,25 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   counts claims, never host resources. `docs/context/architecture.mdx`'s *Parallelism is
   horizontal* is amended with it (B-188 item 8).
 
+- **2026-11-17 — R-BTN-131 and §9.4 amended, S-BTN-231 added: a failed leg keeps what its agent
+  last said (B-256).**
+  Rules changed: R-BTN-131 (a stub's failure after its agent ran names the agent's last lines),
+  §9.4 (a `cannot-finish:transient` end of a failed leg carries the failure's last line as
+  `detail`). On 2026-11-16 seven implement legs on one runner ended "the implement agent exited
+  0, but no open PR …", released `cannot-finish:transient`: the stub kept the agent's output only
+  on a non-zero exit, and the leg's sandbox was killed with the claim, so nothing said why. Two of
+  them (B-228's) had pushed a branch whose commit said the ticket was already delivered — the
+  instructions' "stop with an error", which an agent's exit 0 cannot carry. Now every failure
+  after the agent ran quotes the last twenty lines of its two streams, or says it printed
+  nothing; the runner logs it masked, as it always logged a non-zero exit's; and the end's
+  `detail` is its last line, masked, free text, at most 200 characters — the one place Baton
+  holds it, stored and shown, never read, as every `detail` is. Rejected: parsing the output
+  for a provider's refusal to choose the end (the output is the agent's, never read for
+  decisions beyond the answer line); a provider's exhaustion stays R-BTN-126's confirmed blocked
+  end (B-21, B-245). The standard `implement` instructions now say why in the last lines
+  whenever the leg stops without a PR; an "already delivered" answer that spends no attempt is
+  B-257's.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

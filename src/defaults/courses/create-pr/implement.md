@@ -112,3 +112,9 @@ of every repository the ticket names, and reads them together, as one change.
   aggregate; a release note belongs in the PR body.
 - Merge, approve or review your own PR; later legs do that.
 - Leave the PR without a pushed head: the review reads what is pushed.
+- Exit without a PR and without saying why. Whatever stops you — the ticket already delivered,
+  a stop the repository's rules name, checks you cannot get green, a push or `gh pr create`
+  that fails, a model or provider that refuses (balance, quota, rate limit) — your last lines
+  say what it was, in plain words: an exit with no PR fails the leg, and those lines are all
+  that is kept of it (B-256). Your process exits 0 whatever you say, so saying it is the only
+  way anyone learns it.
