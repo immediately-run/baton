@@ -359,6 +359,17 @@ describe('baton tickets claim | set | done (B-112)', () => {
     expect(run(f.dir, 'done', 'B-1').err).toBe('baton: B-1 is archived (done)\n');
   }, 60_000);
 
+  it('done climbs one more level in the ticket\'s relative links, so they still resolve from archive/', () => {
+    const body = ticket('B-1') + '\n[R-BTN-4](../spec/BATON_SPEC/09-claims.md#sec-9-1), [B-2](./B-2.mdx), [x](https://example.com/../y), [here](#why)\n';
+    const f = repo({ existing: { 'tickets/B-1.mdx': body } });
+    expect(run(f.dir, 'done', 'B-1').code).toBe(0);
+    const archived = f.at('tickets/archive/B-1.mdx')!;
+    expect(archived).toContain('[R-BTN-4](../../spec/BATON_SPEC/09-claims.md#sec-9-1)');
+    expect(archived).toContain('[B-2](../B-2.mdx)');
+    expect(archived).toContain('[x](https://example.com/../y)');
+    expect(archived).toContain('[here](#why)');
+  }, 60_000);
+
   it('a push refused because the branch moved is fetched again and retried on the new head', () => {
     // A peer claims B-1 first, between this command's fetch and its push: a `git` on PATH turns
     // the first push away as a moved head would, and lets the peer's commit land.

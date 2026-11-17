@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  MIN_SECRET_BYTES, SECRET_NAME_EXACT, SECRET_NAME_SUFFIXES, createLegMasker, holdLiteralTail,
+  FAILURE_DETAIL_MAX, MIN_SECRET_BYTES, SECRET_NAME_EXACT, SECRET_NAME_SUFFIXES, createLegMasker, failureDetail, holdLiteralTail,
   maskLegOutput, namesASecret, readMaskEnv, runnerConfigPath, secretValues, underBatonDirectory,
 } from '../../src/runner/mask';
 
@@ -109,6 +109,23 @@ describe('class 7 by name (R-BTN-144)', () => {
     expect(sink.push('AAAA')).toBe('');
     expect(sink.push('-----END OPENSSH PRIVATE KEY-----')).toBe('***');
     expect(sink.flush()).toBe('');
+  });
+});
+
+describe('a failed leg\'s end detail (B-256, S-BTN-231, §9.4)', () => {
+  it('is the failure\'s last line — an agent stub\'s, the agent\'s own last output — masked, as §10.4 free text of at most 200 characters', () => {
+    const error = "the implement agent exited 0, but no open PR on a branch matching claude/B-52-* for ticket B-52 — open one, or the leg fails here; the agent's last output:\n  working\n  Reviewer B's model (deepinfra) failed: insufficient balance <" + KEY + '> {retry}';
+    expect(failureDetail(error, [KEY])).toBe("Reviewer B's model (deepinfra) failed: insufficient balance *** retry");
+    // A class 5 token in the line goes too, as in the log line.
+    expect(failureDetail('boom\nthe provider refused bmr_' + 'b'.repeat(32), [])).toBe('the provider refused ***');
+    // Control characters become spaces; a long line keeps its head, bounded.
+    expect(failureDetail('a\tb\u0007c', [])).toBe('a b c');
+    const long = failureDetail('x'.repeat(500), []);
+    expect(long).toHaveLength(FAILURE_DETAIL_MAX);
+    expect(long?.endsWith('…')).toBe(true);
+    // Nothing left is no detail at all.
+    expect(failureDetail('\n  \n', [])).toBeNull();
+    expect(failureDetail('<>{}', [])).toBeNull();
   });
 });
 

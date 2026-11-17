@@ -556,7 +556,7 @@ describe('baton repo init, through the built CLI', () => {
     expect(settings.agent_command).not.toMatch(/[<>|]/);
     expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -712,6 +712,12 @@ describe('baton repo init, through the built CLI', () => {
       // No such PR: the leg fails naming the pattern it looked for, not trusting exit 0 (B-81).
       writeFileSync(answer, '[]');
       await expect(stub.run(ctx)).rejects.toThrow('no open PR on a branch matching claude/A-1-* for ticket A-1 exists in the checkout’s repository');
+      // B-256 (S-BTN-231): the failure says what an agent that exited 0 last said — nothing, here — and an
+      // agent that explained itself (2026-11-16's "already delivered" legs) is quoted, both streams.
+      await expect(stub.run(ctx)).rejects.toThrow(/or the leg fails here; the agent printed nothing$/);
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'sh -c "echo working; echo A-1 is already delivered on main, so no PR; echo provider said: insufficient balance >&2"' }));
+      const explained = { ...ctx, snapshot: { sha: commitAll(root) } };
+      await expect(stub.run(explained)).rejects.toThrow(/no open PR on a branch matching claude\/A-1-\*[^\n]*; the agent's last output:\n {2}working\n {2}A-1 is already delivered on main, so no PR\n {2}provider said: insufficient balance$/);
       // A forge that cannot be read fails the leg naming that, too.
       writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\necho "no git remotes found" >&2\nexit 1\n');
       await expect(stub.run(ctx)).rejects.toThrow('cannot verify A-1’s PR — no repository the ticket reads could be read: the checkout’s repository (gh pr list --state open --limit 300 --json number,headRefName,headRefOid failed: no git remotes found)');
@@ -721,6 +727,52 @@ describe('baton repo init, through the built CLI', () => {
       rmSync(fakeBin, { recursive: true, force: true });
       writeFileSync(settingsFile, scaffolded);
       commitAll(root);
+    }
+  });
+
+  it('the implement stub takes a delivered answer only for a commit on the default branch: delivered, confirm next, the commit its evidence (B-257, S-BTN-232)', async () => {
+    const g = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const origin = mkdtempSync(join(tmpdir(), 'baton-delivered-origin-'));
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const scaffolded = readFileSync(settingsFile, 'utf8');
+    const main = g('rev-parse', 'HEAD');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' });
+    g('remote', 'add', 'origin', origin);
+    try {
+      g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      // A commit on a side branch only: not delivered, whatever the agent says.
+      g('checkout', '-q', '-b', 'claude/A-1-side');
+      writeFileSync(join(root, 'side.txt'), 'side\n');
+      const side = commitAll(root);
+      g('push', '-q', 'origin', 'HEAD:refs/heads/claude/A-1-side');
+      g('checkout', '-q', 'main');
+      // The agent: `echo` prints its words, the ticket, the leg and the checkout after them — the
+      // last line opens with `delivered <sha>`, the rest is its evidence.
+      const stubFor = async (sha: string) => {
+        writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: `echo delivered ${sha.slice(0, 9)} vitest 47 passed` }));
+        const snapshot = { sha: commitAll(root) };
+        g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+        const stub = await load(join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs'));
+        return { stub, ctx: { ticket: { id: 'A-1' }, leg: 'implement', checkout: root, snapshot, default_branch: 'main' } };
+      };
+      const { stub, ctx } = await stubFor(main);
+      const result = await stub.run(ctx);
+      expect(result).toMatchObject({ suspend: true, reached: 'delivered', next: 'confirm', delivered: main });
+      expect(result.detail).toMatch(new RegExp(`^delivered at ${main.slice(0, 10)}: vitest 47 passed A-1 implement `));
+      // The runner's own reading of it: a suspension at an outcome of implement, confirm queued.
+      expect(decide(result, graphOf(CREATE_PR_COURSE), 'implement', 'filed')).toMatchObject({ kind: 'suspend', reached: 'delivered', next: 'confirm', detail: result.detail });
+      // Its close pushes nothing and names the commit as the end's evidence.
+      expect(await stub.close(ctx, result)).toBe(main);
+      // A commit not on main refuses the answer: the leg fails, naming it.
+      const off = await stubFor(side);
+      await expect(off.stub.run(off.ctx)).rejects.toThrow(`the implement agent answered delivered at ${side.slice(0, 9)}, which is not on main — refused`);
+    } finally {
+      writeFileSync(settingsFile, scaffolded);
+      g('checkout', '-q', 'main');
+      g('reset', '-q', '--hard', main);
+      g('branch', '-q', '-D', 'claude/A-1-side');
+      g('remote', 'remove', 'origin');
+      rmSync(origin, { recursive: true, force: true });
     }
   });
 

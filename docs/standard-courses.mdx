@@ -14,7 +14,7 @@ Fieldhouse, writes and keeps the courses that rely on it.
 
 | course | what it does | legs | where it ends |
 |---|---|---|---|
-| `create-pr` | builds a ticket in a PR, gates every review round behind a deterministic test run, reviews it in up to three rounds, fixes, hands the third round's blockers to the owner, merges | implement, run-tests, review, fix, adjudicate, merge | `merged` |
+| `create-pr` | builds a ticket in a PR, gates every review round behind a deterministic test run, reviews it in up to three rounds, fixes, hands the third round's blockers to the owner, merges | implement, run-tests, review, fix, adjudicate, merge, and the person leg confirm | `merged`, `confirmed` |
 | `review-pr` | reviews a PR someone else opened, in rounds, and concludes with a summary | review, conclude | `approved` or `concluded` |
 | `bug-report` | traces a reported bug to its cause and the artifact that seeded it, dedupes it by cause, files the fix ticket or folds the report into the one that covers it, weighs prevention | trace, origin, dedupe, file or fold, prevent | `closed` |
 | `draft-ticket` | researches, drafts and files a ticket that prescribes its architecture, tests and requirements | research, draft, check | `filed` |
@@ -67,6 +67,20 @@ while checks run (or none has reported yet) the round waits on `ci` — never on
 ticket with PRs both at home and elsewhere passes only when the home marker and the other PRs'
 CI are both green. Only a ticket with several PRs at home, which the gate cannot choose between,
 waits on the owner as `run-tests-unreachable`, whose `skip` waives the gate for it.
+
+## A ticket already delivered
+
+An `implement` agent that finds the whole ticket already on the default branch opens no PR and
+pushes nothing (B-257). Its last line is `delivered <sha> <evidence>` — the commit that delivered
+it (several, comma-separated) and what it ran to find so, such as `delivered 8565aa7
+runner-main.test.ts 47 passed, typecheck clean`. The stub fetches the default branch and checks
+every named commit is on it; one that is not refuses the answer and fails the leg. Otherwise the
+leg reaches `delivered` — an outcome, not a failed attempt — with the commit as the end's
+evidence and the line as its detail, shown on the ticket's history. There the person leg
+`confirm` waits, under Needs you: `baton decision answer <repository>:<ticket> confirmed` closes
+it at the end station `confirmed`; `filed` sends it back to `implement`. The agent's word alone
+never closes a ticket. The ticket's file still says what it said; `baton tickets done <ticket>`
+archives it as for any ticket closed by hand.
 
 ## Starting a course from one sentence
 

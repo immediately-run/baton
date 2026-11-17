@@ -1,5 +1,5 @@
 // sequences.test.ts — the CLI's half of Baton's identifier sequences (B-176, R-BTN-198, §4.6;
-// S-BTN-231's unit half): the floor each kind's number is seeded by — the highest number on the
+// S-BTN-234's unit half): the floor each kind's number is seeded by — the highest number on the
 // default branch and every open branch's head, so a fresh Baton never reissues a number git holds
 // — the fallback that says itself (no key, no answer, --offline), `new`'s PR-first landing with
 // the forge asked through `gh`, `--direct`'s protected-refusal fallback, and R-BTN-190's reserved

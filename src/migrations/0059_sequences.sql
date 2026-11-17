@@ -50,6 +50,7 @@ DROP INDEX IF EXISTS events_by_repository;
 DROP INDEX IF EXISTS events_discrepancies;
 DROP INDEX IF EXISTS events_by_kind_at;
 DROP INDEX IF EXISTS events_unsigned_control;
+DROP INDEX IF EXISTS events_retention;
 DROP TABLE events;
 ALTER TABLE events_0059 RENAME TO events;
 CREATE INDEX events_by_ticket ON events(ticket_id, kind, seq);
@@ -60,3 +61,5 @@ CREATE INDEX events_discrepancies ON events(at) WHERE kind = 'discrepancy';
 -- had not been rebuilt since): the lookups they serve (B-235) keep their windows.
 CREATE INDEX events_by_kind_at ON events(kind, at);
 CREATE INDEX events_unsigned_control ON events(at) WHERE kind = 'unsigned-control';
+-- 0053's retention index (B-238), rebuilt with the table like the others.
+CREATE INDEX events_retention ON events(at) WHERE repository_id IS NOT NULL;

@@ -1,4 +1,4 @@
-// S-BTN-231 Baton hands out the identifiers (BATON_SPEC §15 S-BTN-231, §4.3 R-BTN-198; B-176):
+// S-BTN-234 Baton hands out the identifiers (BATON_SPEC §15 S-BTN-234, §4.3 R-BTN-198; B-176):
 // every id a concurrent branch writes to git — a ticket id from any filer, a rule, scenario,
 // gate or migration number — is one Baton's per-repository, per-kind sequence hands out, and
 // `baton tickets new` files through a PR on `baton-ticket/<id>` by default. Must hold: two
@@ -66,7 +66,7 @@ beforeEach(async () => {
   expect(await withCore((c) => c.registry.addSyncKey('ops', syncKey.publicKey, 'sync', 'admin:test', []))).toBeTruthy();
 });
 
-describe('S-BTN-231 Baton hands out the identifiers (B-176)', () => {
+describe('S-BTN-234 Baton hands out the identifiers (B-176)', () => {
   it('two filers racing get distinct ids; a floor seeds a fresh Baton above what git holds, and a number is never reissued', async () => {
     // A fresh Baton, seeded by the floor the filer read from git: the first number is above it.
     expect(await take(opsOwner, 'ops', 'ticket-b', { floor: 5 })).toMatchObject({ status: 200, json: { kind: 'ticket-b', number: 6 } });
@@ -269,7 +269,7 @@ afterEach(() => {
   rmSync(repo.bare, { recursive: true, force: true });
 });
 
-describe('S-BTN-231 the CLI half: new asks Baton first and files through a PR (B-176)', () => {
+describe('S-BTN-234 the CLI half: new asks Baton first and files through a PR (B-176)', () => {
   it.runIf(HOST === 'local')('new takes its id from the sequence and files the ticket alone on baton-ticket/<id>; the ticket boards only when the branch merges', async () => {
     if (repo === null) return;
     expect(await initMain(['--course', 'create-pr'], { root: repo.dir, log: () => {} })).toBe(0);

@@ -359,7 +359,9 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
     // A done ticket is written at its archive path, and the live file moved there: the move
     // alone would commit the file as it was, without the status and the PR.
     if (takeover) pushed = { prs: prsOf(text), path: found.path };
-    if (status === 'done') return { message, write: [{ path: to, text }], move: [{ from, to }] };
+    // One directory deeper, a relative link climbs one level more: `../spec/…` from the live
+    // file is `../../spec/…` from archive/ (B-26, B-188, B-228 each broke check:wiki on main).
+    if (status === 'done') return { message, write: [{ path: to, text: deepenRelativeLinks(text) }], move: [{ from, to }] };
     return { message, write: [{ path: from, text }], move: [] };
   });
   // The takeover hands the session Baton's position (B-129): the station, the ready leg, each
@@ -1193,4 +1195,10 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   moveTicket(root, at, id, status as Status, flags.pr, command === 'claim', baton, flags.note, reread);
   if (at.offline && command === 'claim') warn(`… ${id}: claimed on git's word alone (--offline) — Baton's position is unknown, not refuted; the frontmatter may say available of work Baton still holds`);
   return 0;
+}
+
+/** A ticket's relative Markdown links rewritten for a file one directory deeper: `](../x` and
+ * `](./x` gain a level; absolute URLs, anchors and bare sibling names are left as written. */
+export function deepenRelativeLinks(text: string): string {
+  return text.replace(/\]\((\.\.?\/)/g, (_m, lead: string) => `](${lead === './' ? '../' : '../../'}`);
 }

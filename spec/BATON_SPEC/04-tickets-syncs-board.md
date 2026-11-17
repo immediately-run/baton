@@ -356,7 +356,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
      next_leg, running?}` from Baton's course history (R-BTN-39); a ticket absent from it is at its
      course's `start` — `versions`, each live ticket's last accepted version (B-183), Baton's own
      record returned to the posting credential only, as `positions` is, for the source's code to
-     judge its store's read against — and `unconfirmed`, every unconfirmed end's `{ticket, claim, evidence?}`
+     judge its store's read against — `legs`, the runs claims finished with evidence, newest
+     first, each `{ticket, leg, claim_nonce, evidence, reached}`: the station function judges a
+     marker by them and places a `create-pr` ticket whose `implement` reached `delivered`
+     (R-BTN-131) — and `unconfirmed`, every unconfirmed end's `{ticket, claim, evidence?}`
      with the `ended_at_sha` it named (R-BTN-10) — before it reads anything else;
   2. fetches and sets `new` to `origin/<default branch>` (the registered branch), then reads PRs
      and code repositories, so everything posted was read after the number was handed out — the
