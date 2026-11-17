@@ -13,7 +13,7 @@ import { RequestQueue } from '../../src/local/queue';
 import { MAX_BODY, serve } from '../../src/local/server';
 import { openStore } from '../../src/local/store';
 import { adminKeysFrom, concreteHost, localConfig, main } from '../../src/local/main';
-import { SECURITY_HEADERS } from '../../src/core/http';
+import { RECOMMENDED_CLIENT, SECURITY_HEADERS } from '../../src/core/http';
 
 const board = inject('board');
 const later = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -132,25 +132,28 @@ describe('the local host', () => {
     const host = current();
     const origin = 'http://127.0.0.1';
     const server = serve(host, 'https://baton.immediately.run');
+    // B-254 (R-BTN-197): this run's deploy serves min 0.1.4, so an HTTP client names its version
+    // as every served client must; the front's own answer to one that does not is S-BTN-227's.
+    const client = { 'Baton-Client': `baton/${RECOMMENDED_CLIENT}` };
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
     try {
       const port = (server.address() as AddressInfo).port;
-      const refused = await fetch(`${origin}:${port}/v1/runner/heartbeat`, { method: 'POST', body: '{}' });
+      const refused = await fetch(`${origin}:${port}/v1/runner/heartbeat`, { method: 'POST', headers: client, body: '{}' });
       expect(refused.status).toBe(401);
       expect(await refused.json()).toMatchObject({ code: 'unauthenticated' });
       for (const [k, v] of Object.entries(SECURITY_HEADERS)) expect(refused.headers.get(k)).toBe(v);
       const secret = 'secret-http';
       const ok = await fetch(`${origin}:${port}/v1/runner/heartbeat`, {
         method: 'POST',
-        headers: { Authorization: 'Bearer tok-vm-a', 'Content-Type': 'application/json' },
+        headers: { ...client, Authorization: 'Bearer tok-vm-a', 'Content-Type': 'application/json' },
         body: JSON.stringify(hbBody('vm-a', { secret_hash: await sha256(secret) })),
       });
       expect(ok.status).toBe(200);
       // A target that looks like another authority stays a path, as on the Worker.
-      const odd = await fetch(`${origin}:${port}//x/v1/sync/head`);
+      const odd = await fetch(`${origin}:${port}//x/v1/sync/head`, { headers: client });
       expect([odd.status, ((await odd.json()) as { code: string }).code]).toEqual([404, 'not-found']);
       // A body over the limit is refused with the §11 envelope and the security headers.
-      const big = await fetch(`${origin}:${port}/v1/runner/heartbeat`, { method: 'POST', body: 'x'.repeat(MAX_BODY + 1) }).catch(() => null);
+      const big = await fetch(`${origin}:${port}/v1/runner/heartbeat`, { method: 'POST', headers: client, body: 'x'.repeat(MAX_BODY + 1) }).catch(() => null);
       expect(big).not.toBeNull();
       if (big) {
         expect(big.status).toBe(400);

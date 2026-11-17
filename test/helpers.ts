@@ -4,7 +4,7 @@
 import { importJWK, SignJWT } from 'jose';
 import roadmapPr from './fixtures/courses/roadmap-pr/course.json';
 import { ACTIVITY_KINDS } from '../src/core/validate';
-import { call as hostCall, config as env, tick as hostTick, withCore } from '#host';
+import { call as hostCall, config as env, raw as hostRaw, tick as hostTick, withCore } from '#host';
 import { signedRequest, type SignOptions, type TestKey } from './lib/sshKeys';
 import { deliverySignature } from '../src/core/webhook';
 
@@ -41,6 +41,12 @@ export function accessToken(email = 'owner@example.com', opts: { audience?: stri
 
 export function call(path: string, init: RequestInit = {}) {
   return hostCall(new Request(ORIGIN + path, init));
+}
+
+/** A request to Baton exactly as built — no harness header added. S-BTN-227 (R-BTN-197, B-254):
+ *  a request from an old client, or from none, reaches Baton as it is. */
+export function rawCall(req: Request) {
+  return hostRaw(req);
 }
 
 export async function syncCall(path: string, body?: unknown, token?: string) {
@@ -128,10 +134,12 @@ export async function sha256(text: string) {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** A worker call with a credential's token and, after the first heartbeat, the secret. */
-export function workerCall(path: string, { cred = 'vm-a', secret, body, method }: { cred?: keyof typeof TOKENS; secret?: string; body?: unknown; method?: string } = {}) {
+/** A worker call with a credential's token and, after the first heartbeat, the secret. `client`
+ *  is the `Baton-Client` the call names — absent, the harness's own (the host's `call`). */
+export function workerCall(path: string, { cred = 'vm-a', secret, body, method, client }: { cred?: keyof typeof TOKENS; secret?: string; body?: unknown; method?: string; client?: string } = {}) {
   const headers: Record<string, string> = { Authorization: `Bearer ${TOKENS[cred]}`, 'Content-Type': 'application/json' };
   if (secret) headers['X-Worker-Secret'] = secret;
+  if (client) headers['Baton-Client'] = client;
   return call(path, { method: method ?? (body === undefined ? 'GET' : 'POST'), headers, body: body === undefined ? undefined : JSON.stringify(body) });
 }
 
@@ -140,10 +148,11 @@ export function workerCall(path: string, { cred = 'vm-a', secret, body, method }
 export const SSH_KEYS: Record<string, TestKey> = Object.fromEntries((JSON.parse(env.TEST_SSH_KEYS ?? '[]') as TestKey[]).map((k) => [k.name, k]));
 
 /** A worker call signed with test key `name` (R-BTN-13): `created` is the core's clock unless
- *  given; a body is JSON. Returns the request too, to replay it. */
-export async function signedCall(name: string, path: string, o: Omit<SignOptions, 'body'> & { body?: unknown; secret?: string; url?: string } = {}) {
+ *  given; a body is JSON. `headers` ride beside the signature (B-254: a `Baton-Client` of the
+ *  test's choosing). Returns the request too, to replay it. */
+export async function signedCall(name: string, path: string, o: Omit<SignOptions, 'body'> & { body?: unknown; secret?: string; url?: string; headers?: Record<string, string> } = {}) {
   const created = o.created ?? Math.floor((await withCore((c) => c.now())) / 1000);
-  const headers: Record<string, string> = o.secret ? { 'X-Worker-Secret': o.secret } : {};
+  const headers: Record<string, string> = { ...(o.headers ?? {}), ...(o.secret ? { 'X-Worker-Secret': o.secret } : {}) };
   const req = await signedRequest(SSH_KEYS[name], o.url ?? ORIGIN + path, { ...o, created, headers, body: o.body === undefined ? undefined : JSON.stringify(o.body) });
   const replay = req.clone();
   const res = await hostCall(req);
@@ -195,8 +204,8 @@ let requests = 0;
 export const requestId = () => `req-${++requests}-${Math.random().toString(16).slice(2, 10)}`;
 
 /** `POST /v1/runner/claim`; returns the status and the body. */
-export async function claimItem(cred: keyof typeof TOKENS, secret: string, body: Record<string, unknown> = {}) {
-  const res = await workerCall('/v1/runner/claim', { cred, secret, body: { request_id: requestId(), ...body } });
+export async function claimItem(cred: keyof typeof TOKENS, secret: string, body: Record<string, unknown> = {}, client?: string) {
+  const res = await workerCall('/v1/runner/claim', { cred, secret, body: { request_id: requestId(), ...body }, ...(client ? { client } : {}) });
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 

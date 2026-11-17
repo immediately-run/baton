@@ -1036,6 +1036,15 @@ export class Runner {
         const outcome = await this.runOnce();
         if (!outcome) await this.idleWait();
       } catch (e) {
+        // R-BTN-197 (B-254): a runner the deploy refuses as too old takes no claim — every call
+        // of its own would be refused the same way — logs the versions it and Baton name, and
+        // exits non-zero. The claim it held ends as its lease lapses (R-BTN-9); nothing of the
+        // runner's own updates it.
+        if (e instanceof BatonRefusal && e.code === 'client-too-old') {
+          const v = e.versions;
+          this.log(`baton: Baton refuses this client — ${v ? `this runner is ${v.client}; Baton serves min ${v.min}, recommended ${v.recommended}` : e.message}; no claim is taken, and this runner exits: update it at your own pace (nothing updates itself, R-BTN-197)`);
+          process.exit(1);
+        }
         this.log(`baton: the loop failed (${msg(e)}) — retrying after a beat`);
         await this.idleWait();
       }

@@ -120,6 +120,11 @@ export interface Config {
    *  a comma- or JSON-separated list. An administrator's setting, as the human keys are; the
    *  default is `claude.ai` alone. */
   BATON_SESSION_HOSTS?: string;
+  /** R-BTN-197 (B-254): the oldest client this deployment serves — the code's `MIN_CLIENT`
+   *  unless the deploy raises it here (a broken value falls back to the constant, so a typo can
+   *  never brick the instance's clients). A constant of the code the deploy may raise early; no
+   *  administrator setting touches it, and `recommended` alone is raisable at runtime. */
+  BATON_MIN_CLIENT?: string;
   /** R-BTN-114's `SigningKey` (R-BTN-171, R-BTN-189): the tenant's Ed25519 signing key, as the
    *  JWK of its private half — `{"kty":"OKP","crv":"Ed25519","d":…,"x":…}`. A secret on
    *  Cloudflare, a key file locally; Baton never generates or stores one. */

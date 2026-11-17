@@ -30,9 +30,11 @@
 //   baton admin -i KEY capacity set <capability> --clear [--yes]             (R-BTN-178)
 //   baton admin -i KEY capacity list
 //   baton admin -i KEY settings set [--link-hosts a,b|none] [--session-hosts a,b|none] [--check-app-id ID|none]
+//                [--recommended-client VER|none]
 //                — the instance settings (B-4, R-BTN-113, §13.1): each flag replaces its own
 //                whole; none clears one to what stands without it (session_hosts: the deploy's
-//                BATON_SESSION_HOSTS, default claude.ai)
+//                BATON_SESSION_HOSTS, default claude.ai; recommended_client: the code's own,
+//                B-254 R-BTN-197 — raiseable, never below the code's)
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
@@ -162,6 +164,8 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requestCredential, signHeaders, signingKey } from './sign.mjs';
+import { clientVersion, packageVersion, workingTreeOf } from './version.mjs';
+import { compareVersions, parseClientVersions } from '../src/shared/versions.mjs';
 
 export const DEFAULT_URL = 'https://baton.immediately.run';
 /** Where the CLI's homes.json sits (B-121): `$XDG_CONFIG_HOME` (or `~/.config`)/baton/
@@ -249,30 +253,10 @@ export function duration(v) {
   return Number(m[1]) * UNITS[m[2]];
 }
 
-/** The version of the package this CLI ships in — the pin the B-138 refusal names. `cli/` reads
- *  the checkout's package.json, the bundled `dist/` the package's own; null when neither reads. */
-function packageVersion() {
-  try {
-    return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** B-138: the git working tree that owns the CLI's code — the directory holding the `.git` the
- *  CLI sits below — or null when no tree owns it (an npm install, npx's cache: a released copy,
- *  whose code no push changes). A checkout's `cli/` and a `dist/` built inside one are working
- *  trees: their code is what a push (a branch a leg checks out) leaves there. A `.git` above a
- *  `node_modules` boundary does not own the code below it — npm laid that down, no branch of
- *  the outer tree does (round 1, the dotfiles `$HOME`: a released copy installed under a `$HOME`
- *  that is itself a git repository is still a released copy). */
-export function workingTreeOf(cliFile = fileURLToPath(import.meta.url)) {
-  for (let dir = dirname(cliFile), parent = dirname(dir), base = basename(dir);; dir = parent, parent = dirname(dir), base = basename(dir)) {
-    if (base === 'node_modules') return null;   // npm's boundary: no tree above it owns this code
-    if (existsSync(join(dir, '.git'))) return dir;
-    if (parent === dir) return null;
-  }
-}
+/** The version of the package this CLI ships in — the pin the B-138 refusal names — and the
+ *  `Baton-Client` value every request names (R-BTN-197, B-254): `cli/version.mjs`'s, the leaf
+ *  the runner's bundle also takes, re-exported where they have always been imported from. */
+export { clientVersion, packageVersion, workingTreeOf } from './version.mjs';
 
 /** A word that keeps the shell it is copied into reading one argument (round 1): the refusal's
  *  suggested command must survive a key path with a space in it. */
@@ -470,17 +454,20 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'GET', path: '/v1/admin/capacities' };
     }
     // B-4 (R-BTN-113, §13.1): the instance settings, each flag replacing its own whole — `none`
-    // clears one back to what stands without it (the deploy's own default).
+    // clears one back to what stands without it (the deploy's own default). B-254
+    // (R-BTN-197): `--recommended-client` raises the recommendation this instance serves, at or
+    // above the code's own; `none` clears it back to the code's.
     if (cmd === 'settings' && rest[0] === 'set') {
-      const { flags } = parseArgs(rest.slice(1), [], ['link-hosts', 'session-hosts', 'check-app-id'], 0);
+      const { flags } = parseArgs(rest.slice(1), [], ['link-hosts', 'session-hosts', 'check-app-id', 'recommended-client'], 0);
       const hosts = (v) => (v === 'none' ? null : list(v));
       const body = {
         ...(flags['link-hosts'] !== undefined ? { link_hosts: hosts(flags['link-hosts']) } : {}),
         ...(flags['session-hosts'] !== undefined ? { session_hosts: hosts(flags['session-hosts']) } : {}),
         ...(flags['check-app-id'] !== undefined ? { check_app_id: flags['check-app-id'] === 'none' ? null : flags['check-app-id'] } : {}),
+        ...(flags['recommended-client'] !== undefined ? { recommended_client: flags['recommended-client'] === 'none' ? null : flags['recommended-client'] } : {}),
       };
       if (!Object.keys(body).length) {
-        throw new Error('baton admin settings set names at least one setting (--link-hosts, --session-hosts, --check-app-id; none clears one)');
+        throw new Error('baton admin settings set names at least one setting (--link-hosts, --session-hosts, --check-app-id, --recommended-client; none clears one)');
       }
       return { method: 'PUT', path: '/v1/admin/settings', body };
     }
@@ -801,14 +788,18 @@ const redirectAnswered = (target, status, to) => new Error(
  *  with that key as a bearer. Returns `{status, json, text}`: `json` is null when the body is
  *  not JSON, `text` the body as it arrived, for the caller to show. A redirect is refused,
  *  never followed (B-80): a 3xx is an error naming what answered — a login page in front of
- *  Baton is not Baton's answer. */
+ *  Baton is not Baton's answer. R-BTN-197 (B-254): every request says which client it is
+ *  (`Baton-Client`, `clientVersion`'s one place), and the first answer that names a
+ *  `recommended` above it draws the warning — once per command, on stderr, so a script's
+ *  stdout stays its own. */
+let saidClientVersions = false;
 export async function send(url, p, keyFile, fetchImpl = fetch) {
   const cred = requestCredential(keyFile);
   const target = new URL(p.path, url).toString();
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
   const auth = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
-  const headers = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
+  const headers = { 'Baton-Client': clientVersion(), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
   let res;
   try {
@@ -822,6 +813,7 @@ export async function send(url, p, keyFile, fetchImpl = fetch) {
   }
   // A fetch stand-in may hand the 3xx back instead of throwing: the same refusal (B-80).
   if (res.status >= 300 && res.status < 400) throw redirectAnswered(target, res.status, res.headers.get('location'));
+  warnClientVersions(res.headers.get('Baton-Client-Versions'));
   const raw = await res.text();
   let json = null;
   try {
@@ -830,6 +822,22 @@ export async function send(url, p, keyFile, fetchImpl = fetch) {
     json = null;
   }
   return { status: res.status, json, text: raw };
+}
+
+/** R-BTN-197: `baton: this CLI is <version>; Baton recommends <recommended> and refuses below
+ *  <min>`, said once per command (one command is one process), only when the recommendation is
+ *  above this CLI's version — compared by semver precedence, `+dev` taking no part. Nothing
+ *  installs or switches anything: the header carries version numbers only, and updating stays
+ *  the operator's act. */
+function warnClientVersions(headerValue) {
+  if (saidClientVersions || headerValue == null) return;
+  const served = parseClientVersions(headerValue);
+  if (!served) return;
+  saidClientVersions = true;
+  const own = clientVersion().replace(/^baton\//, '');
+  if (compareVersions(own, served.recommended) < 0) {
+    process.stderr.write(`baton: this CLI is ${clientVersion()}; Baton recommends ${served.recommended} and refuses below ${served.min}\n`);
+  }
 }
 
 /** The base a course change is judged against: `--base`, else the remote's default branch. */

@@ -3,8 +3,9 @@
 // forwards the API to the core — through the Durable Object on Cloudflare, through the request
 // queue locally (R-BTN-55). Every response leaves with the security headers.
 import { API_KEY, readCapped, verifyOwner, verifyRequest, verifySyncCredential, verifyWorker, checkStateChanging, withBody } from './auth';
-import { BatonError, NO_STORE, SESSION_COOKIE, errorResponse, noStore, withSecurityHeaders } from './http';
+import { BatonError, CLIENT_HEADER, NO_STORE, SESSION_COOKIE, clientTooOld, errorResponse, noStore, servedClientVersions, withClientVersions, withSecurityHeaders } from './http';
 import { MAX_DELIVERY, pickDelivery, verifyDelivery } from './webhook';
+import { clientVersionOf, compareVersions } from '../shared/versions.mjs';
 import type { Config } from './ports';
 import page from '../ui/index.html';
 import style from '../ui/app.css';
@@ -260,6 +261,22 @@ function forward(req: Request, to: Forward, principal: Record<string, string>): 
 export async function front(req: Request, env: Config, to: Forward): Promise<Response> {
   let res: Response;
   let cache: Answer['cache'] = 'public';
+  // R-BTN-197: the one check that comes before every other — the client's own statement of its
+  // version, read before the request's signature is checked and before anything of it is read or
+  // written, so an old client gets this one answer and never a failure of a request shape it no
+  // longer matches. A request without the header compares as `0.0.0`. The front reads nothing:
+  // the served `min` is the deploy's word (the code's constant by default) and its `recommended`
+  // the code's — the core's responses carry the setting an administrator raised above it.
+  const served = servedClientVersions(env);
+  const api = new URL(req.url).pathname.startsWith('/v1/');
+  if (api) {
+    const client = clientVersionOf(req.headers.get(CLIENT_HEADER)) ?? '0.0.0';
+    if (compareVersions(client, served.min) < 0) {
+      if (req.body && !req.bodyUsed) req.body.cancel().catch(() => {});
+      const e = clientTooOld(client, served.min, served.recommended);
+      return withSecurityHeaders(noStore(withClientVersions(errorResponse(e.code, e.message, e.extra), served)));
+    }
+  }
   try {
     ({ res, cache } = await route(req, env, to));
   } catch (e) {
@@ -268,5 +285,9 @@ export async function front(req: Request, env: Config, to: Forward): Promise<Res
     cache = classOf(e) ?? 'public';
     res = e instanceof BatonError ? errorResponse(e.code, e.message, e.extra) : errorResponse('internal', 'internal error');
   }
+  // R-BTN-197: every response under /v1 carries the versions Baton serves, a refusal included —
+  // set here from the deploy's own values when the core (which names the raised `recommended`)
+  // has not set its own.
+  if (api) res = withClientVersions(res, served);
   return withSecurityHeaders(cache === 'private' ? noStore(res) : res);
 }

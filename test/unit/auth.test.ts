@@ -2,6 +2,11 @@
 // R-BTN-16; G-BTN-11, G-BTN-12).
 import { describe, it, expect, inject } from 'vitest';
 import { env } from 'cloudflare:test';
+
+/** B-254 (R-BTN-197): the run's bindings raise the served `min` for S-BTN-227's old clients;
+ *  this file's own drives of the front stay at the code's floor, which is what a deploy without
+ *  the raise serves — the floor is not what they exercise. */
+const envAtCodesFloor = { ...env, BATON_MIN_CLIENT: undefined } as typeof env;
 import { errors, generateKeyPair, SignJWT } from 'jose';
 import { authorityOf, contentDigest, KEY_TYPES, parseAdminKeys, parseSshKey, verifyFailure, verifyRequest, verifySyncToken } from '../../src/core/auth';
 import { front } from '../../src/core/front';
@@ -319,7 +324,7 @@ describe('the front stops a bad signature before the object (R3-1239)', () => {
     const req = await signedRequest(await makeKey('ssh-ed25519', 'x'), `${ORIGIN}/v1/runner/mode`, { created: T });
     const h = new Headers(req.headers);
     edit(h);
-    const res = await front(new Request(req.url, { headers: h }), env, to);
+    const res = await front(new Request(req.url, { headers: h }), envAtCodesFloor, to);
     expect(res.status).toBe(401);
     expect(seen).toEqual([]);
   });
@@ -327,7 +332,7 @@ describe('the front stops a bad signature before the object (R3-1239)', () => {
   it('for another host', async () => {
     seen.length = 0;
     const req = await signedRequest(await makeKey('ssh-ed25519', 'x'), 'https://another-baton.example/v1/runner/mode', { created: T });
-    expect((await front(req, env, to)).status).toBe(401);
+    expect((await front(req, envAtCodesFloor, to)).status).toBe(401);
     expect(seen).toEqual([]);
   });
 
@@ -336,7 +341,7 @@ describe('the front stops a bad signature before the object (R3-1239)', () => {
     const k = await makeKey('ecdsa-sha2-nistp256', 'x');
     const req = await signedRequest(k, `${ORIGIN}/v1/runner/heartbeat`, { body: '{"b":1}', created: T, headers: { 'X-Baton-Signed': 'SHA256:forged' } });
     let body = '';
-    const res = await front(req, env, async (r) => ((body = await r.text()), to(r)));
+    const res = await front(req, envAtCodesFloor, async (r) => ((body = await r.text()), to(r)));
     expect(res.status).toBe(200);
     expect(seen).toEqual([k.fingerprint]);
     expect(body).toBe('{"b":1}');

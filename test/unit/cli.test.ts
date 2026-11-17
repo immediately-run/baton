@@ -1,7 +1,7 @@
 // cli.test.ts — `baton admin …` / `baton owner …` (R3-1240; BATON_SPEC §10.6, R-BTN-57/-58,
 // R-BTN-66/-67): each command's one request (`plan`, pure), and a request signed with a real key
 // file by `ssh-keygen -Y sign` that Baton's verifier accepts. Node only: it runs ssh-keygen.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import * as http from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -942,5 +942,74 @@ describe('baton decision answer (R-BTN-116, R-BTN-127)', () => {
 
   it('refuses a ticket that is not <repository>:<id>', () => {
     expect(() => answerPlan('B-7', 'ship')).toThrow('the ticket is <repository>:<id>');
+  });
+});
+
+// B-254 (R-BTN-197): the client versions the CLI and Baton state about each other. The CLI's
+// every request says its version (`Baton-Client`, `+dev` from this working tree), the first
+// answer above it draws the warning once per command, and `admin settings set` gains the
+// recommendation flag. The server half is S-BTN-227 on both hosts.
+import { clientVersionOf, compareVersions, parseClientVersions } from '../../src/shared/versions.mjs';
+import { clientVersion } from '../../cli/baton.mjs';
+
+describe('the client versions the CLI states and answers (R-BTN-197, B-254)', () => {
+  it('semver precedence: +dev takes no part, prereleases rank below releases, identifiers numerically', () => {
+    expect(compareVersions('0.1.4+dev', '0.1.4')).toBe(0);
+    expect(compareVersions('0.1.3', '0.1.4')).toBeLessThan(0);
+    expect(compareVersions('0.1.4', '0.1.3')).toBeGreaterThan(0);
+    expect(compareVersions('0.1.5', '0.1.4-rc.1')).toBeGreaterThan(0);
+    expect(compareVersions('0.1.4-rc.2', '0.1.4-rc.10')).toBeLessThan(0);
+    expect(compareVersions('0.1.4-rc.2', '0.1.4-rc.2')).toBe(0);
+    expect(compareVersions('0.1.4-rc.1', '0.1.4-rc.1+b1')).toBe(0);
+    expect(compareVersions('1.0.0', '0.9.9')).toBeGreaterThan(0);
+    expect(clientVersionOf('baton/0.1.4+dev')).toBe('0.1.4+dev');
+    expect(clientVersionOf('baton/0.1.4')).toBe('0.1.4');
+    expect(clientVersionOf('other/1.0.0')).toBeNull();
+    expect(clientVersionOf(undefined)).toBeNull();
+    expect(parseClientVersions('min=0.1.4, recommended=0.1.5')).toEqual({ min: '0.1.4', recommended: '0.1.5' });
+    expect(parseClientVersions('an intermediary wrote this')).toBeNull();
+  });
+
+  it('clientVersion names the package version, +dev from this checkout (B-138\'s guard)', () => {
+    expect(clientVersion()).toMatch(/^baton\/\d+\.\d+\.\d+\+dev$/);
+  });
+
+  it('send carries Baton-Client and warns once below the recommendation, the command still running', async () => {
+    vi.resetModules();
+    const fresh = await import('../../cli/baton.mjs');
+    const wrote: string[] = [];
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation((c) => { wrote.push(String(c)); return true; });
+    try {
+      const file = join(tmpdir(), `baton-key-${process.pid}-${Date.now()}`);
+      createApiKey(file, 'admin');
+      let named: unknown;
+      const fetchImpl = (_url: string, init: RequestInit) => {
+        named = (init.headers as Record<string, string>)['Baton-Client'];
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+          status: 200, headers: { 'Content-Type': 'application/json', 'Baton-Client-Versions': 'min=0.1.4, recommended=0.1.5' },
+        }));
+      };
+      // A command at 0.1.4 (the package version): the recommendation is above it, the warning
+      // prints once, and the command's own answer is untouched.
+      const out = await fresh.send(ORIGIN, { method: 'GET', path: '/v1/admin/state' }, file, fetchImpl as typeof fetch);
+      expect([out.status, out.json]).toEqual([200, { ok: true }]);
+      expect(String(named)).toMatch(/^baton\/\d+\.\d+\.\d+\+dev$/);
+      expect(wrote.filter((w) => w.includes('this CLI is baton/') && w.includes('recommends 0.1.5 and refuses below 0.1.4'))).toHaveLength(1);
+      // The next answer of the same command says nothing more.
+      await fresh.send(ORIGIN, { method: 'GET', path: '/v1/admin/state' }, file, fetchImpl as typeof fetch);
+      expect(wrote.filter((w) => w.includes('this CLI is baton/'))).toHaveLength(1);
+    } finally {
+      err.mockRestore();
+    }
+  });
+
+  it('admin settings set --recommended-client plans the field, none clearing to the code\'s default', () => {
+    expect(plan('admin', ['settings', 'set', '--recommended-client', '0.1.6'])).toEqual({
+      method: 'PUT', path: '/v1/admin/settings', body: { recommended_client: '0.1.6' },
+    });
+    expect(plan('admin', ['settings', 'set', '--recommended-client', 'none']).body).toEqual({ recommended_client: null });
+    expect(plan('admin', ['settings', 'set', '--session-hosts', 'claude.ai', '--recommended-client', '0.1.6']).body)
+      .toEqual({ session_hosts: ['claude.ai'], recommended_client: '0.1.6' });
+    expect(() => plan('admin', ['settings', 'set'])).toThrow(/--recommended-client/);
   });
 });

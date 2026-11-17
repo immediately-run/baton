@@ -50,6 +50,7 @@
     "test/integration/S-BTN-41.runner.test.ts",
     "test/integration/S-BTN-202.runner-scope.test.ts",
     "test/integration/S-BTN-26.runner.test.ts",
+    "test/integration/S-BTN-227.runner.test.ts",
     "test/integration/S-BTN-21.machine-lock.test.ts",
     "test/integration/S-BTN-222.runner-half.test.ts",
     "test/integration/S-BTN-77.runner-half.test.ts",

@@ -144,8 +144,9 @@ describe('S-BTN-77: host allowlists (R-BTN-113)', () => {
     expect(await rows<{ session_url: string | null }>('SELECT session_url FROM claim_legs WHERE claim_id = ?', c.claim_id)).toEqual([{ session_url: OTHER }]);
 
     // The state read carries the settings (§11.4's tenant screen): `session_hosts` is the list
-    // the client's own link gate checks against (§12.3).
-    expect((await uiState()).instance).toEqual({ link_hosts: ['links.example'], session_hosts: ['claude.ai', 'sessions.example'], check_app_id: '123456' });
+    // the client's own link gate checks against (§12.3); `recommended_client` is the version as
+    // served — the code's own, until an administrator raises it (R-BTN-197, B-254).
+    expect((await uiState()).instance).toEqual({ link_hosts: ['links.example'], session_hosts: ['claude.ai', 'sessions.example'], check_app_id: '123456', recommended_client: '0.1.5' });
 
     // Clearing the setting restores what stands without it — the deploy's default (claude.ai)
     // — so a sessions.example link is dropped again.
