@@ -2632,12 +2632,12 @@ export async function run(ctx, standard) {
   }, 120_000);
 });
 
-describe('courseSchemas: the sync posts a course\'s schemas (R-BTN-108)', () => {
-  it('reads .baton/schemas/<course>/<name>@<n>.json as <course>:<name>@<n>, with the SHA-256 of its bytes', () => {
+describe('courseSchemas: the sync posts a course\'s schemas (R-BTN-108, R-BTN-134)', () => {
+  it('reads <course dir>/schemas/<name>@<n>.json as <course>:<name>@<n>, with the SHA-256 of its bytes', () => {
     const root = mkdtempSync(join(tmpdir(), 'baton-schemas-'));
     try {
       expect(courseSchemas(root, 'roadmap-pr')).toEqual({});
-      const dir = join(root, '.baton', 'schemas', 'roadmap-pr');
+      const dir = join(root, '.baton', 'courses', 'roadmap-pr', 'schemas');
       mkdirSync(dir, { recursive: true });
       const text = '{ "type": "object" }\n';
       writeFileSync(join(dir, 'findings@2.json'), text);
@@ -2645,7 +2645,14 @@ describe('courseSchemas: the sync posts a course\'s schemas (R-BTN-108)', () => 
       writeFileSync(join(dir, 'findings.json'), '{}');
       expect(courseSchemas(root, 'roadmap-pr')).toEqual({ schemas: [{ id: 'roadmap-pr:findings@2', digest: createHash('sha256').update(text).digest('hex'), schema: { type: 'object' } }] });
       writeFileSync(join(dir, 'broken@1.json'), '{');
-      expect(() => courseSchemas(root, 'roadmap-pr')).toThrow(/broken@1.json is not JSON/);
+      expect(() => courseSchemas(root, 'roadmap-pr')).toThrow(/schemas\/broken@1\.json is not JSON/);
+      // The old location, `.baton/schemas/<course>/`, is read no more (B-52): a repository that
+      // still keeps schemas there posts none of them.
+      const old = join(root, '.baton', 'schemas', 'roadmap-pr');
+      mkdirSync(old, { recursive: true });
+      writeFileSync(join(old, 'left@1.json'), '{ "type": "object" }\n');
+      rmSync(join(dir, 'broken@1.json'));
+      expect(courseSchemas(root, 'roadmap-pr')).toEqual({ schemas: [{ id: 'roadmap-pr:findings@2', digest: createHash('sha256').update(text).digest('hex'), schema: { type: 'object' } }] });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

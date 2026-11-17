@@ -2232,16 +2232,20 @@ jobs:
 `;
 }
 
-/** R-BTN-108: a course's schemas, `.baton/schemas/<course>/<name>@<n>.json`, each posted as
- *  `<course>:<name>@<n>` with the SHA-256 of its file — the digest that makes a version
- *  immutable. Absent directory, no schemas. */
+/** R-BTN-134, R-BTN-108 (B-52): a course's schemas, `schemas/<name>@<n>.json` in its course
+ *  directory, each posted as `<course>:<name>@<n>` with the SHA-256 of its file — the digest
+ *  that makes a version immutable. A repository's own course keeps them at
+ *  `.baton/courses/<course>/schemas/`; a sourced course's sit in its source's directory, which
+ *  B-43 wires to the reader. The sync's post and the course test kit read through this one
+ *  function, so no two parts of Baton disagree on where a schema is. Absent directory, no
+ *  schemas; nothing reads `.baton/schemas/<course>/`, the window the move closed. */
 export function courseSchemas(root: string, course: string): { schemas?: { id: string; digest: string; schema: unknown }[] } {
-  const dir = join(root, '.baton', 'schemas', course);
+  const dir = join(root, '.baton', 'courses', course, 'schemas');
   if (!existsSync(dir)) return {};
   const schemas = readdirSync(dir).filter((f) => /^[A-Za-z][A-Za-z0-9._-]{0,63}@(0|[1-9][0-9]{0,5})\.json$/.test(f)).sort().map((f) => {
     const bytes = readFileSync(join(dir, f));
     let schema: unknown;
-    try { schema = JSON.parse(bytes.toString('utf8')); } catch (e) { throw new Error(`.baton/schemas/${course}/${f} is not JSON: ${(e as Error).message}`); }
+    try { schema = JSON.parse(bytes.toString('utf8')); } catch (e) { throw new Error(`.baton/courses/${course}/schemas/${f} is not JSON: ${(e as Error).message}`); }
     return { id: `${course}:${f.slice(0, -5)}`, digest: createHash('sha256').update(bytes).digest('hex'), schema };
   });
   return schemas.length ? { schemas } : {};

@@ -875,8 +875,9 @@ async function testCourse(argv) {
     input.legScripts ? `${input.legScripts.length} leg script(s)` : 'no legs/',
   ];
   process.stdout.write(`baton test-course: ${said.join('; ')}\n`);
-  // R-BTN-111 (B-234): the signature — the conditions the course's legs may raise, its own
-  // declared types and the standard ones; `baton course test` prints it.
+  // R-BTN-111 (B-234, B-52): the signature — the course's input (its start station's entry), its
+  // output (each end station's) and the conditions its legs may raise, each course its legs'
+  // spawns name printed beside it; `baton course test` prints it.
   for (const line of kit.signatureLines(input)) process.stdout.write(`${line}\n`);
   for (const v of violations) process.stdout.write(`✗ ${v.rule}: ${v.message}\n`);
   process.stdout.write(violations.length ? `${violations.length} violation(s)\n` : '✓ no violations\n');
