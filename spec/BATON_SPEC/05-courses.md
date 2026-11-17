@@ -921,7 +921,10 @@ mean (R-BTN-50).
     repository or one the ticket's `repos:` names (B-29), and the checkout's branch, when it feeds
     such a PR, a head the PR contains — the review reads what is pushed. What cannot be verified
     fails the leg naming what was looked for; the stub reports, never retries. The test kit fails
-    such a stub that returns its position for an `agent_command` exiting 0 with no PR.
+    such a stub that returns its position for an `agent_command` exiting 0 with no PR. A leg that
+    fails after its agent ran — a non-zero exit, or an exit 0 whose answer, push or PR check then
+    fails — names the last lines of the agent's two streams, bounded, or that it printed nothing
+    (B-256): the leg's sandbox may be gone by the time anyone asks.
     - **The stub's wait for its agent ends three ways (B-108)** — at the earliest of the agent's
       exit, the **idle bound** (fifteen minutes of silence across every activity signal the stub
       can see) and the **absolute bound** (five hours of the leg, whatever the agent is doing).

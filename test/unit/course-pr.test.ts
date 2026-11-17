@@ -541,6 +541,14 @@ describe('the implement stub\'s PR verification (B-81)', () => {
     );
   });
 
+  it('a repos: entry naming the checkout\'s own repository is the home, read and named once (B-256)', () => {
+    const { run, repos } = bound({ '': '[]' });
+    expect(() => verifyPrOpen(ask({ repositories: ['immediately-run/baton', 'Immediately-Run/Baton'] }), run)).toThrow(
+      /exists in immediately-run\/baton — open one/,
+    );
+    expect(repos).toEqual([null]);
+  });
+
   it('a previous branch pattern still matches (R-BTN-51)', () => {
     const { run } = bound({ '': pr(4, 'glm/B-81-old') });
     expect(verifyPrOpen(ask({ branchPatterns: ['claude/{ticket}-*', 'glm/{ticket}-*'] }), run)).toBeUndefined();

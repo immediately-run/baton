@@ -32,8 +32,11 @@ declaring a capability you no longer hold.
   exit criteria. Those sections are the contract. Where the ticket prescribes a decision, take
   it; if you take another, say so under "Deviations" in the PR body.
 - **Check it is not already delivered.** Search the code for what the ticket asks for. If it is
-  done, open no PR: say so in the ticket and stop with an error, so a person looks. If part of it
-  is done, build the remainder and say which part you found.
+  done, open no PR: raise it and stop, so a person looks — `baton leg raise error.needs-person
+  --subject "<id> is already delivered: <where>"`, which ends the leg without spending another
+  attempt on it (R-BTN-160, R-BTN-195); where the raise is refused or the command answers "not
+  inside a leg", your last lines say the same instead. If part of it is done, build the remainder and say which
+  part you found.
 - Find the code you will touch by name: the helpers, the tests next to it, the repository's own
   checks (lint, typecheck, tests — whatever a contributor runs).
 
@@ -112,3 +115,9 @@ of every repository the ticket names, and reads them together, as one change.
   aggregate; a release note belongs in the PR body.
 - Merge, approve or review your own PR; later legs do that.
 - Leave the PR without a pushed head: the review reads what is pushed.
+- Exit without a PR and without saying why. Whatever stops you — the ticket already delivered,
+  a stop the repository's rules name, checks you cannot get green, a push or `gh pr create`
+  that fails, a model or provider that refuses (balance, quota, rate limit) — your last lines
+  say what it was, in plain words: an exit with no PR fails the leg, and those lines are all
+  that is kept of it (B-256). Your process exits 0 whatever you say, so saying it is the only
+  way anyone learns it.
