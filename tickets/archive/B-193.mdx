@@ -2,8 +2,8 @@
 title: "B-193 — The V2 toolchain and serving: src/dashboard/ in React and TypeScript, one esbuild bundle delivered as text to both hosts, the vitest ui project, the markup-API source gate, and the front serving the shell at / and every screen path in place of V1"
 id: B-193
 project: baton-ui-v2
-status: available
-updated: 2026-11-09
+status: done
+updated: 2026-11-17
 repos:
   - baton
 tags:
@@ -23,14 +23,14 @@ depends_on:
 **Brief:** the owner, 2026-11-09 (B-191): React and TypeScript; "Nobody is using the V1 Baton
 UI, so the transition doesn't need to be smooth."
 
-**Spec:** [BATON_SPEC §12.3](../spec/BATON_SPEC/12-security.md#sec-12-3) (Rendering: the source
-never parses markup; one bundle, nothing from another origin), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4)
-(the screen paths; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): `/login`),
-[§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4):
-the headers the front sets on every answer), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1)
-(the public row: the shell's assets), [§2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1)
-([R-BTN-55](../spec/BATON_SPEC/02-deployments.md#sec-2-1): one core, both hosts),
-[§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([G-BTN-13](../spec/BATON_SPEC/15-verification.md#gates)).
+**Spec:** [BATON_SPEC §12.3](../../spec/BATON_SPEC/12-security.md#sec-12-3) (Rendering: the source
+never parses markup; one bundle, nothing from another origin), [§11.4](../../spec/BATON_SPEC/11-people.md#sec-11-4)
+(the screen paths; [R-BTN-155](../../spec/BATON_SPEC/11-people.md#sec-11-4): `/login`),
+[§12.4](../../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../../spec/BATON_SPEC/12-security.md#sec-12-4):
+the headers the front sets on every answer), [§12.1](../../spec/BATON_SPEC/12-security.md#sec-12-1)
+(the public row: the shell's assets), [§2.1](../../spec/BATON_SPEC/02-deployments.md#sec-2-1)
+([R-BTN-55](../../spec/BATON_SPEC/02-deployments.md#sec-2-1): one core, both hosts),
+[§15](../../spec/BATON_SPEC/15-verification.md#sec-15) ([G-BTN-13](../../spec/BATON_SPEC/15-verification.md#gates)).
 Context: `docs/context/design-brief.mdx` (React and TypeScript, one built bundle).
 
 **Depends on:** B-191 (the screen paths and the rendering rule are specified).
