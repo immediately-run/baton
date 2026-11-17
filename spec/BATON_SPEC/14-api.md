@@ -17,13 +17,15 @@ updates its `last_seen_at`. A destructive action takes `confirm: true` in its bo
 `confirm-required` (R-BTN-129). A dashboard session's actions that R-BTN-155 lists as confirmed answer
 `202 {confirm_code}` and run when the session's minting key confirms the code (`POST
 /v1/admin/confirm` or `POST /v1/owner/confirm`). The CLI command that calls each route is
-R-BTN-127's. Any route may answer `rate-limited` or `quota` (R-BTN-135).
+R-BTN-127's. Any route may answer `rate-limited` or `quota` (R-BTN-135). Every request
+carries `Baton-Client` and every response `Baton-Client-Versions` (R-BTN-197).
 
 **Errors** are `{ok: false, code, message}`, with these codes:
 
 | Code | Meaning |
 |---|---|
 | `unauthenticated` | no valid credential, or a bearer on a route its kind never reaches |
+| `client-too-old` | 426: a `Baton-Client` below the served `min`, with `client`, `min` and `recommended` (R-BTN-197) |
 | `forbidden` | a valid credential without the power (§12) |
 | `not-found` | no registry entry; an unknown, expired or bound sign-in code |
 | `invalid-params` | a body or query that fails validation |
