@@ -94,8 +94,8 @@ describe('S-BTN-16 cutover (server)', () => {
     expect((await beat('vm-a', mine.secret)).json.claim).toMatchObject({ id: legacy.id, ticket_id: 'docs:R3-9001', nonce: legacy.nonce });
     expect(await rows(`SELECT reap_after FROM claims WHERE id = ?`, legacy.id)).toEqual([{ reap_after: null }]);
     expect(await rows(`SELECT kind, actor FROM events WHERE kind = 'adopted'`)).toEqual([{ kind: 'adopted', actor: 'owner:owner@example.com' }]);
-    // Adopted, it is an ordinary claim: no legacy reap, and the per-worker index applies.
-    expect((await claimItem('vm-a', mine.secret)).json.rule).toBe('one-claim-per-worker');
+    // Adopted, it is an ordinary claim: no legacy reap, and it counts toward R-BTN-4's bound (B-188).
+    expect((await claimItem('vm-a', mine.secret)).json.rule).toBe('max-claims');
   });
 
   it('a note with no holder: any session may ask; the owner still decides; a session holding another item cannot adopt', async () => {

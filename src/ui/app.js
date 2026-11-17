@@ -3,11 +3,17 @@
 // `baton` CLI changes them, R-BTN-66), with the owner's actions (status request, release,
 // force-reap, accept a held history). At /login it trades the one-time token in
 // the URL's fragment for a session (R-BTN-57, R-BTN-16) and goes to /. It polls
-// GET /v1/ui/state every 10 seconds and renders with textContent only (§10.4): no markup is
-// ever built from server text. B-142: the model tables' views are gone — an unavailable
+// GET /v1/ui/state every 10 seconds while the page is visible — backing off to 60 seconds while
+// the answer is unchanged, and paused while the page is hidden (B-242) — and renders with
+// textContent only (§10.4): no markup is ever built from server text. B-142: the model tables' views are gone — an unavailable
 // provider is a reading and a peak preference a course rule (§6.3, §6.10), not a dashboard row.
 
+/** B-242: the poll's interval — 10 s after an answer that changed, doubling to at most 60 s
+ *  while the answers are the same, back to 10 s on a change or when the page is shown again. A
+ *  hidden page does not poll at all: each poll of a production-sized state reads thousands of
+ *  rows (Cloudflare's free tier allows 5,000,000 a day). */
 const POLL_MS = 10_000;
+const POLL_MAX_MS = 60_000;
 let state = null;
 
 /** An element with text, attributes and children; text always goes through textContent. */
@@ -167,6 +173,23 @@ const httpsLink = (text, href) => (typeof href === 'string' && href.startsWith('
   ? el('a', { text, attrs: { href, target: '_blank', rel: 'noopener' } })
   : el('span', { text }));
 
+/** R-BTN-113 (B-4): a session link is drawn only over https, without userinfo, on a host of the
+ *  instance's `session_hosts` — the state read carries the list (§12.3), and the server stored
+ *  the link only when it passed at the time; the allowlist may have narrowed since. */
+function sessionLink(text, href) {
+  if (typeof href !== 'string' || !href.startsWith('https://')) return el('span', { text });
+  const hosts = state?.instance?.session_hosts ?? ['claude.ai'];
+  try {
+    const u = new URL(href);
+    if (!u.username && !u.password && hosts.includes(u.hostname)) {
+      return el('a', { text, attrs: { href, target: '_blank', rel: 'noopener' } });
+    }
+  } catch {
+    // not a URL: text, never a link
+  }
+  return el('span', { text });
+}
+
 function renderWorkers() {
   const body = document.getElementById('workers');
   body.replaceChildren();
@@ -181,6 +204,12 @@ function renderWorkers() {
     // R-BTN-48: the courses its checkouts run, flagged where below the course's minimum.
     const runs = (w.courses ?? []).map((c) => `${c.repository}:${c.course} v${c.version}${c.min_worker_version != null && c.version < c.min_worker_version ? ` (below ${c.min_worker_version})` : ''}`).join(', ') || 'declares no course';
     who.append(el('div', { text: runs, cls: 'muted' }));
+    // B-253: the CLI the runner runs, as its profile states it — an unpinned runner (a branch
+    // its code follows) shows at a glance.
+    if (w.profile?.cli) {
+      const c = w.profile.cli;
+      who.append(el('div', { text: `cli ${[c.ref, c.commit != null ? String(c.commit).slice(0, 10) : null].filter(Boolean).join('@') || 'unknown'}${c.pinned ? '' : ' — not a pinned commit'}`, cls: 'muted' }));
+    }
     if (w.transcript_url) who.append(el('div', {}, httpsLink('transcript', w.transcript_url)));
     const st = w.reaped_at != null ? 'reaped' : w.alive ? 'alive' : 'lease lapsed';
     const stateCell = el('td', {}, el('div', { text: st, cls: w.alive ? 'alive' : 'dead' }), el('div', { text: `seen ${fmtTime(w.last_seen_at)}`, cls: 'muted' }), el('div', { text: `active ${fmtTime(w.last_activity_at)}`, cls: 'muted' }));
@@ -226,6 +255,8 @@ function renderRunning() {
   for (const c of state.running) {
     const item = el('td', {}, el('div', { text: c.ticket_id }), el('div', { text: c.title ?? '', cls: 'muted' }));
     if (c.stalled) item.append(el('div', { text: 'stalled: no activity for 2 h', cls: 'stalled' }));
+    // R-BTN-113 (B-4): the running leg's session link, as the run's row holds it.
+    if (c.session_url) item.append(el('div', {}, sessionLink(c.leg ? `session (${c.leg})` : 'session', c.session_url)));
     const worker = el('td', {}, el('div', { text: `${c.hostname} · #${c.worker_id}` }), el('div', { text: c.alive ? 'alive' : 'silent', cls: c.alive ? 'alive' : 'dead' }));
     const events = el('td', { cls: 'muted' });
     for (const e of c.events.slice(-3)) events.append(el('div', { text: `${fmtTime(e.at)} ${e.kind}` }));
@@ -250,11 +281,15 @@ const KIND_GROUP = {
   'ci-wait': 'wait',
 };
 
-/** The clicked segment's label, detail and transcript (§14), drawn as text. */
-function showActivity(a) {
+/** The clicked segment's label, detail and transcript (§14), drawn as text. B-4 (R-BTN-113): the
+ *  leg run the segment fell inside names its session link. */
+function showActivity(a, claim) {
   const box = document.getElementById('timeline-detail');
   box.replaceChildren(el('div', { text: `${a.kind}${a.seq != null ? ` #${a.seq}` : ''}${a.label ? ` — ${a.label}` : ''}` }),
     el('div', { text: `${fmtTime(a.started_at)} → ${a.ended_at ? fmtTime(a.ended_at) : 'running'}${a.outcome ? ` · ${a.outcome}` : ''}`, cls: 'muted' }));
+  // The last run that started at or before the activity is the one it fell inside.
+  const run = (claim?.runs ?? []).filter((r) => r.started_at <= a.started_at).at(-1);
+  if (run?.session_url) box.append(el('div', {}, sessionLink(`session (${run.leg})`, run.session_url)));
   if (a.detail_json) {
     try {
       for (const [k, v] of Object.entries(JSON.parse(a.detail_json))) {
@@ -266,6 +301,15 @@ function showActivity(a) {
     }
   }
   if (a.transcript_url) box.append(el('div', {}, httpsLink('transcript', a.transcript_url)));
+  box.hidden = false;
+}
+
+/** The clicked claim's leg run (§11.4, R-BTN-113): its times and its session link. */
+function showLegRun(claim, run) {
+  const box = document.getElementById('timeline-detail');
+  box.replaceChildren(el('div', { text: `${run.leg} · ${claim.ticket_id}` }),
+    el('div', { text: `${fmtTime(run.started_at)} → ${run.ended_at != null ? fmtTime(run.ended_at) : 'running'}`, cls: 'muted' }));
+  if (run.session_url) box.append(el('div', {}, sessionLink('session', run.session_url)));
   box.hidden = false;
 }
 
@@ -284,13 +328,23 @@ function renderTimeline() {
       bar.style.left = pct(c.claimed_at);
       bar.style.width = width(c.claimed_at, c.ended_at);
       track.append(bar);
+      // §11.4, R-BTN-113 (B-4): a leg run that carried its session's link is a marker on the
+      // claim's lower band; its detail shows the link.
+      for (const run of c.runs ?? []) {
+        if (!run.session_url) continue;
+        const seg = el('button', { cls: 'legseg', attrs: { type: 'button', 'aria-label': `${run.leg} session`, title: `${run.leg}: session link` } });
+        seg.style.left = pct(run.started_at);
+        seg.style.width = width(run.started_at, run.ended_at);
+        seg.addEventListener('click', () => showLegRun(c, run));
+        track.append(seg);
+      }
       // A review round's reviewers are nested: drawn on a lower band beneath their round.
       for (const a of c.activities) {
         const cls = ['seg', `k-${KIND_GROUP[a.kind] ?? 'other'}`, a.parent_id ? 'child' : '', a.outcome === 'failed' ? 'failed' : ''].filter(Boolean).join(' ');
         const seg = el('button', { cls, attrs: { type: 'button', title: `${a.kind}${a.label ? `: ${a.label}` : ''}${a.outcome ? ` · ${a.outcome}` : ''}`, 'aria-label': `${a.kind} ${a.label ?? ''}` } });
         seg.style.left = pct(a.started_at);
         seg.style.width = width(a.started_at, a.ended_at);
-        seg.addEventListener('click', () => showActivity(a));
+        seg.addEventListener('click', () => showActivity(a, c));
         track.append(seg);
       }
     }
@@ -352,6 +406,11 @@ function renderNeeds() {
   for (const w of n.stale_skills) {
     const what = w.course_id == null ? 'declares no course' : `${w.repository_id}:${w.course_id} version ${w.version}, below its minimum ${w.min_worker_version}`;
     list.append(el('li', { text: `${w.hostname} · ${w.session_name}: ${what} — restart it from a pulled checkout` }));
+  }
+  // R-BTN-197 (B-254): a live runner whose own version statement is below the recommended client.
+  // The version is the runner's statement; updating it is the operator's act, never the runner's own.
+  for (const r of n.stale_clients ?? []) {
+    list.append(el('li', { text: `${r.hostname} · ${r.session_name}: client ${r.client_version}, below the recommended ${r.recommended} — update this runner; nothing updates itself` }));
   }
   // §2e: git has shown a claim's path going backwards for 30 minutes; the holder re-reads git.
   for (const c of n.regressed ?? []) {
@@ -487,6 +546,16 @@ function renderLimits() {
   list('Probes', (l.probes ?? []).map((p) => `${p.label}: ${p.fingerprint} · by ${p.created_by}`), 'No probe key.');
   // R-BTN-80: the personal couriers, by repository.
   list('Couriers', (l.couriers ?? []).map((c) => `${c.repository_id}: ${c.credential_id} delivers ${c.asks}`), 'No courier is registered.');
+  // B-4 (§11.4's tenant settings, R-BTN-113): the administrators' instance settings, read-only
+  // here — `baton admin settings set` changes them.
+  const inst = state.instance;
+  if (inst) {
+    list('Instance settings', [
+      `session hosts: ${inst.session_hosts.join(', ') || 'none'}`,
+      `link hosts: ${inst.link_hosts.join(', ') || 'none'}`,
+      `check app: ${inst.check_app_id ?? 'not set'}`,
+    ]);
+  }
   list('Owner bars', l.bars.map((b) => `#${b.id} ${b.repository_id}: ${b.tag} barred from ${b.course === '*' ? 'every course' : b.course}${b.legs.length ? ` (${b.legs.join(', ')})` : ''} at ${b.applies === 'claim' ? 'claims' : 'claims and advances'}, ${fmtTime(b.starts_at)} to ${b.ends_at == null ? 'lifted' : fmtTime(b.ends_at)}${b.release_holders ? ', releasing holders' : ''} — ${b.reason}`), 'No owner bar is in force or scheduled.');
   list('Settings', l.settings.map((s) => {
     const parts = [];
@@ -520,8 +589,14 @@ function render() {
 
 let latest = 0;
 
+/** The last answer drawn, without the instants that only say when it was read (`server_time`,
+ *  the timeline's window): what says whether the next one changed. */
+let lastSeen = null;
+const sameness = (s) => JSON.stringify({ ...s, server_time: null, timeline: s.timeline && { ...s.timeline, from: null, to: null } });
+
 /** One poll, bounded by the poll interval. Only the newest poll's answer is drawn, so a slow
- *  response can never overwrite a newer one. */
+ *  response can never overwrite a newer one. Returns whether the answer changed — any field,
+ *  the clock-dependent ones (alive, stalled, reap_at) included, but not the read's own instants. */
 async function poll() {
   const mine = ++latest;
   try {
@@ -529,22 +604,63 @@ async function poll() {
     if (res.status === 401) {
       // A session question, not a load failure: say what to do and keep polling — the page
       // recovers on its own once a session cookie lands (R-BTN-57's one-time link).
-      if (mine !== latest) return;
+      if (mine !== latest) return false;
       document.getElementById('head').textContent =
         'This dashboard needs a session. Cloudflare Access alone does not open one while administrator keys are configured.';
       document.getElementById('status').textContent =
         'Run `baton admin open` and open its one-time link; this page recovers by itself.';
-      return;
+      return false;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const next = await res.json();
-    if (mine !== latest) return;
+    if (mine !== latest) return false;
+    const seen = sameness(next);
+    const changed = seen !== lastSeen;
+    lastSeen = seen;
     state = next;
     render();
+    return changed;
   } catch (e) {
-    if (mine !== latest) return;
+    if (mine !== latest) return false;
     document.getElementById('status').textContent = `Could not load the state: ${e.message}. Retrying.`;
+    return false;
   }
+}
+
+let delay = POLL_MS;
+let timer = null;
+let polling = false;
+
+/** The next poll, `delay` from now — only while the page is visible (B-242). */
+function schedule() {
+  clearTimeout(timer);
+  timer = null;
+  if (document.visibilityState === 'visible') timer = setTimeout(tick, delay);
+}
+
+/** Poll, then set the next interval: back to the fastest on a change, else doubled up to
+ *  POLL_MAX_MS. */
+async function tick() {
+  timer = null;
+  if (polling || document.visibilityState !== 'visible') return;
+  polling = true;
+  try {
+    delay = (await poll()) ? POLL_MS : Math.min(delay * 2, POLL_MAX_MS);
+  } finally {
+    polling = false;
+    schedule();
+  }
+}
+
+/** Hidden: no poll is pending. Shown again: poll now, at the fastest interval. */
+function onVisibility() {
+  if (document.visibilityState !== 'visible') {
+    clearTimeout(timer);
+    timer = null;
+    return;
+  }
+  delay = POLL_MS;
+  if (!polling) tick();
 }
 
 /** /login#<token>: the one-time link (R-BTN-57). The token is in the fragment, so it never
@@ -568,6 +684,6 @@ if (location.pathname === '/login') {
   });
 } else {
   document.getElementById('tier').addEventListener('change', () => state && renderReady());
-  poll();
-  setInterval(poll, POLL_MS);
+  document.addEventListener('visibilitychange', onVisibility);
+  tick();
 }

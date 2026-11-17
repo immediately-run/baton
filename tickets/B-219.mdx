@@ -3,7 +3,7 @@ title: "B-219 — Conditions screens: /conditions is what waits on a person, wit
 id: B-219
 project: baton-ui-v2
 status: available
-updated: 2026-11-09
+updated: 2026-11-16
 repos:
   - baton
 tags:
@@ -29,7 +29,7 @@ this screen's row; its "Answer…" is the option buttons.
 the Resolve page returns to itself; resolving is one step), [§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4)
 ([R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4): where the policy admits
 no owner writer the entry names `baton decision answer`), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4)
-(the Conditions screens; R-BTN-155: resolving and answering are not confirmed; the `allowed`
+(the Conditions screens; [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): resolving and answering are not confirmed; the `allowed`
 rule), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5) ([R-BTN-112](../spec/BATON_SPEC/05-courses.md#sec-5-5):
 `View`), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3) (links: the client applies
 `links.mjs` again before drawing), [§14](../spec/BATON_SPEC/14-api.md#sec-14).
@@ -41,18 +41,26 @@ dialogs).
 
 ### What to build
 
-1. **`/repositories/{r}/conditions`** (`src/dashboard/screens/conditions/`): the rows from
-   `GET …/conditions?open=1&person=1`, in the read's order: the kind mark and a plain name for
-   core's types (unconfirmed completion, held, nobody can take, retries exhausted, stalled,
-   contract, course refused, queue over, sign-in burst, policy; a course's own type by its
-   name), the ticket linking its page, `detail` through `Text`, since when, what it unblocks, and
+1. **`/repositories/{r}/conditions`** (`src/dashboard/screens/conditions/`): R-BTN-163's
+   **Needs you** — every open condition with no handler ticket, every queued person's leg, and
+   the floor — in severity then age order. `?open=1&person=1` alone is not that list: it serves
+   the floor (`hitl`, `hitl.*`, `baton.retries`, `baton.contract`, `baton.stalled`) and the person
+   legs, and leaves out unhandled `notify` conditions and interaction requests. Draw from the
+   read B-195 serves for the screen (item 2 there), which returns the whole of R-BTN-163's list
+   in one ordered answer. Each row: the kind mark and a plain name for core's types (each name
+   tied to the condition type it renders, so a name the read can never return is not drawn; a
+   course's own type by its name), the ticket linking its page, `detail` through `Text`, since when, what it unblocks, and
    the controls through B-207 with context `{repository, ticket_id, condition_id}`: each restart
    a one-click button (`ticket.resolve` by `ui.view` on `repository/conditions/{condition}`,
    drawn in the row too), only where `allowed` names it; a person leg's options as buttons
    where `answerable` (each an `attestation.add` of a `std:decision@1` for the ticket's queued
    leg), else `baton decision answer <ticket> <option>` as text; the question's `url` as a link
    when `links.mjs` passes it on the client with the repository's `web_base` and `link_hosts`
-   from `repo.list`. `?type=` and `?ticket=` as URL query; closed conditions behind a toggle
+   from `repo.list`. An **interaction request** (`interact`, R-BTN-195) is a row of its own:
+   the ticket and leg, and its `url` — the leg's session link Baton holds
+   (`claim_legs.session_url`, R-BTN-113), never one the runner sent — as an **Open session**
+   link, host shown; it has no restarts and no answer, and it leaves the list when it closes
+   (`superseded` by a newer raise, or the run's end). `?type=` and `?ticket=` as URL query; closed conditions behind a toggle
    (`?open=0`); load-more by the read's cursor.
 2. **The Resolve page**, `/repositories/{r}/conditions/{condition}`: from `condition.show` — the
    condition's type and plain name, `detail` through `View` where its type's schema has a view
@@ -101,3 +109,11 @@ shows sign-in and keeps its path; a hostile `detail` is text; a `url` on an unli
 ## Status
 
 _filed 2026-11-09, split from B-195 after the second review._
+
+_2026-11-16 — revised against the spec as it stands: interaction requests (R-BTN-195, B-234,
+built 2026-11-14) are on Needs you with their link, and the screen draws R-BTN-163's whole list,
+not only the `person=1` floor, which never returned the `notify` names this ticket listed
+(course refused, queue over, sign-in burst). §7.3's wording for the two reads is the spec's to
+reconcile (Needs you lists every unhandled condition; `person=1` serves the floor)._
+
+_(2026-11-16: rules re-read: R-BTN-163, R-BTN-195)_

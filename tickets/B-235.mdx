@@ -1,215 +1,50 @@
 ---
-title: "B-235 — Leg events: Baton tells a running leg that its ticket changed (`ticket.changed`) or why it is being stopped (`release`)"
+title: "B-235 — Index the dashboard's event lookups, and restore the index 0043 lost"
 id: B-235
 project: baton
-status: available
+status: in-progress
 updated: 2026-11-15
 repos:
   - baton
 tags:
   - roadmap-item
-order: 1235
-tier: judgement
-description: "Conditions go one way: a leg raises them to Baton. Nothing goes the other way except an abort. A ticket's body can be edited in git or in an external tracker while a leg works it; R-BTN-35 calls that progress, not staleness, so the leg runs to its end on the version it read and no one tells it. And when an owner stops the leg on the dashboard (Stop leg, Cancel) or Baton supersedes the ticket, the leg sees only `ctx.signal` aborting with reason `release`, never which of those it was. Specify and build leg events: typed events, sharing the condition type grammar, that Baton delivers to a running leg through the heartbeat and the doorbell and the runner hands to the leg by `ctx` and the leg's channel. Two events: `ticket.changed` (the board's version of the held ticket moved; the leg's course chooses `continue`, the default, under which the leg may read the new version once the runner has re-verified it, or `restart`, which ends the claim `released:ticket-changed`), and `release` (the reason R-BTN-119 already carries, delivered before the stop). No ticket content passes through Baton. Requires: B-227 (the stubs' stop) landed, since both change the agent stubs."
+description: events(kind, at) and the lost events_unsigned_control, so /v1/ui/state stops scanning the whole event log (rows_read)
 topics:
   - baton
-  - conditions
-  - runners
 owns: {}
 prs: []
-depends_on:
-  - B-227
+depends_on: []
 ---
 
-**Brief:** see the description. Designed in a session on 2026-11-15, starting from the question
-whether the condition concept could be reused in the other direction. The owner answered the
-decisions below in the same session. The spec PR's history entry records those answers, and they
-count as rulings once that PR is approved by the owner.
+**What:** the three event lookups behind `/v1/ui/state` scan the whole, never-pruned `events` table.
 
-**Depends on:** B-227.
+- Add `CREATE INDEX events_by_kind_at ON events(kind, at)`.
+- Recreate `events_unsigned_control` (0040:61), silently lost when 0043 rebuilt `events` (0043_part4_resources.sql:95-98 restores four indexes).
+- Make the queries index-friendly: `claims.ts` 'bars-mismatch', `baton.ts` 'unsigned-control', `history.ts:117/121` 'discrepancy' — order by `at` (not `seq`) so the planner uses the index rather than walking rowids.
+- Add the indexes to §13's index list.
 
-**Spec:** [BATON_SPEC §7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1)
-([R-BTN-160](../spec/BATON_SPEC/07-conditions.md#sec-7-1)),
-[§1](../spec/BATON_SPEC/01-what-baton-is.md) ([R-BTN-35](../spec/BATON_SPEC/01-what-baton-is.md)),
-[§4.5](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5) ([R-BTN-5](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5), B-183's version contract in [§4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)),
-[§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2)),
-[§6.9](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-9),
-[§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) ([R-BTN-91](../spec/BATON_SPEC/08-runners.md#sec-8-1), the heartbeat),
-[§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3)'s `ctx`, [R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3)),
-[§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-119](../spec/BATON_SPEC/08-runners.md#sec-8-4)),
-[§9.4](../spec/BATON_SPEC/09-claims.md#sec-9-4) (the end table).
+**Target:** ui/state's events share drops from ≈3·E to the matching rows (tens).
 
-### Why
+**Why:** on 2026-11-14 production exceeded Cloudflare's free-tier Durable Objects limit of
+5,000,000 `rows_read`/day at 21:41Z; every runner call returned 500 until the 00:00Z reset.
+Measured on a production-sized local state (180 tickets, 600 claims, ~3k events) with
+workerd's `SqlStorageCursor.rowsRead`: `GET /v1/ui/state` ≈ 14.4k rows per 10 s poll
+(≈ 3·events + 2–5k), recommendations ≈ 3.7k, claim ≈ 3.8–4k, alarm ≈ 0.8–1.3k per minute,
+`POST /v1/sync/board` 4–5k rows over ~2.5k statements. This ticket is one of B-235–B-243,
+the owner's 2026-11-15 plan to bound what each read costs.
 
-- **Ticket edits under a claim.** R-BTN-5 checks the ticket's version once, before the first leg
-  runs. After that, R-BTN-35's "progress is not staleness" leaves the claim alone for anything but
-  a withdrawal or a re-tier. A ticket rewritten in git, or edited in a tracker behind
-  `.baton/tickets.mjs` (B-183), is worked to the end of the leg on the old text. B-183's version
-  contract already makes the signal exact: a ticket's version changes exactly when something a
-  runner reads of it changes. Baton sees the change in the snapshot it accepts. Nothing passes it
-  on.
-- **Stops from the dashboard.** R-BTN-119 stops a leg at once for `requested` (Stop leg),
-  `owner-cancel` (Cancel) and `superseded`. A leg script only sees `ctx.signal` abort with reason
-  `release`, and a session sees only SIGINT. The leg cannot tell a cancelled ticket (nothing to
-  hand off) from a paused one (hand off carefully), even though the runner knows the reason.
-
-### Decisions (answered by the owner, 2026-11-15)
-
-1. **The name: leg event.** The vocabulary defines a condition as something "a running leg
-   raises". Inbound events are not conditions. Their only handler is the running leg, so there
-   is no binding, no handler ticket, no Needs-you entry, no `conditions` row and no quota. They
-   share the condition **type grammar** (R-BTN-160: dotted, at most 64 characters, a
-   core-reserved namespace), and **leg event** gets its own vocabulary sentence.
-2. **The undeclared default for `ticket.changed` is `continue`**, so no existing course changes.
-3. **Under `continue`, the leg is told and decides whether to read the new version.** The
-   runner never pushes ticket text to the agent. The leg pulls it when it chooses to, by
-   `ctx.readTicket()` or `baton leg ticket`, and only after the runner has re-verified that
-   version as R-BTN-5 verifies one at the claim: read through the source at the new version, the
-   tier within the runner's ceiling, and the course's `sync.mjs` still offering the running leg
-   at Baton's station. A version that fails verification is refused on the channel with the
-   reason, and the leg goes on with the version it has, as it would have if it never asked. The
-   next `advance` releases `stale-board` anyway (item 5). So the leg only ever sees text that
-   passed the same checks the claim's text passed. The ticket stays a task, not authority, at
-   either version.
-4. **A leg's own edits.** A leg that changes its own ticket also moves its version. The runner
-   suppresses the event where it can prove the change is the leg's own: for the markdown source,
-   when the commit that moved the ticket's file on the default branch is one the leg's window
-   pushed (the reflog the scope audit already reads, R-BTN-106). For any other source the event
-   is delivered. Under `continue` it is a harmless notice, and a leg that declared `restart` and
-   writes its own ticket through a tracker must listen and decide itself.
-5. **`release` is not negotiable.** It carries R-BTN-119's reason before the stop and gives the
-   leg no new way to delay or refuse. The 10 s and 25 s escalation and the 2-minute `close` and
-   `handoff` bounds are unchanged.
-
-### What to build
-
-**First PR: the spec amendment** (new rule R-BTN-196, the next free id at merge), with
-`npm run spec:index` and a `spec/BATON_SPEC_HISTORY.md` entry recording the owner's answers to
-the decisions above.
-
-1. **R-BTN-196 (leg events), in §7** as a new subsection after §7.8, or wherever the owner places
-   it. It states:
-   - A leg event is a typed event Baton tells a running leg about. Its type follows R-BTN-160's
-     grammar.
-   - The standard types are `ticket.changed` and `release`. Both are core's alone, and the
-     validator refuses a course that declares either as a condition, as it does for `baton.*`.
-   - A leg event is delivered by the heartbeat and the doorbell, and never stored as a condition.
-2. **R-BTN-35.** "Progress is not staleness" gains one sentence: a version change on a held
-   ticket is delivered to the holder as `ticket.changed` (R-BTN-196), and the claim stays.
-3. **§8.1, the heartbeat response.** The active claim carries `version`, the held ticket's version
-   in the latest accepted snapshot.
-   **R-BTN-91** gains the ring kind `ticket`. In the transaction that accepts a snapshot, Baton
-   rings the holder of every held ticket whose posted version differs from the version it had
-   cached. The ticket's history (R-BTN-81) logs `ticket-changed {claim, from_version,
-   to_version}`. Versions are opaque filter fields (R-BTN-33). They are compared for equality
-   only, never ordered (values 4).
-4. **R-BTN-69, the course file.** A leg field
-   `"on_ticket_changed": "continue" | "restart"`, defaulting to decision 2's answer.
-5. **The runner (§8.3).**
-   - **Detection.** The runner compares each heartbeat's `version` with the version the claim was
-     decided on, or with the last version it delivered. It applies decision 4's suppression, then
-     delivers `ticket.changed {from_version, to_version, snapshot_sha}` once per change.
-   - **`continue`.** The event is delivered and the leg goes on. If the leg asks for the new
-     version, the runner re-verifies it (decision 3) and answers with the ticket as the source
-     reads it, or refuses with the reason. The runner verifies once per version and keeps the
-     result for the claim. A later `advance` in the same claim re-runs R-BTN-5's version check
-     before the next leg starts, so a chained leg never starts on a version the board has moved
-     past.
-   - **`restart`.** The event is delivered. Then the runner stops the leg at its next safe point
-     (§9.4) with `ctx.signal` reason `release`, calls `close` and `handoff`, and ends the claim
-     `released:ticket-changed`. The next claim re-reads the ticket and passes R-BTN-5 again.
-   - **`release`.** The runner delivers `release {reason}` (`requested`, `owner-cancel`,
-     `superseded`, `floor`, a bar's reason, `leg-timeout`) before the stop. R-BTN-119 is
-     otherwise unchanged.
-6. **The leg's side (R-BTN-72, R-BTN-106).**
-   - `ctx.on(type, listener)` receives events by type, a prefix included (`on('ticket', …)`).
-     `ctx.events` is an async iterator over the same events. `ctx.signal` and its three reasons
-     stay as they are, so existing scripts keep working.
-   - The channel gains `baton leg events [--wait <s>]`, which prints the leg's undelivered events
-     as JSON lines. Like `baton leg await`, a harness that bounds tool calls calls it again.
-   - `ctx.readTicket({version})` and `baton leg ticket [--version <v>]` return the ticket at
-     that version (default: the newest delivered) with its body, exit criteria and PRs, read and
-     verified by the runner (decision 3). A refusal names the failed check. The verbs read only
-     the leg's own ticket.
-   - A leg that wants to restart on a `continue` course calls the existing
-     `baton leg release --reason ticket-changed`.
-7. **§9.4's end table.** Add `released:ticket-changed` (status `released`, not a failed attempt).
-   The run counts toward the leg's `max_runs` (R-BTN-63), so a ticket edited over and over is
-   bounded and ends in the existing hold.
-8. **The agent stubs** (`src/defaults/cli.ts`, after B-227 lands). They pass each event to the
-   agent at its next tool boundary. That means a hook for Claude Code and the closest
-   equivalent for opencode. The message is runner-written. It says the ticket changed, that
-   `baton leg ticket` reads the verified new version if the agent wants it, and that
-   `baton leg release --reason ticket-changed` hands the work to a fresh claim. It never includes
-   ticket text. The executor's brief (R-BTN-107) tells the agent that only `baton leg ticket`
-   counts as re-reading the ticket, not a raw `git show` of an unverified head.
-9. **§15.** Scenario S-BTN-223 (the next free number at merge):
-   - a snapshot moves a held ticket's version, and the holder is rung and the event delivered
-     once;
-   - `continue`: the leg runs on, and the next `advance` re-verifies;
-   - `continue` and the leg asks for the new version: it gets the verified ticket. When the
-     edit re-tiers the ticket over the ceiling or the leg is no longer offered, the read is
-     refused with the reason and the leg goes on with the version it has;
-   - `restart`: the claim ends `released:ticket-changed`, unpenalised, and the next claim reads
-     the new version;
-   - the leg's own push to its ticket raises no event (markdown source);
-   - Stop leg delivers `release {reason: "requested"}` before the stop, and Cancel delivers
-     `release {reason: "owner-cancel"}`.
-10. **The vocabulary** (`docs/context/vocabulary.mdx`): one sentence for decision 1's noun.
-
-**Second PR: the build**, items 3 to 8 in the code, with the scenario as a test.
-
-**Done when** S-BTN-223 passes as a scenario test, `npm test` and `npm run typecheck` are green,
-`baton course test` prints `on_ticket_changed` in a leg's signature, and an edit to a held
-ticket's file on the default branch reaches a running leg's `ctx.on('ticket.changed')` within
-one doorbell ring of the snapshot's acceptance.
-
-### Out of scope
-
-- **How quickly an external tracker's edits are seen.** Baton learns of a version change at the
-  next accepted snapshot. For the markdown source that follows the forge's notification
-  (R-BTN-73). An edit in a tracker such as Linear raises no want (R-BTN-94) until something else
-  does, or until a relay calls `POST /v1/sync/want`. Making that prompt is a separate ticket.
-- **Other leg events** (an owner bar set, a prerequisite lapsing). The grammar admits them, and
-  each needs its own rule.
+**Done when:** the named calls' rows_read, measured the same way in a test (cloudflare host),
+is at or below the target, `EXPLAIN QUERY PLAN` shows the intended index where one is named,
+and behaviour is unchanged (the existing scenarios pass).
 
 ### Trust
 
-- **The version** comes from the sync's post, an attestation weighed by its writer as every
-  snapshot is (R-BTN-35, R-BTN-93). A forged version change can at worst make a `restart` leg
-  release unpenalised, and that is bounded by `max_runs`. It never changes what the leg runs:
-  the next claim re-verifies through the source itself.
-- **No ticket content crosses Baton.** The event carries two opaque versions and a sha. Ticket
-  text reaches the leg only through the runner's read under R-BTN-5's checks, or not at all.
-- **The new body is as untrusted as the old one.** It comes from the same source and passes the
-  same checks as the text the claim started with. Anyone who could push it could have pushed it
-  before the claim. Its instructions are a task, never authority (`docs/security-model.mdx`,
-  reach 3), and the leg's scope and grant are unchanged by reading it.
-- **The stub's message to the agent** is runner-written text naming the change. It never quotes
-  the ticket, so an edit cannot use the event to put text in front of a running agent. The agent
-  sees the new text only by asking for it.
-- **The release reason** is Baton's own, from the message the runner already acknowledges
-  (§6.9).
+No new input: indexes, tables and queries over data Baton already stores; no field, file, commit trailer or request is added.
 
 ### Invariants
 
-- **R-BTN-33:** nothing new is stored but opaque versions in a history event.
-- **R-BTN-5 and R-BTN-133:** no leg is handed ticket text that skipped re-verification. The
-  verified read under `continue`, `restart`, and the re-check at `advance` are the only paths to
-  a new version.
-- **R-BTN-119:** the stop's timing and escalation are unchanged. The event is delivered before
-  the stop, never in place of it.
-- **R-BTN-160 to R-BTN-163:** conditions, bindings, handlers, Needs you and their quotas are
-  untouched. A leg event is never a condition row.
-- **Values 4:** versions are compared for equality only.
-- **The architecture page, "Replies stay replies":** the ring carries no effect, and delivery and
-  acknowledgement stay on the heartbeat.
+- R-BTN-81 (history) and the Needs-you lists: the same rows in the same order; only the query plan changes. The existing scenarios and an EXPLAIN QUERY PLAN test check it.
 
 ## Status
 
 _filed 2026-11-15._
-
-_2026-11-15 — the owner answered the five decisions. Decision 3 changed: under `continue` the
-leg is told and may read the new version, verified by the runner first (`ctx.readTicket`,
-`baton leg ticket`), in place of "no mid-leg adoption"; the out-of-scope entry for it is
-removed._

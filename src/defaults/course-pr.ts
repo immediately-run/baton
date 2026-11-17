@@ -168,6 +168,22 @@ export function verdictOf(r: PrFact['reviews'][number]): 'approve' | 'changes' |
  * finished — the review reads what there is (red included) and asks for a fix. */
 export const checksDone = (f: PrFact): boolean => f.checks.every((c) => c != null);
 
+/** The conclusions a sibling PR's CI may finish with and still pass (B-255): the forge's own
+ *  success, and the two it reports for a check that judged nothing (`neutral`, `skipped`). Every
+ *  other conclusion — `failure`, `cancelled`, `timed_out`, `action_required`, `startup_failure`,
+ *  `stale` — is red. */
+const CI_GREEN = new Set(['success', 'neutral', 'skipped']);
+
+/** The run-tests gate's reading of the PRs it cannot test itself (B-255): the forge's checks on
+ *  each one's current head decide in its place. Any concluded red on any of them is `red`; else
+ *  one still running, or one with no check reported yet, is `running` (a PR's CI registers after
+ *  its push); else — every check on every PR concluded green — `green`. No PRs is `green`. */
+export function siblingCiOf(facts: PrFact[]): 'green' | 'red' | 'running' {
+  if (facts.some((f) => f.checks.some((c) => c != null && !CI_GREEN.has(c.toLowerCase())))) return 'red';
+  if (facts.some((f) => f.checks.length === 0 || f.checks.some((c) => c == null))) return 'running';
+  return 'green';
+}
+
 /** A PR's verdicts, oldest first. */
 const verdictsOf = (f: PrFact) => [...f.reviews].filter((r) => verdictOf(r) != null).sort((a, b) => a.submittedAt - b.submittedAt);
 
@@ -388,9 +404,11 @@ export interface CodeRepoEntry {
  *  markers the walk places, the owner's answers to the sync's decisions, and where the rounds'
  *  findings are. */
 interface PlaceInput {
-  /** `open` (no counted marker tested the head), `green`, `red`; `unreachable` when the gate
-   *  cannot test the change — a PR outside the home repository, or several in it. */
-  gate: 'open' | 'green' | 'red' | 'unreachable';
+  /** `open` (no counted marker tested the head), `green`, `red`; `ci` while the CI of a PR
+   *  outside the home repository — which the gate reads in place of a marker (B-255) — is still
+   *  running or has reported nothing; `unreachable` when the gate cannot test the change: several
+   *  PRs in the home repository. */
+  gate: 'open' | 'green' | 'red' | 'ci' | 'unreachable';
   markers: GateMarker[];
   answers: Map<string, string>;
   /** When the owner granted each extra round (a `round` answer, Baton's clock). */
@@ -422,9 +440,10 @@ const roundsDecision = (rounds: number, url: string | null): NonNullable<PostedS
 });
 
 /** The decision a gate that cannot run posts (B-110 round 1, finding 2): the stub tests the home
- *  repository's one PR branch, so a ticket with a PR elsewhere, or several at home, would loop
- *  the gate to its budget with no marker any PR reads. It asks the owner instead — `skip` waives
- *  the gate for this ticket — rather than looping. */
+ *  repository's one PR branch, so a ticket with several PRs at home would loop the gate to its
+ *  budget with no marker any PR reads. It asks the owner instead — `skip` waives the gate for
+ *  this ticket — rather than looping. A PR outside the home is no longer one: its own CI is its
+ *  gate (B-255). */
 const UNREACHABLE = 'run-tests-unreachable';
 const unreachableDecision = (prs: string[], url: string | null): NonNullable<PostedStation['decisions']>[number] => ({
   id: UNREACHABLE, leg: 'run-tests', asks: 'owner', ...(url ? { url } : {}),
@@ -485,11 +504,14 @@ function placeOf(fact: PrFact, graph: PrGraph, bounds: PrBounds = boundsOf(graph
       // is `run-tests` ready; green queues `review`, ci-waited as today; red queues the back leg,
       // wherever the push came from, the deterministic gate refusing to spend a review round on
       // red checks. A gate that cannot test the change asks the owner rather than looping.
+      // B-255: the PRs outside the home are gated by their own CI — while it runs, or before it
+      // reports, the round waits on `ci` (a short wait), never on the owner.
       if (input.gate === 'unreachable') {
         return { ...at(last, path, [{ leg: 'run-tests', state: 'waiting', waiting_on: 'owner' }]), decisions: [unreachableDecision(input.unreachable, input.url ?? fact.url ?? null)] };
       }
       if (input.gate === 'open') return at(last, path, [{ leg: 'run-tests', state: 'ready', waiting_on: null }]);
       if (input.gate === 'red') return at(last, path, [{ leg: bounds.back, state: 'ready', waiting_on: null }]);
+      if (input.gate === 'ci') return at(last, path, [{ leg: 'review', state: 'waiting', waiting_on: 'ci' }]);
     }
     return at(last, path, [{ leg: 'review', state: wait ? 'waiting' : 'ready', waiting_on: wait }]);
   }
@@ -657,15 +679,25 @@ export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; bran
     const answers = new Map(mineAnswers.map((a) => [a.decision, a.answer] as const));
     const rounds = mineAnswers.filter((a) => /^review-rounds-\d+$/.test(a.decision) && a.answer === 'round' && typeof a.answered_at === 'number').map((a) => a.answered_at!);
     const open = mine.filter((f) => f.state === 'open');
-    // The stub tests the home repository's one PR branch; a PR elsewhere, or several at home,
-    // is one it cannot test — the owner is asked (`skip` waives the gate) rather than the gate
-    // looping to its budget with no marker any PR reads (round 1, finding 2).
-    const home = open.filter((f) => f.repository == null || ctx.repository == null || sameRepo(f.repository, ctx.repository));
-    const unreachable = home.length === open.length && home.length <= 1 ? [] : open.map((f) => `${f.repository ?? ctx.repository ?? 'the home repository'}#${f.number}`);
+    // The stub tests the home repository's one PR branch; several at home is a change it cannot
+    // test — the owner is asked (`skip` waives the gate) rather than the gate looping to its
+    // budget with no marker any PR reads (round 1, finding 2).
+    const isHome = (f: PrFact) => f.repository == null || ctx.repository == null || sameRepo(f.repository, ctx.repository);
+    const home = open.filter(isHome);
+    const unreachable = home.length <= 1 ? [] : open.map((f) => `${f.repository ?? ctx.repository ?? 'the home repository'}#${f.number}`);
+    // B-255: a PR outside the home — a `repos:` repository's, B-182's plain-git home whose every
+    // PR is on a code repository — is gated by its own CI, the forge's checks on its head, never
+    // by the owner. Both halves must pass: the home PR's marker (exactly as before) and every
+    // sibling's CI. Red on either routes to the back leg; an open home gate runs the tests first;
+    // a sibling's CI still running (or not reported yet) waits on `ci`.
+    const homeGate = home.length === 0 ? 'green' : home[0].commits ? gateOfBranch(home[0].commits, counted.get(home[0])!) : 'open';
+    const ci = siblingCiOf(open.filter((f) => !isHome(f)));
     const gate: PlaceInput['gate'] = answers.get(UNREACHABLE) === 'skip' ? 'green'
       : unreachable.length ? 'unreachable'
-        : home.length === 0 ? 'green'
-          : home[0].commits ? gateOfBranch(home[0].commits, counted.get(home[0])!) : 'open';
+        : homeGate === 'red' || ci === 'red' ? 'red'
+          : homeGate === 'open' ? 'open'
+            : ci === 'running' ? 'ci'
+              : 'green';
     // The PR the owner reads: the newest open one with a verdict asking for changes, else the
     // first open one.
     const withChanges = open.filter((f) => f.reviews.some((r) => verdictOf(r) === 'changes'));

@@ -465,7 +465,8 @@ Limits that hold throughout:
   - **Arming.** The `advance` that starts a leg with `deadline_s` sets the claim's `deadline_at`
     to now plus `deadline_s`. The next `advance` and the claim's end clear it.
   - **Finishing is not the end.** When the script's `run` returns, the runner sends an immediate
-    heartbeat out of its cadence with `leg_finished: <claim_legs.seq>`. That heartbeat comes before
+    heartbeat out of its cadence with `legs_finished: [{claim_id, seq}]`, the run's claim and its
+    `claim_legs.seq`. That heartbeat comes before
     validation, `close`, and any wait under the claim on a `short_waits` label or a near `time`.
     When the claim has a `deadline_at`, it re-arms it to now plus 40 minutes, once per leg run (R-BTN-149), so a slow push
     or review of the result is never cut off. The heartbeat processes `leg_finished` before it

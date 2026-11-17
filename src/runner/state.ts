@@ -11,8 +11,13 @@ export interface RunnerState {
   worker_id: number | null;
   incarnation: number | null;
   secret: string;
-  /** The active claim as the runner knows it: id, ticket, nonce. */
+  /** The active claim as the runner knows it: id, ticket, nonce — the oldest of `claims`, kept
+   *  because harness hooks and `BATON_STATE` readers read it (B-188). */
   claim: { id: number; ticket_id: string; nonce: string } | null;
+  /** R-BTN-4, R-BTN-72 (B-188): every claim the runner holds, oldest first, each with what a
+   *  restart within the lease needs to reattach to its running leg (`run_id`, the executor's
+   *  `handle`, and the leg's place). Absent in a file written before B-188: its `claim` alone. */
+  claims?: PersistedClaim[];
   /** Epoch ms of the last heartbeat Baton answered (R-BTN-6). */
   last_ok: number | null;
   /** The lease the server granted, in seconds. */
@@ -23,6 +28,26 @@ export interface RunnerState {
   /** B-86: the capabilities the last answered heartbeat declared — what `--capabilities`
    *  chose, narrowed from the grant. Null until a beat answers. */
   declared: string[] | null;
+}
+
+/** R-BTN-72 (B-188): one held claim as the state file keeps it — the claim, and, while a leg
+ *  runs, its run and the executor's handle (its JSON data), the leg's place and its ctx: what a
+ *  restart within the lease reattaches with. */
+export interface PersistedClaim {
+  id: number;
+  ticket_id: string;
+  nonce: string;
+  /** The claim's `request_id`: a claim retried by it answers the same claim (G-BTN-2). */
+  request_id?: string;
+  /** The working tree the claim's legs run in (its own clone, or the home at one claim). */
+  checkout?: string;
+  run_id?: string | null;
+  seq?: number | null;
+  leg?: string | null;
+  /** The station the running leg leaves. */
+  at?: string | null;
+  handle?: Record<string, unknown> | null;
+  ctx?: Record<string, unknown> | null;
 }
 
 export const emptyState = (): RunnerState => ({ worker_id: null, incarnation: null, secret: '', claim: null, last_ok: null, lease_timeout_s: null, lease_lost: false, lease_lost_because: null, declared: null });
@@ -45,7 +70,7 @@ export class StateFile {
     this.s = existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as RunnerState) : emptyState();
   }
   get(): RunnerState {
-    return { ...this.s, claim: this.s.claim ? { ...this.s.claim } : null };
+    return { ...this.s, claim: this.s.claim ? { ...this.s.claim } : null, ...(Array.isArray(this.s.claims) ? { claims: this.s.claims.map((c) => ({ ...c })) } : {}) };
   }
   /** Update and persist atomically enough for one machine's own readers. */
   set(patch: Partial<RunnerState>): void {

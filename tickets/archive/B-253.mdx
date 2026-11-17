@@ -1,0 +1,51 @@
+---
+title: B-253 — The runner says when its CLI is not a pinned commit
+id: B-253
+project: baton
+status: done
+updated: 2026-11-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: routine
+description: "Owner request (2026-11-16): baton run and baton runner start print the CLI checkout's commit and a warning when it follows a branch, and report cli {commit, ref, pinned} in the runner's profile; reported, never refused. Fieldhouse's R-FH-3 development exception is the host side."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/259
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-16, on bumping bering's runner to a newer CLI: "I think pinning to a
+branch should be possible during active development (perhaps baton should issue a warning)."
+Fieldhouse records the development exception in FIELDHOUSE_SPEC R-FH-3; its host script warns.
+This ticket is Baton's half: the CLI itself says when it runs from a checkout that is not a
+release or a fixed commit.
+
+### What to build
+
+1. **`baton run` and `baton runner start` say how they are pinned.** At start, the runner prints
+   the CLI checkout's commit and whether it is a tagged release, a detached commit, or a branch
+   tip (`git symbolic-ref` succeeds), and for a branch prints a warning line naming the branch:
+   `baton: running from branch <name> at <sha> — not a pinned commit`.
+2. **It is reported, not refused.** The runner's `profile` (R-BTN-3) carries
+   `cli: {commit, ref, pinned: boolean}`, so the owner's runner screen can show an unpinned
+   runner; nothing is gated on it.
+3. **Spec first:** one sentence in §8 (R-BTN-107's neighbourhood or R-BTN-3's profile) naming the
+   field, and an S-BTN scenario.
+
+### Trust
+
+The checkout's state is read from git on the host the runner already trusts; the profile field is
+the runner's own statement, like the rest of `profile`.
+
+### Invariants
+
+- R-BTN-31: a scenario names the behaviour.
+- Nothing refuses to start: a warning and a profile field only.
+
+## Status
+
+_filed 2026-11-16._

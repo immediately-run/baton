@@ -91,7 +91,7 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     expect(res.json.grants).toEqual([{
       credential_id: granted.fingerprint, hostname: 'granted-host', label: null, repository_id: 'docs',
       capabilities: JSON.stringify(['authentication', 'create-pr', 'drivable-browser', 'llm-call']),
-      max_tier: null, granted_by: `owner:${docsOwner.fingerprint}`, granted_at: T0,
+      max_tier: null, max_claims: 1, granted_by: `owner:${docsOwner.fingerprint}`, granted_at: T0,
       // R-BTN-58: the other repositories this key is granted on — none yet.
       other_repositories: [],
     }]);

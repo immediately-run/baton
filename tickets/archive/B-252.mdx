@@ -1,0 +1,87 @@
+---
+title: "B-252 — a pathless ticket's legs read it from a file the runner writes from its source's read"
+id: B-252
+project: baton
+status: done
+updated: 2026-11-16
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: routine
+description: "B-183 lets a custom ticket source post tickets with no path, but the leg stubs still read the ticket from ctx.ticket.path in the checkout: a pathless ticket's repos: are lost to the implement leg's PR verification, which looks only in the home, and the agent gets an empty BATON_TICKET_FILE. When the claim's re-verification read returns the ticket as text, the runner writes it (mode 0600) into the claim's scratch directory and hands legs its path as ctx.ticket.file; the stubs read it. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/253
+depends_on: []
+---
+
+**Brief:** the owner is about to run a `custom` ticket source backed by Linear — no ticket files in
+git — over a plain-git home whose PRs sit in a sibling code repository on GitHub (B-182's setup).
+B-183 lets such a source post tickets with no `path` and re-verifies each claim through the
+source's `read`, but every leg still assumes a file: the runner builds the leg's `ctx.ticket` as
+`{id, path: claim.path ?? null, home, version?}`; the CLI's stub reads the ticket text from
+`join(ctx.checkout, ctx.ticket.path)` — null with no path — and hands `ticketRepositories(text)`
+to `verifyPrOpen`, so a pathless ticket's `repos:` are lost and the implement leg looks for its PR
+only in the home, failing when the PR is in the sibling; and the stub sets
+`BATON_TICKET_FILE: ctx.ticket.path ?? ''`, so the agent gets no ticket at all. The owner approved
+the direction: the runner already holds what `read` returned — write it to a file for the legs.
+
+**Spec:** [BATON_SPEC §4.2](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)), [§4.5](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5) ([R-BTN-5](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5)), [§8.3](../../spec/BATON_SPEC/08-runners.md#sec-8-3) (the leg’s `ctx`).
+
+**Depends on:** none.
+
+**Used by:** a tracker-backed ticket source (Linear) over a home whose PRs are in a sibling repository.
+
+### What to build
+
+1. **The amendment** (R-BTN-74): a pathless source's `read` should return `ticket` as markdown
+   text — a frontmatter block with the keys the markdown source reads (`id`, `title`, `repos`,
+   `prs`, …), then the body — because the legs read it as the ticket file. §8's `ctx` names the
+   ticket's `file`. S-BTN-226 in §15.
+2. **The runner** (`src/runner/runner.ts`): the claim's re-verification (`verifyTicketVersion`,
+   `verifyBySource`) returns the read's `ticket` beside its digest. When the claim names no
+   `path` and that `ticket` is a string, the runner writes it to `ticket.md` in the claim's
+   scratch directory (mode 0600; every leg session's path, removed at the claim's end) and adds
+   its absolute path to every leg's `ctx.ticket` as `file`. Nothing else changes: a ticket with a
+   path, or a read that returns anything but a string, gets no `file`.
+3. **The stub template** (`src/defaults/cli.ts`): the ticket text for the PR verification is
+   `ctx.ticket.file`'s when there is one, else the checkout's `ctx.ticket.path` as before; the
+   agent's `BATON_TICKET_FILE` is `ctx.ticket.file ?? ctx.ticket.path ?? ''`.
+
+### Trust
+
+The file's text is what the repository's own ticket source returned from its `read` — the same
+value whose digest is already the claim's recorded read (R-BTN-84) — written by the runner to a
+scratch directory only this claim's sessions see, mode 0600, and removed at the claim's end. No
+new input reaches Baton: nothing of the text is posted or stored (R-BTN-33). The legs read it as
+they read a ticket file in the checkout today: a task, not authority.
+
+### Invariants
+
+- [R-BTN-74](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2): the markdown source's
+  tickets carry a `path`, so their legs' `ctx` and the stubs' behaviour are byte-identical.
+- [R-BTN-33](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1): no ticket body is posted
+  or stored by Baton; the file lives in the runner's claim scratch only.
+
+### Tests
+
+- S-BTN-226 (`test/integration/S-BTN-226.pathless-ticket-file.test.ts`): a `current` source
+  whose `read` returns markdown — the leg's `ctx.ticket.file` is in the claim's scratch, mode
+  0600, holding the read's text, and gone after the claim; an object-returning source gives no
+  `file`; the markdown source's `ctx.ticket` is unchanged; the scaffold's implement stub, given
+  `ctx.ticket.file`, finds the PR in the sibling the file's `repos:` names, fails naming it when
+  there is none, and names the file in `BATON_TICKET_FILE`.
+
+### Exit criteria
+
+- [x] R-BTN-74 amended, `npm run spec:index`, S-BTN-226 in §15
+- [x] the runner writes the file and names it in `ctx.ticket.file`
+- [x] the stubs read it for `repos:` and `BATON_TICKET_FILE`
+- [x] `npm test` and `npm run typecheck` green
+
+## Status
+
+_filed 2026-11-16._

@@ -1,0 +1,262 @@
+---
+title: Runbook — a compromised runner
+description: The kill switch written down — the compromised key first, then owner bars and revocations, then finding what the identity changed by reading the forge and git directly, undoing it, rotating what it could have read, and recording the lesson; every command drilled end to end by scripts/drill-compromise.sh.
+tags: [security, runbook]
+order: 43
+---
+
+<Lede>A runner will be compromised sooner or later, and today revocation is improvised. This
+page is the written kill switch the security model's hardening option 3 asks for (B-125): the
+compromised key before the identity (the review's finding 18), the fleet's hands stopped, the
+credentials cut, what changed found and undone — in that order, under pressure.</Lede>
+
+Every command below was run end to end on 2026-11-16 by
+[the drill](../../scripts/drill-compromise.sh) against a local Baton and a scratch GitHub
+repository — except the steps marked **a human**, which touch credentials no agent may hold
+(Fieldhouse's fourth practice: a credential never enters an agent's context). Run the drill
+yourself before you need this page; it is the only rehearsal the runbook has.
+
+Commands run on the owner's machine, from your own terminal — never from a session that may
+have read agent-written tickets (the security model's reach 3). The CLI is the pinned release,
+`npx --yes @immediately-run/baton@0.1.3` below (B-138: never a checkout's `cli/baton.mjs`,
+whose owner and administrator commands refuse a key without `--dev`); it talks to
+`https://baton.immediately.run` unless `BATON_URL` says otherwise. The examples name the
+repository `baton` and the identity `immediately-run-worker`; put yours in their place. What
+you need at hand: an administrator key, an owner key of each affected repository, `gh` signed
+in with read on every repository the identity can write, and the compromised machine's
+hostname or key fingerprint.
+
+## 1. The first minute — the key, not the identity
+
+Revoking the Baton key comes first because it is the one switch with no side effects on
+anyone else (finding 18; reach 8): a machine key can claim, hold leases and post boards, and
+revoking it stops all three without touching the shared GitHub identity the rest of the fleet
+uses.
+
+Find the key and every repository it is granted on — its grants, not its hostname alone, are
+the blast radius (R-BTN-58: a key's capabilities live in each grant):
+
+```sh
+npx --yes @immediately-run/baton@0.1.3 admin -i ~/.ssh/baton_admin state | \
+  node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);
+    for (const g of j.limits.grants) console.log(g.repository_id, g.hostname, g.credential_id)})'
+npx --yes @immediately-run/baton@0.1.3 owner -i ~/.ssh/baton_repo_owner grants baton
+```
+
+The second command (one repository's owners, grants and the bars in force) is the one to use
+when you hold only owner keys; it names the fingerprint each grant belongs to.
+
+Revoke — everywhere at once with an administrator key, which also ends the credential so no
+owner can re-grant it by accident:
+
+```sh
+npx --yes @immediately-run/baton@0.1.3 admin -i ~/.ssh/baton_admin revoke SHA256:FINGERPRINT
+```
+
+or, per repository, with an owner key (the spec's `owner grant revoke`, R-BTN-58, §12.2):
+
+```sh
+npx --yes @immediately-run/baton@0.1.3 owner -i ~/.ssh/baton_repo_owner revoke baton SHA256:FINGERPRINT
+```
+
+**What this does, and when.** The runner's next heartbeat — within its beat, two minutes by
+default — is refused; a `baton run` marks its lease lost at that beat, kills its running leg
+at once and claims nothing again. The claim it held stays on Baton's board until its lease
+lapses (at most its lease timeout, fifteen minutes by default) and the alarm reaps it, or an
+administrator force-reaps it from the dashboard's Running view (§9.5); until then
+`npx --yes @immediately-run/baton@0.1.3 blocked -i ~/.ssh/baton_repo_owner baton:TICKET`
+answers `claimed` — that is the design, not a failure to revoke.
+
+Then close the board to machine keys while you work (reach 7, B-137): with the policy's
+`inputs.board` still admitting `machine`, any other runner key can post what Baton believes.
+Read the policy, drop `machine`, write it back at the version you read — an approver on
+`approvers.policy` (R-BTN-188; under `cooperative`, any owner of the repository):
+
+```sh
+npx --yes @immediately-run/baton@0.1.3 owner -i ~/.ssh/baton_repo_owner policy show baton > policy.json
+# edit policy.json: remove "machine" from inputs.board, change nothing else
+npx --yes @immediately-run/baton@0.1.3 owner -i ~/.ssh/baton_repo_owner policy diff baton policy.json
+npx --yes @immediately-run/baton@0.1.3 owner -i ~/.ssh/baton_repo_owner policy set baton policy.json --base N   # N: the version show printed
+```
+
+## 2. Stop the fleet's hands
+
+Nothing new should be claimed while you look. An owner bar per affected repository — one
+command each (R-BTN-67), releasing every holder it matches:
+
+```sh
+npx --yes @immediately-run/baton@0.1.3 owner -i ~/.ssh/baton_repo_owner bar baton \
+  --course '*' --tag TAG --applies claim+advance --release-holders --reason compromise-20261116
+```
+
+`TAG` is a tag every runner of the fleet declares on its heartbeat; `--reason` becomes the
+release reason (`released:compromise-20261116`), never a failed attempt. Repeat for each
+affected repository — the homes this fleet serves today: `baton`, `docs`, `fieldhouse`,
+`hq`.
+
+**What keeps running, and for how long.** New claims are refused the moment the bar is set
+(rule 8, `barred-tag`). Each active claim is stopped by a `release` message the alarm writes
+within a minute, delivered at the holder's next beat (two minutes by default); the leg stops
+at its next safe point, pushes its work, writes its hand-off and ends
+`released:compromise-20261116`. A holder that never acknowledges — dead, or hostile — is
+reaped two hours after the release was delivered, and the ticket is fenced until the reap
+instant plus its lease timeout; only a sync after that makes it claimable again. The bar
+binds cooperating runners only (R-BTN-66): it does not touch the GitHub identity, so the
+machines can still push — that is step 3.
+
+**The honest bound: a bar bites only tagged runners.** It matches the tags a runner's own
+heartbeat declares. `baton run` declares none today (no flag exists), so on a fleet started
+with it the command above is a no-op — read the runners' sidecar for a tag every machine
+declares, and where none does, stop the fleet by revoking each key's grants instead (step
+1's commands, once per key; re-grant them from step 5 when you resume). A single claim can
+always be stopped from the dashboard's Running view (Stop leg, R-BTN-119). B-196's Runners
+view will make the fleet's declared tags readable; until it lands, they live in your runner
+configuration, not in Baton.
+
+Lift a bar with its id (step 5 does this when you resume); `owner grants REPO` lists the bars
+in force with their ids:
+
+```sh
+npx --yes @immediately-run/baton@0.1.3 owner -i ~/.ssh/baton_repo_owner bar lift baton ID
+```
+
+## 3. Cut the credentials — **a human**
+
+The GitHub identity is shared by every VM: revoking it stops every runner at once, which is
+the point. None of it may pass through an agent's context — a human opens the pages, an agent
+may run the reads:
+
+- **The identity's SSH keys** — `https://github.com/settings/keys` (the machine account's
+  page for a machine identity). List first, revoke by hand:
+
+  ```sh
+  gh api user/keys -q '.[] | .id, .title, .last_used'
+  ```
+
+- **The `gh` tokens** — `https://github.com/settings/tokens` and
+  `https://github.com/settings/applications` (and the organisation's installed applications:
+  the org's settings). `gh auth status` names the host and account each credential serves.
+
+- **The slot's gateway virtual keys** — Fieldhouse's gateway, per slot (FLDH-17): revoke the
+  compromised slot's virtual keys at the gateway before the slot is reused, and reset the VM
+  (FLDH-16's fresh root disk). A human at the host: the gateway's configuration is a
+  credential like the rest.
+
+Rotating the identity's own key material (new SSH keys, new tokens) is part of step 5, not
+this one: this step is the cut.
+
+## 4. Find what changed
+
+Read the forge and git directly — the `foreign-write` discrepancy is retired (R-BTN-46,
+R-BTN-85), and git's own author and committer fields are settable by anyone, so the forge's
+reading (who pushed, who opened the PR) is the one that counts:
+
+```sh
+SINCE=2026-11-16T00:00:00Z; IDENTITY=immediately-run-worker; REPO=immediately-run/baton
+
+# every commit that landed on the default branch since:
+gh api "repos/$REPO/commits?since=$SINCE&per_page=100" \
+  -q '.[] | .sha[0:8] + " " + .commit.author.date + " " + (.commit.message | split("\n")[0])'
+
+# who brought each commit — the PR that carried it and its author; no answer is a direct push:
+gh api repos/$REPO/commits/SHA/pulls -q '.[] | "#\(.number) by \(.user.login)"'
+
+# the control paths, per repository (run in each checkout):
+git -C CHECKOUT log --since="$SINCE" --format='%h %ad %an %s' --date=iso -- \
+  .baton/ .github/workflows/ .claude/ CLAUDE.md AGENTS.md '**/goals/**' tickets/
+
+# the ticket frontmatter edits among them (tier, EXPEDITE, depends_on are scheduling inputs):
+git -C CHECKOUT log --since="$SINCE" -p -- tickets/ | grep -E '^(commit |[-+] *(id|status|tags|tier|depends_on|repos):)' || true
+
+# the identity's pull requests and merges:
+gh pr list -R $REPO --state all --json number,title,state,author \
+  --jq '.[] | select(.author.login=="'$IDENTITY'") | "\(.number) \(.state) \(.title)"'
+
+# its verdicts — a verdict is a PR comment whose first line is the marker:
+gh api repos/$REPO/issues/N/comments -q '.[] | select(.user.login=="'$IDENTITY'") | .body' | grep '^<!-- baton:' || true
+```
+
+Baton's own record beside the forge's — the discrepancies of the last seven days, the scope
+findings a leg reported outside its ticket, and a ticket's history and provenance:
+
+```sh
+npx --yes @immediately-run/baton@0.1.3 admin -i ~/.ssh/baton_admin state | \
+  node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);
+    console.log(JSON.stringify({discrepancies: j.discrepancies, scope: j.needs_you.scope}, null, 1))})'
+npx --yes @immediately-run/baton@0.1.3 ticket -i ~/.ssh/baton_repo_owner history baton:TICKET
+npx --yes @immediately-run/baton@0.1.3 ticket -i ~/.ssh/baton_repo_owner show baton:TICKET   # who last pushed it
+```
+
+With `require_signed_control` on (B-127, the [owner-signed control](./owner-signed-control.mdx)
+runbook), the sync's `unsigned-control` notice under Needs you names the unsigned control
+changes for you; without it, the git commands above are the whole story.
+
+## 5. Undo and resume
+
+- **Revert the identified commits**, one branch and one PR each (`git revert SHA`), and read
+  the diff before you merge it — a revert of an attacker's commit is still code you are
+  landing. A change to a control path (`.baton/`, workflows, tickets) lands by the
+  human-only identity (B-136, B-140), never the merge runner. A live guard: a token without
+  the `workflow` scope cannot push a revert that touches a workflow path — that push goes
+  over SSH or by a human, which is what the control-path rule asks anyway.
+- **Rotate every Actions secret a pushed workflow could have read** — the repository's
+  Settings → Secrets and variables → Actions, and each environment's secrets beside it. An
+  agent may turn the key; the value comes from your vault, never from a session:
+
+  ```sh
+  gh secret set NAME -R immediately-run/baton        # reads the value from stdin, or -b
+  ```
+
+- **Re-mint the fleet.** A new key per machine (`ssh-keygen -t ed25519 -f ~/.ssh/baton_worker
+  -C "$(hostname)"`), the same grants as before, checked:
+
+  ```sh
+  npx --yes @immediately-run/baton@0.1.3 owner -i ~/.ssh/baton_repo_owner grant baton \
+    --key worker.pub --hostname HOSTNAME --capabilities create-pr,llm-call,agent-venue --max-tier judgement
+  npx --yes @immediately-run/baton@0.1.3 owner -i ~/.ssh/baton_repo_owner grants baton
+  ```
+
+- **Resume.** Lift the bars (step 2's `bar lift`, one per bar), and let a sync run (the next
+  push or the schedule dispatches one; `repo sync` by hand from a checkout with
+  `--sync-key`) — a released ticket is claimable again only after a snapshot observed after
+  its last end (§6.7), so the released claims of step 2 come back one sync later.
+- **Redeploy** the server from a known-good commit if `baton` itself was pushed to (step 6).
+
+## 6. When the server or the Cloudflare account is the compromised thing
+
+Reach 0: a push to `baton` deploys the server every tenant trusts, and the Cloudflare token
+reaches every Worker on the account. Baton's server is recovered, not resisted (the owner,
+2026-11-01) — B-135 makes the deploy a human act, and this is the recovery:
+
+- **A human rotates**: the GitHub App's key (the App's settings), the webhook secret
+  (`BATON_GITHUB_WEBHOOK_SECRET`), the forge trigger secrets (`BATON_FORGE_SECRETS`,
+  `GITHUB_DISPATCH_TOKEN`), and the administrator keys — `npx wrangler secret put NAME`,
+  one call per secret, each value fresh (`openssl rand -hex 32`); the administrator keys are
+  the root of trust, so rotate them from a machine you trust, with
+  [the owner-key-loss runbook](./owner-key-loss.mdx) open beside you.
+- **Redeploy from a known commit**: `npx wrangler deployments list` names what ran;
+  `npx wrangler rollback` only reaches a version at the same migration number, so a
+  compromised migration is redeployed, not rolled back — deploy the last commit you trust
+  and read the diff between it and the tip before you fast-forward again.
+
+The drill does not run this step: its commands touch production secrets, and no script goes
+near them.
+
+## 7. Record it
+
+One dated entry in [lessons](../lessons.mdx): what happened, with links to the evidence (the
+commits, the PRs, the bars set and lifted); one bold sentence carrying the lesson; what
+changed so the next one is cheaper — a tag every runner declares (step 2's bound), a second
+owner key, a shorter leash. Lessons are read before operational work; an incident that
+teaches nothing repeats.
+
+## The drill
+
+[`scripts/drill-compromise.sh`](../../scripts/drill-compromise.sh) runs every command above
+end to end — a scratch plain-git home, a local Baton, a compromised key, a tagged fleet
+runner, an attack commit on the home and on a scratch GitHub repository (`--repo OWNER/NAME`),
+the bar, the release, the search, the revert, the rotation, the lift and the resume — and
+exits non-zero when any command fails. What it does not do is exactly what this page marks
+**a human**: no production secret, no fleet credential, nothing on
+`https://baton.immediately.run`. Its last full run passed on 2026-11-16 against
+`npx --yes @immediately-run/baton@0.1.3`.
