@@ -45,8 +45,9 @@ the runner's credentials under any other executor is that executor's, never Bato
     and `rekey`.
   - The response carries the runner's active claims, a list, empty when it holds none — each
     with its id, ticket, station, leg, nonce,
-    `deadline_at`, Baton's position (`station`, `path`, `next_leg`), the ticket's `version` in
-    the latest accepted snapshot (R-BTN-198) and that snapshot's `git` view (`next` legs with state, `waiting_on` and `not_before`; or `closed:
+    `deadline_at`, Baton's position (`station`, `path`, `next_leg`), the ticket as the latest
+    accepted snapshot holds it (`version`, `snapshot_sha`, `brief`, `last_written_by`,
+    R-BTN-198) and that snapshot's `git` view (`next` legs with state, `waiting_on` and `not_before`; or `closed:
     done | withdrawn`; or `unknown`; for a ticket marked `cancelling`, its queued `cancel` leg
     `ready`, R-BTN-168). A claim the runner's state does not hold is ended by the runner
     `released:lease-lost`, loudly, never left to idle (R-BTN-6); pending messages (§6), marked `delivered` in the same
@@ -369,7 +370,8 @@ the runner's credentials under any other executor is that executor's, never Bato
     - `start({brief, executor, inputs, channel}) → handle` starts a leg session. `brief` holds the
       session's kind, the ticket, the leg, its input URIs, the hand-off document, the leg's
       instructions and its agent command (R-BTN-131), and, as hints,
-      whether the leg is `autonomous` (R-BTN-195) and `reads_only` (R-BTN-183) —
+      whether the leg is `autonomous` (R-BTN-195) and `reads_only` (R-BTN-183), and how the session
+      reads its leg events (`baton leg events`, `baton leg ticket`, R-BTN-198) —
       never the claim id, the runner secret or a Baton credential; `executor` is the leg's
       executor data (below); `channel` is the address of the leg's channel (R-BTN-106). A
       handle may name the session's link, which the runner reports as R-BTN-113 says.

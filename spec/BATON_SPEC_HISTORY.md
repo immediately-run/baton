@@ -3094,14 +3094,17 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   counts claims, never host resources. `docs/context/architecture.mdx`'s *Parallelism is
   horizontal* is amended with it (B-188 item 8).
 
-- **2026-11-17 — R-BTN-198 added; R-BTN-35, R-BTN-69, R-BTN-72, R-BTN-91, R-BTN-106 and R-BTN-119
-  amended; S-BTN-231 added: leg events, what Baton tells a running leg (B-258).**
-  Rules changed: R-BTN-198 (new, §7.10), R-BTN-35 (a new version of a held ticket leaves the
-  claim alone and is told to the leg), R-BTN-69 (the leg field `on_ticket_changed`), R-BTN-72
-  (`ctx.on`, `ctx.events`, `ctx.readTicket`), R-BTN-91 (the ring kind `ticket`), R-BTN-106
-  (`baton leg events`, `baton leg ticket`), R-BTN-119 (the leg is told `release` with its reason
-  before the stop); also §6.9's `release`, the heartbeat's claim `version` (§8.1, §14), §9.4's
-  `released:ticket-changed` and §13's `ticket-changed` history kind.
+- **2026-11-17 — R-BTN-198 added; R-BTN-5, R-BTN-35, R-BTN-69, R-BTN-72, R-BTN-81, R-BTN-91,
+  R-BTN-106, R-BTN-107, R-BTN-119 and R-BTN-127 amended; S-BTN-231 added: leg events, what Baton
+  tells a running leg (B-258).**
+  Rules changed: R-BTN-198 (new, §7.10), R-BTN-5 (points to R-BTN-198 for the check at a newer
+  version), R-BTN-35 (a new version of a held ticket leaves the claim alone), R-BTN-69 (the leg
+  field `on_ticket_changed`), R-BTN-72 (`ctx.on`, `ctx.events`, `ctx.readTicket`), R-BTN-81 (the
+  `ticket-changed` row), R-BTN-91 (the ring kind `ticket`), R-BTN-106 (`baton leg events`,
+  `baton leg ticket`), R-BTN-107 (the brief names them), R-BTN-119 (the leg is told `release`
+  with its reason before the stop), R-BTN-127 (the CLI tree); also §4.2's version contract,
+  §6.9's `release`, the heartbeat's claim fields (§8.1, §14), §9.4's `released:ticket-changed`,
+  which joins the closed end reasons R-BTN-67 refuses as a bar's reason, and §13's history kind.
   The owner, 2026-11-15, asked whether the condition concept could be reused "for the other
   direction: when baton must signal an event to the leg being executed", naming two cases: "a
   ticket's body is updated in git (or another issue tracker system such as linear) while the
@@ -3126,7 +3129,38 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   quickly a tracker's edit reaches Baton (no want is recorded for it, R-BTN-94). The rule id,
   scenario and ticket are R-BTN-198, S-BTN-231 and B-258: R-BTN-197, S-BTN-230 and B-235 were
   taken on main while the branch was open.
-  Review: _(filled by the review rounds below)_
+  Review round 1: two fresh reviewers, one on consistency, one on security and buildability.
+  Their findings, each checked against the text, changed the rule:
+  - the heartbeat now carries the `snapshot_sha` every check needs (both reviewers), and the
+    sha is checked on the default branch;
+  - the mid-leg read shows the version's `brief` and `last_written_by` first, as the claim does
+    (R-BTN-194), so a mid-leg edit never looks more trusted than the claim's text;
+  - a version that changes `repos`, `course` or `requires` is refused, so a read never widens a
+    claim;
+  - the scenario case of a re-tiered read was impossible, since R-BTN-35 ends that claim, and the
+    tier and closure checks left the read for the same reason;
+  - the check before the next leg no longer re-checks readiness, which R-BTN-63 leaves to the
+    holder, and it now updates the versions the runner tracks, so no spurious event follows;
+  - `restart` stops the leg at once, not at an undefined safe point;
+  - Baton accepts `released:ticket-changed` only after a logged change, so it is not a free
+    unpenalised exit;
+  - the own-change test covers every commit in the range and the claim's whole window, and is
+    named cooperative, as the scope audit is;
+  - delivery has one cursor per run, and a `release` wins over a version change in the same
+    heartbeat;
+  - sessions poll, since the executor interface pushes nothing;
+  - the `cancel` leg and `changes` tickets are exempt, and refusals are named (`moved`,
+    `bounds-changed`, `unreadable`, `unknown-version`);
+  - the event types stay unreserved, with condition and leg event types stated as separate
+    namespaces;
+  - B-258 lost the decisions it held: a signature line, refusal codes, the stub's message and
+    the brief now live in the rule, or were cut.
+
+  Kept after review: a `restart` run counts toward `max_runs`. A reviewer called that bound the
+  damage, since forged versions or an editor flipping a ticket can spend it, and proposed a
+  named condition at exhaustion. Not taken: the ticket is held for a person as at any leg's
+  bound, and not counting the run would let such edits restart a leg without limit. A flip back
+  to the version last verified restarts nothing.
 
 ## Retired requirements
 

@@ -9,7 +9,7 @@ A leg that cannot go on alone (it needs a person, it hit an error or it has some
 ordinary child ticket. A `suspend` condition's leg resumes with the **restart** the handler
 chooses. A condition nothing handles reaches the **debugger** (**Needs you**). Baton raises
 conditions of its own the same way. The same section defines the edges that start or stop other
-work (**calls**, **retries**, **deadlines** and **cancellation**) the **outbox**, through
+work (**calls**, **retries**, **deadlines** and **cancellation**), the **outbox**, through
 which runners make the git writes Baton intends, and **leg events**, which go the other way:
 what Baton tells a running leg.
 
@@ -752,51 +752,86 @@ Limits that hold throughout:
   - **A leg event** is a typed event the runner hands to a running leg, from what Baton tells the
     runner. Its type follows R-BTN-160's grammar. It runs the other way from a condition, and the
     leg is its only handler: no binding, handler ticket, `conditions` row, Needs-you entry or
-    quota applies (R-BTN-160 to R-BTN-163). The types are core's, `ticket.changed` and `release`.
-    They are not condition types: no course declares one and no leg raises one.
-  - **Delivery.** The runner hands each event to the running leg it concerns, once and in the
-    order it arose: to the script's listeners (`ctx.on(<type or prefix>, listener)` and the
-    async iterator `ctx.events`, R-BTN-72) and to `baton leg events [--wait <s>]` on the leg's
-    channel (R-BTN-106), which prints the events the leg has not yet read as JSON lines. Events
-    unread when the run ends are dropped. An event carries identifiers only, never ticket text
-    (R-BTN-33).
+    quota applies (R-BTN-160 to R-BTN-163). The types are core's, `ticket.changed` and
+    `release`. Leg event types and condition types are separate namespaces: nothing raises a leg
+    event, and no condition is handed to a leg.
+  - **Delivery.** The runner keeps one queue per leg run. An event is handed to every listener
+    the leg's script has registered with `ctx.on(<type or prefix>, listener)` (R-BTN-72), and
+    appended to the queue, which the async iterator `ctx.events` and `baton leg events [--wait
+    <s>]` on the leg's channel (R-BTN-106, JSON lines) read through one cursor, each event once.
+    Events unread when the run ends are dropped. An event carries identifiers and the release
+    reason only, never ticket text (R-BTN-33). When one heartbeat brings a claim both a `release`
+    and a new version, only `release` is handed.
+  - **Sessions poll.** The executor interface (R-BTN-107) pushes nothing into a session: a
+    session learns of its events only by `baton leg events`, which its brief tells it to call. A
+    leg script that runs an agent may pass its events on to it as text naming the event's type
+    and the verbs below, never a version or ticket text.
   - **`ticket.changed {from_version, to_version, snapshot_sha}`: the ticket moved under the
     claim.**
+    - **Which claims.** Every claim with a ticket, except the two R-BTN-5 re-verifies against
+      Baton's record (a `changes` check ticket and a claim of the `cancel` leg): those are handed
+      no `ticket.changed`, and their legs' `on_ticket_changed` is ignored.
     - **Baton's half.** In the transaction that accepts a snapshot (R-BTN-62), for each ticket an
-      active claim holds whose posted `version` (§4.2) differs from the one Baton held, Baton
-      logs `ticket-changed {from_version, to_version}` on the ticket's history with the claim
-      (R-BTN-81) and rings the holder with the kind `ticket` (R-BTN-91). Each claim in a heartbeat
-      response carries `version`, the latest accepted snapshot's (§8.1). Versions are compared
-      for equality only. A snapshot that ends the claim as stale (R-BTN-35) is told as that
-      release, not as this event.
-    - **The runner's half.** When a claim's `version` differs from the last version its legs saw
-      (the claim's own at its first leg, else the last delivered), the runner hands
-      `ticket.changed` to the claim's running leg — unless the change is the leg's own: for the
-      markdown source, when the commit that last changed the ticket's file at `snapshot_sha` is
-      one the leg's window has pushed, read as the leg-end scope audit reads them (R-BTN-106).
-      With no leg running, nothing is handed; the next leg starts after the re-check below.
+      active claim holds whose posted `version` (§4.2) differs from the one Baton held, and which
+      the snapshot leaves held (R-BTN-35), Baton logs `ticket-changed {from_version, to_version}`
+      with the claim (R-BTN-81), and rings the holder `ticket` after the commit (R-BTN-91). A
+      snapshot that ends the claim is told as that claim's `release`, and logs and rings nothing
+      here. Each claim in a heartbeat response carries the ticket as the latest accepted snapshot
+      holds it: `version`, `snapshot_sha` (that snapshot's head), and its `brief` and
+      `last_written_by` (B-127, R-BTN-194) (§8.1). Versions are compared for equality only.
+    - **The runner's half.** Per claim the runner keeps the version **last seen** and the version
+      **last verified**. Both start as the claim's version once R-BTN-5 passes. While a leg runs,
+      a heartbeat `version` that differs from the last seen is handed as `ticket.changed`, its
+      `from_version` the last seen, and becomes the last seen. Several changes between two
+      heartbeats are one event, to the newest version, and none when the newest is the last
+      seen. A change is the leg's own, and becomes the last seen without being handed, only on
+      the markdown source and only when every commit that changed the ticket's file between the
+      last seen version's snapshot and `snapshot_sha` is one this claim's legs pushed, as the
+      leg-end scope audit reads pushes (R-BTN-106). Like that audit, the test is cooperative.
+      Every other change, on every source and under every executor whose pushes the runner
+      cannot read, is handed, a forge merge of the leg's own branch included; a course whose legs
+      change their own ticket keeps `continue`.
+    - **Verifying a version.** The runner verifies a version as R-BTN-5's re-verification by
+      version, at that version and `snapshot_sha` — the sha checked on the default branch first
+      (R-BTN-143), the source's code loaded from the claim's commit (R-BTN-133), the ticket read
+      where R-BTN-5 reads it (the branch's head for a course that keeps its record there) — and
+      refuses a version whose `repos`, `course` or `requires` differ from the claim's, since they
+      bound the claim's scope, course and runner (§12.9, R-BTN-121). Tier and closure are not
+      checked again, since a snapshot that re-tiers or withdraws the ticket ends the claim
+      (R-BTN-35); nor is readiness, which the leg's own progress moves and the holder judges
+      (R-BTN-63). The runner keeps each result for the claim.
+    - **Before a leg starts.** When the latest heartbeat's `version` differs from the last
+      verified — a change while no leg ran, preparation included — the runner verifies it before
+      the leg starts. It becomes the last seen and the last verified, and the leg reads it. A
+      version that fails releases `stale-board`.
     - **What the leg does** is its course's choice, the leg field `on_ticket_changed`
       (R-BTN-69):
-      - **`continue`** (the default): the leg goes on. It may read the new version by
-        `ctx.readTicket({version?})` or `baton leg ticket [--version <v>]`, which return the
-        ticket at that version (default the newest handed) — body, exit criteria and PRs, as the
-        source reads it — once the runner has re-verified it as R-BTN-5 does a claim's: read
-        through the source at the snapshot (pinned, at the version; current, still at it),
-        neither closed nor archived, and its tier within the runner's ceiling. Readiness is not
-        re-checked here: the leg's own progress moves it, and the position is Baton's
-        (R-BTN-35). A version that fails is refused on the channel with the failed check, and the
-        leg goes on with the version it has. The runner verifies a version once per claim. The
-        verbs read only the claim's own ticket. A leg may also end itself by `baton leg release
-        --reason ticket-changed`.
-      - **`restart`**: the runner stops the leg at its next safe point (§9.4), calls `close` and
-        `handoff`, and ends the claim `released:ticket-changed`. It is not a failed attempt; the
-        run counts toward `max_runs` as every run does (R-BTN-63). The next claim reads the
-        ticket under R-BTN-5.
-    - **The next leg.** Before an `advance` starts another leg in a claim whose ticket moved, the
-      runner re-verifies the ticket at the newest version as R-BTN-5 does a claim's, readiness
-      included, and releases `stale-board` when it fails. The next leg reads that version.
+      - **`continue`** (the default): the leg goes on. It may read a version handed to it by
+        `ctx.readTicket({version?})` or `baton leg ticket [--version <v>]` (default the newest
+        handed). The runner verifies the version, then returns its `brief` and
+        `last_written_by`, printed first as at the claim (R-BTN-194), and the ticket as R-BTN-5's
+        read returns it, a pathless ticket's `file` included (R-BTN-74). The claim's scope and
+        `ctx.ticket` stay as they were. A read is refused on the channel with its reason, and
+        the leg goes on with the text it has:
+        - `moved`: a current source holds a newer version; the next `ticket.changed` names it;
+        - `bounds-changed`: the version changes `repos`, `course` or `requires`;
+        - `unreadable`: the source exports no `read` (§4.2), or it or the executor could not
+          answer, which is never taken as a moved ticket;
+        - `unknown-version`: no event of this claim handed that version.
+
+        The verbs read only the claim's own ticket. A leg may end itself by `baton leg release
+        --reason ticket-changed`, which ends the claim as `restart` does.
+      - **`restart`**: when `to_version` differs from the last verified, the runner stops the leg
+        at once, as R-BTN-119 stops a `requested` release (`close` and `handoff` included), and
+        ends the claim `released:ticket-changed`.
+    - **The end.** Baton accepts `released:ticket-changed` only from a claim with a
+      `ticket-changed` row logged after its running leg started, and refuses it otherwise
+      `invalid-params`. It is not a failed attempt. The run counts toward `max_runs` as every run
+      does (R-BTN-63), so a ticket edited over and over stops at that bound like any other. The
+      next claim reads the ticket under R-BTN-5.
   - **`release {reason}`: why the leg is stopped.** When a `release` message reaches the runner
-    (§6.9), it hands `release` with the message's reason to the claim's running leg, then acts on
-    the message as R-BTN-119 and §6.9 say, without waiting for the leg to read the event. The
-    event changes neither the stop's timing nor its escalation, and the leg cannot defer or
-    refuse the stop by it. The leg's `ctx.signal` aborts by R-BTN-72.
+    (§6.9), whatever its reason, R-BTN-35's staleness and R-BTN-90's deadline included, the
+    runner hands `release` with that reason to the claim's running leg. It then acts on the
+    message as §6.9 and R-BTN-119 say, without waiting for the leg to read the event. The event
+    changes neither the stop's timing nor its escalation, and the leg cannot defer or refuse the
+    stop by it. The leg's `ctx.signal` aborts by R-BTN-72.

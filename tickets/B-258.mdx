@@ -40,55 +40,47 @@ depends_on:
 ### What to build
 
 1. **The course file (R-BTN-69).** The leg field `on_ticket_changed`, `continue` or `restart`,
-   defaulting to `continue`. The validator refuses any other value, naming the leg. `baton
-   course test` prints it in the leg's signature.
-2. **The core (R-BTN-198, §8.1, R-BTN-91).**
-   - In the transaction that accepts a snapshot, for each ticket an active claim holds whose
-     posted `version` differs from the cached one: log `ticket-changed {from_version,
-     to_version}` with the claim, and ring the holder `ticket`. A snapshot that ends the claim as
-     stale (R-BTN-35) does neither.
-   - Each claim in the heartbeat response carries `version`.
-3. **The runner: detection (R-BTN-198).** Track, per claim, the last version its legs saw. When a
-   heartbeat's `version` differs, hand `ticket.changed {from_version, to_version, snapshot_sha}`
-   to the running leg, once. Skip it when the change is the leg's own: on the markdown source,
-   the commit that last changed the ticket's file at `snapshot_sha` is one the leg's window
-   pushed, read from the reflog as the leg-end scope audit reads it. Hand nothing when no leg
-   runs.
-4. **The runner: what the leg's course chose (R-BTN-198).**
-   - `continue`: serve the verified read (item 5). On `baton leg release --reason
-     ticket-changed`, end as that reason.
-   - `restart`: stop the leg at its next safe point, `close`, `handoff`, and end
+   defaulting to `continue`; the validator refuses any other value, naming the leg.
+2. **The core (R-BTN-198, §8.1, §14, R-BTN-91, R-BTN-81).**
+   - In the transaction that accepts a snapshot: for each held ticket whose posted `version`
+     moved and which the snapshot leaves held, log `ticket-changed {from_version, to_version}`
+     with the claim, and ring the holder `ticket` after the commit.
+   - Each heartbeat claim carries `version`, `snapshot_sha`, `brief` and `last_written_by` from
+     the latest accepted snapshot.
+   - Accept an end `released:ticket-changed` only from a claim with a `ticket-changed` row
+     logged after its running leg started; refuse it otherwise `invalid-params`.
+   - `ticket-changed` joins the closed end reasons, which R-BTN-67 refuses as an owner bar's
+     `reason`. A migration renames any bar already set with that reason to
+     `bar-ticket-changed`, logging the rename.
+3. **The runner (R-BTN-198).**
+   - Per claim: the last seen and last verified versions, each with its snapshot sha.
+   - Hand `ticket.changed` while a leg runs, collapsing several changes into one, none when the
+     newest is the last seen.
+   - The own-change test: markdown source only, every commit to the ticket's file in the range
+     pushed by this claim's legs, from the same reflog reading as the leg-end scope audit.
+   - Verification as R-BTN-198 states it: R-BTN-143 on the sha, the source's code from the
+     claim's commit, the read where R-BTN-5 reads, `repos`/`course`/`requires` unchanged. A
+     source or executor that cannot answer is `unreadable`, never a moved ticket (B-232's
+     lesson).
+   - Before every leg start, verify a newer version or release `stale-board`.
+   - `restart`: stop at once through R-BTN-119's path for `requested`, then end
      `released:ticket-changed`.
-   - Before an `advance` starts the next leg in a claim whose ticket moved, re-verify at the
-     newest version as R-BTN-5 does, readiness included, and release `stale-board` on failure.
-5. **The leg's side (R-BTN-72, R-BTN-106).**
-   - `ctx.on(<type or prefix>, listener)` and the async iterator `ctx.events`. `ctx.signal`
-     keeps its three reasons.
-   - `ctx.readTicket({version?})` and `baton leg ticket [--version <v>]`: read the claim's own
-     ticket at that version through the source at the snapshot, check it is neither closed nor
-     archived and its tier is within the runner's ceiling, then return body, exit criteria and
-     PRs; else refuse naming the failed check. Verify a version once per claim and keep the
-     result. No readiness check here. A source or executor that cannot answer refuses the read
-     as `could not read`, never as a moved ticket (B-232's lesson).
-   - `baton leg events [--wait <s>]`: the unread events as JSON lines. Events unread at the run's
-     end are dropped.
-6. **`release` (R-BTN-198, R-BTN-119, §6.9).** On every `release` message, hand `release
-   {reason}` to the running leg, then act on the message exactly as today, without waiting for
-   the leg to read it.
-7. **The end reason (§9.4).** `released:ticket-changed`: status `released`, not a failed attempt,
-   the run counted toward `max_runs`.
-8. **The agent stubs** (`src/defaults/cli.ts`, after B-227). Pass each event to the agent at its
-   next tool boundary: a hook for Claude Code, the nearest equivalent for opencode. The message
-   is runner-written. For `ticket.changed` it says the ticket changed, that `baton leg ticket`
-   reads the verified new version if the agent wants it, and that `baton leg release --reason
-   ticket-changed` hands the work to a fresh claim. For `release` it gives the reason. It never
-   quotes the ticket. The executor's brief (R-BTN-107) says that only `baton leg ticket` counts as
-   re-reading the ticket, not a raw `git show` of an unverified head.
+   - On every `release` message, hand `release {reason}` first, then act exactly as today.
+   - A release and a new version in one heartbeat hand only `release`.
+4. **The leg's side (R-BTN-72, R-BTN-106, R-BTN-107).**
+   - `ctx.on`, `ctx.events`, `ctx.readTicket`; `baton leg events [--wait <s>]` and `baton leg
+     ticket [--version <v>]` on the channel, sharing one cursor per run. The four refusal reasons
+     are R-BTN-198's.
+   - The executor's brief names the two verbs.
+5. **The end table (§9.4).** `released:ticket-changed`.
+6. **The agent stubs** (`src/defaults/cli.ts`, after B-227). Pass each event to the agent at its
+   next tool boundary where the harness allows it (a hook for Claude Code, the nearest
+   equivalent for opencode) as text naming the event's type and the two verbs, never a version
+   or ticket text. Under the `session` and `attached` executors the agent polls `baton leg
+   events` as its brief says.
 
-**Done when** S-BTN-231 passes as a scenario test, `npm test` and `npm run typecheck` are green,
-`baton course test` prints `on_ticket_changed`, and an edit to a held ticket's file on the
-default branch reaches a running leg's `ctx.on('ticket.changed')` within one doorbell ring of
-the snapshot's acceptance.
+**Done when** S-BTN-231 passes as a scenario test, and `npm test` and `npm run typecheck` are
+green.
 
 ### Out of scope
 
@@ -101,31 +93,34 @@ the snapshot's acceptance.
 
 ### Trust
 
-- **The version** comes from the sync's post, an attestation weighed by its writer as every
-  snapshot is (R-BTN-35, R-BTN-93). A forged version change can at worst tell a leg its ticket
-  changed, or make a `restart` leg release unpenalised, which `max_runs` bounds. It never
-  changes what the leg runs: every read of the new version goes through the source and the
-  runner's re-verification.
-- **No ticket content crosses Baton.** The event carries two opaque versions and a sha. Ticket
-  text reaches the leg only through the runner's verified read, and only when the leg asks.
-- **The new body is as untrusted as the old one.** It comes from the same source and passes the
-  same checks as the text the claim started with, and anyone who could push it could have
-  pushed it before the claim. Its instructions are a task, never authority
-  (`docs/security-model.mdx`, reach 3), and reading it changes neither the leg's scope nor its
-  grant.
-- **The stub's message to the agent** is runner-written and never quotes the ticket, so an edit
-  cannot use the event to put text in front of a running agent.
-- **The release reason** is Baton's own, from the message the runner already acknowledges
-  (§6.9).
+- **The version, sha and provenance** come from the sync's post and Baton's own record, as at
+  the claim (R-BTN-35, R-BTN-93, R-BTN-194). A forged post (a stolen machine key, the security
+  model's reach 7) can tell a leg its ticket changed, or make a `restart` leg release until
+  `max_runs` holds the ticket for a person: a denial of service bounded by `max_runs`, the same
+  bound every leg has. It cannot hand a leg text from anywhere else: the read is at the posted
+  sha, checked on the default branch, for the claim's own ticket and only for a version this
+  claim was handed.
+- **The new body is as untrusted as the old one.** The read shows its `brief` mark and
+  `last_written_by` first, as the claim does (R-BTN-194), so the agent sees whose words it is
+  about to read. Its instructions are a task, never authority (`docs/security-model.mdx`,
+  reach 3). A version that would widen the claim (`repos`, `course`, `requires`) is refused, and
+  the claim's scope never changes by a read.
+- **No ticket content crosses Baton**, and an event carries no ticket text. The stub's message
+  names only the event's type and the verbs.
+- **The own-change test** reads the runner's own reflog, which a hostile leg can falsify
+  (§12.9). It can only hide an outside edit from itself.
+- **A self-released `ticket-changed` end** is accepted only after a logged change, so a leg
+  cannot use it to leave unpenalised at will.
 
 ### Invariants
 
 - **R-BTN-33:** nothing new is stored but opaque versions in a history row.
-- **R-BTN-5 and R-BTN-133:** no leg is handed ticket text that skipped re-verification. The
-  verified read, `restart`, and the re-check before the next leg are the only paths to a new
-  version.
+- **R-BTN-5, R-BTN-143 and R-BTN-133:** no leg is handed ticket text that skipped verification,
+  and no new code is loaded mid-claim: the source's code comes from the claim's commit.
+- **R-BTN-194:** provenance is shown before any new text, as at the claim.
 - **R-BTN-119 and §6.9:** a stop's timing and escalation are unchanged. The event is handed
   before the stop, never in place of it.
+- **R-BTN-63:** readiness stays the holder's judgement; nothing here re-checks it.
 - **R-BTN-160 to R-BTN-163:** conditions, bindings, handlers, Needs you and their quotas are
   untouched. A leg event is never a condition row.
 - **Values 4:** versions are compared for equality only.
@@ -144,3 +139,6 @@ R-BTN-198, so this ticket is now the build alone. Three changes from the filed p
 mid-leg read checks source, closure and tier but not readiness, which the leg's own pushes move;
 the event types are not reserved in the validator, since leg events are never condition types;
 the scenario is S-BTN-231._
+
+_2026-11-17 — rewritten after review round 1 of the spec PR, to build R-BTN-198 as amended there;
+the plan holds no decision the spec does not._
