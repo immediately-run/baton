@@ -1,4 +1,4 @@
--- 0056_client_versions.sql — B-254 (BATON_SPEC §11.3 R-BTN-197, §13.1, §13.3): the client
+-- 0057_client_versions.sql — B-254 (BATON_SPEC §11.3 R-BTN-197, §13.1, §13.3): the client
 -- versions Baton and its clients state about each other. `instance_settings.recommended_client`
 -- is the administrator's raise of the code's RECOMMENDED_CLIENT — NULL for the code's default,
 -- never below it (validated in validate.ts) — read into the Baton-Client-Versions response

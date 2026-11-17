@@ -155,6 +155,10 @@ export interface Heartbeat {
    *  half's word, sent out of cadence before validation, `close` or any wait. Shape-checked
    *  only as a positive integer; a heartbeat is never refused for it. */
   leg_finished?: number;
+  /** B-253 (R-BTN-72): the runner's own statement about itself — its `cli` key names the CLI's
+   *  pinning. Opaque to Baton beyond its size: shape-checked here, stored as received, and
+   *  gated on by nothing. */
+  profile?: Record<string, unknown>;
 }
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number }
@@ -212,6 +216,15 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   // R-BTN-90: the finished run's seq — read as absent when it is not one (a heartbeat is never
   // refused for it, §6.8); the finishing half below judges it against the claim's running run.
   const leg_finished = isInt(b.leg_finished) && (b.leg_finished as number) > 0 ? b.leg_finished as number : undefined;
+  // B-253 (R-BTN-72): the profile is the runner's own statement, opaque — bounded only, so a
+  // hostile megabyte stays out of the row it is stored in. The pinning it reports is never a
+  // refusal: an unpinned runner is warned about, not stopped.
+  let profile: Record<string, unknown> | undefined;
+  if (b.profile !== undefined) {
+    if (!isObj(b.profile)) bad('profile', 'must be a JSON object');
+    else if (JSON.stringify(b.profile).length > 4096) bad('profile', 'must serialize to at most 4096 characters');
+    else profile = b.profile;
+  }
   return {
     hostname,
     session_name,
@@ -235,6 +248,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     policy_pins: checkPolicyPins(b.policy_pins),
     session_url,
     leg_finished,
+    profile,
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),

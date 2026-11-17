@@ -311,7 +311,9 @@ export class WorkerApi {
       }
       return true;
     });
-    // Every hash first; then every read and write in one synchronous transaction (§3).
+    // Every hash first; then every read and write in one synchronous transaction (§3). The
+    // profile joins the hash (B-253): a beat that changes it rewrites the settings it belongs
+    // to, as R-BTN-99 counts a profile change among the version-bumping writes.
     const presented = secretHeader ? await sha256Hex(secretHeader) : null;
     const settingsHash = await sha256Hex(JSON.stringify({
       harness: hb.harness, kind: hb.kind, model_id: hb.model_id ?? null,
@@ -320,6 +322,7 @@ export class WorkerApi {
       lease: hb.lease_timeout_s,
       courses: hb.courses.map((c) => `${c.repository}:${c.course}@${c.version}`).sort(),
       tags: [...hb.tags].sort(),
+      profile: hb.profile ?? null,
     }));
     const answer = this.c.store.transaction(() => this.heartbeatTx(credentialId, presented, settingsHash, hb, clientVersion));
     return {
@@ -330,6 +333,8 @@ export class WorkerApi {
   }
 
   private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat, clientVersion: string | null) {
+    // B-253: the profile, serialized once — the same bytes compared, stored and hashed.
+    const profileJson = hb.profile ? JSON.stringify(hb.profile) : null;
     const cred = this.credential(credentialId);
     if (hb.hostname !== cred.hostname) throw new BatonError('forbidden', `this credential may register only ${cred.hostname}`);
     // B-104 (R-BTN-174, §11.1's refusal deleted): a heartbeat's declaration is recorded as
@@ -355,10 +360,10 @@ export class WorkerApi {
     if (!w) {
       if (!hb.secret_hash) bad('secret_hash', 'the first heartbeat of a session carries its SHA-256');
       this.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, model_id,
-                   tier_ceiling, tier_ceilings, lease_timeout_ms, settings_hash, client_version, first_seen_at, last_seen_at, last_activity_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,
+                   tier_ceiling, tier_ceilings, lease_timeout_ms, profile_json, settings_hash, client_version, first_seen_at, last_seen_at, last_activity_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,
         hb.hostname, hb.session_name, hb.secret_hash, cred.id, hb.harness, hb.kind, hb.model_id ?? null,
-        hb.tier_ceiling, JSON.stringify(hb.tier_ceilings), hb.lease_timeout_s * 1000, clientVersion, now, now, hb.last_activity_at ?? null);
+        hb.tier_ceiling, JSON.stringify(hb.tier_ceilings), hb.lease_timeout_s * 1000, profileJson, clientVersion, now, now, hb.last_activity_at ?? null);
       w = this.rows<typeof w>('SELECT id, secret_hash, credential_id, reaped_at, incarnation, settings_hash, secret_seen FROM workers WHERE hostname = ? AND session_name = ?', hb.hostname, hb.session_name)[0];
     } else {
       // R3-1239's handover: a session registered under a bearer token, or under a key since
@@ -401,16 +406,16 @@ export class WorkerApi {
     // B-237 (R-BTN-196): a beat of a live worker that changes nothing but `last_seen_at` and
     // `last_activity_at` is liveness, and does not move the state version — what those decide
     // (live, stalled) is the clock's; any other field it sets that differs is a change.
-    const stored = this.rows<{ harness: string; kind: string; model_id: string | null; tier_ceiling: string; tier_ceilings: string; lease_timeout_ms: number; isolation: string | null; secret_seen: number; client_version: string | null }>(
-      'SELECT harness, kind, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms, isolation, secret_seen, client_version FROM workers WHERE id = ?', w.id)[0];
+    const stored = this.rows<{ harness: string; kind: string; model_id: string | null; tier_ceiling: string; tier_ceilings: string; lease_timeout_ms: number; isolation: string | null; profile_json: string | null; secret_seen: number; client_version: string | null }>(
+      'SELECT harness, kind, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms, isolation, profile_json, secret_seen, client_version FROM workers WHERE id = ?', w.id)[0];
     const beatOnly = !!was?.live && !rekeyed && stored != null && stored.harness === hb.harness && stored.kind === hb.kind
       && stored.model_id === (hb.model_id ?? null) && stored.tier_ceiling === hb.tier_ceiling && stored.tier_ceilings === JSON.stringify(hb.tier_ceilings)
-      && stored.lease_timeout_ms === hb.lease_timeout_s * 1000 && stored.isolation === hb.isolation && stored.secret_seen >= secretSeen
+      && stored.lease_timeout_ms === hb.lease_timeout_s * 1000 && stored.isolation === hb.isolation && stored.profile_json === profileJson && stored.secret_seen >= secretSeen
       && stored.client_version === clientVersion;
     const beat = () => this.exec(`UPDATE workers SET last_seen_at = ?, secret_seen = MAX(secret_seen, ?), last_activity_at = COALESCE(?, last_activity_at), harness = ?, kind = ?,
-                 model_id = ?, tier_ceiling = ?, tier_ceilings = ?, lease_timeout_ms = ?, isolation = ?, client_version = ? WHERE id = ?`,
+                 model_id = ?, tier_ceiling = ?, tier_ceilings = ?, lease_timeout_ms = ?, isolation = ?, profile_json = ?, client_version = ? WHERE id = ?`,
       now, secretSeen, hb.last_activity_at ?? null, hb.harness, hb.kind, hb.model_id ?? null, hb.tier_ceiling, JSON.stringify(hb.tier_ceilings),
-      hb.lease_timeout_s * 1000, hb.isolation, clientVersion, w.id);
+      hb.lease_timeout_s * 1000, hb.isolation, profileJson, clientVersion, w.id);
     if (beatOnly) liveness(this.c.store, beat);
     else beat();
     const rewrote = settingsHash !== w.settings_hash || rekeyed;
@@ -843,7 +848,7 @@ export class WorkerApi {
 
   workersView(now: number) {
     const workers = this.rows<Row>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
-                                       first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation FROM workers ORDER BY hostname, id`);
+                                       first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json FROM workers ORDER BY hostname, id`);
     return workers.map((w) => {
       const id = w.id as number;
       const alive = w.reaped_at == null && now - (w.last_seen_at as number) < (w.lease_timeout_ms as number);
@@ -853,6 +858,9 @@ export class WorkerApi {
       return {
         ...w,
         tier_ceilings: JSON.parse(w.tier_ceilings as string) as Record<string, string>,
+        // B-253 (R-BTN-72): the runner's own opaque statement, stored as received — its `cli`
+        // key names the CLI's pinning. NULL until a heartbeat carried one.
+        profile: w.profile_json == null ? null : JSON.parse(w.profile_json as string) as Record<string, unknown>,
         alive,
         capabilities: this.rows<{ capability: string; declared: string }>('SELECT capability, declared FROM worker_capabilities WHERE worker_id = ? ORDER BY capability', id),
         courses: this.staleCourses(id, true),

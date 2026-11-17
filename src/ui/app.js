@@ -204,6 +204,12 @@ function renderWorkers() {
     // R-BTN-48: the courses its checkouts run, flagged where below the course's minimum.
     const runs = (w.courses ?? []).map((c) => `${c.repository}:${c.course} v${c.version}${c.min_worker_version != null && c.version < c.min_worker_version ? ` (below ${c.min_worker_version})` : ''}`).join(', ') || 'declares no course';
     who.append(el('div', { text: runs, cls: 'muted' }));
+    // B-253: the CLI the runner runs, as its profile states it — an unpinned runner (a branch
+    // its code follows) shows at a glance.
+    if (w.profile?.cli) {
+      const c = w.profile.cli;
+      who.append(el('div', { text: `cli ${[c.ref, c.commit != null ? String(c.commit).slice(0, 10) : null].filter(Boolean).join('@') || 'unknown'}${c.pinned ? '' : ' — not a pinned commit'}`, cls: 'muted' }));
+    }
     if (w.transcript_url) who.append(el('div', {}, httpsLink('transcript', w.transcript_url)));
     const st = w.reaped_at != null ? 'reaped' : w.alive ? 'alive' : 'lease lapsed';
     const stateCell = el('td', {}, el('div', { text: st, cls: w.alive ? 'alive' : 'dead' }), el('div', { text: `seen ${fmtTime(w.last_seen_at)}`, cls: 'muted' }), el('div', { text: `active ${fmtTime(w.last_activity_at)}`, cls: 'muted' }));
