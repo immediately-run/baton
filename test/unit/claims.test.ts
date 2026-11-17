@@ -343,7 +343,7 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
   });
 });
 
-describe('G-BTN-1: one active claim per item and per worker', () => {
+describe('G-BTN-1: one active claim per item, and per worker up to its bound (R-BTN-4, B-188)', () => {
   it('two concurrent claims for one item: exactly one succeeds', async () => {
     const a = await register('vm-a');
     const b = await register('vm-b');
@@ -353,15 +353,17 @@ describe('G-BTN-1: one active claim per item and per worker', () => {
     expect(await rows(`SELECT count(*) AS n FROM claims WHERE status = 'active'`)).toEqual([{ n: 1 }]);
   });
 
-  it('two claims by one worker: the second is refused; the index refuses a second row however it is written', async () => {
+  it('two claims by one worker past its bound: the second is refused max-claims; only the ticket index stays unique (B-188)', async () => {
     const a = await register('vm-a');
     expect((await claimItem('vm-a', a.secret)).status).toBe(200);
-    expect(await claimItem('vm-a', a.secret)).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 'one-claim-per-worker' } });
-    await expect(rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status)
-                       VALUES ('docs:R3-9002', ?, 'raw-1', 'abcdef', '', 0, 'active')`, a.id)).rejects.toThrow(/UNIQUE/);
+    expect(await claimItem('vm-a', a.secret)).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 'max-claims' } });
+    // R-BTN-4 (B-188): the per-worker index is gone — the bound is the claim transaction's — and
+    // the per-ticket one stays.
+    await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status)
+                VALUES ('docs:R3-9002', ?, 'raw-1', 'abcdef', '', 0, 'active')`, a.id);
     const b = await register('vm-b');
     await expect(rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status)
-                       VALUES ('docs:R3-9001', ?, 'raw-2', 'abcdef', '', 0, 'active')`, b.id)).rejects.toThrow(/UNIQUE/);
+                       VALUES ('docs:R3-9002', ?, 'raw-2', 'abcdef', '', 0, 'active')`, b.id)).rejects.toThrow(/UNIQUE/);
   });
 });
 

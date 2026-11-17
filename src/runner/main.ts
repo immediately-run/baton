@@ -56,6 +56,10 @@ export interface RunArgs {
   /** R-BTN-107 (B-184): the executor source the runner's host chose — `--executor`, else the
    *  host's `BATON_EXECUTOR`, else `builtin`. Never read from a checkout. */
   executor: string;
+  /** R-BTN-4, R-BTN-72 (B-188): `--concurrency <k>` — how many claims the runner holds at once,
+   *  1 to 32, default 1 (one claim in the home checkout, as before); each claim beside another
+   *  works in a clone of its own. */
+  concurrency: number;
 }
 
 /** `baton run [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]
@@ -71,7 +75,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     session: env.BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
     repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? hostname(),
     tier: 'critical', capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false, locks: {},
-    executor: env.BATON_EXECUTOR ?? 'builtin',
+    executor: env.BATON_EXECUTOR ?? 'builtin', concurrency: 1,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -94,6 +98,11 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     else if (a === '--tier') out.tier = value();
     else if (a === '--course') out.course = value();
     else if (a === '--executor') out.executor = value();
+    else if (a === '--concurrency') {
+      const n = Number(value());
+      if (!Number.isInteger(n) || n < 1 || n > 32) throw new Error('--concurrency: an integer from 1 to 32 (R-BTN-4)');
+      out.concurrency = n;
+    }
     else if (a === '--capabilities') out.capabilities = value().split(',').map((s) => s.trim()).filter(Boolean);
     else if (a === '--lock') {
       // R-BTN-178: `--lock <capability>=<path>`, repeatable — the capability is declared only
@@ -122,10 +131,11 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
 export const RUN_USAGE = [
   'usage: baton run [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]',
   '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
-  '                 [--beat-every <ms>] [--course <id>] [--executor <source>] [--test-harness] [--verbose]',
+  '                 [--beat-every <ms>] [--course <id>] [--executor <source>] [--concurrency <k>]',
+  '                 [--test-harness] [--verbose]',
   '',
   'Runs this machine\'s worker: it heartbeats, claims a ticket of a course its home checkout',
-  'declares and runs each leg — one leg at a time. --home names a checkout, or a home of',
+  'declares and runs each claim\'s legs one at a time. --home names a checkout, or a home of',
   '~/.config/baton/homes.json, whose checkout it works (B-121).',
   '',
   '  --capabilities a,b  narrows what the grant allows; it never enables what the grant does not.',
@@ -136,6 +146,10 @@ export const RUN_USAGE = [
   '  --executor <source> how legs run (R-BTN-107): builtin (the default — child processes) or',
   '                      pinned:<dir>@sha256:<digest>, a host bundle loaded only when its digest',
   '                      matches. Also BATON_EXECUTOR; never read from the repository.',
+  '  --concurrency <k>   how many claims this runner holds at once, 1 to 32 (default 1; R-BTN-4):',
+  '                      each claim\'s legs run one at a time, claims side by side, each beside',
+  '                      another in a clone of the home of its own. The owner\'s grant bounds it',
+  '                      (--max-claims).',
   '  --lock cap=path     one machine\'s singleton (R-BTN-178), repeatable: the capability is declared',
   '                      only while this runner holds an exclusive lock on the file, and it takes',
   '                      the lock before a claim for, or the advance into, a leg requiring it.',
@@ -449,6 +463,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     ...(agentCommand ? { agentCommand } : {}),
     ...(a.testHarness ? { testHarness: true } : {}),
     ...(maskEnv ? { maskEnv } : {}),
+    ...(a.concurrency !== 1 ? { concurrency: a.concurrency } : {}),
   });
   try {
     await runner.work();

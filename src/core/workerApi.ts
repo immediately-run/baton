@@ -256,15 +256,23 @@ export class WorkerApi {
     return [...new Set(repos.flatMap((r) => transcriptReposOf(this.c.store, r.id)))].sort();
   }
 
-  private activeClaim(workerId: number) {
+  /** R-BTN-4 (B-188): the worker's active claims, oldest first — several, up to its bound. */
+  private activeClaims(workerId: number) {
     return this.rows<{ id: number; ticket_id: string; nonce: string; claimed_at: number }>(
-      `SELECT id, ticket_id, nonce, claimed_at FROM claims WHERE worker_id = ? AND status = 'active'`, workerId)[0] ?? null;
+      `SELECT id, ticket_id, nonce, claimed_at FROM claims WHERE worker_id = ? AND status = 'active' ORDER BY claimed_at, id`, workerId);
   }
 
-  private currentActivity(workerId: number) {
+  /** The worker's oldest active claim — what a caller that knows one claim per worker reads
+   *  (the shadow report, and the heartbeat's `claim` kept for runners before B-188). */
+  private activeClaim(workerId: number) {
+    return this.activeClaims(workerId)[0] ?? null;
+  }
+
+  /** §9.9: the newest open activity — the worker's, or with `claimId` that claim's (B-188). */
+  private currentActivity(workerId: number, claimId?: number) {
     return this.rows<{ id: string; kind: string; label: string | null; started_at: number; claim_id: number | null }>(
-      `SELECT id, kind, label, started_at, claim_id FROM activities WHERE worker_id = ? AND ended_at IS NULL
-       ORDER BY started_at DESC, received_at DESC LIMIT 1`, workerId)[0] ?? null;
+      `SELECT id, kind, label, started_at, claim_id FROM activities WHERE worker_id = ? AND ended_at IS NULL${claimId != null ? ' AND claim_id = ?' : ''}
+       ORDER BY started_at DESC, received_at DESC LIMIT 1`, ...(claimId != null ? [workerId, claimId] : [workerId]))[0] ?? null;
   }
 
   /** `POST /v1/runner/heartbeat` (§11): registration on first contact, the secret and re-key
@@ -403,15 +411,16 @@ export class WorkerApi {
     // B-237 (R-BTN-196): a beat of a live worker that changes nothing but `last_seen_at` and
     // `last_activity_at` is liveness, and does not move the state version — what those decide
     // (live, stalled) is the clock's; any other field it sets that differs is a change.
-    const stored = this.rows<{ harness: string; kind: string; model_id: string | null; tier_ceiling: string; tier_ceilings: string; lease_timeout_ms: number; isolation: string | null; profile_json: string | null; secret_seen: number }>(
-      'SELECT harness, kind, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms, isolation, profile_json, secret_seen FROM workers WHERE id = ?', w.id)[0];
+    const stored = this.rows<{ harness: string; kind: string; model_id: string | null; tier_ceiling: string; tier_ceilings: string; lease_timeout_ms: number; isolation: string | null; profile_json: string | null; secret_seen: number; concurrency: number }>(
+      'SELECT harness, kind, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms, isolation, profile_json, secret_seen, concurrency FROM workers WHERE id = ?', w.id)[0];
     const beatOnly = !!was?.live && !rekeyed && stored != null && stored.harness === hb.harness && stored.kind === hb.kind
       && stored.model_id === (hb.model_id ?? null) && stored.tier_ceiling === hb.tier_ceiling && stored.tier_ceilings === JSON.stringify(hb.tier_ceilings)
-      && stored.lease_timeout_ms === hb.lease_timeout_s * 1000 && stored.isolation === hb.isolation && stored.profile_json === profileJson && stored.secret_seen >= secretSeen;
+      && stored.lease_timeout_ms === hb.lease_timeout_s * 1000 && stored.isolation === hb.isolation && stored.profile_json === profileJson && stored.secret_seen >= secretSeen
+      && stored.concurrency === hb.concurrency;
     const beat = () => this.exec(`UPDATE workers SET last_seen_at = ?, secret_seen = MAX(secret_seen, ?), last_activity_at = COALESCE(?, last_activity_at), harness = ?, kind = ?,
-                 model_id = ?, tier_ceiling = ?, tier_ceilings = ?, lease_timeout_ms = ?, isolation = ?, profile_json = ? WHERE id = ?`,
+                 model_id = ?, tier_ceiling = ?, tier_ceilings = ?, lease_timeout_ms = ?, isolation = ?, profile_json = ?, concurrency = ? WHERE id = ?`,
       now, secretSeen, hb.last_activity_at ?? null, hb.harness, hb.kind, hb.model_id ?? null, hb.tier_ceiling, JSON.stringify(hb.tier_ceilings),
-      hb.lease_timeout_s * 1000, hb.isolation, profileJson, w.id);
+      hb.lease_timeout_s * 1000, hb.isolation, profileJson, hb.concurrency, w.id);
     if (beatOnly) liveness(this.c.store, beat);
     else beat();
     const rewrote = settingsHash !== w.settings_hash || rekeyed;
@@ -443,29 +452,40 @@ export class WorkerApi {
 
     const fresh = this.rows<{ incarnation: number; lease_timeout_ms: number }>('SELECT incarnation, lease_timeout_ms FROM workers WHERE id = ?', w.id)[0];
     // R-BTN-19: only a heartbeat with the secret (never the hash path) clears a fence.
-    if (hb.fenced && secretSeen) this.c.fenced?.(w.id, fresh.incarnation, hb.fenced.claim_id);
-    const claim = this.activeClaim(w.id);
+    if (secretSeen) for (const f of hb.fenced) this.c.fenced?.(w.id, fresh.incarnation, f.claim_id);
+    const claims = this.activeClaims(w.id);
+    const mine = new Map(claims.map((c) => [c.id, c]));
     // R-BTN-113 (B-234, B-4): the running leg's session link, stored on its `claim_legs` row (latest
     // wins while the run is live). A link that fails the rule — https, no userinfo, an
     // allowlisted host — is dropped and logged, never a refused beat. The allowlist is the
     // instance's setting (`instance_settings`), the deploy's config until an administrator
     // sets one.
+    // B-188: `session_urls` names each link's claim; the bare `session_url` of a runner before
+    // B-188 is its one claim's, and with several claims held it names none, so it is dropped.
     let sessionUrlDropped: string | null = null;
-    if (hb.session_url !== undefined && claim) {
-      const why = sessionLinkWhy(hb.session_url, this.c.sessionHosts?.() ?? SESSION_HOSTS.of(this.c.config));
+    const links = [...hb.session_urls];
+    if (hb.session_url !== undefined && claims.length === 1) links.push({ claim_id: claims[0].id, url: hb.session_url });
+    else if (hb.session_url !== undefined && claims.length > 1) sessionUrlDropped = 'session_url names no claim while this runner holds several; send session_urls';
+    for (const link of links) {
+      const claim = mine.get(link.claim_id);
+      if (!claim) continue; // a claim this worker no longer holds: its link has nothing to land on
+      const why = sessionLinkWhy(link.url, this.c.sessionHosts?.() ?? SESSION_HOSTS.of(this.c.config));
       if (why != null) {
         sessionUrlDropped = why;
-        this.event('discrepancy', `worker:${w.id}`, { sub: 'session-url', why, url: hb.session_url.slice(0, 120) }, claim.ticket_id, claim.id);
+        this.event('discrepancy', `worker:${w.id}`, { sub: 'session-url', why, url: link.url.slice(0, 120) }, claim.ticket_id, claim.id);
       } else {
         // The same link again changes no row (B-237: so a working runner's beat moves no version).
         this.exec(`UPDATE claim_legs SET session_url = ? WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL AND session_url IS NOT ?`,
-          hb.session_url, claim.id, hb.session_url);
+          link.url, claim.id, link.url);
       }
     }
     // §7.5 R-BTN-90 (B-234): `leg_finished` is processed before this beat delivers its
     // messages — a `leg-timeout` release still pending for the finished run is withdrawn in
     // there, so the answer below carries it never; one already delivered stands.
-    if (hb.leg_finished !== undefined && claim) this.c.legFinished?.(w.id, claim.id, hb.leg_finished);
+    // B-188: by claim (`legs_finished`); the bare `leg_finished` is a lone claim's.
+    const finished = [...hb.legs_finished];
+    if (hb.leg_finished !== undefined && claims.length === 1) finished.push({ claim_id: claims[0].id, seq: hb.leg_finished });
+    for (const f of finished) if (mine.has(f.claim_id)) this.c.legFinished?.(w.id, f.claim_id, f.seq);
     // B-86: the capabilities a runner with no `--capabilities` declares (see `grantCapabilities`).
     const grantCapabilities = this.grantCapabilities(cred, w.id);
     return {
@@ -473,7 +493,11 @@ export class WorkerApi {
       incarnation: fresh.incarnation,
       lease_timeout_s: fresh.lease_timeout_ms / 1000,
       grant: { capabilities: grantCapabilities },
-      claim: claim ? { ...claim, ...this.c.claimView?.(claim.id), activity: this.currentActivity(w.id) } : null,
+      // R-BTN-4 (B-188): every active claim; `claim`, the oldest, stays for runners before B-188.
+      ...(() => {
+        const views = claims.map((c) => ({ ...c, ...this.c.claimView?.(c.id), activity: this.currentActivity(w.id, c.id) }));
+        return { claims: views, claim: views[0] ?? null };
+      })(),
       messages: this.deliver(w.id, now),
       // R-BTN-67: the owner bars in force on its repositories, so harness hooks can act on them offline.
       bars: this.c.bars?.(now, credentialId) ?? [],
@@ -581,7 +605,7 @@ export class WorkerApi {
   private recordTranscripts(workerId: number, hb: Heartbeat, now: number) {
     const unlinked: number[] = [];
     if (!hb.transcripts.length) return unlinked;
-    const claim = this.activeClaim(workerId);
+    const claims = this.activeClaims(workerId);
     for (const t of hb.transcripts) {
       // An activity not received yet only defers the link: the pointer is stored, and a later
       // report of it, once the activity has arrived, fills the link in.
@@ -589,6 +613,10 @@ export class WorkerApi {
         unlinked.push(t.index ?? -1);
         t.activity_id = undefined;
       }
+      // B-188: the claim a pointer belongs to — the one it names, else its activity's, else the
+      // lone claim; with several held and none named, it waits for a claim as one with none does.
+      const named = t.claim_id ?? (t.activity_id ? this.rows<{ claim_id: number | null }>('SELECT claim_id FROM activities WHERE worker_id = ? AND id = ?', workerId, t.activity_id)[0]?.claim_id ?? undefined : undefined);
+      const claim = named != null ? claims.find((c) => c.id === named) ?? null : claims.length === 1 ? claims[0] : null;
       if (claim) {
         // A pointer under a claim names one of that claim's repository's transcript repositories
         // (§6.8, R-BTN-66): another repository's list does not widen it.
@@ -847,6 +875,8 @@ export class WorkerApi {
         alive,
         capabilities: this.rows<{ capability: string; declared: string }>('SELECT capability, declared FROM worker_capabilities WHERE worker_id = ? ORDER BY capability', id),
         courses: this.staleCourses(id, true),
+        // R-BTN-4 (B-188): every claim the runner holds; `claim`, the oldest, for readers before it.
+        claims: this.activeClaims(id),
         claim: this.activeClaim(id),
         activity: this.currentActivity(id),
         // §6.8: built only as a blob link from validated parts, never a reported URL.

@@ -53,6 +53,7 @@ import instanceSettings from './0051_instance_settings.sql';
 import stateVersion from './0054_state_version.sql';
 import dashboardLookups from './0055_dashboard_lookups.sql';
 import workerProfile from './0056_worker_profile.sql';
+import severalClaims from './0057_several_claims.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -170,4 +171,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 55, sql: dashboardLookups },
   // 0056 is B-253's (the runner's opaque profile, §13.3's `profile_json`; R-BTN-72's `cli` key).
   { id: 56, sql: workerProfile },
+  // 0057 is B-188's (0056 is B-253's) (R-BTN-4: several claims per runner; `concurrency` and the grant's `max_claims`).
+  { id: 57, sql: severalClaims },
 ];

@@ -619,7 +619,7 @@ export class Blocks {
     for (const w of this.named<{ id: number }>(
       `SELECT w.id FROM workers w JOIN credentials c ON c.id = w.credential_id
        WHERE ${LIVE}
-         AND NOT EXISTS (SELECT 1 FROM claims k WHERE k.worker_id = w.id AND k.status = 'active')
+         AND (SELECT COUNT(*) FROM claims k WHERE k.worker_id = w.id AND k.status = 'active') < w.concurrency  -- B-188: a worker with room, not only an idle one
          AND (NOT COALESCE(${grantedKeySql('c.created_by')}, 0) OR EXISTS (SELECT 1 FROM worker_grants g WHERE g.credential_id = w.credential_id AND g.repository_id = :repo AND g.revoked_at IS NULL))
        ORDER BY w.id`, { now, repo })) {
       if (!this.c.fits(w.id, ticket)) continue;
