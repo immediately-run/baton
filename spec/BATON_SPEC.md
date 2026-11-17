@@ -91,7 +91,7 @@ is stale. Never edit it by hand.
 | [`11-people.md`](BATON_SPEC/11-people.md) | **11. People: administrators, owners and their surfaces** | — |
 | | 11.1 Keys | R-BTN-13, R-BTN-159 |
 | | 11.2 Administrators and owners | R-BTN-57, R-BTN-58 |
-| | 11.3 The registry, the CLI and MCP | R-BTN-129, R-BTN-127, R-BTN-130, R-BTN-154 |
+| | 11.3 The registry, the CLI and MCP | R-BTN-129, R-BTN-127, R-BTN-197, R-BTN-130, R-BTN-154 |
 | | 11.4 The dashboard | R-BTN-155 |
 | [`12-security.md`](BATON_SPEC/12-security.md) | **12. Security** | — |
 | | 12.1 Principals | R-BTN-179 |
@@ -301,6 +301,7 @@ is stale. Never edit it by hand.
 | R-BTN-194 | every ticket carries who last wrote it | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-195 | an interaction request asks a person into the leg's session | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-196 | an idle runner's beat reads about nothing | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
+| R-BTN-197 | Baton states the client versions it serves | [`11-people.md`](BATON_SPEC/11-people.md) |
 
 ## Scenarios
 
@@ -488,6 +489,7 @@ is stale. Never edit it by hand.
 | S-BTN-224 | a runner's readings of an account | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-225 | the home in force (B-121) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-226 | a pathless ticket's file for its legs (B-252) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-227 | the client versions Baton serves (B-254) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

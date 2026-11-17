@@ -1,0 +1,72 @@
+---
+title: B-254 — Baton states the client versions it serves; the CLI says which it is
+id: B-254
+project: baton
+status: available
+updated: 2026-11-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "Owner request (2026-11-17): every CLI request carries Baton-Client, every response Baton-Client-Versions (min from the code, recommended raisable by an administrator); below min is client-too-old before the signature, below recommended a warning and a Needs-you row; a refused runner exits, nothing self-updates (R-BTN-197, S-BTN-227)."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-17: "What do you think of having the Baton server communicate the
+minimum expected client version? I think this would allow runners and users interacting with the
+server using the CLI to update at their own pace." The design was agreed in the same session and
+is specified in [R-BTN-197](../spec/BATON_SPEC/11-people.md#sec-11-3); build it as the rule says.
+
+### What to build
+
+1. **The CLI sends `Baton-Client`.** One place in the CLI's request path (the runner's `BatonApi`
+   and the owner, administrator and repository commands) adds `Baton-Client: baton/<version>`
+   from `package.json`, with `+dev` when the CLI runs from a git working tree (the test B-138's
+   guard already makes).
+2. **Baton answers `Baton-Client-Versions`.** `MIN_CLIENT` and `RECOMMENDED_CLIENT` constants in
+   core; the front sets the header on every `/v1` response and refuses a client below `min`
+   with `client-too-old` (426) before the signature check and before any read or write
+   (`src/core/http.ts`, `src/core/front.ts`). Semver precedence, `+dev` ignored; a missing
+   header is `0.0.0`. Set `MIN_CLIENT` to `0.0.0` at first, so nothing in the field is refused
+   by this ticket, and `RECOMMENDED_CLIENT` to the release this ships in.
+3. **The setting.** `instance_settings.recommended_client` (a new migration), validated in
+   `src/core/validate.ts` (a semver at or above the code's default), set by
+   `admin settings set --recommended-client <version>` (R-BTN-127's row) and read into the header.
+4. **Runners.** Every runner call records `runners.client_version` (same migration); Needs you
+   lists live runners below `recommended`.
+5. **The CLI's answer.** A warning line once per command below `recommended`; a runner warns at
+   start and when the header changes, and on `client-too-old` takes no claim, logs the versions
+   and exits non-zero. Nothing installs or switches versions.
+6. **S-BTN-227** as a scenario test, and the unit tests the rule's bullets need.
+
+### Not in scope
+
+Raising `MIN_CLIENT` above `0.0.0`: that is the first change that drops an old request shape,
+14 days after `recommended` reached it (R-BTN-197).
+
+### Trust
+
+One new input: `Baton-Client`, written by whoever sends the request, verified by nothing — it is
+a claim, like a user agent. It decides only whether Baton answers `client-too-old`, before
+anything is read or written, so a forged value can at most get its own request refused or skip
+that refusal and then meet the request checks every client meets. `runners.client_version` is
+the runner's statement and is shown as one. `recommended_client` is an administrator's write
+through `validate.ts`. The response header carries version numbers only, and no client acts on it
+beyond printing and stopping (R-BTN-197): it can never choose what code runs on a host.
+
+### Invariants
+
+- R-BTN-33: `client_version` is a filter field, a short validated string.
+- R-BTN-129: `admin.settings.set` gains a field; no new route outside the registry.
+- R-BTN-13: the version refusal comes before the signature check and decides nothing else; every
+  request it lets through is authenticated as before.
+- R-BTN-31: S-BTN-227 names the behaviour.
+
+## Status
+
+_filed 2026-11-17._

@@ -3028,6 +3028,24 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   markdown with the markdown source's frontmatter keys. The markdown source's tickets carry a
   path and get no `file`.
 
+- **2026-11-17 — R-BTN-197 added, R-BTN-127 amended, S-BTN-227 added: Baton states the client
+  versions it serves (B-254).**
+  Rules changed: R-BTN-197 (new), R-BTN-127 (`admin settings set --recommended-client`).
+  The owner, 2026-11-17: "What do you think of having the Baton server communicate the minimum
+  expected client version? I think this would allow runners and users interacting with the server
+  using the CLI to update at their own pace." Until now a client learned that the server had moved
+  past it only from a refusal of a request shape (on 2026-11-16, 0.1.3 lacked `admin settings set`
+  and an owner fell back to `--dev`). Every CLI request now carries `Baton-Client`, every response
+  `Baton-Client-Versions` with a `min` the deployed code sets and a `recommended` an administrator
+  may raise; below `min` is one refusal, `client-too-old`, decided before the signature; below
+  `recommended` a warning and a Needs-you row per runner. The gap between the two is the pace:
+  `min` rises only 14 days after `recommended` reached it, which also bounds dual-read windows
+  such as B-68's. Rejected: one required version (strands every runner at each deploy), and a CLI
+  that updates itself on Baton's answer (a version number in a response would then choose the code
+  run on a host, against B-138 and FIELDHOUSE_SPEC R-FH-3). Not in the course versions:
+  `min_runner_version` (R-BTN-65) and a source's `min_cli` (R-BTN-134) gate a course's legs, not
+  the API.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
