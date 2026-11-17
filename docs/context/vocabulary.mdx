@@ -104,8 +104,8 @@ the session in its harness's own UI; what they say there never passes through Ba
 (R-BTN-195).
 
 **Condition, leg event.** A condition is what a running leg tells Baton (it needs a person, it
-hit an error, it has something to report), or what Baton raises of its own. A course handles a
-leg's through a binding (R-BTN-160). A **leg event** goes the other way: what Baton tells a running leg, that its ticket changed
+hit an error, it has something to report), or what Baton raises of its own; a binding chooses the
+course that handles a leg's condition (R-BTN-160, R-BTN-161). A **leg event** goes the other way: what Baton tells a running leg, that its ticket changed
 (`ticket.changed`) or why it is being stopped (`release`). The leg alone handles it
 (R-BTN-198).
 

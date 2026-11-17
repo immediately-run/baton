@@ -3156,11 +3156,31 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - B-258 lost the decisions it held: a signature line, refusal codes, the stub's message and
     the brief now live in the rule, or were cut.
 
-  Kept after review: a `restart` run counts toward `max_runs`. A reviewer called that bound the
-  damage, since forged versions or an editor flipping a ticket can spend it, and proposed a
-  named condition at exhaustion. Not taken: the ticket is held for a person as at any leg's
-  bound, and not counting the run would let such edits restart a leg without limit. A flip back
-  to the version last verified restarts nothing.
+  Review round 2: one fresh reviewer. Its findings, checked against the text:
+  - a leg could still leave unpenalised by pushing a trivial edit to its own ticket and
+    releasing for it. Now the runner refuses the reason from a run it handed no change, and the
+    end must name a logged version;
+  - `max_runs` is optional off cycles, so it bounded nothing for most legs. The validator now
+    requires it beside `restart`;
+  - the premise that a snapshot ending the claim covers closure was false (`closed: done` is not
+    stale), so closure and tier are checked again (`closed`);
+  - a forged version could name any blob, so a markdown version must be the blob at the sha;
+  - `unreadable` before a leg ends the claim `cannot-finish:transient`, not `stale-board`, so
+    B-232's claim walk cannot come back;
+  - the logging follows R-BTN-62's ordering;
+  - a context refresh re-hands the newest event;
+  - the queue stays readable through `close` and `handoff`, and stops with no message hand
+    nothing;
+  - `restart` during a condition wait blocks as R-BTN-162 says;
+  - the heartbeat fields and the release clause are cited, not restated;
+  - R-BTN-5's pointer moved to the end of its bullet, where it no longer reads as adding
+    readiness;
+  - B-258 lost its bar migration and agent hook, which the spec does not hold.
+  Kept after review: a `restart` run counts toward `max_runs`, which every `restart` leg must
+  now declare. A reviewer called that bound the damage, since forged versions or an editor
+  flipping a ticket can spend it, and proposed a named condition at exhaustion. Not taken: the
+  ticket is held for a person as at any leg's bound, and not counting the run would let such
+  edits restart a leg without limit. A flip back to the version last verified restarts nothing.
 
 ## Retired requirements
 

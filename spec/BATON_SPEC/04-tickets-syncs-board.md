@@ -612,8 +612,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
     and a different version — the ticket moved under the claim — releases `stale-board` before
     any leg runs. A source at the snapshot that declares `versions` but exports no `read`
     cannot read at all — the CLI refuses one at load (§4.2) — and its claims release
-    `stale-board` too, never run on with no re-verification. When the ticket's version moves under a running claim, R-BTN-198
-    says when the runner runs this check again, at the newer version. It then
+    `stale-board` too, never run on with no re-verification. It then
     checks the tier fits its ceiling and runs the course's `sync.mjs` (through the
     wrapper, from a verified tree at the claim's commit, R-BTN-133) on the ticket and its PRs at
     the fetched head, whose readiness must show the offered leg leaving the claim's station as
@@ -625,6 +624,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
     never against git: a ticket with no file — a `changes` check ticket (R-BTN-114) — and a claim
     of the `cancel` leg Baton queued (R-BTN-168), whose ticket may already be withdrawn or closed
     in git.
+  - **A version that moves under a running claim** is read again as R-BTN-198 says, which
+    checks the version, closure and tier but not readiness.
   - **A ticket Baton has not seen cannot be claimed.** A claim naming it is `not-eligible`
     (`unknown-ticket`, §9.1). It is claimable after the first accepted post that names it, which
     the forge's notification (R-BTN-73, R-BTN-95) or a runner's `ls-remote` poll (R-BTN-105) make

@@ -153,7 +153,7 @@ mean (R-BTN-50).
     least one; no leg's `from` names an end; every `from`, `to` and completion-table key names
     a station; every station is reachable from `start` through any outcome, and an end is
     reachable from every station, the `cancel` leg not counted; every cycle contains a leg with
-    `max_runs`; `start_leg` names a leg whose `from` includes `start`; every `inputs.from` names
+    `max_runs`; every leg with `on_ticket_changed: "restart"` has `max_runs` (R-BTN-198); `start_leg` names a leg whose `from` includes `start`; every `inputs.from` names
     a leg and one of its outputs; `cancel`, if present, names a leg with no `kind`, whose `to` is
     one end station and which no `next`, `exhausted` or completion `next` names (it is queued by
     Baton alone, R-BTN-168); every `kind: call` leg has `spawns` and a completion table

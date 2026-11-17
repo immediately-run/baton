@@ -691,8 +691,7 @@ the runner's credentials under any other executor is that executor's, never Bato
   - A `release` with reason `requested` (an owner's release message, the dashboard's **Stop
     leg**, `baton leg stop`, a delegated key's `leg.stop`, R-BTN-130), `owner-cancel` (Cancel: hold plus
     release, §6) or `superseded` (R-BTN-168) reaches the runner at the doorbell's ring, else at
-    its next heartbeat. The runner first tells the leg `release` with the reason (R-BTN-198). For
-    these three it then stops the leg at once, by its executor's
+    its next heartbeat. For these three the runner stops the leg (told why first, R-BTN-198) at once, by its executor's
     `stop` (R-BTN-107): interrupt, terminate after 10 s, kill after 25 s — under `builtin`,
     `SIGINT` to the process group and R-BTN-145's tagged processes, `SIGTERM` after 10 s, `SIGKILL`
     after 25 s.
