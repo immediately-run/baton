@@ -1,4 +1,4 @@
-// S-BTN-227 the runner says when its CLI is not a pinned commit (BATON_SPEC §15's scenario
+// S-BTN-228 the runner says when its CLI is not a pinned commit (BATON_SPEC §15's scenario
 // table; §8.3 R-BTN-72; B-253): the profile half of the rule, on both hosts. The runner's own
 // heartbeat carries `profile` with its CLI's pinning under `cli: {commit, ref, pinned}` —
 // stored opaque on the runner (§13.3's `profile_json`), shown on the Workers view, the latest
@@ -23,7 +23,7 @@ beforeEach(async () => {
   await cutover();
 });
 
-describe('S-BTN-227 the runner\'s profile says how its CLI is pinned (B-253)', () => {
+describe('S-BTN-228 the runner\'s profile says how its CLI is pinned (B-253)', () => {
   it('a heartbeat\'s profile.cli is stored opaque on the runner and shown on the Workers view, latest wins', async () => {
     const w = await register('vm-a', { profile: ON_BRANCH });
     expect(JSON.parse((await profileOf(w.id))!)).toEqual(ON_BRANCH);

@@ -362,7 +362,7 @@ is summarized in the principal table (§12.1).
     | `admin github-app create --org <org>`, `admin check-app create --org <org> --key-out <path>` | local: GitHub's manifest flow, then the secret sink or `admin.settings.set` (R-BTN-57, §12.7) | administrator |
     | `admin probe add --key <pub> --label <l>`, `admin resource add <name> […]`, `admin instance add <name> […]`, `admin reading set <instance> […]` | `admin.probe.add`, `admin.resource.add`, `admin.instance.add`, `admin.reading.set`: `POST /v1/admin/probes`, `…/resources`, `…/instances`, `…/readings` (R-BTN-76, R-BTN-101) | administrator |
     | `admin capacity set <capability> <n>`, `admin capacity set <capability> --clear` | `admin.capacity.set`: `PUT /v1/admin/capacities` (R-BTN-178) | administrator |
-    | `admin settings set [--link-hosts …] [--session-hosts …] [--check-app-id <id>]` | `admin.settings.set`: `PUT /v1/admin/settings` (R-BTN-112, R-BTN-113, §12.7) | administrator |
+    | `admin settings set [--link-hosts …] [--session-hosts …] [--check-app-id <id>] [--recommended-client <version>]` | `admin.settings.set`: `PUT /v1/admin/settings` (R-BTN-112, R-BTN-113, R-BTN-197, §12.7) | administrator |
     | `admin freeze`, `admin unfreeze`, `admin seal`, `admin export [--with-history]`, `admin import <file>` | `admin.freeze`, `admin.unfreeze`, `admin.seal`, `admin.export`, `admin.import` (R-BTN-88) | administrator |
     | `admin state` | `admin.state`: `GET /v1/admin/state` (R-BTN-57, R-BTN-179) | administrator |
     | `admin open`, `admin confirm <code>`, `admin sessions revoke --all` | an administrator's dashboard sign-in, confirmations and sessions (R-BTN-155) | administrator |
@@ -386,6 +386,40 @@ is summarized in the principal table (§12.1).
     help` reads `GET /v1/actions` and marks the commands that key may run. An unknown word
     suggests the nearest name. Every command that reads a route takes `--json` and prints the
     route's JSON as is; `leg log --json` prints frames as JSON lines.
+
+- **R-BTN-197 (Baton states the client versions it serves).** Every client of the API is the
+  CLI — a person's command, a runner, a sync — and each says which version it is; Baton says which
+  versions it serves, so clients update at their own pace inside a window the deployment sets.
+  - **The client says what it is.** Every request the CLI sends carries `Baton-Client:
+    baton/<version>`, its package's version; a CLI run from a git working tree (B-138's `--dev`,
+    a runner following a branch) adds `+dev` (`baton/0.1.4+dev`). A request without the header
+    is compared as `0.0.0`.
+  - **Baton says what it serves.** Every response under `/v1`, a refusal included, carries
+    `Baton-Client-Versions: min=<version>, recommended=<version>`.
+    - `min` is the oldest client whose requests the deployed code still reads: a constant in
+      Baton's code, raised only in the change that drops what an older client sends, so the
+      deploy sets it and no setting does.
+    - `recommended` is at or above `min`. The code sets its default; an administrator may raise
+      it (`admin settings set --recommended-client <version>`, R-BTN-127), never below the
+      code's default.
+    - Versions compare by semver precedence; `+dev` takes no part in the comparison.
+  - **Below `min` is one refusal.** A request from a client below `min` is answered
+    `client-too-old` (§14), naming the client's version, `min` and `recommended`, before its
+    signature is checked and before anything is read or written, so an old client gets that
+    answer and never a failure of a request shape it no longer matches. No other answer depends
+    on the client's version.
+  - **`min` rises only after notice.** A change that raises `min` to a version lands only once
+    `recommended` has been that version or higher on the deployment for at least 14 days.
+  - **Below `recommended` is a warning.** The CLI prints `baton: this CLI is <version>; Baton
+    recommends <recommended> and refuses below <min>` once per command, and a runner once at
+    start and again whenever the header's values change. Every runner call records its
+    `Baton-Client` as the runner's `client_version` (§13.3, a filter field, R-BTN-33), and Needs
+    you lists each live runner whose `client_version` is below `recommended`, with its version.
+  - **A refused runner stops; no client updates itself.** A runner answered `client-too-old`
+    takes no claim, logs the refusal with the versions, and exits non-zero; a claim it held ends
+    as its lease lapses (R-BTN-9). No client installs, fetches or switches its version on
+    Baton's answer, and the header carries version numbers only, never a location or a
+    package: installing a release stays the operator's act (R-BTN-107, B-138).
 
 - **R-BTN-130 / R-BTN-154 (Baton serves MCP; a delegated key reaches what R-BTN-186 admits).**
   - **The MCP key is a delegated key** (R-BTN-186). It acts as an owner of one repository, for

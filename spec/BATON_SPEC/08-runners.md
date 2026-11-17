@@ -50,7 +50,7 @@ the runner's credentials under any other executor is that executor's, never Bato
     `ready`, R-BTN-168) — or none; pending messages (§6), marked `delivered` in the same
     transaction, and delivered ones not yet acknowledged, re-sent until they are (§6.9); the current activity; owner bars in force (R-BTN-67); stale courses;
     `handled` conditions (R-BTN-162); `pending_grants` (R-BTN-146); `server_time`.
-  - Every runner call updates `last_seen_at`. Lease upkeep has its own rate bucket and no
+  - Every runner call updates `last_seen_at` and the runner's `client_version` (R-BTN-197). Lease upkeep has its own rate bucket and no
     per-tenant cap (R-BTN-135).
 - **R-BTN-14 (runner secrets).** The sidecar generates a random 256-bit secret and sends its
   SHA-256 on the first heartbeat for a new `(hostname, session_name)`; Baton stores the hash and
