@@ -340,7 +340,7 @@ is summarized in the principal table (§12.1).
     | `owner grant list <repository>` | `owner.grant.list`: `GET /v1/owner/{repository}/grants` (R-BTN-179, R-BTN-146) | owner |
     | `owner grant add <repository> --key <pub> --capabilities <a,b> [--hostname <h>] [--label <l>] [--max-tier <t>] [--confirm-span]`, or `--api-key --name <name>` | `owner.grant.add`: `POST /v1/owner/{repository}/grants` (R-BTN-58, R-BTN-146, R-BTN-159) | an approver on `approvers.members` |
     | `owner grant revoke <repository> <fingerprint>` | `owner.grant.revoke` (R-BTN-58) | an approver on `approvers.members` |
-    | `owner grant role <repository> <fingerprint> --role runner\|trusted-runner [--domain <label>] [--checker]` | `owner.grant.role`: `PUT …/grants/{fingerprint}/role` (R-BTN-180) | an approver on `approvers.roles` |
+    | `owner grant role <repository> <fingerprint> --role runner\|trusted-runner [--domain <label>] [--checker] [--max-claims <n>]` | `owner.grant.role`: `PUT …/grants/{fingerprint}/role` (R-BTN-180, R-BTN-4) | an approver on `approvers.roles` |
     | `owner grant flags <repository> <fingerprint> --sync\|--no-sync` | `owner.grant.flags`: `PUT …/grants/{fingerprint}/flags` (R-BTN-146) | owner; `--sync` an approver on `approvers.policy` |
     | `owner owner add <repository> <pub>`, `owner owner remove <repository> <fingerprint>` | `owner.owner.add`, `owner.owner.remove` (R-BTN-58) | an approver on `approvers.members` |
     | `owner bar add <repository> --course <c> --tag <t> […]`, `owner bar lift <repository> <id>`, `owner bar follow <repository> <course>` | `owner.bar.add`, `owner.bar.lift`, `owner.bar.follow` (R-BTN-67, R-BTN-142) | owner; `lift` an approver on `approvers.policy` |

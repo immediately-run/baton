@@ -490,6 +490,7 @@ is stale. Never edit it by hand.
 | S-BTN-225 | the home in force (B-121) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-226 | a pathless ticket's file for its legs (B-252) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-227 | the client versions Baton serves (B-254) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-228 | several claims per runner (B-188) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

@@ -11,9 +11,23 @@ is `active` until it ends
 
 ### 9.1 The lock and claiming
 
-- **R-BTN-4 (the lock).** At most one `active` claim per ticket and per runner, enforced by two
-  partial unique indexes. A claim holds one ticket through a run of its legs; a runner that
-  needs another ticket ends its claim first.
+- **R-BTN-4 (the lock).** At most one `active` claim per ticket, enforced by a partial unique
+  index. A claim holds one ticket through a run of its legs. A runner holds at most the lower of two
+  numbers at once, counting its active claims across every repository:
+  - its **`concurrency`**, which its heartbeat declares (§8.1): an integer from 1 to 32, default
+    1, the runner's own statement of what its host can run;
+  - the claiming repository's grant's **`max_claims`**, the owner's ceiling, set with the grant's
+    role by the `approvers.roles` approver (R-BTN-180): 1 to 32, default 1. A key no grant binds
+    (a bearer or seed key, a check runner) has 1. A compromised runner holds no more tickets than
+    an owner allowed.
+
+  A claim past that bound is refused `not-eligible`, rule `max-claims`, checked in the claim's
+  own transaction; a runner whose bound drops below the claims it holds keeps them and claims
+  again only once it has room. Whether the host has the resources for another claim is the
+  runner's judgement before it asks; Baton counts claims, never a host's resources. Each claim
+  keeps its own nonce, legs, stop (R-BTN-119), end, reap and fence, and one claim's release,
+  failure or supersession touches no other; the lease that keeps them all is the runner's
+  (R-BTN-9).
 - **Claiming** (unnumbered). `POST /v1/runner/claim` with a client-generated `request_id` and
   an optional `ticket_id`, plus optional `prefer` and `rationale` (R-BTN-100). A ticket
   Baton has not seen is `not-eligible` (`unknown-ticket`) until a post names it (R-BTN-5).
@@ -51,9 +65,9 @@ is `active` until it ends
   state file. A lost lease, or a heartbeat response that no longer lists the claim, means the
   session no longer holds the ticket. On reconnecting, a sidecar whose lease was lost ends the
   claim `released:lease-lost` itself. A runner that starts does the same for its host's earlier
-  sessions: every other state file beside its own that still names a claim whose lease is lost
-  by that file's own reading (R-BTN-26) has the claim ended `released:lease-lost` with that
-  session's secret, and the file's claim cleared. A file whose lease still holds is a live
+  sessions: every other state file beside its own that still names claims whose lease is lost
+  by that file's own reading (R-BTN-26) has each claim ended `released:lease-lost` with that
+  session's secret, and the file's claims cleared. A file whose lease still holds is a live
   runner on the host and is left alone; a refusal clears the file, and Baton out of reach
   leaves it for the next start.
   - A heartbeat refused `session-taken`, `runner-reaped` or `forbidden` marks the lease lost at
@@ -188,7 +202,7 @@ end on an ended claim is refused `claim-ended`.
   `lease_timeout_ms`. Such a reap sets no `reaped_at`: the runner's next heartbeat is answered
   without the claim, so it can report the fence. The ticket is not claimable until that
   incarnation's sidecar, with its pre-reap secret, heartbeats, is told it no longer holds the
-  claim, and reports `fenced: {claim_id, terminated: true}` — the lease marked lost and its
+  claim, and reports it in `fenced: [{claim_id, terminated: true}]` — the lease marked lost and its
   running tool processes terminated (Baton logs `fence-cleared`) — or until an administrator
   clears it (below), or until `fence_deadline` passes, whatever the runner does meanwhile (a re-key, a new incarnation's heartbeats, a
   sidecar that heartbeats but cannot terminate a process); the alarm then clears it, logging

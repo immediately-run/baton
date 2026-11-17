@@ -3046,6 +3046,26 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   `min_runner_version` (R-BTN-65) and a source's `min_cli` (R-BTN-134) gate a course's legs, not
   the API.
 
+- **2026-11-17 — R-BTN-4, R-BTN-6, R-BTN-72, R-BTN-113 and R-BTN-180 amended, S-BTN-228 added: a
+  runner holds several claims (B-188).**
+  Rules changed: R-BTN-4 (one active claim per ticket; per runner, the lower of its declared
+  `concurrency` and its grant's `max_claims`), R-BTN-6 (an earlier session's state file names
+  claims), R-BTN-72 (claims side by side, each in a clone of its own and running its legs one at
+  a time; per-claim state and reattachment within the lease), R-BTN-113 (`session_urls` by
+  claim), R-BTN-180 (the `approvers.roles` approver sets `max_claims`); the heartbeat's `fenced`
+  is a list. B-188 (the owner, 2026-11-08: "each runner executing several tickets' legs in
+  parallel") planned the change; the owner returned to it on 2026-11-17: a leg blocked by an
+  interaction request or a rate limit should not stop the runner's other work; one runner per
+  host should own one queue and one view of the host's resources for the sandbox lifecycle to
+  come; a team running every sandbox in the cloud should need one runner talking to E2B. Lanes —
+  several runner identities inside one process, each holding one claim — were considered and
+  rejected ("I don't want lanes"): a lane is an identity that stands for nothing (one process, one
+  key, one host), and anything judging independence by runner identity would read two lanes of
+  one process as two runners. The lease stays the runner's: it says the process is alive, a stuck
+  leg is a deadline's (R-BTN-167, R-BTN-90), and reaps and fences were already per claim. Baton
+  counts claims, never host resources. `docs/context/architecture.mdx`'s *Parallelism is
+  horizontal* is amended with it (B-188 item 8).
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
