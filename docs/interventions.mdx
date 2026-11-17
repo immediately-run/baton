@@ -1,0 +1,179 @@
+---
+title: Supervisor interventions
+description: Every time the supervising agent or a person had to step in so Baton's runners could keep going — when, where, which tickets, why, what was done, and how Baton should handle it alone next time. The gap between this page and empty is the distance to unattended.
+tags: [lessons, operations]
+order: 46
+---
+
+<Lede>Baton is meant to run unattended. Each entry below is a time it did not: a supervising
+agent (or the owner, through it) had to act before the runners could make progress. The last
+field of each entry is the point of the page — what Baton would need so that nobody has to
+step in the next time.</Lede>
+
+How to use this page:
+
+- **Append** one entry per intervention, newest at the bottom, in the shape below. One cause
+  is one entry, even when it touched several tickets.
+- **Timestamps are UTC.** *Host* is the machine whose runner or checkout was involved, and
+  the supervisor's host when it acted from there.
+- **Autonomous handling** names the ticket that builds it when one exists, and says *no
+  ticket yet* otherwise. When that ticket lands, mark the entry *handled by B-n* — never
+  delete it.
+- A surprise about how Baton behaves also gets a [lessons](lessons.mdx) entry; this page
+  counts the interventions, that one keeps the understanding.
+
+Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **Resolution** ·
+**Autonomous handling**.
+
+## 2026-11-15 10:51 — runners idle with work on the board
+
+- **Host:** bering, vltava2
+- **Tickets:** B-193, B-176, B-228, B-174, B-173, B-171, B-16, B-52, B-4, B-150, B-121, B-26,
+  B-125
+- **Why it was needed:** both runners were alive and heartbeating but claimed nothing for
+  hours while the board listed 51 ready tickets. Two server filters left zero eligible
+  tickets: the grants' `max_tier: judgement` put every critical and untiered ticket out of
+  reach, and every remaining ticket was held on a `baton:retries` decision after three
+  failed attempts. The runner logs nothing on a `no-eligible-ticket` refusal, and `baton` has
+  no owner channel, so nobody was told.
+- **Resolution:** the owner answered `retry` on the 13 held tickets; runners claimed within
+  one beat. Diagnosis written up in `~/factory/logs/2026-11-15-false-idle-runner.md`.
+- **Autonomous handling:** the runner logs why it is idle (the refusal's rule and the counts
+  behind it); an owner channel for `baton`, so a hold reaches a person the hour it opens; the
+  board's `ready` list applies holds and the caller's tier cap, or says it does not. A held
+  ticket whose failures were a provider's exhaustion should not have spent attempts at all —
+  *handled by B-256* (#266). *No ticket yet* for the idle log line or the owner channel.
+
+## 2026-11-16 22:19 — false idle again
+
+- **Host:** bering
+- **Tickets:** B-171, B-174, B-193, B-52, B-150, B-176, B-175
+- **Why it was needed:** the same as 2026-11-15: after a restart both runners sat idle for
+  most of 2026-11-17 with 47 tickets "ready". Every ticket inside the `judgement` tier was held
+  on `baton:retries` (opened 2026-11-16 08:03–14:19), and the hourly checks could not see why
+  from the runner logs.
+- **Resolution:** on 2026-11-17 16:57 the owner answered `retry` on B-171, B-174, B-193, B-52,
+  B-150 and B-176; both runners claimed within a minute. Before retrying, the supervisor found
+  the cause of the clean-exit failures (next entries) so the retries were not spent blindly.
+- **Autonomous handling:** as above. In addition, a retry decision should carry the failures'
+  evidence (the end reasons and the leg archive paths), so the owner — or a policy — can answer
+  it without a supervisor's investigation.
+
+## 2026-11-17 07:07 — the sync refused a sourced course edited in place
+
+- **Host:** bering
+- **Tickets:** none (the `create-pr` course; PR #255)
+- **Why it was needed:** #255 marked `review`, `merge` and `run-tests` autonomous by editing
+  `.baton/courses/create-pr/course.json` in place. `create-pr` is sourced
+  (`github/immediately-run/baton/835056e…/create-pr`), and the sync refuses a home copy that
+  differs from its source, so every sync after the merge failed and the runners got no work.
+- **Resolution:** reverted by #256; the lesson is in [lessons](lessons.mdx) (2026-11-17).
+- **Autonomous handling:** PR CI runs the sync's own source check on `.baton/courses/`, so a
+  PR that edits a sourced course is red before it merges and the failure names the fix (change
+  the source, bump the pinned sha). *No ticket yet.*
+
+## 2026-11-17 07:11 — main red after a ticket was archived (B-26)
+
+- **Host:** bering
+- **Tickets:** B-26
+- **Why it was needed:** archiving B-26 moved it into `tickets/archive/` with its
+  `../spec/…` links unchanged; `check:wiki` failed on main and on every PR from then on.
+- **Resolution:** #257 rewrote the links to `../../spec/…`.
+- **Autonomous handling:** *handled by #265* — `baton tickets done` now rewrites relative
+  links when it archives (see 2026-11-17 16:51).
+
+## 2026-11-17 ≈10:45 — a flaky test failed the production deploy (B-188)
+
+- **Host:** bering (GitHub Actions)
+- **Tickets:** B-188
+- **Why it was needed:** the deploy of 52784e3 failed: S-BTN-229's runner-half test "a claim
+  Baton no longer lists is fenced alone…" timed out at 120 s. It had passed in the PR's CI and
+  did not reproduce in 14 local runs.
+- **Resolution:** the supervisor re-ran the deploy; it succeeded. The race is not found.
+- **Autonomous handling:** find and fix the race (suspected: a drain and a lease loss with
+  several slots, where `await working` never settles). Until then a deploy should not be gated
+  on a test that is known to flake — or the deploy job retries a failed test once and reports
+  it. *No ticket yet.*
+
+## 2026-11-17 10:49 — a merge outside the course left B-188 queued on a deleted branch
+
+- **Host:** bering
+- **Tickets:** B-188
+- **Why it was needed:** #262 (B-188) was merged by hand at the owner's request. Baton still
+  held the ticket at `pr-open`; runner-2 claimed it and ran `run-tests`, which failed ("no
+  branch matching claude/B-188-*" — the branch was deleted at merge) and released it
+  `cannot-finish:transient`, which would have spent attempts until a hold.
+- **Resolution:** the supervisor ran `baton tickets done B-188` (b032d4c). That commit, pushed
+  straight to main, broke `check:wiki` again (the archive-link bug); #263 carried the fix.
+- **Autonomous handling:** when a ticket's PR is merged outside the course, the sync sees the
+  merged PR and moves the ticket to `merged` (and the ticket file to done) instead of queuing
+  the next leg against a branch that no longer exists. *No ticket yet.*
+
+## 2026-11-17 16:50 — implement legs that exit 0 with no PR (B-228)
+
+- **Host:** bering, vltava2
+- **Tickets:** B-228 (confirmed); B-171, B-174, B-193, B-52, B-150 (same symptom, cause
+  unconfirmed)
+- **Why it was needed:** implement legs ended "the implement agent exited 0, but no open PR",
+  released `cannot-finish:transient`, three times per ticket, until each was held. For B-228
+  the agent was right: the work had shipped in #207 on `claude/B-227-B-228-…`, a branch the
+  course's `claude/B-228-*` pattern never matches. The prompt tells an agent that finds the
+  work done to "stop with an error", but the agent cannot set its process's exit code —
+  `opencode run` exits 0 however the session ends — so a deliberate stop reads as a crash and
+  is retried. The other tickets' runs predate leg archiving, so nothing inside their sandboxes
+  survived.
+- **Resolution:** B-228 archived as done, citing #207 (5a99f38). The owner filed and built
+  B-256 (#266) and B-257 (#268) the same evening.
+- **Autonomous handling:** the agent ends with a marker line (`already-delivered` or
+  `needs-person`, with its evidence) and `implement.mjs` turns it into a hold with the reason,
+  at once, instead of a transient release — *handled by B-257* (#268); a clean exit with
+  nothing pushed says why, and a provider's exhaustion does not spend the ticket's attempt —
+  *handled by B-256* (#266). Archiving a confirmed ticket is B-258. Leg archives
+  (`~/factory/leg-archive/`) now keep the session of every leg for the diagnosis.
+
+## 2026-11-17 16:51 — main red after B-228 was archived
+
+- **Host:** bering
+- **Tickets:** B-228, B-257
+- **Why it was needed:** `baton tickets done B-228` pushed straight to main and left the same
+  `../spec/` links as B-26 and B-188; then B-257 was filed with a bare `<sha>` in its prose,
+  which MDX reads as an unclosed tag. `check:wiki` and the safe-render test failed on main.
+- **Resolution:** #265 — `tickets done` now writes the archived copy with `../` → `../../`
+  and `./` → `../` (with a test), B-228's links fixed, B-257's `<sha>` put in a code span (also #267).
+- **Autonomous handling:** archive links: *handled by #265*. For prose, `baton tickets new`
+  and `set` run the same MDX compile `check:wiki` runs before they push, and refuse a ticket
+  that would not render. *No ticket yet.*
+
+## 2026-11-17 17:00 — the owner's retry command failed on the operator's side
+
+- **Host:** bering
+- **Tickets:** B-171, B-174, B-193, B-52, B-150, B-176
+- **Why it was needed:** the supervisor's first command ran the owner-key write from the git
+  checkout, which B-138 refuses. The corrected `npx @immediately-run/baton@0.1.4` then failed
+  with `sh: 1: baton: not found` because it ran inside the baton repository, whose own
+  `package.json` is the package — npx looked for the unbuilt local binary.
+- **Resolution:** run from outside the repository (`cd ~ && npx …`).
+- **Autonomous handling:** B-138's refusal prints a command that works from where it was run
+  (`cd ~ &&` in front, or `npx --package=@immediately-run/baton@0.1.4 baton …`). Answering
+  routine decisions should not need a shell at all: the decision's notice links a page where
+  the owner answers it. *No ticket yet.*
+
+## 2026-11-17 17:30 — B-193 stopped at its third review: a workflow change no runner may push
+
+- **Host:** bering
+- **Tickets:** B-193 (PR #235)
+- **Why it was needed:** B-193's only blocking finding, in all three review rounds, was a step
+  the ticket requires in `.github/workflows/baton-deploy.yml` (`npm run build:ui` before
+  `wrangler deploy`). The runner's token has no `workflow` scope, and CLAUDE.md reserves CI
+  workflow edits to the owner anyway, so no fix leg could ever clear it; the course spent three
+  review rounds and suspended for adjudication. The PR had also fallen into conflict with main.
+- **Resolution:** at the owner's word the supervisor merged main into the branch (55d96a7;
+  V1's `src/ui/` stays deleted, main's B-242 poll test removed with it) and applied the
+  workflow step (d6dd3fa), checked with `npm ci`, `build:ui` and `wrangler deploy --dry-run`.
+  The push moved Baton's position for B-193 back to `fixed`, which closed the
+  `review-rounds-3` decision; the next `run-tests` and review run on the new head.
+- **Autonomous handling:** a ticket that requires an owner-only change (a workflow, a
+  credential, a grant) says so in its frontmatter, and the course asks the owner for that
+  change as one decision, with the patch, as soon as the PR opens — instead of three review
+  rounds that cannot pass. A fix leg merges main into its branch whenever the PR conflicts,
+  before review. *No ticket yet.*
