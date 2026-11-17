@@ -713,14 +713,26 @@ mean (R-BTN-50).
     reaches `fixed`; all merged is `merged`; when fixes run out and the last round asks for
     changes, `adjudicate` is queued if the file has it, and a pusher's `<!-- baton:adjudicated
     merge|owner -->` is its answer. Its `run-tests` gate runs no agent: the stub runs the course
-    file's `test_script` on the PR's head, and the script's own exit is the verdict, green
+    file's `test_script` on the home PR's head, and the script's own exit is the verdict, green
     queuing `review` and red `fix`; a run that never reached the tests is no verdict and fails
     the leg (`released:cannot-finish:transient`) with no marker — dependencies declared and none
     installed, the shell's 126 or 127, npm's missing script, npm that cannot start, or a run that
-    outlives the gate's bound. A `fix` run from the gate's red (`pr-open`, `fixed`) must push:
-    when the ticket's PR branch heads are where they were before its agent ran, it fails the leg
-    the same way and reports no position, since the gate would test the same tree again; from
-    `reviewed`, where a fix may answer the findings without a push, it is unchanged.
+    outlives the gate's bound. An open PR in a `repos:` repository — every PR of a `git` home's
+    ticket (R-BTN-140) — is gated by its own CI instead, the checks the forge reports on its
+    head (R-BTN-96): any concluded other than `success`, `neutral` or `skipped` is red and
+    queues `fix`; one still running, or none reported yet, queues `review` waiting on `ci`; all
+    concluded green on every such PR passes. A ticket with PRs at home and elsewhere passes only
+    when both halves are green: red on either queues `fix`, an untested home head queues
+    `run-tests`, then the other PRs' CI as above. With no PR branch at home and a `repos:` naming
+    another repository, the stub runs nothing and makes no marker: it suspends at its station
+    with `review` next, and the sync places the ticket from that CI. Only several open PRs in the
+    home, which the stub cannot choose between, ask the owner — the decision
+    `run-tests-unreachable`, whose `skip` waives the gate for the ticket. A `fix` run from the
+    gate's red (`pr-open`, `fixed`) must push: when the ticket's PR branch heads are where they
+    were before its agent ran, it fails the leg the same way and reports no position, since the
+    gate would test the same tree again — unless the ticket's `repos:` names another repository,
+    whose PRs the stub cannot see; from `reviewed`, where a fix may answer the findings without
+    a push, it is unchanged.
     `review-pr` reviews a PR named in `prs:`: each pusher's
     verdict is a round; after changes the next waits on `author` until a push; on close or when
     rounds run out `conclude` is queued, and a pusher's `<!-- baton:concluded -->` is that leg.

@@ -1,6 +1,6 @@
 # create-pr · fix — make the gate green, and close every finding the last round posted
 
-You are running the `fix` leg of the `create-pr` course. You are here for one of two reasons —
+You are running the `fix` leg of the `create-pr` course. You are here for one of three reasons —
 find out which before anything else:
 
 - **The test gate is red.** The `run-tests` leg ran the repository's test script on the PR's
@@ -9,6 +9,11 @@ find out which before anything else:
   `baton: tests red for <ticket>`; its message names the script that failed and its last lines
   (`git log -1 --format=%B origin/<the branch>`). Reproduce the failure, fix the cause, push.
   There is no review finding to answer.
+- **A PR's CI is red in another repository.** A PR in a repository the ticket's `repos:` names
+  is gated by its own CI, not by the marker: a check on its head concluded red (failed,
+  cancelled, timed out). Read which and why (`gh pr checks <the PR URL>`, then the failing run's
+  log), reproduce it, fix the cause and push to that PR's branch. There is no marker and no
+  review finding.
 - **The last review round asked for changes** on the ticket's PRs: one per repository its
   `repos:` names, besides this one, and the review may have posted its findings on any of them.
   When you finish, every finding of that round is closed: fixed in a pushed commit, or answered

@@ -4,7 +4,8 @@
 // GitHub repository the home's `code_repos` lists with its ids. Must hold: the sync reads only
 // the code repository (verifying its ids at every read, under that host's budget), the ticket
 // walks `filed` → `pr-open` → `reviewed` → `merged` from fixture GitHub facts with its rounds
-// in the PR's conversation — the claim answer carries `leg_state: forge` — and a ticket on a
+// in the PR's conversation and its run-tests gate decided by the code repository's own CI
+// (B-255, S-BTN-230) — the claim answer carries `leg_state: forge` — and a ticket on a
 // course that reads no PR facts keeps `leg_state: branch`; the registry carries each course's
 // `facts` (R-BTN-134) and the claim's scope resolves `repos:` through the list. Node only: it
 // writes a real repository and runs git.
@@ -20,8 +21,9 @@ import { makeKey } from '../lib/sshKeys';
 import { githubFake } from '../githubFake';
 
 // The sync signs with the system clock (the stub runs under the real one), so the two must
-// agree within the signature window; a minute is inside it, as S-BTN-156 sets out.
-const T0 = Date.now() - 60_000;
+// agree within the signature window (5 minutes), as S-BTN-156 sets out: each test starts three
+// minutes back and steps a minute a sync, so its six syncs stay inside it.
+const T0 = Date.now() - 3 * 60_000;
 let minutes = 0;
 const later = () => setClock(T0 + (minutes += 1) * 60_000);
 
@@ -67,6 +69,7 @@ const stationOf = async (id: string) => (await rows<{ station: string; next_leg:
 const nextOf = (id: string) => rows<{ leg: string; state: string; waiting_on: string | null }>('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', `home:${id}`);
 
 beforeEach(async () => {
+  minutes = 0;
   await setClock(T0);
   scratch = mkdtempSync(join(tmpdir(), 'baton-s214-keys-'));
   dir = mkdtempSync(join(tmpdir(), 'baton-s214-'));
@@ -122,14 +125,25 @@ describe('S-BTN-214 a plain-git home on a GitHub code repository', () => {
     expect(asked.filter((k) => k.startsWith('graphql '))).toEqual(['graphql acme/monorepo 7']);
     expect(asked.filter((k) => k.startsWith('/repos/') && !k.startsWith('/repos/acme/monorepo'))).toEqual([]);
     expect(await stationOf('LIN-1')).toMatchObject({ station: 'pr-open' });
-    // B-110: the run-tests gate cannot reach a PR outside the home, so it asks the owner —
-    // through Baton, never a line in git (S-BTN-106's shape, one host further out).
-    expect(await nextOf('LIN-1')).toEqual([{ leg: 'run-tests', state: 'waiting', waiting_on: 'owner' }]);
-    const admin = await makeKey('ssh-ed25519', 'admin-r');
-    const owner = await makeKey('ssh-ed25519', 'owner-r');
-    await setAdminKeys(admin);
-    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'home', owner_keys_add: [owner.publicKey] })).status).toBe(200);
-    expect((await keyCall(owner, '/v1/owner/home/tickets/home:LIN-1/resolve', { decision: 'run-tests-unreachable', answer: 'skip' })).status).toBe(200);
+    // B-255 (S-BTN-230): the run-tests gate cannot test a PR outside the home itself, so the
+    // code repository's own CI on the PR's head is its gate — never the owner. Green on every
+    // check: the round queues and nothing is asked.
+    expect(await nextOf('LIN-1')).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
+    expect(await rows('SELECT decision_id FROM ticket_decisions WHERE ticket_id = ?', 'home:LIN-1')).toEqual([]);
+    const checks = (runs: unknown[]) => ({ [`/repos/acme/monorepo/commits/s7/check-runs`]: { check_runs: runs } });
+    // One still running (or none reported yet, CI registering after the push): a short wait on ci.
+    github = { ...github, ...checks([{ conclusion: 'success' }, { conclusion: null }]) };
+    expect(await sync()).toBe(0);
+    expect(await nextOf('LIN-1')).toEqual([{ leg: 'review', state: 'waiting', waiting_on: 'ci' }]);
+    // A concluded red: fix, as a red marker routes it.
+    github = { ...github, ...checks([{ conclusion: 'success' }, { conclusion: 'failure' }]) };
+    expect(await sync()).toBe(0);
+    expect(await nextOf('LIN-1')).toEqual([{ leg: 'fix', state: 'ready', waiting_on: null }]);
+    expect(await rows('SELECT decision_id FROM ticket_decisions WHERE ticket_id = ?', 'home:LIN-1')).toEqual([]);
+    // Green again: the round.
+    github = { ...github, ...checks([{ conclusion: 'success' }, { conclusion: 'success' }]) };
+    expect(await sync()).toBe(0);
+    expect(await nextOf('LIN-1')).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
 
     // A verdict by someone who can push to the code repository (R-BTN-139) reviews the change.
     github = { ...github, ...detail([verdict('baton')]), ...permission('baton', 'write', 99) };
