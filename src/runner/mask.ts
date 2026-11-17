@@ -54,6 +54,20 @@ export function maskLegOutput(text: string, secrets: readonly string[]): string 
   return maskSecrets(maskLiterals(text, secrets));
 }
 
+/** The end `detail` a failed leg's claim carries (§9.4, B-256): the last line of the leg's error —
+ *  for an agent stub, the agent's own last line of output — masked as the log line is, then made
+ *  §10.4 free text (no control characters, none of `< > { }`) of at most 200 characters, its
+ *  head kept. Null when nothing is left. Baton stores and shows it and never reads it. */
+export function failureDetail(error: string, secrets: readonly string[]): string | null {
+  const last = maskLegOutput(error, secrets).split('\n').map((l) => l.trim()).filter((l) => l !== '').at(-1) ?? '';
+  const text = last.replace(/[\u0000-\u001f\u007f-\u009f<>{}]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (text === '') return null;
+  return text.length <= FAILURE_DETAIL_MAX ? text : `${text.slice(0, FAILURE_DETAIL_MAX - 1)}…`;
+}
+
+/** §9.4: an end's `detail` is at most 200 characters (src/core/validate.ts `checkEnd`). */
+export const FAILURE_DETAIL_MAX = 200;
+
 /** Hold back the part of `text` that could be the start of a class 7 literal — its longest tail
  *  that one still extends — so a value split across two writes is still masked as one. Returns
  *  what may go, and what waits for the next write. The longest tail wins: a shorter suffix that

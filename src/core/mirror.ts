@@ -60,6 +60,16 @@ export class Mirror {
     return { events, next: events.at(-1)?.seq ?? after, cutover_at: at };
   }
 
+  /**
+   * §12, §16: a mirror's read acknowledges the cursor it starts from — every event at or below
+   * `after` is written — and `repositories.mirror_acked_seq` keeps the highest, never past the
+   * last event. R-BTN-149's event prune stays below it (`Retention`).
+   */
+  acknowledge(repo: string, after: number) {
+    this.c.store.exec(`UPDATE repositories SET mirror_acked_seq = MIN(?, (SELECT COALESCE(MAX(seq), 0) FROM events))
+                       WHERE id = ? AND mirror_acked_seq < MIN(?, (SELECT COALESCE(MAX(seq), 0) FROM events))`, after, repo, after);
+  }
+
   private claim(id: number) {
     const c = this.rows<{ id: number; nonce: string; status: string; end_reason: string | null; claimed_at: number; ended_at: number | null; ended_at_sha: string | null; request_id: string }>(
       'SELECT id, nonce, status, end_reason, claimed_at, ended_at, ended_at_sha, request_id FROM claims WHERE id = ?', id)[0];

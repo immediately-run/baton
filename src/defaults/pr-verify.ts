@@ -103,8 +103,11 @@ const ancestor = (a: string, b: string, run: PrExec, checkout: string): boolean 
 export function verifyPrOpen(ask: PrOpenAsk, run: PrExec): void {
   const id = bareId(ask.ticket);
   const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
-  const siblings = ask.repositories ?? [];
   const slug = originSlug(run, ask.checkout);
+  // A `repos:` entry naming the checkout's own repository is the home, read first below — not a
+  // sibling read twice and named twice ("exists in immediately-run/baton or immediately-run/baton",
+  // 2026-11-16's failures, B-256).
+  const siblings = (ask.repositories ?? []).filter((r, i, all) => all.indexOf(r) === i && (slug == null || r.toLowerCase() !== slug.toLowerCase()));
   const label = (repo: string | null): string => repo ?? slug ?? 'the checkout’s repository';
   /** One repository's matching open PRs, or the error that says it could not be read (the
    * command's own message: `gh pr list …` is the only call this makes). */

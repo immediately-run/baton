@@ -258,7 +258,12 @@ process for development and CI. Nothing crosses a tenant.
   - Retention: runner rows unseen for 30 days lose their capability, tag, course and report
     rows; the alarm deletes `board_snapshots` older than 90 days (never the head's) and
     repository `events` older than 90 days below every live repository's mirror's
-    `mirror_acked_seq` (a retired repository's events below none).
+    `mirror_acked_seq` (a retired repository's events below none; a mirror's
+    `GET /v1/sync/events` acknowledges the cursor it reads from), then the claims of a ticket
+    whose history R-BTN-81 purged, with their legs, activities and the rows that name them — a
+    claim still held (R-BTN-39), or named by an event, a condition or a scope finding, waits
+    and its ticket is tried again a day later. The alarm deletes at most 1,000 rows a tick,
+    oldest first, each prune through an index, so a tick with nothing to delete reads a few rows.
 - **Admission.** The Worker turns away what the object need not see:
   - A signed route (`/v1/runner/*`, `/v1/repositories/*`, `/v1/probe/*`,
     `/v1/owner/*`, `/v1/admin/*`) with no or a malformed signature, a stale `created` or a

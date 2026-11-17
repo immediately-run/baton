@@ -712,6 +712,12 @@ describe('baton repo init, through the built CLI', () => {
       // No such PR: the leg fails naming the pattern it looked for, not trusting exit 0 (B-81).
       writeFileSync(answer, '[]');
       await expect(stub.run(ctx)).rejects.toThrow('no open PR on a branch matching claude/A-1-* for ticket A-1 exists in the checkout’s repository');
+      // B-256 (S-BTN-231): the failure says what an agent that exited 0 last said — nothing, here — and an
+      // agent that explained itself (2026-11-16's "already delivered" legs) is quoted, both streams.
+      await expect(stub.run(ctx)).rejects.toThrow(/or the leg fails here; the agent printed nothing$/);
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'sh -c "echo working; echo A-1 is already delivered on main, so no PR; echo provider said: insufficient balance >&2"' }));
+      const explained = { ...ctx, snapshot: { sha: commitAll(root) } };
+      await expect(stub.run(explained)).rejects.toThrow(/no open PR on a branch matching claude\/A-1-\*[^\n]*; the agent's last output:\n {2}working\n {2}A-1 is already delivered on main, so no PR\n {2}provider said: insufficient balance$/);
       // A forge that cannot be read fails the leg naming that, too.
       writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\necho "no git remotes found" >&2\nexit 1\n');
       await expect(stub.run(ctx)).rejects.toThrow('cannot verify A-1’s PR — no repository the ticket reads could be read: the checkout’s repository (gh pr list --state open --limit 300 --json number,headRefName,headRefOid failed: no git remotes found)');
