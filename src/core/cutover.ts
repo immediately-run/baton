@@ -4,7 +4,7 @@
 import { BatonError } from './http';
 import { checkConfirm, checkRepositoryId, SESSION_NAME, TICKET_ID } from './validate';
 import { localOf, repositoryOf } from './registry';
-import { isUniqueViolation, logEvent, randomHex } from './db';
+import { logEvent, randomHex } from './db';
 
 import type { Row, SqlValue, Store } from './ports';
 /** The cutover refuses a board older than this: the import must see git's in-progress items as they are. */
@@ -140,7 +140,7 @@ export class Cutover {
   }
 
   /** `POST /v1/ui/adoptions/{item}/confirm`: the owner moves the legacy claim to the session
-   *  that asked. The per-worker index refuses it if that session already holds another item. */
+   *  that asked, refused if that session already holds another item. */
   confirmAdoption(owner: string, item: string, body: unknown) {
     checkConfirm(body);
     const a = this.rows<{ claim_id: number; worker_id: number }>('SELECT claim_id, worker_id FROM adoptions WHERE ticket_id = ?', item)[0];
@@ -155,12 +155,12 @@ export class Cutover {
     if (!asker || asker.reaped_at != null || this.c.now() - asker.last_seen_at >= asker.lease_timeout_ms) {
       throw new BatonError('not-eligible', 'the session that asked is no longer alive; it must ask again', { rule: 'requester-silent' });
     }
-    try {
-      this.exec('UPDATE claims SET worker_id = ?, reap_after = NULL WHERE id = ?', a.worker_id, a.claim_id);
-    } catch (e) {
-      if (isUniqueViolation(e)) throw new BatonError('not-eligible', 'that session already holds another item', { rule: 'one-claim-per-worker' });
-      throw e;
+    // A legacy session holds one item: 0001's per-worker index once refused a second, and B-188
+    // dropped it for runners holding several claims (R-BTN-4), so the adoption checks it itself.
+    if (this.rows(`SELECT 1 FROM claims WHERE worker_id = ? AND status = 'active'`, a.worker_id).length) {
+      throw new BatonError('not-eligible', 'that session already holds another item', { rule: 'one-claim-per-worker' });
     }
+    this.exec('UPDATE claims SET worker_id = ?, reap_after = NULL WHERE id = ?', a.worker_id, a.claim_id);
     this.exec('DELETE FROM adoptions WHERE ticket_id = ?', item);
     this.event('adopted', `owner:${owner}`, { worker_id: a.worker_id }, item, a.claim_id);
     return { ok: true };

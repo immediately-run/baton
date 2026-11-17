@@ -8,6 +8,7 @@
 // once and kills its process group with no hand-off (the resume record covers it, R-BTN-24); a
 // release message, a releasing owner bar, a regressed path or a course change stop the leg at its
 // next safe point first.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
@@ -22,12 +23,12 @@ import { checkRaise, dispositionOf, errorClassOf, SEVERITIES, type ConditionDecl
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
-import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, readHead, type CourseLoad } from './home';
+import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
 import { MIN_SECRET_BYTES, createLegMasker, maskLegOutput, namesASecret, secretValues } from './mask';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
-import { StateFile, leaseLostFrom, type RunnerState } from './state';
+import { StateFile, leaseLostFrom, type PersistedClaim, type RunnerState } from './state';
 import { bareTicketId } from '../defaults/ticket-state';
 import { digestOfRead, MARKDOWN_SOURCE } from '../defaults/ticket-versions';
 
@@ -96,6 +97,10 @@ export interface RunnerOptions {
    *  taken before a claim for, or the advance into, a leg requiring it and held until the claim
    *  ends or a leg not requiring it starts. Absent, no lock governs anything. */
   locks?: Record<string, string>;
+  /** B-253 (R-BTN-72): the runner's own opaque statement, carried on every heartbeat as
+   *  `profile` — `baton run` puts its CLI's pinning under `cli`. Absent (a caller that is not
+   *  the CLI), the heartbeat sends none. */
+  profile?: Record<string, unknown>;
   /** B-134: one read of the home checkout's remote refs — the runner's evidence for its leg-end
    *  scope audit. The default reads it with the runner's bounded git; a test replaces it. A read
    *  that fails skips the audit (logged), never the leg. */
@@ -109,6 +114,23 @@ export interface RunnerOptions {
    *  stopped, the claim ended with the signal's reason. The default is the stop ladder's own
    *  bound (R-BTN-145's 30 s); a test narrows it. */
   signalGraceMs?: number;
+  /** R-BTN-4, R-BTN-72 (B-188): how many claims this runner holds at once — `--concurrency`,
+   *  1 to 32, default 1 (one claim, in the home checkout, exactly as before). Declared on every
+   *  heartbeat; Baton bounds it by the grant's `max_claims`. */
+  concurrency?: number;
+  /** B-188: where a runner holding several claims keeps its clones, one per claim it may hold
+   *  (`<dir>/<n>`). Absent: beside the state file, keyed by the home's path. */
+  clonesDir?: string;
+}
+
+/** R-BTN-72 (B-188): a reattached leg — where it stands, and the live handle of its session. */
+interface Resume {
+  leg: string;
+  at: string;
+  runId: string | null;
+  seq: number | null;
+  ctx: Record<string, unknown>;
+  handle: Handle;
 }
 
 /** The leg call in flight: its executor call, through which an abort line or a kill reaches it. */
@@ -253,6 +275,93 @@ interface PendingAbort {
   reason?: string;
 }
 
+/** The claim the loop is running, as the beat and a death line read it. */
+interface Inflight {
+  claimId: number;
+  ticket: string;
+  course: CourseLoad;
+  /** B-94: the leg this claim is running, so a death leaves a line naming it. */
+  leg: string | null;
+  /** B-108: when that leg started — the beat's liveness line reads its duration. */
+  legAt: number;
+  child: LegChild | null;
+  /** Resolved by the next tick's view of the snapshot's next legs (the short-wait re-read). */
+  waiters: ((next: NextLegs) => void)[];
+}
+
+/** R-BTN-4, R-BTN-72 (B-188): one held claim's own state — its fence, its leg in flight, its
+ *  session and channel, its scope audit and its checkout. A runner holds up to `concurrency` of
+ *  them; each claim's run is bound to its slot (`AsyncLocalStorage`), so the loop's code reads
+ *  its own claim's fields, and the heartbeat walks every slot explicitly. One claim's release,
+ *  failure or fence touches no other slot. */
+class Slot {
+  claimId: number | null = null;
+  ticket = '';
+  nonce = '';
+  /** The claim's `request_id` — a claim retried by it answers the same claim (reattach). */
+  requestId: string | undefined;
+  inflight: Inflight | null = null;
+  /** B-108: the time of the last line drained from the leg child's stderr (—verbose, where the
+   *  stub mirrors the agent's streams): a live signal the beat's liveness line counts. */
+  legLineAt: number | null = null;
+  pendingAbort: PendingAbort | null = null;
+  closedDone = false;
+  /** B-134: the actions the finished leg's audit found outside the claim's ticket scope —
+   *  reported on the advance or end that finishes it, like the taken, and cleared when it is. */
+  pendingScope: ScopeAction[] | null = null;
+  /** B-134: the out-of-scope actions beyond the report's sixteen, counted here because the
+   *  runner keeps the last sixteen — the report carries the count (`dropped`) so the earliest
+   *  actions leave a number, not silence. */
+  scopeOverflow = 0;
+  /** B-134: the claim's scope — the claim answer's `scope` — against which each leg's pushes
+   *  are audited at its end; null when the answer carried none (a Baton before B-134) or before
+   *  the claim's course loaded. */
+  auditScope: string[] | null = null;
+  /** B-134: the refs the audit's window starts from, read before the claim's first leg runs and
+   *  moved to the last read at each audit — of this claim's own checkout (B-188). */
+  auditWindow: RefState | null = null;
+  /** B-234 (R-BTN-106, R-BTN-195): the running leg's channel — one socket per leg run, served
+   *  while the run's session is live, its address handed to the session as BATON_SOCKET. */
+  legChannel: LegChannel | null = null;
+  /** B-234 (R-BTN-113): the running leg's session link, as its executor's handle names it —
+   *  reported on every beat, and the raise check's word on the run's link once a beat that
+   *  carried it has answered (`sessionLinkLanded`). */
+  legSessionUrl: string | null = null;
+  /** B-234 (R-BTN-113): the run whose link `legSessionUrl` names — bumped each time a run's
+   *  session names its link, so a beat built before this run's session named one answers for
+   *  the last run, never this. */
+  sessionLinkSeq = 0;
+  /** B-234 (R-BTN-113, R-BTN-195): Baton holds the running leg's session link — a beat that
+   *  carried this run's link was answered and kept it. An `interact` is refused on the channel
+   *  until then. */
+  sessionLinkLanded = false;
+  /** §7.5 R-BTN-90 (B-234): the running run's `claim_legs.seq`, named by the advance that
+   *  started it — what the finishing heartbeat's `legs_finished` carries when the run's script
+   *  returns. */
+  legSeq: number | null = null;
+  /** §7.5 R-BTN-90 (B-234): the run whose finish a beat still owes Baton — set when the
+   *  script's `run` returns, cleared by the beat that carried it. */
+  legFinishedSeq: number | null = null;
+  /** R-BTN-107 (B-184): the session of the leg that ran last — its `close` and `handoff` run in
+   *  it, and it is stopped when the next leg starts or the claim ends. */
+  session: { handle: Handle; checkout: string } | null = null;
+  /** R-BTN-144 class 7 (B-170): the last leg's masked set, from the environment it was given. */
+  legSecrets: readonly string[] = [];
+  /** R-BTN-6 (B-188): Baton's answer no longer lists this claim — it is fenced alone: its leg
+   *  stopped at once with no hand-off, the runner's lease and every other claim untouched. Set
+   *  on every claim too when the runner's lease is lost. */
+  lost = false;
+  /** The claim's end has been sent: nothing is judged against the answer for it any more. */
+  ended = false;
+  /** The release messages routed to this claim, acknowledged when it ends. */
+  toAck: number[] = [];
+  /** B-188: the clone this claim holds (`<clonesDir>/<n>`), null in the home checkout. */
+  cloneIndex: number | null = null;
+  /** R-BTN-72 (B-188): the running leg's place, persisted for a restart's reattach. */
+  place: Pick<PersistedClaim, 'run_id' | 'seq' | 'leg' | 'at' | 'handle' | 'ctx'> = {};
+  constructor(public checkout: string) {}
+}
+
 export class Runner {
   private readonly o: RunnerOptions & { beatEvery: number };
   private readonly state: StateFile;
@@ -267,27 +376,11 @@ export class Runner {
    * the claim loop ends the claim at the next leg boundary with its hand-off, the idle wait
    * returns, and work() ends without claiming again. */
   private draining = false;
-  private inflight: {
-    claimId: number;
-    ticket: string;
-    course: CourseLoad;
-    /** B-94: the leg this claim is running, so a death leaves a line naming it. */
-    leg: string | null;
-    /** B-108: when that leg started — the beat's liveness line reads its duration. */
-    legAt: number;
-    child: LegChild | null;
-    /** Resolved by the next tick's view of the snapshot's next legs (the short-wait re-read). */
-    waiters: ((next: NextLegs) => void)[];
-  } | null = null;
-  /** B-108: the time of the last line drained from the leg child's stderr (—verbose, where the
-   *  stub mirrors the agent's streams): a live signal the beat's liveness line counts. */
-  private legLineAt: number | null = null;
-  private pendingAbort: PendingAbort | null = null;
   private lostLease = false;
-  private closedDone = false;
   private toAck: number[] = [];
-  /** R-BTN-19: a claim the runner knows it lost, whose fence the next heartbeat clears. */
-  private fenceToReport: number | null = null;
+  /** R-BTN-19 (B-188): the claims the runner knows it lost, whose fences the next heartbeat
+   *  clears — one entry per claim. */
+  private fences: number[] = [];
   /** R-BTN-77: set when a heartbeat carried an `unblocked` message, so the idle wait ends early. */
   private unblocked = false;
   /** Bumps with every claim: an answer a beat started before the claim cannot fence it. */
@@ -297,8 +390,9 @@ export class Runner {
   private ticking: Promise<void> | null = null;
   /** R-BTN-14: a reaped worker re-keys on its next beat; the fresh secret until it lands. */
   private rekeySecret: string | null = null;
-  /** An end Baton never answered (the network went with the lease): retried on every beat. */
-  private pendingEnd: { claimId: number; body: Record<string, unknown> } | null = null;
+  /** The ends Baton never answered (the network went with the lease), by claim: retried on
+   *  every beat. */
+  private pendingEnds = new Map<number, Record<string, unknown>>();
   /** B-86: the capabilities the beats declare — null until the grant is known; a restart reads
    *  what the last process settled (state.ts's `declared`) rather than asking again. */
   private declared: string[] | null;
@@ -317,49 +411,81 @@ export class Runner {
   /** B-86: the `forbidden` line has been said for this stretch of refusals (reset by the next
    *  answered beat), so asking again is not narrated on every beat. */
   private saidForbidden = false;
-  /** B-134: the actions the finished leg's audit found outside the claim's ticket scope —
-   *  reported on the advance or end that finishes it, like the taken, and cleared when it is. */
-  private pendingScope: ScopeAction[] | null = null;
-  /** B-134: the out-of-scope actions beyond the report's sixteen, counted here because the
-   *  runner keeps the last sixteen — the report carries the count (`dropped`) so the earliest
-   *  actions leave a number, not silence. */
-  private scopeOverflow = 0;
-  /** B-134: the claim's scope — the claim answer's `scope` — against which each leg's pushes
-   *  are audited at its end; null when the answer carried none (a Baton before B-134) or before
-   *  the claim's course loaded. Reset at each claim's start, with the parked report, so a
-   *  previous claim's throw never lands its actions on this claim's ticket. */
-  private auditScope: string[] | null = null;
-  /** B-134: the refs the audit's window starts from, read before the claim's first leg runs and
-   *  moved to the last read at each audit. */
-  private auditWindow: RefState | null = null;
   /** B-106 (R-BTN-178): this machine's locks, null when none were configured. */
   private readonly locks: MachineLocks | null;
-  /** B-234 (R-BTN-106, R-BTN-195): the running leg's channel — one socket per leg run, served
-   *  while the run's session is live, its address handed to the session as BATON_SOCKET. */
-  private legChannel: LegChannel | null = null;
-  /** B-234 (R-BTN-113): the running leg's session link, as its executor's handle names it —
-   *  reported on every beat, and the raise check's word on the run's link once a beat that
-   *  carried it has answered (`sessionLinkLanded`). */
-  private legSessionUrl: string | null = null;
-  /** B-234 (R-BTN-113): the run whose link `legSessionUrl` names — bumped each time a run's
-   *  session names its link, so a beat built before this run's session named one answers for
-   *  the last run, never this. */
-  private sessionLinkSeq = 0;
-  /** B-234 (R-BTN-113, R-BTN-195): Baton holds the running leg's session link — a beat that
-   *  carried this run's link was answered and kept it. An `interact` is refused on the channel
-   *  until then: Baton sets the condition's `url` from the link it holds, so a raise that
-   *  reached it first would be refused there instead of here, its reason never reaching the
-   *  leg (R-BTN-195). */
-  private sessionLinkLanded = false;
-  /** §7.5 R-BTN-90 (B-234): the running run's `claim_legs.seq`, named by the advance that
-   *  started it — what the finishing heartbeat's `leg_finished` carries when the run's script
-   *  returns. */
-  private legSeq: number | null = null;
-  /** §7.5 R-BTN-90 (B-234): the run whose finish a beat still owes Baton — set when the
-   *  script's `run` returns, cleared by the beat that carried it; a beat that fails leaves it
-   *  for the cadence's next, which carries it before its own delivery (§7.5: a pending
-   *  `leg-timeout` release is withdrawn before it is delivered). */
-  private legFinishedSeq: number | null = null;
+  /** R-BTN-4 (B-188): the claims the runner holds — a slot each, bound to its claim's run. */
+  private readonly als = new AsyncLocalStorage<Slot>();
+  private readonly slots = new Set<Slot>();
+  /** The slot code outside any claim's run reads (a test's direct call); never a held claim. */
+  private readonly solo: Slot;
+  /** The current claim's slot: the one this async context runs for. */
+  private get cur(): Slot {
+    return this.als.getStore() ?? this.solo;
+  }
+  private get inflight(): Inflight | null { return this.cur.inflight; }
+  private set inflight(v: Inflight | null) { this.cur.inflight = v; }
+  private get legLineAt(): number | null { return this.cur.legLineAt; }
+  private set legLineAt(v: number | null) { this.cur.legLineAt = v; }
+  private get pendingAbort(): PendingAbort | null { return this.cur.pendingAbort; }
+  private set pendingAbort(v: PendingAbort | null) { this.cur.pendingAbort = v; }
+  private get closedDone(): boolean { return this.cur.closedDone; }
+  private set closedDone(v: boolean) { this.cur.closedDone = v; }
+  private get pendingScope(): ScopeAction[] | null { return this.cur.pendingScope; }
+  private set pendingScope(v: ScopeAction[] | null) { this.cur.pendingScope = v; }
+  private get scopeOverflow(): number { return this.cur.scopeOverflow; }
+  private set scopeOverflow(v: number) { this.cur.scopeOverflow = v; }
+  private get auditScope(): string[] | null { return this.cur.auditScope; }
+  private set auditScope(v: string[] | null) { this.cur.auditScope = v; }
+  private get auditWindow(): RefState | null { return this.cur.auditWindow; }
+  private set auditWindow(v: RefState | null) { this.cur.auditWindow = v; }
+  private get legChannel(): LegChannel | null { return this.cur.legChannel; }
+  private set legChannel(v: LegChannel | null) { this.cur.legChannel = v; }
+  private get legSessionUrl(): string | null { return this.cur.legSessionUrl; }
+  private set legSessionUrl(v: string | null) { this.cur.legSessionUrl = v; }
+  private get sessionLinkSeq(): number { return this.cur.sessionLinkSeq; }
+  private set sessionLinkSeq(v: number) { this.cur.sessionLinkSeq = v; }
+  private get sessionLinkLanded(): boolean { return this.cur.sessionLinkLanded; }
+  private set sessionLinkLanded(v: boolean) { this.cur.sessionLinkLanded = v; }
+  private get legSeq(): number | null { return this.cur.legSeq; }
+  private set legSeq(v: number | null) { this.cur.legSeq = v; }
+  private get legFinishedSeq(): number | null { return this.cur.legFinishedSeq; }
+  private set legFinishedSeq(v: number | null) { this.cur.legFinishedSeq = v; }
+  private get session(): { handle: Handle; checkout: string } | null { return this.cur.session; }
+  private set session(v: { handle: Handle; checkout: string } | null) { this.cur.session = v; }
+  private get legSecrets(): readonly string[] { return this.cur.legSecrets; }
+  private set legSecrets(v: readonly string[]) { this.cur.legSecrets = v; }
+  /** B-188: the working tree the current claim's legs run in — its own clone at k > 1. */
+  private get checkout(): string { return this.cur.checkout; }
+  /** R-BTN-6, R-BTN-26: the current claim is fenced — the runner's lease is lost, or Baton no
+   *  longer lists this claim alone. */
+  private claimLost(): boolean {
+    return this.lostLease || this.cur.lost;
+  }
+  /** R-BTN-4 (B-188): the most claims this runner holds at once. */
+  private readonly concurrency: number;
+  /** Claim requests out, unanswered: a beat built or answered meanwhile cannot tell a claim
+   *  Baton just granted from one this runner does not hold. */
+  private claimsOut = 0;
+  /** B-106, B-188: which claim's leg holds each machine lock — a leg's lock is never released
+   *  by another claim's. */
+  private readonly lockOwners = new Map<string, Slot>();
+  /** B-188: the clones in use, by index. */
+  private readonly clonesBusy = new Set<number>();
+  /** R-BTN-72 (B-188): the claims the state file held when this process started — reattached,
+   *  ended or let go before the first claim; the beat leaves them alone until then. */
+  private persisted: PersistedClaim[];
+  /** Those of them written before B-188 (`claim` alone): ended as orphans, as before. */
+  private readonly legacy: Set<number>;
+  /** Whether the lease still held when this process started (R-BTN-72's reattach window). */
+  private readonly startedInLease: boolean;
+  /** The claim ids the last answered beat listed, null before any. */
+  private answerClaims: Set<number> | null = null;
+  /** The claim runs in flight (several at k > 1). */
+  private readonly tasks = new Set<Promise<unknown>>();
+  /** R-BTN-72 (B-188): the reattached claims' runs at one claim, which `runOnce` returns. */
+  private readonly resumed: Promise<ClaimOutcome | null>[] = [];
+  /** Set when a claim's run ends, so an idle wait at k > 1 asks again at once. */
+  private roomMade = false;
 
   constructor(options: RunnerOptions) {
     this.o = { beatEvery: BEAT_MS, ...options };
@@ -371,6 +497,22 @@ export class Runner {
     if (!this.state.get().secret) this.state.set({ secret: freshSecret() });
     this.o.api.setSecret(this.state.get().secret);
     this.locks = options.locks && Object.keys(options.locks).length ? new MachineLocks(options.locks, this.log) : null;
+    this.solo = new Slot(options.home);
+    const k = options.concurrency ?? 1;
+    if (!Number.isInteger(k) || k < 1 || k > 32) throw new Error(`concurrency ${String(k)}: an integer from 1 to 32 (R-BTN-4)`);
+    this.concurrency = k;
+    // R-BTN-72 (B-188): what the last process held — the claims its state file names, and
+    // whether its lease still held as this one starts (read before this process's first beat
+    // moves `last_ok`).
+    const was = this.state.get();
+    const listed = Array.isArray(was.claims) ? was.claims : [];
+    this.persisted = [...listed];
+    this.legacy = new Set();
+    if (was.claim && !listed.some((c) => c.id === was.claim!.id)) {
+      this.persisted.push({ ...was.claim });
+      this.legacy.add(was.claim.id);
+    }
+    this.startedInLease = was.last_ok != null && !leaseLostFrom(was, this.now());
     // B-86: a restart keeps the declaration the last process settled — a granted runner does not
     // ask again, and `runOnce` has no stale `[]` to force a beat for. `--capabilities` still
     // narrows what was read: a flag is the operator's word, the state file's a past answer.
@@ -410,10 +552,39 @@ export class Runner {
    * claims. Cheap and synchronous by design: it runs on a signal or an `exit` hook. */
   lastLine(why: string): string {
     const s = this.state.get();
-    const claim = s.claim ? `claim ${s.claim.id} on ${s.claim.ticket_id}` : 'no claim';
-    const leg = this.inflight ? `leg ${this.inflight.leg ?? '?'}` : 'no leg in flight';
     const beat = s.last_ok == null ? 'never' : new Date(s.last_ok).toISOString();
-    return `${why}: ${claim}, ${leg}, last beat ${beat}`;
+    // B-188: every claim it holds, each with its leg in flight.
+    const held = Array.isArray(s.claims) && s.claims.length ? s.claims : s.claim ? [s.claim] : [];
+    const legOf = (id: number | null) => {
+      const slot = [...this.slots].find((x) => x.claimId === id) ?? (this.solo.inflight && (id == null || this.solo.inflight.claimId === id) ? this.solo : null);
+      return slot?.inflight ? `leg ${slot.inflight.leg ?? '?'}` : 'no leg in flight';
+    };
+    if (held.length <= 1) {
+      const claim = held[0] ? `claim ${held[0].id} on ${held[0].ticket_id}` : 'no claim';
+      return `${why}: ${claim}, ${legOf(held[0]?.id ?? null)}, last beat ${beat}`;
+    }
+    return `${why}: ${held.map((c) => `claim ${c.id} on ${c.ticket_id}, ${legOf(c.id)}`).join('; ')}, last beat ${beat}`;
+  }
+
+  /** B-188: the slots that hold a claim — and the solo slot when a caller set its claim by hand. */
+  private liveSlots(): Slot[] {
+    const out = [...this.slots];
+    if (this.solo.inflight && !out.includes(this.solo)) out.push(this.solo);
+    return out;
+  }
+
+  /** R-BTN-72 (B-188): the state file's claims — every held slot's, oldest first, with the leg's
+   *  place for a reattach, and the earlier process's still undecided — and `claim`, the oldest,
+   *  for the hooks and `BATON_STATE` readers that read one. */
+  private writeClaims(): void {
+    const held: PersistedClaim[] = [
+      ...this.persisted,
+      ...[...this.slots].filter((x) => x.claimId != null && !x.ended).map((x) => ({
+        id: x.claimId!, ticket_id: x.ticket, nonce: x.nonce,
+        ...(x.requestId ? { request_id: x.requestId } : {}), checkout: x.checkout, ...x.place,
+      })),
+    ];
+    this.state.set({ claims: held, claim: held[0] ? { id: held[0].id, ticket_id: held[0].ticket_id, nonce: held[0].nonce } : null });
   }
 
   /** One heartbeat, by the timer or a test: the §11 answer drives everything local — the lease,
@@ -425,7 +596,9 @@ export class Runner {
    * on the guard let the first claims go out on `null` and `[]`. */
   async tick(): Promise<void> {
     if (this.ticking) return this.ticking;
-    this.ticking = this.beatOnce().finally(() => { this.ticking = null; });
+    // B-188: the beat belongs to no claim — it runs outside any claim's context and walks every
+    // slot explicitly, whichever claim's code asked for it.
+    this.ticking = this.als.exit(() => this.beatOnce()).finally(() => { this.ticking = null; });
     return this.ticking;
   }
 
@@ -501,42 +674,53 @@ export class Runner {
 
   private async beatOnce(): Promise<void> {
     const epoch = this.epoch;
+    // B-188: a claim request out while this beat is built or answered — Baton may hold a claim
+    // the runner has no slot for yet, so this answer cannot judge one it does not know.
+    const claimingAtStart = this.claimsOut > 0;
     const s = this.state.get();
     const spool = this.takeSpool();
+    // R-BTN-4 (B-188): the claims held as this beat is built — each judged against the answer.
+    const live = this.liveSlots();
     // B-86: `--capabilities` narrows; without it the declaration is the grant's, which the first
     // answer carries (`grant.capabilities`), so the first beat asks and declares nothing — the
     // registration has no declaration to widen, and the beat after it serves the grant.
     // B-106 (R-BTN-178): a lock free again is taken and declared; one another process on this
     // machine holds is not declared, so no leg requiring it is offered here. Mid-claim the set
-    // is the claim's own — `ensureLegLocks` holds the legs' locks and releases the rest — so the
-    // idle maintenance stays out until the claim ends.
-    if (this.locks && !this.inflight) await this.locks.takeAll();
+    // is the claims' own — `ensureLegLocks` holds the legs' locks and releases the rest — so the
+    // idle maintenance stays out until every claim ends.
+    if (this.locks && !live.some((x) => x.inflight)) await this.locks.takeAll();
     const declaring = this.declaringList();
+    // R-BTN-113, R-BTN-90 (B-188): each claim's running leg's link and finished run, by claim;
+    // read at build time, so the answer below clears only what this beat carried.
+    const links = live.filter((x) => x.claimId != null && x.legSessionUrl).map((x) => ({ slot: x, claim_id: x.claimId!, url: x.legSessionUrl!, seq: x.sessionLinkSeq }));
+    const finished = live.filter((x) => x.claimId != null && x.legFinishedSeq != null).map((x) => ({ slot: x, claim_id: x.claimId!, seq: x.legFinishedSeq! }));
+    const fences = [...new Set(this.fences)];
+    // One claim at a time keeps the shapes a Baton before B-188 reads: the bare `session_url`
+    // and `leg_finished`, and a `fenced` object.
+    const one = this.concurrency === 1;
     const body: Record<string, unknown> = {
       hostname: this.o.hostname, session_name: this.o.session, harness: this.o.harness, kind: 'vm',
       capabilities: declaring, tier_ceiling: this.o.tierCeiling ?? 'critical',
+      // B-253 (R-BTN-72): the runner's own statement about itself, opaque — the CLI's pinning
+      // under `cli`, on every beat.
+      ...(this.o.profile ? { profile: this.o.profile } : {}),
       ...(this.o.testHarness ? { test_harness: true } : {}),
       lease_timeout_s: s.lease_timeout_s ?? 900,
+      // R-BTN-4 (B-188): how many claims this runner holds at once.
+      concurrency: this.concurrency,
       courses: this.o.courses.map((c) => ({ repository: this.o.repository, course: c.course, version: c.version })),
-      // R-BTN-113 (B-234): the running leg's session link, kept on its run's row (latest wins
-      // while it runs); Baton drops and logs one that fails the link rule.
-      ...(this.legSessionUrl ? { session_url: this.legSessionUrl } : {}),
-      // §7.5 R-BTN-90 (B-234): the run whose script returned — the finishing half's word, read
-      // at build time so the answer below clears only what this beat carried.
-      ...(this.legFinishedSeq != null ? { leg_finished: this.legFinishedSeq } : {}),
+      // R-BTN-113 (B-234, B-188): the running legs' session links, kept on their runs' rows
+      // (latest wins while each runs); Baton drops and logs one that fails the link rule.
+      ...(links.length ? { session_urls: links.map((l) => ({ claim_id: l.claim_id, url: l.url })) } : {}),
+      ...(one && links.length ? { session_url: links[0].url } : {}),
+      // §7.5 R-BTN-90 (B-234, B-188): the runs whose scripts returned — the finishing half's word.
+      ...(finished.length ? { legs_finished: finished.map((f) => ({ claim_id: f.claim_id, seq: f.seq })) } : {}),
+      ...(one && finished.length ? { leg_finished: finished[0].seq } : {}),
       ...((s.worker_id == null || this.rekeySecret) ? { secret_hash: await sha256Hex(this.rekeySecret ?? s.secret), ...(this.rekeySecret ? { rekey: true } : {}) } : {}),
-      ...(this.fenceToReport != null ? { fenced: { claim_id: this.fenceToReport, terminated: true } } : {}),
+      // R-BTN-19 (B-188): one entry per fenced claim.
+      ...(fences.length ? { fenced: one && fences.length === 1 ? { claim_id: fences[0], terminated: true } : fences.map((id) => ({ claim_id: id, terminated: true })) } : {}),
       transcripts: spool.transcripts,
     };
-    // R-BTN-113 (B-234): the link this beat carried, and the run whose link it was — read at
-    // build time, for the answer's word on whether Baton now holds this run's link (a beat
-    // built before the run's session named one carried the last run's, and a refused beat
-    // carries nothing).
-    const linkCarried = typeof body.session_url === 'string' ? body.session_url : null;
-    const linkSeq = this.sessionLinkSeq;
-    // §7.5 R-BTN-90 (B-234): the finish this beat carried, likewise — a beat built before the
-    // run returned owes nothing, and a beat that fails below leaves it owed to the next.
-    const finishedCarried = this.legFinishedSeq;
     // §6.9: the spool's activity rows go up as their own call, before the beat; anything the
     // calls do not land comes back to the spool, so a leg session's record is never lost.
     const carry = [...spool.overflowTranscripts, ...spool.overflowActivities];
@@ -544,7 +728,7 @@ export class Runner {
     let leftover: unknown[] = [...spool.overflowActivities];
     try {
       if (spool.activities.length) leftover = [...leftover, ...await this.postActivities(spool.activities)];
-      if (this.pendingEnd) await this.retryEnd();
+      if (this.pendingEnds.size) await this.retryEnd();
     } catch (e) {
       appendFileSync(this.state.spool, `${[...spool.transcripts, ...leftover].map((t) => JSON.stringify(t)).join('\n')}\n`);
       rmSync(spool.taken, { force: true }); // back in the spool; the taken copy is spent
@@ -586,14 +770,15 @@ export class Runner {
       throw e;
     }
     rmSync(spool.taken, { force: true });
-    // R-BTN-113 (B-234): the answer's word on the link — Baton holds this run's session link
-    // when the beat carried it and the answer kept it (not dropped: a dropped link failed the
-    // rule and was stored nowhere). This is what the raise check reads (R-BTN-195).
-    this.sessionLinkLanded = linkCarried != null && linkSeq === this.sessionLinkSeq && answer.session_url_dropped == null;
-    // §7.5 R-BTN-90 (B-234): the finish landed — nothing further owes Baton this run's return.
-    // (`leg_finished` is judged against the claim's running run, so a late or repeated answer
-    // changes nothing there; the pending report is spent either way once carried.)
-    if (finishedCarried != null && finishedCarried === this.legFinishedSeq) this.legFinishedSeq = null;
+    // R-BTN-113 (B-234): the answer's word on each link — Baton holds a run's session link when
+    // the beat carried it and the answer kept it (not dropped: a dropped link failed the rule
+    // and was stored nowhere). This is what each claim's raise check reads (R-BTN-195).
+    for (const x of live) {
+      const carried = links.find((l) => l.slot === x);
+      x.sessionLinkLanded = carried != null && carried.seq === x.sessionLinkSeq && answer.session_url_dropped == null;
+    }
+    // §7.5 R-BTN-90 (B-234): each finish landed — nothing further owes Baton that run's return.
+    for (const f of finished) if (f.slot.legFinishedSeq === f.seq) f.slot.legFinishedSeq = null;
     // What Baton recorded from this beat: `rewriteSettings` writes the rows of the list a beat
     // carried, so an answer to this beat leaves the server on `declaring` (B-86: `runOnce` reads
     // this to know whether the next claim would go out on a stale declaration).
@@ -641,73 +826,104 @@ export class Runner {
       this.rekeySecret = null;
       this.lostLease = false;
     }
-    if (epoch === this.epoch) {
-      this.state.set({
-        worker_id: answer.worker_id, incarnation: answer.incarnation, last_ok: this.now(),
-        lease_timeout_s: answer.lease_timeout_s ?? s.lease_timeout_s,
-        claim: answer.claim ? { id: answer.claim.id, ticket_id: answer.claim.ticket_id, nonce: answer.claim.nonce } : null,
-      });
-    } else {
-      // A claim began while this beat was out: its claim view is stale — only the lease facts.
-      this.state.set({
-        worker_id: answer.worker_id, incarnation: answer.incarnation, last_ok: this.now(),
-        lease_timeout_s: answer.lease_timeout_s ?? s.lease_timeout_s,
-      });
-    }
-    // R-BTN-19: the fence of a claim this runner lost cleared with this beat.
-    this.fenceToReport = null;
-    const view = answer.claim && typeof answer.claim === 'object' ? answer.claim.git : null;
-    // R-BTN-6 and §6.13: the wall clock's own verdict, or an answer that no longer lists the
-    // claim, fence the runner at once — stop the leg, no hand-off.
+    this.state.set({
+      worker_id: answer.worker_id, incarnation: answer.incarnation, last_ok: this.now(),
+      lease_timeout_s: answer.lease_timeout_s ?? s.lease_timeout_s,
+    });
+    // R-BTN-19: the fences this beat carried cleared with it.
+    this.fences = this.fences.filter((id) => !fences.includes(id));
+    // R-BTN-4 (B-188): every claim the runner holds, oldest first; a Baton before B-188 answers
+    // the one `claim`.
+    const answered = (Array.isArray(answer.claims) ? answer.claims : answer.claim && typeof answer.claim === 'object' ? [answer.claim] : []) as Record<string, any>[];
+    const byId = new Map(answered.filter((c) => c && typeof c.id === 'number').map((c) => [c.id as number, c]));
+    this.answerClaims = new Set(byId.keys());
+    // R-BTN-6 and §6.13: the wall clock's own verdict fences the runner — every claim, stop each
+    // leg, no hand-off; an answer that no longer lists one claim fences that claim alone.
+    const steady = epoch === this.epoch && !claimingAtStart && this.claimsOut === 0;
     if (epoch !== this.epoch) {
-      // A claim began while this beat was out: its answer speaks for the lease it was asked
-      // about, never the one now held.
-    } else if (!this.lostLease && (leaseLostFrom(this.state.get(), this.now()) || (this.inflight && answer.claim == null))) {
+      // A claim began while this beat was out: its answer speaks for the claims it was asked
+      // about, never one taken since.
+    } else if (!this.lostLease && leaseLostFrom(this.state.get(), this.now())) {
       this.loseLease('lease-timeout');
+    } else if (!this.lostLease) {
+      for (const x of live) {
+        const id = x.inflight?.claimId;
+        if (id != null && !x.lost && !x.ended && !byId.has(id)) this.loseClaim(x);
+      }
     }
-    if (this.inflight) {
-      if (view === 'unknown') this.signalLeg('course-changed', 'released:course-changed');
+    for (const x of live) {
+      if (!x.inflight) continue;
+      const view = byId.get(x.inflight.claimId)?.git ?? null;
+      if (view === 'unknown') this.signalSlot(x, 'course-changed', 'released:course-changed');
       else if (view && typeof view === 'object') {
-        if (view.closed === 'done') this.closedDone = true;
-        else if (view.regressed) this.signalLeg('regressed');
+        if (view.closed === 'done') x.closedDone = true;
+        else if (view.regressed) this.signalSlot(x, 'regressed');
         const next = (view.next ?? null) as NextLegs | null;
-        for (const w of this.inflight.waiters.splice(0)) w(next ?? []);
+        for (const w of x.inflight.waiters.splice(0)) w(next ?? []);
       }
       // B-108: the liveness line — while a leg call is in flight, each beat says how long it has
       // run and how old its newest activity signal is, so an operator watches a wedge form (and
       // the leg's ceiling approach) instead of silence. Advice for the operator's eye, never a
       // detector: the stub concludes its agent; this line only makes the wait visible.
-      if (this.inflight.child != null && this.inflight.leg != null) {
-        const leg = this.inflight.leg;
-        const signals = [...legActivity(this.o.home, this.inflight.ticket, leg), ...(this.legLineAt != null ? [{ name: 'drained-line', at: this.legLineAt }] : [])];
+      if (x.inflight.child != null && x.inflight.leg != null) {
+        const leg = x.inflight.leg;
+        const signals = [...legActivity(x.checkout, x.inflight.ticket, leg), ...(x.legLineAt != null ? [{ name: 'drained-line', at: x.legLineAt }] : [])];
         const newest = signals.reduce((a, b) => (b.at > a.at ? b : a));
-        this.log(`baton: ${this.inflight.ticket}'s ${leg} has run ${ageWords(this.now() - this.inflight.legAt)}; newest activity ${newest.at > 0 ? `${ageWords(this.now() - newest.at)} ago (${newest.name})` : 'not seen'}`);
+        this.log(`baton: ${x.inflight.ticket}'s ${leg} has run ${ageWords(this.now() - x.inflight.legAt)}; newest activity ${newest.at > 0 ? `${ageWords(this.now() - newest.at)} ago (${newest.name})` : 'not seen'}`);
       }
     }
-    for (const m of (answer.messages ?? []) as { id: number; kind: string; payload?: { reason?: string } }[]) {
+    for (const m of (answer.messages ?? []) as { id: number; kind: string; payload?: { reason?: string; ticket_id?: string } }[]) {
+      // R-BTN-119 (B-188): a release names its ticket — it stops that claim alone.
+      const target = m.kind === 'release' ? this.slotFor(live, m.payload?.ticket_id) : null;
+      const about = target?.ticket || m.payload?.ticket_id || (live.length === 1 ? live[0].ticket || live[0].inflight?.ticket : '') || this.state.get().claim?.ticket_id || '';
       // 2026-10-24: every message is logged on receipt — a release or cue the runner acts on
       // silently was the hardest class to debug from the log alone.
-      this.log(`baton: message ${m.kind}${m.payload?.reason ? ` (${m.payload.reason})` : ''} received${this.state.get().claim ? ` for ${this.state.get().claim!.ticket_id}` : ''}`);
+      this.log(`baton: message ${m.kind}${m.payload?.reason ? ` (${m.payload.reason})` : ''} received${about ? ` for ${about}` : ''}`);
       if (m.kind === 'release') {
-        this.toAck.push(m.id);
         // A release message's payload reason is one of §6.5's own ('requested', 'owner-cancel',
         // 'provider-suspended') — it names the end directly. (A releasing owner bar arrives
         // the same way, as a release message — §11's heartbeat bars carry no release flag.)
-        this.signalLeg('release', `released:${m.payload?.reason ?? 'requested'}`);
+        // One for a ticket no claim here holds is acknowledged with the idle beat.
+        if (target) {
+          target.toAck.push(m.id);
+          this.signalSlot(target, 'release', `released:${m.payload?.reason ?? 'requested'}`);
+        } else {
+          this.toAck.push(m.id);
+        }
       } else if (m.kind === 'unblocked') {
         // R-BTN-77, §9: the idle wait ends with the next claim attempt, and the cue is acknowledged
         // so it is not delivered again with every beat.
         this.unblocked = true;
         this.toAck.push(m.id);
       } else if (m.kind === 'wind-down') {
-        // B-109: the owner's wind-down sets the same drain flag SIGTERM does — the current leg
-        // completes, the claim ends at its boundary with its hand-off, the runner exits without
-        // claiming again. drain() is idempotent: a second wind-down changes nothing.
+        // B-109: the owner's wind-down sets the same drain flag SIGTERM does — every leg in
+        // flight completes, each claim ends at its boundary with its hand-off, the runner exits
+        // without claiming again. drain() is idempotent: a second wind-down changes nothing.
         this.drain(`the owner's wind-down message`);
         this.toAck.push(m.id);
       }
     }
-    if (!this.inflight) for (const id of this.toAck.splice(0)) await this.o.api.ack(id).catch(() => {});
+    // R-BTN-6 (B-188): a claim Baton lists that this runner's state does not hold — a lost state
+    // file, a claim granted on a request whose answer never came — is ended `released:lease-lost`,
+    // loudly, never left to idle. Not one a claim request still out may be granting, one whose
+    // end is parked, nor one the earlier process left (reattached or ended before the first
+    // claim).
+    if (steady && epoch === this.epoch && this.claimsOut === 0) {
+      const mine = new Set([...this.slots].map((x) => x.claimId));
+      for (const [id, c] of byId) {
+        if (mine.has(id) || this.pendingEnds.has(id) || this.persisted.some((p) => p.id === id)) continue;
+        this.log(`baton: Baton lists claim ${id} on ${String(c.ticket_id ?? '?')}, which this runner does not hold — ending it released:lease-lost (R-BTN-6)`);
+        await this.endQuietly(id, { end_reason: 'released:lease-lost', next: null });
+      }
+    }
+    if (!live.length) for (const id of this.toAck.splice(0)) await this.o.api.ack(id).catch(() => {});
+  }
+
+  /** R-BTN-119 (B-188): the claim a release names, by its ticket — the one held claim when the
+   *  message names none (a Baton before B-188 always named one). */
+  private slotFor(live: Slot[], ticket: string | undefined): Slot | null {
+    if (ticket) return live.find((x) => x.ticket === ticket || x.inflight?.ticket === ticket) ?? null;
+    return live.length === 1 ? live[0] : null;
   }
 
   /** B-229 (R-BTN-26): every other state file beside this session's that still names a claim
@@ -736,20 +952,27 @@ export class Runner {
       } catch {
         continue;
       }
-      if (!s?.claim || typeof s.secret !== 'string' || s.secret === '' || !leaseLostFrom(s, now)) continue;
-      const claim = s.claim;
+      if (!s || typeof s.secret !== 'string' || s.secret === '' || !leaseLostFrom(s, now)) continue;
+      // B-188: every claim the file names — its `claims`, else (a file before B-188) its `claim`.
+      const held = (Array.isArray(s.claims) && s.claims.length ? s.claims : s.claim ? [s.claim] : [])
+        .filter((c): c is PersistedClaim => c != null && typeof c.id === 'number');
+      if (!held.length) continue;
       const session = basename(name, '.json');
-      this.log(`baton: ending claim ${claim.id} on ${claim.ticket_id}, left by the earlier session ${session} (its lease is lost)`);
-      try {
-        await this.o.apiFor(s.secret).end(claim.id, { end_reason: 'released:lease-lost', next: null });
-      } catch (e) {
-        if (!(e instanceof BatonRefusal) || e.code === 'unavailable' || e.status >= 500) {
-          this.log(`baton: claim ${claim.id} could not be ended now (${e instanceof Error ? e.message : String(e)}); the next start tries again`);
-          continue;
+      let unreached = false;
+      for (const claim of held) {
+        this.log(`baton: ending claim ${claim.id} on ${claim.ticket_id}, left by the earlier session ${session} (its lease is lost)`);
+        try {
+          await this.o.apiFor(s.secret).end(claim.id, { end_reason: 'released:lease-lost', next: null });
+        } catch (e) {
+          if (!(e instanceof BatonRefusal) || e.code === 'unavailable' || e.status >= 500) {
+            this.log(`baton: claim ${claim.id} could not be ended now (${e instanceof Error ? e.message : String(e)}); the next start tries again`);
+            unreached = true;
+            continue;
+          }
+          if (e.code !== 'claim-ended') this.log(`baton: claim ${claim.id} of the earlier session ${session} was refused (${e.message}); its file lets it go`);
         }
-        if (e.code !== 'claim-ended') this.log(`baton: claim ${claim.id} of the earlier session ${session} was refused (${e.message}); its file lets it go`);
       }
-      new StateFile(path).set({ claim: null });
+      if (!unreached) new StateFile(path).set({ claim: null, ...(Array.isArray(s.claims) ? { claims: [] } : {}) });
     }
   }
 
@@ -758,20 +981,20 @@ export class Runner {
   private async endQuietly(claimId: number, body: Record<string, unknown>): Promise<void> {
     // An end already parked for this claim keeps its own body — a re-end here must never
     // overwrite a done or suspended end the wire ate.
-    if (this.pendingEnd?.claimId === claimId) return;
+    if (this.pendingEnds.has(claimId)) return;
     try {
       await this.o.api.end(claimId, body);
     } catch (e) {
       if (e instanceof BatonRefusal && e.code === 'claim-ended') return;
       if (e instanceof BatonRefusal && (e.code === 'unavailable' || e.status >= 500)) {
-        this.pendingEnd = { claimId, body };
+        this.pendingEnds.set(claimId, body);
         return;
       }
       if (e instanceof BatonRefusal) {
         this.log(`baton: the orphaned claim ${claimId} was refused (${e.message})`);
         return;
       }
-      this.pendingEnd = { claimId, body };
+      this.pendingEnds.set(claimId, body);
     }
   }
 
@@ -805,12 +1028,33 @@ export class Runner {
   private loseLease(because: string): void {
     this.lostLease = true;
     this.state.set({ lease_lost: true, lease_lost_because: because });
-    // R-BTN-19: the claim was taken away from this worker; the next heartbeat reports the fence
-    // it cleared, so the ticket is re-issued instead of waiting for the worker to go silent.
-    this.fenceToReport = this.inflight?.claimId ?? this.state.get().claim?.id ?? null;
-    const child = this.inflight?.child;
+    // R-BTN-19: the claims were taken away from this worker; the next heartbeat reports the
+    // fences it cleared, so each ticket is re-issued instead of waiting for the worker to go
+    // silent. B-188: the runner's lease is every claim's — each leg stops at once.
+    const live = this.liveSlots().filter((x) => x.claimId != null || x.inflight);
+    const ids = live.map((x) => x.inflight?.claimId ?? x.claimId).filter((id): id is number => id != null);
+    if (!ids.length && this.state.get().claim) ids.push(this.state.get().claim!.id);
+    for (const id of ids) if (!this.fences.includes(id)) this.fences.push(id);
+    for (const x of live) {
+      x.lost = true;
+      const child = x.inflight?.child;
+      if (child) this.killGroup(child);
+      void this.stopSlotSession(x, 'lease-lost');
+    }
+    if (!live.length) void this.stopSlotSession(this.solo, 'lease-lost');
+  }
+
+  /** R-BTN-6 (B-188): Baton's answer no longer lists this claim — a force-reap, a deadline's
+   *  release already taken — so this claim alone is fenced: its leg stops at once, no hand-off,
+   *  and the next beat reports its fence. The runner's lease and its other claims run on. */
+  private loseClaim(x: Slot): void {
+    x.lost = true;
+    const id = x.inflight?.claimId ?? x.claimId;
+    this.log(`baton: Baton no longer lists claim ${id ?? '?'} on ${x.inflight?.ticket ?? x.ticket} — its leg stops at once, no hand-off; this runner's other claims run on (R-BTN-6)`);
+    if (id != null && !this.fences.includes(id)) this.fences.push(id);
+    const child = x.inflight?.child;
     if (child) this.killGroup(child);
-    void this.stopSession('lease-lost');
+    void this.stopSlotSession(x, 'lease-lost');
   }
 
   /** The pending signal as the loop reads it — through a call, so a field-narrowed null at one
@@ -824,14 +1068,19 @@ export class Runner {
    * short wait or between legs is honoured just the same, never dropped. The claim-level end it
    * turns into is remembered for when the runner next settles. */
   private signalLeg(signal: PendingAbort['signal'], reason?: string): void {
-    if (!this.inflight) return;
+    this.signalSlot(this.cur, signal, reason);
+  }
+
+  /** `signalLeg` for a named claim — the beat's, which belongs to no claim (B-188). */
+  private signalSlot(x: Slot, signal: PendingAbort['signal'], reason?: string): void {
+    if (!x.inflight) return;
     // A release is the strongest signal: it overrides a regression or a course change that
     // landed first, so its message is never acknowledged away (§6.13, §9).
-    if (this.pendingAbort && !(signal === 'release' && this.pendingAbort.signal !== 'release')) return;
-    this.pendingAbort = { signal, reason };
+    if (x.pendingAbort && !(signal === 'release' && x.pendingAbort.signal !== 'release')) return;
+    x.pendingAbort = { signal, reason };
     // The wire carries §6.13's closed reason set: a course change stops the leg the way a
     // release does — at its next safe point — so that is the signal it gets.
-    const child = this.inflight.child;
+    const child = x.inflight.child;
     const wire = signal === 'course-changed' ? 'release' : signal;
     child?.running.write(JSON.stringify({ abort: wire }));
   }
@@ -840,19 +1089,10 @@ export class Runner {
     child.running.kill();
   }
 
-  /** R-BTN-107 (B-184): the session of the leg that ran last — its `close` and `handoff` run in
-   *  it, and it is stopped when the next leg starts or the claim ends. */
-  private session: { handle: Handle; checkout: string } | null = null;
-
-  /** R-BTN-144 class 7 (B-170): the last leg's masked set, from the environment it was given. It
-   *  outlives the leg's call: the close and handoff that follow run in its session with the same
-   *  environment, and a leg's own failure text reaches this log after its stream closed. */
-  private legSecrets: readonly string[] = [];
-
   /** Start a session of `kind` on the executor the host chose. */
   private async startSession(kind: SessionKind, o: { session_id: string; run_id?: string; ticket?: string; leg?: string; snapshot_sha?: string; paths: string[]; env: Record<string, string>; channel?: string | null; autonomous?: boolean }): Promise<Handle> {
     return await this.executor.start({
-      brief: { kind, ...o, checkout: this.o.home, wrapper: LEG_PROCESS, ...(o.autonomous ? { autonomous: true } : {}) },
+      brief: { kind, ...o, checkout: this.checkout, wrapper: LEG_PROCESS, ...(o.autonomous ? { autonomous: true } : {}) },
       executor: null, inputs: [], channel: o.channel ?? null,
     });
   }
@@ -863,7 +1103,7 @@ export class Runner {
     if (this.session) return this.session.handle;
     const paths = this.inflight ? [this.inflight.course.scratch] : [];
     const handle = await this.startSession('leg', { session_id: `leg-${randomBytes(6).toString('hex')}`, paths, env: this.baseEnv() });
-    this.session = { handle, checkout: this.o.home };
+    this.session = { handle, checkout: this.checkout };
     return handle;
   }
 
@@ -874,8 +1114,18 @@ export class Runner {
   }
 
   private async stopSession(reason: string): Promise<void> {
-    const s = this.session;
-    this.session = null;
+    await this.stopSlotSession(this.cur, reason);
+  }
+
+  /** `stopSession` for a named claim (B-188). */
+  private async stopSlotSession(x: Slot, reason: string): Promise<void> {
+    const s = x.session;
+    x.session = null;
+    if (x.place.handle) {
+      // R-BTN-72 (B-188): a stopped session is nothing a restart could reattach to.
+      x.place = { ...x.place, handle: null };
+      if (this.slots.has(x)) this.writeClaims();
+    }
     if (s) await this.executor.stop(s.handle, reason).catch((e) => this.log(`baton: the executor's stop failed (${msg(e)})`));
   }
 
@@ -907,7 +1157,7 @@ export class Runner {
   private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number, sink?: () => ReturnType<Runner['legSink']>): Running {
     const leg = sink?.();
     return this.executor.exec(h, ['node', LEG_PROCESS, call, script], {
-      cwd: this.o.home, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
+      cwd: this.checkout, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
       // R-BTN-144: what a leg's stderr carries leaves masked — class 5 and class 6 by the shared
       // pattern, the leg's own class 7 set with it while its run streams, and by the drain after.
       // B-108: a drained line is leg activity either way — the beat's liveness line counts it.
@@ -965,14 +1215,14 @@ export class Runner {
    * own resumable state — the claim is `in-review`'s sibling, ended in spirit, pending on the
    * wire). */
   private async retryEnd(): Promise<void> {
-    const pending = this.pendingEnd;
-    if (!pending) return;
-    try {
-      await this.o.api.end(pending.claimId, pending.body);
-      this.pendingEnd = null;
-    } catch (e) {
-      if (e instanceof BatonRefusal && e.code === 'claim-ended') this.pendingEnd = null;
-      else this.log(`baton: retrying the end Baton never answered (${msg(e)})`);
+    for (const [claimId, body] of [...this.pendingEnds]) {
+      try {
+        await this.o.api.end(claimId, body);
+        this.pendingEnds.delete(claimId);
+      } catch (e) {
+        if (e instanceof BatonRefusal && e.code === 'claim-ended') this.pendingEnds.delete(claimId);
+        else this.log(`baton: retrying the end Baton never answered (${msg(e)})`);
+      }
     }
   }
 
@@ -1002,8 +1252,8 @@ export class Runner {
    *  runner as an orphan pushing against a claim the reaper takes. No leg in flight: nothing. */
   killInflight(): void {
     // The call is killed; its session stays for the hand-off the release still writes, and
-    // goes when the claim ends.
-    if (this.inflight?.child) this.killGroup(this.inflight.child);
+    // goes when the claim ends. B-188: every claim's leg.
+    for (const x of this.liveSlots()) if (x.inflight?.child) this.killGroup(x.inflight.child);
   }
 
   /** B-227: the immediate stop's last resort, when the leg would not take its release in time:
@@ -1011,7 +1261,8 @@ export class Runner {
    *  never outliving it — before the caller exits. The claim is left to the reaper (R-BTN-24). */
   async hardStop(): Promise<void> {
     this.killInflight();
-    await this.stopSession('hard-stop');
+    const live = this.liveSlots();
+    await Promise.all((live.length ? live : [this.solo]).map((x) => this.stopSlotSession(x, 'hard-stop')));
   }
 
   /** B-109: the immediate stop — a safe point, not an abandonment. The leg in flight is
@@ -1025,7 +1276,8 @@ export class Runner {
       this.draining = true;
       this.log('baton: stopping at once (the immediate stop) — the leg in flight is released at its next safe point with its hand-off, the claim ends released, and this runner exits without claiming again');
     }
-    this.signalLeg('release', 'released:requested');
+    // B-188: every leg in flight, each claim ended at its own safe point.
+    for (const x of this.liveSlots()) this.signalSlot(x, 'release', 'released:requested');
   }
 
   async work(): Promise<void> {
@@ -1033,13 +1285,54 @@ export class Runner {
     this.start();
     while (!this.stopped && !this.draining) {
       try {
-        const outcome = await this.runOnce();
-        if (!outcome) await this.idleWait();
+        if (this.concurrency === 1) {
+          // One claim at a time: today's loop exactly.
+          const outcome = await this.runOnce();
+          if (!outcome) await this.idleWait();
+          continue;
+        }
+        // R-BTN-72 (B-188): claims side by side, each on its own task — asked for while the
+        // runner holds fewer than its bound.
+        const next = await this.claimNext();
+        if (next) {
+          this.track(this.runInSlot(next.claim, next.slot));
+          continue;
+        }
+        if (this.slots.size >= this.concurrency) await this.roomWait();
+        else await this.idleWait();
       } catch (e) {
+        // R-BTN-197 (B-254): a runner the deploy refuses as too old takes no claim — every call
+        // of its own would be refused the same way — logs the versions it and Baton name, and
+        // exits non-zero. The claim it held ends as its lease lapses (R-BTN-9); nothing of the
+        // runner's own updates it. The version prints as the header writes it (`baton/<version>`,
+        // what Baton recorded from this runner's own claim), the warning's one form.
+        if (e instanceof BatonRefusal && e.code === 'client-too-old') {
+          const v = e.versions;
+          this.log(`baton: Baton refuses this client — ${v ? `this runner is baton/${v.client}; Baton serves min ${v.min}, recommended ${v.recommended}` : e.message}; no claim is taken, and this runner exits: update it at your own pace (nothing updates itself, R-BTN-197)`);
+          process.exit(1);
+        }
         this.log(`baton: the loop failed (${msg(e)}) — retrying after a beat`);
         await this.idleWait();
       }
     }
+    // Draining (or stopped): every claim still running ends at its own boundary first.
+    await Promise.allSettled([...this.tasks]);
+  }
+
+  /** B-188: a claim's run on its own task — a failure is the loop's line, never another claim's. */
+  private track(task: Promise<ClaimOutcome>): Promise<ClaimOutcome | null> {
+    const t: Promise<ClaimOutcome | null> = task.catch((e) => {
+      this.log(`baton: the loop failed (${msg(e)}) — retrying after a beat`);
+      return null;
+    });
+    this.tasks.add(t);
+    void t.finally(() => this.tasks.delete(t));
+    return t;
+  }
+
+  /** B-188: the runner holds its bound — wait until a claim ends (or the runner stops). */
+  private async roomWait(): Promise<void> {
+    while (!this.stopped && !this.draining && this.slots.size >= this.concurrency) await sleep(Math.min(50, this.o.beatEvery));
   }
 
   /** B-94: a runner's death always leaves a line. An unhandled rejection the loop did not catch
@@ -1067,12 +1360,26 @@ export class Runner {
   /** The idle wait: a beat long, unless an `unblocked` message ends it early. */
   private async idleWait(): Promise<void> {
     const until = this.now() + this.o.beatEvery;
-    while (!this.stopped && !this.draining && !this.unblocked && this.now() < until) await sleep(Math.min(50, this.o.beatEvery));
+    while (!this.stopped && !this.draining && !this.unblocked && !this.roomMade && this.now() < until) await sleep(Math.min(50, this.o.beatEvery));
     this.unblocked = false;
+    this.roomMade = false;
   }
 
   /** One claim's whole run — or one idle attempt, returning null when nothing was claimable. */
   async runOnce(): Promise<ClaimOutcome | null> {
+    const next = await this.claimNext();
+    if (next) return await this.runInSlot(next.claim, next.slot);
+    // R-BTN-72 (B-188): a claim reattached after a restart runs on its own task; an attempt
+    // that claimed nothing beside it is that claim's run.
+    const resumed = this.resumed.shift();
+    if (resumed) return await resumed;
+    return null;
+  }
+
+  /** One claim attempt (R-BTN-72): the claim Baton granted, in a fresh slot already held, or
+   *  null when nothing was claimable — or when the runner holds its bound (B-188). */
+  private async claimNext(): Promise<{ claim: Record<string, any>; slot: Slot } | null> {
+    this.roomMade = false;
     // The worker must exist before it can claim (§5): one heartbeat registers it. Whether this
     // attempt is the registration (B-93) is read before this attempt's own beat: an attempt that
     // finds no worker is the one whose heartbeat creates it, so nothing it asks before that beat
@@ -1094,18 +1401,16 @@ export class Runner {
     // first ask of one Baton may hold no secret for, so it is a registration attempt too.
     let beating = false;
     if (worker == null) { await this.tick(); beating = true; }
-    // A claim the state file still names with nothing in flight is an orphan — a restart, or an
-    // end the network ate. It is ended (its resume record already says why) rather than held:
-    // Baton would refuse every claim of this worker otherwise (rule 3, one claim per worker).
-    const orphan = this.state.get().claim;
-    if (orphan && !this.inflight) {
-      this.log(`baton: ending the orphaned claim ${orphan.id} on ${orphan.ticket_id} before claiming`);
-      this.state.set({ claim: null });
-      await this.endQuietly(orphan.id, { end_reason: 'released:lease-lost', next: null });
-    }
+    // R-BTN-72 (B-188): the claims the state file named when this process started — reattached
+    // within the lease when the executor can, else ended — before any claim of this process.
+    await this.settlePersisted();
+    // One claim at a time: a reattached claim is this attempt's run (`runOnce` awaits it).
+    if (this.concurrency === 1 && this.resumed.length) return null;
     // B-229: and what this host's earlier sessions still hold — each start is a new session with
     // a new state file, so the orphan above never sees them.
     await this.endEarlierSessions();
+    // R-BTN-4 (B-188): no room — the runner holds its bound.
+    if (this.slots.size >= this.concurrency) return null;
     // B-86: the claim goes out only on the declaration the server holds — `sent` is the list the
     // last answered beat carried, which is what `rewriteSettings` recorded. A runner whose grant
     // arrived on a beat that declared nothing must beat once more before claiming (review round
@@ -1158,18 +1463,20 @@ export class Runner {
       if (!stray) this.log(`baton: no recommendation (${e.message})`);
     }
     let claim: Record<string, any>;
+    const requestId = `run-${randomBytes(8).toString('hex')}`;
+    this.claimsOut++;
     try {
-      claim = await this.o.api.claim({ request_id: `run-${randomBytes(8).toString('hex')}`, ...(wanted ? { ticket_id: wanted } : {}) });
+      claim = await this.o.api.claim({ request_id: requestId, ...(wanted ? { ticket_id: wanted } : {}) });
     } catch (e) {
       // B-106 (R-BTN-178): a refused claim releases the locks it would have used — the machine's
-      // singleton is not held by an idle runner.
-      if (this.locks && e instanceof BatonRefusal) this.locks.releaseAll();
+      // singleton is not held by an idle runner (B-188: nor taken from a claim's running leg).
+      if (this.locks && e instanceof BatonRefusal) this.locks.releaseAll((c) => this.lockHeldByLive(c, null));
       if (e instanceof BatonRefusal && e.code === 'no-eligible-ticket') return null;
       if (e instanceof BatonRefusal && e.code === 'not-eligible' && /already held|worker-holds/.test(e.message)) {
         // The worker still holds a claim Baton knows and this runner does not (its state was
         // lost with the container): the heartbeat's claim view named it, so end it loudly
         // rather than idling on the refusal forever.
-        const held = this.state.get().claim;
+        const held = this.slots.size === 0 ? this.state.get().claim : null;
         this.log(`baton: the claim was refused — this worker still holds ${held ? `claim ${held.id}` : 'a claim'} (${e.message})`);
         if (held) {
           this.state.set({ claim: null });
@@ -1177,13 +1484,24 @@ export class Runner {
         }
         return null;
       }
+      // R-BTN-4 (B-188): `max-claims` among them — the runner is at its bound for now.
       if (e instanceof BatonRefusal && e.code === 'not-eligible') return null;
       throw e;
+    } finally {
+      this.claimsOut--;
     }
     this.epoch++;
     const ticket = claim.ticket_id as string;
     const claimId = claim.claim_id as number;
-    this.state.set({ claim: { id: claimId, ticket_id: ticket, nonce: claim.nonce } });
+    // R-BTN-4 (B-188): the claim's slot is held from here — before any await, so no beat can
+    // read a claim Baton granted as one this runner does not hold.
+    const slot = this.newSlot();
+    slot.claimId = claimId;
+    slot.ticket = ticket;
+    slot.nonce = String(claim.nonce ?? '');
+    slot.requestId = requestId;
+    this.slots.add(slot);
+    this.writeClaims();
     // B-127 item 7: the brief's mark, posted whether or not signed control is required — an
     // unsigned `**Brief:** the owner …` line is a claim, not the owner (the standing CLAUDE.md
     // rule), and the log says so before any agent is told to read the ticket. B-126
@@ -1194,7 +1512,127 @@ export class Runner {
     this.log(`baton: claimed ${ticket} at ${claim.station}, queued leg ${claim.legs?.[0]}${this.verbose ? ` (claim ${claimId}, nonce ${claim.nonce})` : ''}`
       + (brief ? ` — brief ${brief.signed ? 'owner-signed' : `unsigned (changed at ${String(brief.commit).slice(0, 8)}): a claim, not the owner`}` : '')
       + (wrote?.pusher ? ` — ticket last written by ${wrote.pusher}${wrote.commit ? ` at ${String(wrote.commit).slice(0, 8)}` : ''}` : ''));
-    return this.runClaim(claim);
+    return { claim, slot };
+  }
+
+  /** B-188: a fresh slot — in the home checkout at one claim, else in a free clone of its own. */
+  private newSlot(at?: string): Slot {
+    if (this.concurrency === 1) return new Slot(at ?? this.o.home);
+    if (at != null && at !== this.o.home) {
+      const n = Number(basename(at));
+      const slot = new Slot(at);
+      if (resolve(dirname(at)) === resolve(this.clonesDir()) && Number.isInteger(n)) {
+        slot.cloneIndex = n;
+        this.clonesBusy.add(n);
+      }
+      return slot;
+    }
+    let n = 1;
+    while (this.clonesBusy.has(n)) n++;
+    this.clonesBusy.add(n);
+    const slot = new Slot(join(this.clonesDir(), String(n)));
+    slot.cloneIndex = n;
+    return slot;
+  }
+
+  /** B-188: where the clones live — `clonesDir`, else beside the state file, keyed by the home. */
+  private clonesDir(): string {
+    return this.o.clonesDir ?? join(dirname(this.o.stateFile), 'clones', createHash('sha1').update(resolve(this.o.home)).digest('hex').slice(0, 12));
+  }
+
+  /** B-188: one claim's whole run, bound to its slot — the slot is let go, its clone freed and
+   *  the state file's claims rewritten when it ends, whatever ended it. */
+  private async runInSlot(claim: Record<string, any>, slot: Slot, resume?: Resume): Promise<ClaimOutcome> {
+    try {
+      return await this.als.run(slot, () => this.runClaim(claim, resume));
+    } finally {
+      slot.ended = true;
+      this.slots.delete(slot);
+      for (const [c, owner] of [...this.lockOwners]) if (owner === slot) this.lockOwners.delete(c);
+      if (slot.cloneIndex != null) this.clonesBusy.delete(slot.cloneIndex);
+      this.writeClaims();
+      this.roomMade = true;
+    }
+  }
+
+  /** B-106, B-188: whether a machine lock is held for another claim's leg than `except`'s. */
+  private lockHeldByLive(capability: string, except: Slot | null): boolean {
+    const owner = this.lockOwners.get(capability);
+    return owner != null && owner !== except && this.slots.has(owner) && !owner.ended;
+  }
+
+  /** R-BTN-72 (B-188): the claims this process found in its state file, settled once before its
+   *  first claim. A claim written before B-188 (`claim` alone), or any when the lease had already
+   *  lapsed, is an orphan, ended `released:lease-lost` as before. Within the lease, a claim Baton
+   *  still lists is reattached when the executor can reach its leg's session — the persisted
+   *  secret was resumed, never re-keyed — and its leg carries on; one it cannot reach is ended
+   *  `released:cannot-finish:transient`. One Baton no longer lists is let go. */
+  private settledPersisted = false;
+  private async settlePersisted(): Promise<void> {
+    if (this.settledPersisted) return;
+    this.settledPersisted = true;
+    for (const p of [...this.persisted]) {
+      const drop = () => {
+        this.persisted = this.persisted.filter((x) => x.id !== p.id);
+        this.writeClaims();
+      };
+      if (this.legacy.has(p.id) || !this.startedInLease) {
+        this.log(`baton: ending the orphaned claim ${p.id} on ${p.ticket_id} before claiming`);
+        drop();
+        await this.endQuietly(p.id, { end_reason: 'released:lease-lost', next: null });
+        continue;
+      }
+      if (this.answerClaims != null && !this.answerClaims.has(p.id)) {
+        this.log(`baton: claim ${p.id} on ${p.ticket_id}, held before this restart, is no longer Baton's to give back — let go`);
+        drop();
+        continue;
+      }
+      const reattached = await this.reattach(p);
+      if ('handle' in reattached) {
+        const slot = this.newSlot(p.checkout ?? this.o.home);
+        slot.claimId = p.id;
+        slot.ticket = p.ticket_id;
+        slot.nonce = p.nonce;
+        slot.requestId = p.request_id;
+        this.epoch++;
+        this.slots.add(slot);
+        this.persisted = this.persisted.filter((x) => x.id !== p.id);
+        this.writeClaims();
+        this.log(`baton: reattached to claim ${p.id} on ${p.ticket_id}'s ${p.leg} (session ${String(p.handle?.session_id ?? '?')}) after the restart — it carries on (R-BTN-72)`);
+        const task = this.track(this.runInSlot(reattached.claim, slot, {
+          leg: p.leg!, at: p.at!, runId: p.run_id ?? null, seq: p.seq ?? null, ctx: p.ctx!, handle: reattached.handle,
+        }));
+        if (this.concurrency === 1) this.resumed.push(task);
+        continue;
+      }
+      this.log(`baton: claim ${p.id} on ${p.ticket_id} was held before this restart and its leg cannot be reattached (${reattached.why}) — ending it released:cannot-finish:transient (R-BTN-72)`);
+      drop();
+      await this.endQuietly(p.id, { end_reason: 'released:cannot-finish:transient', next: null });
+    }
+  }
+
+  /** R-BTN-72 (B-188): reconnect to a persisted claim's running leg — the executor's `reattach`
+   *  over the handle its state kept, and the claim's answer again by its `request_id` (the same
+   *  claim, G-BTN-2) — or why not. */
+  private async reattach(p: PersistedClaim): Promise<{ handle: Handle; claim: Record<string, any> } | { why: string }> {
+    const reattach = this.executor.reattach;
+    if (typeof reattach !== 'function') return { why: `the ${this.executor.source} executor offers no reattach` };
+    if (!p.handle || !p.leg || !p.at || !p.ctx || !p.request_id) return { why: 'no leg session was running' };
+    let handle: Handle | null;
+    try {
+      handle = await reattach.call(this.executor, p.handle);
+    } catch (e) {
+      return { why: `the executor's reattach failed (${msg(e)})` };
+    }
+    if (handle == null) return { why: 'the executor cannot reach its session' };
+    try {
+      const claim = await this.o.api.claim({ request_id: p.request_id });
+      if (claim?.claim_id !== p.id) throw new Error(`the request answered claim ${String(claim?.claim_id)}`);
+      return { handle, claim };
+    } catch (e) {
+      await this.executor.stop(handle, 'cannot-resume').catch(() => {});
+      return { why: `the claim's answer could not be read again (${msg(e)})` };
+    }
   }
 
   /** The course a claim runs (B-103, §11's claim answer): the one its answer names — `course_id`, the ticket's
@@ -1232,8 +1670,9 @@ export class Runner {
    *  rather than run with no re-verification (round 1).
    *
    *  B-190 (R-BTN-84): a read that succeeded is also the claim's recorded read — its digest
-   *  joins the run's inputs (`leg_run_inputs`), so replay re-reads the same way and compares. */
-  private async verifyTicketVersion(claim: Record<string, any>, scratch: string): Promise<{ why: string | null; read: { version: string; read_digest: string } | null }> {
+   *  joins the run's inputs (`leg_run_inputs`), so replay re-reads the same way and compares.
+   *  B-252: the read's `ticket` rides back too, for a pathless ticket's leg file (below). */
+  private async verifyTicketVersion(claim: Record<string, any>, scratch: string): Promise<{ why: string | null; read: { version: string; read_digest: string } | null; ticket?: unknown }> {
     const version = typeof claim.version === 'string' ? claim.version : '';
     const how = (claim.ticket_source ?? null) as { versions?: string | null } | null;
     if (version === '' || how?.versions == null) return { why: null, read: null };
@@ -1250,14 +1689,14 @@ export class Runner {
     const id = bareTicketId({ id: claim.ticket_id as string });
     try {
       if (src.versions === 'pinned') {
-        const out = await read(id, { version, checkout: this.o.home });
+        const out = await read(id, { version, checkout: this.checkout });
         if (out == null || out.ticket == null) return { why: `the ticket cannot be read at its version ${version.slice(0, 16)}`, read: null };
-        return { why: null, read: { version, read_digest: digestOfRead(out.ticket) } };
+        return { why: null, read: { version, read_digest: digestOfRead(out.ticket) }, ticket: out.ticket };
       }
-      const out = await read(id, { checkout: this.o.home });
+      const out = await read(id, { checkout: this.checkout });
       if (out == null) return { why: 'the ticket source no longer reads the ticket', read: null };
       if (out.version !== version) return { why: `the ticket's version is ${typeof out.version === 'string' && out.version !== '' ? out.version.slice(0, 16) : '(none)'}, the claim's ${version.slice(0, 16)}`, read: null };
-      return { why: null, read: { version, read_digest: digestOfRead(out.ticket) } };
+      return { why: null, read: { version, read_digest: digestOfRead(out.ticket) }, ticket: out.ticket };
     } catch (e) {
       return { why: `the ticket source's read failed (${msg(e)})`, read: null };
     }
@@ -1265,7 +1704,7 @@ export class Runner {
 
   /** §4.5 (R-BTN-74) through the executor: the source's `versions` and `read`, each a wrapper call
    *  in one `source` session, stopped when the check ends. Same answers as the in-process check. */
-  private async verifyBySource(file: string, claim: Record<string, any>, version: string, scratch: string): Promise<{ why: string | null; read: { version: string; read_digest: string } | null }> {
+  private async verifyBySource(file: string, claim: Record<string, any>, version: string, scratch: string): Promise<{ why: string | null; read: { version: string; read_digest: string } | null; ticket?: unknown }> {
     let handle: Handle;
     try {
       handle = await this.startSession('source', { session_id: `source-${randomBytes(6).toString('hex')}`, snapshot_sha: String(claim.snapshot_sha ?? ''), paths: [scratch], env: this.baseEnv() });
@@ -1291,14 +1730,14 @@ export class Runner {
       const id = bareTicketId({ id: claim.ticket_id as string });
       try {
         if (v.versions === 'pinned') {
-          const out = await call('read', [id, { version, checkout: this.o.home }]) as { ticket?: unknown } | null;
+          const out = await call('read', [id, { version, checkout: this.checkout }]) as { ticket?: unknown } | null;
           if (out == null || out.ticket == null) return { why: `the ticket cannot be read at its version ${version.slice(0, 16)}`, read: null };
-          return { why: null, read: { version, read_digest: digestOfRead(out.ticket) } };
+          return { why: null, read: { version, read_digest: digestOfRead(out.ticket) }, ticket: out.ticket };
         }
-        const out = await call('read', [id, { checkout: this.o.home }]) as { version?: unknown; ticket?: unknown } | null;
+        const out = await call('read', [id, { checkout: this.checkout }]) as { version?: unknown; ticket?: unknown } | null;
         if (out == null) return { why: 'the ticket source no longer reads the ticket', read: null };
         if (out.version !== version) return { why: `the ticket's version is ${typeof out.version === 'string' && out.version !== '' ? out.version.slice(0, 16) : '(none)'}, the claim's ${version.slice(0, 16)}`, read: null };
-        return { why: null, read: { version, read_digest: digestOfRead(out.ticket) } };
+        return { why: null, read: { version, read_digest: digestOfRead(out.ticket) }, ticket: out.ticket };
       } catch (e) {
         return { why: `the ticket source's read failed (${msg(e)})`, read: null };
       }
@@ -1316,11 +1755,19 @@ export class Runner {
     const locks = this.locks;
     if (!locks) return true;
     const needed = (course.graph.legs.get(leg)?.requires ?? []).filter((c) => locks.manages(c));
+    const slot = this.cur;
     let ok = true;
     for (const capability of needed) {
-      if (!(await locks.take(capability))) ok = false;
+      // B-188: one machine's singleton is one leg's, whichever claim runs it — another claim's
+      // leg holding it is a lock this claim cannot take.
+      if (this.lockHeldByLive(capability, slot)) ok = false;
+      else if (!(await locks.take(capability))) ok = false;
+      else this.lockOwners.set(capability, slot);
     }
-    locks.releaseAll((c) => needed.includes(c));
+    // Released: what this claim's earlier leg needed and this one does not — never a lock
+    // another claim's leg holds.
+    locks.releaseAll((c) => needed.includes(c) || this.lockHeldByLive(c, slot));
+    for (const [c, owner] of [...this.lockOwners]) if (owner === slot && !needed.includes(c)) this.lockOwners.delete(c);
     if (!ok) {
       this.log(`baton: ${leg} requires a lock another process on this machine holds — the claim suspends rather than run it (R-BTN-178)`);
       return false;
@@ -1432,7 +1879,7 @@ export class Runner {
   private readRefs(): RefState | null {
     const read = this.o.auditRefs ?? ((home: string) => readRefState((args) => git(home, args)));
     try {
-      return read(this.o.home);
+      return read(this.checkout);
     } catch (e) {
       this.log(`baton: the scope audit could not read the checkout's refs (${msg(e)}) — the audit is skipped for this leg`);
       return null;
@@ -1465,7 +1912,7 @@ export class Runner {
     this.log(`baton: ${ticket}'s ${leg} pushed outside its ticket's scope: ${outside.map((a) => `${a.target}${a.ref ? ` (${a.ref})` : ''}`).join(', ')} — reported with the leg's finish (B-134)`);
   }
 
-  private async runClaim(claim: Record<string, any>): Promise<ClaimOutcome> {
+  private async runClaim(claim: Record<string, any>, reattached?: Resume): Promise<ClaimOutcome> {
     const claimId = claim.claim_id as number;
     const ticket = claim.ticket_id as string;
     let course: CourseLoad | null = null;
@@ -1512,17 +1959,32 @@ export class Runner {
       const courseSha = typeof signedControl.course === 'string' && signedControl.course !== '' ? signedControl.course : claim.snapshot_sha as string;
       course = loadCourse(this.o.home, courseSha, this.claimCourse(claim));
       // B-228: the legs start from the snapshot's code — the home fast-forwarded to it when it
-      // can be; otherwise it runs as it stands, and the log says why.
-      let stays: string | null;
-      try {
-        stays = advanceHome(this.o.home, claim.snapshot_sha, typeof claim.default_branch === 'string' && claim.default_branch !== '' ? claim.default_branch : null);
-      } catch (e) {
-        stays = `the fast-forward failed (${msg(e)})`;
+      // can be; otherwise it runs as it stands, and the log says why. A reattached leg's tree is
+      // its running session's, and a claim in a clone of its own is put there below (B-188).
+      if (!reattached && this.checkout === this.o.home) {
+        let stays: string | null;
+        try {
+          stays = advanceHome(this.o.home, claim.snapshot_sha, typeof claim.default_branch === 'string' && claim.default_branch !== '' ? claim.default_branch : null);
+        } catch (e) {
+          stays = `the fast-forward failed (${msg(e)})`;
+        }
+        if (stays) this.log(`baton: the home stays at its own commit for ${ticket}, not the snapshot ${String(claim.snapshot_sha).slice(0, 10)}: ${stays}`);
       }
-      if (stays) this.log(`baton: the home stays at its own commit for ${ticket}, not the snapshot ${String(claim.snapshot_sha).slice(0, 10)}: ${stays}`);
     } catch (e) {
       this.log(`baton: the claim's course would not load (${msg(e)})`);
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+    }
+    // R-BTN-72 (B-188): a claim beside others works in a clone of its own — its own git dir, put
+    // at the snapshot — so concurrent legs never write one tree, and its audit reads its own refs.
+    if (!reattached && this.checkout !== this.o.home) {
+      try {
+        await prepareClone(this.o.home, this.checkout, String(claim.snapshot_sha), typeof claim.default_branch === 'string' && claim.default_branch !== '' ? claim.default_branch : null);
+      } catch (e) {
+        this.log(`baton: ${ticket}'s checkout ${this.checkout} could not be prepared (${msg(e)})`);
+        dropCourse(course.scratch);
+        return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+      }
+      if (this.verbose) this.log(`baton: ${ticket} works in its own clone ${this.checkout} (R-BTN-72)`);
     }
     const scratch = claimScratch();
     // B-183 (§4.5, R-BTN-5/R-BTN-34): re-verify the ticket by its version before any leg runs.
@@ -1532,12 +1994,25 @@ export class Runner {
     // file-less cases (check tickets, a `cancel` claim) carry no version and are re-verified
     // against Baton's record as before. B-190: a read that succeeded is the claim's recorded
     // read — its digest joins every run's inputs (R-BTN-84), reported on each advance.
-    const versionCheck = await this.verifyTicketVersion(claim, course.scratch);
+    const versionCheck = reattached ? { why: null, read: null } as Awaited<ReturnType<Runner['verifyTicketVersion']>> : await this.verifyTicketVersion(claim, course.scratch);
     if (versionCheck.why != null) {
       this.log(`baton: ${ticket}'s ticket moved under the claim — ${versionCheck.why}`);
       dropCourse(course.scratch);
       rmSync(scratch, { recursive: true, force: true });
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+    }
+    // B-252 (R-BTN-74): a ticket with no `path` has no file in the checkout for the legs to read.
+    // When the source's read handed its ticket back as text — the markdown a pathless source
+    // returns, its frontmatter the markdown source's keys — that text is the legs' ticket file:
+    // written once, mode 0600, into the claim's scratch (every leg session's path, removed at
+    // the claim's end) and named to each leg as `ctx.ticket.file`. A ticket with a path, the
+    // markdown source's every ticket, gets no file and its ctx is unchanged.
+    let ticketFile: string | null = null;
+    const resumedFile = (reattached?.ctx.ticket as { file?: unknown } | undefined)?.file;
+    if (typeof resumedFile === 'string') ticketFile = resumedFile;
+    else if ((claim.path == null || claim.path === '') && typeof versionCheck.ticket === 'string') {
+      ticketFile = join(scratch, 'ticket.md');
+      writeFileSync(ticketFile, versionCheck.ticket, { mode: 0o600 });
     }
     this.inflight = { claimId, ticket, course, leg: null, legAt: this.now(), child: null, waiters: [] };
     this.closedDone = false;
@@ -1560,9 +2035,11 @@ export class Runner {
       ? claim.scope as string[] : null;
     this.auditWindow = this.auditScope == null ? null : this.readRefs();
     // The first leg is the claim response's queued leg (R-BTN-83); the first advance starts it.
-    let legName = (claim.legs?.[0] ?? null) as string | null;
-    let at = claim.station as string;
+    let legName = (reattached?.leg ?? claim.legs?.[0] ?? null) as string | null;
+    let at = (reattached?.at ?? claim.station) as string;
     let nextLegs = (claim.next ?? []) as NextLegs;
+    // R-BTN-72 (B-188): a reattached leg is already running — its first pass waits for it.
+    let resuming = reattached;
     try {
       if (legName == null) return await this.finish(claimId, { end_reason: 'done', reached: at }, null);
       // B-106 (R-BTN-178): the claim's first leg may require a lock this runner can no longer
@@ -1570,64 +2047,75 @@ export class Runner {
       // grant-less break, a lost state file). The claim suspends at once, touching nothing: no
       // advance, no leg run, and the locks the claim would have used are released.
       if (!(await this.ensureLegLocks(legName, course))) {
-        return await this.finish(claimId, { end_reason: `suspended:${claim.station}`, reached: claim.station, next: legName }, null);
+        if (!reattached) return await this.finish(claimId, { end_reason: `suspended:${claim.station}`, reached: claim.station, next: legName }, null);
+        this.log(`baton: ${ticket}'s reattached ${legName} runs on without its lock (R-BTN-178)`);
       }
-      const firstAnswer = await this.advance(claimId, { leg: legName, ...this.runInputsReport(versionCheck.read) }, at);
-      if ('settle' in firstAnswer) return await this.finish(claimId, firstAnswer.settle, null);
-      at = firstAnswer.station ?? at;
-      nextLegs = (firstAnswer.next ?? nextLegs) as NextLegs;
-      advice = firstAnswer.advice ?? advice;
-      // R-BTN-63 (B-185): the run's id, minted by Baton at the advance that started it.
-      let runId = typeof firstAnswer.run_id === 'string' ? firstAnswer.run_id : null;
-      // §7.5 R-BTN-90 (B-234): the run's `claim_legs.seq`, likewise — the finishing
-      // heartbeat's word when the script returns.
-      this.legSeq = typeof firstAnswer.seq === 'number' ? firstAnswer.seq : null;
+      let runId: string | null = reattached?.runId ?? null;
+      if (reattached) {
+        this.legSeq = reattached.seq;
+        const g = reattached.ctx.snapshot as { path?: { leg: string; reached: string }[]; next?: NextLegs } | undefined;
+        if (Array.isArray(g?.path)) gitPath = g.path;
+        if (Array.isArray(g?.next)) nextLegs = g.next;
+      } else {
+        const firstAnswer = await this.advance(claimId, { leg: legName, ...this.runInputsReport(versionCheck.read) }, at);
+        if ('settle' in firstAnswer) return await this.finish(claimId, firstAnswer.settle, null);
+        at = firstAnswer.station ?? at;
+        nextLegs = (firstAnswer.next ?? nextLegs) as NextLegs;
+        advice = firstAnswer.advice ?? advice;
+        // R-BTN-63 (B-185): the run's id, minted by Baton at the advance that started it.
+        runId = typeof firstAnswer.run_id === 'string' ? firstAnswer.run_id : null;
+        // §7.5 R-BTN-90 (B-234): the run's `claim_legs.seq`, likewise — the finishing
+        // heartbeat's word when the script returns.
+        this.legSeq = typeof firstAnswer.seq === 'number' ? firstAnswer.seq : null;
+      }
       for (;;) {
-        // A drain (2026-10-24): the leg that ran is complete; the claim ends here with its
-        // hand-off and the runner exits without claiming again — SIGTERM's graceful path.
-        if (this.draining) {
-          return await this.finish(claimId, { end_reason: 'released:requested', reached: at, next: legName }, await this.callHandoff(ranScript, ranCtx ?? {}) ?? handoffUrl);
-        }
-        // A signal that landed while no leg was running (a short wait, or the steps between
-        // legs) ends the claim just the same — a release is never dropped (§6.13).
-        const whileWaiting = this.abortSignal();
-        if (whileWaiting) {
-          const reason = whileWaiting.reason ?? `suspended:${at}`;
-          return await this.finish(claimId, { end_reason: reason, reached: at, next: legName }, await this.callHandoff(ranScript, ranCtx ?? {}) ?? handoffUrl);
-        }
-        // §6.13: a leg the latest snapshot shows waiting suspends — unless its wait is one of the
-        // course's short_waits, when the claim is kept and the station is re-read each beat for
-        // up to 30 minutes (R-BTN-40). A signal that landed in the wait ends the claim as the
-        // signal says, never as the suspension it interrupted.
-        const wait = waitState(nextLegs, legName, course.graph.shortWaits);
-        let held: 'cleared' | 'suspend' = wait === 'run' ? 'cleared' : 'suspend';
-        if (wait === 'short') {
-          if (this.inflight) this.inflight.leg = legName;
-          const out = await this.waitOut(legName, course);
-          if (out === 'abort') {
-            const signal = this.abortSignal()!;
-            const reason = signal.reason ?? `suspended:${at}`;
+        if (!resuming) {
+          // A drain (2026-10-24): the leg that ran is complete; the claim ends here with its
+          // hand-off and the runner exits without claiming again — SIGTERM's graceful path.
+          if (this.draining) {
+            return await this.finish(claimId, { end_reason: 'released:requested', reached: at, next: legName }, await this.callHandoff(ranScript, ranCtx ?? {}) ?? handoffUrl);
+          }
+          // A signal that landed while no leg was running (a short wait, or the steps between
+          // legs) ends the claim just the same — a release is never dropped (§6.13).
+          const whileWaiting = this.abortSignal();
+          if (whileWaiting) {
+            const reason = whileWaiting.reason ?? `suspended:${at}`;
             return await this.finish(claimId, { end_reason: reason, reached: at, next: legName }, await this.callHandoff(ranScript, ranCtx ?? {}) ?? handoffUrl);
           }
-          if (out === 'lost') {
-            // The lease went while the wait held it: stop at once, no hand-off (R-BTN-24).
-            return await this.finish(claimId, { end_reason: 'released:lease-lost', reached: at, next: legName }, null);
+          // §6.13: a leg the latest snapshot shows waiting suspends — unless its wait is one of the
+          // course's short_waits, when the claim is kept and the station is re-read each beat for
+          // up to 30 minutes (R-BTN-40). A signal that landed in the wait ends the claim as the
+          // signal says, never as the suspension it interrupted.
+          const wait = waitState(nextLegs, legName, course.graph.shortWaits);
+          let held: 'cleared' | 'suspend' = wait === 'run' ? 'cleared' : 'suspend';
+          if (wait === 'short') {
+            if (this.inflight) this.inflight.leg = legName;
+            const out = await this.waitOut(legName, course);
+            if (out === 'abort') {
+              const signal = this.abortSignal()!;
+              const reason = signal.reason ?? `suspended:${at}`;
+              return await this.finish(claimId, { end_reason: reason, reached: at, next: legName }, await this.callHandoff(ranScript, ranCtx ?? {}) ?? handoffUrl);
+            }
+            if (out === 'lost') {
+              // The lease went while the wait held it: stop at once, no hand-off (R-BTN-24).
+              return await this.finish(claimId, { end_reason: 'released:lease-lost', reached: at, next: legName }, null);
+            }
+            held = out === 'cleared' ? 'cleared' : 'suspend';
           }
-          held = out === 'cleared' ? 'cleared' : 'suspend';
+          if (held === 'suspend') {
+            // §6.13: the hand-off of the leg that ran comes before the suspension (R-BTN-44).
+            const url = await this.callHandoff(ranScript, ranCtx ?? {}) ?? handoffUrl;
+            return await this.finish(claimId, { end_reason: `suspended:${at}`, reached: at, next: legName }, url);
+          }
+          if (this.closedDone) return await this.finish(claimId, { end_reason: 'done', reached: at }, handoffUrl);
         }
-        if (held === 'suspend') {
-          // §6.13: the hand-off of the leg that ran comes before the suspension (R-BTN-44).
-          const url = await this.callHandoff(ranScript, ranCtx ?? {}) ?? handoffUrl;
-          return await this.finish(claimId, { end_reason: `suspended:${at}`, reached: at, next: legName }, url);
-        }
-        if (this.closedDone) return await this.finish(claimId, { end_reason: 'done', reached: at }, handoffUrl);
         // B-108: the leg's own start — its clock (the beat's liveness line) and a fresh drain.
         if (this.inflight) { this.inflight.leg = legName; this.inflight.legAt = this.now(); }
         this.legLineAt = null;
-        const run = runNumber(course.graph, gitPath, legName, own);
+        const run = resuming && typeof resuming.ctx.run === 'number' ? resuming.ctx.run : runNumber(course.graph, gitPath, legName, own);
         own.push(legName);
-        const ctx = {
-          ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}) },
+        const ctx: Record<string, unknown> = resuming ? resuming.ctx : {
+          ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}), ...(ticketFile != null ? { file: ticketFile } : {}) },
           claim: { id: claimId, nonce: claim.nonce, station: at },
           leg: legName, run, ...(runId ? { run_id: runId } : {}),
           snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
@@ -1642,10 +2130,16 @@ export class Runner {
           // to the branch the sync reads whatever branch this checkout is on.
           ...(typeof claim.default_branch === 'string' && claim.default_branch !== '' ? { default_branch: claim.default_branch } : {}),
           handoff: handoffUrl, resume, advice,
-          checkout: this.o.home, session,
+          checkout: this.checkout, session,
           state: this.o.stateFile, worker: this.state.get().worker_id,
         };
-        const outcome = await this.runLeg(course, legName, ctx, scratch);
+        const outcome = resuming ? await this.reattachedLeg(course, legName, resuming.handle) : await this.runLeg(course, legName, ctx, scratch);
+        resuming = undefined;
+        // R-BTN-72 (B-188): the run is over — nothing of it is left for a restart to reattach to.
+        if (this.cur.place.handle) {
+          this.cur.place = {};
+          if (this.slots.has(this.cur)) this.writeClaims();
+        }
         const script = course.scripts.get(legName) ?? null;
         if (outcome.kind !== 'lease-lost' && outcome.kind !== 'missing') {
           ranScript = script;
@@ -1790,7 +2284,7 @@ export class Runner {
    *  hands the runner any), and the home checkout's head: where replay checks the ticket's code
    *  out. Reported at the run's start, stored in `leg_run_inputs` and on the run's row. */
   private runInputsReport(read: { version: string; read_digest: string } | null): { run_inputs: { ticket?: { version: string; read_digest: string }; inputs: [] }; head_sha: string | null } {
-    const head = readHead(this.o.home);
+    const head = readHead(this.checkout);
     return {
       run_inputs: { ...(read ? { ticket: read } : {}), inputs: [] },
       head_sha: /^[0-9a-f]{40}$/.test(head) ? head : null,
@@ -1823,7 +2317,7 @@ export class Runner {
   private async waitOut(leg: string, course: CourseLoad): Promise<'cleared' | 'spent' | 'abort' | 'lost'> {
     const waitedSince = this.now();
     for (;;) {
-      if (this.lostLease || leaseLostFrom(this.state.get(), this.now())) return 'lost';
+      if (this.claimLost() || leaseLostFrom(this.state.get(), this.now())) return 'lost';
       if (this.pendingAbort) return 'abort';
       const shown = await new Promise<NextLegs | null>((resolve) => {
         if (!this.inflight) return resolve(null);
@@ -1868,7 +2362,9 @@ export class Runner {
     }
     if (channel) {
       this.legChannel = channel;
-      channel.listen((req) => this.onChannel(req, course, leg, ctx));
+      // B-188: the channel's requests are this claim's, whatever context the socket calls from.
+      const slot = this.cur;
+      channel.listen((req) => this.als.run(slot, () => this.onChannel(req, course, leg, ctx)));
     }
     // Detached: its own process group, so a lost lease kills the leg and everything it started
     // (§6.13) without touching the runner. The env names the parent every leg session checks
@@ -1940,7 +2436,10 @@ export class Runner {
     // R-BTN-195: the ending a joinable session posts on its channel — `end(handle)` resolves at
     // it (R-BTN-107), so the runner hands it to the session.
     handle.posted = channel ? channel.posted : null;
-    this.session = { handle, checkout: this.o.home };
+    this.session = { handle, checkout: this.checkout };
+    // R-BTN-72 (B-188): what a restart within the lease reattaches with — the run, the
+    // executor's handle (its data) and the leg's place.
+    this.persistPlace(handle, leg, ctx);
     // R-BTN-113/R-BTN-195 (B-234): Baton holds the link before the leg can ask a person into
     // its session — a beat carrying this run's link answers first, so the leg's first
     // `interact` cannot race the beat that lands it. Raised before any beat carried the link,
@@ -1987,7 +2486,7 @@ export class Runner {
       const timer = setInterval(() => {
         // R-BTN-26: the fence computes the lease itself from the state file — the wall clock
         // against `last_ok` — never trusting only the sidecar's flag.
-        if (leaseLostFrom(this.state.get(), this.now()) || this.lostLease || this.stopped) {
+        if (leaseLostFrom(this.state.get(), this.now()) || this.claimLost() || this.stopped) {
           clearInterval(timer);
           resolve();
         }
@@ -1996,7 +2495,7 @@ export class Runner {
       void exited.then(() => clearInterval(timer));
     });
     await Promise.race([exited, lost, ...(postedRace ? [postedRace] : []), signalled]);
-    if (postedBox.ending != null && !done && !this.lostLease) {
+    if (postedBox.ending != null && !done && !this.claimLost()) {
       // R-BTN-107/R-BTN-195: a session that does not exit when its agent is done ends at the
       // result posted on its channel — `end` resolves there — and the runner then stops it,
       // whether or not a person is in it. The close and hand-off that follow run in a fresh
@@ -2008,7 +2507,7 @@ export class Runner {
       this.log(`baton: ${inflight.ticket}'s ${leg} ended at the result posted on its channel — the session is stopped (R-BTN-195)`);
       return { kind: 'ok', result: postedBox.ending.result };
     }
-    if (!done && this.abortSignal() != null && !this.lostLease) {
+    if (!done && this.abortSignal() != null && !this.claimLost()) {
       // A release (the claim's deadline among its reasons, R-BTN-90) reached a session that
       // neither exited nor posted: kill it, stop its session, and let the loop's abort branch
       // end the claim with the signal's reason — the unjoined ask's own end (R-BTN-195).
@@ -2019,7 +2518,7 @@ export class Runner {
       release();
       return { kind: 'crashed', error: `the leg's session was asked to stop (${signal.reason ?? signal.signal}) and neither exited nor posted its result` };
     }
-    if (!done || this.lostLease) {
+    if (!done || this.claimLost()) {
       // The lease went (or the runner stops): kill the leg at once, no hand-off — the resume
       // record covers it (R-BTN-24) — and stop its session.
       this.killGroup(inflight.child);
@@ -2037,6 +2536,73 @@ export class Runner {
     // A crashed leg's error is its own text (the thrown message the wrapper printed), masked
     // here — where the set lives — so the log it reaches carries no literal of the leg's env.
     return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: maskLegOutput(out.error ?? 'the leg script failed', legSecrets) };
+  }
+
+  /** R-BTN-72 (B-188): the running leg's place in the state file, for a reattach. */
+  private persistPlace(handle: Handle, leg: string, ctx: Record<string, unknown>): void {
+    let data: Record<string, unknown> | null = null;
+    try {
+      data = JSON.parse(JSON.stringify({ ...handle, posted: undefined })) as Record<string, unknown>;
+    } catch {
+      data = null; // a handle that is not data: nothing a restart could reattach with
+    }
+    this.cur.place = {
+      run_id: typeof ctx.run_id === 'string' ? ctx.run_id : null, seq: this.legSeq, leg,
+      at: String((ctx.claim as { station?: unknown } | undefined)?.station ?? ''), handle: data, ctx,
+    };
+    if (this.slots.has(this.cur)) this.writeClaims();
+  }
+
+  /** R-BTN-72 (B-188): a leg reattached after a restart — its session found again by the
+   *  executor, its channel served again at the same address, and its end awaited as any run's:
+   *  the session's posted or final result is the leg's, checked as any result is. A lost lease
+   *  or claim stops it, no hand-off; a release stops it after the grace, as a leg that will not
+   *  take its release is stopped. */
+  private async reattachedLeg(course: CourseLoad, leg: string, handle: Handle): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'lease-lost' }> {
+    let channel: LegChannel | null = null;
+    try {
+      channel = await LegChannel.serve(channelPath(this.o.stateFile, handle.session_id));
+      const slot = this.cur;
+      channel.listen((req) => this.als.run(slot, () => this.onChannel(req, course, leg, (this.cur.place.ctx ?? {}) as Record<string, unknown>)));
+      this.legChannel = channel;
+    } catch (e) {
+      this.log(`baton: the reattached leg's channel could not serve (${msg(e)}) — the leg runs on with no way to raise (R-BTN-106)`);
+    }
+    handle.posted = channel ? channel.posted : null;
+    this.session = { handle, checkout: this.checkout };
+    if (typeof handle.link === 'string' && handle.link !== '') {
+      this.legSessionUrl = handle.link;
+      this.sessionLinkSeq++;
+    }
+    const ended = this.executor.end(handle).then((r) => ({ r }), (e: unknown) => ({ e }));
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let signalledAt: number | null = null;
+    const stop = new Promise<'lost' | 'signal'>((resolve) => {
+      timer = setInterval(() => {
+        if (leaseLostFrom(this.state.get(), this.now()) || this.claimLost() || this.stopped) resolve('lost');
+        else if (this.pendingAbort != null) {
+          signalledAt ??= this.now();
+          if (this.now() - signalledAt >= (this.o.signalGraceMs ?? SIGNAL_GRACE_MS)) resolve('signal');
+        }
+      }, Math.min(200, this.o.beatEvery));
+    });
+    const first = await Promise.race([ended, stop]);
+    if (timer) clearInterval(timer);
+    if (first === 'lost') {
+      await this.stopSession('lease-lost');
+      return { kind: 'lease-lost' };
+    }
+    if (first === 'signal') {
+      await this.stopSession(`signal:${this.pendingAbort?.signal ?? 'release'}`);
+      return { kind: 'crashed', error: `the reattached leg's session was asked to stop (${this.pendingAbort?.reason ?? 'release'}) and did not end` };
+    }
+    if ('e' in first) return { kind: 'crashed', error: `the reattached leg's session could not be awaited (${msg(first.e)})` };
+    const result = first.r.result;
+    if (result == null) return { kind: 'crashed', error: 'the reattached leg ended with no result' };
+    // The session's result is the wrapper's outcome or the leg's own result (R-BTN-107).
+    const out = typeof result === 'object' && typeof (result as { ok?: unknown }).ok === 'boolean' ? result as { ok: boolean; result?: unknown; error?: string } : null;
+    if (out) return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: maskLegOutput(out.error ?? 'the leg script failed', this.legSecrets) };
+    return { kind: 'ok', result };
   }
 
   /**
@@ -2159,7 +2725,7 @@ export class Runner {
     // (both always precede this call), so a push either of them made is the leg's, inside the
     // window, not after it.
     this.auditLeg();
-    const ticket = this.state.get().claim?.ticket_id ?? this.inflight?.ticket ?? '';
+    const ticket = this.cur.ticket || (this.inflight?.ticket ?? this.state.get().claim?.ticket_id ?? '');
     // B-134: the end carries the leg's scope audit the same way — the advance that finished the
     // leg clears it once it has delivered it — with the count of the actions beyond its
     // sixteen, parked beside them.
@@ -2180,7 +2746,7 @@ export class Runner {
         // A 5xx is a Baton that could not answer, not one that refused: park it like a
         // transport failure, or the orphan path would re-end the claim with another reason.
         this.log(`baton: the end of ${ticket} did not reach Baton (${e.message}) — retried on every beat`);
-        this.pendingEnd = { claimId, body };
+        this.pendingEnds.set(claimId, body);
       } else if (e instanceof BatonRefusal && refusalKind(e.ruleCode) === 'contract-output' && !String(body.end_reason).startsWith('released:')) {
         // R-BTN-109: a completed end whose outputs fail its station's entry gives the leg up, as
         // a refused advance does — an output contract failure (R-BTN-82).
@@ -2190,21 +2756,30 @@ export class Runner {
         throw e;
       } else {
         this.log(`baton: the end of ${ticket} did not reach Baton (${msg(e)}) — retried on every beat`);
-        this.pendingEnd = { claimId, body };
+        this.pendingEnds.set(claimId, body);
       }
     }
-    for (const id of this.toAck.splice(0)) await this.o.api.ack(id).catch(() => {});
-    this.state.set({ claim: null });
+    const slot = this.cur;
+    slot.ended = true;
+    for (const id of [...slot.toAck.splice(0), ...this.toAck.splice(0)]) await this.o.api.ack(id).catch(() => {});
+    // B-188: the state file holds the claims still held — this one no longer.
+    if (this.slots.has(slot)) this.writeClaims();
+    else this.state.set({ claim: null });
     // R-BTN-113 (B-4): the run's link is spent with its claim — never carried into another.
     this.legSessionUrl = null;
     this.sessionLinkLanded = false;
     // B-106 (R-BTN-178): the claim ended — its locks release, and a beat takes them again if
-    // they are free, so an idle runner does not hold the machine's singleton.
-    this.locks?.releaseAll();
+    // they are free, so an idle runner does not hold the machine's singleton. B-188: never a
+    // lock another claim's leg holds.
+    this.locks?.releaseAll((c) => this.lockHeldByLive(c, slot));
+    for (const [c, owner] of [...this.lockOwners]) if (owner === slot) this.lockOwners.delete(c);
     // The lost lease belonged to that claim (R-BTN-6): a fresh claim starts on a fresh lease,
     // so the flag never outlives the claim it fenced — cleared here, not only on success.
-    this.lostLease = false;
-    this.state.set({ lease_lost: false, lease_lost_because: null });
+    // B-188: once no other claim is still held under it.
+    if (![...this.slots].some((x) => x !== slot && !x.ended)) {
+      this.lostLease = false;
+      this.state.set({ lease_lost: false, lease_lost_because: null });
+    }
     this.closedDone = false;
     this.log(`baton: ${ticket} ${body.end_reason} at ${body.reached ?? '?'}`);
     return { ticket, end_reason: body.end_reason as string, reached: (body.reached as string) ?? null, handoff };

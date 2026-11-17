@@ -3,6 +3,11 @@
 // S-BTN-42.
 import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:test';
+
+/** B-254 (R-BTN-197): the run's test bindings raise the served `min` for S-BTN-227's old
+ *  clients; this file's own drives of the front stay at the code's floor, which is what a deploy
+ *  without the raise serves — the floor is not what they exercise. */
+const envAtCodesFloor = { ...env, TEST_MIN_CLIENT: undefined } as typeof env;
 import { deliverySignature, pickDelivery, verifyDelivery, Webhooks, ACTIONS_BOT, MIRROR_EMAIL } from '../../src/core/webhook';
 import { front } from '../../src/core/front';
 import { armedAt, ORIGIN, withCore } from '../helpers';
@@ -42,13 +47,13 @@ describe('the signature comes first (R-BTN-73)', () => {
     const body = JSON.stringify({ repository: { full_name: 'immediately-run/sandbox' }, comment: { body: 'secret' } });
     const forged = await delivery(body, await deliverySignature('other', enc.encode(body)));
     forged.headers.set('X-GitHub-Event', 'issue_comment');
-    expect((await front(forged, env, to)).status).toBe(401);
+    expect((await front(forged, envAtCodesFloor, to)).status).toBe(401);
     expect(seen).toEqual([]);
     const good = await delivery(body);
     good.headers.set('X-GitHub-Event', 'issue_comment');
     good.headers.set('X-GitHub-Delivery', 'abc-1');
     good.headers.set('X-Baton-Webhook', '{"forged":true}');
-    expect((await front(good, env, to)).status).toBe(200);
+    expect((await front(good, envAtCodesFloor, to)).status).toBe(200);
     expect(seen.map((s) => JSON.parse(s!))).toEqual([{ event: 'issue_comment', id: 'abc-1', repository: 'immediately-run/sandbox' }]);
   });
 });
@@ -62,7 +67,7 @@ describe('a delivery whose fields are not Latin-1 (round 3, 3-A-0)', () => {
     const req = await delivery(body);
     req.headers.set('X-GitHub-Event', 'push');
     req.headers.set('X-GitHub-Delivery', 'u-1');
-    expect((await front(req, env, to)).status).toBe(204);
+    expect((await front(req, envAtCodesFloor, to)).status).toBe(204);
     expect(seen[0]).toMatch(/^[\x20-\x7e]+$/);
     expect(JSON.parse(seen[0])).toEqual({ event: 'push', id: 'u-1', repository: 'immediately-run/sandbox', pusher: 'pëtr', author_email: email });
   });

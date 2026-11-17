@@ -60,9 +60,13 @@ The gate's marker (`Baton-Tests: green|red`, `Baton-Tested`, `Baton-Claim`) is a
 the authority: it counts only as the evidence Baton recorded for that claim's run, so a marker
 anyone else pushes is a push like any other and re-opens the gate. Nothing in git answers the
 owner's question either — no trailer, no comment line. The sync reads the branch's commits from
-the forge, or from the checkout's own git on a plain git repository. A ticket whose PRs are in
-other repositories, or that has several at home, is one the gate cannot test: it waits on the
-owner as `run-tests-unreachable`, whose `skip` waives the gate for it.
+the forge, or from the checkout's own git on a plain git repository. A PR in another repository
+(the ticket's `repos:` — every PR of a plain-git home's ticket) is gated by its own CI instead:
+every check the forge reports on its head green passes, any concluded red routes to `fix`, and
+while checks run (or none has reported yet) the round waits on `ci` — never on the owner. A
+ticket with PRs both at home and elsewhere passes only when the home marker and the other PRs'
+CI are both green. Only a ticket with several PRs at home, which the gate cannot choose between,
+waits on the owner as `run-tests-unreachable`, whose `skip` waives the gate for it.
 
 ## Starting a course from one sentence
 
@@ -128,7 +132,10 @@ Each leg's stub runs the command `.baton/baton.json` names in `agent_command` �
 string the stub splits into words and spawns with **no shell between it and the agent** (B-84),
 with the ticket id, the leg and the checkout appended as its last three arguments, and the leg's
 briefing in the environment (`BATON_COURSE`, `BATON_LEG`, `BATON_TICKET_FILE`,
-`BATON_INSTRUCTIONS`, and `BATON_ANSWER` on a leg whose last line is read). `baton repo init`
+`BATON_INSTRUCTIONS`, and `BATON_ANSWER` on a leg whose last line is read). `BATON_TICKET_FILE`
+is the ticket's path in the checkout, or — for a ticket with no path, posted by a ticket source
+whose `read` returns the ticket as markdown — the runner's copy of that text (`ctx.ticket.file`,
+R-BTN-74). `baton repo init`
 names it for the harness you run, and prints the command for the unfamiliar:
 
 ```

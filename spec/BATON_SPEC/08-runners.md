@@ -40,17 +40,19 @@ the runner's credentials under any other executor is that executor's, never Bato
     course-defined `profile` (opaque), `courses: [{repository, course, version}]` read from the
     runner's checkout at session start (R-BTN-22), `tier_ceilings` (one tier name per
     repository; absent ⇒ that repository's top tier), `lease_timeout_s`, `executor` (a CLI
-    runner's, R-BTN-107), `delivers` (the outbox classes it delivers, R-BTN-171), `session_url` (R-BTN-113), spooled activities and transcript paths (§9.9), `leg_finished` (R-BTN-90),
-    `fenced` (R-BTN-19), `test_harness` (R-BTN-32), `protection` (the protection checker's reading, R-BTN-180); on first contact or re-key, `secret_hash`
+    runner's, R-BTN-107), `concurrency` (R-BTN-4), `delivers` (the outbox classes it delivers, R-BTN-171), `session_urls` (R-BTN-113), spooled activities and transcript paths (§9.9), `legs_finished` (R-BTN-90),
+    `fenced`, one entry per fenced claim (R-BTN-19), `test_harness` (R-BTN-32), `protection` (the protection checker's reading, R-BTN-180); on first contact or re-key, `secret_hash`
     and `rekey`.
-  - The response carries the runner's active claim — id, ticket, station, leg, nonce,
+  - The response carries the runner's active claims, a list, empty when it holds none — each
+    with its id, ticket, station, leg, nonce,
     `deadline_at`, Baton's position (`station`, `path`, `next_leg`) and the latest
     snapshot's `git` view (`next` legs with state, `waiting_on` and `not_before`; or `closed:
     done | withdrawn`; or `unknown`; for a ticket marked `cancelling`, its queued `cancel` leg
-    `ready`, R-BTN-168) — or none; pending messages (§6), marked `delivered` in the same
+    `ready`, R-BTN-168). A claim the runner's state does not hold is ended by the runner
+    `released:lease-lost`, loudly, never left to idle (R-BTN-6); pending messages (§6), marked `delivered` in the same
     transaction, and delivered ones not yet acknowledged, re-sent until they are (§6.9); the current activity; owner bars in force (R-BTN-67); stale courses;
     `handled` conditions (R-BTN-162); `pending_grants` (R-BTN-146); `server_time`.
-  - Every runner call updates `last_seen_at`. Lease upkeep has its own rate bucket and no
+  - Every runner call updates `last_seen_at` and the runner's `client_version` (R-BTN-197). Lease upkeep has its own rate bucket and no
     per-tenant cap (R-BTN-135).
 - **R-BTN-14 (runner secrets).** The sidecar generates a random 256-bit secret and sends its
   SHA-256 on the first heartbeat for a new `(hostname, session_name)`; Baton stores the hash and
@@ -97,7 +99,8 @@ the runner's credentials under any other executor is that executor's, never Bato
 
   - The sidecar polls the harness pid every 10 s and exits when it is gone.
   - **State file** `~/.cache/immediately-run/baton/<session>.json`, mode 0600: runner id,
-    secret, active claim, nonce, `last_ok`, lease-lost flag. Only the sidecar writes it. A lost
+    secret, active claims with their nonces, run ids and executor handles, `last_ok`, lease-lost
+    flag. Only the sidecar writes it. A lost
     state file means a re-key.
   - **Spool.** Every reporter (activity CLI, harness hooks, archivers, status-writing tools)
     appends one JSON line under 4 KB to the session's spool file and returns at once. The sidecar
@@ -172,8 +175,8 @@ the runner's credentials under any other executor is that executor's, never Bato
 ### 8.3 The runner
 
 - **R-BTN-72 (the runner).** `baton runner start` is a generic runner loop. It hosts the
-  sidecar, heartbeats, asks for recommendations, claims, and runs the ticket's legs one at a
-  time, each by **the script for that leg**, then advances, suspends or ends as the script's
+  sidecar, heartbeats, asks for recommendations, claims up to R-BTN-4's bound, and
+  runs each claim's legs one at a time, claims side by side, each leg by **the script for that leg**, then advances, suspends or ends as the script's
   result and the course file allow. It knows no course: it serves every course its home
   checkout declares, loading each claim's course from the claim answer's `course_id` at the
   claim's `snapshot_sha`, one leg at a time (B-103; the bullet after this one). It owns the legs
@@ -188,9 +191,11 @@ the runner's credentials under any other executor is that executor's, never Bato
   wrapper's process group at the wrapper's exit — the lost lease's no-hand-off kill (R-BTN-24)
   and the wrapper's own return alike — so a process a leg started (a held lock, a background
   check an agent spawned) never outlives its leg (S-BTN-200); any other executor keeps the same
-  guarantee by its own means. Idle,
-  it asks for recommendations when
-  a heartbeat carries `unblocked`, else at its own interval (R-BTN-77).
+  guarantee by its own means. With room for another claim — fewer held than R-BTN-4's bound, and
+  the host's own judgement that it can start one — it asks for recommendations when
+  a heartbeat carries `unblocked`, else at its own interval (R-BTN-77). A claim that waits — a
+  leg in a `short_waits` wait (R-BTN-40), a condition's wait (R-BTN-162), a person's
+  `interact` (R-BTN-195) — holds only its own place, never the runner's other claims.
   - **Course directory** (R-BTN-69, R-BTN-134):
 
     ```
@@ -208,7 +213,8 @@ the runner's credentials under any other executor is that executor's, never Bato
     default export. The test kit fails a course whose file names a leg with no script, whose
     `legs/` holds a script for no leg, or whose script lacks one of the three. Marker and forge
     primitives come from `@immediately-run/baton/leg` (R-BTN-133).
-  - **`ctx`** carries: the ticket (id, path, home repository); the claim (id, nonce, the station
+  - **`ctx`** carries: the ticket (id, path, home repository, and a pathless ticket's `file`,
+    R-BTN-74); the claim (id, nonce, the station
     the leg leaves); the leg and its run number; resolved and validated `inputs` (R-BTN-82);
     `replay` (R-BTN-84); the newest hand-off document and the resume record (R-BTN-24); advice;
     Baton's position and the latest snapshot's readiness; `checkout` (working directory); `snapshot: {sha, tree}` and
@@ -257,6 +263,12 @@ the runner's credentials under any other executor is that executor's, never Bato
     The identity banner `baton runner start` logs at startup names the declaration this way: the granted
     name (`grant`, or `grant:*` read as the grant) where no flag was given, the flag's own list
     where one was, beside the home checkout's HEAD, course, host and session.
+  - **The CLI says what it is (B-253).** At start the runner prints its own CLI checkout's
+    commit and whether it is a tagged release, a detached commit or a branch tip — on a branch,
+    the warning `baton: running from branch <name> at <sha> — not a pinned commit` — and every
+    heartbeat's `profile` carries the same as `cli: {commit, ref, pinned}` (a released copy:
+    the commit `dist/build.json` names, unpinned when that build was dirty): the runner's own
+    statement, reported and never gated on.
   - **A wedged git never holds a claim (B-94).** Every git call the runner and a standard course's
     `close` make is bounded and non-interactive: `GIT_TERMINAL_PROMPT=0`, ssh in `BatchMode=yes`
     with a connect timeout, and a timeout that kills the process; the stubs a standard course
@@ -267,10 +279,10 @@ the runner's credentials under any other executor is that executor's, never Bato
     are each bounded too, and then the leg ends `released:cannot-finish:transient` — rather than
     blocking the runner for hours. Nothing on the heartbeat path runs a git without a bound. **A runner's death always leaves a line:** on SIGTERM, SIGINT, SIGHUP (B-109: a closed
     terminal's hangup, found live 2026-10-24),
-    an uncaught exception or an unhandled rejection it logs its claim id, the leg in flight and
-    the time of its last answered beat before the process goes, so "died tracelessly" cannot
+    an uncaught exception or an unhandled rejection it logs every claim it holds, each with its
+    leg in flight, and the time of its last answered beat before the process goes, so "died tracelessly" cannot
     happen. **The immediate stop is a safe point (B-109):** SIGINT, SIGHUP and a second SIGTERM
-    release the leg in flight at its next safe point — its hand-off written, its claim ended
+    release every leg in flight at its next safe point — each hand-off written, each claim ended
     `released:requested` — and exit with the signal's code once the loop ends; the standard
     courses' stubs take a release by stopping their agent at once. A leg that will not take it has
     its call killed after ten seconds (the lease-loss mechanism) and its session stopped
@@ -283,6 +295,17 @@ the runner's credentials under any other executor is that executor's, never Bato
     nonce is public, R-BTN-144). They start no sidecar and register no runner; their harness hooks read the view for
     the fence, owner bars and claim, and append activities and transcript paths to the runner's
     spool; their skills never claim, advance or end.
+  - **A checkout per claim, reattached after a restart (R-BTN-4).** Every claim works in a
+    checkout of its own — a separate clone with its own git directory, never a worktree sharing
+    refs — so concurrent legs never write one tree and one claim's salvage or audit never reads
+    another's; the runner keeps as many clones as it may hold claims and reuses them across claims.
+    It persists, per claim, the claim id, the run id and the executor's handle in its state file.
+    Restarted within its lease it resumes with its persisted secret — no re-key — and reconnects to
+    each claim's still-running session; a session it cannot reach ends its claim
+    `released:cannot-finish:transient`. Past the lease its claims are reaped (§9.5).
+    Under `builtin` the legs of every claim run as the runner's OS user, so a hostile leg can act
+    for any claim its runner holds: `builtin`'s cooperative bound, as many times over as it holds
+    claims (R-BTN-107).
   - **Loading.** The runner loads `course.json` and the scripts from the claim's `snapshot_sha`
     (R-BTN-143, R-BTN-133), so a course change reaches every runner at its next claim without a
     restart. `min_runner_version` (R-BTN-65) covers harness skills; the runner's own features are
@@ -458,8 +481,9 @@ the runner's credentials under any other executor is that executor's, never Bato
     id lives (R-BTN-113's rule; a failing link is dropped).
   - A refresh is not a run for `max_runs`, not a failed attempt, and never lets the lease lapse.
     Past `max_refreshes` the runner suspends at the leg's `from`.
-- **R-BTN-113 (a leg run carries its session's link).** A heartbeat may carry `session_url` for
-  the running leg, and `advance` or `end` for the leg it finishes. It must be `https`, at most
+- **R-BTN-113 (a leg run carries its session's link).** A heartbeat may carry `session_urls`,
+  `[{claim_id, url}]`, one for each claim's running leg, and `advance` or `end` a `session_url`
+  for the leg it finishes. It must be `https`, at most
   512 characters, without userinfo, with its host in the instance's `session_hosts` (an
   administrator's setting, default `claude.ai`), else it is dropped and logged. Stored on
   `claim_legs.session_url` (latest wins while running) and shown on Board and the runner page

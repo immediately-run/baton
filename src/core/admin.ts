@@ -9,7 +9,7 @@ import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, verifyNamespacedSignature, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId, HOLDING_TYPE } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
@@ -680,7 +680,7 @@ export class Admin {
   async grant(actor: string, repository: string, body: unknown, by: 'owner' | 'admin') {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, by === 'admin' ? ['repository', 'public_key', 'hostname', 'label', 'capabilities', 'max_tier'] : ['public_key', 'hostname', 'label', 'capabilities', 'max_tier'], 'body');
+    only(b, by === 'admin' ? ['repository', 'public_key', 'hostname', 'label', 'capabilities', 'max_tier', 'max_claims'] : ['public_key', 'hostname', 'label', 'capabilities', 'max_tier', 'max_claims'], 'body');
     const repo = this.c.registry.get(repository);
     if (!repo || repo.retired_at != null) throw new BatonError('not-found', `${repository} is not registered`);
     const key = await this.parsePersonOrWorkerKey(b.public_key, 'public_key');
@@ -695,6 +695,10 @@ export class Admin {
     // administrators alike, checked by rule 4 as the literal it is.
     const expanded = [...new Set([...capabilitiesOf(raw), ...(raw.includes('human-operator') ? ['human-operator'] : [])])].sort();
     const maxTier = b.max_tier == null ? null : typeof b.max_tier === 'string' && repo.tiers.includes(b.max_tier) ? repo.tiers.indexOf(b.max_tier) : bad('max_tier', `must be one of ${repo.tiers.join(', ')}`);
+    // R-BTN-4 (B-188): the owner's ceiling on how many claims the key's runner holds at once
+    // while claiming here — 1 to 32, default 1, set with the grant as its capabilities are.
+    const maxClaims = b.max_claims == null ? 1 : Number.isInteger(b.max_claims) && (b.max_claims as number) >= 1 && (b.max_claims as number) <= MAX_CLAIMS_CAP
+      ? b.max_claims as number : bad('max_claims', `must be an integer from 1 to ${MAX_CLAIMS_CAP}`);
     const admins = await this.adminFingerprints();
     // B-145 item 12: granting a runner key is an `approvers.members` action, never a plain
     // owner's any more (R-BTN-188).
@@ -726,11 +730,11 @@ export class Admin {
       }
       const prior = this.rows<{ capabilities: string; revoked_at: number | null }>('SELECT capabilities, revoked_at FROM worker_grants WHERE credential_id = ? AND repository_id = ?', key.fingerprint, repository)[0];
       const caps = expanded;
-      this.exec(`INSERT INTO worker_grants (credential_id, repository_id, capabilities, max_tier, granted_by, granted_at) VALUES (?, ?, ?, ?, ?, ?)
+      this.exec(`INSERT INTO worker_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at) VALUES (?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (credential_id, repository_id) DO UPDATE SET capabilities = excluded.capabilities, max_tier = excluded.max_tier,
-                   granted_by = excluded.granted_by, granted_at = excluded.granted_at, revoked_at = NULL`,
-        key.fingerprint, repository, JSON.stringify(caps), maxTier, actor, this.c.now());
-      this.event(actor, { act: 'grant', key: key.fingerprint, repository, capabilities: caps, max_tier: maxTier }, repository);
+                   max_claims = excluded.max_claims, granted_by = excluded.granted_by, granted_at = excluded.granted_at, revoked_at = NULL`,
+        key.fingerprint, repository, JSON.stringify(caps), maxTier, maxClaims, actor, this.c.now());
+      this.event(actor, { act: 'grant', key: key.fingerprint, repository, capabilities: caps, max_tier: maxTier, max_claims: maxClaims }, repository);
       this.c.fleetChanged?.();
       return { ok: true, fingerprint: key.fingerprint };
     });
@@ -1324,7 +1328,7 @@ export class Admin {
    *  `GET /v1/owner/{repository}/grants` narrows to a repository (R-BTN-179, B-90). */
   grants() {
     // max_tier as its name in the repository's ladder (stored as a position, R-BTN-66).
-    return this.rows<{ credential_id: string; hostname: string | null; label: string | null; repository_id: string; capabilities: string; max_tier: number | null; granted_by: string; granted_at: number }>(`SELECT g.credential_id, c.hostname, c.label, g.repository_id, g.capabilities, g.max_tier, g.granted_by, g.granted_at
+    return this.rows<{ credential_id: string; hostname: string | null; label: string | null; repository_id: string; capabilities: string; max_tier: number | null; max_claims: number; granted_by: string; granted_at: number }>(`SELECT g.credential_id, c.hostname, c.label, g.repository_id, g.capabilities, g.max_tier, g.max_claims, g.granted_by, g.granted_at
                        FROM worker_grants g JOIN credentials c ON c.id = g.credential_id WHERE g.revoked_at IS NULL ORDER BY g.repository_id, c.hostname`)
       .map((g) => ({ ...g, max_tier: g.max_tier == null ? null : this.c.registry.get(g.repository_id)?.tiers[g.max_tier] ?? null }));
   }

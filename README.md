@@ -17,7 +17,7 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 `@immediately-run/baton` is the `baton` command, published from this repository:
 
 ```sh
-npx --yes @immediately-run/baton@0.1.3 run   # a runner (§6.13), with BATON_KEY_FILE set
+npx --yes @immediately-run/baton@0.1.4 run   # a runner (§6.13), with BATON_KEY_FILE set
 ```
 
 From the package, `baton run`, `baton repo init`, `baton decision list` and the
@@ -108,7 +108,12 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 - `node cli/baton.mjs tickets new|claim|set|done` — file, claim and move tickets with git as the
   lock, each one commit pushed straight to the default branch from a throwaway worktree (B-112;
   `baton tickets --help`, and the generated `tickets/HOW-TICKETS-WORK.md`), until Baton claims
-  them (R3-1266). `claim` asks Baton first (B-129): with the session's key (`-i KEY`, else
+  them (R3-1266). Every commit the commands push carries the provenance trailers `TICKET_TRAILERS`
+  holds, appended after a blank line (B-16) — the handoff's commit rule: the agent-provenance
+  trailers, then `Claude-Session` and `Co-Authored-By`, taken whole as docs' `claim.sh` takes
+  `CLAIM_TRAILERS` and baton computes none of its own — and with `TICKET_REQUIRE_TRAILERS=1`, a
+  command without trailers refuses rather than push a commit that cannot be attributed. `claim`
+  asks Baton first (B-129): with the session's key (`-i KEY`, else
   `BATON_KEY_FILE`) it reads the ticket's position from Baton's board and history, continues a
   ticket past its course's start where Baton holds it (the PRs written back, the position
   printed) instead of starting over — overriding only a false `available`, never the git lock or

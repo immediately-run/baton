@@ -195,7 +195,8 @@ export class Blocks {
    * its last row change (R-BTN-75; B-49): a fleet coming back to a ticket that needs a capability
    * and an unavailable resource clears one row and writes the other, and the ticket was blocked
    * throughout. A batch inside a batch joins it. `held` is not deferred: a claim's start or end
-   * is its own silent transition (R-BTN-77).
+   * is its own transition — a start silent, an end an event that wakes no one (R-BTN-77;
+   * R-BTN-75 as amended by R3-1254, B-26).
    */
   batch<T>(fn: () => T): T {
     if (this.pending) return fn();
@@ -317,7 +318,9 @@ export class Blocks {
   }
 
   /** A claim started, ended, was confirmed or its fence cleared: whether the ticket is held
-   *  changed, and only that (R-BTN-75). A start or an end is silent (R-BTN-77). */
+   *  changed, and only that (R-BTN-75). A start is silent (R-BTN-77); an end, a confirmation and
+   *  a fence clear are events — an end is never an unblocking, and one that leaves the ticket
+   *  blocked logs `blocked` (R-BTN-75 as amended by R3-1254, B-26). */
   held(ticketId: string, silent: boolean) {
     this.evaluate(ticketId, [], silent);
   }
@@ -620,7 +623,7 @@ export class Blocks {
     for (const w of this.named<{ id: number }>(
       `SELECT w.id FROM workers w JOIN credentials c ON c.id = w.credential_id
        WHERE ${LIVE}
-         AND NOT EXISTS (SELECT 1 FROM claims k WHERE k.worker_id = w.id AND k.status = 'active')
+         AND (SELECT COUNT(*) FROM claims k WHERE k.worker_id = w.id AND k.status = 'active') < w.concurrency  -- B-188: a worker with room, not only an idle one
          AND (NOT COALESCE(${grantedKeySql('c.created_by')}, 0) OR EXISTS (SELECT 1 FROM worker_grants g WHERE g.credential_id = w.credential_id AND g.repository_id = :repo AND g.revoked_at IS NULL))
        ORDER BY +w.id`, { now, repo })) {
       if (!this.c.fits(w.id, ticket)) continue;

@@ -7,6 +7,13 @@
 // (TypeScript, node-only), so scripts/baton-run.mjs bundles it first, the way start-local does.
 //
 //   baton key create FILE [--comment TEXT]     an API key (R-BTN-159), beside SSH keys: FILE for -i, FILE.pub its public line
+//   baton home list | use <name> | add [<name>] --repository <id> [--origin <url>] [--checkout <path>]
+//                | remove <name> | show    (B-121: the CLI's homes, ~/.config/baton/homes.json —
+//                which home repository a command works when its argument names none; local, no
+//                request. The home in force — --home <name|path>, then BATON_HOME, then the
+//                file's default — supplies the repository a missing REPO or bare ticket id
+//                reads in and the origin a missing --url/BATON_URL calls; the argument named
+//                always wins, and a differing origin refuses, both named, R-BTN-56)
 //   baton admin -i KEY repo add <forge path> --owner-key PUB[,PUB…] [--id ID (default: the path's last segment)]
 //                [--forge github|gitlab|gitea|git] [--remote URL] [--web-base URL] [--default-branch main]
 //                [--sync-workflow PATH] [--mirror-workflow PATH] [--ci-identity none|github-actions|gitlab:<issuer>|gitlab-mirror:<issuer>]
@@ -15,7 +22,7 @@
 //                [--sync-workflow PATH|none] [--mirror-workflow PATH|none] [--ci-identity …]
 //                [--add-owner-key PUB[,…]] [--add-sync-key PUB[,…]] [--add-mirror-key PUB[,…]] [--remove-sync-key FP[,…]]
 //   baton admin -i KEY repo retire ID [--yes]
-//   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T]
+//   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T] [--max-claims N]
 //   baton admin -i KEY probe add --key PUB --label L
 //   baton admin -i KEY resource add NAME --scope account|service --schema FILE|JSON    (R-BTN-76)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
@@ -23,16 +30,18 @@
 //   baton admin -i KEY capacity set <capability> --clear [--yes]             (R-BTN-178)
 //   baton admin -i KEY capacity list
 //   baton admin -i KEY settings set [--link-hosts a,b|none] [--session-hosts a,b|none] [--check-app-id ID|none]
+//                [--recommended-client VER|none]
 //                — the instance settings (B-4, R-BTN-113, §13.1): each flag replaces its own
 //                whole; none clears one to what stands without it (session_hosts: the deploy's
-//                BATON_SESSION_HOSTS, default claude.ai)
+//                BATON_SESSION_HOSTS, default claude.ai; recommended_client: the code's own,
+//                B-254 R-BTN-197 — raiseable, never below the code's)
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
 //                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
 //   baton admin -i KEY revoke FINGERPRINT                          baton admin -i KEY open
 //   baton admin -i KEY state      — what the dashboard draws, as JSON, read with the key (B-118)
-//   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T]
+//   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T] [--max-claims N]
 //   baton owner -i KEY revoke REPO FINGERPRINT
 //   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
 //   baton owner -i KEY sign [--message TEXT] [--repo DIR] -- <paths>…   (B-127: a commit signed
@@ -69,8 +78,9 @@
 //   baton admin -i KEY repos                                         (B-90: the registry — one signed request, one JSON answer)
 //   baton owner -i KEY grants REPO                    (B-90: the repository's owners, grants and settings, and the bars in force)
 //   baton board -i KEY REPO                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
-//   baton run [--home <checkout>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
-//             [--harness opencode|claude-code] [--verbose]   (R-BTN-72: the worker loop)
+//   baton run [--home <checkout|home name>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
+//             [--harness opencode|claude-code] [--verbose]   (R-BTN-72: the worker loop; a home
+//             name resolves to its checkout, B-121)
 //   baton leg raise <type> --subject TEXT [--body <file>] [--restarts <json>] [--default <id>]
 //                [--severity critical|high|normal]   (R-BTN-160, R-BTN-195; B-234)
 //                 — raise a condition from the leg this runs in, on its channel: the runner
@@ -145,15 +155,26 @@
 //                none resolving is an error — `--base none` skips the removal rule on purpose),
 //                FILE a board payload placing the live tickets. Runs a local Baton; needs no URL or key.
 //
-// The URL is `--url`, else BATON_URL, else https://baton.immediately.run.
+// The URL is `--url`, else BATON_URL, else the home in force's origin (B-121), else
+// https://baton.immediately.run.
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requestCredential, signHeaders, signingKey } from './sign.mjs';
+import { clientVersion, packageVersion, workingTreeOf } from './version.mjs';
+import { compareVersions, parseClientVersions } from '../src/shared/versions.mjs';
 
 export const DEFAULT_URL = 'https://baton.immediately.run';
+/** Where the CLI's homes.json sits (B-121): `$XDG_CONFIG_HOME` (or `~/.config`)/baton/
+ *  homes.json — the directory keys.json, origins.json and runner.json's own rules name
+ *  (R-BTN-137, R-BTN-144). Spelled here once and imported by src/defaults/homes.ts, so this
+ *  file's fast path and the bundled home resolution read the same file. */
+export function homesPath(env = process.env) {
+  return join(env.XDG_CONFIG_HOME || join(env.HOME || homedir(), '.config'), 'baton', 'homes.json');
+}
 /** The package the pinned release command names (B-138): `npx --yes @immediately-run/baton@<version>`. */
 export const PINNED_PACKAGE = '@immediately-run/baton';
 const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -197,6 +218,29 @@ const need = (v, what) => {
   if (v == null || v === '') throw new Error(`${what} is required`);
   return v;
 };
+/** B-121: the planning half of the home in force — the repository a missing positional REPO
+ *  reads in, and the homes to list when none is in force (never a silent pick). The resolution
+ *  itself (flag, BATON_HOME, default; the origin) is `homesContext`'s, below. */
+const repoOrHome = (given, home, what = 'the repository id') => {
+  if (given != null && given !== '') return given;
+  if (home?.repository != null) return home.repository;
+  if (home?.names?.length) throw new Error(`no home in force and no repository named — name one, or baton home use one of: ${home.names.join(', ')} (B-121)`);
+  throw new Error(`${what} is required`);
+};
+/** B-121: a ticket argument — `<repository>:<id>`, or a bare local id in the home in force; the
+ *  unique-among-the-key's-repositories reading (R-BTN-127, R-BTN-47) applies only when no home
+ *  is in force, because "the default" should mean what it says. */
+const ticketArg = (t, home) => {
+  const s = String(t);
+  const i = s.indexOf(':');
+  if (i >= 1) return { repository: s.slice(0, i), local: s.slice(i + 1) };
+  // A colon at index 0 names no repository: a malformed qualified id keeps its parse refusal
+  // also with a home in force (round 1) — never a bogus request for a local id that begins `:`.
+  if (i === 0) throw new Error('the ticket is <repository>:<id>');
+  if (home?.repository != null) return { repository: home.repository, local: s };
+  if (home?.names?.length) throw new Error(`no home in force and no repository named — name one, or baton home use one of: ${home.names.join(', ')} (B-121)`);
+  throw new Error('the ticket is <repository>:<id>');
+};
 const time = (v, what) => {
   if (v == null) return undefined;
   const t = Date.parse(v);
@@ -209,30 +253,10 @@ export function duration(v) {
   return Number(m[1]) * UNITS[m[2]];
 }
 
-/** The version of the package this CLI ships in — the pin the B-138 refusal names. `cli/` reads
- *  the checkout's package.json, the bundled `dist/` the package's own; null when neither reads. */
-function packageVersion() {
-  try {
-    return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** B-138: the git working tree that owns the CLI's code — the directory holding the `.git` the
- *  CLI sits below — or null when no tree owns it (an npm install, npx's cache: a released copy,
- *  whose code no push changes). A checkout's `cli/` and a `dist/` built inside one are working
- *  trees: their code is what a push (a branch a leg checks out) leaves there. A `.git` above a
- *  `node_modules` boundary does not own the code below it — npm laid that down, no branch of
- *  the outer tree does (round 1, the dotfiles `$HOME`: a released copy installed under a `$HOME`
- *  that is itself a git repository is still a released copy). */
-export function workingTreeOf(cliFile = fileURLToPath(import.meta.url)) {
-  for (let dir = dirname(cliFile), parent = dirname(dir), base = basename(dir);; dir = parent, parent = dirname(dir), base = basename(dir)) {
-    if (base === 'node_modules') return null;   // npm's boundary: no tree above it owns this code
-    if (existsSync(join(dir, '.git'))) return dir;
-    if (parent === dir) return null;
-  }
-}
+/** The version of the package this CLI ships in — the pin the B-138 refusal names — and the
+ *  `Baton-Client` value every request names (R-BTN-197, B-254): `cli/version.mjs`'s, the leaf
+ *  the runner's bundle also takes, re-exported where they have always been imported from. */
+export { clientVersion, packageVersion, workingTreeOf } from './version.mjs';
 
 /** A word that keeps the shell it is copied into reading one argument (round 1): the refusal's
  *  suggested command must survive a key path with a space in it. */
@@ -267,8 +291,11 @@ function devFlagPositions(argv) {
 /**
  * The request a command makes: `{method, path, body}`. `readKey(path)` reads a public key file
  * (or returns the argument when it is a key line itself). Pure: no network, no signing.
+ * `home` (B-121) is the home in force's planning half — `{repository, names}` from
+ * `homesContext` — supplying the repository a missing positional REPO or bare ticket id reads
+ * in; a positional REPO or a qualified id always wins over it.
  */
-export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim()), readJson = (p) => readFileSync(p, 'utf8')) {
+export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim()), readJson = (p) => readFileSync(p, 'utf8'), home = null) {
   const [cmd, ...rest] = argv;
   if (role === 'blocked') {
     // R-BTN-75: a GET any key granted on the repository, an owner of it or an administrator signs.
@@ -276,22 +303,16 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     if (flags.on) {
       if (positional.length) throw new Error('baton blocked --on KIND:REF takes no ticket');
       const q = new URLSearchParams({ on: flags.on, ...(flags.transitive ? { transitive: '1' } : {}) });
-      return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(need(flags.repository, '--repository (with --on)'))}/blocked?${q}` };
+      return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(repoOrHome(flags.repository, home, '--repository (with --on)'))}/blocked?${q}` };
     }
-    const ticket = need(positional[0], 'the ticket, <repository>:<id>');
-    const i = ticket.indexOf(':');
-    if (i < 1) throw new Error('the ticket is <repository>:<id>');
-    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(ticket.slice(0, i))}/tickets/${encodeURIComponent(ticket.slice(i + 1))}/blocks` };
+    const { repository, local } = ticketArg(need(positional[0], 'the ticket, <repository>:<id>'), home);
+    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(repository)}/tickets/${encodeURIComponent(local)}/blocks` };
   }
   if (role === 'ticket') {
     // R-BTN-81: a ticket's history, newest first — signed by an owner, an administrator or a key
     // granted on its repository, the principals of its blocks. B-126 (R-BTN-194): `show` reads
-    // the ticket itself, the same three ways.
-    const ticket = (t) => {
-      const i = String(t).indexOf(':');
-      if (i < 1) throw new Error('the ticket is <repository>:<id>');
-      return { repository: String(t).slice(0, i), local: String(t).slice(i + 1) };
-    };
+    // the ticket itself, the same three ways. B-121: a bare local id reads in the home in force.
+    const ticket = (t) => ticketArg(t, home);
     if (cmd === 'history') {
       const { flags, positional } = parseArgs(rest, [], ['before', 'limit'], 1);
       const t = ticket(need(positional[0], 'the ticket, <repository>:<id>'));
@@ -307,9 +328,10 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
   }
   if (role === 'board') {
     // B-90: the board of one repository, as the dashboard reads it — a GET any key granted on the
-    // repository, an owner of it or an administrator signs.
+    // repository, an owner of it or an administrator signs. B-121: the repository may come from
+    // the home in force.
     parseArgs(argv, [], [], 1);
-    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(need(cmd, 'the repository id'))}/board` };
+    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(repoOrHome(cmd, home))}/board` };
   }
   if (role === 'admin') {
     if (cmd === 'repos') {
@@ -363,7 +385,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     }
     if (cmd === 'grant') {
       const { flags, positional } = parseArgs(rest, [], GRANT_FLAGS, 1);
-      return { method: 'POST', path: '/v1/admin/grants', body: grantBody(flags, readKey, { repository: need(positional[0], 'the repository id') }) };
+      return { method: 'POST', path: '/v1/admin/grants', body: grantBody(flags, readKey, { repository: repoOrHome(positional[0], home) }) };
     }
     if (cmd === 'probe' && rest[0] === 'add') {
       const { flags } = parseArgs(rest.slice(1), [], ['key', 'label', 'instances'], 0);
@@ -432,17 +454,20 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'GET', path: '/v1/admin/capacities' };
     }
     // B-4 (R-BTN-113, §13.1): the instance settings, each flag replacing its own whole — `none`
-    // clears one back to what stands without it (the deploy's own default).
+    // clears one back to what stands without it (the deploy's own default). B-254
+    // (R-BTN-197): `--recommended-client` raises the recommendation this instance serves, at or
+    // above the code's own; `none` clears it back to the code's.
     if (cmd === 'settings' && rest[0] === 'set') {
-      const { flags } = parseArgs(rest.slice(1), [], ['link-hosts', 'session-hosts', 'check-app-id'], 0);
+      const { flags } = parseArgs(rest.slice(1), [], ['link-hosts', 'session-hosts', 'check-app-id', 'recommended-client'], 0);
       const hosts = (v) => (v === 'none' ? null : list(v));
       const body = {
         ...(flags['link-hosts'] !== undefined ? { link_hosts: hosts(flags['link-hosts']) } : {}),
         ...(flags['session-hosts'] !== undefined ? { session_hosts: hosts(flags['session-hosts']) } : {}),
         ...(flags['check-app-id'] !== undefined ? { check_app_id: flags['check-app-id'] === 'none' ? null : flags['check-app-id'] } : {}),
+        ...(flags['recommended-client'] !== undefined ? { recommended_client: flags['recommended-client'] === 'none' ? null : flags['recommended-client'] } : {}),
       };
       if (!Object.keys(body).length) {
-        throw new Error('baton admin settings set names at least one setting (--link-hosts, --session-hosts, --check-app-id; none clears one)');
+        throw new Error('baton admin settings set names at least one setting (--link-hosts, --session-hosts, --check-app-id, --recommended-client; none clears one)');
       }
       return { method: 'PUT', path: '/v1/admin/settings', body };
     }
@@ -452,30 +477,41 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     if (cmd === 'grants') {
       // B-90: the repository's owners, grants, settings and bars in force, read-only.
       const { positional } = parseArgs(rest, [], [], 1);
-      return { method: 'GET', path: `/v1/owner/${encodeURIComponent(need(positional[0], 'the repository id'))}/grants` };
+      return { method: 'GET', path: `/v1/owner/${encodeURIComponent(repoOrHome(positional[0], home))}/grants` };
     }
     if (cmd === 'grant') {
       const { flags, positional } = parseArgs(rest, [], GRANT_FLAGS, 1);
-      return { method: 'POST', path: `/v1/owner/${need(positional[0], 'the repository id')}/grants`, body: grantBody(flags, readKey, {}) };
+      return { method: 'POST', path: `/v1/owner/${repoOrHome(positional[0], home)}/grants`, body: grantBody(flags, readKey, {}) };
     }
     if (cmd === 'revoke') {
-      parseArgs(rest.slice(2), [], [], 0);
-      return { method: 'POST', path: `/v1/owner/${need(rest[0], 'the repository id')}/grants/${encodeURIComponent(need(rest[1], 'the key fingerprint'))}/revoke`, body: {} };
+      // B-121: with a home in force the repository position may be omitted, the fingerprint
+      // alone remaining.
+      const fpOnly = home?.repository != null && rest.length === 1;
+      const repo = repoOrHome(fpOnly ? undefined : rest[0], home);
+      const fp = need(fpOnly ? rest[0] : rest[1], 'the key fingerprint');
+      parseArgs(rest.slice(fpOnly ? 1 : 2), [], [], 0);
+      return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/grants/${encodeURIComponent(fp)}/revoke`, body: {} };
     }
     if (cmd === 'owners') {
       const { flags, positional } = parseArgs(rest, [], ['add', 'remove'], 1);
-      const repo = need(positional[0], 'the repository id');
+      const repo = repoOrHome(positional[0], home);
       if (flags.add) return { method: 'POST', path: `/v1/owner/${repo}/owners`, body: { public_key: readKey(flags.add) } };
       if (flags.remove) return { method: 'POST', path: `/v1/owner/${repo}/owners`, body: { fingerprint: flags.remove, remove: true } };
       throw new Error('baton owner owners REPO --add PUB | --remove FINGERPRINT');
     }
     if (cmd === 'bar' && rest[0] === 'lift') {
-      parseArgs(rest.slice(3), [], [], 0);
-      return { method: 'POST', path: `/v1/owner/${need(rest[1], 'the repository id')}/bars/${need(rest[2], 'the bar id')}/lift`, body: {} };
+      // B-121: with a home in force the repository position may be omitted. The shapes are told
+      // apart by their length after `bar`: `lift REPO ID` is three words, `lift ID` two — a
+      // named REPO (the full shape) always wins over the home, never the other way round.
+      const idOnly = home?.repository != null && rest.length === 2;
+      const repo = repoOrHome(idOnly ? undefined : rest[1], home);
+      const barId = need(idOnly ? rest[1] : rest[2], 'the bar id');
+      parseArgs(rest.slice(idOnly ? 2 : 3), [], [], 0);
+      return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/bars/${encodeURIComponent(barId)}/lift`, body: {} };
     }
     if (cmd === 'bar') {
       const { flags, positional } = parseArgs(rest, ['release-holders'], ['course', 'tag', 'legs', 'applies', 'starts-at', 'ends-at', 'reason'], 1);
-      return { method: 'POST', path: `/v1/owner/${need(positional[0], 'the repository id')}/bars`, body: {
+      return { method: 'POST', path: `/v1/owner/${repoOrHome(positional[0], home)}/bars`, body: {
         course: need(flags.course, '--course'), tag: need(flags.tag, '--tag'), ...(flags.legs ? { legs: list(flags.legs) } : {}),
         applies: need(flags.applies, '--applies'), ...(flags['starts-at'] ? { starts_at: time(flags['starts-at'], '--starts-at') } : {}),
         ...(flags['ends-at'] ? { ends_at: time(flags['ends-at'], '--ends-at') } : {}), ...(flags['release-holders'] ? { release_holders: true } : {}),
@@ -516,29 +552,41 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
         else {
           const { entries, offline } = codeReposSpec(flags['code-repos'], flags['forge-ids']);
           body.code_repos = entries;
-          if (entries.some((e) => e.repo_id == null)) resolveCodeRepos = { repository: need(positional[0], 'the repository id'), offline };
+          // B-121: the repository the resolver reads is the PUT's own — the positional, or the
+          // home in force's when the position is omitted.
+          if (entries.some((e) => e.repo_id == null)) resolveCodeRepos = { repository: repoOrHome(positional[0], home), offline };
         }
       }
       // B-182 (R-BTN-139): the owners' pushers, host-qualified — `id[@host]`, a comma list, or
       // `none` to clear; a host-less entry is the home's host.
       if (flags.pushers !== undefined) body.pushers = flags.pushers === 'none' ? null : pushersSpec(flags.pushers);
       if (!Object.keys(body).length) throw new Error('baton owner settings REPO names at least one setting');
-      return { method: 'PUT', path: `/v1/owner/${need(positional[0], 'the repository id')}/settings`, body, ...(resolveCodeRepos ? { resolveCodeRepos } : {}) };
+      // B-121: the repository may come from the home in force when the position is omitted.
+      return { method: 'PUT', path: `/v1/owner/${repoOrHome(positional[0], home)}/settings`, body, ...(resolveCodeRepos ? { resolveCodeRepos } : {}) };
     }
     if (cmd === 'courier' && rest[0] === 'add') {
       const { flags, positional } = parseArgs(rest.slice(1), [], ['key', 'asks'], 1);
-      return { method: 'POST', path: `/v1/owner/${need(positional[0], 'the repository id')}/couriers`, body: { public_key: readKey(need(flags.key, '--key')), asks: need(list(flags.asks), '--asks') } };
+      return { method: 'POST', path: `/v1/owner/${repoOrHome(positional[0], home)}/couriers`, body: { public_key: readKey(need(flags.key, '--key')), asks: need(list(flags.asks), '--asks') } };
     }
     if (cmd === 'courier' && rest[0] === 'revoke') {
-      parseArgs(rest.slice(3), [], [], 0);
-      return { method: 'POST', path: `/v1/owner/${need(rest[1], 'the repository id')}/couriers`, body: { fingerprint: need(rest[2], 'the key fingerprint'), revoke: true } };
+      // B-121: with a home in force the repository position may be omitted. The shapes are told
+      // apart by their length after `courier`: `revoke REPO FP` is three words, `revoke FP` two
+      // — a named REPO (the full shape) always wins over the home, never the other way round.
+      const fpOnly = home?.repository != null && rest.length === 2;
+      const repo = repoOrHome(fpOnly ? undefined : rest[1], home);
+      const fp = need(fpOnly ? rest[1] : rest[2], 'the key fingerprint');
+      parseArgs(rest.slice(fpOnly ? 2 : 3), [], [], 0);
+      return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/couriers`, body: { fingerprint: fp, revoke: true } };
     }
     if (cmd === 'resolve') {
-      // R-BTN-78: an owner's answer to one of Baton's own decisions on a ticket.
+      // R-BTN-78: an owner's answer to one of Baton's own decisions on a ticket. B-121: with a
+      // home in force the repository position may be omitted, three positionals remaining.
       const { positional } = parseArgs(rest, [], [], 4);
-      const [repo, ticket, decision, answer] = positional;
+      const fromHome = home?.repository != null && positional.length === 3;
+      const [repo, ticket, decision, answer] = fromHome ? [home.repository, ...positional] : positional;
       const local = need(ticket, 'the ticket');
-      return { method: 'POST', path: `/v1/owner/${encodeURIComponent(need(repo, 'the repository id'))}/tickets/${encodeURIComponent(local.includes(':') ? local : `${repo}:${local}`)}/resolve`,
+      const repository = repoOrHome(repo, home);
+      return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repository)}/tickets/${encodeURIComponent(local.includes(':') ? local : `${repository}:${local}`)}/resolve`,
         body: { decision: need(decision, "the decision (baton:retries, baton:stalled or one the ticket's sync posted)"), answer: need(answer, "the answer (retry or park, or one of the posted decision's options)") } };
     }
     throw new Error('baton owner grants|grant|revoke|owners|bar|settings|courier|resolve');
@@ -546,7 +594,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
   throw new Error('baton admin … | baton owner … | baton board REPO');
 }
 
-const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier'];
+const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier', 'max-claims'];
 
 /** §12.2's ask under a destructive action: `--yes` answers the prompt beforehand; without a
  *  TTY the command refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
@@ -714,6 +762,8 @@ function grantBody(flags, readKey, extra) {
   return {
     ...extra, public_key: readKey(need(flags.key, '--key')), ...(flags.hostname ? { hostname: flags.hostname } : {}), ...(flags.label ? { label: flags.label } : {}),
     capabilities: list(flags.capabilities) ?? [], ...(flags['max-tier'] ? { max_tier: flags['max-tier'] } : {}),
+    // R-BTN-4 (B-188): how many claims the key's runner may hold at once while claiming here.
+    ...(flags['max-claims'] ? { max_claims: Number(flags['max-claims']) } : {}),
   };
 }
 
@@ -740,14 +790,19 @@ const redirectAnswered = (target, status, to) => new Error(
  *  with that key as a bearer. Returns `{status, json, text}`: `json` is null when the body is
  *  not JSON, `text` the body as it arrived, for the caller to show. A redirect is refused,
  *  never followed (B-80): a 3xx is an error naming what answered — a login page in front of
- *  Baton is not Baton's answer. */
-export async function send(url, p, keyFile, fetchImpl = fetch) {
+ *  Baton is not Baton's answer. R-BTN-197 (B-254): every request says which client it is
+ *  (`Baton-Client`, `clientVersion`'s one place), and the first answer that names a
+ *  `recommended` above it draws the warning — once per command, on stderr, so a script's
+ *  stdout stays its own. `client` names the version for a test (a CLI this code never shipped
+ *  as); a command's own requests are always `clientVersion()`'s. */
+let saidClientVersions = false;
+export async function send(url, p, keyFile, fetchImpl = fetch, client = clientVersion()) {
   const cred = requestCredential(keyFile);
   const target = new URL(p.path, url).toString();
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
   const auth = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
-  const headers = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
+  const headers = { 'Baton-Client': client, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
   let res;
   try {
@@ -761,6 +816,7 @@ export async function send(url, p, keyFile, fetchImpl = fetch) {
   }
   // A fetch stand-in may hand the 3xx back instead of throwing: the same refusal (B-80).
   if (res.status >= 300 && res.status < 400) throw redirectAnswered(target, res.status, res.headers.get('location'));
+  warnClientVersions(res.headers.get('Baton-Client-Versions'), client);
   const raw = await res.text();
   let json = null;
   try {
@@ -769,6 +825,22 @@ export async function send(url, p, keyFile, fetchImpl = fetch) {
     json = null;
   }
   return { status: res.status, json, text: raw };
+}
+
+/** R-BTN-197: `baton: this CLI is <version>; Baton recommends <recommended> and refuses below
+ *  <min>`, said at most once per command (one command is one process), only when the
+ *  recommendation is above this CLI's version — compared by semver precedence, `+dev` taking no
+ *  part. An answer that recommends nothing above it says nothing and spends nothing: a later
+ *  answer of the same command that does (an administrator raised it mid-run) still gets its
+ *  line. Nothing installs or switches anything: the header carries version numbers only, and
+ *  updating stays the operator's act. */
+function warnClientVersions(headerValue, client) {
+  if (saidClientVersions || headerValue == null) return;
+  const served = parseClientVersions(headerValue);
+  if (!served) return;
+  if (compareVersions(client.replace(/^baton\//, ''), served.recommended) >= 0) return;
+  saidClientVersions = true;
+  process.stderr.write(`baton: this CLI is ${client}; Baton recommends ${served.recommended} and refuses below ${served.min}\n`);
 }
 
 /** The base a course change is judged against: `--base`, else the remote's default branch. */
@@ -813,9 +885,11 @@ async function testCourse(argv) {
 
 /** `baton decision list` (R-BTN-80): the CLI courier, each request signed with the key `-i` names. */
 async function decisionList(argv) {
-  const { flags } = parseArgs(argv, ['watch', 'all'], ['identity', 'url'], 0);
+  const { flags } = parseArgs(argv, ['watch', 'all'], ['identity', 'url', 'home'], 0);
   if (flags.watch && flags.all) throw new Error('--watch claims notices as they come; --all lists the open decisions once: name one');
-  const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+  // B-121: the home in force supplies the origin a missing --url/BATON_URL calls.
+  const homes = await homesContext(flags.home, flags.url ?? process.env.BATON_URL ?? null);
+  const url = flags.url ?? process.env.BATON_URL ?? homes.inForce?.home.origin ?? DEFAULT_URL;
   const keyFile = need(flags.identity, '-i KEY (your courier key file)');
   const request = (method, path, body) => send(url, { method, path, body }, keyFile);
   const write = (text) => process.stdout.write(`${text}\n`);
@@ -829,24 +903,28 @@ async function decisionList(argv) {
  * `baton decision answer TICKET OPTION` (R-BTN-127, R-BTN-116): a person's answer to the ticket's
  * queued person leg, a `std:decision@1` through `POST /v1/repositories/{repository}/attestations`,
  * signed with an owner key of the repository or a human-only key. Pure planning beside `plan`, so
- * the tests check the request without a Baton.
+ * the tests check the request without a Baton. `homeRepository` (B-121) is the home in force's
+ * repository, which a bare local id reads in; a qualified id wins over it.
  */
-export function answerPlan(ticket, option, ref) {
-  const i = String(ticket).indexOf(':');
-  if (i < 1) throw new Error('the ticket is <repository>:<id>');
+export function answerPlan(ticket, option, ref, homeRepository = null) {
+  const s = String(ticket);
+  const i = s.indexOf(':');
+  const t = i >= 1 ? { repository: s.slice(0, i), local: s.slice(i + 1) } : ticketArg(s, { repository: homeRepository });
   return {
     method: 'POST',
-    path: `/v1/repositories/${encodeURIComponent(String(ticket).slice(0, i))}/attestations`,
-    body: { type: 'std:decision@1', subject: { ticket: String(ticket).slice(i + 1) }, value: { option, ...(ref ? { ref } : {}) } },
+    path: `/v1/repositories/${encodeURIComponent(t.repository)}/attestations`,
+    body: { type: 'std:decision@1', subject: { ticket: t.local }, value: { option, ...(ref ? { ref } : {}) } },
   };
 }
 
 /** The command: one request, the answer's arrival printed as one line (R-BTN-39) — deferred
  *  when a claim holds the ticket, which the alarm applies when the hold ends. */
 async function decisionAnswer(argv) {
-  const { flags, positional } = parseArgs(argv, [], ['identity', 'url', 'ref'], 2);
-  const p = answerPlan(need(positional[0], 'the ticket, <repository>:<id>'), need(positional[1], 'the option the person chose'), flags.ref);
-  const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+  const { flags, positional } = parseArgs(argv, [], ['identity', 'url', 'ref', 'home'], 2);
+  // B-121: the home in force supplies the origin and the repository a bare ticket id reads in.
+  const homes = await homesContext(flags.home, flags.url ?? process.env.BATON_URL ?? null);
+  const p = answerPlan(need(positional[0], 'the ticket, <repository>:<id>'), need(positional[1], 'the option the person chose'), flags.ref, homes.inForce?.home.repository ?? null);
+  const url = flags.url ?? process.env.BATON_URL ?? homes.inForce?.home.origin ?? DEFAULT_URL;
   const keyFile = need(flags.identity, '-i KEY (an owner key of the repository, or a human-only key)');
   const { status, json } = await send(url, p, keyFile);
   if (!(status >= 200 && status < 300)) throw new Error(`${json?.code ?? status}: ${json?.message ?? 'refused'}`);
@@ -889,18 +967,22 @@ export function policyDiff(oldDoc, newDoc) {
  *  version), and the floor commands register and remove a deployment's floors. */
 async function policyMain(argv) {
   // `-i KEY` and `--url URL` may sit before the subcommand — `baton owner -i KEY policy show
-  // REPO` is the documented form — or after it, as every other command takes them.
-  const isFlagOrValue = (_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url';
+  // REPO` is the documented form — or after it, as every other command takes them. B-121:
+  // `--home` rides along the same way, and the home in force supplies the repository the
+  // missing positional names and the origin a missing --url/BATON_URL calls.
+  const isFlagOrValue = (_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url' || a[i] === '--home' || a[i - 1] === '--home';
   const { flags: globalFlags } = parseArgs(argv.filter(isFlagOrValue));
   const args = argv.filter((x, i, a) => !isFlagOrValue(x, i, a));
-  const url = globalFlags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+  const homes = await homesContext(globalFlags.home, globalFlags.url ?? process.env.BATON_URL ?? null);
+  const url = globalFlags.url ?? process.env.BATON_URL ?? homes.inForce?.home.origin ?? DEFAULT_URL;
   const keyFile = need(globalFlags.identity, '-i KEY (an owner key file)');
   const request = (method, path, body) => send(url, { method, path, body }, keyFile);
   const write = (text) => process.stdout.write(`${text}\n`);
+  const home = { repository: homes.inForce?.home.repository ?? null, names: homes.names };
   const [sub, ...rest] = args;
   if (sub === 'show') {
     const { positional } = parseArgs(rest, [], ['identity', 'url'], 1);
-    const repo = need(positional[0], 'the repository id');
+    const repo = repoOrHome(positional[0], home);
     const out = await request('GET', `/v1/repositories/${encodeURIComponent(repo)}/policy`);
     if (out.status !== 200) return write(arrived(out.text)), 1;
     write(JSON.stringify(out.json));
@@ -909,8 +991,10 @@ async function policyMain(argv) {
   }
   if (sub === 'diff') {
     const { positional } = parseArgs(rest, [], ['identity', 'url'], 2);
-    const [repo, file] = positional;
-    const out = await request('GET', `/v1/repositories/${encodeURIComponent(need(repo, 'the repository id'))}/policy`);
+    // B-121: with a home in force the repository may be omitted — one positional is the file.
+    const fromHome = home?.repository != null && positional.length === 1;
+    const [repo, file] = fromHome ? [home.repository, positional[0]] : positional;
+    const out = await request('GET', `/v1/repositories/${encodeURIComponent(repoOrHome(repo, home))}/policy`);
     if (out.status !== 200) return write(arrived(out.text)), 1;
     let next;
     try {
@@ -925,14 +1009,19 @@ async function policyMain(argv) {
   if (sub === 'log') {
     const { flags, positional } = parseArgs(rest, [], ['after', 'identity', 'url'], 1);
     const q = new URLSearchParams(flags.after ? { after: flags.after } : {});
-    const out = await request('GET', `/v1/owner/${encodeURIComponent(need(positional[0], 'the repository id'))}/policy/log${q.size ? `?${q}` : ''}`);
+    const out = await request('GET', `/v1/owner/${encodeURIComponent(repoOrHome(positional[0], home))}/policy/log${q.size ? `?${q}` : ''}`);
     if (out.status !== 200) return write(arrived(out.text)), 1;
     write(JSON.stringify(out.json));
     return 0;
   }
   if (sub === 'set' || sub === 'apply') {
     const { flags, positional } = parseArgs(rest, [], ['base', 'identity', 'url'], 2);
-    const [repo, what] = positional.map((x) => need(x, sub === 'set' ? 'the repository id and the policy file' : 'the repository id and the preset name'));
+    // B-121: with a home in force the repository may be omitted — one positional is the file or
+    // preset, the named repository (two positionals) always winning over the home.
+    const fromHome = home?.repository != null && positional.length === 1;
+    const [repoArg, whatArg] = fromHome ? [home.repository, positional[0]] : positional;
+    const what = need(whatArg, sub === 'set' ? 'the policy file' : 'the preset name');
+    const repo = repoOrHome(repoArg, home);
     // R-BTN-188: the change builds on the version the OPERATOR read — the one `show` printed —
     // so a concurrent change is a `conflict` the operator sees, never one this overwrites.
     const base = need(baseOf(flags.base), '--base N (the version your change builds on — `baton owner policy show` names it; a stale one answers conflict)');
@@ -943,15 +1032,21 @@ async function policyMain(argv) {
   }
   if (sub === 'floor' && rest[0] === 'add') {
     const { flags, positional } = parseArgs(rest.slice(1), [], ['guarantees', 'remove-by', 'identity', 'url'], 2);
-    const out = await request('POST', `/v1/owner/${encodeURIComponent(need(positional[0], 'the repository id'))}/policy/floors`,
-      { name: need(positional[1], 'the floor name'), guarantees: need(list(flags.guarantees), '--guarantees'), ...(flags['remove-by'] ? { remove_by: flags['remove-by'] } : {}) });
+    // B-121: with a home in force the repository may be omitted — one positional is the floor.
+    const fromHome = home?.repository != null && positional.length === 1;
+    const [repoArg, nameArg] = fromHome ? [home.repository, positional[0]] : positional;
+    const out = await request('POST', `/v1/owner/${encodeURIComponent(repoOrHome(repoArg, home))}/policy/floors`,
+      { name: need(nameArg, 'the floor name'), guarantees: need(list(flags.guarantees), '--guarantees'), ...(flags['remove-by'] ? { remove_by: flags['remove-by'] } : {}) });
     write(JSON.stringify(out.json));
     return out.status >= 200 && out.status < 300 ? 0 : 1;
   }
   if (sub === 'floor' && rest[0] === 'remove') {
     const { positional } = parseArgs(rest.slice(1), [], ['identity', 'url'], 2);
-    const out = await request('POST', `/v1/owner/${encodeURIComponent(need(positional[0], 'the repository id'))}/policy/floors`,
-      { name: need(positional[1], 'the floor name'), remove: true, confirm: true });
+    // B-121: with a home in force the repository may be omitted — one positional is the floor.
+    const fromHome = home?.repository != null && positional.length === 1;
+    const [repoArg, nameArg] = fromHome ? [home.repository, positional[0]] : positional;
+    const out = await request('POST', `/v1/owner/${encodeURIComponent(repoOrHome(repoArg, home))}/policy/floors`,
+      { name: need(nameArg, 'the floor name'), remove: true, confirm: true });
     write(JSON.stringify(out.json));
     return out.status >= 200 && out.status < 300 ? 0 : 1;
   }
@@ -969,6 +1064,20 @@ function baseOf(v) {
 
 /** What arrived instead of Baton's JSON: its first 300 characters, an empty body named (B-80). */
 const arrived = (text) => (text.length > 300 ? `${text.slice(0, 300)}…` : text) || '(an empty body)';
+
+/** B-121: the homes a command meets, resolved by src/defaults/homes.ts (bundled beside the
+ *  ticket commands): `{inForce, names}` — the home in force (null when none is) and every home's
+ *  name, for the listing a command that needs a repository prints when none is. `--home` rides
+ *  the API commands as `-i` and `--url` do; the origin check compares the home in force's origin
+ *  with `explicitUrl` — the `--url` flag or `BATON_URL`, never a default. The bundle is loaded
+ *  whenever a home could be in force — the flag or env names one, or homes.json exists (its
+ *  default, and the origin it names, are read even by a command that names its repository
+ *  itself); the fast path reads homesPath, spelled once above. */
+async function homesContext(flag, explicitUrl = null) {
+  if (flag === undefined && process.env.BATON_HOME == null && !existsSync(homesPath())) return { inForce: null, names: [] };
+  const { resolveHomes } = await import('../scripts/baton-cli.mjs');
+  return resolveHomes({ flag, env: process.env, explicitUrl });
+}
 
 /** The one management path's exit: 0 when Baton answered its JSON, 1 when the answer was not
  *  Baton's — a refusal, or a 2xx body that is not JSON (B-80) — and any error thrown up to the
@@ -1006,16 +1115,20 @@ export async function main(argv) {
     // policy show REPO` is the documented form (round 1, finding 10). The flags stay in what
     // policyMain receives; only the `policy` word is taken out.
     const rest = argv.slice(1);
-    // B-127 round 1: a `-m`/`--repo` value that is itself the `-i`/`--url` flag shape is refused
-    // by name, BEFORE the token filter below eats it and the command misparses
+    // B-127 round 1: a `-m`/`--repo` value that is itself the `-i`/`--url`/`--home` flag shape
+    // is refused by name, BEFORE the token filter below eats it and the command misparses
     // (`owner sign -m --url -- p` used to lose the value token and end in a confusing refusal).
     for (let i = 0; i < rest.length; i++) {
-      if ((rest[i] === '-m' || rest[i] === '--message' || rest[i] === '--repo') && (rest[i + 1] === '-i' || rest[i + 1] === '--url')) {
+      if ((rest[i] === '-m' || rest[i] === '--message' || rest[i] === '--repo') && (rest[i + 1] === '-i' || rest[i + 1] === '--url' || rest[i + 1] === '--home')) {
         throw new Error(`${rest[i]} needs a plain value — ${rest[i + 1]} is a flag of its own (quote a value that starts with a dash)`);
       }
     }
-    const clean = rest.filter((_, i, a) => !(a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
-    const flagsOf = () => parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'), [], ['identity', 'url'], 0).flags;
+    // B-121 round 1: the strip knows `--home` as it knows `-i`/`--url`, so `baton owner --home
+    // fieldhouse sign …` and `… verify-config …` dispatch on their own word (the flag's value
+    // would otherwise sit where the subcommand is looked for).
+    const flagPair = (_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url' || a[i] === '--home' || a[i - 1] === '--home';
+    const clean = rest.filter((_, i, a) => !flagPair(_, i, a));
+    const flagsOf = () => parseArgs(rest.filter((_, i, a) => flagPair(_, i, a)), [], ['identity', 'url', 'home'], 0).flags;
     // B-127 item 6: `baton owner -i KEY sign` — a commit signed the way `require_signed_control`
     // counts (git's `gpg.format ssh`, the SSHSIG namespace `git`), made with the key `-i` names.
     // Plain `git commit -S` with the same configuration is exactly as good (the runbook says so);
@@ -1030,7 +1143,7 @@ export async function main(argv) {
       let repo = '.';
       // A flag-shaped token is never a value: `-m --url -- p` would otherwise lose `--url`'s
       // place to the `-i`/`--url` filter above and misparse into a confusing refusal (round 1).
-      const flagShaped = (v) => v === '-i' || v === '--url' || v === '-m' || v === '--message' || v === '--repo' || v === '--';
+      const flagShaped = (v) => v === '-i' || v === '--url' || v === '--home' || v === '-m' || v === '--message' || v === '--repo' || v === '--';
       for (let i = 0; i < args.length; i++) {
         if (args[i] === '-m' || args[i] === '--message') {
           const v = args[++i];
@@ -1055,7 +1168,12 @@ export async function main(argv) {
     // The keys come from Baton with the owner's key; the walk runs in the checkout.
     if (clean[0] === 'verify-config') {
       const flags = flagsOf();
-      const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+      // B-121: the home in force — resolved as every API command resolves it — supplies the
+      // repository the omitted REPOSITORY reads in and the origin a missing --url/BATON_URL
+      // calls, a named REPOSITORY still winning over it.
+      const homes = await homesContext(flags.home, flags.url ?? process.env.BATON_URL ?? null);
+      const home = homes.inForce ? { repository: homes.inForce.home.repository, names: homes.names } : (homes.names.length ? { repository: null, names: homes.names } : null);
+      const url = flags.url ?? process.env.BATON_URL ?? homes.inForce?.home.origin ?? DEFAULT_URL;
       const keyFile = need(flags.identity, '-i KEY (an owner key of the repository)');
       const args = clean.slice(1);
       const checkoutAt = args.indexOf('--checkout');
@@ -1063,22 +1181,31 @@ export async function main(argv) {
       // there was no --checkout, eating the REPOSITORY positional of the documented
       // no---checkout form, which then always hit the usage error).
       const positional = args.filter((_, i) => i !== checkoutAt && (checkoutAt < 0 || i !== checkoutAt + 1));
-      if (positional.length !== 1) throw new Error('baton owner -i KEY verify-config REPOSITORY [--checkout DIR]');
-      const read = await send(url, { method: 'GET', path: `/v1/owner/${encodeURIComponent(positional[0])}/signing-keys` }, keyFile);
+      if (positional.length > 1) throw new Error('baton owner -i KEY verify-config REPOSITORY [--checkout DIR]');
+      const repository = repoOrHome(positional[0], home);
+      const read = await send(url, { method: 'GET', path: `/v1/owner/${encodeURIComponent(repository)}/signing-keys` }, keyFile);
       if (!(read.status >= 200 && read.status < 300)) {
         process.stdout.write(`${JSON.stringify(read.json)}\n`);
         return 1;
       }
       const { verifyConfigMain } = await import('../scripts/baton-cli.mjs');
-      return await verifyConfigMain(args, { keys: read.json?.keys ?? [] });
+      // B-121: the resolved repository is passed with the keys, so the omitted-REPOSITORY form
+      // names the repository in its own refusal too (verifyConfigMain's word for it).
+      return await verifyConfigMain(args, { keys: read.json?.keys ?? [], ...(positional.length ? {} : { repository }) });
     }
     let cut = -1;
     for (let i = 0; i < rest.length; i++) {
-      if (rest[i] === '-i' || rest[i] === '--url') { i += 1; continue; }
+      if (rest[i] === '-i' || rest[i] === '--url' || rest[i] === '--home') { i += 1; continue; }
       if (rest[i] === 'policy') cut = i;
       break;
     }
     if (cut >= 0) return policyMain(rest.filter((_, i) => i !== cut));
+  }
+  if (argv[0] === 'home') {
+    // B-121: the CLI's homes — local configuration, no request (R-BTN-129's actions are not
+    // theirs). The command lives in src/defaults/homes.ts, bundled beside the ticket commands.
+    const { homeMain } = await import('../scripts/baton-cli.mjs');
+    return homeMain(argv.slice(1));
   }
   if (argv[0] === 'run') {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
@@ -1118,10 +1245,22 @@ export async function main(argv) {
     return requestMain(argv.slice(1));
   }
   const [role, ...rest] = argv;
-  const { flags } = parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
-  const args = rest.filter((_, i, a) => !(a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
-  const p = plan(role, args);
-  const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+  // B-121: `--home <name|path>` rides the API commands as `-i` and `--url` do, and the home in
+  // force supplies what the command's own arguments do not — the repository a missing positional
+  // REPO or bare ticket id reads in, and the origin a missing --url/BATON_URL calls. A
+  // positional REPO or a qualified ticket id always wins over all three sources; --url and
+  // BATON_URL win for the origin, and a home whose origin differs from the one they name
+  // refuses, both named (R-BTN-56: never guess across origins).
+  const isHomeOrUrl = (_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url' || a[i] === '--home' || a[i - 1] === '--home';
+  const { flags } = parseArgs(rest.filter(isHomeOrUrl));
+  const args = rest.filter((x, i, a) => !isHomeOrUrl(x, i, a));
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === '--home' && rest[i + 1] === undefined) throw new Error('--home needs a value');
+  }
+  const homes = await homesContext(flags.home, flags.url ?? process.env.BATON_URL ?? null);
+  const home = homes.inForce ? { repository: homes.inForce.home.repository, names: homes.names } : (homes.names.length ? { repository: null, names: homes.names } : null);
+  const p = plan(role, args, undefined, undefined, home);
+  const url = flags.url ?? process.env.BATON_URL ?? homes.inForce?.home.origin ?? DEFAULT_URL;
   const keyFile = need(flags.identity, '-i KEY (an administrator, owner or worker key file)');
   // B-182 (R-BTN-140): `--code-repos` entries whose ids the operator did not supply offline are
   // read from their forge here, before the settings PUT goes out — Baton never fetches.
