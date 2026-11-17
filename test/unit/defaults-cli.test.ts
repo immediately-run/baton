@@ -724,7 +724,7 @@ describe('baton repo init, through the built CLI', () => {
     }
   });
 
-  it('the implement stub takes a delivered answer only for a commit on the default branch: delivered, confirm next, the commit its evidence (B-257, S-BTN-231)', async () => {
+  it('the implement stub takes a delivered answer only for a commit on the default branch: delivered, confirm next, the commit its evidence (B-257, S-BTN-232)', async () => {
     const g = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     const origin = mkdtempSync(join(tmpdir(), 'baton-delivered-origin-'));
     const settingsFile = join(root, '.baton', 'baton.json');

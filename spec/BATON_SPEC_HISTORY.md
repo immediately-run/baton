@@ -3094,7 +3094,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   counts claims, never host resources. `docs/context/architecture.mdx`'s *Parallelism is
   horizontal* is amended with it (B-188 item 8).
 
-- **2026-11-17 — R-BTN-131, R-BTN-72 and R-BTN-62's observation amended, S-BTN-231 added: a
+- **2026-11-17 — R-BTN-131, R-BTN-72 and R-BTN-62's observation amended, S-BTN-232 added: a
   ticket already delivered (B-257).**
   Rules changed: R-BTN-131 (`create-pr` gains the station `delivered`, the person leg `confirm`
   and the end `confirmed`; `implement` reaches `pr-open` or `delivered`), R-BTN-72 (a suspension

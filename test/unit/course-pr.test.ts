@@ -599,7 +599,7 @@ describe('the implement stub\'s PR verification (B-81)', () => {
   });
 });
 
-// B-257 (S-BTN-231): an implement run that answered `delivered` places the ticket at
+// B-257 (S-BTN-232): an implement run that answered `delivered` places the ticket at
 // `delivered`, its person leg `confirm` queued — from Baton's record, never from git.
 describe('a ticket already delivered (B-257)', () => {
   const graph = CREATE_PR_COURSE as unknown as Parameters<typeof stationsPr>[0]['graph'];

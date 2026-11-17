@@ -1,4 +1,4 @@
-// S-BTN-231 a ticket already delivered (BATON_SPEC §15, §5.8 R-BTN-131, R-BTN-116, R-BTN-122;
+// S-BTN-232 a ticket already delivered (BATON_SPEC §15, §5.8 R-BTN-131, R-BTN-116, R-BTN-122;
 // B-257): `create-pr`'s implement finds the ticket on the default branch and its stub (the
 // commit checked there — the refusal is the stub's, test/unit/course-pr.test.ts) ends the claim
 // `suspended:delivered` with the commit as its evidence and the agent's line as its detail. Must
@@ -60,7 +60,7 @@ beforeEach(async () => {
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
 });
 
-describe('S-BTN-231 a ticket already delivered', () => {
+describe('S-BTN-232 a ticket already delivered', () => {
   it('delivered: no attempt spent, placed at delivered with confirm queued from Baton’s record, the evidence on the history; the person’s confirmed closes it', async () => {
     const claim = await delivered('D-1');
     // An outcome, not a failure (R-BTN-122): no failed attempt, no backoff, no hold.

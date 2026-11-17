@@ -119,7 +119,7 @@ describe('the standard courses (R-BTN-131)', () => {
     }
   });
 
-  it("create-pr's implement may answer delivered: an outcome whose person leg confirm ends the ticket or sends it back, and its instructions say how (B-257, S-BTN-231)", () => {
+  it("create-pr's implement may answer delivered: an outcome whose person leg confirm ends the ticket or sends it back, and its instructions say how (B-257, S-BTN-232)", () => {
     const b = builtIn('create-pr')!;
     const g = graphOf(b.course);
     expect(b.legs.implement.delivered).toBe(true);
