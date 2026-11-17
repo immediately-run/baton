@@ -17,7 +17,7 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 `@immediately-run/baton` is the `baton` command, published from this repository:
 
 ```sh
-npx --yes @immediately-run/baton@0.1.3 run   # a runner (§6.13), with BATON_KEY_FILE set
+npx --yes @immediately-run/baton@0.1.4 run   # a runner (§6.13), with BATON_KEY_FILE set
 ```
 
 From the package, `baton run`, `baton repo init`, `baton decision list` and the

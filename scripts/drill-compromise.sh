@@ -27,7 +27,7 @@
 #                      with a line saying so and the local half must still pass.
 #   --port N           the local Baton's port (default 8791)
 #   --keep             keep the scratch directory (printed) for inspection
-#   --cli              override the pinned release CLI (default: npx --yes @immediately-run/baton@0.1.3,
+#   --cli              override the pinned release CLI (default: npx --yes @immediately-run/baton@0.1.4,
 #                      the runbook's pin; B-138)
 #
 # Needs: this repository's checkout (node_modules installed — `npm ci --ignore-scripts`),
@@ -39,7 +39,7 @@ PORT=8791
 KEEP=0
 LOCAL_ONLY=0
 REPO=''
-BATON="${BATON_CLI:-npx --yes @immediately-run/baton@0.1.3}"
+BATON="${BATON_CLI:-npx --yes @immediately-run/baton@0.1.4}"
 
 die() { echo "drill: $*" >&2; exit 2; }
 note() { echo; echo "── $* ──────────────────────────────────────────"; }
