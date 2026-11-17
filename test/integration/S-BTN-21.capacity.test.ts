@@ -5,7 +5,8 @@
 // R3-1269's, not built) its recommendations omit the leg, so a claim without an id takes its
 // next candidate, the one needing no RDP; W1's own seat never refuses its advance into another
 // RDP leg, and the advance into a leg without it releases the seat; a force-reap while holding
-// keeps the seat fence-pending until `fence-cleared`; raising the capacity to 2 seats two
+// keeps the seat fence-pending until `fence-cleared` — the sidecar's report, the fence's
+// deadline, or an administrator's clear (B-171); raising the capacity to 2 seats two
 // claims, lowering to 1 takes no seat back and refuses the next claim; a snapshot changing a
 // running leg's `requires.capabilities` changes no held seat; a silent reap frees the seat at
 // once; a ticket whose posted `requires` names the capability, on a leg that does not, is
@@ -255,6 +256,37 @@ describe('S-BTN-21 capacity (R-BTN-178)', () => {
     expect(await seatsOf(c1.json.claim_id)).toEqual([]);
     const took = await claimAs(w3, W3.secret, { ticket_id: 'docs:RDP2' });
     expect(took.status).toBe(200);
+  });
+
+  it('an administrator\'s fence clear releases the seat at once (§9.5, R-BTN-178)', async () => {
+    const W1 = await up(w1, 'vm-12', 'w1', 'docs');
+    const W3 = await up(w3, 'vm-14', 'w3', 'docs');
+    const c1 = await claimAs(w1, W1.secret, { ticket_id: 'docs:RDP1' });
+    expect(c1.status).toBe(200);
+    expect((await advanceAs(w1, W1.secret, c1.json.claim_id, { leg: 'implement' })).status).toBe(200);
+    const session = await adminSession(admin);
+    const reap = await sessionCall(session, `/v1/ui/claims/${c1.json.claim_id}/reap`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ confirm: true }) });
+    expect(await reap.json()).toMatchObject({ fence_pending: true });
+    expect(await seatsOf(c1.json.claim_id)).toEqual([CAP]);
+    expect((await claimAs(w3, W3.secret, { ticket_id: 'docs:RDP2' })).status).toBe(409);
+    // The dashboard's Needs-you list carries the runner's facts, and the clear — one POST,
+    // confirmed — ends the fence now, without the sidecar's report or the deadline.
+    const state = (await (await sessionCall(session, '/v1/ui/state')).json()) as { needs_you: { fence_pending: { id: number; hostname: string; last_seen_at: number; lease_timeout_ms: number }[] } };
+    expect(state.needs_you.fence_pending).toEqual([expect.objectContaining({ id: c1.json.claim_id, hostname: 'vm-12', lease_timeout_ms: 900_000 })]);
+    const cleared = await sessionCall(session, `/v1/ui/claims/${c1.json.claim_id}/fence-clear`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ confirm: true }) });
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toEqual({ ok: true });
+    expect(await seatsOf(c1.json.claim_id)).toEqual([]);
+    expect(await rows(`SELECT actor, json_extract(detail_json, '$.by') AS by FROM events WHERE kind = 'fence-cleared'`))
+      .toEqual([{ actor: `admin:${admin.fingerprint}`, by: 'admin' }]);
+    // The seat free, W3 is seated where it was refused — no snapshot needed for seats.
+    const took = await claimAs(w3, W3.secret, { ticket_id: 'docs:RDP2' });
+    expect(took.status).toBe(200);
+    expect(await seatsOf(took.json.claim_id)).toEqual([CAP]);
+    // A second clear of the same claim: its fence is no longer pending, so conflict.
+    const again = await sessionCall(session, `/v1/ui/claims/${c1.json.claim_id}/fence-clear`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ confirm: true }) });
+    expect(again.status).toBe(409);
+    expect(await again.json()).toMatchObject({ code: 'conflict' });
   });
 
   it('raising the capacity seats two, lowering takes no seat back and refuses the next', async () => {

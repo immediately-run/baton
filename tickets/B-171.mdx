@@ -14,7 +14,8 @@ description: "Build R-BTN-19's administrator fence clear, the owner's ruling of 
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/273
 depends_on: []
 ---
 
@@ -48,10 +49,12 @@ administrator's clear*, §9.5, R-BTN-155's confirmed list, §12.2, §14, G-BTN-1
    its route `POST /v1/ui/claims/{id}/fence-clear`, confirmed like force-reap: it clears the
    fence in one transaction, frees the claim's seats (R-BTN-178) and logs
    `fence-cleared {admin: <fingerprint>}`; a claim whose fence is not pending is `conflict`.
-2. The dashboard control, drawn only for administrators, on the claim wherever the dashboard
+2. ~~The dashboard control, drawn only for administrators, on the claim wherever the dashboard
    shows it and on its `baton.fence-pending` condition in Needs you, with the dialog R-BTN-19
    describes (last-seen time; what the clear gives up, the `session`-mode case included); the
-   clear resolves that condition. It is its own action, never a condition restart.
+   clear resolves that condition. It is its own action, never a condition restart.~~ (2026-11-17:
+   B-193 deleted the old dashboard this item wrote for while this branch was in review; B-222
+   draws the fence clear on BATON-UI-V2's ticket page, depending on this ticket's route.)
 3. A freeze does not refuse the clear, so a seal waiting on a fence-pending claim (S-BTN-50)
    proceeds after it.
 
@@ -68,3 +71,8 @@ S-BTN-4, S-BTN-21 and S-BTN-50 as §15 states them, green in `npm test` on both 
 
 - 2026-11-02: drafted from the 2026-11-02 security review (PR #165).
 - 2026-11-02: decided by the owner (option (a)); the spec half written by PR `claude/baton-spec-review-2fwiga`; this ticket now builds it.
+- 2026-11-17: built — PR #273.
+- 2026-11-17: merging past B-193 (PR #235, merged while this branch was in review): the conflict
+  on the deleted `src/ui/app.js` is resolved for `main`'s side — the dashboard control is
+  B-222's on the new ticket page, which depends on this ticket's route; items 1 and 3, the
+  model and the tests are this PR's.

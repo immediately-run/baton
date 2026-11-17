@@ -1020,6 +1020,14 @@ export class BatonCore {
         const body = await readJson(req);
         return json(tx(() => this.claims.forceReap(owner, Number(reap[1]), body)));
       }
+      // R-BTN-19: an administrator's fence clear, in one transaction with its seats' release
+      // (R-BTN-178) and its event. A dashboard session's principal is an administrator's — the
+      // only key a session is minted from — so the route itself needs no further check.
+      const fenceClear = /^\/v1\/ui\/claims\/(\d+)\/fence-clear$/.exec(p);
+      if (fenceClear) {
+        const body = await readJson(req);
+        return json(tx(() => this.claims.fenceClear(owner, Number(fenceClear[1]), body)));
+      }
       const resolve = /^\/v1\/ui\/claims\/(\d+)\/resolve$/.exec(p);
       if (resolve) {
         const body = await readJson(req);
