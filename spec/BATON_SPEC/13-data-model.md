@@ -143,7 +143,7 @@ Under §12.8 (proposal), `repository_policies` `(repository_id, version)` holds 
 `ticket_history.kind`: `leg-started`, `leg-finished`, `leg-abandoned`, `position-confirmed`,
 `fact-arrival`, `arrival-unapplied`, `history-adopted`, `re-routed`, `blocked`, `unblocked`,
 `question-posted`, `question-answered`, `question-expired`, `condition`, `call-settled`,
-`superseded`, `outbox`, `inputs`, `outputs`, `spawned`, `discrepancy` (its sub in `detail_json`, R-BTN-85).
+`superseded`, `outbox`, `inputs`, `outputs`, `spawned`, `ticket-changed` (R-BTN-198), `discrepancy` (its sub in `detail_json`, R-BTN-85).
 
 ### 13.6 Prerequisites, overrides, conditions and timers
 

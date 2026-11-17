@@ -612,7 +612,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
     and a different version — the ticket moved under the claim — releases `stale-board` before
     any leg runs. A source at the snapshot that declares `versions` but exports no `read`
     cannot read at all — the CLI refuses one at load (§4.2) — and its claims release
-    `stale-board` too, never run on with no re-verification. It then
+    `stale-board` too, never run on with no re-verification. When the ticket's version moves under a running claim, R-BTN-198
+    says when the runner runs this check again, at the newer version. It then
     checks the tier fits its ceiling and runs the course's `sync.mjs` (through the
     wrapper, from a verified tree at the claim's commit, R-BTN-133) on the ticket and its PRs at
     the fetched head, whose readiness must show the offered leg leaving the claim's station as

@@ -103,6 +103,12 @@ condition carrying its run's session link, which a delivery runner sends to a pe
 the session in its harness's own UI; what they say there never passes through Baton
 (R-BTN-195).
 
+**Condition, leg event.** A condition is what a running leg tells Baton: it needs a person, it
+hit an error, it has something to report. A course handles it through a binding (R-BTN-160). A
+**leg event** goes the other way: what Baton tells a running leg, that its ticket changed
+(`ticket.changed`) or why it is being stopped (`release`). The leg alone handles it
+(R-BTN-198).
+
 **Cancel leg.** The ordinary leg a course names to undo its work outside git when a ticket is
 cancelled; Baton alone queues it, and the ticket is withdrawn when it ends (R-BTN-168).
 

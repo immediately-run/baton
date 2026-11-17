@@ -164,6 +164,7 @@ end on an ended claim is refused `claim-ended`.
 | `released:superseded` | `released` | Baton superseded the ticket (R-BTN-168) | no |
 | `released:floor` | `released` | a guarantee a floor names broke on a repository the ticket reaches, and Baton released the claim (R-BTN-189) | no |
 | `released:<bar reason>` | `released` | an owner bar that releases holders, with that bar's `reason` (R-BTN-67) | no |
+| `released:ticket-changed` | `released` | the ticket's version moved under a leg whose course restarts on it (R-BTN-198) | no |
 | `released:course-changed` | `released` | the leg left the course under the claim (R-BTN-64) | no |
 | `released:off-branch` | `released` | the claim's sha is not on the default branch (R-BTN-143) | no |
 | reaped, actor `alarm` | `reaped` | the runner was silent past its lease timeout (§9.5) | yes |

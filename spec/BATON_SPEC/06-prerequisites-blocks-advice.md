@@ -586,7 +586,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   acknowledged, so a lost response loses none; the runner acts on a message `id` once, then
   acknowledges. A ring (R-BTN-91)
   only prompts that heartbeat.
-- **`release`.** The runner stops the leg at its next safe point — at once for `requested`, `floor`,
+- **`release`.** The runner tells the leg the reason (`release`, R-BTN-198), then stops it at its next safe point — at once for `requested`, `floor`,
   `owner-cancel` and `superseded` (R-BTN-119, R-BTN-168) — leaves its work in git with the
   hand-off (R-BTN-44; none for `superseded`), ends the claim `released:<reason>` (§9) and acknowledges. A delivered
   `release` unacknowledged for 2 hours is reaped by the alarm with a fence (R-BTN-19); a

@@ -3094,6 +3094,40 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   counts claims, never host resources. `docs/context/architecture.mdx`'s *Parallelism is
   horizontal* is amended with it (B-188 item 8).
 
+- **2026-11-17 — R-BTN-198 added; R-BTN-35, R-BTN-69, R-BTN-72, R-BTN-91, R-BTN-106 and R-BTN-119
+  amended; S-BTN-231 added: leg events, what Baton tells a running leg (B-258).**
+  Rules changed: R-BTN-198 (new, §7.10), R-BTN-35 (a new version of a held ticket leaves the
+  claim alone and is told to the leg), R-BTN-69 (the leg field `on_ticket_changed`), R-BTN-72
+  (`ctx.on`, `ctx.events`, `ctx.readTicket`), R-BTN-91 (the ring kind `ticket`), R-BTN-106
+  (`baton leg events`, `baton leg ticket`), R-BTN-119 (the leg is told `release` with its reason
+  before the stop); also §6.9's `release`, the heartbeat's claim `version` (§8.1, §14), §9.4's
+  `released:ticket-changed` and §13's `ticket-changed` history kind.
+  The owner, 2026-11-15, asked whether the condition concept could be reused "for the other
+  direction: when baton must signal an event to the leg being executed", naming two cases: "a
+  ticket's body is updated in git (or another issue tracker system such as linear) while the
+  ticket is under claim by a runner and a leg of the ticket is being executed", and "the running
+  leg of a ticket is canceled by the user on the baton web ui". Until now a version change under
+  a claim was progress, not staleness (R-BTN-35), and the leg ran to its end on the text it read;
+  a stop reached a leg only as an abort with reason `release`. The owner's answers to the
+  session's five questions: the name **leg event** ("leg event is fine"), not condition, since
+  no binding, handler, Needs-you entry or quota applies to an event whose only handler is the
+  leg; `continue` as the default ("continue as default is fine"), so no existing course changes;
+  under `continue` the leg is told and chooses ("can we notify the agent of the update and let it
+  decide if it wants to re-read the ticket body or not?") — the session's proposal had been no
+  mid-leg reading at all, so a ticket rewritten after the claim's checks could not reach a
+  running agent; the answer keeps that safety by having the runner re-verify the version (source
+  read, closure, tier) before the leg may read it, and handing the leg no ticket text unasked; a
+  leg's own push to its ticket raises nothing, proven only for the markdown source ("ok"); and
+  `release` changes nothing about the stop ("ok"). Readiness is not re-checked for a mid-leg
+  read, since the leg's own pushes move it and the position is Baton's; it is re-checked before
+  the next leg in the claim. Rejected: reusing condition rows and bindings inbound; pushing the
+  new body to the agent; releasing every claim whose ticket changed; and a validator reservation
+  of the event types, unneeded since leg events are never condition types. Not in this change: how
+  quickly a tracker's edit reaches Baton (no want is recorded for it, R-BTN-94). The rule id,
+  scenario and ticket are R-BTN-198, S-BTN-231 and B-258: R-BTN-197, S-BTN-230 and B-235 were
+  taken on main while the branch was open.
+  Review: _(filled by the review rounds below)_
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
