@@ -3094,6 +3094,32 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   counts claims, never host resources. `docs/context/architecture.mdx`'s *Parallelism is
   horizontal* is amended with it (B-188 item 8).
 
+- **2026-11-17 — R-BTN-131, R-BTN-72 and R-BTN-62's observation amended, S-BTN-231 added: a
+  ticket already delivered (B-257).**
+  Rules changed: R-BTN-131 (`create-pr` gains the station `delivered`, the person leg `confirm`
+  and the end `confirmed`; `implement` reaches `pr-open` or `delivered`), R-BTN-72 (a suspension
+  carries `detail`, stored with the finished run's evidence on its history row), and the sync
+  run's observation (§4.3, §14) names `legs`, now with each run's `reached`. B-228 had been
+  implemented by the commit that filed it (8565aa7); three implement legs found it on `main`, and,
+  following their contract, opened no PR and pushed note-only branches
+  (`claude/B-228-already-on-main`, `claude/B-228-already-delivered`) — and each was released
+  `cannot-finish:transient`, a failed attempt, looping toward a hold while the truth was "done, a
+  person should confirm". The agent now answers `delivered <sha> <evidence>`; the stub accepts it
+  only for commits on the default branch as origin has it, the leg reaches `delivered` (an
+  outcome, so no attempt is spent, R-BTN-122), and the end carries the commit as its evidence and
+  the line as its detail — in Baton, not on a branch made to carry a note. The station function
+  places the ticket from Baton's record of the run's `reached`, never from git, so no pusher can
+  park a ticket at `delivered`; a person confirms (`confirmed`, an end) or sends it back
+  (`filed`). Only the person's answer or a merged PR closes the ticket. Rejected: a decision
+  posted by the sync on `filed` (R-BTN-78), which would leave the leg a failure and the ticket at
+  a station that says nothing happened; a closing marker on the default branch, which a pusher
+  could write and which is the note branch again; letting the stub's check close the ticket,
+  which would make an agent's word plus an ancestry check a closure; and Baton itself checking
+  ancestry, which it cannot (it holds no git) — the stub checks what it reads, as `verify: 'pr'`
+  does for `pr-open`. `confirm`'s `max_runs` 3 is the bound R-BTN-69 asks of the cycle `filed →
+  delivered → filed`, every pass of which is a person's. The ticket file's `status:` stays the
+  person's to set (`baton tickets done`), as for any ticket closed by hand.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

@@ -31,9 +31,21 @@ declaring a capability you no longer hold.
 - Read the whole ticket: what to build, the architecture it prescribes, the tests it names, its
   exit criteria. Those sections are the contract. Where the ticket prescribes a decision, take
   it; if you take another, say so under "Deviations" in the PR body.
-- **Check it is not already delivered.** Search the code for what the ticket asks for. If it is
-  done, open no PR: say so in the ticket and stop with an error, so a person looks. If part of it
-  is done, build the remainder and say which part you found.
+- **Check it is not already delivered.** Search the code for what the ticket asks for. If part of
+  it is done, build the remainder and say which part you found. If all of it is already on the
+  default branch, open no PR, push no branch and edit nothing (a branch made only to carry a
+  note is not wanted): run the tests that cover it, and make the **last line** of your output
+
+  ```
+  delivered <sha> <what you ran and what it showed>
+  ```
+
+  `<sha>` is the commit on the default branch that delivered it (several, comma-separated, no
+  spaces, when it took several); the rest is your evidence in one line — the tests and checks
+  you ran and their result, e.g. `delivered 8565aa7 runner-main.test.ts 47 passed, typecheck
+  clean`. Baton checks each commit is on the default branch — one that is not refuses the answer
+  and fails the leg — and moves the ticket to a station where a person reads your evidence and
+  confirms it closed, or sends it back. Your word alone never closes the ticket. Exit 0.
 - Find the code you will touch by name: the helpers, the tests next to it, the repository's own
   checks (lint, typecheck, tests — whatever a contributor runs).
 

@@ -1247,7 +1247,7 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * not the leg's outcome. The bundled `close` writes the closing marker where the course's
  * convention puts it. */
 export function stubSource(b: BuiltIn, course: string, leg: string): string {
-  const { ask, position, verify, pushes } = b.legs[leg];
+  const { ask, position, verify, pushes, delivered } = b.legs[leg];
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
@@ -1302,7 +1302,7 @@ const newestWrite = (p, depth = 0) => {
 const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
-import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
+import { verifyPrOpen, ticketRepositories${delivered ? ', findDelivered, verifyDelivered, deliveredDetail' : ''} } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
 import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
 import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};${verify ? '' : `
 import { ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};`}` : ''}
@@ -1570,7 +1570,18 @@ ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, b
   // The answer (B-85): the last line that opens with the leg's value word, backwards past any
   // prose after it; a missing or misspelled verdict still fails, naming what it read.
   const { answer } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});` : `
-  void out;`}
+  void out;`}${delivered && verify ? `
+  // B-257: the agent found the ticket already delivered and said so — \`delivered <sha>
+  // <evidence>\` — rather than opening a PR. Each commit it names must be on the default branch
+  // as origin has it (fetched now); one that is not refuses the answer and fails the leg. The
+  // leg then reaches \`delivered\`, where a person confirms it: the agent's word never closes the
+  // ticket, and the answer is an outcome, never a failed attempt. The evidence rides the end.
+  const said = findDelivered(out);
+  if (said != null) {
+    const shas = verifyDelivered({ checkout: ctx.checkout, shas: said.shas, branch: ticketsBranch(ctx.checkout, ctx.default_branch ?? process.env.BATON_DEFAULT_BRANCH ?? null) }, legRun);
+    if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': delivered at ' + shas.join(', ') + ', on the default branch — a person confirms\\n');
+    return { suspend: true, reached: 'delivered', next: 'confirm', delivered: shas[0], detail: deliveredDetail(shas, said.evidence), ...(conclusion ? { conclusion } : {}) };
+  }` : ''}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
 ` : ''}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}
@@ -1803,6 +1814,11 @@ const wrapperExample = (): string =>
 const instructionsOf = (course: string, leg: string): string =>
   readFileSync(fromSource() ? join(packageRoot(), 'src', 'defaults', 'courses', course, `${leg}.md`) : prebuilt('courses', course, `${leg}.md`), 'utf8');
 
+/** The legs of a standard course a runner runs, each with a stub and instructions: every leg
+ *  but a person's (R-BTN-116, B-257's `confirm`), which no runner is offered and no script runs. */
+const runnerLegs = (b: BuiltIn): string[] =>
+  Object.entries(b.course.legs as Record<string, { kind?: unknown }>).filter(([, l]) => l?.kind !== 'person').map(([leg]) => leg);
+
 /** A leg stub, bundled with its `close`: from source in a checkout, else build:cli's copy. The
  * run-tests gate (B-110) generates its own kind — no agent, the script itself. */
 async function writeStub(b: BuiltIn, leg: string, abs: string): Promise<void> {
@@ -1825,7 +1841,7 @@ export async function prebuildDefaults(dist: string, build: { repository: string
   let files = 0;
   for (const b of BUILT_INS) {
     mkdirSync(join(out, 'stubs', b.id), { recursive: true });
-    for (const leg of Object.keys(b.course.legs)) {
+    for (const leg of runnerLegs(b)) {
       await bundleSource(b.legs[leg]?.tests ? testsStubSource(b, b.id, leg) : stubSource(b, b.id, leg), join(out, 'stubs', b.id, `${leg}.mjs`));
       files++;
       const md = join(packageRoot(), 'src', 'defaults', 'courses', b.id, `${leg}.md`);
@@ -1975,7 +1991,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   /** One standard course's files; `rewrite` rewrites Baton's (the course file, the leg scripts). */
   const scaffold = async (bi: BuiltIn, rewrite: boolean): Promise<void> => {
     await put(`.baton/courses/${bi.id}/course.json`, (abs) => writeFileSync(abs, courseFileText(bi)), rewrite);
-    for (const leg of Object.keys(bi.course.legs)) {
+    for (const leg of runnerLegs(bi)) {
       // Each stub is bundled with its `close`, so it imports nothing the runner's scratch copy lacks.
       await put(`.baton/courses/${bi.id}/legs/${leg}.mjs`, (abs) => writeStub(bi, leg, abs), rewrite);
       // The leg's instructions: shipped with the CLI, the repository's to edit from here on.
@@ -2017,7 +2033,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   }
   const b = scaffoldable(course);
   for (const leg of overrides) {
-    if (!Object.hasOwn(b.course.legs, leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${Object.keys(b.course.legs).join(', ')}`);
+    if (!runnerLegs(b).includes(leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${runnerLegs(b).join(', ')}`);
   }
   const entry = { ...courseEntry(b.id, Object.keys(b.course.legs)), skill: b.skill, ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
   let settings: BatonJson;

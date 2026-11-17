@@ -34,7 +34,9 @@ describe('the standard courses (R-BTN-131)', () => {
       });
 
       it('every leg has a stub and shipped instructions, and nothing else is shipped', () => {
-        const legs = Object.keys(b.course.legs).sort();
+        // A person's leg (R-BTN-116; create-pr's `confirm`, B-257) is answered, never run: no
+        // stub, no instructions.
+        const legs = Object.entries(b.course.legs as Record<string, { kind?: string }>).filter(([, l]) => l.kind !== 'person').map(([l]) => l).sort();
         expect(Object.keys(b.legs).sort()).toEqual(legs);
         expect(readdirSync(instructionsDir(b.id)).sort()).toEqual(legs.map((l) => `${l}.md`));
         for (const l of legs) expect(readFileSync(join(instructionsDir(b.id), `${l}.md`), 'utf8')).toMatch(new RegExp(`^# ${b.id} · ${l} — `));
@@ -115,6 +117,20 @@ describe('the standard courses (R-BTN-131)', () => {
         }
       }
     }
+  });
+
+  it("create-pr's implement may answer delivered: an outcome whose person leg confirm ends the ticket or sends it back, and its instructions say how (B-257, S-BTN-231)", () => {
+    const b = builtIn('create-pr')!;
+    const g = graphOf(b.course);
+    expect(b.legs.implement.delivered).toBe(true);
+    expect(g.legs.get('implement')!.to).toEqual(['pr-open', 'delivered']);
+    // The stub's delivered position, as cli.ts writes it: `delivered` reached, `confirm` queued.
+    expect(g.legs.get('confirm')).toMatchObject({ person: true, from: ['delivered'], to: ['confirmed', 'filed'] });
+    expect(g.ends.has('confirmed') && g.ends.has('merged')).toBe(true);
+    expect(onGraph(g, [{ leg: 'implement', reached: 'delivered' }, { leg: 'confirm', reached: 'filed' }, { leg: 'implement', reached: 'delivered' }, { leg: 'confirm', reached: 'confirmed' }])).toBe(true);
+    const text = readFileSync(join(instructionsDir('create-pr'), 'implement.md'), 'utf8');
+    expect(text).toContain('delivered <sha> <what you ran and what it showed>');
+    expect(text).toContain('Your word alone never closes the ticket');
   });
 
   it("create-pr's implement and fix instructions carry the shared-file rule, and this repository's own .baton copies with them (B-102)", () => {
