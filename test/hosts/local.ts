@@ -4,6 +4,7 @@
 import { inject } from 'vitest';
 import type { BatonCore } from '../../src/core/baton';
 import type { Config } from '../../src/core/ports';
+import { RECOMMENDED_CLIENT } from '../../src/core/http';
 import { LocalHost } from '../../src/local/host';
 import { openStore } from '../../src/local/store';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -31,8 +32,26 @@ let host = await fresh();
 /** The host under test, for tests that drive it directly. */
 export const current = () => host;
 
-/** A request to the local front — each commit it makes a step of the scenario's trace (R3-1244). */
+/** B-254 (R-BTN-197): the client version the harness's own requests name — the recommended one,
+ *  so the suite runs inside the served window. S-BTN-227 sends its own values through `raw`. */
+export function withClient(req: Request): Request {
+  if (req.headers.has('Baton-Client')) return req;
+  const headers = new Headers(req.headers);
+  headers.set('Baton-Client', `baton/${RECOMMENDED_CLIENT}`);
+  return new Request(req, { headers });
+}
+
+/** A request to the local front, as the harness's client: `withClient` names the recommended
+ *  client version (B-254, R-BTN-197), so the suite's own requests run inside the served
+ *  window. */
 export async function call(req: Request): Promise<Response> {
+  return raw(withClient(req));
+}
+
+/** A request to the local front exactly as built — S-BTN-227's old and versionless clients, and
+ *  a runner's own `Baton-Client`, reach Baton as they are. A step of the scenario's trace like
+ *  any other (R3-1244): `raw` changes what is sent, never that it was. */
+export async function raw(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const origin: Origin = { kind: 'request', method: req.method, path: url.pathname + url.search, body: parse(req.body ? await req.clone().text() : undefined) };
   const res = await origins.run(origin, () => host.handle(req));
@@ -55,7 +74,7 @@ export function withCore<T>(fn: (core: BatonCore) => T | Promise<T>): Promise<T>
   return host.queue.run(() => fn(host.core));
 }
 
-/** One alarm tick, in its turn — its commits are steps of the trace too. */
+/** One alarm tick, in its turn — its commits are steps of the trace too (R3-1244). */
 export function tick(): Promise<void> {
   return origins.run({ kind: 'alarm' }, () => host.tick());
 }

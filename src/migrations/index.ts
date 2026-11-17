@@ -54,6 +54,7 @@ import stateVersion from './0054_state_version.sql';
 import dashboardLookups from './0055_dashboard_lookups.sql';
 import workerProfile from './0056_worker_profile.sql';
 import severalClaims from './0057_several_claims.sql';
+import clientVersions from './0058_client_versions.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -173,4 +174,7 @@ export const MIGRATIONS: Migration[] = [
   { id: 56, sql: workerProfile },
   // 0057 is B-188's (0056 is B-253's) (R-BTN-4: several claims per runner; `concurrency` and the grant's `max_claims`).
   { id: 57, sql: severalClaims },
+  // 0058 is B-254's (R-BTN-197: the recommended client an administrator may raise, and each
+  // runner's own statement of its version), renumbered at the merge behind B-188's 0057.
+  { id: 58, sql: clientVersions },
 ];

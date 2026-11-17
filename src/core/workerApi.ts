@@ -15,6 +15,7 @@ import { DEFAULT_TRANSCRIPT_REPOS, repositoryOf, transcriptReposOf } from './reg
 
 export { DEFAULT_TRANSCRIPT_REPOS };
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
+import { compareVersions } from '../shared/versions.mjs';
 import {
   checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, bad, HOSTNAME, isGrantedKey,
   type ActivityReport, type Heartbeat, HOLDING } from './validate';
@@ -224,21 +225,23 @@ export class WorkerApi {
   // ── workers (§5, §10.2) ─────────────────────────────────────────────────────────────────
 
   /** The worker a later call comes from: this credential's worker whose secret hashes to the
-   *  presented `X-Worker-Secret` (R-BTN-14). A reaped worker is refused until it re-keys. */
-  async authWorker(credentialId: string, secret: string | null) {
+   *  presented `X-Worker-Secret` (R-BTN-14). A reaped worker is refused until it re-keys.
+   *  R-BTN-197: the call's `Baton-Client` is recorded as the runner's `client_version` beside
+   *  its `last_seen_at` — the runner's own statement, NULL when the call named no version. */
+  async authWorker(credentialId: string, secret: string | null, clientVersion: string | null = null) {
     if (!secret) throw new BatonError('unauthenticated', 'X-Worker-Secret is required after the first heartbeat');
     const hash = await sha256Hex(secret);
-    return this.c.store.transaction(() => this.authWorkerTx(credentialId, hash));
+    return this.c.store.transaction(() => this.authWorkerTx(credentialId, hash, clientVersion));
   }
 
-  private authWorkerTx(credentialId: string, hash: string) {
+  private authWorkerTx(credentialId: string, hash: string, clientVersion: string | null = null) {
     this.credential(credentialId);
     const w = this.rows<{ id: number; reaped_at: number | null; secret_seen: number }>('SELECT id, reaped_at, secret_seen FROM workers WHERE credential_id = ? AND secret_hash = ?', credentialId, hash)[0];
     if (!w) throw new BatonError('unauthenticated', 'no worker holds this secret');
     if (w.reaped_at != null) throw new BatonError('worker-reaped', 'this worker was reaped; re-key with a heartbeat');
     // B-237 (R-BTN-196): a call's `last_seen_at` is liveness — it does not move the state version;
     // the first presentation of the secret does.
-    const seen = () => this.exec('UPDATE workers SET last_seen_at = ?, secret_seen = 1 WHERE id = ?', this.c.now(), w.id);
+    const seen = () => this.exec('UPDATE workers SET last_seen_at = ?, secret_seen = 1, client_version = ? WHERE id = ?', this.c.now(), clientVersion, w.id);
     if (w.secret_seen) liveness(this.c.store, seen);
     else seen();
     return w.id;
@@ -283,7 +286,7 @@ export class WorkerApi {
    *  absent, logging `deprecated-field`. */
   // @model heartbeat sha256:e9da1acd5895
   // @model declare sha256:d898c5bf9f5f
-  async heartbeat(credentialId: string, secretHeader: string | null, body: unknown) {
+  async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null) {
     // B-168 (R-BTN-76): `uses` is retired — a runner uses the repository's instances, never a set
     // it declares — and read as absent while the history's Migrations entry lasts.
     if (body && typeof body === 'object' && !Array.isArray(body) && (body as { uses?: unknown }).uses !== undefined) {
@@ -329,7 +332,7 @@ export class WorkerApi {
       tags: [...hb.tags].sort(),
       profile: hb.profile ?? null,
     }));
-    const answer = this.c.store.transaction(() => this.heartbeatTx(credentialId, presented, settingsHash, hb));
+    const answer = this.c.store.transaction(() => this.heartbeatTx(credentialId, presented, settingsHash, hb, clientVersion));
     return {
       ...answer,
       ...(ignoredCeilings.length ? { tier_ceilings_unregistered: ignoredCeilings } : {}),
@@ -337,7 +340,7 @@ export class WorkerApi {
     };
   }
 
-  private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat) {
+  private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat, clientVersion: string | null) {
     // B-253: the profile, serialized once — the same bytes compared, stored and hashed.
     const profileJson = hb.profile ? JSON.stringify(hb.profile) : null;
     const cred = this.credential(credentialId);
@@ -365,10 +368,10 @@ export class WorkerApi {
     if (!w) {
       if (!hb.secret_hash) bad('secret_hash', 'the first heartbeat of a session carries its SHA-256');
       this.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, model_id,
-                   tier_ceiling, tier_ceilings, lease_timeout_ms, profile_json, settings_hash, first_seen_at, last_seen_at, last_activity_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)`,
+                   tier_ceiling, tier_ceilings, lease_timeout_ms, profile_json, settings_hash, client_version, first_seen_at, last_seen_at, last_activity_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,
         hb.hostname, hb.session_name, hb.secret_hash, cred.id, hb.harness, hb.kind, hb.model_id ?? null,
-        hb.tier_ceiling, JSON.stringify(hb.tier_ceilings), hb.lease_timeout_s * 1000, profileJson, now, now, hb.last_activity_at ?? null);
+        hb.tier_ceiling, JSON.stringify(hb.tier_ceilings), hb.lease_timeout_s * 1000, profileJson, clientVersion, now, now, hb.last_activity_at ?? null);
       w = this.rows<typeof w>('SELECT id, secret_hash, credential_id, reaped_at, incarnation, settings_hash, secret_seen FROM workers WHERE hostname = ? AND session_name = ?', hb.hostname, hb.session_name)[0];
     } else {
       // R3-1239's handover: a session registered under a bearer token, or under a key since
@@ -410,7 +413,10 @@ export class WorkerApi {
     const secretSeen = presented != null && presented === current ? 1 : 0;
     // B-237 (R-BTN-196): a beat of a live worker that changes nothing but `last_seen_at` and
     // `last_activity_at` is liveness, and does not move the state version — what those decide
-    // (live, stalled) is the clock's; any other field it sets that differs is a change.
+    // (live, stalled) is the clock's; any other field it sets that differs is a change. The
+    // caller's own `client_version` (R-BTN-197, B-254) is liveness in every path that records
+    // it — this beat and `authWorkerTx`'s `seen` — like `last_seen_at` beside it: the runner's
+    // statement of itself, never a state change.
     const stored = this.rows<{ harness: string; kind: string; model_id: string | null; tier_ceiling: string; tier_ceilings: string; lease_timeout_ms: number; isolation: string | null; profile_json: string | null; secret_seen: number; concurrency: number }>(
       'SELECT harness, kind, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms, isolation, profile_json, secret_seen, concurrency FROM workers WHERE id = ?', w.id)[0];
     const beatOnly = !!was?.live && !rekeyed && stored != null && stored.harness === hb.harness && stored.kind === hb.kind
@@ -418,9 +424,9 @@ export class WorkerApi {
       && stored.lease_timeout_ms === hb.lease_timeout_s * 1000 && stored.isolation === hb.isolation && stored.profile_json === profileJson && stored.secret_seen >= secretSeen
       && stored.concurrency === hb.concurrency;
     const beat = () => this.exec(`UPDATE workers SET last_seen_at = ?, secret_seen = MAX(secret_seen, ?), last_activity_at = COALESCE(?, last_activity_at), harness = ?, kind = ?,
-                 model_id = ?, tier_ceiling = ?, tier_ceilings = ?, lease_timeout_ms = ?, isolation = ?, profile_json = ?, concurrency = ? WHERE id = ?`,
+                 model_id = ?, tier_ceiling = ?, tier_ceilings = ?, lease_timeout_ms = ?, isolation = ?, profile_json = ?, concurrency = ?, client_version = ? WHERE id = ?`,
       now, secretSeen, hb.last_activity_at ?? null, hb.harness, hb.kind, hb.model_id ?? null, hb.tier_ceiling, JSON.stringify(hb.tier_ceilings),
-      hb.lease_timeout_s * 1000, hb.isolation, profileJson, hb.concurrency, w.id);
+      hb.lease_timeout_s * 1000, hb.isolation, profileJson, hb.concurrency, clientVersion, w.id);
     if (beatOnly) liveness(this.c.store, beat);
     else beat();
     const rewrote = settingsHash !== w.settings_hash || rekeyed;
@@ -859,7 +865,7 @@ export class WorkerApi {
 
   workersView(now: number) {
     const workers = this.rows<Row>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
-                                       first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json FROM workers ORDER BY hostname, id`);
+                                       first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version FROM workers ORDER BY hostname, id`);
     return workers.map((w) => {
       const id = w.id as number;
       const alive = w.reaped_at == null && now - (w.last_seen_at as number) < (w.lease_timeout_ms as number);
@@ -884,6 +890,18 @@ export class WorkerApi {
         last_report: this.rows(`SELECT payload_json, sent_at FROM messages WHERE from_worker_id = ? AND kind = 'status_report' ORDER BY id DESC LIMIT 1`, id)[0] ?? null,
       };
     });
+  }
+
+  /** R-BTN-197 (B-254): Needs you's runners below the recommended client — each live runner
+   *  whose own statement (`client_version`, its last call's `Baton-Client`) is below
+   *  `recommended`, with its version, folded out of the Workers view's own read so the state
+   *  read costs no statement of its own for it (B-240's budget). A runner that named no version
+   *  said nothing to compare and is not listed; liveness is the Workers view's own rule
+   *  (`reaped_at` clear and the lease un-lapsed). */
+  staleClients(workers: ({ alive: boolean } & Record<string, unknown>)[], recommended: string) {
+    return workers
+      .filter((w) => w.client_version != null && w.kind !== 'legacy' && w.alive && compareVersions(w.client_version as string, recommended) < 0)
+      .map((w) => ({ hostname: w.hostname, session_name: w.session_name, client_version: w.client_version, recommended }));
   }
 }
 

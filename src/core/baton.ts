@@ -7,7 +7,7 @@
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
 import { MIGRATIONS } from '../migrations';
 import { versionedStore, type VersionedStore } from './stateVersion';
-import { BatonError, errorResponse, json } from './http';
+import { BatonError, CLIENT_HEADER, errorResponse, json, servedClientVersions, withClientVersions } from './http';
 import { checkPayload, DEFAULT_COURSE, retiredBoardFields, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
@@ -15,6 +15,7 @@ import { Conditions } from './conditions';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
 import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
+import { clientVersionOf } from '../shared/versions.mjs';
 import { WorkerApi } from './workerApi';
 import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
@@ -501,7 +502,13 @@ export class BatonCore {
         await this.armBy(this.blocks.nextDue());
         await this.armBy(this.resources.nextLapse());
       } else this.pendingDispatch.clear();
-      return res;
+      // R-BTN-197 (B-254): the versions this instance serves, on every response under /v1 — the
+      // code's `min` (never a setting's) and the recommended as this instance serves it, an
+      // administrator's raise (instance_settings) included, clamped at or above `min`. The front
+      // learns this value from these answers, for the responses it builds itself.
+      return url.pathname.startsWith('/v1/')
+        ? withClientVersions(res, servedClientVersions(this.ports.config, this.instance.recommendedClient()))
+        : res;
     } catch (e) {
       this.pendingDispatch.clear(); // the transaction rolled back: nothing changed to mirror
       throw e;
@@ -861,13 +868,16 @@ export class BatonCore {
     }
     if (p.startsWith('/v1/runner/')) {
       if (!cred) throw new BatonError('unauthenticated', 'no worker principal');
+      // R-BTN-197: every runner call records its Baton-Client as the runner's own statement of
+      // its version (§13.3), with the heartbeat and with the secret-authenticated calls alike.
+      const client = clientVersionOf(req.headers.get(CLIENT_HEADER));
       if (m === 'POST' && p === '/v1/runner/heartbeat') {
         const body = await readJson(req);
         // The hashing is async; the writes happen in one transaction after it (§3: atomic).
-        return json(await this.workers.heartbeat(cred, secret, body));
+        return json(await this.workers.heartbeat(cred, secret, body, client));
       }
       if (m === 'GET' && p === '/v1/runner/mode') {
-        await this.workers.authWorker(cred, secret);
+        await this.workers.authWorker(cred, secret, client);
         // §11: `?repository=` — each repository cuts over on its own (R-BTN-28). R-BTN-47
         // (B-173): a retired one is as one never registered.
         const repo = checkRepositoryId(url.searchParams.get('repository'));
@@ -882,7 +892,7 @@ export class BatonCore {
         const branch = (url.searchParams.get('branch') ?? '').replace(/^refs\/heads\//, '');
         if (!GIT_REPO.test(gitRepo)) throw new BatonError('invalid-params', 'repo: must be owner/name');
         if (!GIT_BRANCH.test(branch)) throw new BatonError('invalid-params', 'branch: must be a branch name');
-        const caller = secret ? await this.workers.authWorker(cred, secret) : null;
+        const caller = secret ? await this.workers.authWorker(cred, secret, client) : null;
         return json(this.claims.branchHolder(caller, gitRepo, branch));
       }
       const holder = /^\/v1\/runner\/tickets\/([^/]+)\/holder$/.exec(p);
@@ -890,10 +900,10 @@ export class BatonCore {
         // R-BTN-7: callable with the token alone (the witness has no sidecar); with a secret, the
         // caller's own claim is not "another".
         const item = this.ticketParam(holder[1]);
-        const caller = secret ? await this.workers.authWorker(cred, secret) : null;
+        const caller = secret ? await this.workers.authWorker(cred, secret, client) : null;
         return json(this.claims.holder(caller, item));
       }
-      const workerId = await this.workers.authWorker(cred, secret);
+      const workerId = await this.workers.authWorker(cred, secret, client);
       if (m === 'POST' && p === '/v1/runner/claim') {
         const body = await readJson(req);
         // B-127 (round 2, the pairing): the claim and the standing signed-control record are
@@ -1314,7 +1324,7 @@ export class BatonCore {
       const who = url.searchParams.get('worker');
       if (who != null) {
         if (who !== 'me' || role !== 'worker') throw new BatonError('invalid-params', 'worker: only `me`, from a worker session');
-        worker = await this.workers.authWorker(cred, req.headers.get('X-Worker-Secret'));
+        worker = await this.workers.authWorker(cred, req.headers.get('X-Worker-Secret'), clientVersionOf(req.headers.get(CLIENT_HEADER)));
       }
       return json(this.blocks.blocksOf(id, worker));
     }
@@ -2048,6 +2058,9 @@ export class BatonCore {
     const repositories = this.adminView().repositories;
     const ready = this.readyRows(repositories);
     const byTier = this.readyByTier(ready);
+    // The Workers view, read once for both the rows it serves and Needs you's stale clients
+    // (R-BTN-197, B-254) — one read, B-240's statement budget kept.
+    const workers = this.workers.workersView(now);
 
     const held = this.sql(
       `SELECT repository_id, sha, parent_sha, head_sha, ticket_count, received_at, auto_accept_at FROM held_snapshots
@@ -2056,7 +2069,7 @@ export class BatonCore {
     // gone; an unavailable provider is a reading (§6.3, R-BTN-76) and a peak preference a rule
     // in the course (§6.10), never a dashboard row.
     return {
-      server_time: now, repositories, ready, ready_by_tier: byTier, held, workers: this.workers.workersView(now),
+      server_time: now, repositories, ready, ready_by_tier: byTier, held, workers,
       running: this.claims.running(now), timeline: this.claims.timeline(now),
       // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
       limits: this.admin.view(now),
@@ -2065,6 +2078,9 @@ export class BatonCore {
       instance: this.instance.view(),
       // R-BTN-69: a refused course file, the previous one staying in force.
       needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), keys: this.keysNotice(),
+        // R-BTN-197 (B-254): each live runner whose own version statement is below the
+        // recommended client, with its version — update it at your own pace; nothing self-updates.
+        stale_clients: this.workers.staleClients(workers, this.instance.recommendedClient()),
         // B-134: the open scope findings — a leg reported outside its ticket's scope, a worker
         // push no open claim covers — until an owner resolves each.
         scope: this.scope.needsYou(),

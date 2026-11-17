@@ -407,6 +407,11 @@ function renderNeeds() {
     const what = w.course_id == null ? 'declares no course' : `${w.repository_id}:${w.course_id} version ${w.version}, below its minimum ${w.min_worker_version}`;
     list.append(el('li', { text: `${w.hostname} · ${w.session_name}: ${what} — restart it from a pulled checkout` }));
   }
+  // R-BTN-197 (B-254): a live runner whose own version statement is below the recommended client.
+  // The version is the runner's statement; updating it is the operator's act, never the runner's own.
+  for (const r of n.stale_clients ?? []) {
+    list.append(el('li', { text: `${r.hostname} · ${r.session_name}: client ${r.client_version}, below the recommended ${r.recommended} — update this runner; nothing updates itself` }));
+  }
   // §2e: git has shown a claim's path going backwards for 30 minutes; the holder re-reads git.
   for (const c of n.regressed ?? []) {
     let at = '?';

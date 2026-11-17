@@ -1,11 +1,12 @@
 // validate.ts — every rule for untrusted worker and owner input (BATON_SPEC §10.4, §6.8, §6.9,
 // §5). One module, called by every endpoint before any write (R3-1211); a value that fails is
 // refused with `invalid-params` naming the field, never trimmed into shape.
-import { BatonError } from './http';
+import { BatonError, RECOMMENDED_CLIENT } from './http';
 import { FREE_TEXT_MAX, isFreeText } from './text';
 import { COURSE_ID } from './course';
 import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES } from './conditionTypes';
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
+import { CLIENT_VERSION_MAX, compareVersions, parseVersion } from '../shared/versions.mjs';
 
 /** §5: the harness's own session id, the rule `claim.sh --session` already applies. */
 export const SESSION_NAME = /^[A-Za-z0-9_.:-]{1,128}$/;
@@ -96,6 +97,21 @@ export function freeText(v: unknown, field: string, max = FREE_TEXT_MAX): string
 
 const optional = <T>(v: unknown, check: (v: unknown) => T): T | undefined => (v === undefined || v === null ? undefined : check(v));
 const matches = (re: RegExp, field: string) => (v: unknown) => (typeof v === 'string' && re.test(v) ? v : bad(field, `must match ${re}`));
+
+/** §11.3 R-BTN-197 (B-254): `admin settings set --recommended-client` — null to clear back to
+ *  the code's `RECOMMENDED_CLIENT`, else a semver at or above it, and short as a client's own
+ *  statement is (§13.3 R-BTN-33: the header echoes it, so it is bounded like the client's). An
+ *  administrator may raise the recommendation, never lower it below what the deployed code
+ *  itself recommends. */
+export function checkRecommendedClient(v: unknown): string | null {
+  if (v === null) return null;
+  if (typeof v !== 'string' || parseVersion(v) == null) bad('recommended_client', 'must be null or a semver, like 0.1.6');
+  if ((v as string).length > CLIENT_VERSION_MAX) bad('recommended_client', `must be at most ${CLIENT_VERSION_MAX} characters`);
+  if (compareVersions(v as string, RECOMMENDED_CLIENT) < 0) {
+    bad('recommended_client', `must be at or above the code's recommended ${RECOMMENDED_CLIENT} — an administrator may raise the recommendation, never lower it`);
+  }
+  return v as string;
+}
 
 // ── the heartbeat (§11) ──────────────────────────────────────────────────────────────────
 
