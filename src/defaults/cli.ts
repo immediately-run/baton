@@ -1247,7 +1247,7 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * not the leg's outcome. The bundled `close` writes the closing marker where the course's
  * convention puts it. */
 export function stubSource(b: BuiltIn, course: string, leg: string): string {
-  const { ask, position, verify, pushes } = b.legs[leg];
+  const { ask, position, verify, pushes, delivered } = b.legs[leg];
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
@@ -1302,7 +1302,7 @@ const newestWrite = (p, depth = 0) => {
 const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
-import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
+import { verifyPrOpen, ticketRepositories${delivered ? ', findDelivered, verifyDelivered, deliveredDetail' : ''} } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}${pushes ? `
 import { DEFAULT_BRANCH_PATTERN, branchMatches, matchPatterns } from ${JSON.stringify(source('course-pr.ts'))};
 import { bareTicketId } from ${JSON.stringify(source('ticket-state.ts'))};${verify ? '' : `
 import { ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};`}` : ''}
@@ -1464,6 +1464,10 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
       storePaths.push(join(process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== '' ? process.env.CLAUDE_CONFIG_DIR : join(homedir(), '.claude'), 'projects', dashed));
     }
   }
+  // The agent's last output (2026-10-24; B-256): the last lines of both streams, bounded — what a
+  // failed leg's error carries, so the runner's log alone can diagnose it, whether the agent
+  // exited non-zero or exited 0 and the checks after it failed.
+  const lastOutput = (so, se) => (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
   const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === '1';
     const child = spawn(argv[0], argv.slice(1), {
@@ -1512,7 +1516,7 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
       if (watch != null) clearInterval(watch);
       child.kill('SIGKILL');
       process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the agent ' + conclusion.cause + (conclusion.cause === 'agent_concluded_idle' ? ' — quiet past ' + Math.round(AGENT_IDLE_MS / 60000) + ' minutes on ' + conclusion.quiet_signals.join(', ') : ' — the leg\\'s ceiling of ' + Math.round(LEG_CEILING_MS / 60000) + ' minutes') + '; the stdout it received is its output\\n');
-      resolve({ text: so, conclusion });
+      resolve({ text: so, stderr: se, conclusion });
     };
     watch = setInterval(() => {
       if (stopped != null || conclusion != null) return;
@@ -1537,11 +1541,9 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
       if (ctx.signal) ctx.signal.removeEventListener('abort', onAbort);
       if (stopped != null) { reject(new Error('the agent was stopped: ' + stopped)); return; }
       if (conclusion != null) return; // a bound concluded; the kill's own close changes nothing
-      if (code === 0) { resolve({ text: so, conclusion: null }); return; }
-      // The failure names its cause with a tail, not a single line (2026-10-24): the last
-      // lines of both streams, bounded, so the log alone can diagnose the death.
-      const tail = (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
-      reject(new Error('the agent exited ' + (code != null ? 'with code ' + code : 'on signal ' + sig) + '; its last output:\\n  ' + tail));
+      if (code === 0) { resolve({ text: so, stderr: se, conclusion: null }); return; }
+      // The failure names its cause with a tail, not a single line (2026-10-24).
+      reject(new Error('the agent exited ' + (code != null ? 'with code ' + code : 'on signal ' + sig) + '; its last output:\\n  ' + lastOutput(so, se)));
     });
     // B-84's root cause, closed here: an open stdin pipe is one no agent can wait on — the pipe
     // is closed the moment it exists, so a reader sees EOF at once, never a wait (stdin is
@@ -1552,26 +1554,42 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   });
   // B-108: an exit resolves the text with no conclusion; a bound resolves the conclusion it
   // reached, and the received text is the agent's output either way.
-  const { text: out, conclusion } = received;${pushes ? `
+  const { text: out, stderr: errOut, conclusion } = received;
+  // B-256: a leg whose agent exited 0 and whose checks below then fail keeps what the agent
+  // last said, as a non-zero exit's does — on 2026-11-16 seven implement legs ended "exited 0,
+  // but no open PR" with nothing to say why, their sandboxes gone with the claim.
+  const said = lastOutput(out, errOut);
+  const failed = (e) => new Error((e instanceof Error ? e.message : String(e)) + (said !== '' ? '; the agent\\'s last output:\\n  ' + said : '; the agent printed nothing'));${pushes ? `
   if (headsBefore !== '' && prHeads() === headsBefore) {
-    throw new Error('the ${leg} leg pushed nothing: ' + headsBefore.split('\\n').map((l) => l.split('\\t')[1].slice('refs/heads/'.length) + ' at ' + l.slice(0, 10)).join(', ') + ' is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)');
+    throw failed('the ${leg} leg pushed nothing: ' + headsBefore.split('\\n').map((l) => l.split('\\t')[1].slice('refs/heads/'.length) + ' at ' + l.slice(0, 10)).join(', ') + ' is the head the run-tests gate tested red, unchanged — no fix, no position (B-231)');
   }` : ''}${names ? `
   // The answer (B-85): the last line that opens with the leg's value word, wherever it sits —
   // prose before or after it is the agent's, not a lost round — and, on that line, the PR its
   // line goes on. A leg with no answer names its PR by a last line that is a PR URL alone; any
   // other last line names none. A missing or misspelled verdict still fails, naming what was read.${ask ? `
-  const { answer, pr } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});
+  const { answer, pr } = (() => { try { return requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)}); } catch (e) { throw failed(e); } })();
   const on = pr;` : `
   const last = (out.trim().split('\\n').at(-1) ?? '').trim();
   const on = ${PR_URL}.test(last) ? last : null;`}
-${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
 ` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}), ...(conclusion ? { conclusion } : {}) };` : `${ask ? `
   // The answer (B-85): the last line that opens with the leg's value word, backwards past any
   // prose after it; a missing or misspelled verdict still fails, naming what it read.
-  const { answer } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});` : `
-  void out;`}
-${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+  const { answer } = (() => { try { return requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)}); } catch (e) { throw failed(e); } })();` : `
+  void out;`}${delivered && verify ? `
+  // B-257: the agent found the ticket already delivered and said so — \`delivered <sha>
+  // <evidence>\` — rather than opening a PR. Each commit it names must be on the default branch
+  // as origin has it (fetched now); one that is not refuses the answer and fails the leg. The
+  // leg then reaches \`delivered\`, where a person confirms it: the agent's word never closes the
+  // ticket, and the answer is an outcome, never a failed attempt. The evidence rides the end.
+  const claimed = findDelivered(out);
+  if (claimed != null) {
+    const shas = (() => { try { return verifyDelivered({ checkout: ctx.checkout, shas: claimed.shas, branch: ticketsBranch(ctx.checkout, ctx.default_branch ?? process.env.BATON_DEFAULT_BRANCH ?? null) }, legRun); } catch (e) { throw failed(e); } })();
+    if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': delivered at ' + shas.join(', ') + ', on the default branch — a person confirms\\n');
+    return { suspend: true, reached: 'delivered', next: 'confirm', delivered: shas[0], detail: deliveredDetail(shas, claimed.evidence), ...(conclusion ? { conclusion } : {}) };
+  }` : ''}
+${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
 ` : ''}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}
 }
@@ -1803,6 +1821,11 @@ const wrapperExample = (): string =>
 const instructionsOf = (course: string, leg: string): string =>
   readFileSync(fromSource() ? join(packageRoot(), 'src', 'defaults', 'courses', course, `${leg}.md`) : prebuilt('courses', course, `${leg}.md`), 'utf8');
 
+/** The legs of a standard course a runner runs, each with a stub and instructions: every leg
+ *  but a person's (R-BTN-116, B-257's `confirm`), which no runner is offered and no script runs. */
+const runnerLegs = (b: BuiltIn): string[] =>
+  Object.entries(b.course.legs as Record<string, { kind?: unknown }>).filter(([, l]) => l?.kind !== 'person').map(([leg]) => leg);
+
 /** A leg stub, bundled with its `close`: from source in a checkout, else build:cli's copy. The
  * run-tests gate (B-110) generates its own kind — no agent, the script itself. */
 async function writeStub(b: BuiltIn, leg: string, abs: string): Promise<void> {
@@ -1825,7 +1848,7 @@ export async function prebuildDefaults(dist: string, build: { repository: string
   let files = 0;
   for (const b of BUILT_INS) {
     mkdirSync(join(out, 'stubs', b.id), { recursive: true });
-    for (const leg of Object.keys(b.course.legs)) {
+    for (const leg of runnerLegs(b)) {
       await bundleSource(b.legs[leg]?.tests ? testsStubSource(b, b.id, leg) : stubSource(b, b.id, leg), join(out, 'stubs', b.id, `${leg}.mjs`));
       files++;
       const md = join(packageRoot(), 'src', 'defaults', 'courses', b.id, `${leg}.md`);
@@ -1975,7 +1998,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   /** One standard course's files; `rewrite` rewrites Baton's (the course file, the leg scripts). */
   const scaffold = async (bi: BuiltIn, rewrite: boolean): Promise<void> => {
     await put(`.baton/courses/${bi.id}/course.json`, (abs) => writeFileSync(abs, courseFileText(bi)), rewrite);
-    for (const leg of Object.keys(bi.course.legs)) {
+    for (const leg of runnerLegs(bi)) {
       // Each stub is bundled with its `close`, so it imports nothing the runner's scratch copy lacks.
       await put(`.baton/courses/${bi.id}/legs/${leg}.mjs`, (abs) => writeStub(bi, leg, abs), rewrite);
       // The leg's instructions: shipped with the CLI, the repository's to edit from here on.
@@ -2017,7 +2040,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   }
   const b = scaffoldable(course);
   for (const leg of overrides) {
-    if (!Object.hasOwn(b.course.legs, leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${Object.keys(b.course.legs).join(', ')}`);
+    if (!runnerLegs(b).includes(leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${runnerLegs(b).join(', ')}`);
   }
   const entry = { ...courseEntry(b.id, Object.keys(b.course.legs)), skill: b.skill, ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
   let settings: BatonJson;
@@ -2209,16 +2232,20 @@ jobs:
 `;
 }
 
-/** R-BTN-108: a course's schemas, `.baton/schemas/<course>/<name>@<n>.json`, each posted as
- *  `<course>:<name>@<n>` with the SHA-256 of its file — the digest that makes a version
- *  immutable. Absent directory, no schemas. */
+/** R-BTN-134, R-BTN-108 (B-52): a course's schemas, `schemas/<name>@<n>.json` in its course
+ *  directory, each posted as `<course>:<name>@<n>` with the SHA-256 of its file — the digest
+ *  that makes a version immutable. A repository's own course keeps them at
+ *  `.baton/courses/<course>/schemas/`; a sourced course's sit in its source's directory, which
+ *  B-43 wires to the reader. The sync's post and the course test kit read through this one
+ *  function, so no two parts of Baton disagree on where a schema is. Absent directory, no
+ *  schemas; nothing reads `.baton/schemas/<course>/`, the window the move closed. */
 export function courseSchemas(root: string, course: string): { schemas?: { id: string; digest: string; schema: unknown }[] } {
-  const dir = join(root, '.baton', 'schemas', course);
+  const dir = join(root, '.baton', 'courses', course, 'schemas');
   if (!existsSync(dir)) return {};
   const schemas = readdirSync(dir).filter((f) => /^[A-Za-z][A-Za-z0-9._-]{0,63}@(0|[1-9][0-9]{0,5})\.json$/.test(f)).sort().map((f) => {
     const bytes = readFileSync(join(dir, f));
     let schema: unknown;
-    try { schema = JSON.parse(bytes.toString('utf8')); } catch (e) { throw new Error(`.baton/schemas/${course}/${f} is not JSON: ${(e as Error).message}`); }
+    try { schema = JSON.parse(bytes.toString('utf8')); } catch (e) { throw new Error(`.baton/courses/${course}/schemas/${f} is not JSON: ${(e as Error).message}`); }
     return { id: `${course}:${f.slice(0, -5)}`, digest: createHash('sha256').update(bytes).digest('hex'), schema };
   });
   return schemas.length ? { schemas } : {};

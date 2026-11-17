@@ -683,7 +683,7 @@ mean (R-BTN-50).
 
   | Course | Legs (`from` → `to`) | Ends | Reads |
   |---|---|---|---|
-  | `create-pr` (the default) | `implement` (`filed` → `pr-open`); `review` (`pr-open`, `fixed` → `reviewed`, `max_runs` 3); `fix` (`reviewed` → `fixed`, `max_runs` 2); `adjudicate` (`reviewed` → `adjudicated`); `merge` (`reviewed`, `adjudicated` → `merged`); and the fact legs `reviewed-by-hand` (`pr-open`, `fixed` → `reviewed`, `pr-verdict`) and `merged-by-hand` (`pr-open`, `fixed`, `reviewed`, `adjudicated` → `merged`, `pr-merged`) | `merged` | PRs |
+  | `create-pr` (the default) | `implement` (`filed` → `pr-open` \| `delivered`); the person leg `confirm` (`delivered` → `confirmed` \| `filed`, `asks: owner`, `max_runs` 3); `review` (`pr-open`, `fixed` → `reviewed`, `max_runs` 3); `fix` (`reviewed` → `fixed`, `max_runs` 2); `adjudicate` (`reviewed` → `adjudicated`); `merge` (`reviewed`, `adjudicated` → `merged`); and the fact legs `reviewed-by-hand` (`pr-open`, `fixed` → `reviewed`, `pr-verdict`) and `merged-by-hand` (`pr-open`, `fixed`, `reviewed`, `adjudicated` → `merged`, `pr-merged`) | `merged`, `confirmed` | PRs |
   | `review-pr` | `review` (`requested`, `changes-requested` → `approved` \| `changes-requested`, `max_runs` 3); `conclude` (`requested`, `changes-requested` → `concluded`) | `approved`, `concluded` | PRs |
   | `bug-report` | `trace` (`reported` → `traced`); `origin` (`traced` → `explained`); `dedupe` (`explained` → `new-cause` \| `duplicate`); `file` (`new-cause` → `ticketed`); `fold` (`duplicate` → `folded`); `prevent` (`ticketed`, `folded`, `prevented` → `prevented`, `max_runs` 3); the fact leg `merged-by-hand` (`prevented` → `merged`, `pr-merged`) | `merged`; `closed` by `close-pr` | PRs |
   | `draft-ticket` | `research`, `draft`, `check` (`requested` → `researched` → `drafted` → `checked`; `check` also leaves `checked`, `max_runs` 3); `merged-by-hand` (`checked` → `merged`, `pr-merged`) | `merged`; `closed` by `close-pr` | PRs |
@@ -699,7 +699,7 @@ mean (R-BTN-50).
   A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder, `archive/` and the open ticket and request branches, as every allocator below), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and a `## Status` with the `_filed` line (R-BTN-74), and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call — it asks Baton nothing. Where the forge refuses the push because the branch is protected (the CLI's adapter for the forge `--forge` names, else `github` where `origin`'s host is `github.com`, recognises that refusal by the forge's own message: GitHub's `GH006` protected-branch refusal, or a `GH013` ruleset refusal naming a pull-request or update rule and never secret push protection; GitLab's `not allowed to push code to protected branches`; Gitea's `Not allowed to push to protected branch`), it pushes the same commit to `baton-request/<ID>`, or takes the next free id when that branch exists — a branch no `branch_pattern` may match (R-BTN-190), so the request's PR is never one of the new ticket's PRs and no leg continues it (R-BTN-25) — opens a PR from it with the caller's forge credential and prints its URL. With no forge credential it prints the pushed branch and exits non-zero. On a `git` forge, which has no adapter, and for any other refusal — `refs.other` refusing the side branch to a runner under `protected` among them — it reports git's own words (R-BTN-74), opens nothing and exits non-zero. Otherwise the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
 
   - **A wait for a person's answer is a person's leg** (R-BTN-116), answered by a
-    `std:decision@1`: `decision`'s `answer` and `build-app`'s `decide`. Where the policy admits `sync` for `std:decision@1`, the ticket's `answer:`
+    `std:decision@1`: `decision`'s `answer`, `build-app`'s `decide` and `create-pr`'s `confirm`. Where the policy admits `sync` for `std:decision@1`, the ticket's `answer:`
     on the default branch (a sync-local field of the markdown source, read by the station
     function and never posted, R-BTN-74; never applied unless the owner gave it) is attested as
     one. Approving a document is not an answer: it is merging the PR that holds it.
@@ -738,11 +738,29 @@ mean (R-BTN-50).
     rounds run out `conclude` is queued, and a pusher's `<!-- baton:concluded -->` is that leg.
     A commenting leg's answer line may name its PR (`<answer> <PR URL>`; `conclude`'s the URL
     alone); `close` comments there, else on the checkout branch's PR.
+  - **A ticket already delivered** (`create-pr`). An `implement` agent that finds the whole
+    ticket on the default branch opens no PR and pushes nothing; its answer, the last line that
+    opens with the word, is `delivered <sha>[,<sha>…] <evidence>` — the commits that delivered it
+    and what it ran to find so. The stub fetches the default branch (the claim's, else
+    `origin/HEAD`, else `main`) and accepts the answer only when every named commit is on it;
+    otherwise, or with no evidence, the leg fails naming the commit (`released:cannot-finish:transient`).
+    An accepted answer ends the claim `suspended:delivered` with `confirm` queued, the first
+    commit as its `ended_at_sha` and the commits and evidence as its `detail` (R-BTN-72): an
+    outcome reached, so no failed attempt and the leg's count reset (R-BTN-122). The station
+    function reads which station each finished run reached from Baton's record (the sync's
+    `legs`, never git) and, while the ticket has no PR and its newest `implement` run reached
+    `delivered`, places it there with `confirm` queued; each earlier `delivered` pass a person
+    sent back rides its path as `implement` → `delivered`, `confirm` → `filed`. The person reads
+    the evidence on the ticket's history and answers `confirmed`, the end, or `filed`, which
+    queues `implement` again. Only the person's answer or a merged PR ends a `create-pr` ticket;
+    the agent's word never does. The ticket file's `status:` is the person's to set, as for any
+    ticket closed by hand.
   - **One ticket, one PR, one merge.** Every standard course that writes a ticket's work is a PR
     course. Its legs commit their records and outputs on the ticket's branch (`branch_pattern`,
     continued by R-BTN-25), the first push opens the ticket's PR, and the course ends at `merged`.
     A runner's `merge` leg (`create-pr`, `create-spec`, under `merge.*`, R-BTN-182) or the fact leg
-    `merged-by-hand`, the owner merging it, takes it there. A course that needs several approvals
+    `merged-by-hand`, the owner merging it, takes it there; a `create-pr` ticket with no work left
+    to write ends at `confirmed` instead, by a person's word (above). A course that needs several approvals
     is several tickets (`build-app`, below). No leg of a record course (below) writes to the
     default branch, under any policy. A call leg's children are not a record: they are filed as
     R-BTN-165 and `tickets.created` say, directly under `filed` and proposed under `proposed`.
@@ -921,7 +939,10 @@ mean (R-BTN-50).
     repository or one the ticket's `repos:` names (B-29), and the checkout's branch, when it feeds
     such a PR, a head the PR contains — the review reads what is pushed. What cannot be verified
     fails the leg naming what was looked for; the stub reports, never retries. The test kit fails
-    such a stub that returns its position for an `agent_command` exiting 0 with no PR.
+    such a stub that returns its position for an `agent_command` exiting 0 with no PR. A leg that
+    fails after its agent ran — a non-zero exit, or an exit 0 whose answer, push or PR check then
+    fails — names the last lines of the agent's two streams, bounded, or that it printed nothing
+    (B-256): the leg's sandbox may be gone by the time anyone asks.
     - **The stub's wait for its agent ends three ways (B-108)** — at the earliest of the agent's
       exit, the **idle bound** (fifteen minutes of silence across every activity signal the stub
       can see) and the **absolute bound** (five hours of the leg, whatever the agent is doing).

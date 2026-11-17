@@ -2,7 +2,7 @@
 title: "B-257 — An implement leg can answer 'already delivered': a person confirms, and no attempt is spent"
 id: B-257
 project: baton
-status: available
+status: done
 updated: 2026-11-17
 repos:
   - baton
@@ -12,13 +12,14 @@ description: "B-228 was already on main; three implement legs found it and each 
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/268
 depends_on: []
 ---
 
 **What:** an implement leg that finds the ticket already delivered has no outcome to report, so the course counts it as a failure. B-228 was implemented on main by the commit that filed it (8565aa7, 2026-11-10). Three implement legs found this and pushed notes saying so (`claude/B-228-already-on-main`, `claude/B-228-already-delivered`). Each, correctly following its contract, opened no PR, and each was released `cannot-finish:transient`. The ticket loops, spends attempts, and ends up held, while the truth is "done, a person should confirm".
 
-- Give the implement leg an answer for "already delivered at <sha>": it names the commit(s) and the evidence (the tests run), and moves the ticket to a station where a person confirms and closes it. It does not loop back to implement and does not count as a failed attempt.
+- Give the implement leg an answer for "already delivered at `<sha>`": it names the commit(s) and the evidence (the tests run), and moves the ticket to a station where a person confirms and closes it. It does not loop back to implement and does not count as a failed attempt.
 - The confirmation is the person's. The leg's claim alone never closes a ticket.
 - Without a pushed branch, the evidence goes into the end record (Baton) rather than a branch made only to carry a note.
 

@@ -177,6 +177,38 @@ export function personLegsOf(json: unknown): string[] {
     .map(([id]) => id);
 }
 
+/** One requirement of a station's `entry` (R-BTN-109), as the signature reads it. */
+export interface EntryRequirement {
+  output: string;
+  schema: string;
+}
+
+/**
+ * R-BTN-111 (B-52): a course's signature — its **input**, the `start` station's `entry`, and
+ * its **output**, each `end` station's — the two contracts another course composes against.
+ * `baton course test` prints it and the repository's stats carry it per course. A view of the
+ * file like `legNeedsOf`, defensive over an unvalidated one: the kit prints it before the file
+ * is judged, and the stats read it after. The conditions its legs may raise (R-BTN-160) are
+ * `signatureConditions`' half of it (B-234).
+ */
+export function signatureOf(json: unknown): { input: EntryRequirement[]; output: { station: string; entry: EntryRequirement[] }[] } {
+  const entryOf = (station: unknown): EntryRequirement[] =>
+    Array.isArray((station as { entry?: unknown } | null)?.entry)
+      ? ((station as { entry: unknown[] }).entry)
+        .map((r) => (typeof r === 'object' && r !== null && !Array.isArray(r) ? (r as Record<string, unknown>) : {}))
+        .filter((r) => typeof r.output === 'string' && typeof r.schema === 'string')
+        .map((r) => ({ output: r.output as string, schema: r.schema as string }))
+      : [];
+  if (typeof json !== 'object' || json === null || Array.isArray(json)) return { input: [], output: [] };
+  const f = json as { start?: unknown; end?: unknown; stations?: unknown };
+  const stations = typeof f.stations === 'object' && f.stations !== null && !Array.isArray(f.stations) ? (f.stations as Record<string, unknown>) : {};
+  const ends = Array.isArray(f.end) ? f.end.filter((s): s is string => typeof s === 'string') : [];
+  return {
+    input: typeof f.start === 'string' ? entryOf(stations[f.start]) : [],
+    output: [...new Set(ends)].sort().map((station) => ({ station, entry: entryOf(stations[station]) })),
+  };
+}
+
 /**
  * §5.6, §12.5, R-BTN-121: every leg's `requires.capabilities` replaced by its expansion, by leg
  * id, with `capability_roles` left out — the course file as a reader compares it once no role name

@@ -66,20 +66,28 @@ export const DEFAULT_BRANCH_PATTERN = 'claude/{ticket}-*';
  * from), and the loop it forms runs to a generous budget of 30 while the review rounds stay
  * at 3. And the third round's blockers are the owner's: `adjudicate` waits on them — a human
  * in the loop — until they answer `merge`, `owner` or `round` through Baton (the owner,
- * 2026-11-03, "Through Baton, not git"), never by a line in git. */
+ * 2026-11-03, "Through Baton, not git"), never by a line in git.
+ *
+ * B-257: an implement leg that finds the ticket already on the default branch answers
+ * `delivered <sha> <evidence>`; the stub checks the commit is on the default branch and the leg
+ * reaches `delivered`, where the person leg `confirm` waits on a person — `confirmed` closes the
+ * ticket, `filed` sends it back to `implement`. The leg's word alone never closes it, and the
+ * answer is an outcome, never a failed attempt (R-BTN-122). `confirm`'s `max_runs` is the bound
+ * R-BTN-69 asks of the cycle `filed → delivered → filed`; every pass of it is a person's. */
 export const CREATE_PR_COURSE = {
   start: 'filed',
   start_leg: 'implement',
-  end: ['merged'],
+  end: ['merged', 'confirmed'],
   short_waits: ['ci'],
   // B-110: the deterministic gate's script — `npm run <test_script>` in the checkout.
   test_script: 'test',
   stations: {
     filed: { label: 'Filed, no PR yet' }, 'pr-open': { label: 'PR open' }, reviewed: { label: 'Reviewed' },
     fixed: { label: 'Findings addressed' }, adjudicated: { label: 'Open findings adjudicated' }, merged: { label: 'Merged' },
+    delivered: { label: 'Found already delivered' }, confirmed: { label: 'Already delivered, confirmed by a person' },
   },
   legs: {
-    implement: { from: ['filed'], to: 'pr-open', label: 'Implement it and open the PR' },
+    implement: { from: ['filed'], to: ['pr-open', 'delivered'], label: 'Implement it and open the PR, or find it delivered' },
     'run-tests': { from: ['pr-open', 'fixed'], to: ['pr-open', 'fixed'], max_runs: 30, label: 'Run the deterministic tests' },
     // B-110: review also leaves `reviewed` — the owner's `round` answer grants exactly one more
     // round on the same head (the answer itself carries the run, §6.8; the round's verdict is
@@ -88,6 +96,9 @@ export const CREATE_PR_COURSE = {
     fix: { from: ['reviewed', 'pr-open', 'fixed'], to: 'fixed', max_runs: 30, label: 'Fix or answer the findings' },
     adjudicate: { from: ['reviewed'], to: 'adjudicated', label: 'The owner answers the third round' },
     merge: { from: ['reviewed', 'adjudicated'], to: 'merged', label: 'Merge and close the ticket' },
+    // B-257: the person's confirmation — no runner is offered it (R-BTN-116); its options are
+    // its outcomes, `confirmed` and `filed`.
+    confirm: { from: ['delivered'], to: ['confirmed', 'filed'], kind: 'person', asks: 'owner', max_runs: 3, label: 'A person confirms it was already delivered' },
   },
 };
 
@@ -643,10 +654,24 @@ export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; bran
   const record = ctx.baton?.legs ?? [];
   // A dependency counts once it is closed `done` (R-BTN-74); `done` absent, every closed id.
   const done = ctx.done ?? ctx.closed;
+  // B-257: a course with the person leg `confirm` places a ticket whose implement answered
+  // `delivered` from Baton's own record of that run — no PR and no line in git says it.
+  const delivers = (graph.legs?.[CONFIRM_LEG] as { kind?: unknown } | undefined)?.kind === 'person';
+  // The loops a ticket already made through `delivered` and back to `filed` by a person's word,
+  // carried in front of its path so the posted path extends Baton's (R-BTN-10).
+  const prefixes = new Map<string, Step[]>();
   for (const t of ctx.tickets) {
     if (ctx.closed.has(t.id)) continue; // closed tickets are the `closed` list, not stations
     // A closed unmerged PR counts as none, listed or matched alike.
     const mine = ctx.facts.filter((f) => f.state !== 'closed' && ticketOwns(t, f, patterns, ctx.repository));
+    const ran = delivers ? deliveredRuns(record, t.id) : { count: 0, pending: false };
+    if (!mine.length && ran.pending) {
+      // B-257: the newest implement run answered `delivered` and no PR stands — the ticket waits
+      // at `delivered` on the person leg, the evidence the run's end recorded (its commit and
+      // `detail`) on the ticket's view where the person answers.
+      stations[t.id] = at(DELIVERED_STATION, [...deliveredLoops(ran.count - 1), { leg: 'implement', reached: DELIVERED_STATION }], [{ leg: CONFIRM_LEG, state: 'ready', waiting_on: null }]);
+      continue;
+    }
     if (!mine.length) {
       // No PR is `filed`; `implement` is the queued leg, waiting while a dependency is not
       // closed done or an open child blocks it (R-BTN-74, R-BTN-83: the queue is the queued leg).
@@ -654,11 +679,12 @@ export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; bran
       const ready = waiting.length === 0 && t.blocked_by.length === 0;
       const waitingOn = waiting.length ? 'dependencies' : t.blocked_by.length ? 'children' : null;
       stations[t.id] = {
-        station: 'filed', path: [], next_leg: 'implement', next_source: 'course', handoff_url: null,
+        station: 'filed', path: deliveredLoops(ran.count), next_leg: 'implement', next_source: 'course', handoff_url: null,
         next: [{ leg: 'implement', state: ready ? 'ready' : 'waiting', waiting_on: waitingOn }], bars: {},
       };
       continue;
     }
+    if (ran.count > 0) prefixes.set(t.id, deliveredLoops(ran.count));
     if (!bounds.gate) {
       stations[t.id] = placeOf(together(mine), graph, bounds);
       continue;
@@ -709,8 +735,26 @@ export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; bran
     // its nonce the claim's — the sync's placement input beside the pushes, never the counter.
     for (const m of [...counted.values()].flat()) markers.push({ ticket: t.id, leg: 'run-tests', ref: m.sha, claim_nonce: m.claim });
   }
+  for (const [id, loops] of prefixes) stations[id] = { ...stations[id], path: [...loops, ...stations[id].path] };
   return { stations, markers, course_data: {} };
 }
+
+/** B-257: the station `create-pr`'s `implement` reaches when it finds the ticket already on the
+ *  default branch, and the person leg that waits there. */
+export const DELIVERED_STATION = 'delivered';
+export const CONFIRM_LEG = 'confirm';
+
+/** B-257: a ticket's `implement` runs that reached `delivered`, by Baton's record (newest first,
+ *  `Claims.syncRecord`): how many, and whether the newest implement run is one — the ticket then
+ *  waits on the person, unless a PR stands. */
+function deliveredRuns(record: RecordedLeg[], ticket: string): { count: number; pending: boolean } {
+  const runs = record.filter((r) => r.ticket === ticket && r.leg === 'implement');
+  return { count: runs.filter((r) => r.reached === DELIVERED_STATION).length, pending: runs[0]?.reached === DELIVERED_STATION };
+}
+
+/** `n` passes of `filed → delivered → filed`: each a delivered answer a person sent back. */
+const deliveredLoops = (n: number): Step[] =>
+  Array.from({ length: Math.max(0, n) }, () => [{ leg: 'implement', reached: DELIVERED_STATION }, { leg: CONFIRM_LEG, reached: 'filed' }]).flat();
 
 /** The `create-spec` course's stations (R-BTN-131, B-96): a specification's PR is a branch-pattern
  *  PR like any other, so an open or merged one is placed by `create-pr`'s own walk (`placeOf` with

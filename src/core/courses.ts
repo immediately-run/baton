@@ -324,7 +324,7 @@ export class Courses {
     }
     for (const [lid, l] of Object.entries(c.legs ?? {})) {
       for (const [name, o] of Object.entries(l.outputs ?? {})) {
-        if (o.schema && parseSchemaId(o.schema) && !resolve(o.schema)) v(`legs.${lid}.outputs.${name}.schema`, `${o.schema} is not posted, held or in the std: library`);
+        if (o.schema && !resolve(o.schema)) v(`legs.${lid}.outputs.${name}.schema`, `${o.schema} is not posted, held or in the std: library`);
       }
     }
     return out;

@@ -12,7 +12,8 @@ export type CourseRule =
   | 'shape' | 'unknown-key' | 'id' | 'unknown-station' | 'start-leg' | 'unreachable' | 'no-end' | 'terminal'
   | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar' | 'no-chain-from' | 'entry' | 'schema' | 'role-in-roles' | 'starts-from'
   | 'policy' // §12.8 (B-145, R-BTN-181): the repository policy the snapshot is judged against
-  | 'conditions' | 'autonomous'; // R-BTN-160 (B-234): declared condition types, and a leg's `autonomous`
+  | 'conditions' | 'autonomous' // R-BTN-160 (B-234): declared condition types, and a leg's `autonomous`
+  | 'spawns'; // R-BTN-111 (B-52): a leg's declaration of the children it files
 
 export interface CourseViolation {
   rule: CourseRule;
@@ -63,7 +64,7 @@ const STARTS_FROM = new Set(['request']);
 const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
 const ENTRY_KEYS = new Set(['output', 'schema']);
 const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
-  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires', 'conditions', 'autonomous']);
+  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires', 'conditions', 'autonomous', 'spawns']);
 /** R-BTN-116: the one kind a leg may be today — `person`, a leg a person answers by a
  *  `std:decision@1`. A `call` leg (R-BTN-165) is not built, so a file carrying one is refused
  *  rather than kept unread. */
@@ -85,10 +86,12 @@ const REQUIRES_KEYS = new Set(['capabilities']);
 const CAPABILITY = /^[A-Za-z][A-Za-z0-9._:-]{0,63}$/;
 const INPUT_KEYS = new Set(['from', 'accepts', 'required']);
 const OUTPUT_KEYS = new Set(['schema']);
-/** A schema file in the course directory (R-BTN-82): a relative path whose every segment is
- *  a name — none empty, `.` or `..` (as §10.4 asks of a `git:` path). */
-const isSchemaPath = (v: unknown) =>
-  typeof v === 'string' && v.length <= 200 && v.split('/').every((seg) => /^[A-Za-z0-9._-]+$/.test(seg) && seg !== '.' && seg !== '..');
+/** R-BTN-111 (B-52): what a leg's `spawns` holds — the courses of the children it files (one
+ *  id, a list, or `"*"` for any course the repository lists other than its own), what it
+ *  `provides` for their start entries, and their `lifetime` (R-BTN-168: `parent` or `station` —
+ *  accepted and validated here; acting on it, supersession, is B-65's). */
+const SPAWNS_KEYS = new Set(['course', 'provides', 'lifetime']);
+const SPAWNS_LIFETIMES = new Set(['parent', 'station']);
 
 /** R-BTN-160 (B-234): what a course's declaration of one condition type holds. Only
  * `disposition` is required; a restart id matches §12.3's decision-id pattern. */
@@ -299,6 +302,32 @@ export function validateCourse(json: unknown): CourseViolation[] {
         if ('capabilities' in r) capabilityList(r.capabilities, `${at}.requires.capabilities`, 'a leg');
       }
     }
+    // R-BTN-111 (B-52): a leg that files children declares their courses — one id, a list, or
+    // "*" for any course the repository lists other than its own — and what it provides for
+    // their start entries; `lifetime` (R-BTN-168) names how long the children outlive the leg.
+    // This is the file's own shape alone: whether `provides` meets each named course's input is
+    // the kit's to check, over the repository's other course files.
+    if ('spawns' in l) {
+      const sp = l.spawns;
+      const at2 = `${at}.spawns`;
+      if (!isObject(sp)) add('spawns', at2, 'spawns is {course, provides, lifetime?} (R-BTN-111)');
+      else {
+        for (const k of Object.keys(sp)) if (!SPAWNS_KEYS.has(k)) add('unknown-key', `${at2}.${k}`, `unknown key "${k}"`);
+        if (sp.course !== '*') {
+          const ids = typeof sp.course === 'string' ? [sp.course] : Array.isArray(sp.course) ? sp.course : [];
+          if ((typeof sp.course !== 'string' && !Array.isArray(sp.course))
+            || ids.length === 0 || ids.length > COURSE_LIST_MAX || !ids.every((x) => typeof x === 'string' && ID.test(x)) || new Set(ids).size !== ids.length) {
+            add('spawns', `${at2}.course`, `course is "*", a course id, or a list of 1–${COURSE_LIST_MAX} distinct ids (R-BTN-111)`);
+          }
+        }
+        if (!Array.isArray(sp.provides) || sp.provides.length > COURSE_LIST_MAX || !sp.provides.every((x) => typeof x === 'string' && NAME.test(x))) {
+          add('spawns', `${at2}.provides`, `provides is a list of at most ${COURSE_LIST_MAX} output names (R-BTN-111)`);
+        }
+        if ('lifetime' in sp && !SPAWNS_LIFETIMES.has(sp.lifetime as string)) {
+          add('spawns', `${at2}.lifetime`, 'lifetime, when given, is "parent" or "station" (R-BTN-168; supersession itself is B-65\'s)');
+        }
+      }
+    }
     // R-BTN-116: a person's leg — `kind: "person"` with `asks` (who answers) and, at most, an
     // `expires`. `asks` and `expires` sit only on a person's leg; a person's leg names who
     // answers. A `call` leg is not built, so any other kind is refused.
@@ -373,8 +402,10 @@ export function validateCourse(json: unknown): CourseViolation[] {
         if (!NAME.test(name)) add('id', op, `output name "${name}" must match ${NAME.source}`);
         if (!isObject(o)) { add('shape', op, 'an output is an object'); continue; }
         for (const k of Object.keys(o)) if (!OUTPUT_KEYS.has(k)) add('unknown-key', `${op}.${k}`, `unknown key "${k}"`);
-        // R-BTN-108: a named schema `<id>@<version>`, or R-BTN-82's legacy relative path.
-        if ('schema' in o && !parseSchemaId(o.schema) && !isSchemaPath(o.schema)) add('shape', `${op}.schema`, 'a schema is <id>@<version>, or a relative path in the course directory, no segment empty, . or ..');
+        // R-BTN-108: a named schema `<id>@<version>`. The legacy relative-path window is closed
+        // (history, Migrations: Legacy schema forms, deleted with it): a path is a shape
+        // violation like any other non-id string, and the kit names the id to write in its place.
+        if ('schema' in o && !parseSchemaId(o.schema)) add('shape', `${op}.schema`, 'a schema is <id>@<version> (R-BTN-108)');
       }
     }
   }

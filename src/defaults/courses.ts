@@ -60,6 +60,12 @@ export interface LegStub {
    *  stub reads the ticket's PR branch heads before and after the agent; unchanged, it fails the
    *  leg rather than report a fix of a tree the gate already tested red. */
   pushes?: 'after-red';
+  /** B-257: the agent may answer that the ticket is already delivered — `delivered <sha>
+   *  <evidence>` — instead of opening a PR. The stub checks each commit is on the default branch
+   *  and returns the course's `delivered` station with the person leg `confirm` next, the
+   *  evidence in the end's `detail`; a commit that is not there fails the leg. Only beside
+   *  `verify: 'pr'`, whose forge read it replaces. */
+  delivered?: true;
 }
 
 export interface BuiltIn {
@@ -224,7 +230,10 @@ const CREATE_PR: BuiltIn = {
     // ticket, its head pushed) before returning pr-open — never the agent's exit code alone.
     // B-110: what follows implement is the gate, not the round — the claim's walk runs
     // run-tests before any review, green advancing and red routing back to a fix.
-    implement: { position: "{ reached: 'pr-open', next: 'run-tests' }", verify: 'pr' },
+    // B-257: an agent that finds the ticket already on the default branch answers `delivered
+    // <sha> <evidence>`; the stub checks the commit is there and returns `delivered`, where the
+    // person leg `confirm` waits — no PR, no note branch, no failed attempt.
+    implement: { position: "{ reached: 'pr-open', next: 'run-tests' }", verify: 'pr', delivered: true },
     // B-110: the deterministic gate — no agent. The stub runs `npm run <test_script>` itself on
     // the PR branch's fetched head, bounded, and returns the station it ran from (the claim's,
     // pr-open or fixed): green advances to review, red routes to fix — never back to implement —

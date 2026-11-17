@@ -26,7 +26,7 @@ import { outsideScope, pushesBetween, readRefState, type RefState } from './audi
 import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
-import { MIN_SECRET_BYTES, createLegMasker, maskLegOutput, namesASecret, secretValues } from './mask';
+import { MIN_SECRET_BYTES, createLegMasker, failureDetail, maskLegOutput, namesASecret, secretValues } from './mask';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { StateFile, leaseLostFrom, type PersistedClaim, type RunnerState } from './state';
 import { bareTicketId } from '../defaults/ticket-state';
@@ -2192,7 +2192,11 @@ export class Runner {
           // R-BTN-144 (B-170): the leg's own error text leaves masked — a provider-auth message
           // is the one that quotes the key. It was masked at its source too; this is the log.
           this.log(`baton: ${ticket}'s ${legName} failed (${maskLegOutput(outcome.error, this.legSecrets)})`);
-          return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: at, next: legName }, await this.callHandoff(script, ctx));
+          // B-256: the end carries the failure's last line — an agent stub's, the agent's own last
+          // output — masked the same way and bounded to §9.4's detail, so Baton's record of a leg
+          // that exited 0 with nothing done says what the agent said, after the sandbox is gone.
+          const detail = failureDetail(outcome.error, this.legSecrets);
+          return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: at, next: legName, ...(detail != null ? { detail } : {}) }, await this.callHandoff(script, ctx));
         }
         const result = outcome.result;
         session = typeof (result as { session?: unknown } | null)?.session === 'string'
@@ -2220,6 +2224,7 @@ export class Runner {
           return await this.finish(claimId, {
             end_reason: reason, reached: verdict.reached, next: verdict.next,
             ...(verdict.kind === 'suspend' && verdict.outputs ? { outputs: verdict.outputs } : {}),
+            ...(verdict.kind === 'suspend' && verdict.detail ? { detail: verdict.detail } : {}),
             ...(verdict.kind === 'suspend' && closed ? { ended_at_sha: closed } : {}),
           }, await this.callHandoff(script, ctx));
         }
