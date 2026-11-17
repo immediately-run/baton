@@ -1,5 +1,5 @@
 ---
-title: "B-256 — Implement legs that exit 0 with nothing pushed say why, and a provider's exhaustion does not spend the ticket's attempt"
+title: "B-256 — Implement legs that exit 0 with nothing pushed say why"
 id: B-256
 project: baton
 status: available
@@ -8,7 +8,7 @@ repos:
   - baton
 tags:
   - roadmap-item
-description: Five implement legs on 2026-11-16 exited 0 with no branch or PR and no recorded output; find why, keep the output, and raise provider exhaustion as a condition
+description: Five implement legs on 2026-11-16 exited 0 with no branch or PR and no recorded output; find why and keep the output (provider exhaustion moved to B-245)
 topics:
   - baton
 owns: {}
@@ -20,9 +20,9 @@ depends_on: []
 
 - Find the cause. Candidates: a provider failing mid-leg while the agent's process still exits 0 (the same day, B-193's review reported "Reviewer B's model (deepinfra) failed for lack of balance"); the agent deciding there is nothing to do without saying so; a push or `gh pr create` failing in the sandbox and the error being swallowed; the harness (`opencode run`) exiting 0 on an error.
 - Keep enough to diagnose the next one: on any failed leg the runner records the agent's last output (as it already does for a non-zero exit) and, where the executor allows, keeps the transcript before the sandbox is killed.
-- A provider error (balance, quota, rate limit) surfaces as a condition naming the provider, not as a transient failure of the ticket. The ticket's attempt should not be spent when the cause is the runner's own credentials.
+- ~~A provider error (balance, quota, rate limit) surfaces as a condition naming the provider, not as a transient failure of the ticket.~~ Moved to B-245 by the owner's ruling of 2026-11-17: R-BTN-122 already makes a provider at capacity a blocked prerequisite, which B-245 builds.
 
-**Done when:** the cause of the 2026-11-16 failures is named in this ticket; a failing leg that exits 0 leaves its last output in the runner's log and Baton's end record; a test shows a provider-exhaustion failure raising a condition without spending the ticket's attempt.
+**Done when:** the cause of the 2026-11-16 failures is named in this ticket; a failing leg that exits 0 leaves its last output in the runner's log and Baton's end record.
 
 ### Trust
 
