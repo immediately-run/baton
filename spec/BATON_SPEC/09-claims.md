@@ -16,9 +16,10 @@ is `active` until it ends
   numbers at once, counting its active claims across every repository:
   - its **`concurrency`**, which its heartbeat declares (§8.1): an integer from 1 to 32, default
     1, the runner's own statement of what its host can run;
-  - the claiming repository's grant's **`max_claims`**, the owner's ceiling, set with the grant's
-    role by the `approvers.roles` approver (R-BTN-180): 1 to 32, default 1. A key no grant binds
-    (a bearer or seed key, a check runner) has 1. A compromised runner holds no more tickets than
+  - the claiming repository's grant's **`max_claims`**, the owner's ceiling, set with the grant
+    itself (`owner grant add` and `admin grant add`, `--max-claims`, R-BTN-58) by whoever may
+    grant the key: 1 to 32, default 1, and a re-grant that names none sets 1. A key no grant
+    binds (a bearer or seed key, a check runner) has 1. A compromised runner holds no more tickets than
     an owner allowed.
 
   A claim past that bound is refused `not-eligible`, rule `max-claims`, checked in the claim's
@@ -354,7 +355,9 @@ end on an ended claim is refused `claim-ended`.
     and `BATON_ACTIVITY=<activity id>`: no sidecar, no runner; its archiver appends to the
     parent's spool with `role: subagent` and the activity id. An in-process subagent has no
     transcript of its own.
-  - A path reported during a claim links to it; one reported with no claim links to the runner's
+  - A path reported during a claim links to it — to the claim it names (`claim_id`), else its
+    activity's, else the runner's one claim; a runner holding several that names neither leaves
+    it to link to a later claim, as one reported with no claim does; one reported with no claim links to the runner's
     next claim; a path pushed across several claims links to each. The dashboard shows
     `claimed_at` beside the link.
   - **Validation.** `repo` is in the claim's home repository's `transcript_repos` (owners'

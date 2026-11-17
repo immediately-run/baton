@@ -3046,14 +3046,16 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   `min_runner_version` (R-BTN-65) and a source's `min_cli` (R-BTN-134) gate a course's legs, not
   the API.
 
-- **2026-11-17 — R-BTN-4, R-BTN-6, R-BTN-72, R-BTN-113 and R-BTN-180 amended, S-BTN-228 added: a
+- **2026-11-17 — R-BTN-4, R-BTN-6, R-BTN-20, R-BTN-58, R-BTN-72, R-BTN-90 and R-BTN-113 amended, S-BTN-228 added: a
   runner holds several claims (B-188).**
   Rules changed: R-BTN-4 (one active claim per ticket; per runner, the lower of its declared
   `concurrency` and its grant's `max_claims`), R-BTN-6 (an earlier session's state file names
   claims), R-BTN-72 (claims side by side, each in a clone of its own and running its legs one at
   a time; per-claim state and reattachment within the lease), R-BTN-113 (`session_urls` by
-  claim), R-BTN-180 (the `approvers.roles` approver sets `max_claims`); the heartbeat's `fenced`
-  is a list. B-188 (the owner, 2026-11-08: "each runner executing several tickets' legs in
+  claim), R-BTN-58 (the grant carries `max_claims`, set by whoever grants the key, as its capabilities
+  are; B-188 had it on R-BTN-180's role route, which is not built); the heartbeat's `fenced` is a
+  list, and `legs_finished` names each run's claim, since a run's seq is numbered within its
+  claim. B-188 (the owner, 2026-11-08: "each runner executing several tickets' legs in
   parallel") planned the change; the owner returned to it on 2026-11-17: a leg blocked by an
   interaction request or a rate limit should not stop the runner's other work; one runner per
   host should own one queue and one view of the host's resources for the sandbox lifecycle to
@@ -3233,6 +3235,12 @@ refused).
 
 Each entry is a transition the specification no longer describes. The code keeps the old form
 working until the stated condition holds, then removes it.
+
+- **One claim per runner on the heartbeat (B-188, 2026-11-17).** The heartbeat answer keeps
+  `claim` — the runner's oldest active claim, or null — beside `claims`, and reads the bare
+  `session_url`, `leg_finished: <seq>` and a single `fenced` object as the runner's one claim's
+  (a bare `session_url` from a runner holding several is dropped and logged), until no
+  registered runner runs a CLI before B-188.
 
 - **The V1 dashboard's views (B-191, 2026-11-09).** §11.4's screens replace its view list
   outright; no view name is kept as an alias. The old names map — Runners to `/runners`,

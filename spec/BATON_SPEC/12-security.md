@@ -483,8 +483,8 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
   - **Every grant has a role and a domain.** The role is `runner` or `trusted-runner` (R-BTN-182),
     and a `trusted-runner` grant may further be marked the repository's protection checker
     (`checker`, below); the domain is a label (1–128 characters of
-    `[A-Za-z0-9_.:-]`; no `/`) whose meaning is the deployment's. The role, the mark,
-    that label and the grant's `max_claims` (R-BTN-4) are set by the `approvers.roles` approver (`PUT
+    `[A-Za-z0-9_.:-]`; no `/`) whose meaning is the deployment's. The role, the mark
+    and that label are set by the `approvers.roles` approver (`PUT
     /v1/owner/{repository}/grants/{fingerprint}/role`), `trusted-runner` refused for an API-key
     credential (`invalid-params`; a trusted runner signs, R-BTN-159); a grant nobody marked is a
     `runner` with no domain. Baton compares domains as labels and verifies nothing about them:

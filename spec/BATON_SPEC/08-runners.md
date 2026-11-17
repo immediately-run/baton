@@ -40,7 +40,7 @@ the runner's credentials under any other executor is that executor's, never Bato
     course-defined `profile` (opaque), `courses: [{repository, course, version}]` read from the
     runner's checkout at session start (R-BTN-22), `tier_ceilings` (one tier name per
     repository; absent ⇒ that repository's top tier), `lease_timeout_s`, `executor` (a CLI
-    runner's, R-BTN-107), `concurrency` (R-BTN-4), `delivers` (the outbox classes it delivers, R-BTN-171), `session_urls` (R-BTN-113), spooled activities and transcript paths (§9.9), `leg_finished` (R-BTN-90),
+    runner's, R-BTN-107), `concurrency` (R-BTN-4), `delivers` (the outbox classes it delivers, R-BTN-171), `session_urls` (R-BTN-113), spooled activities and transcript paths (§9.9), `legs_finished` (R-BTN-90),
     `fenced`, one entry per fenced claim (R-BTN-19), `test_harness` (R-BTN-32), `protection` (the protection checker's reading, R-BTN-180); on first contact or re-key, `secret_hash`
     and `rekey`.
   - The response carries the runner's active claims, a list, empty when it holds none — each
