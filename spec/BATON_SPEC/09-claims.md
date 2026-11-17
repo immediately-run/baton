@@ -141,7 +141,10 @@ unless `reached` is an end station, R-BTN-83), and as applicable `not_before`, `
 `prerequisite` with `reading` or `commit` (R-BTN-126), `ticket_version` (a
 `released:ticket-changed` end's version, refused on any other end, R-BTN-198), `exit_status`
 (R-BTN-153) and `session_url`. `detail` is a short course-defined label under the
-untrusted-text rule (§12), stored and shown, never read. Baton stores `error.type`
+untrusted-text rule (§12), stored and shown, never read; a claim the runner releases
+`cannot-finish:transient` because its leg failed carries as `detail` the failure's last line —
+for an agent's leg, the agent's own last line of output — masked as the runner's log is
+(R-BTN-144), made free text and cut to 200 characters (B-256). Baton stores `error.type`
 (`claims.error_type`), never the message. Repeating the same end is answered `ok`; a different
 end on an ended claim is refused `claim-ended`.
 

@@ -97,9 +97,12 @@ export function staticViolations(k: KitInput): KitViolation[] {
   const out: KitViolation[] = validateCourse(k.proposed).map((v) => ({ rule: 'course', message: `${v.path}: ${v.message} (${v.rule})` }));
   if (out.length) return out;
   if (k.legScripts) {
-    const legs = Object.keys(asRecord(asRecord(k.proposed).legs));
+    const all = asRecord(asRecord(k.proposed).legs);
+    const legs = Object.keys(all);
     const scripts = k.legScripts.map((x) => x.name);
-    for (const l of legs.filter((x) => !scripts.includes(x))) out.push({ rule: 'legs-scripts', message: `leg ${l} has no legs/${l}.mjs` });
+    // A person's leg (R-BTN-116) is answered, never run: it needs no script (B-257's `confirm`).
+    const runs = legs.filter((x) => asRecord(all[x]).kind !== 'person');
+    for (const l of runs.filter((x) => !scripts.includes(x))) out.push({ rule: 'legs-scripts', message: `leg ${l} has no legs/${l}.mjs` });
     for (const s of scripts.filter((x) => !legs.includes(x))) out.push({ rule: 'legs-scripts', message: `legs/${s}.mjs is no leg of the course` });
     // §6.13: "The test kit fails a script without all three" (round 1, 1-A-9).
     for (const x of k.legScripts) {
@@ -171,7 +174,9 @@ export function shortestRoute(g: Graph): Step[] | null {
         return route;
       }
       for (const [leg, l] of [...g.legs].sort(([a], [b]) => (a < b ? -1 : 1))) {
-        if (!l.from.includes(s)) continue;
+        // A person's leg is answered, never advanced into (R-BTN-116, rule person): the generic
+        // run is a runner's, so its route takes runner legs alone (B-257's `confirm`).
+        if (!l.from.includes(s) || l.person) continue;
         for (const to of l.to) if (!prev.has(to)) { prev.set(to, { from: s, step: { leg, reached: to } }); next.push(to); }
       }
     }

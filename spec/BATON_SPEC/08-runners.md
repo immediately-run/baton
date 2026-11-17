@@ -227,12 +227,14 @@ the runner's credentials under any other executor is that executor's, never Bato
   - **First leg** is the queued leg the claim response names (R-BTN-83), started by the first
     `advance`; a first `advance` into any other leg is refused `not-eligible`, rule `not-queued`.
   - **The result** always carries a position: `{reached, next, not_before?, outputs?, session?,
-    bars?}`, `{suspend: true, reached, next}`, `{end: 'done', reached, detail?}` or
+    bars?}`, `{suspend: true, reached, next, detail?}`, `{end: 'done', reached, detail?}` or
     `{release: <reason>, reached, next}`. `reached` is an outcome station of the leg, or its
     `from` when given up; the script names `next` and any `bars` it chose (R-BTN-63). A `reached`
     that is not an outcome of the leg, or a `next` that does not leave it, is a script bug: the
     runner suspends at the leg's `from`. Outputs are validated against their schemas before
-    anything is reported (R-BTN-82, R-BTN-108).
+    anything is reported (R-BTN-82, R-BTN-108). A `detail` on a suspension or a done end is the
+    end's `detail` (§10.4 free text, at most 200 characters), stored on the claim and on the
+    finished run's history row beside its evidence (R-BTN-81).
   - **After a leg**, when the latest snapshot observed after it shows the next leg `waiting`,
     the runner suspends — unless `waiting_on` is in the course file's `short_waits`: then it
     keeps the claim, re-reads the station each heartbeat for up to 30 minutes, then suspends

@@ -495,7 +495,9 @@ is stale. Never edit it by hand.
 | S-BTN-228 | the runner says when its CLI is not a pinned commit (B-253) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-229 | several claims per runner (B-188) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-230 | the run-tests gate on PRs outside the home (B-255) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-231 | leg events (B-258) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-231 | a failed leg keeps what its agent last said (B-256) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-232 | a ticket already delivered (B-257) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-233 | leg events (B-260) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

@@ -1,0 +1,39 @@
+---
+title: B-259 — Export events to R2 or a local file before retention deletes them
+id: B-259
+project: baton
+status: available
+updated: 2026-11-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "Owner ruling 2026-11-17: B-238's event prune exports first; must land before ~2027-01-14 or event deletion stays off"
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**What:** before R-BTN-149's retention (B-238, PR #246) deletes repository events, they are exported to durable storage: Cloudflare R2, or a local file on the local host (owner ruling, 2026-11-17).
+
+- **Deadline:** B-238's prune starts deleting events older than 90 days, so the first ones go around **2027-01-14** (production began mid-October 2026). This must ship before then, or event pruning must stay off until it does: add a setting that keeps event deletion disabled until an export target is configured, and default it off.
+- In the alarm, before a batch of events is deleted, append it to the export (R2 object per repository and day, e.g. NDJSON, or a local file on the local host) and delete only what the export acknowledged. A failed export deletes nothing.
+- The export is the same shape as the mirror's feed (`GET /v1/sync/events`), so it can be replayed or read later.
+- Optionally the same for board snapshots older than 90 days.
+
+**Done when:** a test shows an alarm tick exporting a batch then deleting exactly those rows; a failing export deletes nothing; with no export target configured, events are never deleted.
+
+### Trust
+
+No new input: rows Baton already stores, written to storage the instance's own configuration names. The R2 binding or file path is configuration, never a request field.
+
+### Invariants
+
+- R-BTN-149: only events past retention and below every live mirror's `mirror_acked_seq` are deleted, and now only once exported.
+- No event is deleted without a successful export.
+
+## Status
+
+_filed 2026-11-17._

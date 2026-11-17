@@ -17,7 +17,8 @@
 //   and a line committed on `HEAD` landed in a PR, or nowhere.)
 // - every other leg — `create-pr`'s `implement`, `fix` and `merge` — writes nothing: no comment,
 //   no marker. Its evidence is the PR itself, which its `verify: 'pr'` checked, or nothing at all
-//   (a merge is read from the forge's own PR state). A pushed `baton:` commit on a PR branch, or
+//   (a merge is read from the forge's own PR state); an `implement` that answered `delivered`
+//   (B-257) names the default branch's commit it found the work in. A pushed `baton:` commit on a PR branch, or
 //   an unpushed one carried by the next push, would move the head past the one the leg verified —
 //   a change no course asked for.
 // - `create-pr`'s `run-tests` (B-110) is the exception the gate needs: its close pushes an
@@ -81,7 +82,7 @@ const MARKER_LEGS = new Set(['converse', 'address']);
  *  forge is the record the sync reads. A ticket write does: the sync reads the ticket's own
  *  git history from the default branch, and a write left in an un-pushed checkout is one no
  *  reading sees (B-96's review round 1) — so it is committed on that branch itself (round 2). */
-export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: string | null; verdict?: unknown; adjudication?: unknown; pr?: unknown }, run: Exec = exec): Promise<string> {
+export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: string | null; verdict?: unknown; adjudication?: unknown; pr?: unknown; delivered?: unknown }, run: Exec = exec): Promise<string> {
   const comment = commentLine(ctx.leg, result);
   if (comment != null) {
     const body = `${comment}\nbaton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? '?'}`;
@@ -91,6 +92,12 @@ export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: 
     return run('gh', ['pr', 'comment', ...(typeof result?.pr === 'string' ? [result.pr] : []), '--body', body], ctx.checkout);
   }
   if (typeof result?.reached !== 'string' || result.reached === '') throw new Error(`the ${ctx.leg} leg returned no station reached`);
+  // B-257: `implement` found the ticket already delivered — no branch, no PR, nothing to push.
+  // The evidence is the commit on the default branch the stub verified, which the end records.
+  if (ctx.leg === 'implement' && result.reached === 'delivered') {
+    if (typeof result.delivered !== 'string' || !/^[0-9a-f]{40}$/.test(result.delivered)) throw new Error(`the implement leg reached delivered naming no verified commit, got ${JSON.stringify(result.delivered)}`);
+    return result.delivered;
+  }
   // Only the legs whose station function READS a marker (B-96): create-spec's interactive
   // converse and address. Every other PR-course leg (implement, fix, merge) writes no marker —
   // a pushed `baton:` commit on each PR branch would move the head past the one `verify: 'pr'`

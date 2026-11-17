@@ -31,6 +31,9 @@ describe('baton test-course', () => {
     // The route starts with the start leg, though another leg reaches an end sooner (R-BTN-83).
     const shortcut = { start: 'a', start_leg: 'long', end: ['z'], stations: { a: {}, b: {}, z: {} }, legs: { long: { from: ['a'], to: 'b' }, skip: { from: ['a'], to: 'z' }, finish: { from: ['b'], to: 'z' } } };
     expect(shortestRoute(graphOf(shortcut))!.map((s) => s.leg)).toEqual(['long', 'finish']);
+    // A person's leg is never on the generic run's route (B-257: create-pr's confirm), however short.
+    const person = { start: 'a', start_leg: 'go', end: ['y', 'z'], stations: { a: {}, b: {}, c: {}, y: {}, z: {} }, legs: { go: { from: ['a'], to: ['b', 'c'] }, ask: { from: ['c'], to: ['y'], kind: 'person', asks: 'owner' }, on: { from: ['b'], to: 'z' } } };
+    expect(shortestRoute(graphOf(person))!.map((s) => s.leg)).toEqual(['go', 'on']);
     expect(await checkCourse(input({ live: [{ id: 'T-1', path: [{ leg: 'implement', reached: 'pr-open' }] }] }))).toEqual([]);
   }, 60_000);
 

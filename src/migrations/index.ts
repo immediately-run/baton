@@ -48,6 +48,8 @@ import ticketProvenance from './0046_ticket_provenance.sql';
 import legRunInputs from './0047_leg_run_inputs.sql';
 import conditions from './0048_conditions.sql';
 import eventLookups from './0049_event_lookups.sql';
+import alarmIndexes from './0052_alarm_indexes.sql';
+import retention from './0053_retention.sql';
 import retirement from './0050_retirement.sql';
 import instanceSettings from './0051_instance_settings.sql';
 import stateVersion from './0054_state_version.sql';
@@ -166,6 +168,10 @@ export const MIGRATIONS: Migration[] = [
   { id: 50, sql: retirement },
   // 0051 is B-4's (R-BTN-113, §13.1: the administrators' instance settings), renumbered at the merge behind 0049–0050.
   { id: 51, sql: instanceSettings },
+  // 0052 is B-236's (the alarm's and the runner calls' indexes), 0053 B-238's (R-BTN-149's
+  // retention); their queries also search 0055's claim and transcript indexes.
+  { id: 52, sql: alarmIndexes },
+  { id: 53, sql: retention },
   // 0054 is B-237's (the state version, R-BTN-196); 0052–0053 are reserved for other branches.
   { id: 54, sql: stateVersion },
   // 0055 is B-240's (the dashboard's claim, transcript and waiting-leg lookups; 0049–0054 are other branches').

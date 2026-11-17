@@ -81,6 +81,10 @@ export interface RecordedLeg {
   leg: string;
   claim_nonce: string;
   evidence: string;
+  /** B-257: the station the leg reached — Baton's record of the holder's report, so a station
+   *  function can tell `create-pr`'s `implement` that opened a PR from one that answered
+   *  `delivered`. Absent from an older Baton's record. */
+  reached?: string;
 }
 
 /** The markers that count on one branch: each one's sha is the evidence Baton recorded for a

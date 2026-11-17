@@ -3094,9 +3094,53 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   counts claims, never host resources. `docs/context/architecture.mdx`'s *Parallelism is
   horizontal* is amended with it (B-188 item 8).
 
+- **2026-11-17 — R-BTN-131 and §9.4 amended, S-BTN-231 added: a failed leg keeps what its agent
+  last said (B-256).**
+  Rules changed: R-BTN-131 (a stub's failure after its agent ran names the agent's last lines),
+  §9.4 (a `cannot-finish:transient` end of a failed leg carries the failure's last line as
+  `detail`). On 2026-11-16 seven implement legs on one runner ended "the implement agent exited
+  0, but no open PR …", released `cannot-finish:transient`: the stub kept the agent's output only
+  on a non-zero exit, and the leg's sandbox was killed with the claim, so nothing said why. Two of
+  them (B-228's) had pushed a branch whose commit said the ticket was already delivered — the
+  instructions' "stop with an error", which an agent's exit 0 cannot carry. Now every failure
+  after the agent ran quotes the last twenty lines of its two streams, or says it printed
+  nothing; the runner logs it masked, as it always logged a non-zero exit's; and the end's
+  `detail` is its last line, masked, free text, at most 200 characters — the one place Baton
+  holds it, stored and shown, never read, as every `detail` is. Rejected: parsing the output
+  for a provider's refusal to choose the end (the output is the agent's, never read for
+  decisions beyond the answer line); a provider's exhaustion stays R-BTN-126's confirmed blocked
+  end (B-21, B-245). The standard `implement` instructions now say why in the last lines
+  whenever the leg stops without a PR; an "already delivered" answer that spends no attempt is
+  B-257's.
+- **2026-11-17 — R-BTN-131, R-BTN-72 and R-BTN-62's observation amended, S-BTN-232 added: a
+  ticket already delivered (B-257).**
+  Rules changed: R-BTN-131 (`create-pr` gains the station `delivered`, the person leg `confirm`
+  and the end `confirmed`; `implement` reaches `pr-open` or `delivered`), R-BTN-72 (a suspension
+  carries `detail`, stored with the finished run's evidence on its history row), and the sync
+  run's observation (§4.3, §14) names `legs`, now with each run's `reached`. B-228 had been
+  implemented by the commit that filed it (8565aa7); three implement legs found it on `main`, and,
+  following their contract, opened no PR and pushed note-only branches
+  (`claude/B-228-already-on-main`, `claude/B-228-already-delivered`) — and each was released
+  `cannot-finish:transient`, a failed attempt, looping toward a hold while the truth was "done, a
+  person should confirm". The agent now answers `delivered <sha> <evidence>`; the stub accepts it
+  only for commits on the default branch as origin has it, the leg reaches `delivered` (an
+  outcome, so no attempt is spent, R-BTN-122), and the end carries the commit as its evidence and
+  the line as its detail — in Baton, not on a branch made to carry a note. The station function
+  places the ticket from Baton's record of the run's `reached`, never from git, so no pusher can
+  park a ticket at `delivered`; a person confirms (`confirmed`, an end) or sends it back
+  (`filed`). Only the person's answer or a merged PR closes the ticket. Rejected: a decision
+  posted by the sync on `filed` (R-BTN-78), which would leave the leg a failure and the ticket at
+  a station that says nothing happened; a closing marker on the default branch, which a pusher
+  could write and which is the note branch again; letting the stub's check close the ticket,
+  which would make an agent's word plus an ancestry check a closure; and Baton itself checking
+  ancestry, which it cannot (it holds no git) — the stub checks what it reads, as `verify: 'pr'`
+  does for `pr-open`. `confirm`'s `max_runs` 3 is the bound R-BTN-69 asks of the cycle `filed →
+  delivered → filed`, every pass of which is a person's. The ticket file's `status:` stays the
+  person's to set (`baton tickets done`), as for any ticket closed by hand.
+
 - **2026-11-17 — R-BTN-198 added; R-BTN-5, R-BTN-35, R-BTN-69, R-BTN-72, R-BTN-81, R-BTN-91,
-  R-BTN-106, R-BTN-107, R-BTN-119 and R-BTN-127 amended; S-BTN-231 added: leg events, what Baton
-  tells a running leg (B-258).**
+  R-BTN-106, R-BTN-107, R-BTN-119 and R-BTN-127 amended; S-BTN-233 added: leg events, what Baton
+  tells a running leg (B-260).**
   Rules changed: R-BTN-198 (new, §7.10), R-BTN-5 (points to R-BTN-198 for the check at a newer
   version), R-BTN-35 (a new version of a held ticket leaves the claim alone), R-BTN-69 (the leg
   field `on_ticket_changed`), R-BTN-72 (`ctx.on`, `ctx.events`, `ctx.readTicket`), R-BTN-81 (the
@@ -3127,8 +3171,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   new body to the agent; releasing every claim whose ticket changed; and a validator reservation
   of the event types, unneeded since leg events are never condition types. Not in this change: how
   quickly a tracker's edit reaches Baton (no want is recorded for it, R-BTN-94). The rule id,
-  scenario and ticket are R-BTN-198, S-BTN-231 and B-258: R-BTN-197, S-BTN-230 and B-235 were
-  taken on main while the branch was open.
+  scenario and ticket are R-BTN-198, S-BTN-233 and B-260: R-BTN-197, S-BTN-230 to S-BTN-232,
+  B-235, B-258 and B-259 were taken on main while the branch was open.
   Review round 1: two fresh reviewers, one on consistency, one on security and buildability.
   Their findings, each checked against the text, changed the rule:
   - the heartbeat now carries the `snapshot_sha` every check needs (both reviewers), and the
@@ -3153,7 +3197,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     `bounds-changed`, `unreadable`, `unknown-version`);
   - the event types stay unreserved, with condition and leg event types stated as separate
     namespaces;
-  - B-258 lost the decisions it held: a signature line, refusal codes, the stub's message and
+  - B-260 lost the decisions it held: a signature line, refusal codes, the stub's message and
     the brief now live in the rule, or were cut.
 
   Review round 2: one fresh reviewer. Its findings, checked against the text:
@@ -3175,7 +3219,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - the heartbeat fields and the release clause are cited, not restated;
   - R-BTN-5's pointer moved to the end of its bullet, where it no longer reads as adding
     readiness;
-  - B-258 lost its bar migration and agent hook, which the spec does not hold.
+  - B-260 lost its bar migration and agent hook, which the spec does not hold.
   Review round 3, the last: one fresh reviewer. Its findings, checked against the text:
   - Baton logged a change only for a post observed after the claim, while the runner reacted to
     every heartbeat version. And a change logged just before an `advance` could be handed to the

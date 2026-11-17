@@ -1594,7 +1594,10 @@ export class Claims {
       // itself or an earlier beat.
       const link = this.rows<{ session_url: string | null }>('SELECT session_url FROM claim_legs WHERE claim_id = ? AND seq = ?', claimId, run.seq)[0]?.session_url ?? null;
       const f = this.legFacts(claimId, run.leg, run.run_id);
-      this.c.history?.record(f.ticket, { kind: opts.finished ? 'leg-finished' : 'leg-abandoned', ...f.row, reached, next_leg: opts.next ?? null, detail: { end_reason: reason, ...(link ? { session_url: link } : {}) } });
+      // B-257: a finished run's end detail and evidence ride its row, so the ticket's history
+      // shows what a person confirms (a `delivered` answer's commit and its tests) beside it.
+      const shown = opts.finished && opts.detail ? { end_detail: opts.detail, ...(opts.evidence ? { evidence: opts.evidence } : {}) } : {};
+      this.c.history?.record(f.ticket, { kind: opts.finished ? 'leg-finished' : 'leg-abandoned', ...f.row, reached, next_leg: opts.next ?? null, detail: { end_reason: reason, ...(link ? { session_url: link } : {}), ...shown } });
     }
     // R-BTN-62: only a reading numbered above the counter's value now can confirm this end. §2e:
     // regressed_since clears with the end; a suspension made while regressed is confirmed by any
@@ -1740,18 +1743,20 @@ export class Claims {
    *  and the legs claims finished with an evidence pointer, each with its claim's nonce — what a
    *  station function checks a marker in git against (a marker counts only as the evidence a
    *  claim's own advance recorded). Newest first, bounded. */
-  syncRecord(repo: string): { answers: { ticket: string; decision: string; answer: string; answered_at: number }[]; legs: { ticket: string; leg: string; claim_nonce: string; evidence: string }[] } {
+  syncRecord(repo: string): { answers: { ticket: string; decision: string; answer: string; answered_at: number }[]; legs: { ticket: string; leg: string; claim_nonce: string; evidence: string; reached: string }[] } {
     const local = (id: string) => id.slice(id.indexOf(':') + 1);
     const live = `t.repository_id = ? AND NOT EXISTS (SELECT 1 FROM closed_tickets x WHERE x.ticket_id = t.id)`;
     const answers = this.rows<{ ticket_id: string; decision_id: string; answer: string; answered_at: number }>(
       `SELECT a.ticket_id, a.decision_id, a.answer, a.answered_at FROM decision_answers a JOIN tickets t ON t.id = a.ticket_id
        WHERE ${live} ORDER BY a.answered_at DESC LIMIT ${SYNC_RECORD_MAX}`, repo);
-    const legs = this.rows<{ ticket_id: string; leg: string; nonce: string; evidence: string }>(
-      `SELECT c.ticket_id, l.leg, c.nonce, l.evidence FROM claim_legs l JOIN claims c ON c.id = l.claim_id JOIN tickets t ON t.id = c.ticket_id
-       WHERE ${live} AND l.evidence IS NOT NULL AND l.finished_at IS NOT NULL ORDER BY l.finished_at DESC LIMIT ${SYNC_RECORD_MAX}`, repo);
+    // B-257: each with the station it reached, so a station function tells an implement run that
+    // opened a PR from one that answered `delivered` by Baton's record, not by git.
+    const legs = this.rows<{ ticket_id: string; leg: string; nonce: string; evidence: string; reached: string }>(
+      `SELECT c.ticket_id, l.leg, c.nonce, l.evidence, l.to_station AS reached FROM claim_legs l JOIN claims c ON c.id = l.claim_id JOIN tickets t ON t.id = c.ticket_id
+       WHERE ${live} AND l.evidence IS NOT NULL AND l.finished_at IS NOT NULL ORDER BY l.finished_at DESC, l.claim_id DESC, l.seq DESC LIMIT ${SYNC_RECORD_MAX}`, repo);
     return {
       answers: answers.map((a) => ({ ticket: local(a.ticket_id), decision: a.decision_id, answer: a.answer, answered_at: a.answered_at })),
-      legs: legs.map((l) => ({ ticket: local(l.ticket_id), leg: l.leg, claim_nonce: l.nonce, evidence: l.evidence })),
+      legs: legs.map((l) => ({ ticket: local(l.ticket_id), leg: l.leg, claim_nonce: l.nonce, evidence: l.evidence, reached: l.reached })),
     };
   }
 
@@ -2381,7 +2386,7 @@ export class Claims {
     // Silent workers: reaped at exactly their clamped timeout (R-BTN-9), never by Date.now().
     const silent = this.rows<{ id: number; ticket_id: string; worker_id: number; kind: string }>(
       `SELECT c.id, c.ticket_id, c.worker_id, w.kind FROM claims c JOIN workers w ON w.id = c.worker_id
-       WHERE c.status = 'active' AND ((w.kind != 'legacy' AND ? - w.last_seen_at >= w.lease_timeout_ms)
+       WHERE c.status = 'active' AND ((w.kind != 'legacy' AND w.last_seen_at + w.lease_timeout_ms <= ?)
                                       OR (w.kind = 'legacy' AND c.reap_after IS NOT NULL AND c.reap_after <= ?))`, now, now);
     for (const c of silent) {
       each(c.id, c.ticket_id, () => {
@@ -2406,7 +2411,7 @@ export class Claims {
     // A fence also clears when its worker goes silent past its own timeout (R-BTN-19).
     const lapsed = this.rows<{ id: number; ticket_id: string; worker_id: number }>(
       `SELECT c.id, c.ticket_id, c.worker_id FROM claims c JOIN workers w ON w.id = c.worker_id
-       WHERE c.status = 'reaped' AND c.fence_pending = 1 AND ? - w.last_seen_at >= w.lease_timeout_ms`, now);
+       WHERE c.status = 'reaped' AND c.fence_pending = 1 AND w.last_seen_at + w.lease_timeout_ms <= ?`, now);
     for (const c of lapsed) {
       this.exec('UPDATE claims SET fence_pending = 0 WHERE id = ?', c.id);
       // R-BTN-178: the fence deadline releasing, the reaped claim's seats go with it.
@@ -2487,7 +2492,7 @@ export class Claims {
   timeline(now: number) {
     const from = now - 24 * 3_600_000;
     const lanes = this.rows<{ id: number; hostname: string; session_name: string }>(
-      `SELECT id, hostname, session_name FROM workers WHERE reaped_at IS NULL AND ? - last_seen_at < lease_timeout_ms ORDER BY hostname, id`, now);
+      `SELECT id, hostname, session_name FROM workers WHERE reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? ORDER BY hostname, id`, now);
     // The window's claims (`claims_by_ended`, B-240: the active ones and those ended since
     // `from`), by `claimed_at`, ties by id.
     const laneIds = JSON.stringify(lanes.map((l) => l.id));
@@ -2548,10 +2553,10 @@ export class Claims {
       stale_skills: this.rows(`SELECT w.id, w.hostname, w.session_name, f.repository_id, f.course_id, f.version, k.min_worker_version
                                FROM workers w JOIN worker_courses f ON f.worker_id = w.id
                                JOIN courses k ON k.repository_id = f.repository_id AND k.id = f.course_id
-                               WHERE w.reaped_at IS NULL AND w.kind != 'legacy' AND f.version < k.min_worker_version AND ? - w.last_seen_at < w.lease_timeout_ms
+                               WHERE w.reaped_at IS NULL AND w.kind != 'legacy' AND f.version < k.min_worker_version AND w.last_seen_at + w.lease_timeout_ms > ?
                                UNION ALL
                                SELECT w.id, w.hostname, w.session_name, NULL, NULL, NULL, NULL FROM workers w
-                               WHERE w.reaped_at IS NULL AND w.kind != 'legacy' AND ? - w.last_seen_at < w.lease_timeout_ms
+                               WHERE w.reaped_at IS NULL AND w.kind != 'legacy' AND w.last_seen_at + w.lease_timeout_ms > ?
                                  AND NOT EXISTS (SELECT 1 FROM worker_courses f WHERE f.worker_id = w.id) AND EXISTS (SELECT 1 FROM courses)
                                ORDER BY 1, 4, 5`, now, now),
       // §2e: a claim git has shown going backwards for 30 minutes.

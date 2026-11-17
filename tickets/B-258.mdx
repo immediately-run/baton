@@ -1,5 +1,5 @@
 ---
-title: "B-258 — Build R-BTN-198: leg events, so a running leg learns that its ticket changed (`ticket.changed`) or why it is being stopped (`release`)"
+title: "B-258 — A person's 'confirmed' archives the ticket file: an archive leg after confirm"
 id: B-258
 project: baton
 status: available
@@ -8,152 +8,31 @@ repos:
   - baton
 tags:
   - roadmap-item
-order: 1258
-tier: judgement
-description: "Build what R-BTN-198 specifies. Conditions go one way, from a leg to Baton; leg events go the other. `ticket.changed`: when an accepted snapshot moves the version of a held ticket, Baton logs it and rings the holder, the heartbeat carries the claim's `version`, and the runner hands the event to the running leg (never for the leg's own push, on the markdown source). The leg's course chooses `continue` (the default: the leg may read the new version through `ctx.readTicket` or `baton leg ticket` once the runner has re-verified it) or `restart` (the claim ends `released:ticket-changed`, not a failed attempt). The next leg in the claim starts only after re-verification. `release`: the runner tells the leg the reason of a release (Stop leg, Cancel, supersession and the rest) before the unchanged stop. No ticket text passes through Baton or reaches an agent unasked. Requires: B-227 landed, since both change how a release stops a leg."
+description: "Owner ruling 2026-11-17: confirming a delivered ticket also runs baton tickets done; the owner answers confirm"
 topics:
   - baton
-  - conditions
-  - runners
 owns: {}
 prs: []
-depends_on:
-  - B-227
+depends_on: []
 ---
 
-**Brief:** see the description. The owner's question and answers are in
-`spec/BATON_SPEC_HISTORY.md`'s 2026-11-17 entry for R-BTN-198.
+**What:** a person's `confirmed` answer at B-257's `delivered` station also archives the ticket file (owner ruling, 2026-11-17). Today Baton holds the ticket at the `confirmed` end, but the file keeps its status until someone runs `baton tickets done`, so git and Baton disagree until a person remembers.
 
-**Depends on:** B-227.
+- Add a runner leg after `confirm` (`archive`) that runs the same steps as `baton tickets done <id>` — status `done`, the file moved to `tickets/archive/`, relative links rewritten (#265) — in one commit, naming the delivered commit(s) from the end record as the ticket's evidence.
+- The leg runs only after the person's `confirmed` answer, never from the agent's `delivered` word alone.
+- The owner answers `confirm` (owner ruling, 2026-11-17: `asks: owner` stays).
 
-**Spec:** [BATON_SPEC §7.10](../spec/BATON_SPEC/07-conditions.md#sec-7-10)
-([R-BTN-198](../spec/BATON_SPEC/07-conditions.md#sec-7-10)),
-[§1](../spec/BATON_SPEC/01-what-baton-is.md) ([R-BTN-35](../spec/BATON_SPEC/01-what-baton-is.md)),
-[§4.5](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5) ([R-BTN-5](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5)),
-[§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2)),
-[§6.9](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-9),
-[§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) ([R-BTN-91](../spec/BATON_SPEC/08-runners.md#sec-8-1), the heartbeat),
-[§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3), [R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3)),
-[§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-119](../spec/BATON_SPEC/08-runners.md#sec-8-4)),
-[§9.4](../spec/BATON_SPEC/09-claims.md#sec-9-4), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13)'s `ticket_history.kind`, [§14](../spec/BATON_SPEC/14-api.md#sec-14)'s heartbeat.
-
-### What to build
-
-Everything below is R-BTN-198 and the rules it amends; where this list and the rule differ, the
-rule wins.
-
-1. **The course file (R-BTN-69).** The leg field `on_ticket_changed`, `continue` or `restart`,
-   defaulting to `continue`. The validator refuses any other value, and `restart` on a leg with
-   no `max_runs`, naming the leg.
-2. **The core (R-BTN-198, §8.1, §14, R-BTN-91, R-BTN-81, §9.4).**
-   - In the transaction that accepts a snapshot, whatever its observation: for each held ticket
-     (not a `cancel`-leg claim or a `changes` ticket) whose posted `version` moved and which the
-     snapshot leaves held, log `ticket-changed {from_version, to_version}` with the claim, and
-     ring the holder `ticket` after the commit.
-   - Each heartbeat claim carries `version`, `snapshot_sha`, `brief` and `last_written_by`.
-   - `ticket_version` on the `advance` that starts a run and on the end (§9.4, §14).
-   - Accept `released:ticket-changed` only when a `ticket-changed` row of the claim carries the
-     end's `ticket_version` and it differs from the running leg's `advance`'s; refuse it
-     otherwise `invalid-params`, except an end answering a `release` Baton sent with that reason.
-     Not a failed attempt.
-3. **The runner (R-BTN-198).**
-   - Per claim: the last seen and last verified versions, each with its snapshot sha.
-   - Hand `ticket.changed` while a leg runs, collapsing several changes into one, none when the
-     newest is the last seen.
-   - The own-change test: markdown source only, every commit to the ticket's file in the range
-     pushed by this claim's legs, from the same reflog reading as the leg-end scope audit.
-   - Verification with the five refusals. A source or executor that cannot answer is
-     `unreadable`, never a moved ticket (B-232's lesson); before a leg it ends the claim
-     `cannot-finish:transient`; `off-branch` ends it `released:off-branch`; a version closed
-     `done` ends it `done`; the rest release `stale-board`.
-   - A heartbeat whose `git` view is `closed: 'done'` hands nothing (R-BTN-72 ends `done`).
-   - `restart`, when `to_version` differs from the version the leg started on: stop at once
-     through R-BTN-119's path for `requested`, then end `released:ticket-changed` naming the
-     version.
-   - Refuse the release reason `ticket-changed` from a run that was handed no `ticket.changed`.
-   - On every `release` message, hand `release {reason}` first, then act exactly as today; hand
-     only `release` when a heartbeat brings both. Stops made with no message hand nothing.
-   - A context refresh re-hands the run's newest `ticket.changed` to the fresh session.
-4. **The leg's side (R-BTN-72, R-BTN-106, R-BTN-107).**
-   - `ctx.on`, `ctx.events` and `ctx.readTicket` under `builtin`. `baton leg events [--wait <s>]`
-     (at most 900) and `baton leg ticket [--version <v>]` on the channel. One cursor per run,
-     readable until `close` and `handoff` return.
-   - The executor's brief names the two verbs.
-5. **The standard stubs** (`src/defaults/cli.ts`, after B-227) need no change: their agents learn
-   of events by polling, as the brief says. Passing events into an agent between tool calls
-   is a later ticket.
-
-**Done when** S-BTN-231 passes as a scenario test, and `npm test` and `npm run typecheck` are
-green.
-
-### Out of scope
-
-- **How quickly an external tracker's edits are seen.** Baton learns of a version change at the
-  next accepted snapshot. For the markdown source that follows the forge's notification
-  (R-BTN-73). An edit in a tracker such as Linear records no want (R-BTN-94) until something
-  else does, or until a relay calls `POST /v1/sync/want`. Making that prompt is a separate
-  ticket.
-- **Other leg events** (an owner bar set, a prerequisite lapsing). Each needs its own rule.
+**Done when:** a scenario where the owner answers `confirmed` ends with the ticket archived in git and closed in Baton, with no further person step; a `filed` answer archives nothing.
 
 ### Trust
 
-- **The version, sha and provenance** come from the sync's post and Baton's own record, as at
-  the claim (R-BTN-35, R-BTN-93, R-BTN-194). A forged post (a stolen machine key, the security
-  model's reach 7) can tell a leg its ticket changed, or make a `restart` leg release until its
-  `max_runs` holds the ticket for a person, which the validator makes every `restart` leg
-  declare. It cannot hand a leg other text. The read is at the posted sha, checked on the
-  default branch, for the claim's own ticket, and only for a version this claim was handed. On
-  the markdown source, the version must be the blob at the ticket's path at that sha.
-- **The new body is as untrusted as the old one.** The read shows its `brief` mark and
-  `last_written_by` first, as the claim does. `last_written_by` names only the newest pusher:
-  after an outside edit and the leg's own push it names the runner, so the brief mark is the
-  only authorship signal that holds. The instructions are a task, never authority
-  (`docs/security-model.mdx`, reach 3). A version that would widen the claim (`repos`, `course`,
-  `requires`) is refused, and a read never changes the claim's scope.
-- **No ticket content crosses Baton**, and an event carries no ticket text.
-- **The own-change test** reads the runner's own reflog, which a hostile leg can falsify
-  (§12.9). It can only hide an outside edit from itself.
-- **A self-released `ticket-changed` end** needs a change the runner handed, and a logged row
-  carrying the named version. So a leg's own push, or an edit and its revert, gives it no
-  unpenalised exit.
+No new input: the leg acts on Baton's record of the person's answer and the end's evidence, both already stored.
 
 ### Invariants
 
-- **R-BTN-33:** nothing new is stored but opaque versions in a history row.
-- **R-BTN-5, R-BTN-143 and R-BTN-133:** no leg is handed ticket text that skipped verification,
-  and no new code is loaded mid-claim: the source's code comes from the claim's commit.
-- **R-BTN-194:** provenance is shown before any new text, as at the claim.
-- **R-BTN-119 and §6.9:** a stop's timing and escalation are unchanged. The event is handed
-  before the stop, never in place of it.
-- **R-BTN-63:** readiness stays the holder's judgement; nothing here re-checks it.
-- **R-BTN-162:** a `restart` during a condition wait blocks on that condition, as any release
-  does.
-- **R-BTN-67:** `ticket-changed` joins the closed end reasons, so it can no longer be an owner
-  bar's reason.
-- **R-BTN-160 to R-BTN-163:** conditions, bindings, handlers, Needs you and their quotas are
-  untouched. A leg event is never a condition row.
-- **Values 4:** versions are compared for equality only.
-- **The architecture page, "Replies stay replies":** the ring carries no effect, and delivery
-  stays on the heartbeat.
+- A ticket is closed only by a person's confirmation or a merged PR, never by a leg's word alone (B-257).
+- The archive commit is the same one `baton tickets done` writes.
 
 ## Status
 
-_filed 2026-11-15._
-
-_2026-11-15 — the owner answered the five decisions; under `continue` the leg is told and may
-read the re-verified new version._
-
-_2026-11-17 — refiled as B-258 (main took B-235). The spec half landed in the same PR as
-R-BTN-198, so this ticket is now the build alone. Changes from the filed plan: the
-mid-leg read does not check readiness, which the leg's own pushes move; the event types are not reserved in the validator, since leg events are never condition types;
-the scenario is S-BTN-231._
-
-_2026-11-17 — rewritten after review round 1 of the spec PR, to build R-BTN-198 as amended there;
-the plan holds no decision the spec does not._
-
-_2026-11-17 — rewritten again after review round 2: the bar migration and the agent hook were
-cut (the stubs poll), and the plan follows R-BTN-198's closure check, refusal handling,
-self-release check and `max_runs` requirement._
-
-_2026-11-17 — updated after review round 3: logging on every accepted post, `ticket_version` on
-the advance and the end, the `off-branch` refusal, and `closed: done` ending `done`._
+_filed 2026-11-17._
