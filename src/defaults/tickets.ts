@@ -25,6 +25,7 @@ import { checkPayload, dependsCycles } from '../core/board';
 import { checkTicketsMain, dependsLine } from './tickets-check';
 import { accepts, accepting, allocates, allocatingPrefix, GITHUB_PR, LIVE_STATUSES, readSettingsJson, readTicketSettings, requiresFrom, TAGS, type Status, type TicketSettings } from './tickets-config';
 import { addPr, idOf, locate, nextNumber, prsOf, scalar, setKey } from './tickets-file';
+import { openRequestNumbers } from './request-branches';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
 import { appendStatus, filingDate, firstCommit, historyEntries, rereadMismatch, rereadNote, rulesConfig, sectionGaps, sectionHint, sectionsSince, staleIds, staleList, staleRules, unshallow } from './tickets-rules';
@@ -531,7 +532,11 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
     const files = readItems(dir, items);
     const read = sourceAt(dir, settings);
     const prefix = `${allocatingPrefix(settings)}-`;
-    const id = `${prefix}${nextNumber(files, settings, prefix)}`;
+    // R-BTN-131, B-174: the open request branches' ids count too — a request still waiting on its
+    // `baton-request/<ID>` branch holds its id, and no allocator hands it out again. The head the
+    // filing sits on is the worktree's own (the fetched default branch).
+    const openRequests = openRequestNumbers(dir, remote, items, prefix, git(dir, 'rev-parse', 'HEAD'), io.warn);
+    const id = `${prefix}${Math.max(nextNumber(files, settings, prefix), ...openRequests.map((n) => n + 1))}`;
     // The prefix's pattern may name ids `new` cannot allocate (a fixed count, `\d{7}`): it says so
     // rather than write a wrong one.
     if (!allocates(settings, id)) throw new Error(`new allocates ${prefix}<n>, but ${prefix}'s pattern in .baton/baton.json is \`${settings.prefixes[prefix]}\` — write the pattern's number as \\d+, or name another ticket_prefix`);

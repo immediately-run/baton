@@ -9,8 +9,8 @@ const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C',
 interface GitFailure { status?: number | null; stderr?: string | Uint8Array }
 
 /** `owner/name` of a checkout's `origin` remote (an SSH or HTTPS URL, or the proxy's
- * `…/git/owner/name` form), or null when the checkout has no `origin` — or belongs to no
- * repository at all.
+ * `…/git/owner/name` form) — or any named remote's — or null when the checkout has no such
+ * remote — or belongs to no repository at all.
  *
  * B-93: both of those are null and *silent*, and nothing else is. git's own
  * `error: No such remote 'origin'` (exit 2, from a real repository) and `fatal: not a git
@@ -26,11 +26,24 @@ interface GitFailure { status?: number | null; stderr?: string | Uint8Array }
  * captured stderr, because those are failures the operator must see, and a null slug would make
  * a broken checkout indistinguishable from an origin-less one. Only `git remote get-url`'s own
  * two answers about the absence of a remote go quiet. */
-export function remoteSlug(root: string): string | null {
+/** `owner/name` of a remote URL — the parse a remote's own URL gets below (the scp form's
+ * `git@host:` and the user-less `host:owner/name` and the `https://host/` prefix stripped,
+ * `.git` dropped, the proxy's `git/` folded away): exported for the caller that holds the
+ * URL itself rather than a remote's name (request.ts's PR, opened on the remote the request
+ * was pushed to, round 1). */
+export const slugOfUrl = (url: string): string =>
+  url
+    .replace(/^git@[^:]+:/, '')
+    .replace(/^https?:\/\/[^/]+\//, '')
+    .replace(/^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9-]+:(?=[^/])/, '')
+    .replace(/\.git$/, '')
+    .replace(/^git\/(?=[^/]+\/[^/]+$)/, '');
+
+export function remoteSlug(root: string, remote: string = 'origin'): string | null {
   try {
     // The proxy's `…/git/owner/name` form drops its `git/` — only when `owner/name` follows, so an
     // owner named `git` keeps its name.
-    return git(root, 'remote', 'get-url', 'origin').replace(/^git@[^:]+:/, '').replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '').replace(/^git\/(?=[^/]+\/[^/]+$)/, '');
+    return slugOfUrl(git(root, 'remote', 'get-url', remote));
   } catch (e) {
     const { status, stderr } = (e ?? {}) as GitFailure;
     const said = typeof stderr === 'string' ? stderr : stderr ? new TextDecoder().decode(stderr) : (e instanceof Error ? e.message : '');
@@ -40,12 +53,12 @@ export function remoteSlug(root: string): string | null {
     // too, round 3, 3-r0-1): `git remote get-url`'s "No such remote" (exit 2), and "not a git
     // repository (" — anchored to the parenthesised continuation, so a broken worktree link
     // ("not a git repository: /gone/…", no parenthesis) stays loud (round 4, 4-r1-3).
-    const noRemote = status === 2 || /No such remote 'origin'/.test(said);
+    const noRemote = status === 2 || said.includes(`No such remote '${remote}'`);
     const noRepository = /not a git repository \(/.test(said);
     if (noRemote || noRepository) return null;
     // Any other failure is the operator's to see, with git's own words (git is not installed, the
     // ownership check refused the checkout, the repository is corrupt): rethrown as an Error
     // carrying the captured stderr, never a quiet null.
-    throw new Error(`git remote get-url origin failed in ${root}${status != null ? ` (exit ${status})` : ''}: ${said.trim() || 'no stderr'}`);
+    throw new Error(`git remote get-url ${remote} failed in ${root}${status != null ? ` (exit ${status})` : ''}: ${said.trim() || 'no stderr'}`);
   }
 }

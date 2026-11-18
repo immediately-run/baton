@@ -81,9 +81,78 @@ const int = (v: unknown, lo: number, hi: number) => Number.isInteger(v) && (v as
 /** Stars per branch pattern (spec-silent, recorded on R3-1231): a pattern is a name, not a glob. */
 const PATTERN_STARS_MAX = 4;
 
+/** R-BTN-190 (B-174): the reserved side-branch namespace `baton-request/*` — the request
+ *  command's fallback branches (R-BTN-131), whose PRs are never one of the new ticket's own. No
+ *  `branch_pattern` may match a branch of it, so no reader of `branch_pattern` — a station
+ *  function, R-BTN-25's continuation, the PR courses' mapping, the branch-holder query — ever
+ *  sees one. */
+const RESERVED_NAMESPACE = 'baton-request/';
+
+/** Whether a branch pattern can match a branch of `RESERVED_NAMESPACE` — some
+ *  `baton-request/<id>` with a nonempty id. The pattern's own words decide, as the LOOSEST
+ *  reader of `branch_pattern` reads them (round 1: the PR courses' mapping reader substitutes
+ *  `*` for `{repository}` — course-pr.ts's matchPatterns, a star that spans `/` — while
+ *  claims.ts's branch-holder query substitutes the repository's id; the guard must hold for
+ *  the `*` reading, and `{repository}` is walked as one below): a literal must match the
+ *  namespace's fixed half letter for letter (case-insensitively, as branch names are
+ *  compared), `*` and `{repository}` may cover any run of the half and of the id after it,
+ *  and `{ticket}` stands for an id — never empty, never a `/` (the id is substituted
+ *  literally by every reader) — so it cannot cross the namespace's own trailing slash
+ *  (`baton-{ticket}` never reaches `baton-request/<id>`, while `baton-request/{ticket}`
+ *  always does). The walk keeps every position in the fixed half the match may have reached,
+ *  and `past`, the state where the half is covered and the match is writing the branch's own
+ *  id: a pattern that can end there claims the namespace. Ending exactly at the half's end
+ *  claims nothing — no branch is named `baton-request/` alone, and no token is left to write
+ *  an id. */
+function claimsReservedNamespace(pattern: string): boolean {
+  const ns = RESERVED_NAMESPACE;
+  let at = new Set([0]);
+  let past = false;
+  for (let i = 0; i < pattern.length; ) {
+    if (pattern.startsWith('{ticket}', i)) {
+      const next = new Set<number>();
+      for (const j of at) {
+        // An id is one or more characters without a `/`: it may run through the fixed half's
+        // letters but never over its trailing slash, and at the half's end it writes the id.
+        if (j === ns.length) past = true;
+        else for (let k = j + 1; k < ns.length; k++) next.add(k);
+      }
+      at = next;
+      i += '{ticket}'.length;
+    } else if (pattern.startsWith('{repository}', i)) {
+      // The loosest reader's `*`: any run, the slash included — `baton-request{repository}`
+      // reads as `baton-request*` there, matching `baton-request/<id>` whole.
+      const next = new Set<number>();
+      for (const j of at) for (let k = j; k <= ns.length; k++) next.add(k);
+      past = past || at.size > 0;
+      at = next;
+      i += '{repository}'.length;
+    } else if (pattern[i] === '*') {
+      // A star covers any run — part of the half, all of it, or the id past it.
+      const next = new Set<number>();
+      for (const j of at) for (let k = j; k <= ns.length; k++) next.add(k);
+      past = past || at.size > 0;
+      at = next;
+      i++;
+    } else {
+      const c = pattern[i].toLowerCase();
+      const next = new Set<number>();
+      for (const j of at) {
+        if (j === ns.length) past = true;
+        else if (ns[j] === c) next.add(j + 1);
+      }
+      at = next;
+      i++;
+    }
+    if (!at.size && !past) return false;
+  }
+  return past;
+}
+
 function pattern(v: unknown, field: string): string {
   if (typeof v !== 'string' || !BRANCH_PATTERN.test(v) || !v.includes('{ticket}')) bad(field, 'must be a branch pattern containing {ticket}');
   if ((v as string).split('*').length - 1 > PATTERN_STARS_MAX) bad(field, `must have at most ${PATTERN_STARS_MAX} *`);
+  if (claimsReservedNamespace(v as string)) bad(field, `must not match ${RESERVED_NAMESPACE}* — that namespace holds the request command's side branches (R-BTN-190), whose PRs are never a ticket's own`);
   return v as string;
 }
 
