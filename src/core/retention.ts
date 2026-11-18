@@ -93,18 +93,18 @@ export class Retention {
        RETURNING sha`, now - SNAPSHOTS_KEEP_MS, n).length;
   }
 
-  /** Step 3, through `workers_last_seen`, from the cursor: the runners that fell silent since the
+  /** Step 3, through `runners_last_seen`, from the cursor: the runners that fell silent since the
    *  last prune, oldest first, each one's rows deleted whole. */
   private runners(now: number, n: number): number {
     const raw = this.rows<{ value: string }>('SELECT value FROM baton_settings WHERE key = ?', RUNNERS_CURSOR)[0]?.value;
     let [at, id] = raw ? (JSON.parse(raw) as [number, number]) : [-1, 0];
     let deleted = 0;
     const due = this.rows<{ id: number; last_seen_at: number }>(
-      `SELECT id, last_seen_at FROM workers WHERE last_seen_at >= ? AND last_seen_at < ? AND NOT (last_seen_at = ? AND id <= ?)
+      `SELECT id, last_seen_at FROM runners WHERE last_seen_at >= ? AND last_seen_at < ? AND NOT (last_seen_at = ? AND id <= ?)
        ORDER BY last_seen_at, id LIMIT ?`, at, now - RUNNER_UNSEEN_MS, at, id, n);
     for (const w of due) {
       if (deleted >= n) break;
-      for (const t of ['worker_capabilities', 'worker_tags', 'worker_courses']) deleted += this.rows(`DELETE FROM ${t} WHERE worker_id = ? RETURNING worker_id`, w.id).length;
+      for (const t of ['runner_capabilities', 'runner_tags', 'runner_courses']) deleted += this.rows(`DELETE FROM ${t} WHERE runner_id = ? RETURNING runner_id`, w.id).length;
       [at, id] = [w.last_seen_at, w.id];
     }
     if (due.length) {

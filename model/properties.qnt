@@ -76,9 +76,9 @@ module properties {
   val verifyShape = TICKETS.size() == 1 and not(FLEET) and WORKERS.forall(w => DECLARED.get(w) == Set()) and OWNER_BUDGET == 1
 
   // R-BTN-4, R-BTN-19, R-BTN-26: at most one live holder per ticket — an active claim, or a
-  // force-reaped one whose worker has not cleared its fence — and one active claim per worker.
+  // force-reaped one whose runner has not cleared its fence — and one active claim per runner.
   val oneLiveHolderPerTicket = TICKETS.forall(t => activeOf(t).size() + fencedOf(t).size() <= 1)
-  val oneClaimPerWorker = WORKERS.forall(w => workerClaim(w).size() <= 1)
+  val oneClaimPerRunner = WORKERS.forall(w => runnerClaim(w).size() <= 1)
 
   // R-BTN-62: accepted observations strictly increase; none exceeds what was handed out.
   val observationsIncrease =
@@ -123,11 +123,11 @@ module properties {
   })
 
   // R-BTN-45, R-BTN-60, R-BTN-67: every writing leg started under docs' required bar — some
-  // family barred, by the sync or the holder — and never by a worker of a barred family.
+  // family barred, by the sync or the holder — and never by a runner of a barred family.
   val writingLegsBarred = st.claims.keys().forall(i => {
     val c = st.claims.get(i)
     c.status != "active" or not(REQUIRED.contains(c.leg)) or
-      (c.startBars.intersect(FAMILIES).size() > 0 and c.startBars.intersect(TAGS.get(c.worker)).size() == 0)
+      (c.startBars.intersect(FAMILIES).size() > 0 and c.startBars.intersect(TAGS.get(c.runner)).size() == 0)
   })
 
   // R-BTN-45, rules 1, 3, 8: every claim and every advance was granted with every gate in force
@@ -135,7 +135,7 @@ module properties {
   // (Rule 12, the hook's refusal, went with R-BTN-98.)
   val gatesHeld = st.claims.keys().forall(i => not(st.claims.get(i).gateViolation))
 
-  // R-BTN-6, R-BTN-26: no worker pushes for a claim Baton reaped without a fence — its own
+  // R-BTN-6, R-BTN-26: no runner pushes for a claim Baton reaped without a fence — its own
   // fence check stops it first, given drift below the margin (baton.qnt, time).
   val noActAfterLoss = not(st.actedAfterLoss)
 
@@ -167,7 +167,7 @@ module properties {
   val blockedEndsBounded = TICKETS.forall(t => LEGS.forall(l => st.blockedEnds.get(t).get(l) <= MAX_BLOCKED + 1))
 
   // R-BTN-75 (R3-1254 part 2b): the `capability` rows are what the fleet Baton last counted
-  // says — every change to what a worker declares, or to the live set, recounts.
+  // says — every change to what a runner declares, or to the live set, recounts.
   val capabilityRowsCounted = TICKETS.forall(t => st.capRows.get(t) == capRowsFor(st, st.fleetLive, t))
   // R-BTN-77 as amended by R3-1251: a lost answer is remembered only while the ticket is
   // unblocked and its `blocked` is still open — the `unblocked` it is owed.
@@ -183,7 +183,7 @@ module properties {
 
   // `safety` in four groups, so the proof can check them in four processes at once (B-37,
   // `npm run model:verify`); `safety` is their conjunction, so no property is left out of a split.
-  val safetyA = and { observationsIncrease, oneLiveHolderPerTicket, oneClaimPerWorker, staleOnlyWhenTakenAway, writingLegsBarred }
+  val safetyA = and { observationsIncrease, oneLiveHolderPerTicket, oneClaimPerRunner, staleOnlyWhenTakenAway, writingLegsBarred }
   val safetyB = and { confirmationAfterEnd, gatesHeld, noActAfterLoss, noStuckTicket, unblockedFollowsBlocked }
   val safetyC = and { confirmedIsInGit, regressedOnlyWhenGitRegressed, capabilityRowsCounted, answerLostOwesUnblocked }
   val safetyD = and { boundedLoops, blockedIsStored, attemptsBounded, blockedEndsBounded, capacityRespected }

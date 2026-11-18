@@ -32,7 +32,7 @@ function api(client?: string): BatonApi {
   return new BatonApi({
     url: ORIGIN,
     transport: (req) => hostRaw(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
     ...(client ? { client } : {}),
   }, (line) => lines.push(line));
 }
@@ -55,7 +55,7 @@ describe('S-BTN-227 the runner half', () => {
     const a = new BatonApi({
       url: ORIGIN,
       transport: (req) => (seen.push(req.headers.get('Baton-Client')!), hostRaw(req)),
-      auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+      auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
     });
     await a.heartbeat(hbBody('vm-a', { secret_hash: await sha256('s-own') }));
     expect(seen).toEqual([`baton/${PACKAGE_VERSION}+dev`]);
@@ -64,7 +64,7 @@ describe('S-BTN-227 the runner half', () => {
   it('a runner below recommended warns at start and again when the served versions change, never per call', async () => {
     const a = api('baton/0.1.4');
     const body = hbBody('vm-a', { secret_hash: await sha256('s-warn') });
-    expect((await a.heartbeat(body)).worker_id).toBeGreaterThan(0);
+    expect((await a.heartbeat(body)).runner_id).toBeGreaterThan(0);
     expect(lines).toEqual([`baton: this runner is baton/0.1.4; Baton recommends ${RECOMMENDED} and refuses below ${MIN}`]);
     // The same values again say nothing.
     await a.heartbeat(body);

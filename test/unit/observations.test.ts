@@ -2,7 +2,7 @@
 // one number outstanding per repository, each used once, a post refused whole unless its number
 // is the outstanding one and above the last accepted reading's.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { MIRROR_WORKFLOW_REF, observe, payload, register, rows, setClock, syncCall, syncToken, withCore, workerCall } from '../helpers';
+import { MIRROR_WORKFLOW_REF, observe, payload, register, rows, setClock, syncCall, syncToken, withCore, runnerCall } from '../helpers';
 import { checkPayload } from '../../src/core/board';
 
 const board = inject('board');
@@ -103,11 +103,11 @@ describe('every claim records the counter (round 1, 1-A-3)', () => {
     await syncCall('/v1/sync/board', payload(sha.A, null, board.states.A));
     const n = (await observe()).json.observation;
     const { secret } = await register('vm-a');
-    const res = await workerCall('/v1/runner/shadow-report', { secret, body: { transition: 'claim', ticket_id: 'docs:R3-9001', status: 'in-progress', nonce: 'abc123', at: T0 } });
+    const res = await runnerCall('/v1/runner/shadow-report', { secret, body: { transition: 'claim', ticket_id: 'docs:R3-9001', status: 'in-progress', nonce: 'abc123', at: T0 } });
     expect(res.status).toBe(200);
     expect(await rows(`SELECT claim_observation FROM claims WHERE ticket_id = 'docs:R3-9001'`)).toEqual([{ claim_observation: n }]);
     // …and its shadow release records the counter when it ended (round 2, 2-A-1).
-    expect((await workerCall('/v1/runner/shadow-report', { secret, body: { transition: 'set', ticket_id: 'docs:R3-9001', status: 'available', at: T0 + 1 } })).status).toBe(200);
+    expect((await runnerCall('/v1/runner/shadow-report', { secret, body: { transition: 'set', ticket_id: 'docs:R3-9001', status: 'available', at: T0 + 1 } })).status).toBe(200);
     expect(await rows(`SELECT status, end_observation FROM claims WHERE ticket_id = 'docs:R3-9001'`)).toEqual([{ status: 'released', end_observation: n }]);
   });
 });

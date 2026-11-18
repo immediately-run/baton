@@ -1,5 +1,5 @@
 // state.ts — the runner's local state (BATON_SPEC §6.4): one JSON file per session under
-// `~/.cache/immediately-run/baton/`, mode 0600, holding the worker id, the worker secret, the
+// `~/.cache/immediately-run/baton/`, mode 0600, holding the runner id, the runner secret, the
 // active claim, the time of the last successful heartbeat, the lease the server granted and the
 // sidecar's lease-lost flag — everything a harness hook or a leg session reads through
 // `BATON_STATE` (read-only for them) and everything the fence computes from (R-BTN-26). The
@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { dirname, join } from 'node:path';
 
 export interface RunnerState {
-  worker_id: number | null;
+  runner_id: number | null;
   incarnation: number | null;
   secret: string;
   /** The active claim as the runner knows it: id, ticket, nonce — the oldest of `claims`, kept
@@ -50,7 +50,7 @@ export interface PersistedClaim {
   ctx?: Record<string, unknown> | null;
 }
 
-export const emptyState = (): RunnerState => ({ worker_id: null, incarnation: null, secret: '', claim: null, last_ok: null, lease_timeout_s: null, lease_lost: false, lease_lost_because: null, declared: null });
+export const emptyState = (): RunnerState => ({ runner_id: null, incarnation: null, secret: '', claim: null, last_ok: null, lease_timeout_s: null, lease_lost: false, lease_lost_because: null, declared: null });
 
 /** §6.3's margin (R-BTN-6): two missed beats of the 2-minute cadence. */
 export const LEASE_MARGIN_MS = 4 * 60_000;

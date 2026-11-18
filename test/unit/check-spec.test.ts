@@ -9,7 +9,7 @@ import { impact, patchNotes, render, units } from '../../scripts/spec-tools.mjs'
 
 const SPEC = [
   '- **R-BTN-1 (the lock).** One holder.',
-  '- **The worker declares its own lease timeout** (R-BTN-9): a property.',
+  '- **The runner declares its own lease timeout** (R-BTN-9): a property.',
   '| 4-A-8 = 4-B-13 a review finding id, not a ticket |',
   'Owned by R3-1205.',
 ].join('\n');
@@ -65,7 +65,7 @@ describe('check-spec', () => {
   it('allows the allowlisted retired files (B-67 empties the list)', () => {
     const history = '## Retired scenarios and gates\n\n| Id | What it tested |\n|---|---|\n| S-BTN-46 | couriers |\n';
     const problems = check(SPEC, [['src/a.ts', '// R-BTN-1']], new Set(['R3-1205']), history,
-      ['S-BTN-46.decision-reaches-owner.test.ts', 'S-BTN-60.worker-couriers.test.ts']);
+      ['S-BTN-46.decision-reaches-owner.test.ts', 'S-BTN-60.runner-couriers.test.ts']);
     expect([...problems]).toEqual([]);
   });
 

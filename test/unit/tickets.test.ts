@@ -87,7 +87,7 @@ describe('reference data and the dashboard state', () => {
       { name: 'review-pr-claude', family: 'claude', bills: '["zai-coding-plan","anthropic"]', models: '{"zai-coding-plan":"zai-coding-plan/glm-5.3-flash","anthropic":"claude-opus-5-5"}' },
       { name: 'review-pr-glm', family: 'glm', bills: '["zai-coding-plan"]', models: null }]);
     // min_skills_version is gone (R-BTN-22): the registry carries each course's version.
-    expect(await rows(`SELECT id, version, min_worker_version FROM courses`)).toEqual([{ id: 'roadmap-pr', version: 3, min_worker_version: 3 }]);
+    expect(await rows(`SELECT id, version, min_runner_version FROM courses`)).toEqual([{ id: 'roadmap-pr', version: 3, min_runner_version: 3 }]);
     // The `providers` and `prices` the reference still carries (the sync keeps posting them
     // through the window) reach no table: the model tables are gone by migration.
     expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('model_providers', 'provider_models', 'peak_schedules', 'provider_suspensions')`)).toEqual([]);

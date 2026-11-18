@@ -10,7 +10,7 @@
 // (R-BTN-8); observation numbers and whole-post acceptance (R-BTN-62); confirmation by path
 // extension (R-BTN-10, R-BTN-71); staleness only when the ticket is taken away and
 // regressions flagged (R-BTN-35, §1); holds (§6.6, rule 3); barred tags — posted, owner and
-// holder bars (R-BTN-60, R-BTN-67, rule 8); required bars (R-BTN-67); reaping a dead worker
+// holder bars (R-BTN-60, R-BTN-67, rule 8); required bars (R-BTN-67); reaping a dead runner
 // and force-reaping a live one, with the fence (§9.5, R-BTN-19, R-BTN-26); any pusher writing
 // git (R-BTN-66); the owner resolving a flagged completion (§9.6).
 // In sync with the spec's 2026-11-02 restructure, part 4 (B-167): rule 4 matches capabilities by
@@ -31,10 +31,10 @@ module baton {
   const MAX_CLAIMS: int          // bounds the state space
   const GIT_BUDGET: int          // foreign pushes, regressions and withdrawals per run
   const OWNER_BUDGET: int        // holds, owner bars and force-reaps per run
-  // Set by the instance too, so a scenario's trace replays with its own workers' tags and its
+  // Set by the instance too, so a scenario's trace replays with its own runners' tags and its
   // repository's required bar (R3-1244); the checked instances keep R3-1243's values.
   const FAMILIES: Set[str]       // the tags a required bar's prefix covers (R-BTN-67)
-  const TAGS: str -> Set[str]    // each worker's tags (R-BTN-60)
+  const TAGS: str -> Set[str]    // each runner's tags (R-BTN-60)
   const REQUIRED: Set[str]       // the legs the required bar covers (R-BTN-67)
   const MAX_TIME: int            // ticks a run may last
   // R-BTN-122: a leg's retry policy in force — attempts before a hold, and the backoff after a
@@ -44,7 +44,7 @@ module baton {
   const BACKOFF: int
   const MAX_BLOCKED: int
   // R3-1254 part 2b. R-BTN-121, §6.6 rule 4: what each runner's configuration declares (its
-  // checks drop and re-declare it), what each worker is granted on the repository (R-BTN-58), and
+  // checks drop and re-declare it), what each runner is granted on the repository (R-BTN-58), and
   // each ticket's posted `requires`, expanded. R-BTN-76: the registered resources, one `service`
   // instance each, and each leg's needs — the sync's `needs` and the course's `requires.resources`.
   // R-BTN-174: what a runner has for a repository is its declared holdings (declared ∩ grant,
@@ -131,12 +131,12 @@ module baton {
   pure val READING_TTL = 8       // R-BTN-76's valid_for, in ticks: an `unavailable` reading's life
 
   // ---- time (§6.3, R-BTN-6, R-BTN-26), in abstract ticks ----
-  // A lease lasts TIMEOUT ticks from the last heartbeat. A worker's own fence check refuses to
+  // A lease lasts TIMEOUT ticks from the last heartbeat. A runner's own fence check refuses to
   // act MARGIN ticks before its lease ends by ITS clock, which runs up to MAX_DRIFT ticks
-  // behind Baton's — standing for how far the worker's last_ok lags Baton's renewal plus its
+  // behind Baton's — standing for how far the runner's last_ok lags Baton's renewal plus its
   // clock's rate skew, since R-BTN-6 measures now − last_ok on one clock and a constant offset
   // cancels (round 2, 2-A-5). The spec's margin is 4 minutes; the assumption it rests on — drift below
-  // the margin — is MAX_DRIFT <= MARGIN here (Baton reaps at the lease end; the worker stops
+  // the margin — is MAX_DRIFT <= MARGIN here (Baton reaps at the lease end; the runner stops
   // strictly before end − MARGIN by its clock), and a mutation with MAX_DRIFT > MARGIN breaks
   // `noActAfterLoss`.
   pure val TIMEOUT = 4
@@ -165,7 +165,7 @@ module baton {
 
   // ---- state ----
   type Claim = {
-    id: int, ticket: str, worker: str,
+    id: int, ticket: str, runner: str,
     offered: str,        // R-BTN-83: the queued leg the claim was offered; its first advance must be it
     status: str,         // active | completed | released | reaped
     kind: str,           // "" | done | suspended | stale | release | fail | blocked | reap
@@ -180,7 +180,7 @@ module baton {
     endedRegressed: bool,
     confirmed: bool,
     confirmObs: int,     // the observation that confirmed it; -1 for the owner
-    fencePending: bool,  // R-BTN-19: reaped while its worker was alive
+    fencePending: bool,  // R-BTN-19: reaped while its runner was alive
     leaseUntil: int,     // R-BTN-4: Baton reaps the claim at this tick unless a heartbeat renews it
     gateViolation: bool, // ghost: the claim or one of its advances was granted with a gate failing
   }
@@ -212,26 +212,26 @@ module baton {
     claims: int -> Claim, nextId: int,
     held: str -> bool,               // ticket_overrides.hold (§8)
     ownerBars: Set[Bar], ownerBudget: int,
-    // workers
+    // runners
     up: str -> bool,                 // alive (a crash makes it false)
     pushed: str -> bool,             // evidence of the running leg pushed (R-BTN-8)
     asleep: str -> bool,             // a sleeping laptop: alive, silent, unable to act
-    localClaim: str -> int,          // the claim the worker believes it holds (0: none)
-    localLease: str -> int,          // the lease end the worker last heard (R-BTN-26)
+    localClaim: str -> int,          // the claim the runner believes it holds (0: none)
+    localLease: str -> int,          // the lease end the runner last heard (R-BTN-26)
     drift: str -> int,               // how far its clock runs behind Baton's (0..MAX_DRIFT)
     now: int,                        // Baton's clock
     // sync runs
     syncs: int -> Sync,
     // ghosts
     accepted: List[int], gitRegressedEver: str -> bool,
-    actedAfterLoss: bool,            // a worker pushed for a claim Baton had reaped, unfenced
+    actedAfterLoss: bool,            // a runner pushed for a claim Baton had reaped, unfenced
     lastEvent: str -> str,           // each ticket's last `blocked`/`unblocked` event (R-BTN-77)
     unpairedUnblock: bool,           // an `unblocked` logged with no `blocked` open before it
     events: int,                     // ghost: `blocked` and `unblocked` events logged, all tickets
     // the fleet (R3-1254 part 2b): R-BTN-75's capability rows, R-BTN-76's resources, R-BTN-77's
     // lost answers
-    lastSeen: str -> int,            // workers.last_seen_at: each worker's last authenticated call (§5, §11)
-    declared: str -> Set[str],       // worker_capabilities: what its last heartbeat declared
+    lastSeen: str -> int,            // runners.last_seen_at: each runner's last authenticated call (§5, §11)
+    declared: str -> Set[str],       // runner_capabilities: what its last heartbeat declared
     fleetLive: Set[str],             // the live set as Baton last counted it (baton_settings.fleet_live)
     capRows: str -> Set[str],        // `capability` rows, on the whole ticket
     unavailable: str -> int,         // each resource's instance: `unavailable` until this tick (0: not)
@@ -245,18 +245,18 @@ module baton {
   // ---- derived ----
   def claimsWhere(p: Claim => bool): Set[int] = st.claims.keys().filter(i => p(st.claims.get(i)))
   def activeOf(t: str): Set[int] = claimsWhere(c => c.ticket == t and c.status == "active")
-  def workerClaim(w: str): Set[int] = claimsWhere(c => c.worker == w and c.status == "active")
+  def runnerClaim(w: str): Set[int] = claimsWhere(c => c.runner == w and c.status == "active")
   def fencedOf(t: str): Set[int] =
     claimsWhere(c => c.ticket == t and c.status == "reaped" and c.fencePending)
-  def workerFenced(w: str): bool =
-    claimsWhere(c => c.worker == w and c.status == "reaped" and c.fencePending).size() > 0
+  def runnerFenced(w: str): bool =
+    claimsWhere(c => c.runner == w and c.status == "reaped" and c.fencePending).size() > 0
   def unconfirmedOf(t: str): Set[int] =
     claimsWhere(c => c.ticket == t and c.status == "completed" and not(c.confirmed))
   def maxEndObs(t: str): int =
     claimsWhere(c => c.ticket == t and c.status != "active")
       .fold(-1, (m, i) => if (st.claims.get(i).endObs > m) st.claims.get(i).endObs else m)
   pure def expected(c: Claim): List[str] = c.startPath.concat(c.finished)
-  def theClaim(w: str): Claim = st.claims.get(workerClaim(w).fold(0, (a, i) => i))
+  def theClaim(w: str): Claim = st.claims.get(runnerClaim(w).fold(0, (a, i) => i))
 
   // ---- seats (R-BTN-178, §6.11) ----
   // A claim holds its seats while it holds — active, or a fence-pending reap (R-BTN-19), whose
@@ -336,16 +336,16 @@ module baton {
   val FLEET: bool = TICKETS.exists(t => REQUIRES.get(t) != Set()) or RESOURCES != Set()
   // §5: live while its last authenticated call — a heartbeat (a fence report rides one), a claim,
   // an advance, an end — is within its lease timeout. Only a heartbeat recounts; any other call
-  // that revives a lapsed worker waits for the alarm's check (`alarmLive`), as in core.
+  // that revives a lapsed runner waits for the alarm's check (`alarmLive`), as in core.
   pure def liveIn(s: State): Set[str] = WORKERS.filter(w => s.now < s.lastSeen.get(w) + TIMEOUT)
-  // R-BTN-75: a capability no live worker both declares and is granted
+  // R-BTN-75: a capability no live runner both declares and is granted
   pure def capRowsFor(s: State, live: Set[str], t: str): Set[str] =
     REQUIRES.get(t).filter(c => not(live.exists(w => s.declared.get(w).contains(c) and GRANTED.get(w).contains(c))))
   // R-BTN-76, R-BTN-126: a ticket's needs, posted and `end`-sourced
   pure def needsOf(s: State, t: str): Set[Need] =
     LEGS.map(l => NEEDS.get(l).map(x => { leg: l, res: x })).flatten().union(s.endNeeds.get(t))
-  // R-BTN-76: a need's row stands while an instance is usable by a live worker (one `service`
-  // instance: any live worker) and none is not `unavailable`
+  // R-BTN-76: a need's row stands while an instance is usable by a live runner (one `service`
+  // instance: any live runner) and none is not `unavailable`
   pure def resRowsFor(s: State, live: Set[str], t: str): Set[Need] =
     needsOf(s, t).filter(n => live != Set() and s.unavailable.get(n.res) > s.now)
   // R-BTN-75, R-BTN-77: the transaction that changes a ticket's rows, queued leg or held state
@@ -358,7 +358,7 @@ module baton {
   // `model:verify`, R3-1254). `flips` are the tickets whose blocked state changes; `loud` those
   // of them whose change is logged.
   // R-BTN-77 as amended by R3-1251, `answer_lost`: `lostNow` holds the `resource` rows a recount
-  // just dropped only because no live worker is left to answer (`recount`). A ticket they leave
+  // just dropped only because no live runner is left to answer (`recount`). A ticket they leave
   // unblocked clears silently and remembers them. While the record stands: blocked again on
   // only rows it lost (core: every row added was lost), silently; blocked on anything else,
   // logged — the owed `unblocked` first, logged only (counted in `events`; `lastEvent` keeps the
@@ -426,19 +426,19 @@ module baton {
     activeOf(t).size() == 0, fencedOf(t).size() == 0, unconfirmedOf(t).size() == 0,
     st.lastAccepted > maxEndObs(t),
   }
-  // ... and rule 8 for this worker, on the queued leg (R-BTN-83)
+  // ... and rule 8 for this runner, on the queued leg (R-BTN-83)
   def claimableBy(t: str, w: str): bool =
     ticketClaimable(t) and barred(t, st.queued.get(t), "claim", Set()).intersect(TAGS.get(w)).size() == 0
-  // §6.6 rule 4: the ticket's `requires` within what the worker has — its declarations the
+  // §6.6 rule 4: the ticket's `requires` within what the runner has — its declarations the
   // grant admits, matched by name (R-BTN-174; nothing is derived, B-167). A leg's own
   // `requires.capabilities` join it for that leg once B-10 builds them.
   def rule4(w: str, t: str): bool = REQUIRES.get(t).subseteq(st.declared.get(w).intersect(GRANTED.get(w)))
-  def workerFree(w: str): bool =
-    st.up.get(w) and not(st.asleep.get(w)) and workerClaim(w).size() == 0 and not(workerFenced(w))
+  def runnerFree(w: str): bool =
+    st.up.get(w) and not(st.asleep.get(w)) and runnerClaim(w).size() == 0 and not(runnerFenced(w))
       and st.localClaim.get(w) == 0
-  // R-BTN-6, R-BTN-26: a worker acts only while its lease, by its own clock, is more than
+  // R-BTN-6, R-BTN-26: a runner acts only while its lease, by its own clock, is more than
   // MARGIN from its end
-  def workerCanAct(w: str): bool =
+  def runnerCanAct(w: str): bool =
     st.up.get(w) and not(st.asleep.get(w)) and st.localClaim.get(w) != 0
       and st.now - st.drift.get(w) < st.localLease.get(w) - MARGIN
   // §4.3, R-BTN-62 as amended 2026-10-15: one reading in flight per repository
@@ -451,7 +451,7 @@ module baton {
     nondet d = WORKERS.setOfMaps(0.to(MAX_DRIFT)).oneOf()
     initWith(d)
   }
-  // @impl external — an empty Baton, migrated, with each worker's clock drift
+  // @impl external — an empty Baton, migrated, with each runner's clock drift
   action initWith(d: str -> int): bool = all {
     st' = {
       gitPath: TICKETS.mapBy(t => List()), withdrawn: TICKETS.mapBy(t => false),
@@ -495,7 +495,7 @@ module baton {
   // @impl src/core/claims.ts#claim
   // @impl pending — the per-leg `at`/`reached` prerequisites (R-BTN-120, B-10), the per-leg backoff (R-BTN-122, B-11) and provisional rows (R-BTN-126, B-21) as gates
   action claim(w: str, t: str): bool = all {
-    workerFree(w), st.nextId <= MAX_CLAIMS, claimableBy(t, w), rule4(w, t),
+    runnerFree(w), st.nextId <= MAX_CLAIMS, claimableBy(t, w), rule4(w, t),
     not(seatsFull(t, -1)),                                  // rule 11 (R-BTN-178): a free seat
     // ghost, written apart from the guard: the gates as they stand at the grant
     val leg = st.queued.get(t)
@@ -505,7 +505,7 @@ module baton {
                    or not(REQUIRES.get(t).subseteq(st.declared.get(w).intersect(GRANTED.get(w))))
     // a claimed ticket is not waiting: blocked_since clears silently (R-BTN-75)
     st' = settle(st.with("claims", st.claims.put(st.nextId, {
-              id: st.nextId, ticket: t, worker: w, offered: leg, status: "active", kind: "",
+              id: st.nextId, ticket: t, runner: w, offered: leg, status: "active", kind: "",
               station: stationOf(st.posted.get(t)), leg: "", startBars: Set(),
               startPath: st.posted.get(t), finished: List(),
               claimObs: st.counter, endObs: -1, regressed: false, endedRegressed: false,
@@ -522,12 +522,12 @@ module baton {
   // R-BTN-8: the holder pushes the running leg's evidence. It lands only if the leg leaves
   // the station git is at (else git rejects it), or not at all (lost) — what confirmation
   // guards (R-BTN-10).
-  // The push is git's, not Baton's: the worker acts on the claim IT believes it holds, so a
-  // worker whose lease Baton has reaped can still push — unless its own fence check stops it
+  // The push is git's, not Baton's: the runner acts on the claim IT believes it holds, so a
+  // runner whose lease Baton has reaped can still push — unless its own fence check stops it
   // (R-BTN-26). `actedAfterLoss` records a push for a claim Baton reaped without a fence.
   // @impl external — the holder pushes to git (R-BTN-8)
   action pushEvidence(w: str, lands: bool): bool = all {
-    workerCanAct(w), not(st.pushed.get(w)),
+    runnerCanAct(w), not(st.pushed.get(w)),
     val c = st.claims.get(st.localClaim.get(w))
     val g = st.gitPath.get(c.ticket)
     all {
@@ -548,7 +548,7 @@ module baton {
   // @impl src/core/claims.ts#advance
   // @impl pending — backoff and provisional rows as advance gates (R-BTN-122, B-11; R-BTN-126, B-21)
   action advance(w: str, leg: str, bars: Set[str]): bool = all {
-    workerCanAct(w), workerClaim(w).size() == 1,
+    runnerCanAct(w), runnerClaim(w).size() == 1,
     val c = theClaim(w)
     val fin = if (c.leg == "") c.finished else c.finished.append(c.leg)
     val stn = if (c.leg == "") c.station else TO.get(c.leg)
@@ -592,7 +592,7 @@ module baton {
   // @impl src/core/claims.ts#end
   // @impl pending — attempts and backoff per leg (R-BTN-122, B-11)
   action endClaim(w: str, kind: str, reached: bool): bool = all {
-    workerCanAct(w), workerClaim(w).size() == 1,
+    runnerCanAct(w), runnerClaim(w).size() == 1,
     val c = theClaim(w)
     val reach = reached and c.leg != "" and st.pushed.get(w)
     val fin = if (reach) c.finished.append(c.leg) else c.finished
@@ -627,7 +627,7 @@ module baton {
   // `capability` blocked ends: `endBlockedOn`, below.)
   // @impl pending — `released:blocked` for ticket and decision prerequisites (R-BTN-126, B-21)
   action endBlocked(w: str, kind: str, d: Dep): bool = all {
-    workerCanAct(w), workerClaim(w).size() == 1, not(st.pushed.get(w)),
+    runnerCanAct(w), runnerClaim(w).size() == 1, not(st.pushed.get(w)),
     val c = theClaim(w)
     val l = legOf(c)
     val v = st.gitVersion + 1
@@ -652,7 +652,7 @@ module baton {
   // R-BTN-174 (B-167): the declared set shrinks in that same transaction, atomically.
   // @impl pending — `released:blocked` for capability and resource prerequisites (R-BTN-126, B-21)
   action endBlockedOn(w: str, kind: str, x: str): bool = all {
-    workerCanAct(w), workerClaim(w).size() == 1, not(st.pushed.get(w)),
+    runnerCanAct(w), runnerClaim(w).size() == 1, not(st.pushed.get(w)),
     val c = theClaim(w)
     all {
       or {
@@ -682,18 +682,18 @@ module baton {
      .with("lastSeen", s.lastSeen.set(w, s.now))
   }
 
-  // ---- workers dying, and the lease (§6.3, §6.6) ----
-  // @impl external — a worker's machine
+  // ---- runners dying, and the lease (§6.3, §6.6) ----
+  // @impl external — a runner's machine
   action crash(w: str): bool = all {
     st.up.get(w),
     st' = st.with("up", st.up.set(w, false)),
   }
-  // @impl external — a worker's machine
+  // @impl external — a runner's machine
   action sleep(w: str): bool = all {
     st.up.get(w), not(st.asleep.get(w)),
     st' = st.with("asleep", st.asleep.set(w, true)),
   }
-  // @impl external — a worker's machine
+  // @impl external — a runner's machine
   action wake(w: str): bool = all {
     st.asleep.get(w),
     st' = st.with("asleep", st.asleep.set(w, false)),
@@ -704,50 +704,50 @@ module baton {
     st' = st.with("now", st.now + 1),
   }
   // The run's time is up: it idles (a stutter, R3-1254). Bounding time is the model's, not
-  // Baton's. Without it a run whose workers all crashed holding claims when time reached
+  // Baton's. Without it a run whose runners all crashed holding claims when time reached
   // MAX_TIME has no enabled action — the alarm cannot reap a lease without time passing, and a
-  // dead worker does not restart while it holds a claim — and Quint's simulator re-draws that
+  // dead runner does not restart while it holds a claim — and Quint's simulator re-draws that
   // step forever instead of ending the run (a 10,000-run `npm run model` that never finished).
   // @impl external — the model's bound on time
   action timeUp: bool = all {
     st.now >= MAX_TIME,
     st' = st,
   }
-  // §6.3: the sidecar's heartbeat renews the lease, and tells the worker what it holds.
-  // @impl src/core/workerApi.ts#heartbeat
+  // §6.3: the sidecar's heartbeat renews the lease, and tells the runner what it holds.
+  // @impl src/core/runnerApi.ts#heartbeat
   // @impl src/core/claims.ts#fenced
   action heartbeat(w: str): bool = all {
     st.up.get(w), not(st.asleep.get(w)),
     st' = beatOf(w, st.declared.get(w)),
   }
-  // The heartbeat's transaction: it renews the lease (§6.3), records the worker's last heartbeat
-  // and what it declares (R-BTN-121), and recounts the fleet when the worker was not live or its
+  // The heartbeat's transaction: it renews the lease (§6.3), records the runner's last heartbeat
+  // and what it declares (R-BTN-121), and recounts the fleet when the runner was not live or its
   // declared set changed (R-BTN-75, R-BTN-76).
   def beatOf(w: str, decl: Set[str]): State = {
-    val renewed = if (workerClaim(w).size() == 1) {
+    val renewed = if (runnerClaim(w).size() == 1) {
       val c = theClaim(w)
       st.with("claims", st.claims.set(c.id, c.with("leaseUntil", st.now + TIMEOUT)))
         .with("localClaim", st.localClaim.set(w, c.id))
         .with("localLease", st.localLease.set(w, st.now + TIMEOUT))
     } else {
-      // no active claim: a fenced worker keeps its local claim until it clears the fence, and
+      // no active claim: a fenced runner keeps its local claim until it clears the fence, and
       // its heartbeat keeps the fence alive — R-BTN-19's timeout runs from its last heartbeat
-      st.with("localClaim", if (workerFenced(w)) st.localClaim else st.localClaim.set(w, 0))
+      st.with("localClaim", if (runnerFenced(w)) st.localClaim else st.localClaim.set(w, 0))
         .with("claims", st.claims.keys().mapBy(i => {
            val c = st.claims.get(i)
-           if (c.worker == w and c.fencePending) c.with("leaseUntil", st.now + TIMEOUT) else c }))
+           if (c.runner == w and c.fencePending) c.with("leaseUntil", st.now + TIMEOUT) else c }))
     }
     val s = renewed.with("lastSeen", st.lastSeen.set(w, st.now)).with("declared", st.declared.set(w, decl))
     if (not(FLEET) or (st.now < st.lastSeen.get(w) + TIMEOUT and decl == st.declared.get(w))) s else recount(s)
   }
   // R-BTN-121: a heartbeat declaring a changed set — a capability whose check failed dropped, or
   // one whose check passes again re-declared (the runner runs its checks; Baton runs nothing).
-  // @impl src/core/workerApi.ts#heartbeat
+  // @impl src/core/runnerApi.ts#heartbeat
   action declare(w: str, decl: Set[str]): bool = all {
     st.up.get(w), not(st.asleep.get(w)), decl.subseteq(DECLARED.get(w)), decl != st.declared.get(w),
     st' = beatOf(w, decl),
   }
-  // R-BTN-75: the alarm finds a worker no longer live — silent past its lease timeout, dead or
+  // R-BTN-75: the alarm finds a runner no longer live — silent past its lease timeout, dead or
   // asleep — and recounts the fleet, as it reaps, in the same tick.
   // @impl src/core/baton.ts#alarm
   action alarmLive: bool = all {
@@ -768,7 +768,7 @@ module baton {
     RESOURCES.contains(x), st.unavailable.get(x) > 0, st.unavailable.get(x) <= st.now,
     st' = recount(st.with("unavailable", st.unavailable.set(x, 0))),
   }
-  // R-BTN-4, §6.6: the alarm reaps a claim whose lease ran out — its worker dead or silent; a
+  // R-BTN-4, §6.6: the alarm reaps a claim whose lease ran out — its runner dead or silent; a
   // failed attempt on the claim's leg (§7.4, R-BTN-122), and an end (R-BTN-75).
   // @impl src/core/claims.ts#alarm
   // @impl pending — the attempt counted per leg (R-BTN-122, B-11)
@@ -777,36 +777,36 @@ module baton {
     val c = st.claims.get(i)
     all {
       c.status == "active", c.leaseUntil <= st.now,
-      // the leg stays recorded: the worker, which does not know yet, may still try to push it
+      // the leg stays recorded: the runner, which does not know yet, may still try to push it
       st' = settle(failIn(st.with("claims", st.claims.set(i, c.with("status", "reaped").with("kind", "reap")
                   .with("endObs", st.counter).with("endedRegressed", c.regressed).with("regressed", false)))
               .with("seats", st.seats.set(i, Set())),         // R-BTN-178: a silent reap is not fenced
                  c.ticket, legOf(c)), Set()),
     },
   }
-  // A dead worker restarts once the alarm has reaped its claim and any fence of its own has
+  // A dead runner restarts once the alarm has reaped its claim and any fence of its own has
   // timed out (below).
-  // @impl external — a worker restarting
+  // @impl external — a runner restarting
   action reapDead(w: str): bool = all {
-    not(st.up.get(w)), workerClaim(w).size() == 0, not(workerFenced(w)),
+    not(st.up.get(w)), runnerClaim(w).size() == 0, not(runnerFenced(w)),
     st' = st.with("up", st.up.set(w, true)).with("asleep", st.asleep.set(w, false))
             .with("localClaim", st.localClaim.set(w, 0)).with("pushed", st.pushed.set(w, false)),
   }
-  // R-BTN-19: the owner force-reaps a live worker's claim; the ticket is not re-issued until
-  // the worker reports `fence-cleared` (or dies and times out, above). Not a failed attempt
+  // R-BTN-19: the owner force-reaps a live runner's claim; the ticket is not re-issued until
+  // the runner reports `fence-cleared` (or dies and times out, above). Not a failed attempt
   // (§7.4); fenced, the ticket stays held (R-BTN-75).
   // @impl src/core/claims.ts#forceReap
   action forceReap(w: str): bool = all {
-    st.ownerBudget > 0, st.up.get(w), workerClaim(w).size() == 1,
+    st.ownerBudget > 0, st.up.get(w), runnerClaim(w).size() == 1,
     val c = theClaim(w)
     st' = st.with("claims", st.claims.set(c.id, c.with("status", "reaped").with("kind", "reap")
                 .with("endObs", st.counter).with("endedRegressed", c.regressed).with("regressed", false)
                 .with("fencePending", true)))
             .with("ownerBudget", st.ownerBudget - 1).with("pushed", st.pushed.set(w, false)),
   }
-  // R-BTN-19: a fence also clears when its worker has been silent past its own timeout — dead
+  // R-BTN-19: a fence also clears when its runner has been silent past its own timeout — dead
   // or asleep — measured by time, never by knowing it is dead (baton#10 round 2, 2-A-0). The
-  // worker is not told; if it wakes, its own fence check (R-BTN-26) must stop it.
+  // runner is not told; if it wakes, its own fence check (R-BTN-26) must stop it.
   // @impl src/core/claims.ts#alarm
   action fenceTimeout(i: int): bool = all {
     st.claims.keys().contains(i),
@@ -820,11 +820,11 @@ module baton {
     },
   }
   // R-BTN-19: an administrator clears a pending fence at once (B-171) — the third way a fence
-  // ends, beside the worker's report and its deadline above. An owner act, so it draws on the
-  // budget; whatever the worker does meanwhile, nothing extends a fence and the clear needs
-  // nothing of the worker. The ticket stops being held (R-BTN-75) and the claim's seats free
-  // (R-BTN-178), as at the deadline; the worker may still act until its own lease check
-  // (R-BTN-26) stops it, which the model keeps through the worker's own fence check.
+  // ends, beside the runner's report and its deadline above. An owner act, so it draws on the
+  // budget; whatever the runner does meanwhile, nothing extends a fence and the clear needs
+  // nothing of the runner. The ticket stops being held (R-BTN-75) and the claim's seats free
+  // (R-BTN-178), as at the deadline; the runner may still act until its own lease check
+  // (R-BTN-26) stops it, which the model keeps through the runner's own fence check.
   // @impl src/core/claims.ts#fenceClear
   action adminFenceClear(i: int): bool = all {
     st.ownerBudget > 0,
@@ -837,18 +837,18 @@ module baton {
                     .with("ownerBudget", st.ownerBudget - 1), Set()),
     },
   }
-  // R-BTN-6, R-BTN-26: the worker learns its lease is lost, kills its tool calls and reports.
+  // R-BTN-6, R-BTN-26: the runner learns its lease is lost, kills its tool calls and reports.
   // @impl src/core/claims.ts#fenced
-  // In core the report is the heartbeat's `fenced` field, so a worker that was not live is
+  // In core the report is the heartbeat's `fenced` field, so a runner that was not live is
   // recounted in the same call (round 1 of baton#60, 1-A-1/1-B-1).
   action fenceCleared(w: str): bool = all {
-    st.up.get(w), not(st.asleep.get(w)), workerFenced(w),
+    st.up.get(w), not(st.asleep.get(w)), runnerFenced(w),
     val s = st.with("claims", st.claims.keys().mapBy(i => {
               val c = st.claims.get(i)
-              if (c.worker == w and c.fencePending) c.with("fencePending", false) else c }))
+              if (c.runner == w and c.fencePending) c.with("fencePending", false) else c }))
             .with("seats", st.claims.keys().mapBy(i => {
               val c = st.claims.get(i)
-              if (c.worker == w and c.fencePending) Set() else st.seats.get(i) }))  // R-BTN-178
+              if (c.runner == w and c.fencePending) Set() else st.seats.get(i) }))  // R-BTN-178
             .with("localClaim", st.localClaim.set(w, 0))
             .with("lastSeen", st.lastSeen.set(w, st.now))
     st' = if (FLEET and st.now >= st.lastSeen.get(w) + TIMEOUT) recount(s) else settle(s, Set()),
@@ -1080,7 +1080,7 @@ module baton {
   // The happy path's done: once the claim stands at an end station, as the runner ends it (§11).
   // @impl external — the model's scheduler: endClaim's happy-path case
   action endDoneAtEnd(w: str): bool = all {
-    workerClaim(w).size() == 1,
+    runnerClaim(w).size() == 1,
     val c = theClaim(w)
     ENDS.contains(if (c.leg != "" and st.pushed.get(w)) TO.get(c.leg) else c.station),
     endClaim(w, "done", true),

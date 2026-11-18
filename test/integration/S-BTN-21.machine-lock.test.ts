@@ -121,7 +121,7 @@ function makeRunner(cred: keyof typeof TOKENS, over: Partial<RunnerOptions> = {}
   const api = new BatonApi({
     url: 'https://baton.test',
     transport: (req) => hostCall(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS[cred]}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS[cred]}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });
   const log: string[] = [];
   logs.push(log);
@@ -150,7 +150,7 @@ async function until(q: () => boolean | Promise<boolean>): Promise<void> {
 
 /** An outsider's hold on the machine's lock: `flock` kept alive; kill it to release. A day's
  *  `sleep`, not `sleep infinity`, which BSD `sleep` (macOS) refuses — and a refused sleep frees
- *  the lock at once. A spawn error fails the test that waits on it, not the worker. */
+ *  the lock at once. A spawn error fails the test that waits on it, not the runner. */
 async function outsiderTakes(): Promise<ReturnType<typeof spawn>> {
   const child = spawn('flock', ['--exclusive', lockPath, 'sleep', '86400'], { stdio: 'ignore' });
   child.on('error', () => { /* no flock: the test's own wait says so */ });
@@ -198,13 +198,13 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
 
     const a = makeRunner('vm-a');
     void a.work();
-    await until(async () => (await rows(`SELECT 1 FROM worker_capabilities w JOIN workers k ON k.id = w.worker_id WHERE k.hostname = 'vm-a' AND w.capability = ?`, LOCKED)).length > 0);
+    await until(async () => (await rows(`SELECT 1 FROM runner_capabilities w JOIN runners k ON k.id = w.runner_id WHERE k.hostname = 'vm-a' AND w.capability = ?`, LOCKED)).length > 0);
     const b = makeRunner('vm-b');
     const bLog = logs.at(-1)!;
     void b.work();
     // B's boot beat cannot take the lock and does not declare it — no leg requiring it is offered.
     await until(() => bLog.some((l) => l.includes('held by another process on this machine')));
-    expect(await rows(`SELECT 1 FROM worker_capabilities w JOIN workers k ON k.id = w.worker_id WHERE k.hostname = 'vm-b' AND w.capability = ?`, LOCKED)).toEqual([]);
+    expect(await rows(`SELECT 1 FROM runner_capabilities w JOIN runners k ON k.id = w.runner_id WHERE k.hostname = 'vm-b' AND w.capability = ?`, LOCKED)).toEqual([]);
     // B never claims the lock leg — with no core capacity set at all, the machine lock alone
     // keeps the singleton single.
     try {
@@ -213,14 +213,14 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
       console.log('A LOGS', JSON.stringify(logs[0], null, 1));
       throw e;
     }
-    const holderRow = (await rows<{ worker_id: number }>(`SELECT w.worker_id FROM worker_capabilities w JOIN workers k ON k.id = w.worker_id WHERE w.capability = ?`, LOCKED))[0];
-    const claim = (await rows<{ worker_id: number; status: string }>(`SELECT worker_id, status FROM claims WHERE ticket_id = 'docs:T-1'`))[0];
-    expect(claim.worker_id).toBe(holderRow.worker_id);
+    const holderRow = (await rows<{ runner_id: number }>(`SELECT w.runner_id FROM runner_capabilities w JOIN runners k ON k.id = w.runner_id WHERE w.capability = ?`, LOCKED))[0];
+    const claim = (await rows<{ runner_id: number; status: string }>(`SELECT runner_id, status FROM claims WHERE ticket_id = 'docs:T-1'`))[0];
+    expect(claim.runner_id).toBe(holderRow.runner_id);
     // The holder runs the claim through, the lock legs and the plain one.
     await until(async () => (await rows(`SELECT status FROM claims WHERE ticket_id = 'docs:T-1'`))[0]?.status === 'completed');
     expect(home.evidence().filter((l) => l.startsWith('run'))).toEqual(['run rdp1', 'run rdp3', 'run plain']);
     // The claim ended: the lock is released, and B's next beat takes it and declares.
-    await until(async () => (await rows(`SELECT 1 FROM worker_capabilities w JOIN workers k ON k.id = w.worker_id WHERE k.hostname = 'vm-b' AND w.capability = ?`, LOCKED)).length > 0);
+    await until(async () => (await rows(`SELECT 1 FROM runner_capabilities w JOIN runners k ON k.id = w.runner_id WHERE k.hostname = 'vm-b' AND w.capability = ?`, LOCKED)).length > 0);
   }, 90_000);
 
   it('an advance into a leg whose lock an outsider holds suspends the claim rather than sending it', async () => {

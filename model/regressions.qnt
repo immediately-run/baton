@@ -16,7 +16,7 @@ module regressions {
   val c1 = st.claims.get(1)
   val c2 = st.claims.get(2)
   val NONE: Set[str] = Set()
-  // a deterministic start: no worker's clock drifts
+  // a deterministic start: no runner's clock drifts
   action start: bool = initWith(WORKERS.mapBy(w => 0))
   // start `l` and push its evidence so it lands; a writing leg bars family b (w1 is family a)
   action leg(w: str, l: str): bool =
@@ -28,14 +28,14 @@ module regressions {
   action read(s: int, bars: Set[str]): bool = syncRead(s, TICKETS.mapBy(t => bars), queuedFor(st.gitPath, TICKETS.mapBy(_ => "")))
 
   // R3-1254: at the bound on time, `timeUp` is enabled and changes nothing, so `step` always
-  // has an action. A run whose workers are all dead or fenced, holding claims whose leases have
+  // has an action. A run whose runners are all dead or fenced, holding claims whose leases have
   // not expired when time reaches MAX_TIME, has no other: the alarm needs time to pass, and a
-  // dead worker holding a claim does not restart. Quint's simulator then re-drew that step
+  // dead runner holding a claim does not restart. Quint's simulator then re-drew that step
   // forever (seed 1, run 2,938–2,952 of `npm run model`'s 10,000).
   run timeUpIdlesAtTheBoundTest =
     start.then(claim("w1", "t1")).then(crash("w1")).then(MAX_TIME.reps(_ => tick))
       .expect(st.now == MAX_TIME)
-      .then(timeUp).expect(st.now == MAX_TIME and workerClaim("w1").size() == 1)
+      .then(timeUp).expect(st.now == MAX_TIME and runnerClaim("w1").size() == 1)
   run timeUpWaitsForTheBoundTest = start.then(timeUp).fail()
 
   // The fifth review's B3 (a claim hook as an await, R-BTN-52) and its fallback runs went with
@@ -51,7 +51,7 @@ module regressions {
       .then(syncNumber(1)).then(syncRead(1, TICKETS.mapBy(t => Set("family:b")), queuedFor(st.gitPath, TICKETS.mapBy(_ => "adjudicate")))).then(syncPost(1))
       .expect(st.queued.get("t1") == "adjudicate" and claimableBy("t1", "w1"))
       .then(claim("w1", "t1"))
-      .expect(workerClaim("w1").size() == 1 and st.claims.get(2).offered == "adjudicate")
+      .expect(runnerClaim("w1").size() == 1 and st.claims.get(2).offered == "adjudicate")
       .then(advance("w1", "merge", Set("family:b")))
       .fail()
 
@@ -139,11 +139,11 @@ module regressions {
       .expect(c1.confirmed and ticketClaimable("t1"))
 
   // §4 (R3-1254, round 1 1-B-1): every end clears the regression flag and records it as
-  // `endedRegressed` — a worker's end, an alarm reap, a force-reap and a stale release.
+  // `endedRegressed` — a runner's end, an alarm reap, a force-reap and a stale release.
   action regressedClaim: bool =
     start.then(claim("w1", "t1")).then(leg("w1", "implement")).then(advance("w1", "review", NONE))
       .then(sync1).then(regress("t1")).then(sync1).expect(c1.regressed)
-  run workerEndClearsRegressedTest =
+  run runnerEndClearsRegressedTest =
     regressedClaim.then(endClaim("w1", "suspended", false))
       .expect(not(c1.regressed) and c1.endedRegressed)
   run alarmReapClearsRegressedTest =
@@ -181,7 +181,7 @@ module regressions {
       .then(ownerResolve(1))
       .expect(ticketClaimable("t1"))
 
-  // R-BTN-19: a force-reaped ticket is not re-issued until the live worker clears its fence.
+  // R-BTN-19: a force-reaped ticket is not re-issued until the live runner clears its fence.
   run forceReapFencesTest =
     start.then(claim("w1", "t1")).then(forceReap("w1")).then(sync1)
       .expect(not(ticketClaimable("t1")) and fencedOf("t1").size() == 1)
@@ -236,9 +236,9 @@ module regressions {
       .then(syncNumber(2))
       .expect(st.syncs.get(2).phase == "numbered")
 
-  // baton#10 review (1-A-3, 1-B-3): a sleeping worker whose lease the alarm reaped wakes and
+  // baton#10 review (1-A-3, 1-B-3): a sleeping runner whose lease the alarm reaped wakes and
   // cannot push — its own fence check, at MARGIN before the lease's end by its clock, stops it.
-  run sleepingWorkerReapedCannotActTest =
+  run sleepingRunnerReapedCannotActTest =
     start.then(claim("w1", "t1")).then(advance("w1", "implement", NONE))
       .then(sleep("w1")).then(tick).then(tick).then(tick).then(tick)
       .then(alarmReap(1)).then(wake("w1"))
@@ -246,7 +246,7 @@ module regressions {
       .then(pushEvidence("w1", true))
       .fail()
 
-  // baton#10 round 2 (2-A-0) / R-BTN-19: a force-reaped worker that sleeps is silent past its
+  // baton#10 round 2 (2-A-0) / R-BTN-19: a force-reaped runner that sleeps is silent past its
   // timeout; its fence clears by time, the ticket is re-issued, and when it wakes its own
   // fence check stops it pushing.
   run sleeperFenceTimesOutTest =
@@ -259,14 +259,14 @@ module regressions {
       .then(pushEvidence("w1", true))
       .fail()
 
-  // ... while a fenced worker that keeps heartbeating keeps its fence.
+  // ... while a fenced runner that keeps heartbeating keeps its fence.
   run heartbeatingFenceHoldsTest =
     start.then(claim("w1", "t1")).then(forceReap("w1"))
       .then(tick).then(tick).then(heartbeat("w1")).then(tick).then(tick)
       .then(fenceTimeout(1))
       .fail()
 
-  // The drift edge: a worker whose clock runs MAX_DRIFT behind may act until its clock
+  // The drift edge: a runner whose clock runs MAX_DRIFT behind may act until its clock
   // reaches lease end − MARGIN, which is still before Baton's reap.
   run driftEdgeTest =
     initWith(WORKERS.mapBy(w => if (w == "w1") MAX_DRIFT else 0))
@@ -438,7 +438,7 @@ module regressions {
       .expect(not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked" and not(st.unpairedUnblock))
 
   // ---- the fleet (R3-1254 part 2b) ----
-  // R-BTN-75: a `capability` row stands while no live worker both declares and is granted it —
+  // R-BTN-75: a `capability` row stands while no live runner both declares and is granted it —
   // w3, live and declaring it without a grant, counts for nothing — and the heartbeats that change
   // what is declared write and clear it, with their events.
   run capabilityRowFollowsTheFleetTest =
@@ -450,13 +450,13 @@ module regressions {
       .then(declare("w1", Set("vpn:corp")))
       .expect(st.capRows.get("t2") == Set() and not(st.blocked.get("t2")) and st.lastEvent.get("t2") == "unblocked"
               and not(st.unpairedUnblock))
-  // §6.6 rule 4: a worker that no longer declares what the ticket requires may not claim it,
+  // §6.6 rule 4: a runner that no longer declares what the ticket requires may not claim it,
   // nor advance on a claim it holds.
   run rule4RefusesTheClaimTest =
     start.then(declare("w1", NONE)).then(claim("w1", "t2")).fail()
   run rule4RefusesTheAdvanceTest =
     start.then(claim("w1", "t2")).then(declare("w1", NONE)).then(advance("w1", "implement", NONE)).fail()
-  // R-BTN-75: workers that stop heartbeating leave the fleet when the alarm sees it; one coming
+  // R-BTN-75: runners that stop heartbeating leave the fleet when the alarm sees it; one coming
   // back clears the row in its heartbeat.
   run lapsedFleetWritesTheRowTest =
     start.then(sleep("w1")).then(sleep("w2")).then(sleep("w3")).then(tick).then(tick).then(tick).then(tick)
@@ -475,7 +475,7 @@ module regressions {
   run capabilityEndLeavesItToAnotherTest =
     start.then(claim("w1", "t2")).then(endBlockedOn("w1", "capability", "vpn:corp"))
       .then(sync1).then(claim("w2", "t2"))
-      .expect(c2.worker == "w2" and c2.status == "active")
+      .expect(c2.runner == "w2" and c2.status == "active")
   run capabilityEndOfTheLastHolderBlocksTest =
     start.then(declare("w2", NONE))
       .then(claim("w1", "t2")).then(endBlockedOn("w1", "capability", "vpn:corp"))
@@ -521,9 +521,9 @@ module regressions {
       .then(wake("w1")).then(heartbeat("w1"))
       .expect(not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked" and st.lost.get("t1") == Set()
               and st.events == 4 and not(st.unpairedUnblock))
-  // §5, §11: every authenticated call keeps a worker live, not only a heartbeat — a lapsed worker
+  // §5, §11: every authenticated call keeps a runner live, not only a heartbeat — a lapsed runner
   // that claims and ends `resource`-blocked is live in that end's recount (round 1, 1-B-0).
-  run aWorkersCallKeepsItLiveTest =
+  run aRunnersCallKeepsItLiveTest =
     start.then(tick).then(tick).then(tick).then(tick).then(claim("w1", "t1"))
       .then(endBlockedOn("w1", "resource", "llm"))
       .expect(st.fleetLive == Set("w1") and st.resRows.get("t1").contains({ leg: "implement", res: "llm" })
@@ -558,7 +558,7 @@ module regressions {
     fleetEmptiedWhileBlocked.then(reading("disk", false)).then(wake("w1")).then(heartbeat("w1"))
       .expect(st.resRows.get("t1").contains({ leg: "review", res: "disk" }) and st.blocked.get("t1")
               and st.lost.get("t1") == Set() and st.events == 2)
-  // Each call keeps a worker live, not only the claim: a lapsed fleet's one caller is counted at
+  // Each call keeps a runner live, not only the claim: a lapsed fleet's one caller is counted at
   // the alarm's next check (round 1 of baton#60, 1-B-2). w1 claims at tick 2, calls at 3; at tick
   // 6 only that call is within TIMEOUT.
   action claimAtTwo: bool = start.then(tick).then(tick).then(claim("w1", "t1")).then(tick)
@@ -571,9 +571,9 @@ module regressions {
   run aBlockedEndKeepsItLiveTest =
     claimAtTwo.then(endBlocked("w1", "decision", T2_DONE)).then(tick).then(tick).then(tick).then(alarmLive)
       .expect(st.fleetLive == Set("w1"))
-  // ... and a fence report is a heartbeat: from a lapsed worker it recounts at once. It comes
+  // ... and a fence report is a heartbeat: from a lapsed runner it recounts at once. It comes
   // before the alarm, as in core, whose alarm times the fence out in the same transaction that
-  // drops the worker from the live set (round 2 of baton#60, 2-r2-1).
+  // drops the runner from the live set (round 2 of baton#60, 2-r2-1).
   run aFenceReportRecountsTest =
     start.then(claim("w1", "t1")).then(forceReap("w1")).then(tick).then(tick).then(tick).then(tick)
       .then(fenceCleared("w1")).expect(st.fleetLive == Set("w1"))

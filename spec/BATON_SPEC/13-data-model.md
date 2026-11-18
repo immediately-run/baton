@@ -64,7 +64,7 @@ path, R-BTN-193) — and the object refuses to serve until every migration is ap
 | `pushers` JSON (forge user ids) | `[]` | R-BTN-139 |
 | `code_repos` JSON `[{path, repo_id, former_paths}]` — owners write `path` only; Baton resolves `repo_id` and keeps `former_paths` | `[]` | R-BTN-140 |
 | `scope_policy` (`report`\|`hold`) — what a scope-exceeded finding does: Needs you alone, or a hold on its ticket | `report` | §12.9 |
-| `worker_pushers` JSON (forge logins) — the fleet's VM runners' pushes, cross-checked against open claims | none (NULL; an empty list once set — both spell "no pushers") | §12.9 |
+| `runner_pushers` JSON (forge logins) — the fleet's VM runners' pushes, cross-checked against open claims | none (NULL; an empty list once set — both spell "no pushers") | §12.9 |
 | `api_keys` | 1 | R-BTN-117 |
 | `checks` JSON `{<course>: {name, conclusions}}` | `{}` | R-BTN-114 |
 | `leg_log_root` — `s3://…`, `gs://…`, or on the local host `file:///…` | NULL (off) | R-BTN-128 |
@@ -99,7 +99,7 @@ and never accepted holds no role (§12.1).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `runners` | `id`; unique `(hostname, session_name)` among rows not of kind `legacy` (*adoption*) | `hostname`, `session_name` (1–128), `credential_id`, `secret_hash`, `incarnation` (bumped by a re-key), `harness` (a label), `kind` (`vm`\|`local`\|`cloud`\|`legacy` *adoption*), `executor_json` (the last heartbeat's `executor`: `{source, digest, api, provides}`, R-BTN-107; NULL for a sidecar), `profile_json` (opaque), `tier_ceilings` JSON `{repository: tier}`, `delivers` JSON (`["git" | "forge-check"]` from the last heartbeat, R-BTN-171), `lease_timeout_ms` (15 min – 24 h), `concurrency` (1–32, the last heartbeat's, R-BTN-4), `settings_hash`, `client_version` (the last call's `Baton-Client`, R-BTN-197), `first_seen_at`, `last_seen_at`, `last_activity_at`, `reaped_at` | One agent session; created at its first heartbeat, never deleted (R-BTN-3, R-BTN-9, R-BTN-14) |
+| `runners` | `id`; unique `(hostname, session_name)` among rows not of kind `legacy` (*adoption*) | `hostname`, `session_name` (1–128), `credential_id`, `secret_hash`, `incarnation` (bumped by a re-key), `harness` (a label), `kind` (`vm`\|`local`\|`cloud`\|`legacy` *adoption*), `executor_json` (the last heartbeat's `executor`: `{source, digest, api, provides}`, R-BTN-107; NULL for a sidecar), `profile_json` (opaque), `tier_ceilings` JSON `{repository: tier}`, `delivers` JSON (`["git" | "forge-check"]` from the last heartbeat, R-BTN-171), `lease_timeout_ms` (15 min – 24 h), `concurrency` (1–32, the last heartbeat's, R-BTN-4), `settings_hash`, `client_version` (the last call's `Baton-Client`, R-BTN-197), `legacy_names_at` (the last accepted use of B-68's old wire spelling; NULL if none), `first_seen_at`, `last_seen_at`, `last_activity_at`, `reaped_at` | One agent session; created at its first heartbeat, never deleted (R-BTN-3, R-BTN-9, R-BTN-14) |
 | `runner_capabilities` | `(runner_id, capability)` | `declared`, `provided` (from the executor's `provides`, R-BTN-107) | Declared capabilities, expanded, and the executor's; a repository counts only those its grant admits, and of a type declared `"from": "executor"` only provided ones (R-BTN-121) |
 | `runner_tags` | `(runner_id, tag)` | — | R-BTN-60 |
 | `runner_courses` | `(runner_id, repository_id, course_id)` | `version` | What its checkouts can run (R-BTN-48) |
@@ -225,4 +225,3 @@ unacknowledged `release` + 2 h (15 min for `leg-timeout`); `owner_bars.starts_at
 `instance_readings.lapses_at`; `outbox.not_before`; `unblocked_dispatch.due_at`, `webhook_syncs.window_until` where `trailing_wanted`, and `webhook_syncs.last_dispatch_at` + 10 min (R-BTN-73, R-BTN-94);
 `board_head.behind_since` + 30 min (`baton.head-behind`); `repositories.sync_wanted_at` + 30 min (`baton.sync-late`);
 `outbox.queued_at` + 24 h, or + 15 min for an undelivered `forge-check` (`baton.outbox-late`); and `closed_tickets.closed_at` + 90 days.
-

@@ -108,7 +108,7 @@ describe('S-BTN-77 (the runner half): the finishing calls carry the run\'s link 
             if (p.endsWith('/end')) ends.push(await req.clone().json() as Record<string, any>);
             return hostCall(req);
           },
-          auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+          auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
         }),
         home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', capabilities: ['key:zai'],
         session: `b4-${Math.random().toString(16).slice(2, 8)}`, courses: [{ course: 'roadmap-pr', version: 3 }],

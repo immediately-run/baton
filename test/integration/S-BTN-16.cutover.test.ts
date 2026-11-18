@@ -4,7 +4,7 @@
 // marker and git fallback are R3-1219's.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import {
-  beat, claimItem, claimRow, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, workerCall,
+  beat, claimItem, claimRow, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall,
 } from '../helpers';
 
 const board = inject('board');
@@ -13,7 +13,7 @@ const T0 = Date.parse('2026-10-13T12:00:00Z');
 const DAY = 24 * 3_600_000;
 const owner = (path: string, body: unknown) =>
   ownerCall(path, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify(body) });
-const mode = async (secret: string) => (await (await workerCall('/v1/runner/mode?repository=docs', { secret })).json()) as { mode: string; cutover_at?: number };
+const mode = async (secret: string) => (await (await runnerCall('/v1/runner/mode?repository=docs', { secret })).json()) as { mode: string; cutover_at?: number };
 /** Board B, where R3-9001 is in progress (claimed 2026-10-13), optionally naming its holder. */
 const boardB = (holder?: string) => {
   const items = structuredClone(board.states.B.state.items) as Record<string, unknown>[];
@@ -42,14 +42,14 @@ describe('S-BTN-16 cutover (server)', () => {
     expect(await res.json()).toEqual({ ok: true, repository: 'docs', cutover_at: T0, imported: ['docs:R3-9001'] });
     expect(await mode(secret)).toEqual({ mode: 'cut-over', cutover_at: T0 });
 
-    // G-BTN-19: one legacy worker per item, its claim reaped at the note's date + 7 days.
-    expect(await rows(`SELECT hostname, session_name, kind, credential_id FROM workers WHERE kind = 'legacy'`)).toEqual([
+    // G-BTN-19: one legacy runner per item, its claim reaped at the note's date + 7 days.
+    expect(await rows(`SELECT hostname, session_name, kind, credential_id FROM runners WHERE kind = 'legacy'`)).toEqual([
       { hostname: 'legacy', session_name: 'item-R3-9001', kind: 'legacy', credential_id: 'legacy' }]);
     expect(await rows(`SELECT ticket_id, status, claimed_at, reap_after, snapshot_sha FROM claims`)).toEqual([
       { ticket_id: 'docs:R3-9001', status: 'active', claimed_at: Date.parse('2026-10-13'), reap_after: Date.parse('2026-10-13') + 7 * DAY, snapshot_sha: sha.B }]);
     expect(await rows(`SELECT kind FROM events WHERE kind IN ('claimed', 'cutover') ORDER BY seq`)).toEqual([{ kind: 'claimed' }, { kind: 'cutover' }]);
     // The legacy claim blocks re-issue but is not "another live holder" for status writes (R-BTN-7).
-    expect(await (await workerCall('/v1/runner/tickets/docs:R3-9001/holder', { cred: 'vm-b' })).json()).toEqual({ held_by_other: false, fence_pending: false });
+    expect(await (await runnerCall('/v1/runner/tickets/docs:R3-9001/holder', { cred: 'vm-b' })).json()).toEqual({ held_by_other: false, fence_pending: false });
     // Claims now go through Baton.
     expect((await claimItem('vm-a', secret)).json.ticket_id).toBe('docs:R3-9002');
   });
@@ -62,7 +62,7 @@ describe('S-BTN-16 cutover (server)', () => {
     expect(await (await owner('/v1/ui/cutover', { repository: 'docs', confirm: true })).json()).toEqual({ ok: true, repository: 'docs', cutover_at: T0, imported: [] });
     for (const body of [{ repository: 'docs', confirm: false }, { repository: 'docs', cutover: false }, { repository: 'docs', cutover_at: null }]) await owner('/v1/ui/cutover', body);
     expect(await mode(secret)).toEqual({ mode: 'cut-over', cutover_at: T0 });
-    const shadow = await workerCall('/v1/runner/shadow-report', { secret, body: { transition: 'claim', ticket_id: 'docs:R3-9002', status: 'in-progress', nonce: 'abcdef', at: T0 } });
+    const shadow = await runnerCall('/v1/runner/shadow-report', { secret, body: { transition: 'claim', ticket_id: 'docs:R3-9002', status: 'in-progress', nonce: 'abcdef', at: T0 } });
     expect(shadow.status).toBe(403);
     expect(await rows(`SELECT cutover_at FROM repositories WHERE id = 'docs'`)).toEqual([{ cutover_at: T0 }]);
   });
@@ -79,11 +79,11 @@ describe('S-BTN-16 cutover (server)', () => {
     const other = await register('vm-b');
     await syncCall('/v1/sync/board', boardB('s-vm-a'));
     await owner('/v1/ui/cutover', { repository: 'docs', confirm: true });
-    expect(await rows(`SELECT session_name FROM workers WHERE kind = 'legacy'`)).toEqual([{ session_name: 's-vm-a' }]);
+    expect(await rows(`SELECT session_name FROM runners WHERE kind = 'legacy'`)).toEqual([{ session_name: 's-vm-a' }]);
     const legacy = (await rows<{ id: number; nonce: string }>(`SELECT id, nonce FROM claims`))[0];
 
-    expect((await workerCall('/v1/runner/adopt', { cred: 'vm-b', secret: other.secret, body: { ticket_id: 'docs:R3-9001' } })).status).toBe(403);
-    const asked = await workerCall('/v1/runner/adopt', { secret: mine.secret, body: { ticket_id: 'docs:R3-9001' } });
+    expect((await runnerCall('/v1/runner/adopt', { cred: 'vm-b', secret: other.secret, body: { ticket_id: 'docs:R3-9001' } })).status).toBe(403);
+    const asked = await runnerCall('/v1/runner/adopt', { secret: mine.secret, body: { ticket_id: 'docs:R3-9001' } });
     expect(await asked.json()).toEqual({ claim_id: legacy.id, nonce: legacy.nonce, pending: true });
     // Not moved yet: a public name alone proves nothing.
     expect((await beat('vm-a', mine.secret)).json.claim).toBeNull();
@@ -103,9 +103,9 @@ describe('S-BTN-16 cutover (server)', () => {
     await syncCall('/v1/sync/board', boardB());
     await owner('/v1/ui/cutover', { repository: 'docs', confirm: true });
     await claimItem('vm-a', a.secret, { ticket_id: 'docs:R3-9002' });
-    expect((await workerCall('/v1/runner/adopt', { secret: a.secret, body: { ticket_id: 'docs:R3-9001' } })).status).toBe(200);
-    expect(await (await owner('/v1/ui/adoptions/docs:R3-9001/confirm', { confirm: true })).json()).toMatchObject({ code: 'not-eligible', rule: 'one-claim-per-worker' });
-    expect((await workerCall('/v1/runner/adopt', { secret: a.secret, body: { ticket_id: 'docs:R3-9002' } })).status).toBe(404);
+    expect((await runnerCall('/v1/runner/adopt', { secret: a.secret, body: { ticket_id: 'docs:R3-9001' } })).status).toBe(200);
+    expect(await (await owner('/v1/ui/adoptions/docs:R3-9001/confirm', { confirm: true })).json()).toMatchObject({ code: 'not-eligible', rule: 'one-claim-per-runner' });
+    expect((await runnerCall('/v1/runner/adopt', { secret: a.secret, body: { ticket_id: 'docs:R3-9002' } })).status).toBe(404);
   });
 
   it('an unadopted legacy claim is reaped at its reap_after, not counted as a failed attempt', async () => {

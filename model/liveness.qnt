@@ -1,6 +1,6 @@
 // The liveness properties of R3-1243, over the `small` instance, for Apalache's --temporal
 // mode. Kept apart from properties.qnt because their fairness terms inline whole actions per
-// worker and ticket, which made the safety proof's input too large for Apalache.
+// runner and ticket, which made the safety proof's input too large for Apalache.
 module liveness {
   import baton(TICKETS = Set("t1"), WORKERS = Set("w1", "w2"), SLOTS = Set(1),
                MAX_CLAIMS = 3, GIT_BUDGET = 1, OWNER_BUDGET = 1,
@@ -13,14 +13,14 @@ module liveness {
   action linit = init
   action lstep = step
 
-  // Each is stated under weak fairness of every step that resolves it, per worker, so that
-  // no other worker's activity can stand in for it (review gate round 1). R-BTN-19, R-BTN-10,
+  // Each is stated under weak fairness of every step that resolves it, per runner, so that
+  // no other runner's activity can stand in for it (review gate round 1). R-BTN-19, R-BTN-10,
   // §9.6, R-BTN-67, R-BTN-45.
-  // R-BTN-19: every fence clears — at the worker's fence-cleared, or once it has been silent
+  // R-BTN-19: every fence clears — at the runner's fence-cleared, or once it has been silent
   // past its timeout. Time is bounded (MAX_TIME), so only a fence whose timeout itself falls
-  // past the horizon — its worker kept heartbeating — may still stand at the end
+  // past the horizon — its runner kept heartbeating — may still stand at the end
   // (round 3, 3-A-0: the round-2 escape `now == MAX_TIME` made this a tautology; with
-  // fenceTimeout deleted, a crashed fenced worker now falsifies it).
+  // fenceTimeout deleted, a crashed fenced runner now falsifies it).
   def fencesBeyondHorizon(t: str): bool =
     fencedOf(t).forall(i => st.claims.get(i).leaseUntil > MAX_TIME)
   temporal fencesClear =
@@ -37,8 +37,8 @@ module liveness {
     1.to(MAX_CLAIMS).forall(i => weakFair(ownerResolve(i), st)) implies
       always(st.claims.keys().forall(i => st.claims.get(i).status == "completed" implies
         eventually(st.claims.get(i).confirmed)))
-  // R-BTN-67: a ticket held back only by owner bars — some worker could claim it but for
-  // them — becomes claimable by some worker once they lift, unless git or the posted bars
+  // R-BTN-67: a ticket held back only by owner bars — some runner could claim it but for
+  // them — becomes claimable by some runner once they lift, unless git or the posted bars
   // change it meanwhile (round 2, 2-A-1: the consequent is claimability, not the lift).
   def claimableButForOwner(t: str, w: str): bool =
     ticketClaimable(t) and postedBarsOf(t, st.queued.get(t)).intersect(TAGS.get(w)).size() == 0
@@ -48,14 +48,14 @@ module liveness {
         (WORKERS.exists(w => claimableButForOwner(t, w)) and WORKERS.forall(w => not(claimableBy(t, w))))
           implies eventually(WORKERS.exists(w => claimableBy(t, w))
                              or not(WORKERS.exists(w => claimableButForOwner(t, w))))))
-  // R-BTN-45: a free worker able to claim a ticket — with claim ids left — sees it claimed
-  // (by itself or another), stop being claimable, or the worker sleeps or dies. A claim is one
+  // R-BTN-45: a free runner able to claim a ticket — with claim ids left — sees it claimed
+  // (by itself or another), stop being claimable, or the runner sleeps or dies. A claim is one
   // step since R-BTN-98 retired the hook, so weak fairness of it is enough (R3-1254; it was
   // strong fairness of the hook's ordering finish, baton#10 round 3, 3-A-1).
   temporal readyIsClaimed =
     WORKERS.forall(w => TICKETS.forall(t => weakFair(claim(w, t), st))) implies
       TICKETS.forall(t => WORKERS.forall(w =>
-        always((workerFree(w) and claimableBy(t, w) and st.nextId <= MAX_CLAIMS) implies
+        always((runnerFree(w) and claimableBy(t, w) and st.nextId <= MAX_CLAIMS) implies
           eventually(activeOf(t).size() > 0 or not(claimableBy(t, w))
                      or not(st.up.get(w)) or st.asleep.get(w)))))
   // A held history accepted within 24 hours (R-BTN-11) is not stated: held histories are not

@@ -3,7 +3,7 @@
 // Must hold: the sync key's post is accepted; registering a key that already serves a repository is
 // `conflict`; a machine key's — with `machine_sync` off, today the only kind (R3-1270 adds the
 // sync-on case) — and the mirror key's posts are `forbidden`; a revoked key's post and a replay are
-// `unauthenticated`; a worker key cannot become a sync key. Runs on both hosts.
+// `unauthenticated`; a runner key cannot become a sync key. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { HOST, ORIGIN, payload, rows, setClock, SSH_KEYS, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
@@ -47,7 +47,7 @@ describe(`S-BTN-55 the sync key (${HOST})`, () => {
       { repository_id: 'docs', sha: null }, { repository_id: 'plain', sha: 'a'.repeat(40) }]);
   });
 
-  it('a key that already serves a repository, a worker key and an administrator key cannot be added: conflict', async () => {
+  it('a key that already serves a repository, a runner key and an administrator key cannot be added: conflict', async () => {
     const docsKey = await makeKey('ssh-ed25519', 'docs-sync');
     await withCore(async (c) => {
       await c.registry.addSyncKey('docs', docsKey.publicKey, 'sync', 'admin:test', []);
@@ -58,9 +58,9 @@ describe(`S-BTN-55 the sync key (${HOST})`, () => {
     });
   });
 
-  it('a worker key’s and the mirror key’s posts are forbidden; the mirror key reads the events', async () => {
-    const worker = await hostCall(await signed(SSH_KEYS['vm-ed'], '/v1/sync/observation', {}));
-    expect([worker.status, await code(worker)]).toEqual([403, 'forbidden']);
+  it('a runner key’s and the mirror key’s posts are forbidden; the mirror key reads the events', async () => {
+    const runner = await hostCall(await signed(SSH_KEYS['vm-ed'], '/v1/sync/observation', {}));
+    expect([runner.status, await code(runner)]).toEqual([403, 'forbidden']);
     const asMirror = await hostCall(await signed(mirror, '/v1/sync/observation', {}));
     expect([asMirror.status, await code(asMirror)]).toEqual([403, 'forbidden']);
     const events = await hostCall(await signed(mirror, '/v1/sync/events?after=0'));
@@ -92,11 +92,11 @@ describe(`S-BTN-55 the sync key (${HOST})`, () => {
     expect([revoked.status, await code(revoked)]).toEqual([401, 'unauthenticated']);
   });
 
-  it('a sync key is never a worker’s: BATON_KEYS refuses it, and the runner API does not know it', async () => {
+  it('a sync key is never a runner’s: BATON_KEYS refuses it, and the runner API does not know it', async () => {
     await withCore(async (c) => {
-      const { WorkerApi } = await import('../../src/core/workerApi');
+      const { RunnerApi } = await import('../../src/core/runnerApi');
       const config = (c as unknown as { ports: { config: object } }).ports.config;
-      const w = new WorkerApi({ store: c.store, deprecated: new Deprecated(c.store), config: { ...config, BATON_KEYS: JSON.stringify([{ key: sync.publicKey, name: 'x', allowed_capabilities: [] }]) } as never, now: () => T0 });
+      const w = new RunnerApi({ store: c.store, deprecated: new Deprecated(c.store), config: { ...config, BATON_KEYS: JSON.stringify([{ key: sync.publicKey, name: 'x', allowed_capabilities: [] }]) } as never, now: () => T0 });
       await expect(w.seedKeys()).rejects.toThrow(/sync key/);
     });
     const res = await hostCall(await signedRequest(sync, `${ORIGIN}/v1/runner/branch-holder?repo=server/plain&branch=main`, { created: T0 / 1000 }));

@@ -99,10 +99,10 @@ export interface Config {
   ACCESS_AUD?: string;
   OWNER_EMAILS?: string;
   /** `{credential id: SHA-256 of its token}` and `{credential id: {hostname, allowed_capabilities}}`
-   *  (R-BTN-13; R3-1208 sets them as Worker secrets). */
+   *  (R-BTN-13; R3-1208 sets them as Runner secrets). */
   TOKEN_HASHES?: string;
   CREDENTIALS?: string;
-  /** R-BTN-13 as amended (R3-1239): the worker keys, a JSON array of `{key, name,
+  /** R-BTN-13 as amended (R3-1239): the runner keys, a JSON array of `{key, name,
    *  allowed_capabilities}` — `key` an OpenSSH public key line, `name` the one hostname it may
    *  register. Seeded into `credentials` at start until R3-1240's owner grants replace it. */
   BATON_KEYS?: string;
@@ -110,7 +110,7 @@ export interface Config {
    *  the two workflows run on their 15-minute schedules. */
   GITHUB_DISPATCH_TOKEN?: string;
   /** R-BTN-94: per repository, `{forge, gitlab_issuer?, webhook?, dispatch?}` as JSON — what the
-   *  Worker knows of each repository's forge before the object, and its forge secrets (R3-1262
+   *  Runner knows of each repository's forge before the object, and its forge secrets (R3-1262
    *  reads `gitlab_issuer`; R3-1263 and R3-1264 the rest). */
   BATON_FORGE_SECRETS?: string;
   /** R-BTN-73: the GitHub App's webhook secret. Absent, every delivery is refused. */

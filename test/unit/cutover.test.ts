@@ -2,7 +2,7 @@
 // refusals, the legacy import's name collisions, and adoption requests that went stale.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { calendarDate } from '../../src/core/board';
-import { hbBody, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, workerCall } from '../helpers';
+import { hbBody, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall } from '../helpers';
 
 const board = inject('board');
 const sha = board.shas;
@@ -54,7 +54,7 @@ describe('the cutover’s refusals and the import’s names', () => {
   it('adopt before cutover is not-cut-over', async () => {
     await syncCall('/v1/sync/board', payload(sha.A, null, board.states.A));
     const { secret } = await register('vm-a');
-    const res = await workerCall('/v1/runner/adopt', { secret, body: { ticket_id: 'docs:R3-9001' } });
+    const res = await runnerCall('/v1/runner/adopt', { secret, body: { ticket_id: 'docs:R3-9001' } });
     expect([res.status, ((await res.json()) as { code: string }).code]).toEqual([409, 'not-cut-over']);
   });
 
@@ -70,7 +70,7 @@ describe('the cutover’s refusals and the import’s names', () => {
     await rows(`UPDATE tickets SET blocked_since = 1 WHERE id = 'docs:R3-9001'`);
     expect(await (await owner('/v1/ui/cutover', { repository: 'docs', confirm: true })).json()).toMatchObject({ imported: ['docs:R3-9001', 'docs:R3-9002'] });
     expect(await rows(`SELECT blocked_since AS b FROM tickets WHERE id = 'docs:R3-9001'`)).toEqual([{ b: null }]);
-    expect(await rows(`SELECT c.ticket_id, w.session_name FROM claims c JOIN workers w ON w.id = c.worker_id ORDER BY c.ticket_id`)).toEqual([
+    expect(await rows(`SELECT c.ticket_id, w.session_name FROM claims c JOIN runners w ON w.id = c.runner_id ORDER BY c.ticket_id`)).toEqual([
       { ticket_id: 'docs:R3-9001', session_name: 'shared-session' }, { ticket_id: 'docs:R3-9002', session_name: 'item-R3-9002' }]);
   });
 });
@@ -81,7 +81,7 @@ describe('adoption requests that went stale', () => {
     await syncCall('/v1/sync/board', boardB(() => {}));
     await owner('/v1/ui/cutover', { repository: 'docs', confirm: true });
     const a = await register('vm-a');
-    expect((await workerCall('/v1/runner/adopt', { secret: a.secret, body: { ticket_id: 'docs:R3-9001' } })).status).toBe(200);
+    expect((await runnerCall('/v1/runner/adopt', { secret: a.secret, body: { ticket_id: 'docs:R3-9001' } })).status).toBe(200);
     return a;
   };
   const adoptions = async () => ((await (await ownerCall('/v1/ui/state')).json()) as { needs_you: { adoptions: unknown[] } }).needs_you.adoptions;
@@ -102,10 +102,10 @@ describe('adoption requests that went stale', () => {
     expect(await adoptions()).toEqual([]);
     const res = await owner('/v1/ui/adoptions/docs:R3-9001/confirm', { confirm: true });
     expect([res.status, ((await res.json()) as { rule: string }).rule]).toEqual([409, 'requester-silent']);
-    expect(await rows(`SELECT w.kind FROM claims c JOIN workers w ON w.id = c.worker_id`)).toEqual([{ kind: 'legacy' }]);
+    expect(await rows(`SELECT w.kind FROM claims c JOIN runners w ON w.id = c.runner_id`)).toEqual([{ kind: 'legacy' }]);
     // Alive again (a heartbeat), and asking again: the owner can confirm.
-    await workerCall('/v1/runner/heartbeat', { secret: a.secret, body: hbBody('vm-a') });
-    await workerCall('/v1/runner/adopt', { secret: a.secret, body: { ticket_id: 'docs:R3-9001' } });
+    await runnerCall('/v1/runner/heartbeat', { secret: a.secret, body: hbBody('vm-a') });
+    await runnerCall('/v1/runner/adopt', { secret: a.secret, body: { ticket_id: 'docs:R3-9001' } });
     expect((await owner('/v1/ui/adoptions/docs:R3-9001/confirm', { confirm: true })).status).toBe(200);
   });
 

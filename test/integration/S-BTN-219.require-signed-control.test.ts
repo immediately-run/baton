@@ -75,7 +75,7 @@ function makeRunner(log: string[]): Runner {
   const api = new BatonApi({
     url: 'https://baton.test',
     transport: (req) => hostCall(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });
   const runner = new Runner({
     api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
@@ -158,7 +158,7 @@ describe('S-BTN-219 require_signed_control', () => {
     await tick();
     expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
     expect((await sync()).code).toBe(0);
-    // The worker pushes a new agent_command.
+    // The runner pushes a new agent_command.
     const settings = JSON.parse(readFileSync(join(dir, '.baton', 'baton.json'), 'utf8')) as Record<string, unknown>;
     settings.agent_command = 'node ./evil-agent.mjs';
     write('.baton/baton.json', `${JSON.stringify(settings, null, 2)}\n`);
@@ -252,7 +252,7 @@ describe('S-BTN-219 require_signed_control', () => {
     expect((await sync()).code).toBe(0);
     // Even with the setting off the brief is marked; turn it off to prove the marking stands.
     write('tickets/B-9001.mdx', '---\nid: B-9001\ntitle: Signed control\ntags: [EXPEDITE]\n---\n\n**Brief:** the owner, 2026-11-06: hold the line.\n\nWork.\n');
-    const expedited = commit(null, 'the worker adds EXPEDITE');
+    const expedited = commit(null, 'the runner adds EXPEDITE');
     await tick();
     expect((await sync()).code).toBe(0);
     expect(await rows('SELECT expedite FROM tickets WHERE id = ?', 'docs:B-9001')).toEqual([{ expedite: 0 }]);
@@ -283,9 +283,9 @@ describe('S-BTN-219 require_signed_control', () => {
     expect((await keyCall(ownerHttp, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
     expect((await sync()).code).toBe(0);
     expect(await rows('SELECT expedite FROM tickets WHERE id = ?', 'docs:B-9001')).toEqual([{ expedite: 1 }]);
-    // The worker removes the tag unsigned: the last signed state — present — stays in force.
+    // The runner removes the tag unsigned: the last signed state — present — stays in force.
     write('tickets/B-9001.mdx', '---\nid: B-9001\ntitle: Signed control\n---\n\n**Brief:** the owner, 2026-11-06: hold the line.\n\nWork.\n');
-    const removed = commit(null, 'the worker removes EXPEDITE');
+    const removed = commit(null, 'the runner removes EXPEDITE');
     await tick();
     expect((await sync()).code).toBe(0);
     expect(await rows('SELECT expedite FROM tickets WHERE id = ?', 'docs:B-9001')).toEqual([{ expedite: 1 }]);

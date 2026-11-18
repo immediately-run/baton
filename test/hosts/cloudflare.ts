@@ -1,5 +1,5 @@
 // cloudflare.ts — the integration harness's Cloudflare host (BATON_SPEC §13a S-BTN-31): the
-// Worker and its Durable Object in workerd, through @cloudflare/vitest-plugin.
+// Runner and its Durable Object in workerd, through @cloudflare/vitest-plugin.
 import { env, reset as resetStorage, runInDurableObject } from 'cloudflare:test';
 import { exports } from 'cloudflare:workers';
 import type { Baton } from '../../src/cloudflare/baton';

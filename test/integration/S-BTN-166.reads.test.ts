@@ -5,7 +5,7 @@
 // two-repository instance (the registry; the repository's owners, grants and settings; the
 // board's repository, ready and per-tier sections); a key without the right role is refused
 // with its code — an owner reads its own repository and no other, an administrator's key is no
-// owner's, a worker key granted on the repository reads its board and is told what its grant
+// owner's, a runner key granted on the repository reads its board and is told what its grant
 // allows, and a key granted nowhere is refused `forbidden`, an unknown one `unauthenticated`.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { adminSession, cutover, hbBody, keyCall, ORIGIN, payload, sessionCall, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore } from '../helpers';
@@ -37,11 +37,11 @@ async function heartbeat(key: TestKey, hostname: string, over: Record<string, un
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 
-/** A `GET` signed by `key`, with its worker secret once it registered. */
-async function workerAs(key: TestKey, path: string, body?: unknown, secret?: string) {
+/** A `GET` signed by `key`, with its runner secret once it registered. */
+async function runnerAs(key: TestKey, path: string, body?: unknown, secret?: string) {
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
   const res = await hostCall(await signedRequest(key, ORIGIN + path, {
-    created, method: body === undefined ? 'GET' : 'POST', ...(body === undefined ? {} : { body: JSON.stringify(body) }), headers: secret ? { 'X-Worker-Secret': secret } : {},
+    created, method: body === undefined ? 'GET' : 'POST', ...(body === undefined ? {} : { body: JSON.stringify(body) }), headers: secret ? { 'X-Runner-Secret': secret } : {},
   }));
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }

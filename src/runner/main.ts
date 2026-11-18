@@ -134,7 +134,7 @@ export const RUN_USAGE = [
   '                 [--beat-every <ms>] [--course <id>] [--executor <source>] [--concurrency <k>]',
   '                 [--test-harness] [--verbose]',
   '',
-  'Runs this machine\'s worker: it heartbeats, claims a ticket of a course its home checkout',
+  'Runs this machine\'s runner: it heartbeats, claims a ticket of a course its home checkout',
   'declares and runs each claim\'s legs one at a time. --home names a checkout, or a home of',
   '~/.config/baton/homes.json, whose checkout it works (B-121).',
   '',
@@ -442,7 +442,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   runner = new Runner({
     executor,
     api: new BatonApi({ url: a.url, transport, auth }, say),
-    // B-229: the earlier sessions' claims are ended through an API of their own worker's.
+    // B-229: the earlier sessions' claims are ended through an API of their own runner's.
     apiFor: (secret: string) => { const other = new BatonApi({ url: a.url, transport, auth }, say); other.setSecret(secret); return other; },
     home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),

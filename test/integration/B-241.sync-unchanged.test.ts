@@ -108,7 +108,7 @@ describe('B-241 a board post reads its tickets once and skips the unchanged', { 
     // A leg run on T-4 declaring a tag the snapshot's bars for `review` lack, started before
     // the next reading: the first post after it logs one `bars-mismatch`, a later one none.
     const w = await register('vm-a');
-    await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason)
+    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason)
                 VALUES ('docs:T-4', ?, 'b241', 'n', '', ?, 'released', ?, 'released:owner')`, w.id, T0 - 2, T0 - 1);
     const claim = (await rows<{ id: number }>('SELECT MAX(id) AS id FROM claims'))[0].id;
     await rows(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation)

@@ -103,7 +103,7 @@ function makeRunner(courses: { course: string; version: number }[], over: Record
   const api = new BatonApi({
     url: 'https://baton.test',
     transport: (req) => hostCall(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });
   const runner = new Runner({
     api, home: home.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
@@ -183,8 +183,8 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     const other = claims.find((c) => c.ticket_id === second!.ticket)!;
     expect(home.evidence().at(-1)).toMatchObject({ course: other.course_id, ticket: other.ticket_id,
       leg: other.course_id === 'roadmap-pr' ? 'implement' : 'do' });
-    // Both claims ran under one runner process (one session), one leg each: one claim per worker.
-    expect(await rows(`SELECT COUNT(DISTINCT worker_id) AS n FROM claims`)).toEqual([{ n: 1 }]);
+    // Both claims ran under one runner process (one session), one leg each: one claim per runner.
+    expect(await rows(`SELECT COUNT(DISTINCT runner_id) AS n FROM claims`)).toEqual([{ n: 1 }]);
     expect(await rows(`SELECT COUNT(*) AS n FROM claim_legs WHERE finished_at IS NOT NULL`)).toEqual([{ n: 2 }]);
   }, 60_000);
 

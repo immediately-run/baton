@@ -107,28 +107,28 @@ function requiredLegs(required) {
  */
 export function translate(trace) {
   const states = trace.steps.map((s) => s.state);
-  const empty = { counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], workers: {}, required: [], courseFile: null };
-  // The constants: every ticket and worker the trace names; each worker's tags as it first
-  // acts; the required bar in force at the first worker action.
+  const empty = { counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: {}, required: [], courseFile: null };
+  // The constants: every ticket and runner the trace names; each runner's tags as it first
+  // acts; the required bar in force at the first runner action.
   const tickets = new Set();
-  const workers = new Set();
+  const runners = new Set();
   for (const s of states) {
     for (const t of Object.keys(s.tickets)) tickets.add(t);
     for (const t of Object.keys(s.held)) tickets.add(t);
-    for (const c of Object.values(s.claims)) { tickets.add(c.ticket); workers.add(String(c.worker)); }
+    for (const c of Object.values(s.claims)) { tickets.add(c.ticket); runners.add(String(c.runner)); }
   }
   const W = (id) => `w${id}`;
   const tags = {};
-  for (const w of workers) {
-    const first = states.find((s) => Object.values(s.claims).some((c) => String(c.worker) === w));
-    tags[w] = first?.workers[w] ?? [];
+  for (const w of runners) {
+    const first = states.find((s) => Object.values(s.claims).some((c) => String(c.runner) === w));
+    tags[w] = first?.runners[w] ?? [];
   }
   const firstAct = states.findIndex((s) => Object.keys(s.claims).length > 0);
   const required = firstAct >= 0 ? states[firstAct].required : (states.at(-1)?.required ?? []);
   const prefixes = required.map((r) => r.tag_prefix);
   const allTags = new Set();
   for (const s of states) {
-    for (const ts of Object.values(s.workers)) ts.forEach((t) => allTags.add(t));
+    for (const ts of Object.values(s.runners)) ts.forEach((t) => allTags.add(t));
     for (const tv of Object.values(s.tickets)) Object.values(tv.bars).flat().forEach((t) => allTags.add(t));
     for (const c of Object.values(s.claims)) c.legBars.forEach((t) => allTags.add(t));
     for (const b of s.ownerBars) allTags.add(b.tag);
@@ -136,7 +136,7 @@ export function translate(trace) {
   const REQUIRED = requiredLegs(required);
   const FAMILIES = [...allTags].filter((t) => prefixes.some((p) => t.startsWith(p)));
   const T = tickets.size ? [...tickets].sort() : ['t0'];
-  const WS = workers.size ? [...workers].sort((a, b) => a - b).map(W) : ['w0'];
+  const WS = runners.size ? [...runners].sort((a, b) => a - b).map(W) : ['w0'];
   const claimIds = Object.keys(states.at(-1)?.claims ?? {}).length;
   const consts = {
     TICKETS: `Set(${T.map(q).join(', ')})`,
@@ -206,13 +206,13 @@ function translateStep(step, P, env, k) {
   const origin = step.kind === 'request' ? path.replace(/\?.*$/, '') : step.kind;
   if (Q.courseFile && JSON.stringify(JSON.parse(Q.courseFile)) !== JSON.stringify(COURSE)) return { end: 'a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)' };
   if (Object.keys(Q.claims).length && JSON.stringify(Q.required) !== JSON.stringify(k.required)) return { end: 'the required bar changed under a run (the model’s REQUIRED is constant)' };
-  // A worker's tags matter to the model only at its own claims and advances (rule 8, R-BTN-67):
+  // A runner's tags matter to the model only at its own claims and advances (rule 8, R-BTN-67):
   // there they must be the tags it first claimed with.
-  const sameTags = (worker) => JSON.stringify(Q.workers[String(worker)] ?? []) === JSON.stringify(k.tags[String(worker)] ?? []);
+  const sameTags = (runner) => JSON.stringify(Q.runners[String(runner)] ?? []) === JSON.stringify(k.tags[String(runner)] ?? []);
   for (const b of Q.ownerBars) if (b.legs.length) return { end: 'an owner bar on named legs (the model’s owner bars bar every leg)' };
   if (step.kind === 'harness' && JSON.stringify(P.claims) !== JSON.stringify(Q.claims)) return { end: 'the harness wrote a claim (a state Baton did not reach)' };
-  const silent = (worker) => {
-    const l = Q.liveness?.[String(worker)];
+  const silent = (runner) => {
+    const l = Q.liveness?.[String(runner)];
     return !!l && step.now - l.lastSeen >= l.lease;
   };
   for (const [id, d] of Object.entries(Q.claims)) {
@@ -298,11 +298,11 @@ function translateStep(step, P, env, k) {
   for (const id of Object.keys(Q.claims).sort((a, b) => a - b)) {
     const d = Q.claims[id];
     const c = P.claims[id];
-    const w = q(k.W(d.worker));
+    const w = q(k.W(d.runner));
     if (!c) {
       if (origin === '/v1/ui/cutover') return { end: `claim ${id} imported at cutover (a legacy claim; §16.1, not modelled)` };
-      if (step.kind !== 'request' || origin !== '/v1/runner/claim') return { reject: `claim ${id} made by ${origin}, which is no worker's claim` };
-      if (!sameTags(d.worker)) return { end: `worker ${d.worker} claims with other tags than at its first claim (the model’s TAGS are constant)` };
+      if (step.kind !== 'request' || origin !== '/v1/runner/claim') return { reject: `claim ${id} made by ${origin}, which is no runner's claim` };
+      if (!sameTags(d.runner)) return { end: `runner ${d.runner} claims with other tags than at its first claim (the model’s TAGS are constant)` };
       if (d.leg !== '' || d.finished.length || d.status !== 'active') return { reject: `claim ${id} created already advanced or ended` };
       env.ids[id] = env.nextId++;
       env.claimTier[id] = Q.tickets[d.ticket]?.tier ?? null;
@@ -313,7 +313,7 @@ function translateStep(step, P, env, k) {
     if (m == null) continue; // a claim from before the checked part (none: claims are made in it)
     if (c.status === 'active' && d.status === 'active' && (d.leg !== c.leg || d.finished.length !== c.finished.length)) {
       if (!/\/advance$/.test(origin)) return { reject: `claim ${id}'s legs changed by ${origin}` };
-      if (!sameTags(d.worker)) return { end: `worker ${d.worker} advances with other tags than at its first claim (the model’s TAGS are constant)` };
+      if (!sameTags(d.runner)) return { end: `runner ${d.runner} advances with other tags than at its first claim (the model’s TAGS are constant)` };
       // the bars are the ones the holder SENT (round 1, 1-B-2): a store that kept others is rejected
       const sent = step.body?.bars ?? []; // absent is none (validate.ts)
       if (!Array.isArray(sent)) return { reject: `claim ${id} advanced by a request whose bars are not a list` };
@@ -330,14 +330,14 @@ function translateStep(step, P, env, k) {
       if (origin === 'alarm' && d.endReason === 'reaped:release-unacknowledged') return { end: `claim ${id} reaped on an unacknowledged release (§9; messages are not modelled)` };
       if (origin === 'alarm') {
         // the lease ran out by Baton's clock (round 1, 1-A-0)
-        if (!silent(d.worker)) return { reject: `claim ${id} reaped by the alarm before worker ${d.worker}'s lease ran out` };
+        if (!silent(d.runner)) return { reject: `claim ${id} reaped by the alarm before runner ${d.runner}'s lease ran out` };
         tick();
         acts.push(`alarmReap(${m})`);
       } else if (/\/reap$/.test(origin)) {
         if (d.fencePending) acts.push(`forceReap(${w})`);
-        // R-BTN-19: a worker already silent past its lease is not fenced — the fence, timed out
-        else if (silent(d.worker)) { acts.push(`forceReap(${w})`); tick(); acts.push(`fenceTimeout(${m})`); }
-        else return { reject: `claim ${id} force-reaped without a fence while worker ${d.worker} was alive (R-BTN-19)` };
+        // R-BTN-19: a runner already silent past its lease is not fenced — the fence, timed out
+        else if (silent(d.runner)) { acts.push(`forceReap(${w})`); tick(); acts.push(`fenceTimeout(${m})`); }
+        else return { reject: `claim ${id} force-reaped without a fence while runner ${d.runner} was alive (R-BTN-19)` };
       } else return { reject: `claim ${id} reaped by ${origin}` };
     } else if (c.status === 'active' && d.status === 'released' && d.endReason === 'released:stale-board') {
       if (origin !== '/v1/sync/board') return { reject: `claim ${id} released stale by ${origin}` };
@@ -349,7 +349,7 @@ function translateStep(step, P, env, k) {
     if (c.fencePending && !d.fencePending) {
       if (origin === '/v1/runner/heartbeat') acts.push(`fenceCleared(${w})`);
       else if (origin === 'alarm') {
-        if (!silent(d.worker)) return { reject: `claim ${id}'s fence timed out while worker ${d.worker} was heard from` };
+        if (!silent(d.runner)) return { reject: `claim ${id}'s fence timed out while runner ${d.runner} was heard from` };
         tick();
         acts.push(`fenceTimeout(${m})`);
       } else if (/\/fence-clear$/.test(origin)) acts.push(`adminFenceClear(${m})`);
@@ -361,7 +361,7 @@ function translateStep(step, P, env, k) {
   return { actions: dedupeHeartbeats(acts) };
 }
 
-/** A worker heartbeats once before its actions in one step. */
+/** A runner heartbeats once before its actions in one step. */
 function dedupeHeartbeats(acts) {
   const out = [];
   for (const a of acts) if (!(a.startsWith('heartbeat(') && out.at(-1) === a)) out.push(a);
@@ -445,11 +445,11 @@ function expectations(Q, env, T, W) {
     const g = `st.claims.get(${m})`;
     e.push(
       [`claim ${id} ticket`, `${g}.ticket == ${q(c.ticket)}`],
-      [`claim ${id} worker`, `${g}.worker == ${q(W(c.worker))}`],
+      [`claim ${id} runner`, `${g}.runner == ${q(W(c.runner))}`],
       [`claim ${id} status`, `${g}.status == ${q(c.status)}`],
       [`claim ${id} kind`, `${g}.kind == ${q(kindOf(c.endReason))}`],
       [`claim ${id} station`, `${g}.station == ${q(c.station)}`],
-      // a reaped claim keeps its leg in the model, as its worker's view; Baton keeps no worker's view
+      // a reaped claim keeps its leg in the model, as its runner's view; Baton keeps no runner's view
       ...(c.status === 'active' ? [[`claim ${id} leg`, `${g}.leg == ${q(c.leg)}`]] : []),
       [`claim ${id} finished`, `${g}.finished == ${qList(c.finished)}`],
       [`claim ${id} startPath`, `${g}.startPath == ${qList(c.startPath)}`],

@@ -3,7 +3,7 @@
 // during a held force-push, and the archive's sync takes its number before W1's /end. Must hold:
 // every advance is accepted as an edge; no sync ends the claim stale; the held post's stations are
 // accepted; the done end is confirmed from the recorded closure; the ticket is never offered to
-// another worker in between. (A stale checkout posting nothing, and the schedule covering a lost
+// another runner in between. (A stale checkout posting nothing, and the schedule covering a lost
 // delivery, are the CLI's and the workflow's: S-BTN-13 and R-BTN-73.) Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { advance, claimItem, claimRow, cutover, endClaim, Git, observe, placed, recommended, register, rows, setClock, syncCall } from '../helpers';

@@ -43,12 +43,12 @@ describe('plan: one request per command', () => {
     expect(plan('admin', ['open'], key)).toEqual({ method: 'POST', path: '/v1/admin/login-links', body: {} });
     // B-118: the dashboard's state is one signed GET, and takes nothing more.
     expect(plan('admin', ['state'], key)).toEqual({ method: 'GET', path: '/v1/admin/state' });
-    // B-168 (R-BTN-76): a resource has two scopes; `worker` and `host` are retired, and a
+    // B-168 (R-BTN-76): a resource has two scopes; `runner` and `host` are retired, and a
     // retired flag is not quietly dropped (B-105's finding).
     expect(plan('admin', ['resource', 'add', 'anthropic-capacity', '--scope', 'account', '--schema', '{"type":"object"}'], key).body)
       .toEqual({ name: 'anthropic-capacity', scope: 'account', detail_schema: { type: 'object' } });
     expect(plan('admin', ['resource', 'add', 'disk:fs-1', '--scope', 'service', '--schema', '{"type":"object"}'], key).body.scope).toBe('service');
-    expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'worker', '--schema', '{"type":"object"}'], key)).toThrow('retired');
+    expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'runner', '--schema', '{"type":"object"}'], key)).toThrow('retired');
     expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'sometimes', '--schema', '{"type":"object"}'], key)).toThrow('account or service');
     expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'account', '--schema', '{"type":"object"}', '--atoms-from', 'any'], key)).toThrow('not a flag');
     // R-BTN-178 (B-106): a capacity is set, cleared and listed — the set carries the read its
@@ -438,7 +438,7 @@ describe('a redirect or a non-JSON answer is a refusal, never success (B-80)', (
 // checkout (this suite's own) an owner or administrator command with `-i` exits 2, naming the
 // pinned command for the same argv, unless `--dev` overrides — the development this checkout
 // itself is. The other roles (the reads, `run`, the repository commands) still run from a
-// checkout: they are the leg's own path, signed with a worker's key.
+// checkout: they are the leg's own path, signed with a runner's key.
 describe('an owner or administrator key never runs a working-tree CLI (B-138)', () => {
   let dir: string;
   beforeEach(() => {

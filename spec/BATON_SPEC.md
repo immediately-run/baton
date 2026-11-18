@@ -500,6 +500,7 @@ is stale. Never edit it by hand.
 | S-BTN-232 | a ticket already delivered (B-257) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-233 | leg events (B-260) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-234 | Baton hands out the identifiers (B-176) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-236 | runner names (B-68) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

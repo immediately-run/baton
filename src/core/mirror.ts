@@ -10,11 +10,11 @@ import type { DispatchTarget, Row, SqlValue, Store, Workflow } from './ports';
 const MAX_PAGE = 200;
 const NONCE = /^[0-9a-f]{6}$/;
 const GIT_SHA = /^[0-9a-f]{40}$/;
-/** R-BTN-36: the detail keys the feed may carry. Nothing that names a session, worker or host
- *  (`session`, `worker_id`, `request_id`, an owner's email) ever leaves through it. */
+/** R-BTN-36: the detail keys the feed may carry. Nothing that names a session, runner or host
+ *  (`session`, `runner_id`, `request_id`, an owner's email) ever leaves through it. */
 const DETAIL_KEYS = new Set(['foreign', 'end_reason', 'ended_at_sha', 'hold_reason', 'hold', 'expedite', 'retry_after', 'attempts', 'fence_pending',
   'by', 'legacy', 'shadow', 'status', 'nonce', 'holder_nonce', 'sha', 'imported', 'snapshot', 'reason', 'action', 'after', 'since', 'claim_id']);
-/** The actor's kind only: `worker:<id>` and `owner:<email>` name people and machines. */
+/** The actor's kind only: `runner:<id>` and `owner:<email>` name people and machines. */
 const actorKind = (actor: string) => actor.split(':')[0];
 
 export interface Ctx {
@@ -35,7 +35,7 @@ export class Mirror {
    * `GET /v1/sync/events?after=<seq>` (§12): the log after the mirror's cursor, oldest first,
    * at most 200 per page. Each event carries its claim's nonce and, once ended, its end and
    * whether work started; an ended claim also carries its activities and transcript pointers
-   * for the export. Workers are named only by claim id (R-BTN-36). `cutover_at` lets the
+   * for the export. Runners are named only by claim id (R-BTN-36). `cutover_at` lets the
    * mirror leave pre-cutover claims to git, which wrote them itself. A mirror reads its own
    * repository's events only (R-BTN-47); ticket ids are qualified, `<repository>:<local>`.
    */
@@ -120,7 +120,7 @@ export class Mirror {
       if (!seen) logEvent(this.c.store, now, 'foreign-claim', 'sync', { nonce, holder_nonce: holder.nonce, sha: b.sha }, item, holder.id);
       return { held: true, claim_id: holder.id, nonce: holder.nonce, claimed_at: holder.claimed_at };
     }
-    // Nobody holds it: a legacy claim of its own legacy worker, the shape the cutover import makes.
+    // Nobody holds it: a legacy claim of its own legacy runner, the shape the cutover import makes.
     const head = this.rows<{ sha: string | null }>('SELECT sha FROM board_head WHERE repository_id = ?', repo)[0]?.sha ?? '';
     const { claimId } = importLegacyClaim(this.c.store, now, {
       item, preferred: null, nonce, claimedAt: b.at as number, sha: head, requestId: `foreign:${item}:${nonce}`, detail: { foreign: true },

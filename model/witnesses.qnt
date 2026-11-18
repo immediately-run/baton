@@ -39,5 +39,5 @@ module witnesses {
   val noResourceRow = TICKETS.forall(t => st.resRows.get(t) == Set())
   val noAnswerLost = TICKETS.forall(t => st.lost.get(t) == Set())
   val noAlarmReap = st.claims.keys().forall(i =>
-    not(st.claims.get(i).kind == "reap" and not(st.claims.get(i).fencePending) and st.up.get(st.claims.get(i).worker)))
+    not(st.claims.get(i).kind == "reap" and not(st.claims.get(i).fencePending) and st.up.get(st.claims.get(i).runner)))
 }

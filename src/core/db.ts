@@ -12,7 +12,7 @@ export function logEvent(sql: Store, at: number, kind: string, actor: string, de
     at, kind, ticketId, claimId, actor, JSON.stringify(detail), repositoryId);
 }
 
-/** `bytes` random bytes as hex: a claim's 6-hex nonce, a legacy worker's unusable secret hash. */
+/** `bytes` random bytes as hex: a claim's 6-hex nonce, a legacy runner's unusable secret hash. */
 export function randomHex(bytes: number): string {
   return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
