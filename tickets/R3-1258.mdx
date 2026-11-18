@@ -17,7 +17,8 @@ description: "Build BATON_SPEC §4.6, §2.3 and §4.8 (R-BTN-86–88): child tic
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/287
 depends_on:
   - R3-1251
   - R3-1257
@@ -152,3 +153,5 @@ _(2026-10-20: rescoped to the current-state spec, PR #71 — `spawned` is record
 _(2026-10-20: extended for the coverage audit — R-BTN-2's day's usage against the plan's limits on the **Capacity** view.)_
 
 _(2026-11-09: the staging deployment is retired — B-224, the owner: a home repository binds to one Baton, and every registered one binds to production, so staging held nothing and tested nothing. B-224's Decision, default (a): the load test runs locally; the budgets are read on production. The §15 text now says so.)_
+
+_(2026-11-18: implemented, baton#287 — children (parent stored qualified or logged `parent-invalid`, `spawned` ends and `spawned-unposted`, the `children` read, no provisional block), capacity (the figures against the envelope, `capacity` crossings and `baton.capacity`, the day's usage against `BATON_PLAN_LIMITS` named in §2.1, `npm run test:load` at the envelope), and owner state (freeze, seal, the `baton.owner-state/v1` export over one section list, the import with `pending_owner_state`; the runbook in the README; `baton admin` drives it). S-BTN-49's non-call cases and S-BTN-50 pass on both hosts. Two halves stay the owner's: the one-line CI wiring for `test:load` (a workflow edit is the standing rule's stop) and G-BTN-77's reading of production's own `capacity` log and live figures against the envelope — this ticket's `Requires: human-operator`.)_
