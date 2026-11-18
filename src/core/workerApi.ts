@@ -875,9 +875,11 @@ export class WorkerApi {
    *  (the transcripts: a latest-per-worker read keyed by `worker_id` costs the workers
    *  registered, the very count this view stops paying, so it walks the table once instead).
    *  The rows are grouped here to the order the per-worker reads served, and the latest of a
-   *  list is kept by a strict `>` in the scan's order — the tie a SQL `ORDER BY … LIMIT 1` and
-   *  a scan would resolve differently. `workers` itself is read in its served order through
-   *  0060's `workers_by_hostname`: a sort reads every row twice on the Cloudflare host. */
+   *  list is kept in code by the key its per-worker `ORDER BY … LIMIT 1` broke ties on — the
+   *  unique `received_at` of an activity, the unique `id` of a report, and, for the
+   *  transcripts, the union read's own arrival order at their fold below. `workers` itself is
+   *  read in its served order through 0060's `workers_by_hostname`: a sort reads every row
+   *  twice on the Cloudflare host. */
   workersView(now: number) {
     const workers = this.rows<Row>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
                                        first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version FROM workers ORDER BY hostname, id`);
@@ -894,17 +896,30 @@ export class WorkerApi {
       if (!best || a.started_at > best.started_at
         || (a.started_at === best.started_at && a.received_at > best.received_at)) activity.set(a.worker_id, a);
     }
-    // §6.8: the latest transcript per worker, the linked table first — a pending pointer wins
-    // only when strictly newer, as the union's own order served it.
-    const transcript = new Map<number, { repo: string; path: string; t: number }>();
-    const latest = (r: { worker_id: number; repo: string; path: string; t: number }) => {
+    // §6.8: the latest transcript per worker, by the rule the per-worker union read settled
+    // ties with. That read fed its `ORDER BY t DESC LIMIT 1` sorter the linked table's rows
+    // first and each table in its autoindex's order — `(worker_id, repo, path, claim_id)`,
+    // `(worker_id, repo, path)` — and a sorter keeps the first of a tie, so: a greater t wins,
+    // a tie keeps a linked pointer over a pending one, and within one table the
+    // lexicographically least (repo, path, claim_id). A first heartbeat reports several
+    // pointers at one instant (they share its `first_seen_at`), so the tie is ordinary, and a
+    // walk that kept the first row it saw — rowid order, not the autoindex's — would serve
+    // another transcript_url than the per-worker read did. The fold below walks the linked
+    // table first and replaces the kept pointer only at a strictly greater t or, same table
+    // and instant, a lexicographically smaller (repo, path, claim_id): the old rule exactly.
+    type Pointer = { worker_id: number; repo: string; path: string; claim_id: number; t: number; linked: boolean };
+    const transcript = new Map<number, Pointer>();
+    const latest = (r: Pointer) => {
       const best = transcript.get(r.worker_id);
-      if (!best || r.t > best.t) transcript.set(r.worker_id, r);
+      if (!best || r.t > best.t
+        || (r.t === best.t && r.linked === best.linked
+          && (r.repo < best.repo || (r.repo === best.repo && (r.path < best.path
+            || (r.path === best.path && r.claim_id < best.claim_id)))))) transcript.set(r.worker_id, r);
     };
+    for (const t of this.rows<{ worker_id: number; repo: string; path: string; claim_id: number; t: number }>(
+      'SELECT worker_id, repo, path, claim_id, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts')) latest({ ...t, linked: true });
     for (const t of this.rows<{ worker_id: number; repo: string; path: string; t: number }>(
-      'SELECT worker_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts')) latest(t);
-    for (const t of this.rows<{ worker_id: number; repo: string; path: string; t: number }>(
-      'SELECT worker_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM pending_transcripts')) latest(t);
+      'SELECT worker_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM pending_transcripts')) latest({ ...t, claim_id: 0, linked: false });
     // §9: the latest status report per worker — `id` decides, never the scan's order.
     const reports = new Map<number, { payload_json: string | null; sent_at: number; id: number }>();
     for (const m of this.rows<{ worker_id: number; id: number; payload_json: string | null; sent_at: number }>(

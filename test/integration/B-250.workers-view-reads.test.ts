@@ -8,9 +8,11 @@
 // `workers` equal what the per-worker reads built, re-run here as they were, across states that
 // exercise every tie and fallback (two claims claimed at one instant, two open activities
 // started and received at one instant, a transcript re-reported under a second claim at the
-// same instant, a pending pointer newer than the linked ones and one older than a linked one,
-// a lapsed lease with the claim still held, a reaped worker, a course no repository registered,
-// 300 unseen workers). The statement count no longer grows with the workers, the lookups search
+// same instant, two pointers of one heartbeat's instant told out of lexical order beside a
+// pending pointer at that instant — the lexically first linked path wins, the union read's own
+// tie rule — an older pending pointer, a lapsed lease with the claim
+// still held, a reaped worker, a course no repository registered, 300 unseen workers). The
+// statement count no longer grows with the workers, the lookups search
 // their indexes (migration 0060), and on the Cloudflare host the view's reads stay under the
 // ticket's 500-row target on that harness state.
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -160,9 +162,12 @@ async function oldWorkers(count: number, at = T0 - 40 * 24 * H) {
 
 /** What one rich worker holds: two active claims claimed at one instant, two open activities
  *  started and received at one instant, a transcript re-reported under a second claim at the
- *  same instant, an older linked one, a pending pointer newer than both and one older, two
- *  status reports (the later one wins), an ended claim with its ended activity, and — straight
- *  in the tables — a course no repository registered and a capability row out of order. */
+ *  same instant, two pointers of one first heartbeat — the same `first_seen_at` — told out of
+ *  lexical order beside a pending pointer at that same instant (the lexically first linked
+ *  path wins; a pending pointer loses a tie to a linked one), an older linked one, an older
+ *  pending pointer, two status reports (the later one wins), an ended
+ *  claim with its ended activity, and — straight in the tables — a course no repository
+ *  registered and a capability row out of order. */
 async function fill(worker: number, tickets: string[]) {
   const ended = await claim(worker, tickets[0], T0 - 72 * H, T0 - 48 * H);
   await activity(worker, ended, 'ended-act', T0 - 72 * H, T0 - 72 * H, T0 - 71 * H);
@@ -175,7 +180,13 @@ async function fill(worker: number, tickets: string[]) {
   await transcript(worker, a, `claude-code/s-${worker}.jsonl`, T0 - 4 * H);
   await transcript(worker, b, `claude-code/s-${worker}.jsonl`, T0 - 4 * H); // re-reported under the second claim
   await transcript(worker, a, `claude-code/older-${worker}.jsonl`, T0 - 5 * H);
-  await transcript(worker, null, `claude-code/pending-newer-${worker}.jsonl`, T0 - H);
+  // Two pointers of one first heartbeat — a heartbeat stamps every pointer it reports with the
+  // same `first_seen_at` — told out of lexical order, at the pending one's instant: a linked
+  // pointer beats a pending one at one instant and the lexically first path wins within the
+  // table, so this pair is what the view serves, here and in the per-worker reads above.
+  await transcript(worker, a, `claude-code/tie-z-${worker}.jsonl`, T0 - H);
+  await transcript(worker, a, `claude-code/tie-a-${worker}.jsonl`, T0 - H);
+  await transcript(worker, null, `claude-code/pending-tied-${worker}.jsonl`, T0 - H);
   await transcript(worker, null, `claude-code/pending-older-${worker}.jsonl`, T0 - 3 * H);
   await report(worker, T0 - 4 * H, 'first');
   await report(worker, T0 - 30 * 60_000, 'second');
@@ -212,6 +223,10 @@ describe('B-250 the Workers view in one read per list', { timeout: 180_000 }, ()
     // The lapsed worker's only open activities are a tied pair — the tie decides its served row.
     await activity(b.id, null, 'b-tie-z', T0 - H, T0 - H);
     await activity(b.id, null, 'b-tie-a', T0 - H, T0 - H);
+    // Its pointers wait as pending ones (it holds no claim): two of one heartbeat's instant,
+    // told out of lexical order — the lexically first is served.
+    await transcript(b.id, null, 'claude-code/b-pending-z.jsonl', T0 - H);
+    await transcript(b.id, null, 'claude-code/b-pending-a.jsonl', T0 - H);
     const s = await sameAsBefore(session, T0);
     // The state exercises what it claims to: an alive worker with two claims at one instant,
     // a lapsed one, a reaped one, and the lists' orders and latests.
@@ -229,10 +244,11 @@ describe('B-250 the Workers view in one read per list', { timeout: 180_000 }, ()
     ]);
     expect(s.workers[1].claims.map((c: any) => c.ticket_id)).toEqual([tickets[1], tickets[2]]);
     expect(s.workers[1].activity.id).toBe('newer');
-    expect(s.workers[1].transcript_url).toBe(transcriptUrl(TRANSCRIPTS, `claude-code/pending-newer-${a.id}.jsonl`));
+    expect(s.workers[1].transcript_url).toBe(transcriptUrl(TRANSCRIPTS, `claude-code/tie-a-${a.id}.jsonl`)); // the heartbeat pair's instant: linked before pending, `a` before `z`
     expect(JSON.parse(s.workers[1].last_report.payload_json).text).toBe('second');
     expect(s.workers[0].activity.id).toBe('newer'); // the reaped worker's open activity is served as it was
     expect(['b-tie-a', 'b-tie-z']).toContain(s.workers[2].activity.id); // one tied row, the same one both reads pick
+    expect(s.workers[2].transcript_url).toBe(transcriptUrl(TRANSCRIPTS, 'claude-code/b-pending-a.jsonl')); // the pending pair's instant: the lexically first
     expect(s.workers[2].claims).toEqual([]);
     // Later: the lease lapses on the held claims too — the alarm has not run (B-229's window).
     await setClock(T0 + 21 * H);
@@ -247,17 +263,16 @@ describe('B-250 the Workers view in one read per list', { timeout: 180_000 }, ()
     // re-reported transcript at one instant served one row each, identically to before.
     const tie = big.workers.find((w: any) => w.hostname === 'vm-a');
     expect(tie.activity.id).toBe('newer'); // the tie pair lost to it in both reads
-    expect(tie.transcript_url).toBe(transcriptUrl(TRANSCRIPTS, `claude-code/pending-newer-${a.id}.jsonl`));
+    expect(tie.transcript_url).toBe(transcriptUrl(TRANSCRIPTS, `claude-code/tie-a-${a.id}.jsonl`)); // its instant's winner, identically to before
   });
 
   it('runs the same statements however many workers were ever registered; the lookups search their indexes', async () => {
     const a = await register('vm-a');
     await fill(a.id, tickets.slice(0, 3));
     await state(session); // the session's first read does its own one-time work
-    const ten = 7;
-    for (let i = 0; i < ten; i++) await register('vm-b', { session_name: `extra-${i}` });
+    for (let i = 1; i < 10; i++) await register('vm-b', { session_name: `extra-${i}` }); // with vm-a: the criterion's ten workers
     const small = await quiet(session);
-    await oldWorkers(290);
+    await oldWorkers(290); // ten live and 290 unseen: the criterion's 300
     const large = await quiet(session);
     const smallView = viewStatements(small);
     const largeView = viewStatements(large);

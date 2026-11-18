@@ -3307,9 +3307,13 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   `workers` JSON is unchanged: a test compares it with what the per-worker reads built, re-run
   as they were, across ties (two claims claimed at one instant, two open activities started
   and received at one instant, a transcript re-reported under a second claim at the same
-  instant), fallbacks (a pending pointer newer than the linked ones and one older), a lapsed
+  instant, two transcript pointers of one heartbeat's instant told out of lexical order beside
+  a pending pointer at that instant — the latest-transcript fold keeps the union read's own tie
+  rule: a linked pointer before a pending one at one instant, the lexicographically least
+  `(repo, path, claim_id)` within one table, the order its autoindexes fed the per-worker
+  read's sorter), fallbacks (an older pending pointer), a lapsed
   lease with the claim still held, a reaped worker, a course no repository registered, and 300
-  unseen workers; on the Cloudflare host the view's reads measure 358 rows on that harness
+  unseen workers; on the Cloudflare host the view's reads measure 362 rows on that harness
   state, inside the ticket's 500-row target. Migration 0060 also adds `workers_by_hostname` —
   the view's own served order — without which the `ORDER BY hostname, id` sort reads every row
   twice on the Cloudflare host; the timeline's lanes read stays pinned to `workers_live`
