@@ -1,4 +1,4 @@
--- 0059_sequences.sql — B-176 (BATON_SPEC §4.3 R-BTN-198, §13.4 `sequences`): the per-repository,
+-- 0059_sequences.sql — B-176 (BATON_SPEC §4.3 R-BTN-199, §13.4 `sequences`): the per-repository,
 -- per-kind sequence table behind `POST /v1/repositories/{repository}/sequences/{kind}/next`.
 -- Every identifier a concurrent branch writes to git — a ticket id from any filer, a rule,
 -- scenario or gate id, a migration number — is one Baton hands out, so two branches open at once
@@ -14,7 +14,7 @@
 -- keeps every kind main's 0048 added (`condition`, `leg-timeout`) beside `sequence`.
 CREATE TABLE sequences (
   repository_id TEXT NOT NULL,
-  kind          TEXT NOT NULL,                -- opaque to core (R-BTN-198): the CLI names kinds
+  kind          TEXT NOT NULL,                -- opaque to core (R-BTN-199): the CLI names kinds
   last_number   INTEGER NOT NULL,             -- the last number issued; a kind with no row starts at 0
   PRIMARY KEY (repository_id, kind)
 );

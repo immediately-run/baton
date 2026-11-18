@@ -65,7 +65,7 @@ export class BatonCore {
   readonly registry: Registry;
   readonly courses: Courses;
   readonly observations: Observations;
-  /** §4.6 (B-176, R-BTN-198): the per-repository, per-kind sequences — every id written to git. */
+  /** §4.6 (B-176, R-BTN-199): the per-repository, per-kind sequences — every id written to git. */
   readonly sequences: Sequences;
   readonly webhooks: Webhooks;
   readonly stations: Stations;
@@ -121,7 +121,7 @@ export class BatonCore {
     this.policies.releaseForFloor = (repository) => this.claims.releaseForFloor(repository);
     this.courses = new Courses({ store, requiredBars: (repo) => this.admin.requiredBars(repo), policies: this.policies });
     this.observations = new Observations({ store, now: () => this.now() });
-    // B-176 (R-BTN-198): the identifier sequences, beside the observation counter they follow.
+    // B-176 (R-BTN-199): the identifier sequences, beside the observation counter they follow.
     this.sequences = new Sequences({ store, now: () => this.now() });
     // B-134: the scope audit, before the webhooks and the claims it serves — its hold callback
     // reaches the claims, built later, through the closure.
@@ -664,7 +664,7 @@ export class BatonCore {
       }
       const read = await this.blocksRoute(req, url);
       if (read) return read;
-      // §4.6 (B-176, R-BTN-198): the sequence route — a write, so it has its own half beside
+      // §4.6 (B-176, R-BTN-199): the sequence route — a write, so it has its own half beside
       // the blocks' reads, with the sync key admitted among its principals.
       const sequence = await this.sequenceRoute(req, url);
       if (sequence) return sequence;
@@ -1029,6 +1029,14 @@ export class BatonCore {
         const body = await readJson(req);
         return json(tx(() => this.claims.forceReap(owner, Number(reap[1]), body)));
       }
+      // R-BTN-19: an administrator's fence clear, in one transaction with its seats' release
+      // (R-BTN-178) and its event. A dashboard session's principal is an administrator's — the
+      // only key a session is minted from — so the route itself needs no further check.
+      const fenceClear = /^\/v1\/ui\/claims\/(\d+)\/fence-clear$/.exec(p);
+      if (fenceClear) {
+        const body = await readJson(req);
+        return json(tx(() => this.claims.fenceClear(owner, Number(fenceClear[1]), body)));
+      }
       const resolve = /^\/v1\/ui\/claims\/(\d+)\/resolve$/.exec(p);
       if (resolve) {
         const body = await readJson(req);
@@ -1359,7 +1367,7 @@ export class BatonCore {
   }
 
   /**
-   * `POST /v1/repositories/{repository}/sequences/{kind}/next` (§4.3, B-176, R-BTN-198): the
+   * `POST /v1/repositories/{repository}/sequences/{kind}/next` (§4.3, B-176, R-BTN-199): the
    * next number of a repository's sequence, for the principals that file tickets today — a key
    * granted on the repository (the runner role), an owner of it, an administrator, the
    * repository's sync key, and a delegated key (a number is not authority, and issuing one more

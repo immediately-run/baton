@@ -12,11 +12,13 @@ class_name = "Baton"
 tag = "v1"
 new_sqlite_classes = ["Baton"]
 
-# The schema migrations, the dashboard page and its stylesheet are bundled as text; the
-# dashboard's one ES module too (it is served to the browser, never imported by the Worker).
+# The schema migrations, the dashboard's page and its stylesheet are bundled as text; the
+# dashboard's one built ES module too (it is served to the browser, never imported by the
+# Worker — built into src/dashboard/dist/ by `npm run build:ui`, which baton-deploy.yml runs
+# before deploying because no pre-script runs there).
 [[rules]]
 type = "Text"
-globs = ["**/*.sql", "**/*.html", "**/*.css", "**/ui/*.js"]
+globs = ["**/*.sql", "**/*.html", "**/*.css", "**/dashboard/dist/*.js"]
 fallthrough = false
 
 [vars]

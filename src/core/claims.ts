@@ -1998,6 +1998,31 @@ export class Claims {
     return { ok: true, fence_pending: alive };
   }
 
+  /** `POST /v1/ui/claims/{id}/fence-clear` (§9.5, §12.2): an administrator clears a pending
+   *  fence at once — the manual counterpart of the sidecar's `fenced` report, destructive and
+   *  confirmed like force-reap (R-BTN-155) and never delegated. One transaction: the fence goes,
+   *  the claim's seats free (R-BTN-178, as at the fence's deadline), `fence-cleared {admin}` is
+   *  logged and the ticket stops being held — claimable again under §6.7's reading-since-the-end,
+   *  the next claimant's re-read of git (R-BTN-25) its only protection. A claim whose fence is
+   *  not pending is `conflict`; a freeze never refuses it (R-BTN-88), so a seal waiting on the
+   *  claim proceeds after it. The worker is not reaped: it may still be alive, its own lease
+   *  check (R-BTN-26) the bound on what it can push. */
+  // @model adminFenceClear sha256:8a6522848b22
+  fenceClear(admin: string, claimId: number, body: unknown) {
+    checkConfirm(body);
+    const c = this.rows<{ ticket_id: string }>('SELECT ticket_id FROM claims WHERE id = ?', claimId)[0];
+    if (!c) throw new BatonError('not-found', 'no such claim');
+    if (!this.rows(`SELECT 1 FROM claims WHERE id = ? AND status = 'reaped' AND fence_pending = 1`, claimId).length) {
+      throw new BatonError('conflict', 'the claim\'s fence is not pending');
+    }
+    this.exec('UPDATE claims SET fence_pending = 0 WHERE id = ?', claimId);
+    // R-BTN-178: the clear releases the reaped claim's seats, as its fence's deadline does.
+    this.exec('DELETE FROM claim_seats WHERE claim_id = ?', claimId);
+    this.event('fence-cleared', `admin:${admin}`, { by: 'admin', admin }, c.ticket_id, claimId);
+    this.c.blocks?.held(c.ticket_id, false);
+    return { ok: true };
+  }
+
   /** R-BTN-47 (B-173): retirement's reaps, inside the retiring transaction — each active claim
    *  on the repository's tickets as an administrator's force-reap reaps one (§9.5), actor
    *  `admin:<fingerprint>`, fence-pending where its runner is alive so the old holder can still
@@ -2546,7 +2571,10 @@ export class Claims {
                               WHERE status = 'completed' AND confirmed_at IS NULL AND ended_at <= ? ORDER BY ended_at`, now - UNCONFIRMED_FLAG_MS),
       unacknowledged_releases: this.rows(`SELECT id, to_worker_id, payload_json, sent_at, delivered_at FROM messages
                                           WHERE kind = 'release' AND status IN ('pending','delivered') ORDER BY sent_at`),
-      fence_pending: this.rows(`SELECT id, ticket_id, worker_id, ended_at FROM claims WHERE status = 'reaped' AND fence_pending = 1 ORDER BY ended_at`),
+      fence_pending: this.rows(`SELECT c.id, c.ticket_id, c.worker_id, c.ended_at, w.hostname, w.session_name, w.last_seen_at,
+                                       w.lease_timeout_ms, w.isolation
+                                FROM claims c JOIN workers w ON w.id = c.worker_id
+                                WHERE c.status = 'reaped' AND c.fence_pending = 1 ORDER BY c.ended_at`),
       // R-BTN-22: live workers declaring a course below its min_worker_version, one row per
       // course, and those declaring none (course_id null) — each needs a restart from a pulled
       // checkout.

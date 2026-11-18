@@ -139,6 +139,7 @@
 //   baton tickets --help
 //                — the commands, the tags Baton reads and their meanings, the Requires: clause (B-112)
 //   baton request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B] [--remote R]
+//                [--forge github|gitlab|gitea|git]
 //                — start a course from one sentence, no hand-written ticket (B-98, R-BTN-131):
 //                files ONE request ticket (the sentence as title and description, course: C,
 //                status available, tags [request], the next free id under the repository's own prefix) as one commit pushed
@@ -147,7 +148,12 @@
 //                not an API call: the push triggers the sync, the board places the ticket, and
 //                the next claim starts C. C's .baton/courses/C/course.json must say
 //                starts_from: request (create-spec, build-app), and .baton/baton.json must list
-//                it; an ordinary course keeps its hand-filed tickets.
+//                it; an ordinary course keeps its hand-filed tickets. Where the forge refuses
+//                the push as protected (B-174), the same commit lands on baton-request/<ID> and
+//                a PR opens from it with the caller's forge credential (GITHUB_TOKEN,
+//                GITLAB_TOKEN, GITEA_TOKEN) — the adapter --forge names, else github on
+//                github.com; no credential prints the branch and exits non-zero, and any other
+//                refusal stays git's own words.
 //
 //   baton test-course <repository root> <course> [--base REF] [--board FILE]
 //                — the course test kit (§2d, R-BTN-64/-65; R3-1248): the working tree's .baton/ is
@@ -875,8 +881,9 @@ async function testCourse(argv) {
     input.legScripts ? `${input.legScripts.length} leg script(s)` : 'no legs/',
   ];
   process.stdout.write(`baton test-course: ${said.join('; ')}\n`);
-  // R-BTN-111 (B-234): the signature — the conditions the course's legs may raise, its own
-  // declared types and the standard ones; `baton course test` prints it.
+  // R-BTN-111 (B-234, B-52): the signature — the course's input (its start station's entry), its
+  // output (each end station's) and the conditions its legs may raise, each course its legs'
+  // spawns name printed beside it; `baton course test` prints it.
   for (const line of kit.signatureLines(input)) process.stdout.write(`${line}\n`);
   for (const v of violations) process.stdout.write(`✗ ${v.rule}: ${v.message}\n`);
   process.stdout.write(violations.length ? `${violations.length} violation(s)\n` : '✓ no violations\n');

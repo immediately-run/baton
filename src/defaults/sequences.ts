@@ -1,5 +1,5 @@
 // sequences.ts — the CLI's half of Baton's identifier sequences (B-176, BATON_SPEC §4.3
-// R-BTN-198): the kinds the CLI names (`ticket-b`, `rule`, `scenario`, `gate`, `migration`), the
+// R-BTN-199): the kinds the CLI names (`ticket-b`, `rule`, `scenario`, `gate`, `migration`), the
 // `floor` each kind's is seeded by, and `baton tickets next <kind>`, the command a PR author
 // (and an agent) takes a number from. Baton hands the number out (R-BTN-193: git is never a
 // counter); git keeps the work, and the one thing the CLI still reads git for is the floor — the
@@ -79,7 +79,7 @@ export function parseKind(word: string, root: string): NamedKind {
 }
 
 /** The highest number the `kind`'s identifiers reach across the default branch's and every open
- *  branch's head — the floor a fresh Baton is seeded by (R-BTN-198). A checkout that cannot see
+ *  branch's head — the floor a fresh Baton is seeded by (R-BTN-199). A checkout that cannot see
  *  the remote has no floor and says so (value 1: lost state fails closed — reading "cannot see
  *  git" as "git holds nothing" would seed a fresh Baton below every number git holds); a head
  *  the checkout cannot read is skipped, never guessed: a floor too low only risks a number git
@@ -139,7 +139,7 @@ export function floorFor(root: string, remote: string, k: NamedKind): number {
   return floor;
 }
 
-/** `POST /v1/repositories/{repository}/sequences/{kind}/next` (R-BTN-198) with the floor this
+/** `POST /v1/repositories/{repository}/sequences/{kind}/next` (R-BTN-199) with the floor this
  *  checkout sees: the next number, Baton's to give. Throws whatever kept Baton from answering —
  *  the caller falls back to the scan and says so. */
 export async function takeNumber(o: {
@@ -192,7 +192,7 @@ export const fallbackNote = (why: string): string => `id by the next-free scan �
 
 /**
  * `baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--remote R] [--offline]`
- * (B-176, R-BTN-198): the next number of one of the repository's sequences — `rule`, `scenario`,
+ * (B-176, R-BTN-199): the next number of one of the repository's sequences — `rule`, `scenario`,
  * `gate`, `migration`, `ticket[-<prefix>]` — for a PR author (and an agent) to use, taken from
  * Baton with the floor this checkout sees. With `--offline`, or when Baton does not answer, the
  * next free number by the scan is printed with the fallback's note. Exit 0 either way: a number

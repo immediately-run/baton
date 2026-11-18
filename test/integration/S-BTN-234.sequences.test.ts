@@ -1,4 +1,4 @@
-// S-BTN-234 Baton hands out the identifiers (BATON_SPEC §15 S-BTN-234, §4.3 R-BTN-198; B-176):
+// S-BTN-234 Baton hands out the identifiers (BATON_SPEC §15 S-BTN-234, §4.3 R-BTN-199; B-176):
 // every id a concurrent branch writes to git — a ticket id from any filer, a rule, scenario,
 // gate or migration number — is one Baton's per-repository, per-kind sequence hands out, and
 // `baton tickets new` files through a PR on `baton-ticket/<id>` by default. Must hold: two

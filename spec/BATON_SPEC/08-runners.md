@@ -45,8 +45,9 @@ the runner's credentials under any other executor is that executor's, never Bato
     and `rekey`.
   - The response carries the runner's active claims, a list, empty when it holds none — each
     with its id, ticket, station, leg, nonce,
-    `deadline_at`, Baton's position (`station`, `path`, `next_leg`) and the latest
-    snapshot's `git` view (`next` legs with state, `waiting_on` and `not_before`; or `closed:
+    `deadline_at`, Baton's position (`station`, `path`, `next_leg`), the ticket as the latest
+    accepted snapshot holds it (`version`, `snapshot_sha`, `brief`, `last_written_by`,
+    R-BTN-198) and that snapshot's `git` view (`next` legs with state, `waiting_on` and `not_before`; or `closed:
     done | withdrawn`; or `unknown`; for a ticket marked `cancelling`, its queued `cancel` leg
     `ready`, R-BTN-168). A claim the runner's state does not hold is ended by the runner
     `released:lease-lost`, loudly, never left to idle (R-BTN-6); pending messages (§6), marked `delivered` in the same
@@ -75,8 +76,8 @@ the runner's credentials under any other executor is that executor's, never Bato
     new one closes the old.
   - Baton sends `{ring: [<kind>]}` after the transaction that queued something commits; kinds
     are `release`, `status_request`, `wind-down` (B-109), `unblocked` and `handled` (R-BTN-162),
-    `facts` to a fact reader (R-BTN-192), and `outbox` to a runner that delivers the class
-    queued (R-BTN-171). The runner heartbeats at
+    `facts` to a fact reader (R-BTN-192), `outbox` to a runner that delivers the class
+    queued (R-BTN-171), and `ticket` to the holder of a ticket whose version moved (R-BTN-198). The runner heartbeats at
     once. At most one ring per runner per second; kinds suppressed within the second go in one **trailing ring** at its end, set by the alarm.
   - Delivery, acknowledgement, the lease and the fence stay on the heartbeat; its 2-minute
     cadence is unchanged, and a ring adds at most one heartbeat.
@@ -219,7 +220,8 @@ the runner's credentials under any other executor is that executor's, never Bato
     `replay` (R-BTN-84); the newest hand-off document and the resume record (R-BTN-24); advice;
     Baton's position and the latest snapshot's readiness; `checkout` (working directory); `snapshot: {sha, tree}` and
     `course: {dir}` (R-BTN-133); the `session` token the previous leg returned; `refresh` and
-    `yield` (R-BTN-123); `raise` (R-BTN-160) and `resume` (the chosen restart, R-BTN-162); and an
+    `yield` (R-BTN-123); `raise` (R-BTN-160) and `resume` (the chosen restart, R-BTN-162); `on`,
+    `events` and `readTicket` (leg events, R-BTN-198); and an
     `AbortSignal` whose reason is `lease-lost` (stop at once), `release` (stop at the next safe
     point), or `context` (stop at the yield just answered).
   - **First leg** is the queued leg the claim response names (R-BTN-83), started by the first
@@ -325,6 +327,7 @@ the runner's credentials under any other executor is that executor's, never Bato
     `baton leg release --blocked --kind <kind> --ref <ref> […]` (R-BTN-126);
     `baton leg yield [--context <fraction>]` (R-BTN-123);
     `baton leg raise`, `baton leg await` (R-BTN-160, R-BTN-162);
+    `baton leg events`, `baton leg ticket` (R-BTN-198);
     `baton leg next` (the `attached` executor, R-BTN-107).
     A script may return its result directly instead. The channel carries these verbs and nothing
     else: a raw `advance` or `end`, a run label (R-BTN-180), or a run's `executor_digest`,
@@ -369,7 +372,8 @@ the runner's credentials under any other executor is that executor's, never Bato
     - `start({brief, executor, inputs, channel}) → handle` starts a leg session. `brief` holds the
       session's kind, the ticket, the leg, its input URIs, the hand-off document, the leg's
       instructions and its agent command (R-BTN-131), and, as hints,
-      whether the leg is `autonomous` (R-BTN-195) and `reads_only` (R-BTN-183) —
+      whether the leg is `autonomous` (R-BTN-195) and `reads_only` (R-BTN-183), and how the session
+      reads its leg events (`baton leg events`, `baton leg ticket`, R-BTN-198) —
       never the claim id, the runner secret or a Baton credential; `executor` is the leg's
       executor data (below); `channel` is the address of the leg's channel (R-BTN-106). A
       handle may name the session's link, which the runner reports as R-BTN-113 says.
@@ -689,7 +693,7 @@ the runner's credentials under any other executor is that executor's, never Bato
   - A `release` with reason `requested` (an owner's release message, the dashboard's **Stop
     leg**, `baton leg stop`, a delegated key's `leg.stop`, R-BTN-130), `owner-cancel` (Cancel: hold plus
     release, §6) or `superseded` (R-BTN-168) reaches the runner at the doorbell's ring, else at
-    its next heartbeat. For these three the runner stops the leg at once, by its executor's
+    its next heartbeat. For these three the runner stops the leg (told why first, R-BTN-198) at once, by its executor's
     `stop` (R-BTN-107): interrupt, terminate after 10 s, kill after 25 s — under `builtin`,
     `SIGINT` to the process group and R-BTN-145's tagged processes, `SIGTERM` after 10 s, `SIGKILL`
     after 25 s.

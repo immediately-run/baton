@@ -9,7 +9,7 @@ import { cloudflareTest } from '@cloudflare/vitest-plugin';
 import { exportJWK, generateKeyPair } from 'jose';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { makeKey } from './test/lib/sshKeys.ts';
 
 /** The test credentials (R-BTN-13): tokens, their hashes and their policy — the shapes the
@@ -65,14 +65,23 @@ function testVars(vars: Record<string, string>): Record<string, string> {
   return out;
 }
 
-/** Schema migrations and the dashboard load as text, as wrangler's Text rule bundles them. */
+/** Schema migrations and the dashboard's built files load as text, as wrangler's Text rule
+ *  bundles them. A stylesheet is re-id'd first — as `.js`, whose bytes it still are — because
+ *  Vitest empties every CSS module it is not told to process: the file is data the front
+ *  serves, never style a test run applies. */
 const textModules: Plugin = {
   name: 'baton-text-modules',
   enforce: 'pre',
+  resolveId(source, importer) {
+    if (!source.endsWith('.css') || !importer || source.startsWith('baton-text:')) return null;
+    return `baton-text:${resolve(dirname(importer), source)}.js`;
+  },
   load(id) {
-    const file = id.split('?')[0];
-    if (/\.(sql|html|css)$/.test(file) || /[\\/]ui[\\/]app\.js$/.test(file)) return `export default ${JSON.stringify(readFileSync(file, 'utf8'))};`;
-    return null;
+    const virtual = /^baton-text:(.*)\.js$/.exec(id)?.[1];
+    const plain = id.split('?')[0];
+    const file = virtual ?? (/\.(sql|html)$/.test(plain) || /[\\/]dashboard[\\/]dist[\\/]app\.js$/.test(plain) ? plain : null);
+    if (!file) return null;
+    return `export default ${JSON.stringify(readFileSync(file, 'utf8'))};`;
   },
 };
 
@@ -83,7 +92,7 @@ const SCRIPT_TESTS = ['scripts/**/*.test.mjs'];
 /** The tests only the local project runs: they need Node (the request queue, the file scan,
  *  the runner's leg child processes, the model replay). It also runs every integration scenario
  *  and the mirror's unit tests (S-BTN-14's server half). */
-const NODE_ONLY = ['test/unit/spec-files.test.ts', 'test/unit/local-queue.test.ts', 'test/unit/boundary-host.test.ts', 'test/unit/cli.test.ts', 'test/model/replay.test.ts', 'test/unit/check-traces.test.ts', 'test/unit/runner-main.test.ts', 'test/unit/runner-clipin.test.ts', 'test/unit/runner-bundle.test.ts', 'test/unit/runner-mask.test.ts', 'test/unit/runner-replay.test.ts', 'test/integration/S-BTN-41.runner.test.ts', 'test/integration/S-BTN-26.runner.test.ts', 'test/integration/S-BTN-21.machine-lock.test.ts', 'test/integration/S-BTN-227.runner.test.ts', 'test/unit/test-course.test.ts', 'test/unit/stats-size.test.ts', 'test/integration/S-BTN-43.defaults.test.ts', 'test/unit/defaults-cli.test.ts', 'test/unit/standard-courses.test.ts', 'test/unit/ticket-state.test.ts', 'test/unit/bounded-git.test.ts', 'test/integration/S-BTN-104.standard-courses.test.ts', 'test/integration/S-BTN-105.course-sources.test.ts', 'test/integration/S-BTN-106.cross-repo-prs.test.ts', 'test/integration/S-BTN-107.build-app-course.test.ts', 'test/integration/S-BTN-174.create-spec.test.ts', 'test/integration/S-BTN-157.busy-sync.test.ts', 'test/unit/sign.test.ts', 'test/integration/S-BTN-156.sync-key.test.ts', 'test/integration/S-BTN-204.runner-half.test.ts', 'test/integration/S-BTN-222.runner-half.test.ts', 'test/integration/S-BTN-229.runner-half.test.ts', 'test/integration/S-BTN-77.runner-half.test.ts', 'test/integration/S-BTN-209.executor-sources.test.ts', 'test/integration/S-BTN-210.exec-calls.test.ts', 'test/unit/seed-owners-fresh.test.ts', 'test/unit/tickets-check.test.ts', 'test/unit/ticket-pr.test.ts', 'test/unit/tickets-commands.test.ts', 'test/integration/S-BTN-189.ticket-commands.test.ts', 'test/unit/request.test.ts', 'test/unit/request-round2.test.ts', 'test/unit/request-round4.test.ts', 'test/integration/S-BTN-172.ticket-check.test.ts', 'test/unit/check-wiki-vocabulary.test.ts', 'test/unit/pr-markers.test.ts', 'test/unit/cloud-runner.test.ts', 'test/unit/start-runner.test.ts', 'test/unit/safe-render.test.ts', 'test/integration/S-BTN-202.runner-scope.test.ts', 'test/integration/S-BTN-207.ticket-versions-sync.test.ts', 'test/integration/S-BTN-48.replay.test.ts', 'test/integration/S-BTN-214.local-home.test.ts', 'test/integration/S-BTN-216.ids-decide.test.ts', 'test/integration/S-BTN-217.cross-host-pushers.test.ts', 'test/unit/signed-control.test.ts', 'test/integration/S-BTN-219.require-signed-control.test.ts', 'test/unit/dependency-hygiene.test.ts', 'test/unit/dashboard-poll.test.ts', 'test/unit/homes.test.ts', 'test/integration/S-BTN-225.homes.test.ts', 'test/integration/S-BTN-226.pathless-ticket-file.test.ts', 'test/unit/sequences.test.ts'];
+const NODE_ONLY = ['test/unit/spec-files.test.ts', 'test/unit/local-queue.test.ts', 'test/unit/boundary-host.test.ts', 'test/unit/cli.test.ts', 'test/model/replay.test.ts', 'test/unit/check-traces.test.ts', 'test/unit/runner-main.test.ts', 'test/unit/runner-clipin.test.ts', 'test/unit/runner-bundle.test.ts', 'test/unit/runner-mask.test.ts', 'test/unit/runner-replay.test.ts', 'test/integration/S-BTN-41.runner.test.ts', 'test/integration/S-BTN-26.runner.test.ts', 'test/integration/S-BTN-21.machine-lock.test.ts', 'test/integration/S-BTN-227.runner.test.ts', 'test/unit/test-course.test.ts', 'test/unit/stats-size.test.ts', 'test/integration/S-BTN-43.defaults.test.ts', 'test/unit/defaults-cli.test.ts', 'test/unit/standard-courses.test.ts', 'test/unit/ticket-state.test.ts', 'test/unit/bounded-git.test.ts', 'test/integration/S-BTN-104.standard-courses.test.ts', 'test/integration/S-BTN-105.course-sources.test.ts', 'test/integration/S-BTN-106.cross-repo-prs.test.ts', 'test/integration/S-BTN-107.build-app-course.test.ts', 'test/integration/S-BTN-174.create-spec.test.ts', 'test/integration/S-BTN-157.busy-sync.test.ts', 'test/unit/sign.test.ts', 'test/integration/S-BTN-156.sync-key.test.ts', 'test/integration/S-BTN-204.runner-half.test.ts', 'test/integration/S-BTN-222.runner-half.test.ts', 'test/integration/S-BTN-229.runner-half.test.ts', 'test/integration/S-BTN-77.runner-half.test.ts', 'test/integration/S-BTN-209.executor-sources.test.ts', 'test/integration/S-BTN-210.exec-calls.test.ts', 'test/unit/seed-owners-fresh.test.ts', 'test/unit/tickets-check.test.ts', 'test/unit/ticket-pr.test.ts', 'test/unit/tickets-commands.test.ts', 'test/integration/S-BTN-189.ticket-commands.test.ts', 'test/unit/request.test.ts', 'test/unit/request-round2.test.ts', 'test/unit/request-round4.test.ts', 'test/unit/request-protected.test.ts', 'test/unit/forge.test.ts', 'test/integration/S-BTN-172.ticket-check.test.ts', 'test/unit/check-wiki-vocabulary.test.ts', 'test/unit/pr-markers.test.ts', 'test/unit/cloud-runner.test.ts', 'test/unit/start-runner.test.ts', 'test/unit/safe-render.test.ts', 'test/integration/S-BTN-202.runner-scope.test.ts', 'test/integration/S-BTN-207.ticket-versions-sync.test.ts', 'test/integration/S-BTN-48.replay.test.ts', 'test/integration/S-BTN-214.local-home.test.ts', 'test/integration/S-BTN-216.ids-decide.test.ts', 'test/integration/S-BTN-217.cross-host-pushers.test.ts', 'test/unit/signed-control.test.ts', 'test/integration/S-BTN-219.require-signed-control.test.ts', 'test/unit/dependency-hygiene.test.ts', 'test/unit/dashboard-poll.test.ts', 'test/unit/homes.test.ts', 'test/integration/S-BTN-225.homes.test.ts', 'test/integration/S-BTN-226.pathless-ticket-file.test.ts', 'test/unit/sequences.test.ts'];
 /** `BATON_SKIP_QUINT=1` (`npm test`, what hosted CI runs) leaves out the model-drawn replay
  *  (R3-1244); test/unit/check-traces.test.ts skips its own Quint cases on the same variable.
  *  `npm run test:full` and `npm run model:full` run them. */
@@ -140,7 +149,7 @@ export default defineConfig({
           globalSetup: ['./test/global-setup.ts'],
           setupFiles: ['./test/setup.ts'],
           include: ['test/**/*.test.ts'],
-          exclude: NODE_ONLY,
+          exclude: [...NODE_ONLY, 'test/ui/**'],
         },
       },
       {
@@ -154,6 +163,18 @@ export default defineConfig({
           include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...NODE_ONLY, ...SCRIPT_TESTS],
           exclude: [...configDefaults.exclude, ...QUINT_TESTS],
           provide: { localConfig: { ...testVars(wranglerVars()), ...bindings } },
+        },
+      },
+      {
+        // B-193: the dashboard's own tests — React in a DOM (jsdom), @testing-library/react,
+        // and the source gate (Decision 6a), which reads the checkout from Node. Nothing here
+        // runs in the Workers runtime or against the local host: the client speaks HTTP only,
+        // and these tests never do.
+        oxc: { jsx: { runtime: 'automatic' } },
+        test: {
+          name: 'ui',
+          environment: 'jsdom',
+          include: ['test/ui/**/*.test.{ts,tsx}'],
         },
       },
     ],

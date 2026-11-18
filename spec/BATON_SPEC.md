@@ -33,7 +33,7 @@ is stale. Never edit it by hand.
 | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) | **4. Tickets, syncs and the board** | — |
 | | 4.1 The `.baton/` folder and the registry | R-BTN-51, R-BTN-48 |
 | | 4.2 What a sync runs | R-BTN-74 |
-| | 4.3 The sync run and the head | R-BTN-62, R-BTN-150, R-BTN-11, R-BTN-147, R-BTN-198 |
+| | 4.3 The sync run and the head | R-BTN-62, R-BTN-150, R-BTN-11, R-BTN-147, R-BTN-199 |
 | | 4.4 The board post | R-BTN-194 |
 | | 4.5 Reading the ticket | R-BTN-5, R-BTN-34 |
 | | 4.6 Children | R-BTN-86 |
@@ -71,6 +71,7 @@ is stale. Never edit it by hand.
 | | 7.7 Cancellation | R-BTN-168 |
 | | 7.8 The outbox | R-BTN-171 |
 | | 7.9 Standard handler courses | R-BTN-169 |
+| | 7.10 Leg events | R-BTN-198 |
 | [`08-runners.md`](BATON_SPEC/08-runners.md) | **8. Runners** | — |
 | | 8.1 Runners, heartbeats and the doorbell | R-BTN-3, R-BTN-9, R-BTN-14, R-BTN-91 |
 | | 8.2 Keys and grants | R-BTN-102, R-BTN-146, R-BTN-117 |
@@ -302,7 +303,8 @@ is stale. Never edit it by hand.
 | R-BTN-195 | an interaction request asks a person into the leg's session | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-196 | an idle runner's beat reads about nothing | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
 | R-BTN-197 | Baton states the client versions it serves | [`11-people.md`](BATON_SPEC/11-people.md) |
-| R-BTN-198 | Baton hands out every identifier that concurrent branches write to git | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-198 | leg events: what Baton tells a running leg | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
+| R-BTN-199 | Baton hands out every identifier that concurrent branches write to git | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 
 ## Scenarios
 
@@ -496,6 +498,7 @@ is stale. Never edit it by hand.
 | S-BTN-230 | the run-tests gate on PRs outside the home (B-255) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-231 | a failed leg keeps what its agent last said (B-256) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-232 | a ticket already delivered (B-257) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-233 | leg events (B-260) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-234 | Baton hands out the identifiers (B-176) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates

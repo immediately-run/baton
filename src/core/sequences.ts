@@ -1,4 +1,4 @@
-// sequences.ts — the per-repository, per-kind sequences (BATON_SPEC §4.3 R-BTN-198, B-176):
+// sequences.ts — the per-repository, per-kind sequences (BATON_SPEC §4.3 R-BTN-199, B-176):
 // every identifier a concurrent branch writes to git — a ticket id from any filer, a rule,
 // scenario or gate id, a migration number — is one Baton hands out, so two branches open at once
 // can never take the same number. The observation counter (R-BTN-62) is the precedent: one
@@ -24,7 +24,7 @@ interface Row { last_number: number }
 export class Sequences {
   constructor(private readonly c: { store: Store; now: () => number }) {}
 
-  /** `POST /v1/repositories/{repository}/sequences/{kind}/next` (R-BTN-198): the next number of
+  /** `POST /v1/repositories/{repository}/sequences/{kind}/next` (R-BTN-199): the next number of
    *  the repository's `kind` sequence — `max(stored, floor) + 1`, the row written and one
    *  `sequence` event logged, naming the caller and, when given, the ticket it is for. Core
    *  knows no kind's meaning (value 3): `kind` reached here already matches SEQUENCE_KIND. */
@@ -37,7 +37,7 @@ export class Sequences {
       // roll back, and with no number in it: nothing was issued.
       logEvent(this.c.store, this.c.now(), 'sequence', actor, { kind, floor: f, refused: 'floor-cap' },
         forTicket != null ? `${repo}:${forTicket}` : null, null, repo);
-      throw new BatonError('invalid-params', `floor: more than ${FLOOR_CAP} above the stored number (${stored}) is refused — gaps are harmless, and a floor that large only burns numbers (R-BTN-198)`);
+      throw new BatonError('invalid-params', `floor: more than ${FLOOR_CAP} above the stored number (${stored}) is refused — gaps are harmless, and a floor that large only burns numbers (R-BTN-199)`);
     }
     return this.c.store.transaction(() => {
       const n = Math.max(stored, f) + 1;

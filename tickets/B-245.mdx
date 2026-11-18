@@ -42,6 +42,8 @@ On 2026-11-15 the zai coding plan's weekly limit ran out and one runner spent an
 - Counter an administrator's or an instrument key's reading.
 - Change Baton's handling of a `blocked` end (B-21's).
 
+- **Provider exhaustion spends no attempt** (moved here from B-256 by the owner's ruling of 2026-11-17). On 2026-11-16 a review leg failed because DeepInfra's balance was exhausted ("Reviewer B's model (deepinfra) failed for lack of balance") and the leg ended `cannot-finish:transient`, spending the ticket's attempt. Per R-BTN-122 a provider at capacity is a blocked prerequisite: the runner confirms it with its own check and the leg ends `released:blocked` on the provider key, never a retry. Include the case where the exhaustion happens inside a sub-agent and the harness (`opencode run`) still exits 0 — B-256's findings. Done when a test shows a provider-exhaustion failure blocking on the key without spending the ticket's attempt.
+
 ### Trust
 
 - **New input: a check's stdout line**, written by the host's own check command (the operator's configuration), run outside every leg in a directory the runner owns. The runner parses one JSON line, bounded, validated against the resource's `detail` schema before posting; anything else is logged and ignored.

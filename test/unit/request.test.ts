@@ -333,7 +333,7 @@ describe('baton request: the id, the branch and the push (B-98)', () => {
     let threw: string | null = null;
     try {
       git(dir, 'fetch', '-q', 'origin');
-      filed = fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), { warn: (l) => warns.push(l) });
+      filed = await fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), { warn: (l) => warns.push(l) });
     } catch (e) {
       threw = (e as Error).message;
     } finally {

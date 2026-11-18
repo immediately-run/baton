@@ -3094,11 +3094,11 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   counts claims, never host resources. `docs/context/architecture.mdx`'s *Parallelism is
   horizontal* is amended with it (B-188 item 8).
 
-- **2026-11-13 — §4.3 R-BTN-198, §4.2 R-BTN-74, §4.6 R-BTN-86, §5.8 R-BTN-131 and R-BTN-190,
+- **2026-11-13 — §4.3 R-BTN-199, §4.2 R-BTN-74, §4.6 R-BTN-86, §5.8 R-BTN-131 and R-BTN-190,
   §7.2 R-BTN-161, §7.6 R-BTN-165, §13, §14, §15 R-BTN-31 and S-BTN-189**
   (B-176, filed 2026-11-03).
   Rules changed: R-BTN-31, R-BTN-74, R-BTN-86, R-BTN-131, R-BTN-161, R-BTN-165, R-BTN-190;
-  R-BTN-198 added.
+  R-BTN-199 added.
   Baton hands out every identifier that concurrent branches write to git — the owner's
   2026-11-03 question "Wouldn't it be simpler to solve this if Baton also handed out ticket
   IDs?", and the follow-up: "check the spec for any other situation where identifiers were
@@ -3106,7 +3106,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   coordination by baton can make it much easier to choose non-colliding IDs." The collisions
   that prompted it: B-110 and B-107 both took migration 0028, B-129 and B-145 both took
   S-BTN-197 (2026-11-02/-03), and `baton ticket new` pushed every filing to `main`, redeploying
-  the server each time. R-BTN-198 states the whole shape once (§4.3, beside the observation
+  the server each time. R-BTN-199 states the whole shape once (§4.3, beside the observation
   counter it generalises, R-BTN-62): one per-repository, per-kind sequence,
   `POST /v1/repositories/{repository}/sequences/{kind}/next` → `{kind, number}`, the number
   `max(stored, floor) + 1` with the caller's floor capped 10 000 above the stored number, each
@@ -3130,7 +3130,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   list lands its promised retirement for every next-free scan. **Deviation carried in the
   implementation, not the spec**: the CLI's forge detection builds the GitHub adapter alone
   (`gh pr create`); GitLab and Gitea origins file as a `git` forge does — the branch pushed and
-  printed — until B-174 builds their adapters.
+  printed — until B-174 builds their adapters. The rule id and scenario are R-BTN-199 and
+  S-BTN-234: R-BTN-198 and S-BTN-231 to S-BTN-233 were taken on main while the branch was open.
 - **2026-11-17 — R-BTN-131 and §9.4 amended, S-BTN-231 added: a failed leg keeps what its agent
   last said (B-256).**
   Rules changed: R-BTN-131 (a stub's failure after its agent ran names the agent's last lines),
@@ -3174,6 +3175,116 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   does for `pr-open`. `confirm`'s `max_runs` 3 is the bound R-BTN-69 asks of the cycle `filed →
   delivered → filed`, every pass of which is a person's. The ticket file's `status:` stays the
   person's to set (`baton tickets done`), as for any ticket closed by hand.
+
+- **2026-11-17 — R-BTN-198 added; R-BTN-5, R-BTN-35, R-BTN-69, R-BTN-72, R-BTN-81, R-BTN-91,
+  R-BTN-106, R-BTN-107, R-BTN-119 and R-BTN-127 amended; S-BTN-233 added: leg events, what Baton
+  tells a running leg (B-260).**
+  Rules changed: R-BTN-198 (new, §7.10), R-BTN-5 (points to R-BTN-198 for the check at a newer
+  version), R-BTN-35 (a new version of a held ticket leaves the claim alone), R-BTN-69 (the leg
+  field `on_ticket_changed`), R-BTN-72 (`ctx.on`, `ctx.events`, `ctx.readTicket`), R-BTN-81 (the
+  `ticket-changed` row), R-BTN-91 (the ring kind `ticket`), R-BTN-106 (`baton leg events`,
+  `baton leg ticket`), R-BTN-107 (the brief names them), R-BTN-119 (the leg is told `release`
+  with its reason before the stop), R-BTN-127 (the CLI tree); also §4.2's version contract,
+  §6.9's `release`, the heartbeat's claim fields (§8.1, §14), §9.4's `released:ticket-changed`,
+  which joins the closed end reasons R-BTN-67 refuses as a bar's reason, and §13's history kind.
+  The owner, 2026-11-15, asked whether the condition concept could be reused "for the other
+  direction: when baton must signal an event to the leg being executed", naming two cases: "a
+  ticket's body is updated in git (or another issue tracker system such as linear) while the
+  ticket is under claim by a runner and a leg of the ticket is being executed", and "the running
+  leg of a ticket is canceled by the user on the baton web ui". Until now a version change under
+  a claim was progress, not staleness (R-BTN-35), and the leg ran to its end on the text it read;
+  a stop reached a leg only as an abort with reason `release`. The owner's answers to the
+  session's five questions: the name **leg event** ("leg event is fine"), not condition, since
+  no binding, handler, Needs-you entry or quota applies to an event whose only handler is the
+  leg; `continue` as the default ("continue as default is fine"), so no existing course changes;
+  under `continue` the leg is told and chooses ("can we notify the agent of the update and let it
+  decide if it wants to re-read the ticket body or not?") — the session's proposal had been no
+  mid-leg reading at all, so a ticket rewritten after the claim's checks could not reach a
+  running agent; the answer keeps that safety by having the runner re-verify the version (source
+  read, closure, tier) before the leg may read it, and handing the leg no ticket text unasked; a
+  leg's own push to its ticket raises nothing, proven only for the markdown source ("ok"); and
+  `release` changes nothing about the stop ("ok"). Readiness is not re-checked when a moved
+  version is read, mid-leg or before the next leg, since the leg's own pushes move it and
+  R-BTN-63 leaves it to the holder. Rejected: reusing condition rows and bindings inbound; pushing the
+  new body to the agent; releasing every claim whose ticket changed; and a validator reservation
+  of the event types, unneeded since leg events are never condition types. Not in this change: how
+  quickly a tracker's edit reaches Baton (no want is recorded for it, R-BTN-94). The rule id,
+  scenario and ticket are R-BTN-198, S-BTN-233 and B-260: R-BTN-197, S-BTN-230 to S-BTN-232,
+  B-235, B-258 and B-259 were taken on main while the branch was open.
+  Review round 1: two fresh reviewers, one on consistency, one on security and buildability.
+  Their findings, each checked against the text, changed the rule:
+  - the heartbeat now carries the `snapshot_sha` every check needs (both reviewers), and the
+    sha is checked on the default branch;
+  - the mid-leg read shows the version's `brief` and `last_written_by` first, as the claim does
+    (R-BTN-194), so a mid-leg edit never looks more trusted than the claim's text;
+  - a version that changes `repos`, `course` or `requires` is refused, so a read never widens a
+    claim;
+  - the scenario case of a re-tiered read was impossible, since R-BTN-35 ends that claim, and the
+    tier and closure checks left the read for the same reason;
+  - the check before the next leg no longer re-checks readiness, which R-BTN-63 leaves to the
+    holder, and it now updates the versions the runner tracks, so no spurious event follows;
+  - `restart` stops the leg at once, not at an undefined safe point;
+  - Baton accepts `released:ticket-changed` only after a logged change, so it is not a free
+    unpenalised exit;
+  - the own-change test covers every commit in the range and the claim's whole window, and is
+    named cooperative, as the scope audit is;
+  - delivery has one cursor per run, and a `release` wins over a version change in the same
+    heartbeat;
+  - sessions poll, since the executor interface pushes nothing;
+  - the `cancel` leg and `changes` tickets are exempt, and refusals are named (`moved`,
+    `bounds-changed`, `unreadable`, `unknown-version`);
+  - the event types stay unreserved, with condition and leg event types stated as separate
+    namespaces;
+  - B-260 lost the decisions it held: a signature line, refusal codes, the stub's message and
+    the brief now live in the rule, or were cut.
+
+  Review round 2: one fresh reviewer. Its findings, checked against the text:
+  - a leg could still leave unpenalised by pushing a trivial edit to its own ticket and
+    releasing for it. Now the runner refuses the reason from a run it handed no change, and the
+    end must name a logged version;
+  - `max_runs` is optional off cycles, so it bounded nothing for most legs. The validator now
+    requires it beside `restart`;
+  - the premise that a snapshot ending the claim covers closure was false (`closed: done` is not
+    stale), so closure and tier are checked again (`closed`);
+  - a forged version could name any blob, so a markdown version must be the blob at the sha;
+  - `unreadable` before a leg ends the claim `cannot-finish:transient`, not `stale-board`, so
+    B-232's claim walk cannot come back;
+  - the logging follows R-BTN-62's ordering;
+  - a context refresh re-hands the newest event;
+  - the queue stays readable through `close` and `handoff`, and stops with no message hand
+    nothing;
+  - `restart` during a condition wait blocks as R-BTN-162 says;
+  - the heartbeat fields and the release clause are cited, not restated;
+  - R-BTN-5's pointer moved to the end of its bullet, where it no longer reads as adding
+    readiness;
+  - B-260 lost its bar migration and agent hook, which the spec does not hold.
+  Review round 3, the last: one fresh reviewer. Its findings, checked against the text:
+  - Baton logged a change only for a post observed after the claim, while the runner reacted to
+    every heartbeat version. And a change logged just before an `advance` could be handed to the
+    next leg. Either way a correct `released:ticket-changed` end was refused. Now Baton logs
+    every accepted post that moves a held ticket's version. The `advance` that starts a run
+    names its `ticket_version`, and the end is accepted against that.
+  - The end body had no field for the version it must name; `ticket_version` was added to §9.4
+    and §14.
+  - A version closed `done` defers to R-BTN-72's `done` end, mid-leg and before a leg.
+  - `off-branch` is a named refusal.
+  - The order with R-BTN-5 is stated: its check at the claim's version, then R-BTN-198.
+  - R-BTN-194's list of where provenance is served includes the heartbeat and `baton leg
+    ticket`.
+  - The exemption of `cancel`-leg and `changes` claims covers Baton's half too.
+  - An end answering a `release` Baton sent with the reason `ticket-changed` (an owner bar set
+    before the reason was closed) is accepted as that release. R-BTN-67 checks bar reasons when
+    a bar is written.
+  - Versions may reach an agent. The "never a version" clause was dropped: a version is an
+    opaque §12.3 string from the same writer as the ticket's body, which the leg may read
+    anyway, so it carries nothing the body does not.
+
+  Three rounds is the most the review takes, so nothing ran after these fixes.
+  Kept after review: a `restart` run counts toward `max_runs`, which every `restart` leg must
+  now declare. A reviewer called that bound the damage, since forged versions or an editor
+  flipping a ticket can spend it, and proposed a named condition at exhaustion. Not taken: the
+  ticket is held for a person as at any leg's bound, and not counting the run would let such
+  edits restart a leg without limit. A flip back to the version last verified restarts nothing.
 
 ## Retired requirements
 
@@ -3398,9 +3509,6 @@ working until the stated condition holds, then removes it.
   and a grant's type-less legacy capability (`agent-venue`) satisfies it. A course leaves the
   window when an accepted snapshot first carries its file with types. Stop when no registered
   course reads through `ROLES` (the **Courses** view shows it): remove `ROLES`.
-- **Legacy schema forms (R-BTN-108).** A contract output whose `schema` is a file path is read
-  as `<course>:<leg>.<output>@<contract version>` with no base. Stop when no registered course
-  file uses a path.
 - **Bearer-key migration (R-BTN-117).** The bearer tokens and `BATON_KEYS` seed keys the code
   accepted become API-key credentials, granted on each repository they heartbeated or claimed on
   in the 30 days before, with the capabilities they declared there and `accepted_at` set to the

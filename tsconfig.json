@@ -28,6 +28,8 @@
     "test"
   ],
   "exclude": [
+    "src/dashboard",
+    "test/ui",
     "test/global-setup.ts",
     "test/lib",
     "src/local",
@@ -74,6 +76,8 @@
     "test/unit/request.test.ts",
     "test/unit/request-round2.test.ts",
     "test/unit/request-round4.test.ts",
+    "test/unit/request-protected.test.ts",
+    "test/unit/forge.test.ts",
     "test/integration/S-BTN-175.request.test.ts",
     "test/integration/S-BTN-234.sequences.test.ts",
     "test/unit/sequences.test.ts",

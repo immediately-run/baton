@@ -25,6 +25,7 @@ import { checkPayload, dependsCycles } from '../core/board';
 import { checkTicketsMain, dependsLine } from './tickets-check';
 import { accepts, accepting, allocates, allocatingPrefix, GITHUB_PR, LIVE_STATUSES, readSettingsJson, readTicketSettings, requiresFrom, TAGS, type Status, type TicketSettings } from './tickets-config';
 import { addPr, idOf, locate, nextNumber, prsOf, scalar, setKey } from './tickets-file';
+import { openRequestNumbers } from './request-branches';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
 import { appendStatus, filingDate, firstCommit, historyEntries, rereadMismatch, rereadNote, rulesConfig, sectionGaps, sectionHint, sectionsSince, staleIds, staleList, staleRules, unshallow } from './tickets-rules';
@@ -512,7 +513,7 @@ export function skeletonBody(o: { description: string; deps: readonly string[]; 
 }
 
 /** `baton tickets new …` (B-112, B-176): file one ticket — an id from Baton's sequence
- *  (`ticket-<prefix>`, R-BTN-198) under `.baton/baton.json`'s prefix, its conventional body,
+ *  (`ticket-<prefix>`, R-BTN-199) under `.baton/baton.json`'s prefix, its conventional body,
  *  `roadmap-item` unless `--tags` says otherwise — unique before any push, so two filers at once
  *  never take one number. With no key, no configured Baton, an unreachable Baton or `--offline`,
  *  the id is today's next-free scan at the head it files on, and the output says so
@@ -538,7 +539,7 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
   let filed: string | null = null;
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   const warn = io.warn ?? ((l: string) => process.stderr.write(`${l}\n`));
-  // B-176: the id is Baton's to give (R-BTN-198), asked before any git runs. The floor is the
+  // B-176: the id is Baton's to give (R-BTN-199), asked before any git runs. The floor is the
   // highest number this checkout sees — the default branch and every open branch's head — so a
   // lost or fresh Baton never reissues a number git holds. A Baton that cannot answer leaves
   // today's scan at the head the filing lands on, and says so.
@@ -574,7 +575,15 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
     const files = readItems(dir, items);
     const read = sourceAt(dir, settings);
     const prefix = `${allocatingPrefix(settings)}-`;
-    const id = given ?? `${prefix}${nextNumber(files, settings, prefix)}`;
+    // B-176: Baton's id when it gave one under this tree's prefix. Else the scan, where
+    // (R-BTN-131, B-174) the open request branches' ids count too — a request still waiting on
+    // its `baton-request/<ID>` branch holds its id, and no allocator hands it out again. The head
+    // the filing sits on is the worktree's own (the fetched default branch).
+    const scanned = (): string => {
+      const openRequests = openRequestNumbers(dir, remote, items, prefix, git(dir, 'rev-parse', 'HEAD'), io.warn);
+      return `${prefix}${Math.max(nextNumber(files, settings, prefix), ...openRequests.map((n) => n + 1))}`;
+    };
+    const id = given?.startsWith(prefix) ? given : scanned();
     // The prefix's pattern may name ids `new` cannot allocate (a fixed count, `\d{7}`): it says so
     // rather than write a wrong one.
     if (!allocates(settings, id)) throw new Error(`new allocates ${prefix}<n>, but ${prefix}'s pattern in .baton/baton.json is \`${settings.prefixes[prefix]}\` — write the pattern's number as \\d+, or name another ticket_prefix`);
@@ -1004,7 +1013,7 @@ export function ticketsHelp(): string[] {
     '                   [--trust T] [--invariants I] [--direct] [-i KEY] [--url URL] [--offline]',
     'baton tickets next <kind> [--for <ticket>] [-i KEY] [--url URL] [--remote R] [--offline]',
     '                   rule | scenario | gate | migration | ticket[-<prefix>]: the next number of',
-    '                   that sequence, taken from Baton (R-BTN-198) — what a PR takes a migration',
+    '                   that sequence, taken from Baton (R-BTN-199) — what a PR takes a migration',
     '                   number or a scenario id from; --offline prints the next free by the scan',
     'baton tickets claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]   available → in-progress;',
     '                   a ticket Baton holds past its start is taken over where Baton holds it;',
@@ -1063,7 +1072,7 @@ export function ticketsHelp(): string[] {
     '### Trust, ### Invariants, ### Tests, ### Exit criteria, **Requires:**, ## Status — and judges it as `baton tickets',
     'check` would before pushing, so a filing introduces no cycle and no undeclared dependency.',
     '',
-    'The id new takes is Baton\'s to give (R-BTN-198): the next number of the repository\'s',
+    'The id new takes is Baton\'s to give (R-BTN-199): the next number of the repository\'s',
     'ticket-<prefix> sequence, asked with a floor this checkout sees (the default branch and every',
     'open branch\'s head), so two filers at once never take one number. With no key, no configured',
     'Baton, an unreachable Baton or --offline, the id is today\'s next-free scan and the output',
@@ -1093,7 +1102,7 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   }
   const [command, ...rest] = argv;
   if (command === 'check') return ticketsCheckMain(rest, io);
-  // B-176 (R-BTN-198): the sequence numbers, for a PR author and an agent.
+  // B-176 (R-BTN-199): the sequence numbers, for a PR author and an agent.
   if (command === 'next') return nextMain(rest, io);
   const COMMON = ['repo', 'branch', 'remote'];
   const allowed: Record<string, string[]> = {

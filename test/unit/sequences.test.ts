@@ -1,4 +1,4 @@
-// sequences.test.ts — the CLI's half of Baton's identifier sequences (B-176, R-BTN-198, §4.6;
+// sequences.test.ts — the CLI's half of Baton's identifier sequences (B-176, R-BTN-199, §4.6;
 // S-BTN-234's unit half): the floor each kind's number is seeded by — the highest number on the
 // default branch and every open branch's head, so a fresh Baton never reissues a number git holds
 // — the fallback that says itself (no key, no answer, --offline), `new`'s PR-first landing with
@@ -366,12 +366,12 @@ describe('R-BTN-190: no branch_pattern matches the reserved namespaces (B-176)',
     id: 'c', version: 1, min_worker_version: 1, skill: 'next-ticket', step_kinds: ['implement'], course: {}, branch_pattern,
   });
   it('a pattern matching baton-ticket/*, baton-request/* or baton-legs/* is refused — the exact shape too', () => {
-    expect(() => checkRegistry([entry('baton-ticket/{ticket}-*')])).toThrow(/branch_pattern: must not match the reserved namespace baton-ticket\//);
+    expect(() => checkRegistry([entry('baton-ticket/{ticket}-*')])).toThrow(/branch_pattern: must not match baton-ticket\/\*/);
     // The exact-collision pattern `baton-ticket/{ticket}` — the shape `new` itself pushes
-    // (`baton-ticket/<id>`): the probe is that shape (round 1, finding 2).
-    expect(() => checkRegistry([entry('baton-ticket/{ticket}')])).toThrow(/branch_pattern: must not match the reserved namespace baton-ticket\//);
-    expect(() => checkRegistry([entry('baton-request/{ticket}')])).toThrow(/reserved namespace baton-request/);
-    expect(() => checkRegistry([entry('baton-legs/{ticket}-*')])).toThrow(/reserved namespace baton-legs/);
+    // (`baton-ticket/<id>`) is refused as the starred one is (round 1, finding 2).
+    expect(() => checkRegistry([entry('baton-ticket/{ticket}')])).toThrow(/branch_pattern: must not match baton-ticket\/\*/);
+    expect(() => checkRegistry([entry('baton-request/{ticket}')])).toThrow(/must not match baton-request\/\*/);
+    expect(() => checkRegistry([entry('baton-legs/{ticket}-*')])).toThrow(/must not match baton-legs\/\*/);
     // A pattern that cannot reach a reserved namespace stands.
     expect(checkRegistry([entry('claude/{ticket}-*')])).toHaveLength(1);
     expect(checkRegistry([entry('ticket/{ticket}-*')])).toHaveLength(1);

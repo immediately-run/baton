@@ -167,6 +167,40 @@ describe('baton tickets new: the ticket it files (B-112)', () => {
     expect(f.at('tickets/B-5.mdx')).toBeNull();
   }, 60_000);
 
+  it('B-174 (R-BTN-131): the next free number also skips an open request branch’s id — a merged one keeps none', () => {
+    const f = repo({ existing: { 'tickets/B-2.mdx': ticket('B-2') } });
+    // A request still waiting on its side branch holds B-3: `baton request` pushed it there, and
+    // the default branch does not reach the branch.
+    git(f.dir, 'checkout', '-q', '-b', 'side', 'origin/main');
+    writeFileSync(join(f.dir, 'tickets', 'B-3.mdx'), `---\ntitle: "B-3 — a request"\nid: B-3\nstatus: available\ntags: [request]\ncourse: create-spec\n---\n`);
+    git(f.dir, 'add', '-A');
+    git(f.dir, 'commit', '-qm', 'B-3: request');
+    git(f.dir, 'push', '-q', 'origin', 'HEAD:refs/heads/baton-request/B-3');
+    git(f.dir, 'checkout', '-q', 'main');
+    git(f.dir, 'branch', '-D', 'side');
+    // B-176: Baton is not asked here (no key), so the scan gives the id and says so; `--direct`
+    // lands on the default branch as B-174's filing did.
+    const r = run(f.dir, 'new', '--direct', '--title', 'Write the thing');
+    expect(r).toMatchObject({ code: 0 });
+    expect(r.err).toMatch(/^… id by the next-free scan — Baton did not answer \(no key/);
+    expect(r.out).toBe('✓ tickets: file B-4 — Write the thing\n');
+
+    // A request whose PR MERGED leaves its id free again: the branch stays, but the default
+    // branch reaches its commit, so no allocator counts it.
+    const merged = repo({});
+    git(merged.dir, 'checkout', '-q', '-b', 'side2', 'origin/main');
+    writeFileSync(join(merged.dir, 'tickets', 'B-1.mdx'), `---\ntitle: "B-1 — a request"\nid: B-1\nstatus: available\ntags: [request]\ncourse: create-spec\n---\n`);
+    git(merged.dir, 'add', '-A');
+    git(merged.dir, 'commit', '-qm', 'B-1: request');
+    git(merged.dir, 'push', '-q', 'origin', 'HEAD:refs/heads/baton-request/B-1', 'HEAD:refs/heads/main');
+    git(merged.dir, 'checkout', '-q', 'main');
+    git(merged.dir, 'branch', '-D', 'side2');
+    const r2 = run(merged.dir, 'new', '--direct', '--title', 'Write the other thing');
+    expect(r2).toMatchObject({ code: 0 });
+    expect(r2.err).toMatch(/^… id by the next-free scan — Baton did not answer \(no key/);
+    expect(r2.out).toBe('✓ tickets: file B-2 — Write the other thing\n');
+  }, 60_000);
+
   it('the next free number skips the archived ones, and the configured prefix is the one allocated', () => {
     const archived = repo({ existing: { 'tickets/archive/B-7.mdx': ticket('B-7', 'status: done').replace('status: available', ''), 'tickets/B-2.mdx': ticket('B-2') }, settings: { ticket_prefix: 'F', legacy_ids: ['R3-\\d+', 'B-\\d+'] } });
     expect(run(archived.dir, 'new', '--direct', '--title', 'x').out).toBe('✓ tickets: file F-1 — x\n');

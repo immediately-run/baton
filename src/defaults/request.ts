@@ -18,11 +18,20 @@
 // `.baton/baton.json` lists, because the sync refuses a ticket on a course it does not know, and
 // filing one would wedge the board.
 // Course code in the CLI, never core (§2b).
+//
+// B-174 (R-BTN-131, R-BTN-180's request bullet): where the forge refuses the push because the
+// branch is protected, the CLI decides by the forge's answer — the adapters in forge.ts match
+// the refusal's own words — and lands the same commit on `baton-request/<ID>` (outside every
+// `branch_pattern`, R-BTN-190), opening a PR from it with the caller's forge credential. A `git`
+// forge and any other refusal are the operator's, in git's own words (R-BTN-74).
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { batonTarget, fallbackNote, floorFor, parseKind, takeNumber } from './sequences';
+import { hostOf, NAMED_FORGES, openRequestPr, protectedRefusal, requestForge, tokenOf, type PrForge } from './forge';
+import { remoteSlug, slugOfUrl } from './remote-slug';
+import { openRequestNumbers, requestBranch, requestHeads } from './request-branches';
 
 /** The most tries one request makes when the default branch moves under it, as
  *  scripts/ticket.mjs's transact does: a lost race is refetched and re-committed on the new head. */
@@ -67,6 +76,12 @@ export interface Filed {
   text: string;
   /** The commit's subject. */
   message: string;
+  /** B-174 (R-BTN-131): the side branch the request landed on — `baton-request/<ID>`, pushed
+   *  because the forge refused the default branch as protected — and the PR opened from it with
+   *  the caller's forge credential. Without a credential the command never returns: the branch
+   *  is pushed and the refusal names it (exit non-zero). */
+  onBranch?: string;
+  pr?: string;
 }
 
 const git = (root: string, ...a: string[]): string =>
@@ -78,6 +93,29 @@ const gitQuiet = (root: string, ...a: string[]): boolean => {
     return true;
   } catch {
     return false;
+  }
+};
+
+/** The stderr of a git call that failed, as text — git's own words (R-BTN-74). */
+const stderrOf = (e: unknown): string => {
+  const said = (e as { status?: unknown; stderr?: string | Uint8Array }).stderr;
+  return typeof said === 'string' ? said : said ? new TextDecoder().decode(said) : (e as Error).message;
+};
+
+/** git's refusal in its own words: the stderr's lines that say why — `remote:` and `! [remote
+ *  rejected]` among them — with the `To …` address and the trailing count line aside. */
+const refusalWords = (e: unknown): string => {
+  const why = stderrOf(e).trim().split('\n').map((l) => l.trim()).filter((l) => l !== '' && !/^To /.test(l) && !/failed to push some refs/.test(l));
+  return why.join('; ') || 'no reason given';
+};
+
+/** The origin remote's URL: the named remote's own, else `remote` itself — a path or URL names
+ *  no remote, and is the URL the request pushed to all the same. */
+const remoteUrl = (root: string, remote: string): string | null => {
+  try {
+    return git(root, 'remote', 'get-url', remote);
+  } catch {
+    return remote.trim() !== '' ? remote : null;
   }
 };
 
@@ -165,8 +203,10 @@ export function ticketPrefix(root: string, items: string): string {
 
 /** The next free `<prefix>-<n>` across `<items>/` and `<items>/archive/` — the next free NUMBER
  *  under that prefix only, as scripts/ticket.mjs numbers `B-`, so two id series in one repository
- *  each keep their own count (round 2, 2-r0-2). */
-export function nextId(root: string, items: string, prefix = ticketPrefix(root, items)): string {
+ *  each keep their own count (round 2, 2-r0-2). `extra` holds numbers the open request branches
+ *  took (R-BTN-131, B-174): a request still waiting on its `baton-request/<ID>` branch holds its
+ *  id, and no allocator hands it out again. */
+export function nextId(root: string, items: string, prefix = ticketPrefix(root, items), extra: number[] = []): string {
   const re = new RegExp('^' + prefix + '-(\\d+)\\.mdx$');
   const taken = [items, join(items, 'archive')]
     .filter((sub) => existsSync(join(root, sub)))
@@ -174,7 +214,7 @@ export function nextId(root: string, items: string, prefix = ticketPrefix(root, 
     .map((f) => re.exec(f)?.[1])
     .filter((n) => n != null)
     .map(Number);
-  return prefix + '-' + (Math.max(0, ...taken) + 1);
+  return prefix + '-' + (Math.max(0, ...taken, ...extra) + 1);
 }
 
 /** Read and judge the checkout before any git runs: the `.baton/baton.json` the request must be
@@ -236,11 +276,19 @@ export interface RequestOptions {
   /** The remote name (`origin`), or its path. */
   remote?: string;
   tier?: string;
+  /** B-174: the forge whose adapter decides the protected-branch fallback (R-BTN-131) — the
+   *  `--forge` flag. Unset, the origin's host decides (`github` on github.com; else none). */
+  forge?: string;
+  /** The environment a forge credential is read from (`GITHUB_TOKEN` and its kin); the
+   *  process's own by default. */
+  env?: Record<string, string | undefined>;
+  /** The fetch the PR-open call uses; the global one by default (the tests inject one). */
+  fetchImpl?: typeof fetch;
   /** A log for the retry notices; silent by default. */
   warn?: (line: string) => void;
   /** The clock's date for `updated:`, for a test's fixed day. */
   date?: string;
-  /** B-176 (R-BTN-198): an id Baton's `ticket-<prefix>` sequence already gave — unique before
+  /** B-176 (R-BTN-199): an id Baton's `ticket-<prefix>` sequence already gave — unique before
    *  any push, so every try files the same one. */
   allocated?: string;
 }
@@ -254,8 +302,12 @@ export interface RequestOptions {
  *  any other. Git plumbing (a temp index and `commit-tree`) would skip those; a real worktree does
  *  not. `opts.allocated` (B-176) is the id Baton's sequence gave under the prefix the caller's
  *  checkout reads; a landing tree whose own prefix differs falls back to its scan — the id would
- *  file under a series the head does not use. */
-export function fileRequest(plan: RequestPlan, opts: RequestOptions = {}): Filed {
+ *  file under a series the head does not use.
+ *
+ *  B-174 (R-BTN-131): the scan's id also counts the open request branches, and a push the forge
+ *  refuses as protected lands on `baton-request/<ID>` with a PR opened from it
+ *  (`fileOnRequestBranch`). Async for that one call: the PR is opened over the forge's API. */
+export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}): Promise<Filed> {
   const remote = opts.remote ?? 'origin';
   // The branch is resolved again on every try: a fetch may bring `origin/HEAD` the first pass lacked.
   const branch = () => defaultBranch(plan.root, opts.branch);
@@ -272,7 +324,12 @@ export function fileRequest(plan: RequestPlan, opts: RequestOptions = {}): Filed
       // the branch this ticket will be read from, never only on one the caller stands on. The
       // plan's root is swapped for the worktree for this try.
       const atHead = readRequestPlan(plan.root, plan.course, plan.sentence, dir, `${remote}/${branch()}`);
-      const id = opts.allocated?.startsWith(`${atHead.prefix}-`) ? opts.allocated : nextId(dir, atHead.items, atHead.prefix);
+      // B-176: Baton's id when it gave one under this tree's prefix; else the scan, where
+      // (R-BTN-131, B-174) the open request branches' ids count too, so two requests waiting on
+      // their branches never share an id. The head the commit sits on is the worktree's own.
+      const id = opts.allocated?.startsWith(`${atHead.prefix}-`)
+        ? opts.allocated
+        : nextId(dir, atHead.items, atHead.prefix, openRequestNumbers(dir, remote, atHead.items, `${atHead.prefix}-`, git(dir, 'rev-parse', 'HEAD'), warn));
       const text = requestFile(id, atHead.course, plan.sentence, opts.tier, opts.date);
       const message = requestMessage(id, plan.course, plan.sentence);
       const file = join(dir, atHead.items, `${id}.mdx`);
@@ -286,16 +343,23 @@ export function fileRequest(plan: RequestPlan, opts: RequestOptions = {}): Filed
         git(dir, 'push', '-q', remote, `HEAD:refs/heads/${branch()}`);
         return { id, text, message, course: atHead.course, start: atHead.start, startLeg: atHead.startLeg };
       } catch (e) {
-        const said = (e as { status?: unknown; stderr?: string | Uint8Array }).stderr;
-        const detail = typeof said === 'string' ? said : said ? new TextDecoder().decode(said) : (e as Error).message;
+        const detail = stderrOf(e);
+        // B-174 (R-BTN-131): a refusal the forge's own words say is protection — the CLI's
+        // adapter for the forge `--forge` names, else github on github.com, decides; the policy
+        // is never read (R-BTN-180) — lands the same commit on `baton-request/<ID>` and opens a
+        // PR from it. Checked before the moved-head retry: a protected branch never moved, and
+        // before the plain refusal: these words are the operator's answer, not an error to fix.
+        const forge = requestForge(opts.forge, remoteUrl(plan.root, remote));
+        if (forge != null && protectedRefusal(forge, detail)) {
+          return await fileOnRequestBranch(dir, remote, branch(), atHead, id, plan, opts, forge);
+        }
         // Only a push refused because the branch moved is retried: git's `stderr` on a
         // non-fast-forward is its own words for it (`rejected`, `fetch first`). Any other failure
         // (no remote, no permission, a missing branch) is the operator's to fix, and passes up.
         // A hook or a protected branch: git says why in its `remote:` / ` ! [remote rejected]`
         // lines, and those are what the operator needs — not only `failed to push some refs`.
         if (!/non-fast-forward|fetch first|stale info/.test(detail)) {
-          const why = detail.trim().split('\n').map((l) => l.trim()).filter((l) => l !== '' && !/^To /.test(l) && !/failed to push some refs/.test(l));
-          throw new Error(`the push was refused: ${why.join('; ') || 'no reason given'}`);
+          throw new Error(`the push was refused: ${refusalWords(e)}`);
         }
         if (attempt === REQUEST_TRIES) throw new Error(`push refused ${REQUEST_TRIES} times: ${detail.trim().split('\n').at(-1)}`);
         warn(`baton request: ${remote}/${branch()} moved; retrying on the new head (${attempt}/${REQUEST_TRIES})`);
@@ -312,6 +376,86 @@ export function fileRequest(plan: RequestPlan, opts: RequestOptions = {}): Filed
   throw new Error('baton request: no try ran');
 }
 
+/** A forge's own public host, for a PR opened where the origin names none (a `--forge` adapter
+ *  on a local path): GitHub's, GitLab's, Gitea's. */
+const publicHost = (forge: PrForge): string => (forge === 'github' ? 'github.com' : forge === 'gitlab' ? 'gitlab.com' : 'gitea.com');
+
+/** The protected-branch fallback (B-174, R-BTN-131): the commit the worktree `dir` already
+ *  holds — the request `id` on the default branch's head — goes to `baton-request/<ID>`
+ *  instead, nothing reaches the default branch (its refusal is what brought us here), and a PR
+ *  opens from it with the caller's forge credential. A side branch that already exists — a
+ *  request still waiting on it, or one whose merge kept it — takes the next free id, the request
+ *  committed again under it, so the side branch is always this request's own. */
+async function fileOnRequestBranch(
+  dir: string,
+  remote: string,
+  base: string,
+  atHead: RequestPlan,
+  id: string,
+  plan: RequestPlan,
+  opts: RequestOptions,
+  forge: PrForge,
+): Promise<Filed> {
+  // The heads as they stand now: a branch that appeared since the allocation counts again.
+  const heads = requestHeads(dir, remote, opts.warn);
+  let taken = id;
+  while (heads.has(requestBranch(taken))) taken = `${atHead.prefix}-${Number(/-(\d+)$/.exec(taken)?.[1] ?? 0) + 1}`;
+  if (taken !== id) {
+    // Back to the default branch's head and forward under the new id: one commit, the ticket
+    // file alone, exactly as the first one was made.
+    git(dir, 'reset', '-q', '--hard', 'HEAD~1');
+    const moved = join(dir, atHead.items, `${taken}.mdx`);
+    mkdirSync(dirname(moved), { recursive: true });
+    writeFileSync(moved, requestFile(taken, atHead.course, plan.sentence, opts.tier, opts.date));
+    git(dir, 'add', '--', `${atHead.items}/${taken}.mdx`);
+    git(dir, 'commit', '-q', '-m', requestMessage(taken, plan.course, plan.sentence));
+  }
+  const on = requestBranch(taken);
+  try {
+    git(dir, 'push', '-q', remote, `HEAD:refs/heads/${on}`);
+  } catch (e) {
+    // Any refusal of the side branch — `refs.other` refusing it to a runner under `protected`
+    // among them (R-BTN-188) — is the operator's, in git's own words (R-BTN-74): nothing is
+    // opened, and the default branch was never written.
+    throw new Error(`the push was refused: ${refusalWords(e)}`);
+  }
+  const filed: Filed = {
+    id: taken,
+    text: requestFile(taken, atHead.course, plan.sentence, opts.tier, opts.date),
+    message: requestMessage(taken, plan.course, plan.sentence),
+    course: atHead.course,
+    start: atHead.start,
+    startLeg: atHead.startLeg,
+    onBranch: on,
+  };
+  const token = (opts.env ?? process.env)[tokenOf(forge)];
+  if (!token) {
+    // The branch is pushed; the PR cannot open. R-BTN-131: the pushed branch is printed and the
+    // command exits non-zero — a person opens the PR with their own credential.
+    throw new Error(`the push was refused as protected and no ${tokenOf(forge)} is set to open a PR — the request is pushed on ${on}; set the credential and open the PR from it yourself`);
+  }
+  // Both of the PR's facts come from the remote the request was pushed to (round 1), never
+  // origin's slug beside the pushed remote's host: the PR opens on the repository the branch
+  // landed in, and the credential goes to the host that repository is on. A `--remote` that is
+  // a URL rather than a remote's name names both directly; a local path names neither — the
+  // forge's public host, no slug, the refusal the forge then answers.
+  const pushed = remoteUrl(plan.root, remote);
+  const host = pushed != null ? hostOf(pushed) : null;
+  filed.pr = await openRequestPr(
+    {
+      forge,
+      host: host ?? publicHost(forge),
+      repo: remoteSlug(plan.root, remote) ?? (pushed != null && host != null ? slugOfUrl(pushed) : ''),
+      head: on,
+      base,
+      title: filed.message,
+    },
+    token,
+    opts.fetchImpl,
+  );
+  return filed;
+}
+
 /** Whether a path is inside a git checkout at all (`git rev-parse` names its top level). */
 const topOf = (root: string): string | null => {
   try {
@@ -323,11 +467,14 @@ const topOf = (root: string): string | null => {
 
 /**
  * `baton request "<one sentence>" --course <course> [--repo DIR] [--tier T] [--branch B]
- * [--remote R] [-i KEY] [--url URL] [--offline]` (B-98): files ONE request ticket on a course
- * that opts in, as one commit pushed straight to the repository's default branch — the push
- * triggers the sync, the board places the ticket, the next claim starts the course. The id is
- * Baton's to give (B-176, R-BTN-198): the next number of the `ticket-<prefix>` sequence, asked
- * with a floor this checkout sees; a Baton that cannot answer — no key, none configured,
+ * [--remote R] [--forge github|gitlab|gitea|git] [-i KEY] [--url URL] [--offline]` (B-98, B-174,
+ * B-176): files ONE request ticket on a course that opts in, as one commit pushed straight to the
+ * repository's default branch — the push triggers the sync, the board places the ticket, the next
+ * claim starts the course. Where the forge refuses the push because the branch is protected
+ * (R-BTN-131), the same commit lands on `baton-request/<ID>` and a PR opens from it with the
+ * caller's forge credential; without one, the pushed branch is printed and the exit is non-zero.
+ * The id is Baton's to give (B-176, R-BTN-199): the next number of the `ticket-<prefix>` sequence,
+ * asked with a floor this checkout sees; a Baton that cannot answer — no key, none configured,
  * unreachable, `--offline` — leaves today's next-free scan, and the output says so. Prints the
  * id and the course's first station.
  *
@@ -337,7 +484,7 @@ const topOf = (root: string): string | null => {
  */
 export async function requestMain(
   argv: string[],
-  io: { root?: string; log?: (line: string) => void; warn?: (line: string) => void; date?: string; identity?: string; url?: string; offline?: boolean; fetchImpl?: typeof fetch } = {},
+  io: { root?: string; log?: (line: string) => void; warn?: (line: string) => void; date?: string; env?: Record<string, string | undefined>; identity?: string; url?: string; offline?: boolean; fetchImpl?: typeof fetch } = {},
 ): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   const warn = io.warn ?? ((l: string) => process.stderr.write(`${l}\n`));
@@ -346,6 +493,7 @@ export async function requestMain(
   let tier: string | undefined;
   let branch: string | undefined;
   let remote: string | undefined;
+  let forge: string | undefined;
   const sentence: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -361,11 +509,16 @@ export async function requestMain(
       break;
     }
     if (a === '--help' || a === '-h') {
-      log('baton request "<one sentence>" --course <id> [--repo DIR] [--tier T] [--branch B] [--remote R]');
+      log('baton request "<one sentence>" --course <id> [--repo DIR] [--tier T] [--branch B] [--remote R] [--forge github|gitlab|gitea|git] [-i KEY] [--url URL] [--offline]');
       log('  files one request ticket on a course whose course.json says starts_from: request, commits');
       log('  it to the default branch and pushes it: the push starts the sync, the board places the');
       log('  ticket, the next claim starts the course. -- ends the flags: a sentence may start with -.');
-      log("  The id is Baton's to give (R-BTN-198); with --offline, or a Baton that does not answer,");
+      log('  Where the forge refuses the push as protected (B-174), the commit lands on');
+      log('  baton-request/<ID> and a PR opens from it with the caller’s forge credential');
+      log('  (GITHUB_TOKEN, GITLAB_TOKEN, GITEA_TOKEN) — the adapter is the forge --forge names,');
+      log('  else github on github.com. Without a credential the branch is printed and the exit is');
+      log('  non-zero. --forge git, and any refusal that is not protection, stay git’s own words.');
+      log("  The id is Baton's to give (R-BTN-199); with --offline, or a Baton that does not answer,");
       log("  it is today's next-free scan and the output says so.");
       return 0;
     }
@@ -374,6 +527,7 @@ export async function requestMain(
     else if (a === '--tier') tier = value();
     else if (a === '--branch') branch = value();
     else if (a === '--remote') remote = value();
+    else if (a === '--forge') forge = value();
     else if (a === '-i') io.identity = value();
     else if (a === '--url') io.url = value();
     else if (a === '--offline') io.offline = true;
@@ -382,6 +536,9 @@ export async function requestMain(
   }
   if (course == null || course === '') throw new Error('--course is required: the course the request starts (a course whose course.json says starts_from: request)');
   if (!/^[a-z][a-z0-9-]{0,39}$/.test(course)) throw new Error(`--course ${course}: not a course id`);
+  if (forge != null && !NAMED_FORGES.includes(forge as (typeof NAMED_FORGES)[number])) {
+    throw new Error(`--forge ${forge}: not a forge (one of ${NAMED_FORGES.join(', ')}) — git names the plain servers, which have no adapter`);
+  }
   const said = sentence.join(' ').replace(/\s+/g, ' ').trim();
   if (!said) throw new Error('the request is one sentence, in quotes: baton request "<what to do>" --course <id>');
   if (!existsSync(root)) throw new Error(`--repo ${root}: no such directory`);
@@ -395,7 +552,7 @@ export async function requestMain(
   // (round 1, 1-A-2; round 2, 2-r0-1: judging them here both duplicated the check and refused
   // requests the target would have accepted).
   const plan = { root: top, sentence: said, course, items: 'tickets', prefix: 'B', start: '', startLeg: '' };
-  // B-176 (R-BTN-198): the id is Baton's to give, asked before any git runs — the request id IS
+  // B-176 (R-BTN-199): the id is Baton's to give, asked before any git runs — the request id IS
   // the request ticket's id (the build-app legs write `product/<request id>/`), so the kind is
   // the ticket sequence under the checkout's prefix; the landing tree's own prefix is re-read
   // per try, and a mismatch falls back to its scan. A Baton that cannot answer leaves the scan
@@ -422,20 +579,32 @@ export async function requestMain(
   }
   let filed: Filed;
   try {
-    filed = fileRequest(plan, { ...(branch ? { branch } : {}), ...(remote ? { remote } : {}), ...(tier ? { tier } : {}), ...(io.date ? { date: io.date } : {}), ...(allocated != null ? { allocated } : {}), warn });
+    filed = await fileRequest(plan, {
+      ...(branch ? { branch } : {}),
+      ...(remote ? { remote } : {}),
+      ...(forge ? { forge } : {}),
+      ...(tier ? { tier } : {}),
+      ...(io.date ? { date: io.date } : {}),
+      ...(io.env ? { env: io.env } : {}),
+      ...(io.fetchImpl ? { fetchImpl: io.fetchImpl } : {}),
+      ...(allocated != null ? { allocated } : {}),
+      warn,
+    });
   } catch (e) {
     // A failure the git call itself raised carries git's stderr; a refusal of this command's does
     // not. A git one becomes the CLI's one `baton: …` line naming the repository and git's own
     // words, never a bare `Command failed` with the arguments in it. The caller's refusals pass
     // through as the sentence they are.
     if (!(e as { status?: unknown }).status) throw e;
-    const said2 = (e as { stderr?: string | Uint8Array }).stderr;
-    const detail = typeof said2 === 'string' ? said2 : said2 ? new TextDecoder().decode(said2) : (e as Error).message;
-    const lines = detail.trim().split('\n').filter(Boolean);
+    const lines = stderrOf(e).trim().split('\n').filter(Boolean);
     // git's own `fatal: …`/`error: …` lines first — the cause — then the advice after them.
     const cause = lines.filter((l) => /^(fatal|error):/.test(l));
     throw new Error(`git in ${resolve(root)}: ${(cause.length ? cause : lines).join('; ') || 'failed'}`);
   }
-  log(`baton request: filed ${filed.id} (course ${filed.course}) — the next claim starts ${filed.startLeg} at ${filed.start}`);
+  if (filed.pr != null) {
+    log(`baton request: filed ${filed.id} (course ${filed.course}) on ${filed.onBranch} — the default branch refused the push as protected; PR ${filed.pr}; its merge starts ${filed.startLeg} at ${filed.start}`);
+  } else {
+    log(`baton request: filed ${filed.id} (course ${filed.course}) — the next claim starts ${filed.startLeg} at ${filed.start}`);
+  }
   return 0;
 }

@@ -2,8 +2,8 @@
 title: "B-174 — The request command where the default branch is protected: decide by the forge's answer and open a PR"
 id: B-174
 project: baton
-status: available
-updated: 2026-11-02
+status: done
+updated: 2026-11-18
 repos:
   - baton
 tags:
@@ -14,7 +14,8 @@ description: "Build R-BTN-131's protected-branch fallback, the owner's rulings o
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/276
 depends_on: []
 ---
 
@@ -63,3 +64,12 @@ S-BTN-175 as extended, green in `npm test`.
 
 - 2026-11-02: drafted from the 2026-11-02 security review (PR #165).
 - 2026-11-02: decided by the owner (option (a)); the spec half written by PR `claude/baton-spec-review-2fwiga`; this ticket now builds it.
+- 2026-11-18: round 1 — the adapter's fallback reads the host of the remote the request pushed
+  to (`--remote`'s, else `origin`'s), not `origin`'s alone: the refusal is that remote's own
+  answer, so its host names the forge whose words it speaks — R-BTN-131's "origin" presumes the
+  default remote, and `--remote` naming a github.com remote engages the adapter there (the
+  liberal, safe direction; with `--remote` elsewhere and `origin` on github.com it does not
+  engage, exactly as the rule says).
+- 2026-11-18: merged — PR #276 (review round 2 approved; its one non-blocking should-fix, the
+  host reader and the slug reader disagreeing on `ssh://` remotes so the PR-open call fails
+  gracefully there, is recorded in the round-2 review for whoever next touches R-BTN-131).

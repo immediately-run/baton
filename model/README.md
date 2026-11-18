@@ -172,8 +172,9 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   holds, and its own fence check stops it `MARGIN` ticks before its lease ends by its own
   clock, which runs up to `MAX_DRIFT` behind Baton's. The owner force-reaps a live worker's
   claim, which stays fenced — the ticket not re-issued — until that worker reports
-  `fence-cleared` or has been silent (dead or asleep) past its timeout, measured in ticks
-  from its last heartbeat (`fenceTimeout`; round 2, 2-A-0).
+  `fence-cleared`, has been silent (dead or asleep) past its timeout, measured in ticks
+  from its last heartbeat (`fenceTimeout`; round 2, 2-A-0), or an administrator clears it
+  at once (`adminFenceClear`, B-171).
 - **The sync** (§4.3, R-BTN-62): number, then read, then post, as three actions, so every
   interleaving with workers and git is explored — with at most one reading in flight per
   repository: a second number is refused while one is outstanding, and a voided number's post
