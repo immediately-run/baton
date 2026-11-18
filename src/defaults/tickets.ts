@@ -535,7 +535,7 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
     // R-BTN-131, B-174: the open request branches' ids count too — a request still waiting on its
     // `baton-request/<ID>` branch holds its id, and no allocator hands it out again. The head the
     // filing sits on is the worktree's own (the fetched default branch).
-    const openRequests = openRequestNumbers(dir, remote, items, prefix, git(dir, 'rev-parse', 'HEAD'));
+    const openRequests = openRequestNumbers(dir, remote, items, prefix, git(dir, 'rev-parse', 'HEAD'), io.warn);
     const id = `${prefix}${Math.max(nextNumber(files, settings, prefix), ...openRequests.map((n) => n + 1))}`;
     // The prefix's pattern may name ids `new` cannot allocate (a fixed count, `\d{7}`): it says so
     // rather than write a wrong one.

@@ -21,17 +21,24 @@ const git = (root: string, ...a: string[]): string =>
 export const requestBranch = (id: string): string => `baton-request/${id}`;
 
 /** The `baton-request/*` heads on `remote`, by branch name — the ref names alone, one
- *  `ls-remote`, no objects fetched. */
-export function requestHeads(at: string, remote: string): Map<string, string> {
+ *  `ls-remote`, no objects fetched. A listing that fails (a remote the fetch a moment earlier
+ *  did reach, refusing one more call) answers empty and says one line on `warn` (round 1):
+ *  the ids it hid are handed out again, and the sync's duplicate-id refusal (R-BTN-131) is
+ *  the backstop that answers a collision no listing saw. */
+export function requestHeads(at: string, remote: string, warn: (line: string) => void = () => {}): Map<string, string> {
   const out = new Map<string, string>();
   let listed = '';
   try {
     listed = git(at, 'ls-remote', '--heads', remote, 'refs/heads/baton-request/*');
   } catch {
-    return out; // a remote the fetch already reached, refusing a listing: no heads to count
+    warn(`baton: the baton-request/* heads on ${remote} could not be listed; none of their ids is counted — a duplicate is answered by the sync's duplicate-id refusal`);
+    return out;
   }
   for (const line of listed.split('\n')) {
-    const m = /^([0-9a-f]{40})\trefs\/heads\/(baton-request\/.+)$/.exec(line.trim());
+    // A head's object name is a SHA-1 repository's 40 hex or a SHA-256 repository's 64 (round 1:
+    // on the latter every head must stay visible to the allocators); ls-remote never prints a
+    // truncated name, so no shorter run is matched.
+    const m = /^([0-9a-f]{40}(?:[0-9a-f]{24})?)\trefs\/heads\/(baton-request\/.+)$/.exec(line.trim());
     if (m) out.set(m[2], m[1]);
   }
   return out;
@@ -42,15 +49,32 @@ export function requestHeads(at: string, remote: string): Map<string, string> {
  *  request was about to land on — does not reach, read from the branch's own tree under
  *  `items` by its file names, as every allocator reads the folder. A head `head` reaches is a
  *  request whose PR merged: its id is free again, and counts for nothing here. */
-export function openRequestNumbers(at: string, remote: string, items: string, prefix: string, head: string): number[] {
-  const heads = requestHeads(at, remote);
+export function openRequestNumbers(at: string, remote: string, items: string, prefix: string, head: string, warn: (line: string) => void = () => {}): number[] {
+  const heads = requestHeads(at, remote, warn);
   if (!heads.size) return [];
   // The heads' objects, fetched by name with an empty refmap: FETCH_HEAD and the object store
-  // alone, never a remote-tracking ref in the caller's repository.
-  git(at, 'fetch', '-q', '--refmap=', remote, ...[...heads.keys()].map((name) => `refs/heads/${name}`));
+  // alone, never a remote-tracking ref in the caller's repository. One head deleted between the
+  // listing and this fetch must not fail the whole command (round 1): its branch is gone, its
+  // id is free again — so a refused batch is fetched one head at a time, and the heads that no
+  // longer answer are dropped.
+  const byName = (names: string[]) => git(at, 'fetch', '-q', '--refmap=', remote, ...names.map((name) => `refs/heads/${name}`));
+  let live = heads;
+  try {
+    byName([...heads.keys()]);
+  } catch {
+    live = new Map();
+    for (const name of heads.keys()) {
+      try {
+        byName([name]);
+        live.set(name, heads.get(name)!);
+      } catch {
+        warn(`baton: ${name} on ${remote} could not be fetched; its id is not counted`);
+      }
+    }
+  }
   const re = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)\\.mdx?$`);
   const taken: number[] = [];
-  for (const sha of heads.values()) {
+  for (const sha of live.values()) {
     let reachable = true;
     try {
       git(at, 'merge-base', '--is-ancestor', sha, head);

@@ -89,22 +89,27 @@ const PATTERN_STARS_MAX = 4;
 const RESERVED_NAMESPACE = 'baton-request/';
 
 /** Whether a branch pattern can match a branch of `RESERVED_NAMESPACE` — some
- *  `baton-request/<id>` with a nonempty id. The pattern's own words decide: a literal must
- *  match the namespace's fixed half letter for letter (case-insensitively, as branch names are
- *  compared), `*` may cover any run of it and of the id after it, and `{ticket}` and
- *  `{repository}` stand for ids — never empty, never a `/` — so they cannot cross the
- *  namespace's own trailing slash (`baton-{ticket}` never reaches `baton-request/<id>`, while
- *  `baton-request/{ticket}` always does). The walk keeps every position in the fixed half the
- *  match may have reached, and `past`, the state where the half is covered and the match is
- *  writing the branch's own id: a pattern that can end there claims the namespace. Ending
- *  exactly at the half's end claims nothing — no branch is named `baton-request/` alone, and no
- *  token is left to write an id. */
+ *  `baton-request/<id>` with a nonempty id. The pattern's own words decide, as the LOOSEST
+ *  reader of `branch_pattern` reads them (round 1: the PR courses' mapping reader substitutes
+ *  `*` for `{repository}` — course-pr.ts's matchPatterns, a star that spans `/` — while
+ *  claims.ts's branch-holder query substitutes the repository's id; the guard must hold for
+ *  the `*` reading, and `{repository}` is walked as one below): a literal must match the
+ *  namespace's fixed half letter for letter (case-insensitively, as branch names are
+ *  compared), `*` and `{repository}` may cover any run of the half and of the id after it,
+ *  and `{ticket}` stands for an id — never empty, never a `/` (the id is substituted
+ *  literally by every reader) — so it cannot cross the namespace's own trailing slash
+ *  (`baton-{ticket}` never reaches `baton-request/<id>`, while `baton-request/{ticket}`
+ *  always does). The walk keeps every position in the fixed half the match may have reached,
+ *  and `past`, the state where the half is covered and the match is writing the branch's own
+ *  id: a pattern that can end there claims the namespace. Ending exactly at the half's end
+ *  claims nothing — no branch is named `baton-request/` alone, and no token is left to write
+ *  an id. */
 function claimsReservedNamespace(pattern: string): boolean {
   const ns = RESERVED_NAMESPACE;
   let at = new Set([0]);
   let past = false;
   for (let i = 0; i < pattern.length; ) {
-    if (pattern.startsWith('{ticket}', i) || pattern.startsWith('{repository}', i)) {
+    if (pattern.startsWith('{ticket}', i)) {
       const next = new Set<number>();
       for (const j of at) {
         // An id is one or more characters without a `/`: it may run through the fixed half's
@@ -113,7 +118,15 @@ function claimsReservedNamespace(pattern: string): boolean {
         else for (let k = j + 1; k < ns.length; k++) next.add(k);
       }
       at = next;
-      i += pattern.startsWith('{ticket}', i) ? '{ticket}'.length : '{repository}'.length;
+      i += '{ticket}'.length;
+    } else if (pattern.startsWith('{repository}', i)) {
+      // The loosest reader's `*`: any run, the slash included — `baton-request{repository}`
+      // reads as `baton-request*` there, matching `baton-request/<id>` whole.
+      const next = new Set<number>();
+      for (const j of at) for (let k = j; k <= ns.length; k++) next.add(k);
+      past = past || at.size > 0;
+      at = next;
+      i += '{repository}'.length;
     } else if (pattern[i] === '*') {
       // A star covers any run — part of the half, all of it, or the id past it.
       const next = new Set<number>();

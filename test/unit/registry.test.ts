@@ -184,6 +184,11 @@ describe('the reserved branch namespaces (R-BTN-190, B-174)', () => {
     ['BATON-REQUEST/{ticket}', 'case-insensitively, as branch names are compared'],
     ['baton-request/{repository}-{ticket}', 'with the repository beside the ticket'],
     ['baton-request/x{ticket}', 'a literal before the placeholder, once the prefix matches'],
+    // Round 1, blocking: the PR courses' mapping reader substitutes `*` for {repository} — a
+    // star that spans `/` — so the pattern it keeps must not claim the namespace under THAT
+    // reading, whatever the literal-substituting reader (claims.ts) would do with it.
+    ['baton-request{repository}{ticket}', 'the reader’s * spans the namespace’s slash'],
+    ['{repository}/{ticket}', 'a repository placeholder standing for the whole namespace'],
   ])('the registry refuses %s (%s)', (branch_pattern) => {
     expect(() => checkRegistry([entry(branch_pattern as string)])).toThrow(/must not match baton-request\/\*/);
     // The previous pattern is refused the same way.

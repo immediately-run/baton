@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileRequest, readRequestPlan, requestMain } from '../../src/defaults/request';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
 import { CREATE_SPEC_COURSE } from '../../src/defaults/course-pr';
@@ -52,26 +52,61 @@ function repo(): { dir: string; origin: string } {
   return { dir, origin };
 }
 
-/** A `git` shim first on PATH that refuses ONE push — the first to the refspec `to`, with
- *  `words` on stderr, as the forge would — and passes everything else to the real git. */
-function refuseOnce(dirs: string[], to: string, words: string[]): { bin: string } {
+/** A `git` shim first on PATH that refuses each listed push once — the first to each refspec
+ *  `to`, with that refusal's `words` on stderr, as the forge would — and passes everything
+ *  else (other refspecs, later pushes) to the real git. */
+function refuseOnceEach(dirs: string[], refusals: { to: string; words: string[] }[]): { bin: string } {
   const bin = mkdtempSync(join(tmpdir(), 'baton-b174-git-'));
   dirs.push(bin);
   const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
-  const flag = JSON.stringify(join(bin, 'refused'));
   // No backticks and no commas in the shell body: the plan's own tests pin every line.
   const shim = [
     '#!/bin/sh',
     'n=0',
     'for a in "$@"; do if [ "$a" = "push" ]; then n=1; fi; done',
-    `if [ "$n" = "1" ] && [ ! -e ${flag} ]; then`,
+    'if [ "$n" = "1" ]; then',
     '  for a in "$@"; do',
-    `    if [ "$a" = ${JSON.stringify(to)} ]; then`,
-    `      touch ${flag}`,
-    ...words.map((l) => `      echo ${JSON.stringify(l)} 1>&2`),
-    '      exit 1',
-    '    fi',
+    ...refusals.flatMap(({ to, words }) => {
+      const flag = JSON.stringify(join(bin, to.replace(/[^a-zA-Z0-9]/g, '_')));
+      return [
+        `    if [ "$a" = ${JSON.stringify(to)} ] && [ ! -e ${flag} ]; then`,
+        `      touch ${flag}`,
+        ...words.map((l) => `      echo ${JSON.stringify(l)} 1>&2`),
+        '      exit 1',
+        '    fi',
+      ];
+    }),
     '  done',
+    'fi',
+    `exec ${JSON.stringify(realGit)} "$@"`,
+    '',
+  ].join('\n');
+  writeFileSync(join(bin, 'git'), shim, { mode: 0o755 });
+  return { bin };
+}
+
+/** A `git` shim first on PATH that refuses ONE push — the first to the refspec `to`, with
+ *  `words` on stderr, as the forge would — and passes everything else to the real git. */
+function refuseOnce(dirs: string[], to: string, words: string[]): { bin: string } {
+  return refuseOnceEach(dirs, [{ to, words }]);
+}
+
+/** A `git` shim first on PATH that answers the ONE `ls-remote` of the request-branch scan as
+ *  told — a failure, or one printed head line — and passes everything else to the real git:
+ *  the scan's view of the remote, whatever the remote itself would say. */
+function listOnce(dirs: string[], answer: { fail: true } | { line: string }): { bin: string } {
+  const bin = mkdtempSync(join(tmpdir(), 'baton-b174-git-'));
+  dirs.push(bin);
+  const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  const flag = JSON.stringify(join(bin, 'answered'));
+  const shim = [
+    '#!/bin/sh',
+    'n=0',
+    'for a in "$@"; do if [ "$a" = "ls-remote" ]; then n=1; fi; done',
+    `if [ "$n" = "1" ] && [ ! -e ${flag} ]; then`,
+    `  touch ${flag}`,
+    ...(answer.fail ? ['  exit 1'] : [`  printf '%b\\n' ${JSON.stringify(answer.line)}`]),
+    '  exit 0',
     'fi',
     `exec ${JSON.stringify(realGit)} "$@"`,
     '',
@@ -233,6 +268,72 @@ describe('B-174: the protected default branch, decided by the forge’s answer (
     expect(pr.calls.length).toBe(0);
     expect(git(noAdapter.origin, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/baton-request/*').trim()).toBe('');
     expect(git(noAdapter.origin, 'rev-parse', 'main')).toBe(beforeNoAdapter);
+  });
+
+  it('the side branch refused too — refs.other under protected — is git’s own words, nothing opened, non-zero', async () => {
+    const { dir, origin } = repo();
+    const before = git(origin, 'rev-parse', 'main');
+    // The default branch refuses as protected; the side branch's own push is refused as well —
+    // R-BTN-188's `refs.other` refusing `baton-request/<ID>` to a runner under `protected`
+    // (R-BTN-131: "it reports git's own words (R-BTN-74), opens nothing and exits non-zero").
+    const words = [
+      'remote: error: refs.other admits no runner on this repository: baton-request/B-1 is a branch outside the course pattern',
+      'remote: error: and the policy names its updater human alone (protected)',
+      '! [remote rejected] HEAD -> baton-request/B-1 (pre-receive hook declined)',
+    ];
+    const shim = refuseOnceEach(dirs, [
+      { to: 'HEAD:refs/heads/main', words: GH006 },
+      { to: 'HEAD:refs/heads/baton-request/B-1', words },
+    ]);
+    const pr = prAnswer();
+    await expect(refusing(shim.bin, () => fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), { forge: 'github', env: { GITHUB_TOKEN: 'tok' }, fetchImpl: pr.fetchImpl })))
+      .rejects.toThrow(`the push was refused: ${words.join('; ')}`);
+    // Nothing was opened, no branch was left, and the default branch never moved.
+    expect(pr.calls.length).toBe(0);
+    expect(git(origin, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/baton-request/*').trim()).toBe('');
+    expect(git(origin, 'rev-parse', 'main')).toBe(before);
+  });
+
+  it('the PR opens on the remote the request was pushed to — never origin’s, when --remote names another', async () => {
+    const { dir, origin } = repo();
+    // A second bare repository as `upstream`, level with main: the request is pushed to it.
+    const upstream = join(dirname(origin), 'upstream.git');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', upstream]);
+    git(dir, 'remote', 'add', 'upstream', upstream);
+    git(dir, 'push', '-q', 'upstream', 'main');
+    const shim = refuseOnce(dirs, 'HEAD:refs/heads/main', GH006);
+    const pr = prAnswer();
+    const filed = await refusing(shim.bin, () =>
+      fileRequest(readRequestPlan(dir, 'create-spec', SENTENCE), { remote: 'upstream', forge: 'github', env: { GITHUB_TOKEN: 'tok' }, fetchImpl: pr.fetchImpl }),
+    );
+    // The branch is upstream's, and the PR's repository is upstream's own slug — never
+    // origin's beside a host read from upstream (round 1): both facts, one remote.
+    expect(filed).toMatchObject({ id: 'B-1', onBranch: 'baton-request/B-1' });
+    expect(git(origin, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/baton-request/*').trim()).toBe('');
+    expect(git(upstream, 'show', '--name-only', '--format=%s', 'refs/heads/baton-request/B-1').split('\n'))
+      .toEqual(['B-1: request — Decide the export format, so two implementations agree — create-spec', '', 'tickets/B-1.mdx']);
+    expect(pr.calls[0].url).toBe(`https://api.github.com/repos/${upstream.replace(/\.git$/, '')}/pulls`);
+  });
+
+  it('a listing that fails, and a head that vanishes before its fetch, cost their ids nothing — and each says one line', async () => {
+    // The listing itself refused: no heads are counted, one warning line, the request goes on.
+    const silent = repo();
+    const warned: string[] = [];
+    const failList = listOnce(dirs, { fail: true });
+    const filed = await refusing(failList.bin, () => fileRequest(readRequestPlan(silent.dir, 'create-spec', SENTENCE), { warn: (l) => warned.push(l) }));
+    expect(filed.id).toBe('B-1');
+    expect(git(silent.origin, 'show', 'main:tickets/B-1.mdx')).toContain('id: B-1');
+    expect(warned.join('\n')).toContain('could not be listed');
+
+    // A head listed but gone before its fetch — deleted between the ls-remote and the fetch —
+    // is dropped, not fatal: its branch is gone, its id is free again, the request goes on.
+    const vanished = repo();
+    const ghost = listOnce(dirs, { line: `${'e'.repeat(40)}\trefs/heads/baton-request/B-7` });
+    const warnedToo: string[] = [];
+    const filedToo = await refusing(ghost.bin, () => fileRequest(readRequestPlan(vanished.dir, 'create-spec', SENTENCE), { warn: (l) => warnedToo.push(l) }));
+    expect(filedToo.id).toBe('B-1'); // B-7 is uncounted: the branch cannot be fetched at all
+    expect(git(vanished.origin, 'show', 'main:tickets/B-1.mdx')).toContain('id: B-1');
+    expect(warnedToo.join('\n')).toContain('baton-request/B-7 on origin could not be fetched');
   });
 
   it('the allocator counts the open request branches even when the push is admitted', async () => {

@@ -29,7 +29,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { hostOf, NAMED_FORGES, openRequestPr, protectedRefusal, requestForge, tokenOf, type PrForge } from './forge';
-import { remoteSlug } from './remote-slug';
+import { remoteSlug, slugOfUrl } from './remote-slug';
 import { openRequestNumbers, requestBranch, requestHeads } from './request-branches';
 
 /** The most tries one request makes when the default branch moves under it, as
@@ -320,7 +320,7 @@ export async function fileRequest(plan: RequestPlan, opts: RequestOptions = {}):
       const atHead = readRequestPlan(plan.root, plan.course, plan.sentence, dir, `${remote}/${branch()}`);
       // R-BTN-131, B-174: the open request branches' ids count too, so two requests waiting on
       // their branches never share an id. The head the commit sits on is the worktree's own.
-      const open = openRequestNumbers(dir, remote, atHead.items, `${atHead.prefix}-`, git(dir, 'rev-parse', 'HEAD'));
+      const open = openRequestNumbers(dir, remote, atHead.items, `${atHead.prefix}-`, git(dir, 'rev-parse', 'HEAD'), warn);
       const id = nextId(dir, atHead.items, atHead.prefix, open);
       const text = requestFile(id, atHead.course, plan.sentence, opts.tier, opts.date);
       const message = requestMessage(id, plan.course, plan.sentence);
@@ -389,7 +389,7 @@ async function fileOnRequestBranch(
   forge: PrForge,
 ): Promise<Filed> {
   // The heads as they stand now: a branch that appeared since the allocation counts again.
-  const heads = requestHeads(dir, remote);
+  const heads = requestHeads(dir, remote, opts.warn);
   let taken = id;
   while (heads.has(requestBranch(taken))) taken = `${atHead.prefix}-${Number(/-(\d+)$/.exec(taken)?.[1] ?? 0) + 1}`;
   if (taken !== id) {
@@ -426,11 +426,18 @@ async function fileOnRequestBranch(
     // command exits non-zero — a person opens the PR with their own credential.
     throw new Error(`the push was refused as protected and no ${tokenOf(forge)} is set to open a PR — the request is pushed on ${on}; set the credential and open the PR from it yourself`);
   }
+  // Both of the PR's facts come from the remote the request was pushed to (round 1), never
+  // origin's slug beside the pushed remote's host: the PR opens on the repository the branch
+  // landed in, and the credential goes to the host that repository is on. A `--remote` that is
+  // a URL rather than a remote's name names both directly; a local path names neither — the
+  // forge's public host, no slug, the refusal the forge then answers.
+  const pushed = remoteUrl(plan.root, remote);
+  const host = pushed != null ? hostOf(pushed) : null;
   filed.pr = await openRequestPr(
     {
       forge,
-      host: hostOf(remoteUrl(plan.root, remote) ?? '') ?? publicHost(forge),
-      repo: remoteSlug(plan.root) ?? '',
+      host: host ?? publicHost(forge),
+      repo: remoteSlug(plan.root, remote) ?? (pushed != null && host != null ? slugOfUrl(pushed) : ''),
       head: on,
       base,
       title: filed.message,

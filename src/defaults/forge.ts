@@ -21,18 +21,28 @@ export const NAMED_FORGES = ['github', 'gitlab', 'gitea', 'git'] as const;
 const FETCH_TIMEOUT_MS = 30_000;
 
 /** A remote URL's host, lowercased — an `https://` or `ssh://` URL's, or the scp form's
- *  (`git@host:owner/name`); null for a local path or `file://` remote, which is no forge's.
+ *  (`git@host:owner/name`, and the user-less `host:owner/name`); null for a local path or
+ *  `file://` remote, which is no forge's. An `http(s)` URL's explicit port rides along
+ *  (`git.example:8443` — it serves the forge's API as it serves the repository); an `ssh://`
+ *  URL's names the ssh channel, never the API's origin, so it does not.
  *  The local forms are plainGitRemote's (cli.ts): the two must agree on what is no forge. */
 export function hostOf(url: string): string | null {
   const u = url.trim();
   if (/^(file:|\/|\.{1,2}[\\/]|~)/.test(u) || /^[A-Za-z]:[\\/]/.test(u)) return null;
   try {
-    return new URL(u).hostname.toLowerCase();
+    const parsed = new URL(u);
+    // A parse that yields no hostname is the scp form's colon read as a scheme
+    // (`github.com:owner/repo` parses as protocol `github.com:`): fall through, below.
+    if (parsed.hostname) return (parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.host : parsed.hostname).toLowerCase();
   } catch {
     // not a URL: the scp form, or nothing this command can name a host from
-    const m = /^[^@/]+@([^/:]+):/.exec(u);
-    return m ? m[1].toLowerCase() : null;
   }
+  const withUser = /^[^@/]+@([^/:]+):/.exec(u);
+  if (withUser) return withUser[1].toLowerCase();
+  // The user-less scp form (`github.com:owner/repo`): a host with a dot, so a bare word before
+  // a colon (a scheme, a drive letter's remains) is not read as one.
+  const userLess = /^([a-z0-9][a-z0-9.-]*\.[a-z0-9-]+):/i.exec(u);
+  return userLess ? userLess[1].toLowerCase() : null;
 }
 
 /** The adapter that decides the request command's protected-branch fallback (R-BTN-131): the one
@@ -51,17 +61,20 @@ export const tokenOf = (forge: PrForge): string => `${forge.toUpperCase()}_TOKEN
 
 /** Whether `detail` — git's own stderr from the refused push — is `forge` refusing it because
  *  the branch is protected (R-BTN-131): each forge recognised by its own words.
- *  - GitHub's `GH006` is the protected-branch refusal, every variant of it. `GH013` is its
- *    ruleset code: the rulesets governing how a branch may be updated — a pull request
- *    required, a check required — are answered by a PR, and one that does not, secret push
- *    protection, names secrets in its refusal and is never matched.
+ *  - GitHub's `GH006` is the protected-branch refusal, every variant of it. A `GH013` ruleset
+ *    refusal counts only where its own words name a rule a PR answers — one asking for a
+ *    pull request ("Changes must be made through a pull request"), or a check an update must
+ *    pass ("Required status check … is expected to pass"); a GH013 naming any other rule
+ *    (secret push protection's "Push cannot contain secrets" among them, or a future kind
+ *    whose wording this adapter does not know) is the operator's, in git's words — a PR does
+ *    not answer it.
  *  - GitLab's and Gitea's own protected-branch messages, verbatim enough to match.
  *  Anything else — a hook's own words, a permission refusal, a `git` server that happens to say
  *  one of these phrases — is the operator's, reported in git's words (R-BTN-74). */
 export function protectedRefusal(forge: PrForge, detail: string): boolean {
   if (forge === 'github') {
     if (/GH006/i.test(detail)) return true;
-    return /GH013/i.test(detail) && !/secret/i.test(detail);
+    return /GH013/i.test(detail) && /through a pull request|required status check/i.test(detail);
   }
   if (forge === 'gitlab') return /not allowed to push code to protected branches/i.test(detail);
   return /not allowed to push to protected branch/i.test(detail);
@@ -101,12 +114,20 @@ export async function openRequestPr(pr: RequestPr, token: string, fetchImpl: typ
     pr.forge === 'gitlab'
       ? [`${base}/projects/${encodeURIComponent(pr.repo)}/merge_requests`, { title: pr.title, source_branch: pr.head, target_branch: pr.base }]
       : [`${base}/repos/${pr.repo}/pulls`, { title: pr.title, head: pr.head, base: pr.base }];
-  const res = await fetchImpl(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'baton-cli' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
+  let res: Response;
+  try {
+    res = await fetchImpl(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'baton-cli' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+  } catch (e) {
+    // The branch is already pushed: the one case where the operator must open the PR by hand
+    // is the one whose failure must say so (round 1) — DNS, TLS and the 30 s bound land here,
+    // never answered, and get the same closing clause the refusal lines carry.
+    throw new Error(`${pr.forge} (${pr.host}) was not reached opening the PR from ${pr.head}: ${(e as Error).message} — the request is pushed on ${pr.head}; open the PR yourself`);
+  }
   const answered = (await res.json().catch(() => null)) as { html_url?: unknown; web_url?: unknown; message?: unknown; error?: unknown; errors?: unknown } | null;
   const said = answered?.[pr.forge === 'gitlab' ? 'web_url' : 'html_url'];
   if (!res.ok || typeof said !== 'string') {

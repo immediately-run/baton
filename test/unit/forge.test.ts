@@ -33,6 +33,11 @@ const REFUSALS = {
     'remote: error: GitHub found 2 potential secrets in your changes.',
     ' ! [remote rejected] HEAD -> main (push declined due to repository ruleset violation)',
   ].join('\n'),
+  gh013OtherRule: [
+    'remote: error: GH013: Rule violation found for refs/heads/main.',
+    'remote: error: - This rule requires commit signatures.',
+    ' ! [remote rejected] HEAD -> main (push declined due to repository ruleset violation)',
+  ].join('\n'),
   gitlab: [
     'remote: GitLab: You are not allowed to push code to protected branches on this project.',
     'To gitlab.com:immediately-run/baton',
@@ -44,12 +49,14 @@ const REFUSALS = {
 } as const;
 
 describe('the protected-branch matchers (R-BTN-131): each forge by its own words', () => {
-  it('GitHub: GH006, and GH013 naming an update rule — never secret push protection', () => {
+  it('GitHub: GH006, and GH013 naming an update rule — never secret push protection, nor any other rule', () => {
     expect(protectedRefusal('github', REFUSALS.gh006)).toBe(true);
     expect(protectedRefusal('github', REFUSALS.gh013PullRequest)).toBe(true);
     expect(protectedRefusal('github', REFUSALS.gh013Checks)).toBe(true);
     // A GH013 about content, not about how the branch updates: a PR does not answer it.
     expect(protectedRefusal('github', REFUSALS.gh013Secrets)).toBe(false);
+    // A GH013 naming a rule of neither kind (round 1): not protection, whatever the rule is.
+    expect(protectedRefusal('github', REFUSALS.gh013OtherRule)).toBe(false);
     expect(protectedRefusal('github', REFUSALS.hook)).toBe(false);
     expect(protectedRefusal('github', REFUSALS.permission)).toBe(false);
   });
@@ -73,6 +80,13 @@ describe('the adapter that decides (R-BTN-131): --forge names it, else github on
     expect(hostOf('ssh://git@github.company.com:22/immediately-run/baton')).toBe('github.company.com');
     expect(hostOf('git@github.com:immediately-run/baton')).toBe('github.com');
     expect(hostOf('GIT@Gitea.com:immediately-run/baton')).toBe('gitea.com');
+    // The user-less scp form (round 1): its colon parses as a scheme with no hostname, and the
+    // host must still be read — a github.com origin engages the adapter with no --forge.
+    expect(hostOf('github.com:immediately-run/baton')).toBe('github.com');
+    // An https URL's explicit port rides along — it serves the forge's API as the repository —
+    // an ssh URL's names the ssh channel, never the API's origin.
+    expect(hostOf('https://git.example:8443/o/n')).toBe('git.example:8443');
+    expect(hostOf('ssh://git@git.example:2222/o/n')).toBe('git.example');
     // A local path or file:// remote is no forge's.
     expect(hostOf('/srv/git/baton.git')).toBeNull();
     expect(hostOf('file:///srv/git/baton.git')).toBeNull();
@@ -81,6 +95,7 @@ describe('the adapter that decides (R-BTN-131): --forge names it, else github on
   it('github where origin is on github.com; nothing for any other host or a local path', () => {
     expect(requestForge(undefined, 'https://github.com/immediately-run/baton')).toBe('github');
     expect(requestForge(undefined, 'git@github.com:immediately-run/baton')).toBe('github');
+    expect(requestForge(undefined, 'github.com:immediately-run/baton')).toBe('github');
     expect(requestForge(undefined, 'https://gitlab.com/immediately-run/baton')).toBeNull();
     expect(requestForge(undefined, 'https://gitea.com/immediately-run/baton')).toBeNull();
     expect(requestForge(undefined, '/srv/git/baton.git')).toBeNull();
@@ -127,9 +142,21 @@ describe('opening the request’s PR with the caller’s forge credential', () =
     expect(forgeApi('github', 'github.company.com')).toBe('https://github.company.com/api/v3');
     expect(forgeApi('gitlab', 'gitlab.company.com')).toBe('https://gitlab.company.com/api/v4');
     expect(forgeApi('gitea', 'gitea.company.com')).toBe('https://gitea.company.com/api/v1');
+    // An explicit port rides along (round 1): a self-hosted forge on a non-default port gets
+    // its API call sent to the origin that serves it.
+    expect(forgeApi('gitea', 'git.example:8443')).toBe('https://git.example:8443/api/v1');
     expect(tokenOf('github')).toBe('GITHUB_TOKEN');
     expect(tokenOf('gitlab')).toBe('GITLAB_TOKEN');
     expect(tokenOf('gitea')).toBe('GITEA_TOKEN');
+  });
+
+  it('a forge that is not reached at all says so, naming the branch that is pushed (round 1)', async () => {
+    const unreachable: typeof fetch = async () => {
+      throw new TypeError('fetch failed');
+    };
+    await expect(
+      openRequestPr({ forge: 'github', host: 'github.com', repo: 'immediately-run/baton', head: 'baton-request/B-3', base: 'main', title: 'T' }, 'tok', unreachable),
+    ).rejects.toThrow('github (github.com) was not reached opening the PR from baton-request/B-3: fetch failed — the request is pushed on baton-request/B-3; open the PR yourself');
   });
 
   it('a refusal is one line naming the forge, its answer, and the branch that is pushed', async () => {
