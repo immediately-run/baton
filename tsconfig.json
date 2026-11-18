@@ -76,6 +76,8 @@
     "test/unit/request.test.ts",
     "test/unit/request-round2.test.ts",
     "test/unit/request-round4.test.ts",
+    "test/unit/request-protected.test.ts",
+    "test/unit/forge.test.ts",
     "test/integration/S-BTN-175.request.test.ts",
     "test/integration/S-BTN-172.ticket-check.test.ts",
     "test/integration/S-BTN-174.create-spec.test.ts",

@@ -175,3 +175,28 @@ describe('a branch pattern cannot stall the object (round 1, 1-B-0)', () => {
   });
 });
 
+describe('the reserved branch namespaces (R-BTN-190, B-174)', () => {
+  const entry = (branch_pattern: string) => ({ id: 'c', version: 1, min_worker_version: 1, skill: 's', course: {}, step_kinds: [], branch_pattern });
+
+  it.each([
+    ['baton-request/{ticket}', 'the namespace itself'],
+    ['baton-request/{ticket}-*', 'with the usual trailing star'],
+    ['BATON-REQUEST/{ticket}', 'case-insensitively, as branch names are compared'],
+    ['baton-request/{repository}-{ticket}', 'with the repository beside the ticket'],
+    ['baton-request/x{ticket}', 'a literal before the placeholder, once the prefix matches'],
+  ])('the registry refuses %s (%s)', (branch_pattern) => {
+    expect(() => checkRegistry([entry(branch_pattern as string)])).toThrow(/must not match baton-request\/\*/);
+    // The previous pattern is refused the same way.
+    expect(() => checkRegistry([{ ...entry('claude/{ticket}'), previous_branch_pattern: branch_pattern as string }])).toThrow(/must not match baton-request\/\*/);
+  });
+
+  it.each([
+    ['claude/{ticket}-*', 'the default'],
+    ['baton-{ticket}', 'an id never crosses the namespace’s slash'],
+    ['baton-reques{ticket}', 'stopping one letter short of it'],
+    ['{ticket}-request', 'a prefix-less pattern that cannot spell the slash either'],
+  ])('the registry keeps %s (%s)', (branch_pattern) => {
+    expect(checkRegistry([entry(branch_pattern as string)])[0].branch_pattern).toBe(branch_pattern);
+  });
+});
+
