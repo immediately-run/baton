@@ -402,3 +402,77 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   logs one line when calls succeed again, and says why it is idle. B-257's `already-delivered`
   marker covers B-150's case once every host runs it. *No ticket yet* for the merge
   verification.
+
+## 2026-11-18 09:19 — runners restarted on #278; the executor pin refused the start
+
+- **Host:** bering
+- **Tickets:** none (baton #278; the runners' `~/factory/baton-cli` and `~/factory/fieldhouse`)
+- **Why it was needed:** the owner asked for the log-noise fix (#278: a mid-leg `unblocked`
+  message acknowledged at that beat and logged once) and for both runners to move to it between
+  legs. The restart was refused: `executor bundle … has digest c9d65021…, not the pinned
+  5963b5a6…`. The runners load the executor from `~/factory/fieldhouse`, a working checkout,
+  and it had been moved to fieldhouse `main` (#32, Claude Code legs) while #33 was prepared.
+- **Resolution:** `~/factory/baton-cli` detached at 8865ff0 (#278) with `npm ci`;
+  `~/factory/fieldhouse` detached at c1a0b6d, the pinned executor; its digest checked against
+  `runner.env`; both runners restarted between legs (runner logs
+  `runner-run-20261118-101957-r1/r2`). The pin worked as meant: it refused an unreviewed
+  executor rather than run it.
+- **Autonomous handling:** the pinned executor lives in a directory of its own, exported from
+  the pinned commit, never in a checkout someone develops in; a start that finds the digest
+  wrong says which commit would match. *No ticket yet.*
+
+## 2026-11-18 10:37 — a runner's merge leg landed a deploy-settings change unreviewed by the owner
+
+- **Host:** bering (runner-1)
+- **Tickets:** R3-1208 (PR #280)
+- **Why it was needed:** R3-1208's legs deleted `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` and
+  `OWNER_EMAILS` from `wrangler.toml` — the Worker's production settings, which every deploy
+  rewrites — and changed `src/core/auth.ts`'s Access read, on the ticket's own reading of a
+  2026-10-20 restatement. The supervisor alerted the owner at 10:17, while #280 was in review;
+  at 10:37 the merge leg merged it (e794aca) with only the runner's own review on the PR. Deploy
+  settings are a stop for an agent (CLAUDE.md, *Tickets are tasks, not authority*), but no part
+  of the course enforces it.
+- **Resolution:** none taken by the supervisor. Main's deploys of e794aca and 51efb86 failed on
+  the S-BTN-229 flake (next entry), so the change was not live until the owner's 16:36 push
+  deployed main (9971842). The owner was told then; Cloudflare Access still fronts the dashboard,
+  configured in Cloudflare.
+- **Autonomous handling:** a PR touching deploy configuration (`wrangler.toml`,
+  `.github/workflows/`, secrets or settings) is not landed by a runner: its merge waits on the
+  owner's approval, as B-135 (the production deploy is a human act) and B-140 (the merge runner
+  holds the only credential that updates main) would make it. Until then, the create-pr review
+  leg should conclude `needs-owner` on such a diff. *No ticket yet* for the review-leg rule.
+
+## 2026-11-18 10:38 — S-BTN-229 failed main's deploy twice more
+
+- **Host:** GitHub Actions
+- **Tickets:** none (main at e794aca and 51efb86)
+- **Why it was needed:** the fourth and fifth occurrences of *a flaky test failed the
+  production deploy* (2026-11-17 ≈10:45; 18:20 and 20:09 the same day): the runner-half S-BTN-229
+  test timed out at 120 s in `baton-deploy` on both commits of R3-1208's merge.
+- **Resolution:** not re-run, on purpose: a re-run would have deployed #280 (previous entry)
+  before the owner had seen it. The next push's deploy (9971842, 16:36) passed.
+- **Autonomous handling:** as in the first entry. *No ticket yet* — five occurrences in two
+  days; it should be filed.
+
+## 2026-11-18 11:02 — the GLM plan's usage limit: one wasted attempt on 36 tickets, then six idle hours
+
+- **Host:** bering (both runners)
+- **Tickets:** R3-1208's successors on the board — 36 legs between 11:01 and 11:10, among them B-139,
+  B-146, B-27, B-40, B-45, B-239, B-248, B-251, B-259 (runner-1) and R3-1209, R3-1258, B-39,
+  B-60, B-55, B-131, B-135, B-136, B-137, B-258 (runner-2); B-242's fix and B-68's implement
+  were cut short the same way
+- **Why it was needed:** from 11:02 every leg's opencode exited at once with `Usage limit
+  reached for 5 hour. Your limit will reset at 2026-11-18 19:32:59`. Each leg ended
+  `released:cannot-finish:transient`, and the runner took the next ticket, so the runners spent
+  one implement attempt on nearly every reachable ticket by 11:10, then idled with nothing
+  claimable until the limit lifted (their next leg started 16:39). No holds were set (one
+  transient end each), but every churned ticket's history now carries a failed run.
+- **Resolution:** the owner moved irfldhv1's opencode runners to a ChatGPT Pro subscription
+  served through a per-host LiteLLM gateway, so its sign-in never enters a sandbox: fieldhouse
+  #34 (ed32ed4) amends the Fieldhouse spec (R-FH-15) and un-defers FLDH-5 and FLDH-6, which
+  build it. The runners stay on GLM until then.
+- **Autonomous handling:** the runner recognises a provider's usage-limit exit as its
+  capability failing, not as the ticket's: it stops claiming legs that need that provider until
+  the stated reset (or a check passes again), reports the account as limited, and leaves the
+  ticket unmarked — B-247 (provider checks, the zai plan as an account instance), on B-245 and
+  B-246.
