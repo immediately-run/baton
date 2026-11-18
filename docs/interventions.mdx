@@ -250,3 +250,155 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   ticket-text change.
 - **Resolution:** the supervisor re-ran the failed job; it passed and #269 merged at 18:30.
 - **Autonomous handling:** as in that entry. *No ticket yet.*
+
+## 2026-11-17 20:18 — joinable legs ran without their instructions
+
+- **Host:** bering
+- **Tickets:** B-171, B-193, B-52 (every leg on bering since the leg pages went live)
+- **Why it was needed:** the supervisor read the leg pages' sessions. In the B-171 review and
+  the B-193 merge, the agent's first shell call found `BATON_INSTRUCTIONS`, `BATON_COURSE`,
+  `BATON_LEG`, `BATON_TICKET_FILE` and `BATON_ANSWER` empty, so it guessed its leg from the
+  prompt's arguments. The fieldhouse E2B executor (FLDH-57, fieldhouse #30) starts the leg's
+  `opencode serve` in `start()` with the brief's env only (`executor.mjs` lines 169 and 257). The
+  per-leg `BATON_*` values go only to the `opencode run` client (line 288), and the agent's tools
+  run inside the server. B-52 (#272) and B-193 (#235) were reviewed and merged this way. Their
+  CI was green, but no leg instructions shaped those reviews. Nothing in the runner's log
+  showed it.
+- **Resolution:** at the owner's word, fieldhouse #31 moves the server's start into the agent
+  shim, so it starts from the agent's own environment and stops when the agent exits. It was
+  checked live on bering (17/17: a real agent printed `BATON_INSTRUCTIONS` from a tool). At
+  2026-11-17 21:19 the runners were stopped gracefully, with no claim held, and restarted with
+  the executor pinned at `sha256:a8bf3de6…` and baton-cli at main `dc9b280`. The restart also
+  brought in B-256 and B-257.
+- **Autonomous handling:** the agent shim refuses to start a leg whose instructions file is
+  missing from the environment the agent's tools will see, and it ends the leg with an error
+  that names the missing variable. An executor test also runs a tool inside a joinable leg and
+  checks that the `BATON_*` env reaches it. *No ticket yet.*
+
+## 2026-11-17 20:18 — B-193's merge leg waits on an npm release approval
+
+- **Host:** bering (runner-2)
+- **Tickets:** B-193 (PR #235)
+- **Why it was needed:** #235 merged at 19:49, and c9343a3's deploy succeeded. The merge agent
+  then ran `gh run watch --exit-status` on main's newest `ci` run (44163621619). That run's
+  `release` job waits for the `npm` environment's required reviewer. The watch cannot end until
+  the owner approves or rejects the release, so runner-2 is held until the leg's 300-minute
+  ceiling. The agent had no instructions to tell it what to wait for (see the entry above).
+- **Resolution:** none was needed in the end. After 31 minutes the runner ended the leg as
+  `agent_concluded_idle` (quiet for over 15 minutes), and Baton recorded B-193 `done at merged`.
+  The idle check is what freed runner-2, not the leg's own logic. The `release` job still waits
+  on every push to main (run 44163621619, and again on dc9b280).
+- **Autonomous handling:** the merge leg confirms its own delivery (the merge commit's deploy)
+  and never waits on a job gated on a person. A leg with no activity on its leg page for a set
+  time is released with a hand-off. *No ticket yet.*
+
+## 2026-11-17 20:09 — S-BTN-229 failed main's deploy again
+
+- **Host:** GitHub Actions
+- **Tickets:** none (main at 61633c8, #274)
+- **Why it was needed:** this is the third occurrence of *a flaky test failed the production
+  deploy* (2026-11-17 ≈10:45). The same runner-half test timed out at 120 s in `baton-deploy`
+  on a commit that changes only docs.
+- **Resolution:** none needed. Production already runs c9343a3's code (deploy success), and
+  61633c8 changes only docs. Main's deploy status stays red until the next push.
+- **Autonomous handling:** as in the first entry. *No ticket yet.* Three occurrences in one day
+  are reason to file one.
+
+## 2026-11-17 20:44 — Baton down again: internal error on every call
+
+- **Host:** bering (both runners), GitHub Actions (sync)
+- **Tickets:** B-171 (PR #273); none otherwise
+- **Why it was needed:** from 20:44 UTC every heartbeat, recommendation and end report failed
+  with `internal error`. `baton sync` failed `failed:internal` on ad50672 and dc9b280, so
+  Baton's ledger does not yet know that B-171 merged. The owner-key `board` read fails the same
+  way. The symptoms match the 2026-11-15 quota outage (the free tier's 5M `rows_read` a day),
+  and it began an hour after B-193's dashboard shell was deployed (c9343a3, ≈19:55). The
+  supervisor has no Cloudflare credential on bering, so this is not confirmed.
+  Before the outage, B-171's review passed and its merge leg merged #273 at 20:53, both without
+  their leg instructions (see 20:18). The agent merged main into a branch that conflicted (it
+  edited the deleted `src/ui/app.js`). The merge commit's deploy succeeded (dc9b280, 21:07).
+- **Resolution:** Baton answered again from about 00:38 UTC on 2026-11-18 (at 00:17 every call
+  still failed, so the owner was alerted to check Cloudflare; the cause is unconfirmed). The
+  reaper ended B-171's merge leg `reaped:silent` at 00:40. The scheduled sync of dc9b280 at 00:17
+  had failed too; at 01:18 the supervisor re-ran it (44206539698), which succeeded, and Baton
+  recorded B-171's merge.
+- **Autonomous handling:** as in 2026-11-15 — Baton counts its reads against the day's budget
+  and warns before the quota runs out (*no ticket yet*). The read cuts still open are B-239,
+  B-243 and B-250, and B-242, B-240 and B-250 are prioritised for the dashboard poll's reads. A
+  deploy that raises reads per beat should show it before it merges. A failed sync is retried
+  once Baton answers again, without waiting for a push. *No ticket yet.*
+
+## 2026-11-18 00:38 — runners idle after the outage, with routine work on the board
+
+- **Host:** bering
+- **Tickets:** B-175, B-176, B-174
+- **Why it was needed:** once Baton answered again, both runners heartbeated quietly and claimed
+  nothing. The routine tier, the only one their grants reach that had work, listed B-175 (merge),
+  B-176 (run-tests) and B-174. `baton blocked` shows an unconfirmed end on B-175 (claim 185) and
+  B-176 (claim 240); B-174 shows nothing, so it is probably on a `baton:retries` hold, which that
+  command does not show. As before, the runner logs nothing about why it is idle.
+- **Resolution:** reported to the owner at 01:19; these are the owner's decisions.
+- **Autonomous handling:** as in 2026-11-15: the runner logs why it is idle, and an owner channel
+  carries the holds and unconfirmed ends. *No ticket yet.*
+
+## 2026-11-18 04:18 — B-174's merge leg broke main, then waited on the npm release gate
+
+- **Host:** bering (runner-1), GitHub Actions
+- **Tickets:** B-174 (PR #276)
+- **Why it was needed:** the merge leg merged #276 at 04:20 and then archived the ticket by hand
+  with git, straight on main (97a3625). It committed the `git mv` without the staged edits
+  (`status: done`, the status entry), so `check:wiki` failed on main. The agent could not fetch
+  the CI logs (the log host failed TLS from the sandbox), re-ran the job as a flake, then
+  reproduced the failure in a clean checkout and pushed the fix (e94e048) at 04:51. It then waited
+  in a silent loop for main's `ci` run to finish. That run's `release` job waited on the `npm`
+  environment's approval until 05:22, so after 15 quiet minutes the runner ended the leg
+  `agent_concluded_idle` (05:06). The ticket still closed `done at merged`. It is the same gate
+  that held B-193's merge leg on 2026-11-17. The supervisor read the leg's archive to explain the
+  idle end. The archive also showed the collector's `opencode session list` going through the
+  agent shim and trying a second server on the leg's port; fieldhouse #33 fixes that.
+- **Resolution:** none needed for B-174, which merged and was archived. Main was red for about 30
+  minutes.
+- **Autonomous handling:** the merge leg archives a ticket with `baton tickets done`, which
+  writes the archive commit whole, and never with hand-run git. A merge leg waits only for the
+  checks that gate main (`test`), not for a run that holds a release for the owner's approval,
+  or the `release` job no longer blocks the run's conclusion. The leg prints a line at least
+  every few minutes while it waits, so a wait is not read as idle. *No ticket yet.*
+
+## 2026-11-18 06:24 — B-150, B-175 and B-176 completed by hand; bering's grant raised
+
+- **Host:** bering
+- **Tickets:** B-150, B-175 (PR #232), B-176 (PR #236)
+- **Why it was needed:** after the outage both bering runners sat idle for six hours, and
+  runner-2's screen still ended with the outage's `internal error` lines, which read as stuck. It
+  was healthy, heartbeating silently with nothing to claim: the grant's `max_tier: judgement`
+  reached only three tickets, and each was blocked in a way no runner could clear.
+  - **B-175** was held by claim 185's end, unconfirmed since 2026-11-13. That merge leg ended
+    `done` after 18m39s (about 3½ minutes of work, then the 15-minute idle watchdog) without
+    merging #232. The create-pr merge stub returns `{ reached: 'merged' }` whenever its agent
+    exits 0 *or* the watchdog concludes it idle, and never asks the forge whether the PR merged
+    (`src/defaults/courses.ts`'s `merge` position; `src/defaults/cli.ts`'s generated stub). Baton
+    correctly refused to confirm a `done` whose ticket git still showed open (R-BTN-10), and after
+    6 hours the end can only be confirmed or released by an administrator. Nothing told anyone.
+    The approved PR had meanwhile fallen into conflict with main.
+  - **B-176** was held by claim 240's review end (2026-11-17 18:04), left unconfirmed when the
+    supervisor's renumbering push moved the branch. #236 then conflicted with main again (B-174's
+    request fallback), and its rule id R-BTN-198 had been taken again, by B-260 — the very
+    collision B-176 builds the allocator to prevent.
+  - **B-150** was on a `baton:retries` hold. Its work had been delivered on 2026-11-02 by 530e03b
+    (B-166's spec restructure emptied `PATCH_NOTES_ALLOWED`), so every implement attempt found
+    nothing to do and exited clean with no PR — read as `cannot-finish:transient`. After the
+    owner's retry at 06:32, another host's runner (worker 45) spent one more attempt the same way.
+- **Resolution:** at the owner's word: bering's grant raised to `max_tier: critical` (06:31; both
+  runners claimed B-113 and B-242 at once); B-150's hold retried, then archived as delivered
+  (36ca1a9). #232: main merged in (two additive conflicts), CI green, merged (77f73d8), archived
+  (31184f5). #236: main merged in by a subagent (B-174's reserved-namespace walk generalised to
+  B-176's namespaces; both id-allocation paths kept), its rule renumbered to R-BTN-199, CI green
+  after one re-run of the S-BTN-229 flake, merged (850649f), archived (bb8de3d). Claims 185 and
+  240 remain unconfirmed on the dashboard for an administrator; their tickets are closed.
+- **Autonomous handling:** the merge stub verifies the PR is merged (the forge, or the merge
+  commit on the default branch) before it reaches `merged`, and an idle conclusion without that
+  verification fails the leg instead of ending `done`. An end Baton will not confirm reaches the
+  owner the hour it turns 6 hours old (the owner channel). A runner that has logged an error
+  logs one line when calls succeed again, and says why it is idle. B-257's `already-delivered`
+  marker covers B-150's case once every host runs it. *No ticket yet* for the merge
+  verification.
