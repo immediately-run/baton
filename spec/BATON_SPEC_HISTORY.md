@@ -3094,6 +3094,44 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   counts claims, never host resources. `docs/context/architecture.mdx`'s *Parallelism is
   horizontal* is amended with it (B-188 item 8).
 
+- **2026-11-13 — §4.3 R-BTN-199, §4.2 R-BTN-74, §4.6 R-BTN-86, §5.8 R-BTN-131 and R-BTN-190,
+  §7.2 R-BTN-161, §7.6 R-BTN-165, §13, §14, §15 R-BTN-31 and S-BTN-189**
+  (B-176, filed 2026-11-03).
+  Rules changed: R-BTN-31, R-BTN-74, R-BTN-86, R-BTN-131, R-BTN-161, R-BTN-165, R-BTN-190;
+  R-BTN-199 added.
+  Baton hands out every identifier that concurrent branches write to git — the owner's
+  2026-11-03 question "Wouldn't it be simpler to solve this if Baton also handed out ticket
+  IDs?", and the follow-up: "check the spec for any other situation where identifiers were
+  written to Git without being assigned by a baton. This is a classic case where central
+  coordination by baton can make it much easier to choose non-colliding IDs." The collisions
+  that prompted it: B-110 and B-107 both took migration 0028, B-129 and B-145 both took
+  S-BTN-197 (2026-11-02/-03), and `baton ticket new` pushed every filing to `main`, redeploying
+  the server each time. R-BTN-199 states the whole shape once (§4.3, beside the observation
+  counter it generalises, R-BTN-62): one per-repository, per-kind sequence,
+  `POST /v1/repositories/{repository}/sequences/{kind}/next` → `{kind, number}`, the number
+  `max(stored, floor) + 1` with the caller's floor capped 10 000 above the stored number, each
+  take a `sequence` event (a refused floor's too, with the floor and no number; a remote the
+  floor cannot read is an error, never a floor of 0 — round 1 of its review); the CLI names the
+  kinds (`ticket-<prefix>`, `rule`, `scenario`,
+  `gate`, `migration` — the request id resolved as the request ticket's own, so the `ticket`
+  sequence serves it) and computes every floor from one scan: the default branch and every open
+  branch's head. Cited, not restated, where the filers live: R-BTN-74's `new` (whose landing
+  becomes a PR on the reserved `baton-ticket/<id>` by default, `--direct` keeping the push and
+  falling back to the PR on a protected refusal — the owner's "Yes" to filing in a PR, recorded
+  as its own Decisions line beside B-174's, whose order `request` keeps), R-BTN-86's spawned
+  children, R-BTN-165's call children, R-BTN-161's handler tickets (whose `.c<n>` ids were
+  already Baton's), R-BTN-131's allocator paragraph (Baton first, the scan the fallback that
+  says itself), R-BTN-190's reserved namespaces (`baton-ticket/*` beside `baton-legs/*` and
+  `baton-request/*`), R-BTN-31's scenario numbers and §13's migration numbers (`baton ticket
+  next scenario` / `next migration`; the next-free-at-merge dance kept as the no-Baton
+  fallback). §13 gains the `sequences` row, the `sequence` event kind and the `runner:<fp>`
+  actor (a take from a CLI or a delegated key, no runner session behind it); §14 the route;
+  S-BTN-234 walks it, and S-BTN-189's `new` invocations became `--direct`'s. R-BTN-193's legacy
+  list lands its promised retirement for every next-free scan. **Deviation carried in the
+  implementation, not the spec**: the CLI's forge detection builds the GitHub adapter alone
+  (`gh pr create`); GitLab and Gitea origins file as a `git` forge does — the branch pushed and
+  printed — until B-174 builds their adapters. The rule id and scenario are R-BTN-199 and
+  S-BTN-234: R-BTN-198 and S-BTN-231 to S-BTN-233 were taken on main while the branch was open.
 - **2026-11-17 — R-BTN-131 and §9.4 amended, S-BTN-231 added: a failed leg keeps what its agent
   last said (B-256).**
   Rules changed: R-BTN-131 (a stub's failure after its agent ran names the agent's last lines),

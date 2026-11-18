@@ -81,15 +81,16 @@ const int = (v: unknown, lo: number, hi: number) => Number.isInteger(v) && (v as
 /** Stars per branch pattern (spec-silent, recorded on R3-1231): a pattern is a name, not a glob. */
 const PATTERN_STARS_MAX = 4;
 
-/** R-BTN-190 (B-174): the reserved side-branch namespace `baton-request/*` — the request
- *  command's fallback branches (R-BTN-131), whose PRs are never one of the new ticket's own. No
- *  `branch_pattern` may match a branch of it, so no reader of `branch_pattern` — a station
- *  function, R-BTN-25's continuation, the PR courses' mapping, the branch-holder query — ever
- *  sees one. */
-const RESERVED_NAMESPACE = 'baton-request/';
+/** R-BTN-190 (B-174, B-176): the reserved side-branch namespaces — `baton-legs/*` (leg state,
+ *  R-BTN-190), `baton-request/*` (the request command's fallback branches, R-BTN-131) and
+ *  `baton-ticket/*` (`baton tickets new`'s filing branches, R-BTN-74) — whose PRs are never one of
+ *  a ticket's own. No `branch_pattern` may match a branch of any of them, so no reader of
+ *  `branch_pattern` — a station function, R-BTN-25's continuation, the PR courses' mapping, the
+ *  branch-holder query — ever sees one, and no work branch's name collides with one. */
+const RESERVED_NAMESPACES = ['baton-request/', 'baton-ticket/', 'baton-legs/'] as const;
 
-/** Whether a branch pattern can match a branch of `RESERVED_NAMESPACE` — some
- *  `baton-request/<id>` with a nonempty id. The pattern's own words decide, as the LOOSEST
+/** Whether a branch pattern can match a branch of the reserved namespace `ns` — some
+ *  `<ns><id>` with a nonempty id. The pattern's own words decide, as the LOOSEST
  *  reader of `branch_pattern` reads them (round 1: the PR courses' mapping reader substitutes
  *  `*` for `{repository}` — course-pr.ts's matchPatterns, a star that spans `/` — while
  *  claims.ts's branch-holder query substitutes the repository's id; the guard must hold for
@@ -104,8 +105,7 @@ const RESERVED_NAMESPACE = 'baton-request/';
  *  id: a pattern that can end there claims the namespace. Ending exactly at the half's end
  *  claims nothing — no branch is named `baton-request/` alone, and no token is left to write
  *  an id. */
-function claimsReservedNamespace(pattern: string): boolean {
-  const ns = RESERVED_NAMESPACE;
+function claimsReservedNamespace(pattern: string, ns: string): boolean {
   let at = new Set([0]);
   let past = false;
   for (let i = 0; i < pattern.length; ) {
@@ -152,7 +152,8 @@ function claimsReservedNamespace(pattern: string): boolean {
 function pattern(v: unknown, field: string): string {
   if (typeof v !== 'string' || !BRANCH_PATTERN.test(v) || !v.includes('{ticket}')) bad(field, 'must be a branch pattern containing {ticket}');
   if ((v as string).split('*').length - 1 > PATTERN_STARS_MAX) bad(field, `must have at most ${PATTERN_STARS_MAX} *`);
-  if (claimsReservedNamespace(v as string)) bad(field, `must not match ${RESERVED_NAMESPACE}* — that namespace holds the request command's side branches (R-BTN-190), whose PRs are never a ticket's own`);
+  const reserved = RESERVED_NAMESPACES.find((ns) => claimsReservedNamespace(v as string, ns));
+  if (reserved) bad(field, `must not match ${reserved}* — a reserved namespace of side branches (R-BTN-190), whose PRs are never a ticket's own`);
   return v as string;
 }
 

@@ -258,6 +258,13 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a per-tenant request counter with a 5-minute mean over amending R-BTN-87 to live counts
   alone, so the envelope's figures are shown as stated (2026-11-09, the owner; R-BTN-87, §11.4;
   B-202 builds it).
+- Chose `baton ticket new` PR-first — the filing branch `baton-ticket/<id>` asked of the forge
+  before any push to the default branch, `--direct` keeping the push — over B-174's order (push
+  first, PR on the forge's refusal) for `new` alone: the id is unique before any push once
+  Baton hands it out, so the branch can be the filing, and a person — and `check:tickets` —
+  sees the ticket before it lands (2026-11-03, the owner, "Yes", to filing new tickets in a PR
+  before merge "now that they get ids from baton"; B-176; R-BTN-74, R-BTN-199). `baton ticket
+  request` keeps B-174's order unchanged.
 - Chose a person joining the leg's own agent session in its harness's UI, asked by an `interact` condition carrying the run's session link and sent from Baton's list by a delivery runner, with autonomous legs that fail rather than ask, over pausing, hibernating or answering such requests in Baton (2026-11-14, the owner: "we need to remove concepts"; R-BTN-195, R-BTN-69, R-BTN-107).
 - Chose a floor and a recommendation of client versions, stated by Baton on every response and set by the deploy, with a floor that rises only after 14 days' notice and clients that never update themselves, over a single required version or an auto-updating CLI, so runners and people update at their own pace (2026-11-17, the owner: "would allow runners and users interacting with the server using the CLI to update at their own pace"; R-BTN-197).
 - Chose to keep a failed leg's last output — the agent's last lines in the leg's failure and the runner's log, its last line masked as the end's `detail` — over keeping nothing on an agent's exit 0 or parsing that output to choose the end: a sandbox is gone with its claim, and an agent's words are shown, never read (2026-11-17; R-BTN-131, §9.4, B-256).

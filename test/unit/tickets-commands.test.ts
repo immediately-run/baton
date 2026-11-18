@@ -144,8 +144,9 @@ describe('baton tickets new: the ticket it files (B-112)', () => {
     git(f.dir, 'checkout', '-q', '-b', 'my-work');
     writeFileSync(join(f.dir, 'draft.txt'), 'uncommitted\n');
     const before = f.head().sha;
-    const r = run(f.dir, 'new', '--title', 'Write the thing', '--description', 'Write the thing, so two of them agree');
-    expect(r).toMatchObject({ code: 0, err: '' });
+    const r = run(f.dir, 'new', '--direct', '--title', 'Write the thing', '--description', 'Write the thing, so two of them agree');
+    expect(r).toMatchObject({ code: 0 });
+    expect(r.err).toMatch(/^… id by the next-free scan — Baton did not answer \(no key: pass -i KEY \(or set BATON_KEY_FILE\), or --offline to say nothing\)/);
     expect(r.out).toBe('✓ tickets: file B-4 — Write the thing\n');
     // One commit on top of the head, the ticket file alone.
     const { sha, parent } = f.head();
@@ -177,8 +178,11 @@ describe('baton tickets new: the ticket it files (B-112)', () => {
     git(f.dir, 'push', '-q', 'origin', 'HEAD:refs/heads/baton-request/B-3');
     git(f.dir, 'checkout', '-q', 'main');
     git(f.dir, 'branch', '-D', 'side');
-    const r = run(f.dir, 'new', '--title', 'Write the thing');
-    expect(r).toMatchObject({ code: 0, err: '' });
+    // B-176: Baton is not asked here (no key), so the scan gives the id and says so; `--direct`
+    // lands on the default branch as B-174's filing did.
+    const r = run(f.dir, 'new', '--direct', '--title', 'Write the thing');
+    expect(r).toMatchObject({ code: 0 });
+    expect(r.err).toMatch(/^… id by the next-free scan — Baton did not answer \(no key/);
     expect(r.out).toBe('✓ tickets: file B-4 — Write the thing\n');
 
     // A request whose PR MERGED leaves its id free again: the branch stays, but the default
@@ -191,17 +195,18 @@ describe('baton tickets new: the ticket it files (B-112)', () => {
     git(merged.dir, 'push', '-q', 'origin', 'HEAD:refs/heads/baton-request/B-1', 'HEAD:refs/heads/main');
     git(merged.dir, 'checkout', '-q', 'main');
     git(merged.dir, 'branch', '-D', 'side2');
-    const r2 = run(merged.dir, 'new', '--title', 'Write the other thing');
-    expect(r2).toMatchObject({ code: 0, err: '' });
+    const r2 = run(merged.dir, 'new', '--direct', '--title', 'Write the other thing');
+    expect(r2).toMatchObject({ code: 0 });
+    expect(r2.err).toMatch(/^… id by the next-free scan — Baton did not answer \(no key/);
     expect(r2.out).toBe('✓ tickets: file B-2 — Write the other thing\n');
   }, 60_000);
 
   it('the next free number skips the archived ones, and the configured prefix is the one allocated', () => {
     const archived = repo({ existing: { 'tickets/archive/B-7.mdx': ticket('B-7', 'status: done').replace('status: available', ''), 'tickets/B-2.mdx': ticket('B-2') }, settings: { ticket_prefix: 'F', legacy_ids: ['R3-\\d+', 'B-\\d+'] } });
-    expect(run(archived.dir, 'new', '--title', 'x').out).toBe('✓ tickets: file F-1 — x\n');
+    expect(run(archived.dir, 'new', '--direct', '--title', 'x').out).toBe('✓ tickets: file F-1 — x\n');
     // F was not among the accepted ids before the prefix named it: its own pattern is `\d+`.
     expect(fmOf(archived, 'tickets/F-1.mdx').id).toBe('F-1');
-    const again = run(archived.dir, 'new', '--title', 'y');
+    const again = run(archived.dir, 'new', '--direct', '--title', 'y');
     expect(again.out).toBe('✓ tickets: file F-2 — y\n');
   }, 60_000);
 
@@ -209,15 +214,15 @@ describe('baton tickets new: the ticket it files (B-112)', () => {
     const f = repo({ existing: { 'tickets/R3-1249.mdx': ticket('R3-1249', 'status: done') } });
     // A closed ticket may be depended on no more than a live one may (a filing does not wait on
     // a done one, but the id is accepted): an unknown pattern is the refusal.
-    expect(run(f.dir, 'new', '--title', 'x', '--depends-on', 'R3-1250').err).toContain('--depends-on R3-1250: no such ticket on origin/main');
-    expect(run(f.dir, 'new', '--title', 'x', '--depends-on', 'B-9').err).toContain('--depends-on B-9: no such ticket');
-    expect(run(f.dir, 'new', '--title', 'x', '--depends-on', 'Q-1').err).toContain('--depends-on Q-1 is not a ticket id of this repository');
+    expect(run(f.dir, 'new', '--direct', '--title', 'x', '--depends-on', 'R3-1250').err).toContain('--depends-on R3-1250: no such ticket on origin/main');
+    expect(run(f.dir, 'new', '--direct', '--title', 'x', '--depends-on', 'B-9').err).toContain('--depends-on B-9: no such ticket');
+    expect(run(f.dir, 'new', '--direct', '--title', 'x', '--depends-on', 'Q-1').err).toContain('--depends-on Q-1 is not a ticket id of this repository');
     expect(f.at('tickets/B-1.mdx')).toBeNull();
   }, 60_000);
 
   it('--depends-on writes the depends_on list, the **Depends on:** line and the reverse mention', () => {
     const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1') } });
-    const r = run(f.dir, 'new', '--title', 'the second', '--depends-on', 'B-1');
+    const r = run(f.dir, 'new', '--direct', '--title', 'the second', '--depends-on', 'B-1');
     expect(r.out).toBe('✓ tickets: file B-2 — the second\n');
     expect(parseFrontmatter(f.at('tickets/B-2.mdx')!)!.depends_on).toEqual(['B-1']);
     expect(f.at('tickets/B-2.mdx')).toContain('**Depends on:** B-1.');
@@ -229,25 +234,25 @@ describe('baton tickets new: the ticket it files (B-112)', () => {
 
   it('--tags writes what it names, else the file’s tags', () => {
     const f = repo();
-    expect(run(f.dir, 'new', '--title', 'expedited', '--tags', 'EXPEDITE,OP').out).toBe('✓ tickets: file B-1 — expedited\n');
+    expect(run(f.dir, 'new', '--direct', '--title', 'expedited', '--tags', 'EXPEDITE,OP').out).toBe('✓ tickets: file B-1 — expedited\n');
     expect(fmOf(f, 'tickets/B-1.mdx').tags).toEqual(['EXPEDITE', 'OP']);
-    expect(run(f.dir, 'new', '--title', 'plain').out).toBe('✓ tickets: file B-2 — plain\n');
+    expect(run(f.dir, 'new', '--direct', '--title', 'plain').out).toBe('✓ tickets: file B-2 — plain\n');
     expect(fmOf(f, 'tickets/B-2.mdx').tags).toEqual(['roadmap-item']);
     const named = repo({ settings: { tags: ['feature'] } });
-    expect(run(named.dir, 'new', '--title', 'x').code).toBe(0);
+    expect(run(named.dir, 'new', '--direct', '--title', 'x').code).toBe(0);
     expect(fmOf(named, 'tickets/B-1.mdx').tags).toEqual(['feature']);
   }, 30_000);
 
   it('--project writes the page it names; an unknown project, or none at all, is refused', () => {
     const f = repo({ files: { 'tickets/projects/other.mdx': PROJECT('other') } });
-    expect(run(f.dir, 'new', '--title', 'x', '--project', 'other').code).toBe(0);
+    expect(run(f.dir, 'new', '--direct', '--title', 'x', '--project', 'other').code).toBe(0);
     expect(fmOf(f, 'tickets/B-1.mdx').project).toBe('other');
-    const missing = run(f.dir, 'new', '--title', 'y', '--project', 'nope');
+    const missing = run(f.dir, 'new', '--direct', '--title', 'y', '--project', 'nope');
     expect(missing.code).toBe(2);
-    expect(missing.err).toBe('baton: --project nope: no `kind: project` page in tickets/projects/ — write tickets/projects/nope.mdx (frontmatter `id: nope`, `kind: project`) first, or name a project that is there\n');
+    expect(missing.err.split('\n').find((l) => l.startsWith('baton:'))).toBe('baton: --project nope: no `kind: project` page in tickets/projects/ — write tickets/projects/nope.mdx (frontmatter `id: nope`, `kind: project`) first, or name a project that is there');
     // Without a configured default, --project is required — there is no hard-coded one.
     const none = repo({ settings: { project: undefined } });
-    const refused = run(none.dir, 'new', '--title', 'z');
+    const refused = run(none.dir, 'new', '--direct', '--title', 'z');
     expect(refused.code).toBe(2);
     expect(refused.err).toContain('--project is required: this repository names no default project');
     expect(none.at('tickets/B-1.mdx')).toBeNull();
@@ -258,16 +263,16 @@ describe('baton tickets new: the ticket it files (B-112)', () => {
     const body = join(f.dir, 'body.md');
     const withLine = (line: string) => `**Brief:** mine\n\n${line}\n\n### What to build\n\nMine.\n`;
     writeFileSync(body, withLine('**Depends on:** none.'));
-    expect(run(f.dir, 'new', '--title', 'a', '--body-file', body).out).toBe('✓ tickets: file B-1 — a\n');
+    expect(run(f.dir, 'new', '--direct', '--title', 'a', '--body-file', body).out).toBe('✓ tickets: file B-1 — a\n');
     expect(f.at('tickets/B-1.mdx')).toContain('### What to build\n\nMine.\n');
     // The flag names a dependency the file's line does not: refused, nothing pushed.
     writeFileSync(body, withLine('**Depends on:** none.'));
-    const r = run(f.dir, 'new', '--title', 'b', '--body-file', body, '--depends-on', 'B-1');
+    const r = run(f.dir, 'new', '--direct', '--title', 'b', '--body-file', body, '--depends-on', 'B-1');
     expect(r.code).toBe(2);
     expect(r.err).toContain("--body-file's **Depends on:** line does not name B-1, which --depends-on names");
     // The file's line names a dependency the flag does not: refused too.
     writeFileSync(body, withLine('**Depends on:** B-1.'));
-    const s = run(f.dir, 'new', '--title', 'c', '--body-file', body);
+    const s = run(f.dir, 'new', '--direct', '--title', 'c', '--body-file', body);
     expect(s.code).toBe(2);
     expect(s.err).toContain('**Depends on:** names B-1, which --depends-on does not (--depends-on names none)');
     expect(f.at('tickets/B-2.mdx')).toBeNull();
@@ -281,15 +286,15 @@ describe('baton tickets new: the ticket it files (B-112)', () => {
       'tickets/B-1.mdx': ticket('B-1').replace('**Depends on:** none.', '**Depends on:** B-2.').replace('depends_on: []', 'depends_on:\n  - B-2'),
     } });
     const head = f.head().sha;
-    const r = run(f.dir, 'new', '--title', 'a loop', '--depends-on', 'B-1');
+    const r = run(f.dir, 'new', '--direct', '--title', 'a loop', '--depends-on', 'B-1');
     expect(r.code).toBe(2);
-    expect(r.err).toMatch(/^baton: B-2: a dependency cycle: B-1 → B-2 → B-1\n$/);
+    expect(r.err.split('\n').find((l) => l.startsWith('baton:'))).toBe('baton: B-2: a dependency cycle: B-1 → B-2 → B-1');
     expect(f.head().sha).toBe(head);
     expect(f.at('tickets/B-2.mdx')).toBeNull();
     // A prefix whose pattern names four-digit ids is accepted but never allocated: `new` says so
     // rather than write an id its pattern does not admit.
     const zero = repo({ settings: { prefixes: { 'B-': '\\d{4}' } } });
-    const r2 = run(zero.dir, 'new', '--title', 'x');
+    const r2 = run(zero.dir, 'new', '--direct', '--title', 'x');
     expect(r2.code).toBe(2);
     expect(r2.err).toContain('new allocates B-<n>');
     expect(zero.at('tickets/B-1.mdx')).toBeNull();
@@ -297,7 +302,7 @@ describe('baton tickets new: the ticket it files (B-112)', () => {
 
   it('the Requires: clause a description ends with is written on the requires line, and nowhere else', () => {
     const f = repo();
-    expect(run(f.dir, 'new', '--title', 'x', '--description', 'Check the results. Requires: human-operator, drivable-browser.').code).toBe(0);
+    expect(run(f.dir, 'new', '--direct', '--title', 'x', '--description', 'Check the results. Requires: human-operator, drivable-browser.').code).toBe(0);
     const text = f.at('tickets/B-1.mdx')!;
     expect(text).toContain('**Requires:** `human-operator`, `drivable-browser`.');
     expect(text).not.toContain('_A description that ends with a `Requires:` clause');
@@ -429,7 +434,7 @@ describe('baton tickets claim | set | done (B-112)', () => {
       '',
     ].join('\n');
     writeFileSync(join(bin, 'git'), shim, { mode: 0o755 });
-    const out = spawnSync(process.execPath, [CLI, 'tickets', 'new', '--title', 'mine'], { cwd: f.dir, encoding: 'utf8', env: { ...process.env, BATON_HOME: f.dir, PATH: `${bin}:${process.env.PATH}` } });
+    const out = spawnSync(process.execPath, [CLI, 'tickets', 'new', '--direct', '--title', 'mine'], { cwd: f.dir, encoding: 'utf8', env: { ...process.env, BATON_HOME: f.dir, PATH: `${bin}:${process.env.PATH}` } });
     expect(out.stderr).toContain('origin/main moved; retrying on the new head (1/6)');
     expect(out.stdout).toBe('✓ tickets: file B-3 — mine\n');
     // It landed on the peer's commit, which the first try never saw.
@@ -933,20 +938,21 @@ describe('baton tickets new: the Trust and Invariants sections (2026-11-03)', ()
   it('after check.sections_since, an unfilled skeleton is refused before the push; --trust and --invariants fill it', async () => {
     const f = repo({ settings: { check: { sections_since: '2000-01-01' } } });
     const before = f.head().sha;
-    const r = run(f.dir, 'new', '--title', 'a');
+    const r = run(f.dir, 'new', '--direct', '--title', 'a');
     expect(r.code).toBe(2);
     expect(r.err).toContain('B-1: filed on or after check.sections_since (2000-01-01), so ### Trust');
     expect(r.err).toContain('pass --trust "<text>" and --invariants "<text>", or a --body-file that fills them');
     expect(f.head().sha).toBe(before);
     // One filled is still refused, naming only the other.
-    expect(run(f.dir, 'new', '--title', 'a', '--trust', 'no new input').err).toContain('pass --invariants "<text>"');
-    const ok = run(f.dir, 'new', '--title', 'a', '--trust', 'no new input', '--invariants', 'keeps the board post valid');
-    expect(ok).toMatchObject({ code: 0, err: '' });
+    expect(run(f.dir, 'new', '--direct', '--title', 'a', '--trust', 'no new input').err).toContain('pass --invariants "<text>"');
+    const ok = run(f.dir, 'new', '--direct', '--title', 'a', '--trust', 'no new input', '--invariants', 'keeps the board post valid');
+    expect(ok).toMatchObject({ code: 0 });
+    expect(ok.err).toMatch(/^… id by the next-free scan/);
     expect(f.at('tickets/B-1.mdx')).toContain('### Trust\n\nno new input\n\n### Invariants\n\nkeeps the board post valid\n');
     git(f.dir, 'pull', '-q', 'origin', 'main');
     expect((await checkTickets(f.dir, {}, { sections_since: '2000-01-01' })).findings).toEqual([]);
     // Before the cutover (no setting), the skeleton files as before.
-    expect(run(repo().dir, 'new', '--title', 'b')).toMatchObject({ code: 0, err: '' });
+    expect(run(repo().dir, 'new', '--direct', '--title', 'b')).toMatchObject({ code: 0 });
   });
 
 });
@@ -956,11 +962,11 @@ describe('baton tickets new --body-file: filed and judged like the skeleton (202
     const f = repo();
     const body = join(f.dir, 'body.md');
     writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n### What to build\n\nMine.\n');
-    expect(run(f.dir, 'new', '--title', 'a', '--body-file', body).code).toBe(0);
+    expect(run(f.dir, 'new', '--direct', '--title', 'a', '--body-file', body).code).toBe(0);
     expect(f.at('tickets/B-1.mdx')).toMatch(/\n## Status\n\n_filed \d{4}-\d{2}-\d{2}\._\n/);
     // A body that already has its own _filed line keeps it, once.
     writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n## Status\n\n_filed 2026-01-02._\n');
-    expect(run(f.dir, 'new', '--title', 'b', '--body-file', body).code).toBe(0);
+    expect(run(f.dir, 'new', '--direct', '--title', 'b', '--body-file', body).code).toBe(0);
     expect(f.at('tickets/B-2.mdx')!.match(/_filed /g)).toHaveLength(1);
   });
 
@@ -969,12 +975,12 @@ describe('baton tickets new --body-file: filed and judged like the skeleton (202
     const before = f.head().sha;
     const body = join(f.dir, 'body.md');
     writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n### What to build\n\nMine.\n\n### Trust\n\nno new input\n');
-    const r = run(f.dir, 'new', '--title', 'a', '--body-file', body);
+    const r = run(f.dir, 'new', '--direct', '--title', 'a', '--body-file', body);
     expect(r.code).toBe(2);
     expect(r.err).toContain('B-1: filed on or after check.sections_since (2000-01-01), so the body needs ### Invariants (the rules it must not break, by id, and how the design keeps each)');
     expect(f.head().sha).toBe(before);
     writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n### What to build\n\nMine.\n\n### Trust\n\nno new input\n\n### Invariants\n\nR-BTN-33: posts no prose.\n');
-    expect(run(f.dir, 'new', '--title', 'a', '--body-file', body).code).toBe(0);
+    expect(run(f.dir, 'new', '--direct', '--title', 'a', '--body-file', body).code).toBe(0);
   });
 });
 

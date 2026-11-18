@@ -26,6 +26,9 @@ import { ORIGIN, claimItem, cutover, register, rows, setClock, syncToken } from 
 const T0 = Date.parse('2026-10-28T12:00:00Z');
 // The CLI's own entry, as an operator runs it.
 const CLI = resolve(import.meta.dirname, '..', '..', 'cli', 'baton.mjs');
+/** stderr's lines past B-176's fallback note (`… id by the next-free scan …`): these runs ask no
+ *  Baton, so the scan gives the id and says so first; the lines under test follow it. */
+const said = (stderr: string): string[] => stderr.split('\n').filter((l) => !l.startsWith('… id by the next-free scan'));
 // No --pin: the CLI pins its own commit, the one its courses' sources name (B-33).
 const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: () => {} });
 
@@ -151,9 +154,11 @@ describe('S-BTN-175 the request', () => {
     repo.publish();
     const before = repo.git('rev-parse', 'HEAD');
 
-    // The request, as an operator files it.
+    // The request, as an operator files it. B-176: with no key in this environment the id is
+    // the scan's, and the fallback's note is said on stderr.
     const filed = repo.request(SENTENCE, '--course', 'create-spec');
-    expect(filed).toMatchObject({ status: 0, stderr: '' });
+    expect(filed).toMatchObject({ status: 0 });
+    expect(filed.stderr).toMatch(/^… id by the next-free scan — Baton did not answer/);
     expect(filed.stdout).toBe('baton request: filed B-1 (course create-spec) — the next claim starts converse at requested\n');
 
     // One commit on the origin's main, on top of the scaffold, the ticket file and nothing else —
@@ -245,7 +250,7 @@ describe('S-BTN-175 the request', () => {
     // No GITHUB_TOKEN: the side branch is pushed, and the command says so and exits non-zero.
     const no = repo.spawn({ PATH: `${bin}:${process.env.PATH}`, GITHUB_TOKEN: '' }, [SENTENCE, '--course', 'create-spec', '--forge', 'github']);
     expect(no.status).toBe(2);
-    expect(no.stderr.split('\n')[0])
+    expect(said(no.stderr)[0])
       .toBe('baton: the push was refused as protected and no GITHUB_TOKEN is set to open a PR — the request is pushed on baton-request/B-1; set the credential and open the PR from it yourself');
     expect(execFileSync('git', ['-C', repo.bare, 'show', 'refs/heads/baton-request/B-1:tickets/B-1.mdx'], { encoding: 'utf8' })).toContain('id: B-1');
     expect(execFileSync('git', ['-C', repo.bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(before);
@@ -281,7 +286,7 @@ describe('S-BTN-175 the request', () => {
     const bin = refuseMain(repo.bare);
     const git1 = repo.spawn({ PATH: `${bin}:${process.env.PATH}` }, [SENTENCE, '--course', 'create-spec']);
     expect(git1.status).toBe(2);
-    expect(git1.stderr.split('\n')[0]).toBe('baton: the push was refused: remote: error: GH006: Protected branch update failed for refs/heads/main.; remote: error: Cannot push to this protected branch; ! [remote rejected] HEAD -> main (protected branch hook declined)');
+    expect(said(git1.stderr)[0]).toBe('baton: the push was refused: remote: error: GH006: Protected branch update failed for refs/heads/main.; remote: error: Cannot push to this protected branch; ! [remote rejected] HEAD -> main (protected branch hook declined)');
 
     // A refusal that is not protection, adapter or not: the same one line, nothing opened.
     const plain = mkdtempSync(join(tmpdir(), 'baton-s175-git-'));
@@ -305,7 +310,7 @@ describe('S-BTN-175 the request', () => {
     writeFileSync(join(plain, 'git'), shim, { mode: 0o755 });
     const other = repo.spawn({ PATH: `${plain}:${process.env.PATH}`, GITHUB_TOKEN: 'tok' }, [SENTENCE, '--course', 'create-spec', '--forge', 'github']);
     expect(other.status).toBe(2);
-    expect(other.stderr.split('\n')[0]).toBe('baton: the push was refused: remote: error: this repository wants no tickets by push; ! [remote rejected] HEAD -> main (pre-receive hook declined)');
+    expect(said(other.stderr)[0]).toBe('baton: the push was refused: remote: error: this repository wants no tickets by push; ! [remote rejected] HEAD -> main (pre-receive hook declined)');
 
     // Nothing was opened anywhere, and the default branch never moved.
     expect(execFileSync('git', ['-C', repo.bare, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/baton-request/*'], { encoding: 'utf8' }).trim()).toBe('');

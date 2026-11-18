@@ -170,9 +170,9 @@ export function requiresFrom(description: string): string[] {
  *  commands' Baton reads go, the sync's own default) and `default_course` (the course a ticket
  *  naming none follows, read by `courseStart`). `{}` for a file that is missing or
  *  unreadable: the caller read the same file as settings and has already refused it if it must. */
-export function readSettingsJson(root: string): { repos?: Record<string, string>; baton_url?: string; default_course?: string } {
+export function readSettingsJson(root: string): { repos?: Record<string, string>; baton_url?: string; default_course?: string; check?: { rules?: unknown } } {
   try {
-    return JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8')) as { repos?: Record<string, string>; baton_url?: string; default_course?: string };
+    return JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8')) as { repos?: Record<string, string>; baton_url?: string; default_course?: string; check?: { rules?: unknown } };
   } catch {
     return {};
   }

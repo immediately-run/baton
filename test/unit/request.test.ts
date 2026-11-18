@@ -184,7 +184,7 @@ describe('baton request: the ticket it files (B-98)', () => {
     expect(parseFrontmatter(atOrigin(dir2, 'tickets/B-1.mdx')!)!).not.toHaveProperty('tier');
   });
 
-  it('every key the request writes is one the item schema admits, and the ticket-shaped ones are there', () => {
+  it('every key the request writes is one the item schema admits, and the ticket-shaped ones are there', async () => {
     const schema = JSON.parse(readFileSync(join(ROOT, 'tickets', 'item.schema.json'), 'utf8')) as { required: string[]; propertyNames: { enum: string[] } };
     const fm = parseFrontmatter(requestFile('B-9', 'create-spec', SENTENCE, 'routine', '2026-10-28'))!;
     // The ticket's own required keys are Baton's wiki's, not every repository's: a request
@@ -194,7 +194,7 @@ describe('baton request: the ticket it files (B-98)', () => {
     expect(fm.updated).toBe('2026-10-28');
   });
 
-  it('round 2, finding 3: the file carries the _filed Status line new writes, and the check exempts it as a request', () => {
+  it('round 2, finding 3: the file carries the _filed Status line new writes, and the check exempts it as a request', async () => {
     const text = requestFile('B-9', 'create-spec', SENTENCE, 'routine', '2026-10-28');
     expect(filedDate(text)).toBe('2026-10-28');
     expect(text.trimEnd().endsWith('## Status\n\n_filed 2026-10-28._')).toBe(true);
@@ -348,15 +348,16 @@ describe('baton request: the id, the branch and the push (B-98)', () => {
     expect(log.slice(0, 3)).toEqual([requestMessage('B-10', 'create-spec', SENTENCE), 'a peer’s requests', 'fixture']);
   });
 
-  it('a repository with no remote is the CLI’s one line and exit 2, not a stack trace', () => {
+  it('a repository with no remote is the CLI’s one line and exit 2, not a stack trace', async () => {
     const dir = repo({ remote: false });
     const out = spawnSync(process.execPath, [CLI, 'request', '--course', 'create-spec', SENTENCE], { cwd: dir, encoding: 'utf8', env: { ...process.env, BATON_HOME: dir } });
     expect(out.status).toBe(2);
-    expect(out.stderr.split('\n')[0]).toMatch(/^baton: git in .*: fatal: 'origin' does not appear to be a git repository; fatal: Could not read from remote repository\.$/);
+    // B-176's fallback note precedes the refusal (the id Baton did not give, then git's own words).
+    expect(out.stderr.split('\n').find((l) => l.startsWith('baton:'))).toMatch(/^baton: git in .*: fatal: 'origin' does not appear to be a git repository; fatal: Could not read from remote repository\.$/);
     // And through the CLI's own path a refusal is the same one line and exit 2.
     const refused = spawnSync(process.execPath, [CLI, 'request', '--course', 'create-pr', SENTENCE], { cwd: repo({ courses: { 'create-pr': GRAPH['create-pr'] } }), encoding: 'utf8' });
     expect(refused.status).toBe(2);
-    expect(refused.stderr).toMatch(/^baton: origin\/main: course create-pr does not start from a request — its course\.json carries no starts_from: request\./);
+    expect(refused.stderr.split('\n').find((l) => l.startsWith('baton:'))).toMatch(/^baton: origin\/main: course create-pr does not start from a request — its course\.json carries no starts_from: request\./);
     // And the CLI's happy path: the line, exit 0.
     const ok = spawnSync(process.execPath, [CLI, 'request', '--course', 'create-spec', SENTENCE], { cwd: repo(), encoding: 'utf8' });
     expect(ok.status).toBe(0);

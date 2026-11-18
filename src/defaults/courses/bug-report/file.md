@@ -19,9 +19,10 @@ ticket for the fix exists and the bug ticket names it.
 ## Write the fix ticket
 
 - Create a new ticket file in the repository's tickets directory (the `items` setting in
-  `.baton/baton.json`, `tickets/` by default), with the next id the repository uses. If the
-  repository has a tool that allocates ticket ids, use it. Its course is the repository's
-  default (`create-pr` unless it says otherwise).
+  `.baton/baton.json`, `tickets/` by default), with the next id the repository uses — its id
+  tool if it has one: `baton tickets new` (or `baton tickets next ticket-<prefix>` for a child
+  on a branch) takes the id from Baton's sequence, never a scan (R-BTN-131). Its course is the
+  repository's default (`create-pr` unless it says otherwise).
 - Write it the way the `draft-ticket` course does: **Why** (the symptom and the cause at
   `file:line`), **What to build**, **Architecture** (the decisions, named), **Trust** (every new
   input it adds, who may write it and how it is verified, or "no new input"), **Invariants** (the

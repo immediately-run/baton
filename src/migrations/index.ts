@@ -57,6 +57,7 @@ import dashboardLookups from './0055_dashboard_lookups.sql';
 import workerProfile from './0056_worker_profile.sql';
 import severalClaims from './0057_several_claims.sql';
 import clientVersions from './0058_client_versions.sql';
+import sequences from './0059_sequences.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -183,4 +184,7 @@ export const MIGRATIONS: Migration[] = [
   // 0058 is B-254's (R-BTN-197: the recommended client an administrator may raise, and each
   // runner's own statement of its version), renumbered at the merge behind B-188's 0057.
   { id: 58, sql: clientVersions },
+  // 0059 is B-176's (the per-repository, per-kind sequences, and the `sequence` event kind),
+  // renumbered at the merge behind main's 0048–0058, its events CHECK the union with B-234's.
+  { id: 59, sql: sequences },
 ];
