@@ -54,6 +54,7 @@ export type ErrorCode =
   | 'client-too-old' // §11 (R-BTN-197): a Baton-Client below the served min
   | 'floor-violated' | 'unsatisfiable-approvers' | 'confirm-required' // §12.8 (B-145): the policy's refusals
   | 'capacity-full'
+  | 'frozen' | 'sealed' // §4.8 (R-BTN-88): a claim or owner write on a frozen Baton; any request but an administrator's read on a sealed one
   | 'quota'; // §7.1 (R-BTN-160, B-234): past a raise's open-condition or daily quota
 
 const STATUS: Record<ErrorCode, number> = {
@@ -69,6 +70,8 @@ const STATUS: Record<ErrorCode, number> = {
   closed: 409, // a notice whose decision was answered (R-BTN-80)
   'floor-violated': 409, 'unsatisfiable-approvers': 409, // R-BTN-189's floor, R-BTN-188's unsatisfiable list
   'confirm-required': 428, // a destructive action without confirm: true (§14)
+  frozen: 409, // §4.8 (R-BTN-88): new claims and owner writes on a frozen Baton
+  sealed: 503, // §4.8 (R-BTN-88): a sealed Baton serves an administrator's reads alone — retryable elsewhere
   quota: 429, // §7.1 (R-BTN-160, B-234): past a raise's quota
 };
 

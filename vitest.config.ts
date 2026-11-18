@@ -96,6 +96,9 @@ const NODE_ONLY = ['test/unit/spec-files.test.ts', 'test/unit/local-queue.test.t
  *  (R3-1244); test/unit/check-traces.test.ts skips its own Quint cases on the same variable.
  *  `npm run test:full` and `npm run model:full` run them. */
 const QUINT_TESTS = process.env.BATON_SKIP_QUINT === '1' ? ['test/model/replay.test.ts'] : [];
+/** R3-1258 (§15): `npm run test:load` — the envelope mix on the local host alone (G-BTN-77);
+ *  the Cloudflare budgets are read on production (B-224), never from a staging run. */
+const LOAD_TEST = ['test/load/**'];
 const host = (name: string) => ({ '#host': resolve(import.meta.dirname, `test/hosts/${name}.ts`) });
 
 /** The test SSH keys (R-BTN-13 as amended, R3-1239): one of each type, made per run, seeded
@@ -148,7 +151,7 @@ export default defineConfig({
           globalSetup: ['./test/global-setup.ts'],
           setupFiles: ['./test/setup.ts'],
           include: ['test/**/*.test.ts'],
-          exclude: [...NODE_ONLY, 'test/ui/**'],
+          exclude: [...NODE_ONLY, ...LOAD_TEST, 'test/ui/**'],
         },
       },
       {
@@ -159,7 +162,7 @@ export default defineConfig({
           environment: 'node',
           globalSetup: ['./test/global-setup.ts'],
           setupFiles: ['./test/setup.ts'],
-          include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...NODE_ONLY, ...SCRIPT_TESTS],
+          include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...LOAD_TEST, ...NODE_ONLY, ...SCRIPT_TESTS],
           exclude: [...configDefaults.exclude, ...QUINT_TESTS],
           provide: { localConfig: { ...testVars(wranglerVars()), ...bindings } },
         },

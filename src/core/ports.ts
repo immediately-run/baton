@@ -127,6 +127,11 @@ export interface Config {
    *  JWK of its private half — `{"kty":"OKP","crv":"Ed25519","d":…,"x":…}`. A secret on
    *  Cloudflare, a key file locally; Baton never generates or stores one. */
   BATON_SIGNING_KEY?: string;
+  /** R-BTN-2 (§2.1, R3-1258): the plan's daily limits, `{"requests": <n>, "rows_written": <n>}`,
+   *  a Worker var on Cloudflare and `--plan-limits` locally — the default is Workers Free's
+   *  100,000 each. The dashboard draws the day's usage against them; nothing is refused at a
+   *  limit. */
+  BATON_PLAN_LIMITS?: string;
   /** Test bindings only (vitest.config.ts, §13a): never set by a deploy or a local start. */
   BATON_TEST_BINDINGS?: string;
   TEST_OIDC_JWKS?: string;

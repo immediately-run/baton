@@ -31,6 +31,7 @@
     "test:full": "rm -rf test/.traces && vitest run && npm run model:links && npm run traces && npm run model:quick",
     "test:baton": "vitest run",
     "pretest:baton": "npm run build:ui",
+    "test:load": "npm run build:ui && BATON_SKIP_QUINT=1 vitest run test/load/ --project local",
     "test:no-quint": "BATON_SKIP_QUINT=1 vitest run && npm run model:links",
     "pretest:no-quint": "npm run build:ui",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.local.json && tsc --noEmit -p tsconfig.dashboard.json",

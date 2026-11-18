@@ -5,6 +5,7 @@
 // running record for people and for replay, never an event-sourced log: nothing is rebuilt from
 // it, and git stays the truth. Rows hold names, ids, versions and pointers, never content (R-BTN-33).
 import { logEvent } from './db';
+import { adjustCounts } from './capacity';
 import { repositoryOf } from './validate';
 import type { Store } from './ports';
 
@@ -67,12 +68,15 @@ export class History {
     return this.c.store.exec<T>(q, ...p).toArray();
   }
 
-  /** Append one row to `ticket`'s history, in the caller's transaction. */
+  /** Append one row to `ticket`'s history, in the caller's transaction. R3-1258: the row moves
+   *  the maintained history count (R-BTN-87's figure — a scan of a growing table is B-236's
+   *  to refuse, so the count is kept, not counted). */
   record(ticket: string, r: HistoryRow) {
     this.c.store.exec(`INSERT INTO ticket_history (repository_id, ticket_id, at, kind, claim_id, worker_id, leg, reached, next_leg, run, run_id, snapshot_sha,
                          head_sha, course_version, leg_version, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       repositoryOf(ticket), ticket, this.c.now(), r.kind, r.claim_id ?? null, r.worker_id ?? null, r.leg ?? null, r.reached ?? null, r.next_leg ?? null,
       r.run ?? null, r.run_id ?? null, r.snapshot_sha ?? null, r.head_sha ?? null, r.course_version ?? null, r.leg_version ?? null, detailJson(r.detail));
+    adjustCounts(this.c.store, { history: 1 });
   }
 
   /**
@@ -104,11 +108,15 @@ export class History {
   purge() {
     const cutoff = this.c.now() - KEEP_AFTER_CLOSE_MS;
     const due = this.rows<{ ticket_id: string }>(`SELECT ticket_id FROM closed_tickets WHERE purged_at IS NULL AND closed_at <= ? ORDER BY closed_at LIMIT ?`, cutoff, PURGE_BATCH);
+    let purgedRows = 0;
     for (const t of due) {
-      this.c.store.exec('DELETE FROM ticket_history WHERE ticket_id = ?', t.ticket_id);
+      // R3-1258: each delete's own count (the cursor's `rowsWritten`) leaves the maintained
+      // history figure (R-BTN-87) — a purge's rows are as many as the ticket held.
+      purgedRows += this.c.store.exec('DELETE FROM ticket_history WHERE ticket_id = ?', t.ticket_id).rowsWritten ?? 1;
       // B-238 (R-BTN-149): the ticket's claims are due to go next (`Retention`).
       this.c.store.exec('UPDATE closed_tickets SET purged_at = ?, claims_due_at = ? WHERE ticket_id = ?', this.c.now(), this.c.now(), t.ticket_id);
     }
+    if (purgedRows) adjustCounts(this.c.store, { history: -purgedRows });
     return due.length;
   }
 
