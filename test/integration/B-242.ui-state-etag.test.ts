@@ -74,7 +74,7 @@ describe('B-242 the dashboard poll’s ETag', () => {
     const etag = (await poll()).headers.get('ETag')!;
     const w = await register('vm-a');
     expect((await beat('vm-a', w.secret)).status).toBe(200);
-    // The first heartbeat registered the worker — a write; a steady beat after it is liveness
+    // The first heartbeat registered the runner — a write; a steady beat after it is liveness
     // alone (R-BTN-196): the version stands, and so does the poll's answer.
     const etag2 = (await poll()).headers.get('ETag')!;
     expect((await beat('vm-a', w.secret)).status).toBe(200);
@@ -147,13 +147,13 @@ describe.runIf(HOST === 'cloudflare')('B-242 an unchanged poll reads about one r
 
   it('production-sized: the poll naming its ETag reads a handful of rows, not the state', { timeout: 120_000 }, async () => {
     // The state the incident measured (B-237's recipe): 180 tickets, ~600 ended claims, ~3k
-    // events, a worker with a steady lease.
+    // events, a runner with a steady lease.
     for (let i = 2; i <= 180; i++) git.add(`T-${i}`, { requires: ['human-operator'] });
     expect((await git.post()).status).toBe(200);
     const w = await register('vm-a');
     const other = await register('vm-b');
     await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < 600)
-                INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, end_reason, ended_at, ended_at_sha, confirmed_at, end_observation)
+                INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, end_reason, ended_at, ended_at_sha, confirmed_at, end_observation)
                 SELECT 'docs:T-' || (1 + i % 180), ?, 'hist-' || i, 'abc123', '', ?, 'completed', 'suspended:reviewed', ?, 'abc', ?, 0 FROM k`, other.id, T0 - 86_400_000, T0 - 86_400_000, T0 - 86_400_000);
     await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < 3000)
                 INSERT INTO events (at, kind, actor, detail_json, repository_id) SELECT ?, 'claimed', 'test', '{}', 'docs' FROM k`, T0 - 86_400_000);
