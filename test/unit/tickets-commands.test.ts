@@ -348,6 +348,50 @@ describe('baton tickets claim | set | done (B-112)', () => {
     expect(run(f.dir, 'claim', 'B-2', '--offline').code).toBe(0);
   }, 60_000);
 
+  it('a qualified dependency resolves through the repos map and gates the claim on the target\'s own board (B-113)', () => {
+    // The target repository: a bare git remote the repos map names by path, holding an archived
+    // done ticket (B-1), a live done one (B-2) and a live open one (B-3).
+    const target = tmp('baton-b113-target-');
+    execFileSync('git', ['init', '-q', '-b', 'main', target], { stdio: 'ignore' });
+    git(target, 'config', 'user.email', 'b113@test');
+    git(target, 'config', 'user.name', 'b113');
+    mkdirSync(join(target, '.baton'), { recursive: true });
+    writeFileSync(join(target, '.baton', 'baton.json'), JSON.stringify({ items: 'tickets', repos: {} }));
+    mkdirSync(join(target, 'tickets', 'archive'), { recursive: true });
+    writeFileSync(join(target, 'tickets', 'archive', 'B-1.mdx'), ticket('B-1').replace('status: available', 'status: done'));
+    writeFileSync(join(target, 'tickets', 'B-2.mdx'), ticket('B-2').replace('status: available', 'status: done'));
+    writeFileSync(join(target, 'tickets', 'B-3.mdx'), ticket('B-3'));
+    git(target, 'add', '-A');
+    git(target, 'commit', '-qm', 'target fixture');
+    const depends = (id: string, dep: string) => ticket(id).replace('**Depends on:** none.', `**Depends on:** ${dep}.`).replace('depends_on: []', `depends_on:\n  - ${dep}`);
+    const f = repo({
+      settings: { repos: { target: target } },
+      existing: {
+        'tickets/B-9.mdx': depends('B-9', 'target:B-1'),
+        'tickets/B-10.mdx': depends('B-10', 'target:B-2'),
+        'tickets/B-11.mdx': depends('B-11', 'target:B-3'),
+        'tickets/B-12.mdx': depends('B-12', 'target:B-99'),
+        'tickets/B-13.mdx': depends('B-13', 'ghost:B-1'),
+      },
+    });
+    // Archived there and live `done` there are done here: the claims go through.
+    expect(run(f.dir, 'claim', 'B-9', '--offline').code).toBe(0);
+    expect(run(f.dir, 'claim', 'B-10', '--offline').code).toBe(0);
+    // A live open target keeps the claim waiting; an unknown ticket and a repository the map
+    // does not name refuse, as the board post would (§4.4).
+    expect(run(f.dir, 'claim', 'B-11', '--offline').err).toBe('baton: B-11 depends on target:B-3, not done yet\n');
+    expect(run(f.dir, 'claim', 'B-12', '--offline').err).toContain('target:B-99, which is neither live nor archived on');
+    expect(run(f.dir, 'claim', 'B-13', '--offline').err).toContain('ghost: the baton.json repos map does not resolve it');
+  }, 60_000);
+
+  it('dependencyRemote reads the repos map: a forge path is GitHub\'s, a remote as written', async () => {
+    const { dependencyRemote } = await import('../../src/defaults/tickets');
+    expect(dependencyRemote({ baton: 'immediately-run/baton' }, 'baton')).toBe('https://github.com/immediately-run/baton');
+    expect(dependencyRemote({ local: '/srv/git/local.git' }, 'local')).toBe('/srv/git/local.git');
+    expect(dependencyRemote({ ssh: 'git@github.com:immediately-run/baton.git' }, 'ssh')).toBe('git@github.com:immediately-run/baton.git');
+    expect(() => dependencyRemote({}, 'ghost')).toThrow('ghost: the baton.json repos map does not resolve it');
+  });
+
   it('set writes any live status and --pr adds the pull request once', () => {
     const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1') } });
     const url = 'https://github.com/immediately-run/baton/pull/40';

@@ -44,6 +44,10 @@ export const COURSES_MAX = 64;
 export const LOCAL_ID = new RegExp(`^${LOCAL_SRC}$`);
 /** A ticket's qualified id, `<repository>:<local>`: what Baton's API, events and dashboard use. */
 export const TICKET_ID = new RegExp(`^(${REPOSITORY_SRC}):(${LOCAL_SRC})$`);
+/** B-113 (§4.4): what one `depends_on` entry may be — a local id of the posting repository, or
+ *  a ticket of another registered repository named by its qualified id (`baton:B-111`). `parent`
+ *  and `blocked_by` stay local (§3.1, R-BTN-47). */
+export const DEPENDENCY_ID = new RegExp(`^(?:${REPOSITORY_SRC}:${LOCAL_SRC}|${LOCAL_SRC})$`);
 /** A qualified ticket id and its two halves. Every caller holds an id `TICKET_ID` accepted. */
 export const qualify = (repository: string, local: string) => `${repository}:${local}`;
 export const repositoryOf = (ticketId: string) => ticketId.slice(0, ticketId.indexOf(':'));
@@ -774,7 +778,6 @@ export interface SequenceTake {
   floor: number | null;
   forTicket: string | null;
 }
-
 /** The `next` request's body, validated before any SQL (§12.3): `floor` a non-negative integer,
  *  `for` a local ticket id; unknown fields refused. */
 export function checkSequenceTake(v: unknown): SequenceTake {
@@ -789,6 +792,18 @@ export function checkSequenceTake(v: unknown): SequenceTake {
   }
   const forTicket = optional(r.for, matches(LOCAL_ID, 'for')) ?? null;
   return { floor, forTicket };
+}
+
+/** B-113 (§4.3): what the sync's dependencies read (`POST /v1/sync/dependencies`) carries —
+ *  `{ids: [<qualified id>…]}`, the `depends_on` entries of other repositories the posting
+ *  repository's tickets name. The ids themselves are judged where they are resolved
+ *  (dependencies.ts); this holds the body's shape alone. */
+export function checkDependenciesRead(v: unknown): string[] {
+  if (!isObj(v)) bad('body', 'must be {ids: [<repository>:<local>…]}');
+  const r = v as Record<string, unknown>;
+  for (const k of Object.keys(r)) if (k !== 'ids') bad(k, 'is not a dependencies-read field');
+  if (!Array.isArray(r.ids) || r.ids.length > 500 || !r.ids.every((x) => typeof x === 'string')) bad('ids', 'must be a list of at most 500 qualified ids');
+  return r.ids as string[];
 }
 
 /** B-190: `run_inputs` as the advance carries it (§13.5 `leg_run_inputs`): pointers and digests

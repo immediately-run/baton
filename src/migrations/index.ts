@@ -58,6 +58,7 @@ import workerProfile from './0056_worker_profile.sql';
 import severalClaims from './0057_several_claims.sql';
 import clientVersions from './0058_client_versions.sql';
 import sequences from './0059_sequences.sql';
+import dependencyConsents from './0060_dependency_consents.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -187,4 +188,7 @@ export const MIGRATIONS: Migration[] = [
   // 0059 is B-176's (the per-repository, per-kind sequences, and the `sequence` event kind),
   // renumbered at the merge behind main's 0048–0058, its events CHECK the union with B-234's.
   { id: 59, sql: sequences },
+  // 0060 is B-113's (R-BTN-47's relations rule relaxed for `depends_on`: the target repository's
+  // owners' consent to a less visible dependent, and the `dependency-consent` event).
+  { id: 60, sql: dependencyConsents },
 ];

@@ -261,9 +261,20 @@ interface Board {
   statusOf: (id: string) => string | null;
 }
 
+/** One dependency the sync's dependencies read answered (B-113): the qualified id and whether it
+ *  is done on its own board. */
+export interface ResolvedDep {
+  ticket: string;
+  done: boolean;
+}
+
 /** Read the board from the checkout as it stands: the tickets and stations from the
- * repository's own code or the CLI's defaults, the registry from `baton.json`'s courses. */
-async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void, record?: BatonRecord): Promise<Board> {
+ *  repository's own code or the CLI's defaults, the registry from `baton.json`'s courses.
+ *  `resolveDeps` (B-113) resolves the qualified `depends_on` entries of other repositories the
+ *  live tickets name against their boards — the read a sync makes after its number, as every
+ *  input it posts is (§4.3); its doneness joins `done`, so each course's station function gates
+ *  on a cross-repository dependency as on a local one (R-BTN-120). */
+async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void, record?: BatonRecord, resolveDeps?: (ids: readonly string[]) => Promise<readonly ResolvedDep[]>): Promise<Board> {
   const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
 
   // The ticket source: the repository's own, else the markdown default. B-183 (R-BTN-74): a
@@ -299,6 +310,31 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   }
   const closedIds = new Set(result.closed.map((c) => c.id));
   const doneIds = new Set(result.closed.filter((c) => c.as === 'done').map((c) => c.id));
+
+  // B-113: the qualified dependencies the live tickets name. Another repository's resolve
+  // against its board — the dependencies read, after the number as everything this run posts is
+  // (§4.3) — and one done there is done here, so the station functions gate on it as on a local
+  // one (R-BTN-120). The posting repository's own id spelled qualified (`docs:R3-1` posted by
+  // docs) is the local id's own dependency read as itself: the repos map names this checkout's
+  // registered id (the short name its forge path maps to), and a done local target marks its
+  // qualified spelling done. A read that refuses — an unregistered repository, an unknown
+  // ticket, a less visible target without its owners' consent — fails the run here, before the
+  // forge is read, with the same words the post would be refused with.
+  const ownRepoId = Object.entries(batonJson.repos ?? {}).find(([, path]) => {
+    const slug = remoteSlug(root)?.toLowerCase();
+    return slug != null && path.toLowerCase() === slug;
+  })?.[0] ?? null;
+  const qualified = [...new Set(result.tickets.filter((t) => !closedIds.has(t.id)).flatMap((t) => t.depends_on.filter((d) => d.includes(':'))))];
+  if (ownRepoId != null && qualified.some((d) => d.startsWith(`${ownRepoId}:`))) {
+    for (const d of qualified) {
+      if (d.startsWith(`${ownRepoId}:`) && doneIds.has(d.slice(ownRepoId.length + 1))) doneIds.add(d);
+    }
+  }
+  const foreign = qualified.filter((d) => ownRepoId == null || !d.startsWith(`${ownRepoId}:`));
+  if (foreign.length) {
+    if (!resolveDeps) throw new Error(`tickets name cross-repository dependencies (${foreign.join(', ')}) that this run cannot resolve — the sync's dependencies read was not given (B-113)`);
+    for (const d of await resolveDeps(foreign)) if (d.done) doneIds.add(d.ticket);
+  }
 
   // Every live ticket's course must be one this repository lists (R-BTN-74: a ticket on a course
   // with no station function fails the sync — nothing is posted).
@@ -714,7 +750,12 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         git(root, 'checkout', '-q', '--detach', 'FETCH_HEAD');
       }
       // baton.json too is read at the commit posted.
-      board = await readBoard(root, JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson, args, log, record);
+      // B-113: the qualified dependencies of other repositories resolve against their boards —
+      // one read after the number, its doneness joining the `done` the station functions gate on.
+      board = await readBoard(root, JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson, args, log, record, async (ids) => {
+        const answer = await api.dependencies([...ids]);
+        return (Array.isArray(answer.dependencies) ? answer.dependencies : []).map((d) => ({ ticket: String(d.ticket), done: d.done === true }));
+      });
       return git(root, 'rev-parse', 'HEAD');
     },
     readHead: () => asResult(() => api.head()),

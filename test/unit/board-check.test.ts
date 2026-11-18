@@ -49,6 +49,27 @@ describe('a board post with a dependency cycle is refused (B-111)', () => {
   });
 });
 
+describe('a qualified depends_on names another repository\'s ticket (B-113)', () => {
+  it('the shape takes a qualified id in depends_on, in both post shapes, and keeps blocked_by local', () => {
+    expect(post([ticket('B-1', { depends_on: ['baton:B-111', 'B-2'] }), ticket('B-2')]).tickets).toHaveLength(2);
+    // The interim shape's `dependsOn` carries them too (B-111's round 1 read, kept).
+    expect(() => checkPayload({
+      sha: '0'.repeat(40), parent_sha: null, observation: 1,
+      state: { items: [{ id: 'T-1', title: 'T', status: 'available', queue: 'q', node: 'n', dependsOn: ['baton:B-1'] }] }, ready: ['T-1'],
+    })).not.toThrow();
+    // A malformed qualified id, and `blocked_by` — a parent's children, R-BTN-47 — stays local.
+    expect(() => post([ticket('B-1', { depends_on: ['NotARepo:x'] })])).toThrow('depends_on must be a list');
+    expect(() => post([ticket('B-1', { depends_on: ['docs:B-1:x'] })])).toThrow('depends_on must be a list');
+    expect(() => post([ticket('B-1', { blocked_by: ['baton:B-1'] })])).toThrow('blocked_by must be a list');
+  });
+
+  it('a qualified edge is no node of the one-board cycle graph — the cross-board walk is the post\'s judgment', () => {
+    // B-1 → baton:B-9 → B-2 → B-1 would loop only if baton's board answered; the shape check
+    // holds one board's own graph and follows no qualified edge (§4.4).
+    expect(post([ticket('B-1', { depends_on: ['baton:B-9'] })]).tickets).toHaveLength(1);
+  });
+});
+
 describe('bodyDependencies: the **Depends on:** line (B-111)', () => {
   const ID = /[A-Z]+-\d+/;
 

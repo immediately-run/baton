@@ -6,7 +6,7 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
-import { ASKS, COURSE_ID as LEG_ID, DECISION_GRANT_MAX, DECISION_ID, DECISION_OPTION, DECISION_OPTIONS_MAX, DECISION_QUESTION, DECISIONS_MAX, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE } from './validate';
+import { ASKS, COURSE_ID as LEG_ID, DECISION_GRANT_MAX, DECISION_ID, DECISION_OPTION, DECISION_OPTIONS_MAX, DECISION_QUESTION, DECISIONS_MAX, DEPENDENCY_ID, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE } from './validate';
 import type { Step } from './graph';
 
 /** One factory-state item, as the sync posts it (`docs/scripts/factory-state.mjs`). Only the
@@ -392,7 +392,9 @@ function checkInterim(p: BoardPayload) {
     list(it.tags, /^[A-Za-z0-9-]{1,64}$/, `${it.id}: tags`);
     // B-104 (R-BTN-121/174): a clause may name a typed capability — `<type>:<value>`.
     list(it.requires, new RegExp(`^(?:${NAME.source}|${HOLDING_TYPE}:${HOLDING_VALUE})$`), `${it.id}: requires`);
-    list(it.dependsOn, ID, `${it.id}: dependsOn`);
+    // B-113: `dependsOn` may name another repository's ticket by its qualified id;
+    // `blockedBy` (parent's children, R-BTN-47) stays local.
+    list(it.dependsOn, DEPENDENCY_ID, `${it.id}: dependsOn`);
     list(it.blockedBy, ID, `${it.id}: blockedBy`);
     list(it.repos, REPO, `${it.id}: repos`);
     if (it.course !== undefined && (typeof it.course !== 'string' || !COURSE_ID.test(it.course))) throw new BatonError('invalid-params', `${it.id}: course must be a course id`);
@@ -470,7 +472,9 @@ function checkNormative(p: BoardPayload) {
     if (typeof t.operator_only !== 'boolean' || typeof t.expedite !== 'boolean') fail(`${t.id}`, 'operator_only and expedite are booleans');
     for (const k of ['depends_on', 'blocked_by'] as const) {
       if (!isObjArr(t[k], DEP_MAX)) fail(`${t.id}.${k}`, `must be a list of at most ${DEP_MAX}`);
-      list(t[k], ID, `${t.id}: ${k}`);
+      // B-113 (§4.4): a `depends_on` entry is a local id or a qualified one naming another
+      // registered repository's ticket; `blocked_by` (a parent's children, R-BTN-47) stays local.
+      list(t[k], k === 'depends_on' ? DEPENDENCY_ID : ID, `${t.id}: ${k}`);
     }
     if (!isObjArr(t.repos, 64)) fail(`${t.id}.repos`, 'must be a list of at most 64');
     list(t.repos, REPO, `${t.id}: repos`);
@@ -532,7 +536,10 @@ function checkNormative(p: BoardPayload) {
   }
   // B-111: a post whose live tickets' `depends_on` form a cycle is refused, naming it — no
   // ticket source posts a loop that would hold every ticket on it out of the default order
-  // unseen. After `closed` is seen, so the graph is the live one exactly.
+  // unseen. After `closed` is seen, so the graph is the live one exactly. B-113: a cycle that
+  // runs through two boards is refused the same way at the post's judgment, where the other
+  // boards are read (`checkCrossBoardCycle`, §4.4) — this check holds one board's own graph,
+  // and a qualified edge is no node of it.
   const live = new Set(p.tickets!.map((t) => t.id));
   for (const c of p.closed ?? []) live.delete(c.id);
   const loop = dependsCycle(p.tickets!.filter((t) => live.has(t.id)).map((t) => ({ id: t.id, depends_on: t.depends_on })));

@@ -3286,6 +3286,29 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   ticket is held for a person as at any leg's bound, and not counting the run would let such
   edits restart a leg without limit. A flip back to the version last verified restarts nothing.
 
+- **2026-11-18 — §3.1 R-BTN-47, §4.2 R-BTN-74, §4.4, §6.1 R-BTN-120 and §11.3's owner routes
+  amended; S-BTN-235 added: dependencies on another repository's tickets (B-113).**
+  Rules changed: R-BTN-47 (*Relations stay home* relaxed for `depends_on` alone, with the
+  visibility-and-consent clause), R-BTN-74 (the markdown source posts qualified ids as written;
+  `baton ticket check` and the ticket commands take them), §4.4 (the post's judgment of a
+  qualified `depends_on` — unregistered and unknown targets refused, consent, the cross-board
+  cycle, the sync's dependencies read), R-BTN-120 (a qualified prerequisite resolves against the
+  target's board, as for a local one), §11.3 (the owner route
+  `POST /v1/owner/{repository}/dependency-consents`). Until now a wait on another repository's
+  ticket could only be written as prose (a `**Waits on:**` line), so nothing stopped a claim
+  before the other repository's work was done; a file URL was considered and rejected — a done
+  ticket moves to `archive/`, so the URL breaks exactly when the dependency is met. The owner,
+  2026-10-25, asked for a dependency that is not just a local id, and Baton already names
+  tickets by their qualified id (`docs:R3-1205`), so `depends_on` takes it. `parent` (so
+  `blocked_by`) stays home, and an unqualified id stays local. Visibility is judged over the
+  principals a board reaches — its owner keys and worker grants, an administrator's lowering
+  nothing — so a dependency on an equally visible target (the same owners, the instance's usual
+  shape) asks for nothing, and one on a less visible target needs the target repository owners'
+  consent, recorded as R-BTN-140's cross-repository consent is (its `code_repo_consents` table
+  itself still waits on its own ticket; `dependency_consents` is migration 0060). The ticket is
+  B-113; fieldhouse FLDH-27's wait becomes `depends_on: [baton:B-111, baton:B-112]` when the CLI
+  release carrying this is pinned.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

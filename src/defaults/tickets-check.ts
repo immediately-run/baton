@@ -33,8 +33,11 @@ import { parseFrontmatter, ticketsMarkdown, type MarkdownFile, type MarkdownSett
  *  underscore directly after the number, means the token is something else (round 2, 2-r0-1).
  *  A full stop after it is usually the sentence's (`… see B-2.`), so only a stop followed by
  *  more token (`B-4.1`) is part of the id (round 3, 3-r1-1) — except a wiki link's `.md`/`.mdx`
- *  (`[[R3-1128.mdx]]`, docs' form: 117 of its 218 lines, round 4, 4-r2-0). */
-const ID_TOKEN = /(?<![A-Za-z0-9._-])([A-Za-z](?:[A-Za-z0-9]*|[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)-\d+[a-z]?)(?![A-Za-z0-9_]|\.(?!mdx?(?![A-Za-z0-9]))[A-Za-z0-9])/g;
+ *  (`[[R3-1128.mdx]]`, docs' form: 117 of its 218 lines, round 4, 4-r2-0).
+ *  B-113: a token may carry another repository's id before it — `baton:B-111`, the repository
+ *  id exactly as Baton registers it (`^[a-z][a-z0-9-]{0,39}$`), a colon, then the local id — so
+ *  the comparison reads a qualified dependency as one token, never its local half alone. */
+const ID_TOKEN = /(?<![A-Za-z0-9._-])((?:[a-z][a-z0-9-]{0,39}:)?[A-Za-z](?:[A-Za-z0-9]*|[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)-\d+[a-z]?)(?![A-Za-z0-9_]|\.(?!mdx?(?![A-Za-z0-9]))[A-Za-z0-9])/g;
 
 /** The ticket ids a markdown ticket's body names on its `**Depends on:**` line, or null when it
  *  has no such line (B-111). The body is the file's text with its frontmatter blanked; the line
@@ -187,9 +190,12 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
     if (!said.has(key)) findings.push(f);
     said.add(key);
   };
+  // A qualified id (B-113) names another repository's ticket: not this repository's to check —
+  // `baton tickets claim` resolves it through the repos map, the sync's dependencies read
+  // against its board, and the post's judgment refuses what neither resolves.
   for (const t of live) {
     const at = t.path ?? (used.items ?? 'tickets');
-    for (const dep of t.depends_on ?? []) if (!known.has(dep)) add({ path: at, message: `depends_on names ${dep}, which is neither live nor closed` });
+    for (const dep of t.depends_on ?? []) if (!dep.includes(':') && !known.has(dep)) add({ path: at, message: `depends_on names ${dep}, which is neither live nor closed` });
   }
 
   // The markdown source's body line (B-111): `**Depends on:**` names exactly `depends_on`.
@@ -199,7 +205,14 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
     // (`^FLDH-\d+$`, `.baton/baton.json`'s ticket_prefix), so those are prose there and here.
     const ownIds = new Set([...result.tickets.map((t) => t.id), ...result.closed.map((c) => c.id)]);
     const prefixes = new Set([...ownIds].map((id) => id.replace(/\d+[a-z]?$/, '')));
-    const isMine = (id: string): boolean => ownIds.has(id) || prefixes.has(id.replace(/\d+[a-z]?$/, ''));
+    // B-113: a qualified id is this comparison's when its repository is one the repos map names
+    // (the own repository included, a key of its own map) — its local half alone is not: the
+    // line names `baton:B-111` or nothing, and `B-111` alone would be another repository's id
+    // read as prose.
+    const reposNamed = new Set(Object.keys(used.repos ?? {}));
+    const isMine = (id: string): boolean => ownIds.has(id)
+      || prefixes.has(id.replace(/\d+[a-z]?$/, ''))
+      || (id.includes(':') && reposNamed.has(id.slice(0, id.indexOf(':'))));
     const texts = new Map(files.map((f) => [`${(used.items ?? 'tickets').replace(/\/$/, '')}/${f.path}`, f.text]));
     for (const t of result.tickets) {
       if (t.path == null) continue; // a pathless ticket has no body line to compare

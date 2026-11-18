@@ -199,6 +199,32 @@ describe('checkTickets: the markdown source’s **Depends on:** line (check.depe
       .toEqual(['**Depends on:** names B-2, which depends_on does not']);
   });
 
+  it('a qualified dependency is one token on the line, and not this repository\'s to look for (B-113)', async () => {
+    // depends_on: [baton:B-1] is no finding (the target is another repository's, resolved at the
+    // claim and against its board), and the line names it whole — its local half alone is not
+    // the dependency. `baton` is one of the repos map's names, as a dependency's repository is.
+    const withMap = { repos: { baton: 'immediately-run/baton' } };
+    const ok = repo({
+      'tickets/A-1.md': ticket('id: A-1\ndepends_on: [baton:B-1, A-2]', '**Depends on:** baton:B-1 and A-2.\n'),
+      'tickets/A-2.md': ticket('id: A-2'),
+    }, { ...on, ...withMap });
+    expect((await checkTickets(ok, {}, { depends_line: true })).findings).toEqual([]);
+    const half = repo({
+      'tickets/A-1.md': ticket('id: A-1\ndepends_on: [baton:B-1]', '**Depends on:** B-1.\n'),
+    }, { ...on, ...withMap });
+    // The line's bare `B-1` is prose (no such ticket here, 4-r2-1's rule); the disagreement is
+    // still a finding — the line does not name the dependency it must.
+    expect(lines(await checkTickets(half, {}, { depends_line: true }))).toEqual([
+      'tickets/A-1.md: depends_on names baton:B-1, which **Depends on:** does not',
+    ]);
+    // A qualified id whose repository the repos map names is the comparison's; one it does not
+    // name is prose (as another prefix's local id is, 4-r2-1).
+    const unMapped = repo({
+      'tickets/A-1.md': ticket('id: A-1', '**Depends on:** ghost:B-1 and R-FH-40.\n'),
+    }, on);
+    expect((await checkTickets(unMapped, {}, { depends_line: true })).findings).toEqual([]);
+  });
+
   it('a line naming an id depends_on does not, and depends_on naming one the line does not, are both findings', async () => {
     const dir = repo({
       'tickets/A-1.md': ticket('id: A-1\ndepends_on: [A-2]', 'Prose, with a **Depends on:** mention in it — not the line.\n\n**Depends on:** A-3, A-4\n\nMore prose.\n'),

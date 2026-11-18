@@ -85,8 +85,28 @@ repository reachable over SSH is enough (R-BTN-105).
   - **One board per repository**: its own head and compare-and-set (R-BTN-11), observation
     counter (R-BTN-62) and sync run. A sync credential posts only its own
     repository's board.
-  - **Relations stay home.** A ticket's `parent` and `depends_at` name tickets of the same
-    repository.
+  - **Relations stay home, `depends_on` excepted (B-113).** A ticket's `parent` (so its
+    children's `blocked_by`) names tickets of the same repository. Its `depends_on` may name a
+    ticket of another repository registered with the same Baton, by its qualified id
+    `<repository id>:<local id>` (`baton:B-111`); an unqualified id stays local, and a
+    repository naming its own id qualified is read as it reads the local id alone. A qualified
+    dependency resolves against the target's board (§4.4, R-BTN-120): the target must be
+    live-registered and its ticket live or closed there, and a cycle through two boards is
+    refused as one board's is.
+    - **Visibility and consent.** A dependency exposes the target's ticket — its state, its
+      title — wherever the dependent's board is seen. It is accepted when the target's
+      repository is **at least as visible** as the dependent's: every owner key and every
+      worker grant that sees the dependent's board sees the target's too (an administrator sees
+      every board, so administrator keys lower nothing). Otherwise the dependency needs the
+      target repository owners' consent, recorded as R-BTN-140's cross-repository consent is:
+      one row on the target naming the dependent, given by `POST
+      /v1/owner/{repository}/dependency-consents {repository: <dependent>, confirm: true}`
+      (R-BTN-58; `withdraw: true` takes it back), judged by id at every use and never written by
+      the dependent's own settings. Without it, the post is refused `invalid-params` and the
+      sync's dependencies read `forbidden`, both naming the consent; a board never shows a less
+      visible repository's ticket without that consent — the link a qualified dependency draws
+      (§4.4) is the target's registration, not a stored URL, and no other field of the target
+      crosses.
   - **Repositories a ticket changes** (`repos:`) are filter fields its course reports. They
     need no registration and reach nothing unless the home's owners list them in `code_repos`
     (R-BTN-140).
