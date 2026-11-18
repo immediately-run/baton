@@ -1,0 +1,300 @@
+// B-250 — the Workers view reads a constant number of queries, however many workers were ever
+// registered (BATON_SPEC §14's /v1/ui/state, §13's indexes; R-BTN-3's kept rows). The view ran
+// about six queries for *every* worker row on each poll — reaped ones included — the latest
+// transcript (a UNION over `transcripts` and `pending_transcripts`), `worker_capabilities`,
+// the latest `status_report`, and more: ~1.9k statements a poll on the B-240 harness with 300
+// old worker rows (~3.6k rows_read), polled every 10 seconds (production passed Cloudflare's
+// 5,000,000 rows_read/day on 2026-11-14 and 2026-11-15). The answer is unchanged: the served
+// `workers` equal what the per-worker reads built, re-run here as they were, across states that
+// exercise every tie and fallback (two claims claimed at one instant, two open activities
+// started and received at one instant, a transcript re-reported under a second claim at the
+// same instant, a pending pointer newer than the linked ones and one older than a linked one,
+// a lapsed lease with the claim still held, a reaped worker, a course no repository registered,
+// 300 unseen workers). The statement count no longer grows with the workers, the lookups search
+// their indexes (migration 0060), and on the Cloudflare host the view's reads stay under the
+// ticket's 500-row target on that harness state.
+import { describe, it, expect, beforeEach } from 'vitest';
+import { Git, HOST, adminSession, cutover, register, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import { makeKey, type TestKey } from '../lib/sshKeys';
+import { transcriptUrl } from '../../src/core/links';
+
+const T0 = Date.parse('2026-11-15T12:00:00Z');
+const H = 3_600_000;
+const TRANSCRIPTS = 'immediately-run/claude-sessions';
+
+type Captured = { sql: string; params: unknown[]; cursor: { rowsRead?: number } };
+
+/** One state answer, with every statement it ran and its cursor. */
+async function state(session: string): Promise<{ state: Record<string, any>; log: Captured[] }> {
+  const log: Captured[] = [];
+  await withCore((c) => {
+    const s = c.store as unknown as { exec: (q: string, ...p: unknown[]) => unknown; __b250?: (q: string, ...p: unknown[]) => unknown };
+    s.__b250 ??= s.exec;
+    const orig = s.__b250;
+    s.exec = (q: string, ...p: unknown[]) => {
+      const cursor = orig.call(s, q, ...p) as Captured['cursor'];
+      log.push({ sql: q, params: p, cursor });
+      return cursor;
+    };
+  });
+  try {
+    const res = await sessionCall(session, '/v1/ui/state');
+    expect(res.status).toBe(200);
+    return { state: (await res.json()) as Record<string, any>, log };
+  } finally {
+    await withCore((c) => {
+      const s = c.store as unknown as { exec: unknown; __b250?: unknown };
+      if (s.__b250) s.exec = s.__b250;
+    });
+  }
+}
+
+/** The Workers view's own statements, from the capture: the eight reads `workersView` makes. */
+const VIEW_SQL = [
+  /FROM workers ORDER BY hostname, id$/,
+  /FROM worker_capabilities ORDER BY capability$/,
+  /FROM worker_courses f LEFT JOIN courses/,
+  /FROM claims WHERE status = 'active' ORDER BY claimed_at, id$/,
+  /FROM activities WHERE ended_at IS NULL$/,
+  /AS t FROM transcripts$/,
+  /AS t FROM pending_transcripts$/,
+  /FROM messages WHERE kind = 'status_report'$/,
+];
+const viewStatements = (log: Captured[]) => log.filter((l) => VIEW_SQL.some((re) => re.test(l.sql)));
+
+/** The fewest statements of three state reads: an alarm workerd runs meanwhile (the test clock
+ *  is behind the real one) adds its own statements to the capture, never takes any away. */
+async function quiet(session: string): Promise<Captured[]> {
+  let best: Captured[] | null = null;
+  for (let i = 0; i < 3; i++) {
+    const { log } = await state(session);
+    if (!best || log.length < best.length) best = log;
+  }
+  return best!;
+}
+
+// ── the per-worker reads B-250 replaced, as they were (src/core/workerApi.ts before B-250) ─
+
+async function oldWorkersView(now: number) {
+  const out = [];
+  for (const w of await rows<Record<string, any>>(
+    `SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
+            first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version FROM workers ORDER BY hostname, id`)) {
+    const id = w.id;
+    const alive = w.reaped_at == null && now - w.last_seen_at < w.lease_timeout_ms;
+    const transcript = (await rows<{ repo: string; path: string }>(
+      `SELECT repo, path FROM (SELECT repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts WHERE worker_id = ?
+       UNION ALL SELECT repo, path, COALESCE(last_pushed_at, first_seen_at) FROM pending_transcripts WHERE worker_id = ?) ORDER BY t DESC LIMIT 1`, id, id))[0];
+    const claims = await rows(`SELECT id, ticket_id, nonce, claimed_at FROM claims WHERE worker_id = ? AND status = 'active' ORDER BY claimed_at, id`, id);
+    out.push({
+      ...w,
+      tier_ceilings: JSON.parse(w.tier_ceilings),
+      profile: w.profile_json == null ? null : JSON.parse(w.profile_json),
+      alive,
+      capabilities: await rows('SELECT capability, declared FROM worker_capabilities WHERE worker_id = ? ORDER BY capability', id),
+      courses: await rows(`SELECT f.repository_id AS repository, f.course_id AS course, f.version, c.min_worker_version
+        FROM worker_courses f LEFT JOIN courses c ON c.repository_id = f.repository_id AND c.id = f.course_id
+        WHERE f.worker_id = ? ORDER BY f.repository_id, f.course_id`, id),
+      claims,
+      claim: claims[0] ?? null,
+      activity: (await rows(`SELECT id, kind, label, started_at, claim_id FROM activities WHERE worker_id = ? AND ended_at IS NULL
+                             ORDER BY started_at DESC, received_at DESC LIMIT 1`, id))[0] ?? null,
+      transcript_url: transcript ? transcriptUrl(transcript.repo, transcript.path) : null,
+      last_report: (await rows(`SELECT payload_json, sent_at FROM messages WHERE from_worker_id = ? AND kind = 'status_report' ORDER BY id DESC LIMIT 1`, id))[0] ?? null,
+    });
+  }
+  return out;
+}
+
+const served = (x: unknown) => JSON.parse(JSON.stringify(x));
+
+async function sameAsBefore(session: string, now: number) {
+  const { state: s } = await state(session);
+  expect(s.workers).toEqual(served(await oldWorkersView(now)));
+  return s;
+}
+
+// ── the state ───────────────────────────────────────────────────────────────────────────────
+
+let n = 0;
+async function claim(worker: number, ticket: string, claimedAt: number, endedAt: number | null) {
+  n++;
+  await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason)
+              VALUES (?, ?, ?, ?, '', ?, ?, ?, ?)`, ticket, worker, `b250:${n}`, `n${n}`, claimedAt, endedAt == null ? 'active' : 'released', endedAt,
+  endedAt == null ? null : 'released:owner');
+  return (await rows<{ id: number }>('SELECT MAX(id) AS id FROM claims'))[0].id;
+}
+
+/** An open activity; `kind` names its id, so a tie's winner is visible in the served row. */
+async function activity(worker: number, claimId: number | null, id: string, started: number, received: number, ended: number | null = null) {
+  await rows(`INSERT INTO activities (worker_id, id, claim_id, kind, label, source, started_at, ended_at, outcome, received_at)
+              VALUES (?, ?, ?, ?, ?, 'skill', ?, ?, ?, ?)`, worker, id, claimId, claimId == null ? 'orient' : 'implement', id, started, ended, ended == null ? null : 'succeeded', received);
+}
+
+async function transcript(worker: number, claimId: number | null, path: string, at: number, pushed: number | null = null) {
+  if (claimId == null) {
+    await rows(`INSERT INTO pending_transcripts (worker_id, repo, path, role, first_seen_at, last_pushed_at) VALUES (?, ?, ?, 'session', ?, ?)`,
+      worker, TRANSCRIPTS, path, at, pushed);
+    return;
+  }
+  await rows(`INSERT INTO transcripts (worker_id, claim_id, repo, path, role, first_seen_at, last_pushed_at) VALUES (?, ?, ?, ?, 'session', ?, ?)`,
+    worker, claimId, TRANSCRIPTS, path, at, pushed);
+}
+
+/** A `status_report` the dashboard reads, addressed as §9.4 shapes one. */
+async function report(worker: number, at: number, text: string) {
+  await rows(`INSERT INTO messages (kind, payload_json, from_worker_id, to_worker_id, sent_at, delivered_at, acknowledged_at, status)
+              VALUES ('status_report', ?, ?, ?, ?, ?, ?, 'acknowledged')`, JSON.stringify({ text }), worker, worker, at, at, at);
+}
+
+/** A fleet's worth of bare old workers: rows R-BTN-3 keeps, seen 40 days ago, half reaped —
+ *  what R-BTN-149's retention has already stripped of declarations (B-238). */
+async function oldWorkers(count: number, at = T0 - 40 * 24 * H) {
+  await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < ?)
+              INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling,
+                                   tier_ceilings, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at, reaped_at)
+              SELECT 'old-' || k.i, 's-' || k.i, 'x-' || k.i, 'vm-a', 'opencode', 'vm', 'critical', '{}', 900000, '', ${at}, ${at},
+                     CASE WHEN k.i % 2 = 0 THEN ${at + 60_000} ELSE NULL END
+              FROM k`, count);
+}
+
+/** What one rich worker holds: two active claims claimed at one instant, two open activities
+ *  started and received at one instant, a transcript re-reported under a second claim at the
+ *  same instant, an older linked one, a pending pointer newer than both and one older, two
+ *  status reports (the later one wins), an ended claim with its ended activity, and — straight
+ *  in the tables — a course no repository registered and a capability row out of order. */
+async function fill(worker: number, tickets: string[]) {
+  const ended = await claim(worker, tickets[0], T0 - 72 * H, T0 - 48 * H);
+  await activity(worker, ended, 'ended-act', T0 - 72 * H, T0 - 72 * H, T0 - 71 * H);
+  await transcript(worker, ended, `claude-code/old-${worker}.jsonl`, T0 - 72 * H);
+  const a = await claim(worker, tickets[1], T0 - 5 * H, null);
+  const b = await claim(worker, tickets[2], T0 - 5 * H, null);
+  await activity(worker, a, 'tie-z', T0 - 2 * H, T0 - 2 * H);
+  await activity(worker, a, 'tie-a', T0 - 2 * H, T0 - 2 * H);
+  await activity(worker, b, 'newer', T0 - H, T0 - 30 * 60_000);
+  await transcript(worker, a, `claude-code/s-${worker}.jsonl`, T0 - 4 * H);
+  await transcript(worker, b, `claude-code/s-${worker}.jsonl`, T0 - 4 * H); // re-reported under the second claim
+  await transcript(worker, a, `claude-code/older-${worker}.jsonl`, T0 - 5 * H);
+  await transcript(worker, null, `claude-code/pending-newer-${worker}.jsonl`, T0 - H);
+  await transcript(worker, null, `claude-code/pending-older-${worker}.jsonl`, T0 - 3 * H);
+  await report(worker, T0 - 4 * H, 'first');
+  await report(worker, T0 - 30 * 60_000, 'second');
+  await rows(`INSERT INTO worker_courses (worker_id, repository_id, course_id, version) VALUES (?, 'docs', 'unregistered', 9)`, worker);
+}
+
+let admin: TestKey;
+let session: string;
+const tickets = Array.from({ length: 12 }, (_, i) => `docs:T-${i + 1}`);
+
+beforeEach(async () => {
+  n = 0;
+  await setClock(T0);
+  admin = await makeKey('ssh-ed25519', 'admin');
+  await setAdminKeys(admin);
+  const git = new Git();
+  for (const t of tickets) git.add(t.slice(5));
+  expect((await git.post()).status).toBe(200);
+  await cutover();
+  session = await adminSession(admin);
+});
+
+describe('B-250 the Workers view in one read per list', { timeout: 180_000 }, () => {
+  it('serves what the per-worker reads served — empty, then across ties, fallbacks, lapsed and reaped workers', async () => {
+    await sameAsBefore(session, T0);
+    const a = await register('vm-a', { capabilities: ['create-pr', 'agent-venue'], profile: { cli: { commit: 'a1b2c3d', ref: 'main', pinned: 1 } } });
+    const b = await register('vm-b');
+    const gone = await register('mac');
+    await sameAsBefore(session, T0);
+    await fill(a.id, tickets.slice(0, 3));
+    await rows(`UPDATE workers SET last_seen_at = ? WHERE id = ?`, T0 - 2 * H, b.id); // lapsed, holding nothing
+    await fill(gone.id, tickets.slice(3, 6));
+    await rows('UPDATE workers SET reaped_at = ? WHERE id = ?', T0 - 1, gone.id);
+    // The lapsed worker's only open activities are a tied pair — the tie decides its served row.
+    await activity(b.id, null, 'b-tie-z', T0 - H, T0 - H);
+    await activity(b.id, null, 'b-tie-a', T0 - H, T0 - H);
+    const s = await sameAsBefore(session, T0);
+    // The state exercises what it claims to: an alive worker with two claims at one instant,
+    // a lapsed one, a reaped one, and the lists' orders and latests.
+    expect(s.workers).toHaveLength(3);
+    expect(s.workers.map((w: any) => [w.hostname, w.alive])).toEqual([['owner-mac', false], ['vm-a', true], ['vm-b', false]]);
+    expect(s.workers[1].capabilities).toEqual([
+      { capability: 'authentication', declared: 'agent-venue' },
+      { capability: 'create-pr', declared: 'create-pr' },
+      { capability: 'drivable-browser', declared: 'agent-venue' },
+      { capability: 'llm-call', declared: 'agent-venue' },
+    ]);
+    expect(s.workers[1].courses).toEqual([
+      { repository: 'docs', course: 'roadmap-pr', version: 3, min_worker_version: 3 },
+      { repository: 'docs', course: 'unregistered', version: 9, min_worker_version: null },
+    ]);
+    expect(s.workers[1].claims.map((c: any) => c.ticket_id)).toEqual([tickets[1], tickets[2]]);
+    expect(s.workers[1].activity.id).toBe('newer');
+    expect(s.workers[1].transcript_url).toBe(transcriptUrl(TRANSCRIPTS, `claude-code/pending-newer-${a.id}.jsonl`));
+    expect(JSON.parse(s.workers[1].last_report.payload_json).text).toBe('second');
+    expect(s.workers[0].activity.id).toBe('newer'); // the reaped worker's open activity is served as it was
+    expect(['b-tie-a', 'b-tie-z']).toContain(s.workers[2].activity.id); // one tied row, the same one both reads pick
+    expect(s.workers[2].claims).toEqual([]);
+    // Later: the lease lapses on the held claims too — the alarm has not run (B-229's window).
+    await setClock(T0 + 21 * H);
+    await rows('UPDATE workers SET last_seen_at = ? WHERE id = ?', T0 + 21 * H, a.id);
+    session = await adminSession(admin); // a session lives 4 hours (R-BTN-155)
+    await sameAsBefore(session, T0 + 21 * H);
+    // However many workers were ever registered: the rows R-BTN-3 keeps are served the same.
+    await oldWorkers(300);
+    const big = await sameAsBefore(session, T0 + 21 * H);
+    expect(big.workers).toHaveLength(303);
+    // The tie cases the scenarios hold: the two open activities at one instant and the
+    // re-reported transcript at one instant served one row each, identically to before.
+    const tie = big.workers.find((w: any) => w.hostname === 'vm-a');
+    expect(tie.activity.id).toBe('newer'); // the tie pair lost to it in both reads
+    expect(tie.transcript_url).toBe(transcriptUrl(TRANSCRIPTS, `claude-code/pending-newer-${a.id}.jsonl`));
+  });
+
+  it('runs the same statements however many workers were ever registered; the lookups search their indexes', async () => {
+    const a = await register('vm-a');
+    await fill(a.id, tickets.slice(0, 3));
+    await state(session); // the session's first read does its own one-time work
+    const ten = 7;
+    for (let i = 0; i < ten; i++) await register('vm-b', { session_name: `extra-${i}` });
+    const small = await quiet(session);
+    await oldWorkers(290);
+    const large = await quiet(session);
+    const smallView = viewStatements(small);
+    const largeView = viewStatements(large);
+    expect(smallView.length).toBe(largeView.length);
+    expect(smallView.length).toBeLessThanOrEqual(12);
+    // The joined reads, explained: each searches an index and none scans its table — except the
+    // two transcript tables, whose latest-per-worker walk has no key but the workers registered
+    // (the count this ticket removes); it walks each table once, as the per-worker reads did in sum.
+    const plans = new Map<string, string[]>();
+    for (const l of largeView) {
+      const plan = (await rows<{ detail: string }>(`EXPLAIN QUERY PLAN ${l.sql}`, ...l.params)).map((r) => r.detail);
+      plans.set(l.sql, plan);
+      const table = /FROM (workers|claims|activities|messages|transcripts|pending_transcripts)\b/.exec(l.sql)?.[1]!;
+      if (table === 'transcripts' || table === 'pending_transcripts') continue;
+      const scans = plan.filter((d) => d.startsWith(`SCAN ${table}`) && !/USING (COVERING )?INDEX/.test(d));
+      expect(scans, `${l.sql}\n${plan.join('\n')}`).toEqual([]);
+    }
+    expect(plans.get(smallView.find((l) => /FROM workers ORDER BY/.test(l.sql))!.sql)).toContain('SCAN workers USING INDEX workers_by_hostname');
+    expect(plans.get(largeView.find((l) => /FROM claims WHERE status/.test(l.sql))!.sql)).toContain('SCAN claims USING INDEX claims_active_by_worker');
+    expect(plans.get(largeView.find((l) => /FROM activities WHERE ended_at/.test(l.sql))!.sql)).toContain('SCAN activities USING INDEX activities_open');
+    expect(plans.get(largeView.find((l) => /FROM messages WHERE kind/.test(l.sql))!.sql)).toContain('SCAN messages USING INDEX messages_reports');
+  });
+
+  it.runIf(HOST === 'cloudflare')('reads within the target on the B-240 harness state with 300 old workers', async () => {
+    const a = await register('vm-a');
+    const b = await register('vm-b');
+    await fill(a.id, tickets.slice(0, 3));
+    await fill(b.id, tickets.slice(3, 6));
+    await oldWorkers(300);
+    await state(session); // the session's first read does its own one-time work
+    const log = await quiet(session);
+    // The Workers view's own statements and rows: 300 old workers cost their 300 rows (the
+    // served rows themselves, R-BTN-3) and nothing per worker beyond them.
+    const view = viewStatements(log);
+    expect(view.length).toBeLessThanOrEqual(12);
+    const read = view.reduce((s, l) => s + (l.cursor.rowsRead ?? 0), 0);
+    expect(read).toBeLessThanOrEqual(500);
+    expect(read).toBeGreaterThan(300); // the workers' own rows, still served
+  });
+});

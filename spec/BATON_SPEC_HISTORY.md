@@ -3286,6 +3286,35 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   ticket is held for a person as at any leg's bound, and not counting the run would let such
   edits restart a leg without limit. A flip back to the version last verified restarts nothing.
 
+- **2026-11-18 — §13's Workers view indexes: the Workers view reads one query per list, however
+  many workers were ever registered (B-250).**
+  Rules changed: none; §13's index notes.
+  Following B-235–B-243 (the owner's 2026-11-15 plan to bound what each read costs after
+  production passed Cloudflare's free-tier limit of 5,000,000 Durable Object `rows_read`/day on
+  2026-11-14 and again on 2026-11-15), the dashboard's Workers view — `workersView`, served by
+  `GET /v1/ui/state`'s `workers` — ran about six queries for *every* worker row ever
+  registered, reaped ones included (R-BTN-3 keeps the rows): the latest transcript (a UNION
+  over `transcripts` and `pending_transcripts`), `worker_capabilities`, the worker's declared
+  courses, its active claims, its newest open activity and its latest `status_report` — about
+  1.9k statements a poll (~3.6k rows_read) on the B-240 harness with 300 old worker rows. It
+  now reads one query per list — eight statements whatever the fleet's size — each covering a
+  set bounded without the workers' count: the declarations (R-BTN-149's retention prunes a
+  runner unseen 30 days), the active claims (`claims_active_by_worker`) and open activities
+  (`activities_open`) through their partial indexes, the status reports through migration
+  0060's partial `messages_reports`, and the transcripts and pending transcripts each walked
+  once — what the per-worker reads already walked in sum, a latest-per-worker read being
+  keyable by nothing but the workers registered, the very count this stops paying. The served
+  `workers` JSON is unchanged: a test compares it with what the per-worker reads built, re-run
+  as they were, across ties (two claims claimed at one instant, two open activities started
+  and received at one instant, a transcript re-reported under a second claim at the same
+  instant), fallbacks (a pending pointer newer than the linked ones and one older), a lapsed
+  lease with the claim still held, a reaped worker, a course no repository registered, and 300
+  unseen workers; on the Cloudflare host the view's reads measure 358 rows on that harness
+  state, inside the ticket's 500-row target. Migration 0060 also adds `workers_by_hostname` —
+  the view's own served order — without which the `ORDER BY hostname, id` sort reads every row
+  twice on the Cloudflare host; the timeline's lanes read stays pinned to `workers_live`
+  (0052), whose selective walk the new name-ordered index would otherwise displace.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

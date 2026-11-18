@@ -1,6 +1,7 @@
 // db.ts — the small helpers every class that writes the object's tables shares: the event log's
-// one insert, the random hex nonces and secrets, and recognising a unique-index refusal.
-import type { Store } from './ports';
+// one insert, the random hex nonces and secrets, recognising a unique-index refusal, and the
+// grouping of one read's rows by their parent.
+import type { Row, SqlValue, Store } from './ports';
 import { repositoryOf } from './validate';
 
 /** Append to the event log (§4): the one place an event row is written. An event about a
@@ -15,6 +16,18 @@ export function logEvent(sql: Store, at: number, kind: string, actor: string, de
 /** `bytes` random bytes as hex: a claim's 6-hex nonce, a legacy worker's unusable secret hash. */
 export function randomHex(bytes: number): string {
   return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** B-240: rows read for many parents at once, grouped by their parent's `key` and each without
+ *  it, in the order the query gave them. */
+export function groupBy<T extends Row>(rows: T[], key = 'claim_id'): Map<SqlValue, Row[]> {
+  const out = new Map<SqlValue, Row[]>();
+  for (const { [key]: k, ...rest } of rows) {
+    const list = out.get(k);
+    if (list) list.push(rest);
+    else out.set(k, [rest]);
+  }
+  return out;
 }
 
 /** The core's random source: `n` random bytes. Tests replace it as they replace the clock

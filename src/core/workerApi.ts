@@ -6,7 +6,7 @@
 // carry `model_provider_id`, `billing`, `usage` and `rate_limits`, all accepted and ignored,
 // and an unavailable provider is a reading (§6.3, R-BTN-76), never a table core keeps.
 import { BatonError } from './http';
-import { logEvent } from './db';
+import { groupBy, logEvent } from './db';
 import type { Deprecated } from './deprecated';
 import { NONCE_TTL_MS, parseSshKey } from './auth';
 import { SESSION_HOSTS, isPullRequestUrl, sessionLinkWhy, transcriptUrl } from './links';
@@ -847,16 +847,15 @@ export class WorkerApi {
   }
 
   /** A worker's declared courses (R-BTN-48) with each one's `min_worker_version` — only those
-   *  below it (rule 9), or all of them for the Workers view. A course no repository registered
+   *  below it (rule 9), for the heartbeat's `stale_courses`. A course no repository registered
    *  has no minimum and is never stale. A worker that declares no course at all (a sidecar from
    *  before R-BTN-22's change) is stale on every registered course, its version `null`. */
-  staleCourses(workerId: number, all = false) {
+  staleCourses(workerId: number) {
     type Stale = { repository: string; course: string; version: number | null; min_worker_version: number | null };
     const declared = this.rows<Stale>(
       `SELECT f.repository_id AS repository, f.course_id AS course, f.version, c.min_worker_version
        FROM worker_courses f LEFT JOIN courses c ON c.repository_id = f.repository_id AND c.id = f.course_id
        WHERE f.worker_id = ? ORDER BY f.repository_id, f.course_id`, workerId);
-    if (all) return declared;
     if (!declared.length) {
       return this.rows<Stale>('SELECT repository_id AS repository, id AS course, NULL AS version, min_worker_version FROM courses ORDER BY repository_id, id');
     }
@@ -865,15 +864,61 @@ export class WorkerApi {
 
   // ── the dashboard's Workers view (§14) ──────────────────────────────────────────────────
 
+  /** Every worker row ever registered (R-BTN-3 keeps them) with its declarations, active
+   *  claims, current activity, latest transcript and latest status report. B-250: one read per
+   *  list, whatever the fleet's size — the per-worker loop this replaced ran about six queries
+   *  for *every* worker, reaped ones included, ~1.9k statements a poll at 300 workers. Each
+   *  read covers a set bounded without the workers' count — the declarations (R-BTN-149's
+   *  retention prunes a runner unseen 30 days), the active claims (`claims_active_by_worker`)
+   *  and open activities (`activities_open`) through their partial indexes, the status reports
+   *  through 0060's `messages_reports` — or a table the per-worker reads already walked in sum
+   *  (the transcripts: a latest-per-worker read keyed by `worker_id` costs the workers
+   *  registered, the very count this view stops paying, so it walks the table once instead).
+   *  The rows are grouped here to the order the per-worker reads served, and the latest of a
+   *  list is kept by a strict `>` in the scan's order — the tie a SQL `ORDER BY … LIMIT 1` and
+   *  a scan would resolve differently. `workers` itself is read in its served order through
+   *  0060's `workers_by_hostname`: a sort reads every row twice on the Cloudflare host. */
   workersView(now: number) {
     const workers = this.rows<Row>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
                                        first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version FROM workers ORDER BY hostname, id`);
+    const capabilities = groupBy(this.rows('SELECT worker_id, capability, declared FROM worker_capabilities ORDER BY capability'), 'worker_id');
+    const courses = groupBy(this.rows(`SELECT f.worker_id, f.repository_id AS repository, f.course_id AS course, f.version, c.min_worker_version
+                                       FROM worker_courses f LEFT JOIN courses c ON c.repository_id = f.repository_id AND c.id = f.course_id
+                                       ORDER BY f.repository_id, f.course_id`), 'worker_id');
+    const claims = groupBy(this.rows(`SELECT worker_id, id, ticket_id, nonce, claimed_at FROM claims WHERE status = 'active' ORDER BY claimed_at, id`), 'worker_id');
+    // §9.9: the newest open activity per worker — `received_at` breaks ties and is never served.
+    const activity = new Map<number, { id: string; kind: string; label: string | null; started_at: number; claim_id: number | null; received_at: number }>();
+    for (const a of this.rows<{ worker_id: number; id: string; kind: string; label: string | null; started_at: number; claim_id: number | null; received_at: number }>(
+      'SELECT worker_id, id, kind, label, started_at, claim_id, received_at FROM activities WHERE ended_at IS NULL')) {
+      const best = activity.get(a.worker_id);
+      if (!best || a.started_at > best.started_at
+        || (a.started_at === best.started_at && a.received_at > best.received_at)) activity.set(a.worker_id, a);
+    }
+    // §6.8: the latest transcript per worker, the linked table first — a pending pointer wins
+    // only when strictly newer, as the union's own order served it.
+    const transcript = new Map<number, { repo: string; path: string; t: number }>();
+    const latest = (r: { worker_id: number; repo: string; path: string; t: number }) => {
+      const best = transcript.get(r.worker_id);
+      if (!best || r.t > best.t) transcript.set(r.worker_id, r);
+    };
+    for (const t of this.rows<{ worker_id: number; repo: string; path: string; t: number }>(
+      'SELECT worker_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts')) latest(t);
+    for (const t of this.rows<{ worker_id: number; repo: string; path: string; t: number }>(
+      'SELECT worker_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM pending_transcripts')) latest(t);
+    // §9: the latest status report per worker — `id` decides, never the scan's order.
+    const reports = new Map<number, { payload_json: string | null; sent_at: number; id: number }>();
+    for (const m of this.rows<{ worker_id: number; id: number; payload_json: string | null; sent_at: number }>(
+      `SELECT from_worker_id AS worker_id, id, payload_json, sent_at FROM messages WHERE kind = 'status_report'`)) {
+      const best = reports.get(m.worker_id);
+      if (!best || m.id > best.id) reports.set(m.worker_id, m);
+    }
     return workers.map((w) => {
       const id = w.id as number;
       const alive = w.reaped_at == null && now - (w.last_seen_at as number) < (w.lease_timeout_ms as number);
-      const transcript = this.rows<{ repo: string; path: string }>(
-        `SELECT repo, path FROM (SELECT repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts WHERE worker_id = ?
-         UNION ALL SELECT repo, path, COALESCE(last_pushed_at, first_seen_at) FROM pending_transcripts WHERE worker_id = ?) ORDER BY t DESC LIMIT 1`, id, id)[0];
+      const claimsList = claims.get(id) ?? [];
+      const a = activity.get(id);
+      const t = transcript.get(id);
+      const report = reports.get(id);
       return {
         ...w,
         tier_ceilings: JSON.parse(w.tier_ceilings as string) as Record<string, string>,
@@ -881,15 +926,15 @@ export class WorkerApi {
         // key names the CLI's pinning. NULL until a heartbeat carried one.
         profile: w.profile_json == null ? null : JSON.parse(w.profile_json as string) as Record<string, unknown>,
         alive,
-        capabilities: this.rows<{ capability: string; declared: string }>('SELECT capability, declared FROM worker_capabilities WHERE worker_id = ? ORDER BY capability', id),
-        courses: this.staleCourses(id, true),
+        capabilities: capabilities.get(id) ?? [],
+        courses: courses.get(id) ?? [],
         // R-BTN-4 (B-188): every claim the runner holds; `claim`, the oldest, for readers before it.
-        claims: this.activeClaims(id),
-        claim: this.activeClaim(id),
-        activity: this.currentActivity(id),
+        claims: claimsList,
+        claim: claimsList[0] ?? null,
+        activity: a == null ? null : { id: a.id, kind: a.kind, label: a.label, started_at: a.started_at, claim_id: a.claim_id },
         // §6.8: built only as a blob link from validated parts, never a reported URL.
-        transcript_url: transcript ? transcriptUrl(transcript.repo, transcript.path) : null,
-        last_report: this.rows(`SELECT payload_json, sent_at FROM messages WHERE from_worker_id = ? AND kind = 'status_report' ORDER BY id DESC LIMIT 1`, id)[0] ?? null,
+        transcript_url: t ? transcriptUrl(t.repo, t.path) : null,
+        last_report: report == null ? null : { payload_json: report.payload_json, sent_at: report.sent_at },
       };
     });
   }
