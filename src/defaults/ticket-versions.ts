@@ -7,6 +7,7 @@
 // wrapper `baton repo init --eject tickets` writes, so an ejected copy posts and reads versions
 // the same way; the runner also falls back to it for a repository with no source of its own.
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { GIT_NONINTERACTIVE_ENV } from './ticket-state';
 import type { TicketsResult } from './tickets-markdown';
 
@@ -73,3 +74,13 @@ export const MARKDOWN_SOURCE = {
     return { version: o.version ?? '', ticket: readTicketBlob(o.checkout ?? process.cwd(), o.version) };
   },
 };
+
+/** B-190 (R-BTN-84, §4.2): the digest of what a source's `read` returned — the `ticket` of its
+ *  `{version, ticket}` answer, hashed as it stands: a string's own bytes (the markdown source's
+ *  blob), anything else its JSON. The runner records it with the run's inputs; replay recomputes
+ *  it over its own read and compares, which is the version check's second half — a version names
+ *  the source's own bytes, and two reads of the same version under one digest cannot have
+ *  moved. The digest is of the pointer's target only, never stored content (R-BTN-33). */
+export function digestOfRead(ticket: unknown, hash: (text: string) => string = (t) => createHash('sha256').update(t, 'utf8').digest('hex')): string {
+  return `sha256:${hash(typeof ticket === 'string' ? ticket : JSON.stringify(ticket ?? null))}`;
+}

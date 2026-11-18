@@ -343,7 +343,7 @@ describe('the claim and end contracts (§11, §6.5, §11)', () => {
   });
 });
 
-describe('G-BTN-1: one active claim per item and per worker', () => {
+describe('G-BTN-1: one active claim per item, and per worker up to its bound (R-BTN-4, B-188)', () => {
   it('two concurrent claims for one item: exactly one succeeds', async () => {
     const a = await register('vm-a');
     const b = await register('vm-b');
@@ -353,15 +353,17 @@ describe('G-BTN-1: one active claim per item and per worker', () => {
     expect(await rows(`SELECT count(*) AS n FROM claims WHERE status = 'active'`)).toEqual([{ n: 1 }]);
   });
 
-  it('two claims by one worker: the second is refused; the index refuses a second row however it is written', async () => {
+  it('two claims by one worker past its bound: the second is refused max-claims; only the ticket index stays unique (B-188)', async () => {
     const a = await register('vm-a');
     expect((await claimItem('vm-a', a.secret)).status).toBe(200);
-    expect(await claimItem('vm-a', a.secret)).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 'one-claim-per-worker' } });
-    await expect(rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status)
-                       VALUES ('docs:R3-9002', ?, 'raw-1', 'abcdef', '', 0, 'active')`, a.id)).rejects.toThrow(/UNIQUE/);
+    expect(await claimItem('vm-a', a.secret)).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 'max-claims' } });
+    // R-BTN-4 (B-188): the per-worker index is gone — the bound is the claim transaction's — and
+    // the per-ticket one stays.
+    await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status)
+                VALUES ('docs:R3-9002', ?, 'raw-1', 'abcdef', '', 0, 'active')`, a.id);
     const b = await register('vm-b');
     await expect(rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status)
-                       VALUES ('docs:R3-9001', ?, 'raw-2', 'abcdef', '', 0, 'active')`, b.id)).rejects.toThrow(/UNIQUE/);
+                       VALUES ('docs:R3-9002', ?, 'raw-2', 'abcdef', '', 0, 'active')`, b.id)).rejects.toThrow(/UNIQUE/);
   });
 });
 
@@ -498,6 +500,30 @@ describe('G-BTN-14: a force-reaped live worker’s item waits for its fence', ()
     expect(await claimRow(c.claim_id)).toMatchObject({ status: 'active' });
     await alarmAt(T0 + 2 * 3_600_000);
     expect(await claimRow(c.claim_id)).toMatchObject({ status: 'reaped', end_reason: 'reaped:release-unacknowledged', fence_pending: 1 });
+  });
+
+  it('§9.5: an administrator clears a pending fence at once; a claim not fence-pending is conflict', async () => {
+    const a = await register('vm-a');
+    const b = await register('vm-b');
+    const { json: c } = await claimItem('vm-a', a.secret);
+    await owner(`/v1/ui/claims/${c.claim_id}/reap`, { confirm: true });
+    expect((await claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9001' })).json.rule).toBe(3);
+    // §12.2: destructive, so it names its confirmation.
+    expect((await owner(`/v1/ui/claims/${c.claim_id}/fence-clear`, {})).status).toBe(400);
+    expect(await (await owner(`/v1/ui/claims/${c.claim_id}/fence-clear`, { confirm: true })).json()).toEqual({ ok: true });
+    expect((await claimRow(c.claim_id)).fence_pending).toBe(0);
+    // The clear is logged naming the administrator (§9.5), the third way a fence ends.
+    expect(await rows(`SELECT actor, json_extract(detail_json, '$.by') AS by, json_extract(detail_json, '$.admin') AS admin
+                       FROM events WHERE kind = 'fence-cleared'`)).toEqual([{ actor: 'admin:owner@example.com', by: 'admin', admin: 'owner@example.com' }]);
+    // The ticket stops being held; §6.7 still asks a reading since the reap, so the next
+    // claimant re-reads git (R-BTN-25) — the dialog's only protection, as the spec says.
+    expect((await claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9001' })).json).toMatchObject({ rule: 1, rule_code: 'awaiting-sync' });
+    await refresh();
+    expect((await claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9001' })).status).toBe(200);
+    // The clear is never a condition restart (`ticket.resolve` clears no fence): a claim whose
+    // fence is not pending is conflict, and no claim at all is not-found.
+    expect(await code(await owner(`/v1/ui/claims/${c.claim_id}/fence-clear`, { confirm: true }))).toBe('conflict');
+    expect(await code(await owner('/v1/ui/claims/999/fence-clear', { confirm: true }))).toBe('not-found');
   });
 });
 

@@ -4,7 +4,9 @@
 // leg wait and run times, ends by reason and detail, suspensions by station and overridden advice,
 // with no worker, profile or report in it; the `ops` key is refused `forbidden`. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { advance, claimItem, cutover, endClaim, Git, keyCall, ORIGIN, placed, register, setAdminKeys, setClock, withCore, workerCall } from '../helpers';
+import { advance, claimItem, cutover, endClaim, Git, keyCall, ORIGIN, placed, register, setAdminKeys, setClock, withCore, workerCall, course } from '../helpers';
+import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
+import chore from '../fixtures/courses/chore/course.json';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -112,5 +114,25 @@ describe('S-BTN-38 a course measures itself', () => {
     expect((await workerCall('/v1/repositories/nope/stats', { cred: 'vm-a' })).status).toBe(404);
     expect((await readAs(docsKey, '/v1/repositories/docs/stats?since=yesterday')).json).toMatchObject({ code: 'invalid-params' });
     expect(await readAs(docsKey, '/v1/repositories/%zz/stats')).toMatchObject({ status: 400, json: { code: 'invalid-params' } });
+  });
+
+  it('carries each registered course\'s signature — its start entry as input, each end\'s as output — a course with no activity included (R-BTN-111, B-52)', async () => {
+    // A course file that declares its input and its output, and a second registered course that
+    // runs nothing in the window: both carry their signature, a contract rather than a count.
+    git.registry = [
+      course(3, 3, { course: { ...roadmapPr, stations: { ...roadmapPr.stations,
+        filed: { entry: [{ output: 'brief', schema: 'std:object@1' }] },
+        merged: { entry: [{ output: 'change', schema: 'std:forge.change@1' }] } } } }),
+      course(1, 1, { id: 'chore', skill: 'chore', course: chore, step_kinds: ['other'] }),
+    ];
+    expect((await git.post()).status).toBe(200);
+    const r = await readAs(docsKey, '/v1/repositories/docs/stats');
+    expect(r.status).toBe(200);
+    expect(r.json.courses['roadmap-pr'].signature).toEqual({
+      input: [{ output: 'brief', schema: 'std:object@1' }],
+      output: [{ station: 'merged', entry: [{ output: 'change', schema: 'std:forge.change@1' }] }],
+    });
+    expect(r.json.courses.chore.signature).toEqual({ input: [], output: [{ station: 'checked', entry: [] }] });
+    expect(r.json.courses.chore.legs).toEqual({});
   });
 });

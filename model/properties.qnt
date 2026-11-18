@@ -39,7 +39,9 @@ module properties {
   //   declare — a declared set is a subset of DECLARED's, here empty, and must change;
   //   alarmLive — FLEET is false;
   //   reading, readingLapses — no RESOURCES;
-  //   endBlockedOn — no REQUIRES and no RESOURCES.
+  //   endBlockedOn — no REQUIRES and no RESOURCES;
+  //   adminFenceClear — the owner budget is 1 here, spent by the force-reap that raises the
+  //     fence, so the clear (an owner act too) is never enabled.
   // `npm run model` simulates `safety` with the full `step` on `sim`, which has all of them.
   action pverify = {
     nondet w = WORKERS.oneOf()
@@ -68,9 +70,10 @@ module properties {
       syncNumber(s), syncRead(s, postBars, queuedFor(st.gitPath, picks)), syncVoid(s), syncPost(s),
     }
   }
-  // What makes `pverify` the same as `step`: one ticket, no fleet, nothing declared. A constant,
-  // so it holds in every state or none; the proof checks it beside `safety`.
-  val verifyShape = TICKETS.size() == 1 and not(FLEET) and WORKERS.forall(w => DECLARED.get(w) == Set())
+  // What makes `pverify` the same as `step`: one ticket, no fleet, nothing declared, and an
+  // owner budget of 1 — spent by the force-reap that raises a fence, so the clear never has any.
+  // A constant, so it holds in every state or none; the proof checks it beside `safety`.
+  val verifyShape = TICKETS.size() == 1 and not(FLEET) and WORKERS.forall(w => DECLARED.get(w) == Set()) and OWNER_BUDGET == 1
 
   // R-BTN-4, R-BTN-19, R-BTN-26: at most one live holder per ticket — an active claim, or a
   // force-reaped one whose worker has not cleared its fence — and one active claim per worker.

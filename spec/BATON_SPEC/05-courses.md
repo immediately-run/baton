@@ -139,6 +139,8 @@ mean (R-BTN-50).
   | `deadline_s` | leg | how long one run may take before Baton takes the claim back, 60 s–7 d | R-BTN-167, R-BTN-90 |
   | `stalled_s` | leg | how long the leg may be posted `waiting` before `baton.stalled` is raised; default 259,200 (72 h) | R-BTN-167 |
   | `conditions` | leg | narrows the condition types it may raise (`[]`: none) | R-BTN-160 |
+  | `autonomous` | leg | `true`: the leg never asks for a person | R-BTN-195 |
+  | `on_ticket_changed` | leg | what a running leg does when its ticket's version moves: `continue` (the default) or `restart` | R-BTN-198 |
   | `spawns` | leg | the courses of the children it files (for a call leg, the courses it calls), their contract and their `lifetime` | R-BTN-111, R-BTN-165, R-BTN-168 |
   | `no_chain_from` | leg | legs whose credential may not take this one on the same ticket (for a credential `domains.per_run` lists, across claims only under another label) | R-BTN-106 |
   | `stream` | leg | `false`: its output is never written to a leg log | R-BTN-128 |
@@ -151,7 +153,7 @@ mean (R-BTN-50).
     least one; no leg's `from` names an end; every `from`, `to` and completion-table key names
     a station; every station is reachable from `start` through any outcome, and an end is
     reachable from every station, the `cancel` leg not counted; every cycle contains a leg with
-    `max_runs`; `start_leg` names a leg whose `from` includes `start`; every `inputs.from` names
+    `max_runs`; every leg with `on_ticket_changed: "restart"` has `max_runs` (R-BTN-198); `start_leg` names a leg whose `from` includes `start`; every `inputs.from` names
     a leg and one of its outputs; `cancel`, if present, names a leg with no `kind`, whose `to` is
     one end station and which no `next`, `exhausted` or completion `next` names (it is queued by
     Baton alone, R-BTN-168); every `kind: call` leg has `spawns` and a completion table
@@ -159,6 +161,8 @@ mean (R-BTN-50).
     `expires` sits only on a `kind: person` leg and names one of its outcomes, and `deadline_s`
     and `stalled_s` sit on no `kind: person` leg (R-BTN-167); `deadline_s`, `stalled_s` and
     `expires.after_s` are within their ranges (R-BTN-167, R-BTN-116);
+    `autonomous` sits on no `kind: person`, `call` or `arrives` leg, and never beside a `conditions`
+    list naming a type R-BTN-195 bars it;
     `renamed_from` passes R-BTN-142; every capability is typed (R-BTN-121) and `runner:leg-trees`
     is listed where R-BTN-133 needs it; its schemas pass R-BTN-108. It refuses the fields
     `error_types`, `max_duration`, `max_attempts_s` and `max_ready_s`, whose meanings are
@@ -460,7 +464,7 @@ mean (R-BTN-50).
   - **One renderer per channel** in the shared library: `plain` (the CLI, a
     `forge-check` summary, a handler course's text), `html` (a handler course's mail: every value
     escaped, inline styles only, no script, image or remote resource) and `ui` (the dashboard,
-    through `textContent`). Courses never ship rendering code.
+    as §12.3's rendering rule states). Courses never ship rendering code.
   - **Fallback:** the value's own schema's view, else the nearest up its base chain, else a
     generic rendering of keys and values two levels deep, truncated.
   - Core events are rendered by core's templates, each with one slot for the course's view of
@@ -547,11 +551,39 @@ mean (R-BTN-50).
     type two courses define differently.
   - **The runner declares what it has** in its configuration (`baton runner start --config`,
     default `~/.config/baton/runner.json`): `{origin, capabilities: [{name, check?: [<argv>…],
-    every_s?, lock?: <path>}]}`. A capability with a `check` is declared only while the command exits 0 (run at
-    start, before each claim, and every `every_s` seconds, default 300, while idle). Capabilities
-    are self-reported (R-BTN-66). A capability may stand for what several things the runner holds
-    amount to — `capability:code-generation-llm` for a provider key and an installed harness — and
-    the runner declares it when a check that tests them passes; Baton derives nothing (R-BTN-174).
+    every_s?, lock?: <path>, instance?: <instance>}]}`. Capabilities are self-reported
+    (R-BTN-66). A capability may stand for what several things the runner holds amount to —
+    `capability:code-generation-llm` for a provider key and an installed harness — and the runner
+    declares it when a check that tests them passes; Baton derives nothing (R-BTN-174).
+    - **A check** is declared only while its command exits 0. It runs at start, before each
+      claim, every `every_s` seconds (default 300) while idle, and to confirm a leg's request to
+      end blocked on the capability (R-BTN-126). One run per capability is in flight at a time,
+      and every request waiting on it shares its result. It runs with the runner's own
+      environment, in a directory the runner owns — never a checkout or a leg's working directory
+      — reading nothing a leg can write; how far that holds is the executor's isolation
+      (R-BTN-107, §12.8). A run past 60 seconds is a failure.
+    - **After a failure** the check keeps running every `every_s`, and the capability is
+      declared again at the first pass at least `every_s` after the failure.
+    - **Its line.** A failing check may print one JSON line `{available: false, until?,
+      valid_for?, detail?}` on stdout, read as `{available: false}` when it prints none; without
+      `instance` the line is only logged.
+    - **`instance`** names a registered account instance listing a repository the runner's key
+      is granted on (R-BTN-76), and binds only a check that tests that account's own
+      availability, its quota or limit, not merely that it answers. While that check fails, the
+      runner reports its line as a `state` reading of the instance within R-BTN-76's bounds for
+      a runner credential, its `until` the earlier of the line's and the reading's end, renewed at
+      each failing run and at least every half of its `valid_for` while the check keeps failing:
+      carried by the end it confirms (R-BTN-126), else posted itself. While it passes and no
+      administrator's or instrument key's `available: false` reading of the instance is in force,
+      and the latest reading in force is a runner credential's `available: false` (each reading's
+      writer as R-BTN-181 records it), the runner posts `{available: true}`, at most once an hour
+      for each runner whose reading it counters.
+    - **Example.** A leg requires `capability:code-generation-llm`. The runner declares it with
+      a check that passes while either provider it holds is usable, and declares `key:zai` with
+      `instance: zai-coding-plan` and a check that tests only that account's quota. When both
+      providers are spent, the leg's request names the capability it requires and that check
+      confirms it; the `key:zai` check, at its next run, posts the account's reading for every
+      runner.
     A capability with a `lock` is a thing one runner on the machine may use at a time: the runner
     declares it only while it holds, or can take, an exclusive lock on that file. It takes the
     lock before it claims, or sends the `advance` into, a leg requiring the capability, and sends
@@ -652,7 +684,7 @@ mean (R-BTN-50).
 
   | Course | Legs (`from` → `to`) | Ends | Reads |
   |---|---|---|---|
-  | `create-pr` (the default) | `implement` (`filed` → `pr-open`); `review` (`pr-open`, `fixed` → `reviewed`, `max_runs` 3); `fix` (`reviewed` → `fixed`, `max_runs` 2); `adjudicate` (`reviewed` → `adjudicated`); `merge` (`reviewed`, `adjudicated` → `merged`); and the fact legs `reviewed-by-hand` (`pr-open`, `fixed` → `reviewed`, `pr-verdict`) and `merged-by-hand` (`pr-open`, `fixed`, `reviewed`, `adjudicated` → `merged`, `pr-merged`) | `merged` | PRs |
+  | `create-pr` (the default) | `implement` (`filed` → `pr-open` \| `delivered`); the person leg `confirm` (`delivered` → `confirmed` \| `filed`, `asks: owner`, `max_runs` 3); `review` (`pr-open`, `fixed` → `reviewed`, `max_runs` 3); `fix` (`reviewed` → `fixed`, `max_runs` 2); `adjudicate` (`reviewed` → `adjudicated`); `merge` (`reviewed`, `adjudicated` → `merged`); and the fact legs `reviewed-by-hand` (`pr-open`, `fixed` → `reviewed`, `pr-verdict`) and `merged-by-hand` (`pr-open`, `fixed`, `reviewed`, `adjudicated` → `merged`, `pr-merged`) | `merged`, `confirmed` | PRs |
   | `review-pr` | `review` (`requested`, `changes-requested` → `approved` \| `changes-requested`, `max_runs` 3); `conclude` (`requested`, `changes-requested` → `concluded`) | `approved`, `concluded` | PRs |
   | `bug-report` | `trace` (`reported` → `traced`); `origin` (`traced` → `explained`); `dedupe` (`explained` → `new-cause` \| `duplicate`); `file` (`new-cause` → `ticketed`); `fold` (`duplicate` → `folded`); `prevent` (`ticketed`, `folded`, `prevented` → `prevented`, `max_runs` 3); the fact leg `merged-by-hand` (`prevented` → `merged`, `pr-merged`) | `merged`; `closed` by `close-pr` | PRs |
   | `draft-ticket` | `research`, `draft`, `check` (`requested` → `researched` → `drafted` → `checked`; `check` also leaves `checked`, `max_runs` 3); `merged-by-hand` (`checked` → `merged`, `pr-merged`) | `merged`; `closed` by `close-pr` | PRs |
@@ -668,7 +700,7 @@ mean (R-BTN-50).
   A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder, `archive/` and the open ticket and request branches, as every allocator below), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and a `## Status` with the `_filed` line (R-BTN-74), and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call — it asks Baton nothing. Where the forge refuses the push because the branch is protected (the CLI's adapter for the forge `--forge` names, else `github` where `origin`'s host is `github.com`, recognises that refusal by the forge's own message: GitHub's `GH006` protected-branch refusal, or a `GH013` ruleset refusal naming a pull-request or update rule and never secret push protection; GitLab's `not allowed to push code to protected branches`; Gitea's `Not allowed to push to protected branch`), it pushes the same commit to `baton-request/<ID>`, or takes the next free id when that branch exists — a branch no `branch_pattern` may match (R-BTN-190), so the request's PR is never one of the new ticket's PRs and no leg continues it (R-BTN-25) — opens a PR from it with the caller's forge credential and prints its URL. With no forge credential it prints the pushed branch and exits non-zero. On a `git` forge, which has no adapter, and for any other refusal — `refs.other` refusing the side branch to a runner under `protected` among them — it reports git's own words (R-BTN-74), opens nothing and exits non-zero. Otherwise the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
 
   - **A wait for a person's answer is a person's leg** (R-BTN-116), answered by a
-    `std:decision@1`: `decision`'s `answer` and `build-app`'s `decide`. Where the policy admits `sync` for `std:decision@1`, the ticket's `answer:`
+    `std:decision@1`: `decision`'s `answer`, `build-app`'s `decide` and `create-pr`'s `confirm`. Where the policy admits `sync` for `std:decision@1`, the ticket's `answer:`
     on the default branch (a sync-local field of the markdown source, read by the station
     function and never posted, R-BTN-74; never applied unless the owner gave it) is attested as
     one. Approving a document is not an answer: it is merging the PR that holds it.
@@ -682,24 +714,54 @@ mean (R-BTN-50).
     reaches `fixed`; all merged is `merged`; when fixes run out and the last round asks for
     changes, `adjudicate` is queued if the file has it, and a pusher's `<!-- baton:adjudicated
     merge|owner -->` is its answer. Its `run-tests` gate runs no agent: the stub runs the course
-    file's `test_script` on the PR's head, and the script's own exit is the verdict, green
+    file's `test_script` on the home PR's head, and the script's own exit is the verdict, green
     queuing `review` and red `fix`; a run that never reached the tests is no verdict and fails
     the leg (`released:cannot-finish:transient`) with no marker — dependencies declared and none
     installed, the shell's 126 or 127, npm's missing script, npm that cannot start, or a run that
-    outlives the gate's bound. A `fix` run from the gate's red (`pr-open`, `fixed`) must push:
-    when the ticket's PR branch heads are where they were before its agent ran, it fails the leg
-    the same way and reports no position, since the gate would test the same tree again; from
-    `reviewed`, where a fix may answer the findings without a push, it is unchanged.
+    outlives the gate's bound. An open PR in a `repos:` repository — every PR of a `git` home's
+    ticket (R-BTN-140) — is gated by its own CI instead, the checks the forge reports on its
+    head (R-BTN-96): any concluded other than `success`, `neutral` or `skipped` is red and
+    queues `fix`; one still running, or none reported yet, queues `review` waiting on `ci`; all
+    concluded green on every such PR passes. A ticket with PRs at home and elsewhere passes only
+    when both halves are green: red on either queues `fix`, an untested home head queues
+    `run-tests`, then the other PRs' CI as above. With no PR branch at home and a `repos:` naming
+    another repository, the stub runs nothing and makes no marker: it suspends at its station
+    with `review` next, and the sync places the ticket from that CI. Only several open PRs in the
+    home, which the stub cannot choose between, ask the owner — the decision
+    `run-tests-unreachable`, whose `skip` waives the gate for the ticket. A `fix` run from the
+    gate's red (`pr-open`, `fixed`) must push: when the ticket's PR branch heads are where they
+    were before its agent ran, it fails the leg the same way and reports no position, since the
+    gate would test the same tree again — unless the ticket's `repos:` names another repository,
+    whose PRs the stub cannot see; from `reviewed`, where a fix may answer the findings without
+    a push, it is unchanged.
     `review-pr` reviews a PR named in `prs:`: each pusher's
     verdict is a round; after changes the next waits on `author` until a push; on close or when
     rounds run out `conclude` is queued, and a pusher's `<!-- baton:concluded -->` is that leg.
     A commenting leg's answer line may name its PR (`<answer> <PR URL>`; `conclude`'s the URL
     alone); `close` comments there, else on the checkout branch's PR.
+  - **A ticket already delivered** (`create-pr`). An `implement` agent that finds the whole
+    ticket on the default branch opens no PR and pushes nothing; its answer, the last line that
+    opens with the word, is `delivered <sha>[,<sha>…] <evidence>` — the commits that delivered it
+    and what it ran to find so. The stub fetches the default branch (the claim's, else
+    `origin/HEAD`, else `main`) and accepts the answer only when every named commit is on it;
+    otherwise, or with no evidence, the leg fails naming the commit (`released:cannot-finish:transient`).
+    An accepted answer ends the claim `suspended:delivered` with `confirm` queued, the first
+    commit as its `ended_at_sha` and the commits and evidence as its `detail` (R-BTN-72): an
+    outcome reached, so no failed attempt and the leg's count reset (R-BTN-122). The station
+    function reads which station each finished run reached from Baton's record (the sync's
+    `legs`, never git) and, while the ticket has no PR and its newest `implement` run reached
+    `delivered`, places it there with `confirm` queued; each earlier `delivered` pass a person
+    sent back rides its path as `implement` → `delivered`, `confirm` → `filed`. The person reads
+    the evidence on the ticket's history and answers `confirmed`, the end, or `filed`, which
+    queues `implement` again. Only the person's answer or a merged PR ends a `create-pr` ticket;
+    the agent's word never does. The ticket file's `status:` is the person's to set, as for any
+    ticket closed by hand.
   - **One ticket, one PR, one merge.** Every standard course that writes a ticket's work is a PR
     course. Its legs commit their records and outputs on the ticket's branch (`branch_pattern`,
     continued by R-BTN-25), the first push opens the ticket's PR, and the course ends at `merged`.
     A runner's `merge` leg (`create-pr`, `create-spec`, under `merge.*`, R-BTN-182) or the fact leg
-    `merged-by-hand`, the owner merging it, takes it there. A course that needs several approvals
+    `merged-by-hand`, the owner merging it, takes it there; a `create-pr` ticket with no work left
+    to write ends at `confirmed` instead, by a person's word (above). A course that needs several approvals
     is several tickets (`build-app`, below). No leg of a record course (below) writes to the
     default branch, under any policy. A call leg's children are not a record: they are filed as
     R-BTN-165 and `tickets.created` say, directly under `filed` and proposed under `proposed`.
@@ -878,7 +940,10 @@ mean (R-BTN-50).
     repository or one the ticket's `repos:` names (B-29), and the checkout's branch, when it feeds
     such a PR, a head the PR contains — the review reads what is pushed. What cannot be verified
     fails the leg naming what was looked for; the stub reports, never retries. The test kit fails
-    such a stub that returns its position for an `agent_command` exiting 0 with no PR.
+    such a stub that returns its position for an `agent_command` exiting 0 with no PR. A leg that
+    fails after its agent ran — a non-zero exit, or an exit 0 whose answer, push or PR check then
+    fails — names the last lines of the agent's two streams, bounded, or that it printed nothing
+    (B-256): the leg's sandbox may be gone by the time anyone asks.
     - **The stub's wait for its agent ends three ways (B-108)** — at the earliest of the agent's
       exit, the **idle bound** (fifteen minutes of silence across every activity signal the stub
       can see) and the **absolute bound** (five hours of the leg, whatever the agent is doing).
@@ -912,7 +977,7 @@ mean (R-BTN-50).
     (the runner refuses one before `close`). The kit fails an override naming no leg, exporting
     no `run`, or beside a leg script that does not load it from this course's path. An override
     keeps the leg's contract `version`; `snapshot_sha` names the bytes that ran.
-  - **A runner serves every course its capabilities serve, one leg at a time.** `baton runner start`
+  - **A runner serves every course its capabilities serve, one leg at a time per claim.** `baton runner start`
     declares every course its home checkout declares (`--home`) — each at its version, rule 9 per
     course — and `--course <id>` narrows that to one, a machine serving a subset; a `--course`
     naming a course the home does not declare is refused at startup, and so is a home held by
@@ -920,8 +985,8 @@ mean (R-BTN-50).
     `course_id` names the ticket's course, which the runner loads from the claim's
     `snapshot_sha`: consecutive claims of one runner — a `create-spec` `converse` and the next
     claim's `create-pr` `implement` — run their own course's graph and scripts with no restart
-    and no second clone. Its only parallelism limit is one leg at a time, at least for now (rule
-    3, one claim per worker).
+    and no second clone. Its parallelism is its claims, up to R-BTN-4's bound, each in a clone of
+    its own (R-BTN-72) and running one leg at a time.
 - **R-BTN-190 (leg state: in the forge's conversation, or on a side branch where there is no
   forge).** State one leg hands the next that must never reach the default branch — review rounds
   and their answers (B-101) — goes where the PRs the course reads live; every claim response

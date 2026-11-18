@@ -2831,6 +2831,423 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   notice (`require_signed_control`) is the detection for a repository that wants it. Provenance
   is information only: nothing is refused, held or noticed. Scenario S-BTN-220.
 
+- **2026-11-09 — §11.4, R-BTN-129, R-BTN-155, R-BTN-163, R-BTN-16, §12.1, §12.3, §5.5, §15**
+  (B-191, the V2 dashboard, filed 2026-11-13).
+  Rules changed: R-BTN-129, R-BTN-155, R-BTN-163, R-BTN-16.
+  The owner handed the Claude Design mockup
+  ([`docs/design/baton-dashboard-v2.html`](../docs/design/baton-dashboard-v2.html), self-contained; its
+  overview in [`baton-dashboard-v2-overview.png`](../docs/design/baton-dashboard-v2-overview.png))
+  over on 2026-11-09: "I want the V2 API to be organized along the same concepts as the REST
+  API, CLI and MCP. Under that assumption the dashboard becomes a walk down the same tree the
+  URLs already draw — sign in, pick a repository, and every screen after that is one entity.
+  Every screen = one entity's REST reads, with its controls the registry actions placed there
+  by `ui.view` — so 'what I see' and 'what I can do' come from the same definition." §11.4's
+  view list becomes that tree — `/`, `/login`, the repository screens under
+  `/repositories/{repository}` and the administrator's tenant screens — each screen one
+  sentence carrying over the view it retires (Running and Ready to Board and Tickets, Needs you
+  to Conditions, Timeline to the runner page, Instances and Capacity to `/instances` and
+  `/capacities`, Discrepancies to Sync, the Courses view to the course screens and the ticket
+  page), and seven rules stated once there: the entity-reads-and-`ui.view` rule; the overview
+  strip (running now · ready · needs you, and the mode where not cut over); the 10-second
+  `If-None-Match` polling, paused while the page is hidden, the confirmation-code dialog alone
+  at 5 seconds for its two minutes; the refusal wording ("This repository is not yours or does
+  not exist" with a link to `/`; "No such ticket" — one component, one wording);
+  target-dependent controls drawn only on the read's `allowed` word, computed by `authorize`
+  with the session as principal, the app never reading the policy; the ticket state vocabulary —
+  `unconfirmed`, `running`, `waiting-person`, `held`, `blocked`, `backing-off`, `suspended`,
+  `ready`, `closed`, in that precedence — and the Tickets tabs (Blocked counting a held ticket,
+  Closed meaning the last 24 hours), the same words on the vocabulary page; and Stop as one
+  click, R-BTN-155's confirmed list unchanged. R-BTN-129's `ui` becomes
+  `{view: [<screen id>…], route?}` — a screen id being `root`, `tenant/<segment>` or
+  `repository/<segment>[/{param}]`, held in one data file (`src/core/screens.ts`) the front, the
+  client router and `check:actions` read, `view` set only on session-callable entries,
+  `check:actions` failing a `view` naming no screen or an entry no session can call and listing,
+  never failing, a screen no control names — and `GET /v1/actions` answers a session its entries
+  as the registry holds them, minus `delegated`, with `ui`, a delegated key staying
+  `unauthenticated` there. §12.3's rendering sentence is stated for the built React bundle:
+  every value a text node; a schema'd value through R-BTN-112's `ui` renderer, its schema
+  fetched from `GET …/schemas` (B-217); any other blob pretty-printed JSON; `src/dashboard/**`
+  using no markup-parsing API, React the only code that touches the DOM; one bundle, no script,
+  style, font or data from another origin; the client applying the server's own link rule from
+  `src/shared/links.mjs` with `web_base`, `link_hosts` and `session_hosts` from the read. §5.5's
+  `ui` renderer and §11.4 cite it. R-BTN-163's Resolve page moves to
+  `/repositories/{repository}/conditions/{condition}` — the `resolve_url` of
+  `GET …/conditions` — with `GET /conditions/{condition}` answered by a `302` when the core
+  finds the id among the session's repositories and the shell otherwise (sign-in signed out,
+  `not-found` for none and another repository's alike). R-BTN-16's Access paragraph lists the
+  tree's page paths and states that a session's reads outside `/v1/ui/*` are authenticated by
+  Baton alone (B-192); §12.1's dashboard-session row follows, and its public row names the
+  shell's three assets. §15: S-BTN-76's `ui` column reads "text node", G-BTN-13 reads "the
+  dashboard's source never uses a markup-parsing API", and S-BTN-221 — *the screen draws only
+  its caller's actions* — is new, its API half B-204's and its DOM half B-207's (in B-193's
+  `ui` project).
+  The nine choices B-191's Decision needed packet carried were the owner's, 2026-11-09 ("I take
+  your recommendations"; 7: "we don't need staging at all", 8 and 9: "your recommendations"),
+  each now a Decisions line: the tenant screens read-only naming the CLI command, the tenant's
+  export staying the CLI's; route and adopt the CLI's alone; Stop one click;
+  `GET /v1/admin/state` keeping its shape (B-216); the held post's Accept kept on Sync (B-201);
+  the markup-API source test over ESLint; no staging check in this project — B-216 checks
+  production, the only deployment, per the one-instance decision above; a per-tenant request
+  counter with a 5-minute mean (B-202), R-BTN-87 standing as written; runners grouped by
+  hostname, per R-BTN-3. The owner's choices beside them: React and TypeScript replace the
+  brief's dependency-free rule; V2 replaces V1 outright; the timeline is per runner; the
+  mockup's unbuilt elements are a Decisions line with their reasons. The old view names go to
+  the Migrations below; the brief (`docs/context/design-brief.mdx`) was checked against the
+  amended §11.4 and its drift fixed.
+- **2026-11-14 — R-BTN-195 added; R-BTN-69, R-BTN-107, R-BTN-113, R-BTN-160, R-BTN-161, R-BTN-163 amended: a person is asked into the leg's session.**
+  Rules changed: R-BTN-195, R-BTN-69, R-BTN-107, R-BTN-113, R-BTN-160, R-BTN-161, R-BTN-163,
+  and the leads of §6.4 and §7.
+  The owner, on how a leg asks for human input: the native harnesses already handle a person
+  in the loop well, so Baton hands the person to the harness rather than mediating, and "we need
+  to remove concepts". A leg may be declared `autonomous` (deterministic code, or an agent that
+  succeeds or fails): it never asks, and fails with the new non-retryable `error.needs-person`;
+  live debugging is not an option. Any other leg may raise the new standard type `interact`
+  while its run has a session link and a `deadline_s`. Baton sets the condition's `url` from the
+  run's stored session link; no binding applies and no handler ticket is filed; the condition is
+  on Needs you and a delivery runner sends it from Baton's list with the ticket, leg and link and
+  none of the leg's text. "The user may choose to end their interaction with the agent harness
+  web ui, which leaves open a future interaction request invoked by the same leg during its
+  execution": Baton tracks nothing of the interaction, and a later raise in the run supersedes the
+  open one. A joinable session ends at the result posted on its channel, and the runner then stops
+  it. R-BTN-113 lets the session link be a page the runner serves that leads to the session (the
+  owner: "The link should point to a runner on the tailnet with the ticket, leg and run id in the
+  url. The runner could then redirect or include the harness web ui via iframe"). §6.4 and §7 now
+  say a course waits on a person one way, a person leg. Before the PR merged, an adversarial review
+  moved delivery from a handler ticket bound to `announce` to Baton's list: under
+  `tickets-approved` a handler ticket is only proposed and nothing would have sent it (the owner:
+  "read from Baton's list"). Left out of the first version and listed as possible later work in
+  FIELDHOUSE_SPEC §5.1: a question with a menu that the delivery runner delivers and the person
+  answers without joining the session, and hibernating a long-waiting leg, revived when the
+  person loads the leg page or answers. Scenario S-BTN-222.
+
+- **2026-11-15 — R-BTN-126, R-BTN-121, R-BTN-76: a leg's block is a request the runner confirms
+  (owner direction).** Found live: the zai coding plan's weekly limit ran out, every agent call
+  failed at once, and one runner spent an attempt on seven tickets in six minutes, each
+  `released:cannot-finish:transient`. The owner asked that the runner notice the provider's limit,
+  verify it by trusted means and tell Baton, because "the sandboxed implementation leg is the first
+  to notice that we are out of tokens, but we can't take its reading at face value (it's
+  sandboxed, potentially compromised code)". Before this change R-BTN-126 forwarded what the leg
+  said: a `capability` end was the runner's statement made on the leg's word, and a `resource`
+  end's `reading` came from the leg, so compromised leg code could post an `available: false`
+  reading of an account instance for up to 24 hours and block every repository it serves. Now a
+  leg's `capability` request ends blocked only when that capability's own `check`, run by the
+  runner after the leg stops, in a directory the runner owns and bounded to 60 seconds, fails; a
+  passing check or none is a counted failed attempt. A `resource` request still stands as a need,
+  as before, but carries a reading only from a runner check bound to the instance, and nothing a
+  leg sends is forwarded. `runner.json` gains `instance`: a check that tests one account alone
+  reports that account's `state` reading while it fails, at most an hour at a time and renewed,
+  and any runner whose bound check passes while the instance reads `unavailable` posts
+  `available: true` (never over an administrator's or an instrument's reading), so one
+  misconfigured runner cannot hold the fleet off for long. A failed check keeps running and its
+  capability is declared again at the first pass at least `every_s` later; one run per capability
+  is in flight at a time; a name the executor provides is blocked only by the executor's own end.
+  Blocked `capability` ends still count toward `max_blocked`: a runner whose check fails stops
+  claiming, so a ticket is bounced only by checks that pass while the provider is spent, which is
+  why a bound check must test the quota itself. Runners each holding their own subscription that
+  run out one after another can still hold a ticket `blocked-exhausted` after five such ends in a
+  day; that case was accepted. A runner reading's `until` is clamped to its one-hour end and
+  renewed while the check fails, so a weekly limit stays read as `unavailable` without a
+  reading that outlives its writer's evidence.
+  Considered and rejected: the owner's first sketch, a leg-raised condition whose bound
+  deterministic handler course verifies the claim and posts the reading. No disposition ends a leg
+  without spending an attempt (`interrupt` is `cannot-finish`, `notify` goes on, `suspend` is
+  closed to autonomous legs), and a handler is a ticket filed in git, synced and claimed, so other
+  runners would keep failing for as long as that takes. The owner's other two points needed no
+  new mechanism: a leg requires an ability (`capability:code-generation-llm`, R-BTN-174) and falls
+  back between providers within its run (§6.10, R-BTN-122); a capability block clears when the
+  check passes again, and a resource block when the reading lapses or a passing runner counters
+  it. An adversarial review before the PR found the first draft contradicting the rule's own
+  "never a retry" sentence, turning reading-less resource ends into counted failures, leaving the
+  check's working directory open to the leg, and letting one runner's failing check block the
+  fleet for a day; a second round found an unbounded exemption from `max_blocked`, counter-posts
+  overriding administrators, and an executor confirmation with no interface, and a third a
+  reading with a far reset that the one-hour bound would refuse; each is fixed above.
+  Scenarios S-BTN-223 and S-BTN-224, gate G-BTN-169.
+- **2026-11-15 — §13's event indexes: the dashboard's event windows read through an index** (B-235).
+  Rules changed: none; §13's index list.
+  On 2026-11-14 production passed Cloudflare's free-tier limit of 5,000,000 Durable Object
+  `rows_read` a day at 21:41Z, and every runner call failed until the 00:00Z reset. Each
+  10-second poll of `GET /v1/ui/state` scanned the never-pruned event log three times for its
+  `bars-mismatch`, `unsigned-control` and `discrepancy` windows (≈ 3 × the events, ~9k of a
+  ~14.4k-row poll on a production-sized state). Migration 0049 adds `events_by_kind_at`
+  `(kind, at)` and the windows read in its order, `at` then `seq` — the log's order, since every
+  event is written at the core's clock. It also restores `events_unsigned_control`, made by 0040
+  and lost when 0043 rebuilt `events` with only its four other indexes (0048's rebuild repeated
+  the list); §13 now names the event indexes and says a rebuild recreates them all. One of
+  B-235–B-243, the owner's 2026-11-15 plan to bound what each read costs.
+
+- **2026-11-15 — §13's dashboard and sync indexes, §11.4's polling: the dashboard reads in joined queries, a sync post reads its tickets once, and a hidden dashboard does not poll** (B-240, B-241, B-242's UI half).
+  Rules changed: none; §13's index notes, §11.4's polling rule.
+  On 2026-11-14 production passed Cloudflare's free-tier limit of 5,000,000 Durable Object
+  `rows_read` a day. `GET /v1/ui/state` ran about 676 statements a poll on a production-sized
+  state — per active claim its events and activities, per alive worker its claims, per claim its
+  activities, per activity its transcript, per blocked ticket its blocks — and scanned the claims
+  for the timeline's window, the unconfirmed completions and the pending fences. It now runs
+  about 65, the same however many claims, activities and blocked tickets, each list in the order
+  it was served; migration 0055 adds `claims_by_ended`, `claims_unconfirmed_by_end`,
+  `claims_fence_pending`, `transcripts_by_claim` and `next_legs_waiting`. A board post read
+  each ticket's course, station, next legs, bars, needs, decisions and answers one query at a
+  time (3,165 statements for a 180-ticket refresh that wrote 4 rows); it reads them once per
+  repository and judges its unjudged leg runs through 0055's `claim_legs_unjudged`, so an
+  unchanged ticket costs no statement and writes nothing, as before. The dashboard polls only
+  while its page is visible, and backs off to 60 seconds while the answers are unchanged. One
+  of B-235–B-243, the owner's 2026-11-15 plan to bound what each read costs.
+
+- **2026-11-16 — R-BTN-127 amended, S-BTN-225 added: the CLI's home in force (B-121).**
+  Rules changed: R-BTN-127.
+  The CLI switches between home repositories — docs, fieldhouse, baton — through
+  `~/.config/baton/homes.json`, beside `keys.json`, `origins.json` and `runner.json`:
+  `{default?: <name>, homes: {<name>: {origin, repository, checkout?}}}`, the name matching a
+  repository id's pattern and defaulting to the repository id. `baton home list | use <name> |
+  add [<name>] --repository <id> [--origin <url>] [--checkout <path>] | remove <name> | show`
+  manage it, local commands that call no server. The home in force — `--home <name|path>` (a
+  value containing `/` or naming an existing directory is a path, read as its checkout), then
+  `BATON_HOME`, then the file's `default` — supplies the repository a command's omitted
+  `<repository>` names and the one a bare ticket id is read in, and the origin a missing
+  `--url`/`BATON_URL` calls; a positional `<repository>` or a qualified ticket id always wins
+  over all three, and a bare ticket id resolves in the home in force (the owner's proposal of
+  2026-10-27, taken because "the default" should mean what it says), the
+  unique-among-the-key's-repositories reading applying only when no home is in force. A home
+  whose origin differs from `--url`/`BATON_URL` exits 2 naming both, never guessing across
+  origins (R-BTN-56); with homes and none in force, a command that needs a repository exits 2
+  listing them, never picking one. `baton run` and `baton runner start` keep their `--home`: a
+  name resolves to its home's `checkout`, and a home with no `checkout` exits 2 naming the
+  home. A home is a convenience, never a boundary: it grants nothing, and every request is
+  still signed and checked as without it. The ticket filed its scenario as S-BTN-171; that id
+  had been taken by the dependency-cycle refusal (B-166 part 3, 2026-11-02), so it lands as
+  S-BTN-225.
+
+- **2026-11-16 — R-BTN-74 amended, S-BTN-226 added: a pathless ticket's file for its legs (B-252).**
+  Rules changed: R-BTN-74. B-183 let a `custom` source post tickets with no `path`, but the legs
+  still read the ticket from `ctx.ticket.path` in the checkout: a pathless ticket's `repos:` was
+  lost to the implement stub's PR verification, which then looked only in the home, and its
+  agent got an empty `BATON_TICKET_FILE`. When the claim's re-verification read returns the
+  ticket as a string, the runner now writes it, mode 0600, into the claim's scratch directory
+  and hands legs its path as `ctx.ticket.file`, which the CLI's stubs read for `repos:` and name
+  in `BATON_TICKET_FILE`; a pathless source's `read` should therefore return the ticket as
+  markdown with the markdown source's frontmatter keys. The markdown source's tickets carry a
+  path and get no `file`.
+
+- **2026-11-16 — R-BTN-131 amended, S-BTN-230 added: the run-tests gate on PRs outside the home
+  (B-255).** Rules changed: R-BTN-131. The `create-pr` gate tested only the home repository's one
+  PR branch and asked the owner (`run-tests-unreachable`, `skip`) about any ticket with a PR
+  elsewhere — so a `git` home whose tickets all open PRs on a code repository (B-182) waited on
+  the owner after every `implement`, per ticket. A PR in a `repos:` repository is now gated by
+  its own CI, the checks the forge already reports on its head: green passes, a concluded red
+  queues `fix`, running or none reported waits on `ci`. A ticket with PRs at home and elsewhere
+  needs both the home marker and the other PRs' CI green. The run-tests stub with no home branch
+  and such a `repos:` suspends without a marker, and the fix stub's push check (B-231) skips such
+  a ticket. Several home PRs still ask the owner, and an earlier `skip` still waives the gate. The scenario is S-BTN-230 and the ticket B-255: S-BTN-227 and B-253 were taken on main
+  (B-254, and the CLI-pin ticket) while this branch was in review.
+
+- **2026-11-17 — R-BTN-197 added, R-BTN-127 amended, S-BTN-227 added: Baton states the client
+  versions it serves (B-254).**
+  Rules changed: R-BTN-197 (new), R-BTN-127 (`admin settings set --recommended-client`).
+  The owner, 2026-11-17: "What do you think of having the Baton server communicate the minimum
+  expected client version? I think this would allow runners and users interacting with the server
+  using the CLI to update at their own pace." Until now a client learned that the server had moved
+  past it only from a refusal of a request shape (on 2026-11-16, 0.1.3 lacked `admin settings set`
+  and an owner fell back to `--dev`). Every CLI request now carries `Baton-Client`, every response
+  `Baton-Client-Versions` with a `min` the deployed code sets and a `recommended` an administrator
+  may raise; below `min` is one refusal, `client-too-old`, decided before the signature; below
+  `recommended` a warning and a Needs-you row per runner. The gap between the two is the pace:
+  `min` rises only 14 days after `recommended` reached it, which also bounds dual-read windows
+  such as B-68's. Rejected: one required version (strands every runner at each deploy), and a CLI
+  that updates itself on Baton's answer (a version number in a response would then choose the code
+  run on a host, against B-138 and FIELDHOUSE_SPEC R-FH-3). Not in the course versions:
+  `min_runner_version` (R-BTN-65) and a source's `min_cli` (R-BTN-134) gate a course's legs, not
+  the API.
+- **2026-11-17 — R-BTN-72 amended, S-BTN-228 added: the runner says when its CLI is not a pinned
+  commit (B-253).**
+  Rules changed: R-BTN-72. The owner, on bumping bering's runner to a newer CLI: "I think pinning
+  to a branch should be possible during active development (perhaps baton should issue a
+  warning)." A runner's start now says how its own CLI is pinned — the checkout's commit, and
+  whether a tagged release, a detached commit or a branch tip — warning on a branch with
+  `baton: running from branch <name> at <sha> — not a pinned commit`, and every heartbeat
+  carries the same as its `profile`'s `cli: {commit, ref, pinned}`: stored opaque on the runner
+  (§13.3's `profile_json`, this change's migration), shown on the Workers view, and gated on by
+  nothing — reported, never refused, so a runner never stops for what its CLI runs from. A
+  released copy reads the commit `dist/build.json` names and is unpinned only when that build
+  was dirty. Fieldhouse's R-FH-3 keeps the host side's development exception. The scenario is
+  S-BTN-228: S-BTN-227 was taken on main by B-254 while this branch was in review, and the
+  number is the next free one at merge.
+
+- **2026-11-17 — R-BTN-4, R-BTN-6, R-BTN-20, R-BTN-58, R-BTN-72, R-BTN-90 and R-BTN-113 amended, S-BTN-229 added: a
+  runner holds several claims (B-188).**
+  Rules changed: R-BTN-4 (one active claim per ticket; per runner, the lower of its declared
+  `concurrency` and its grant's `max_claims`), R-BTN-6 (an earlier session's state file names
+  claims), R-BTN-72 (claims side by side, each in a clone of its own and running its legs one at
+  a time; per-claim state and reattachment within the lease), R-BTN-113 (`session_urls` by
+  claim), R-BTN-58 (the grant carries `max_claims`, set by whoever grants the key, as its capabilities
+  are; B-188 had it on R-BTN-180's role route, which is not built); the heartbeat's `fenced` is a
+  list, and `legs_finished` names each run's claim, since a run's seq is numbered within its
+  claim. B-188 (the owner, 2026-11-08: "each runner executing several tickets' legs in
+  parallel") planned the change; the owner returned to it on 2026-11-17: a leg blocked by an
+  interaction request or a rate limit should not stop the runner's other work; one runner per
+  host should own one queue and one view of the host's resources for the sandbox lifecycle to
+  come; a team running every sandbox in the cloud should need one runner talking to E2B. Lanes —
+  several runner identities inside one process, each holding one claim — were considered and
+  rejected ("I don't want lanes"): a lane is an identity that stands for nothing (one process, one
+  key, one host), and anything judging independence by runner identity would read two lanes of
+  one process as two runners. The lease stays the runner's: it says the process is alive, a stuck
+  leg is a deadline's (R-BTN-167, R-BTN-90), and reaps and fences were already per claim. Baton
+  counts claims, never host resources. `docs/context/architecture.mdx`'s *Parallelism is
+  horizontal* is amended with it (B-188 item 8).
+
+- **2026-11-17 — R-BTN-131 and §9.4 amended, S-BTN-231 added: a failed leg keeps what its agent
+  last said (B-256).**
+  Rules changed: R-BTN-131 (a stub's failure after its agent ran names the agent's last lines),
+  §9.4 (a `cannot-finish:transient` end of a failed leg carries the failure's last line as
+  `detail`). On 2026-11-16 seven implement legs on one runner ended "the implement agent exited
+  0, but no open PR …", released `cannot-finish:transient`: the stub kept the agent's output only
+  on a non-zero exit, and the leg's sandbox was killed with the claim, so nothing said why. Two of
+  them (B-228's) had pushed a branch whose commit said the ticket was already delivered — the
+  instructions' "stop with an error", which an agent's exit 0 cannot carry. Now every failure
+  after the agent ran quotes the last twenty lines of its two streams, or says it printed
+  nothing; the runner logs it masked, as it always logged a non-zero exit's; and the end's
+  `detail` is its last line, masked, free text, at most 200 characters — the one place Baton
+  holds it, stored and shown, never read, as every `detail` is. Rejected: parsing the output
+  for a provider's refusal to choose the end (the output is the agent's, never read for
+  decisions beyond the answer line); a provider's exhaustion stays R-BTN-126's confirmed blocked
+  end (B-21, B-245). The standard `implement` instructions now say why in the last lines
+  whenever the leg stops without a PR; an "already delivered" answer that spends no attempt is
+  B-257's.
+- **2026-11-17 — R-BTN-131, R-BTN-72 and R-BTN-62's observation amended, S-BTN-232 added: a
+  ticket already delivered (B-257).**
+  Rules changed: R-BTN-131 (`create-pr` gains the station `delivered`, the person leg `confirm`
+  and the end `confirmed`; `implement` reaches `pr-open` or `delivered`), R-BTN-72 (a suspension
+  carries `detail`, stored with the finished run's evidence on its history row), and the sync
+  run's observation (§4.3, §14) names `legs`, now with each run's `reached`. B-228 had been
+  implemented by the commit that filed it (8565aa7); three implement legs found it on `main`, and,
+  following their contract, opened no PR and pushed note-only branches
+  (`claude/B-228-already-on-main`, `claude/B-228-already-delivered`) — and each was released
+  `cannot-finish:transient`, a failed attempt, looping toward a hold while the truth was "done, a
+  person should confirm". The agent now answers `delivered <sha> <evidence>`; the stub accepts it
+  only for commits on the default branch as origin has it, the leg reaches `delivered` (an
+  outcome, so no attempt is spent, R-BTN-122), and the end carries the commit as its evidence and
+  the line as its detail — in Baton, not on a branch made to carry a note. The station function
+  places the ticket from Baton's record of the run's `reached`, never from git, so no pusher can
+  park a ticket at `delivered`; a person confirms (`confirmed`, an end) or sends it back
+  (`filed`). Only the person's answer or a merged PR closes the ticket. Rejected: a decision
+  posted by the sync on `filed` (R-BTN-78), which would leave the leg a failure and the ticket at
+  a station that says nothing happened; a closing marker on the default branch, which a pusher
+  could write and which is the note branch again; letting the stub's check close the ticket,
+  which would make an agent's word plus an ancestry check a closure; and Baton itself checking
+  ancestry, which it cannot (it holds no git) — the stub checks what it reads, as `verify: 'pr'`
+  does for `pr-open`. `confirm`'s `max_runs` 3 is the bound R-BTN-69 asks of the cycle `filed →
+  delivered → filed`, every pass of which is a person's. The ticket file's `status:` stays the
+  person's to set (`baton tickets done`), as for any ticket closed by hand.
+
+- **2026-11-17 — R-BTN-198 added; R-BTN-5, R-BTN-35, R-BTN-69, R-BTN-72, R-BTN-81, R-BTN-91,
+  R-BTN-106, R-BTN-107, R-BTN-119 and R-BTN-127 amended; S-BTN-233 added: leg events, what Baton
+  tells a running leg (B-260).**
+  Rules changed: R-BTN-198 (new, §7.10), R-BTN-5 (points to R-BTN-198 for the check at a newer
+  version), R-BTN-35 (a new version of a held ticket leaves the claim alone), R-BTN-69 (the leg
+  field `on_ticket_changed`), R-BTN-72 (`ctx.on`, `ctx.events`, `ctx.readTicket`), R-BTN-81 (the
+  `ticket-changed` row), R-BTN-91 (the ring kind `ticket`), R-BTN-106 (`baton leg events`,
+  `baton leg ticket`), R-BTN-107 (the brief names them), R-BTN-119 (the leg is told `release`
+  with its reason before the stop), R-BTN-127 (the CLI tree); also §4.2's version contract,
+  §6.9's `release`, the heartbeat's claim fields (§8.1, §14), §9.4's `released:ticket-changed`,
+  which joins the closed end reasons R-BTN-67 refuses as a bar's reason, and §13's history kind.
+  The owner, 2026-11-15, asked whether the condition concept could be reused "for the other
+  direction: when baton must signal an event to the leg being executed", naming two cases: "a
+  ticket's body is updated in git (or another issue tracker system such as linear) while the
+  ticket is under claim by a runner and a leg of the ticket is being executed", and "the running
+  leg of a ticket is canceled by the user on the baton web ui". Until now a version change under
+  a claim was progress, not staleness (R-BTN-35), and the leg ran to its end on the text it read;
+  a stop reached a leg only as an abort with reason `release`. The owner's answers to the
+  session's five questions: the name **leg event** ("leg event is fine"), not condition, since
+  no binding, handler, Needs-you entry or quota applies to an event whose only handler is the
+  leg; `continue` as the default ("continue as default is fine"), so no existing course changes;
+  under `continue` the leg is told and chooses ("can we notify the agent of the update and let it
+  decide if it wants to re-read the ticket body or not?") — the session's proposal had been no
+  mid-leg reading at all, so a ticket rewritten after the claim's checks could not reach a
+  running agent; the answer keeps that safety by having the runner re-verify the version (source
+  read, closure, tier) before the leg may read it, and handing the leg no ticket text unasked; a
+  leg's own push to its ticket raises nothing, proven only for the markdown source ("ok"); and
+  `release` changes nothing about the stop ("ok"). Readiness is not re-checked when a moved
+  version is read, mid-leg or before the next leg, since the leg's own pushes move it and
+  R-BTN-63 leaves it to the holder. Rejected: reusing condition rows and bindings inbound; pushing the
+  new body to the agent; releasing every claim whose ticket changed; and a validator reservation
+  of the event types, unneeded since leg events are never condition types. Not in this change: how
+  quickly a tracker's edit reaches Baton (no want is recorded for it, R-BTN-94). The rule id,
+  scenario and ticket are R-BTN-198, S-BTN-233 and B-260: R-BTN-197, S-BTN-230 to S-BTN-232,
+  B-235, B-258 and B-259 were taken on main while the branch was open.
+  Review round 1: two fresh reviewers, one on consistency, one on security and buildability.
+  Their findings, each checked against the text, changed the rule:
+  - the heartbeat now carries the `snapshot_sha` every check needs (both reviewers), and the
+    sha is checked on the default branch;
+  - the mid-leg read shows the version's `brief` and `last_written_by` first, as the claim does
+    (R-BTN-194), so a mid-leg edit never looks more trusted than the claim's text;
+  - a version that changes `repos`, `course` or `requires` is refused, so a read never widens a
+    claim;
+  - the scenario case of a re-tiered read was impossible, since R-BTN-35 ends that claim, and the
+    tier and closure checks left the read for the same reason;
+  - the check before the next leg no longer re-checks readiness, which R-BTN-63 leaves to the
+    holder, and it now updates the versions the runner tracks, so no spurious event follows;
+  - `restart` stops the leg at once, not at an undefined safe point;
+  - Baton accepts `released:ticket-changed` only after a logged change, so it is not a free
+    unpenalised exit;
+  - the own-change test covers every commit in the range and the claim's whole window, and is
+    named cooperative, as the scope audit is;
+  - delivery has one cursor per run, and a `release` wins over a version change in the same
+    heartbeat;
+  - sessions poll, since the executor interface pushes nothing;
+  - the `cancel` leg and `changes` tickets are exempt, and refusals are named (`moved`,
+    `bounds-changed`, `unreadable`, `unknown-version`);
+  - the event types stay unreserved, with condition and leg event types stated as separate
+    namespaces;
+  - B-260 lost the decisions it held: a signature line, refusal codes, the stub's message and
+    the brief now live in the rule, or were cut.
+
+  Review round 2: one fresh reviewer. Its findings, checked against the text:
+  - a leg could still leave unpenalised by pushing a trivial edit to its own ticket and
+    releasing for it. Now the runner refuses the reason from a run it handed no change, and the
+    end must name a logged version;
+  - `max_runs` is optional off cycles, so it bounded nothing for most legs. The validator now
+    requires it beside `restart`;
+  - the premise that a snapshot ending the claim covers closure was false (`closed: done` is not
+    stale), so closure and tier are checked again (`closed`);
+  - a forged version could name any blob, so a markdown version must be the blob at the sha;
+  - `unreadable` before a leg ends the claim `cannot-finish:transient`, not `stale-board`, so
+    B-232's claim walk cannot come back;
+  - the logging follows R-BTN-62's ordering;
+  - a context refresh re-hands the newest event;
+  - the queue stays readable through `close` and `handoff`, and stops with no message hand
+    nothing;
+  - `restart` during a condition wait blocks as R-BTN-162 says;
+  - the heartbeat fields and the release clause are cited, not restated;
+  - R-BTN-5's pointer moved to the end of its bullet, where it no longer reads as adding
+    readiness;
+  - B-260 lost its bar migration and agent hook, which the spec does not hold.
+  Review round 3, the last: one fresh reviewer. Its findings, checked against the text:
+  - Baton logged a change only for a post observed after the claim, while the runner reacted to
+    every heartbeat version. And a change logged just before an `advance` could be handed to the
+    next leg. Either way a correct `released:ticket-changed` end was refused. Now Baton logs
+    every accepted post that moves a held ticket's version. The `advance` that starts a run
+    names its `ticket_version`, and the end is accepted against that.
+  - The end body had no field for the version it must name; `ticket_version` was added to §9.4
+    and §14.
+  - A version closed `done` defers to R-BTN-72's `done` end, mid-leg and before a leg.
+  - `off-branch` is a named refusal.
+  - The order with R-BTN-5 is stated: its check at the claim's version, then R-BTN-198.
+  - R-BTN-194's list of where provenance is served includes the heartbeat and `baton leg
+    ticket`.
+  - The exemption of `cancel`-leg and `changes` claims covers Baton's half too.
+  - An end answering a `release` Baton sent with the reason `ticket-changed` (an owner bar set
+    before the reason was closed) is accepted as that release. R-BTN-67 checks bar reasons when
+    a bar is written.
+  - Versions may reach an agent. The "never a version" clause was dropped: a version is an
+    opaque §12.3 string from the same writer as the ticket's body, which the leg may read
+    anyway, so it carries nothing the body does not.
+
+  Three rounds is the most the review takes, so nothing ran after these fixes.
+  Kept after review: a `restart` run counts toward `max_runs`, which every `restart` leg must
+  now declare. A reviewer called that bound the damage, since forged versions or an editor
+  flipping a ticket can spend it, and proposed a named condition at exhaustion. Not taken: the
+  ticket is held for a person as at any leg's bound, and not counting the run would let such
+  edits restart a leg without limit. A flip back to the version last verified restarts nothing.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -2999,6 +3416,25 @@ refused).
 Each entry is a transition the specification no longer describes. The code keeps the old form
 working until the stated condition holds, then removes it.
 
+- **One claim per runner on the heartbeat (B-188, 2026-11-17).** The heartbeat answer keeps
+  `claim` — the runner's oldest active claim, or null — beside `claims`, and reads the bare
+  `session_url`, `leg_finished: <seq>` and a single `fenced` object as the runner's one claim's
+  (a bare `session_url` from a runner holding several is dropped and logged), until no
+  registered runner runs a CLI before B-188.
+
+- **The V1 dashboard's views (B-191, 2026-11-09).** §11.4's screens replace its view list
+  outright; no view name is kept as an alias. The old names map — Runners to `/runners`,
+  Running and Ready to Board and Tickets, Needs you to Conditions, Timeline to the runner
+  page, Instances to `/instances`, Capacity to `/state`, Courses to the course screens and the
+  ticket page, Discrepancies to Sync, and the Resolve page to
+  `/repositories/{repository}/conditions/{condition}`, whose old address `GET
+  /conditions/{condition}` keeps answering with a `302` (R-BTN-163). V1 itself — `src/ui/`
+  (`index.html`, `app.css`, `app.js`), polling `GET /v1/ui/state` — is served until B-193's
+  shell lands and deleted with it, V2 replacing V1 outright at `/` (the owner's ruling); the
+  route and `ui.state`'s §14 row follow with B-203, `uiState()` staying as the one function
+  that builds `GET /v1/admin/state`'s kept shape (Decision 4a; B-216 renames it `stateView()`).
+  Stop when `src/ui/` and `GET /v1/ui/state` are gone.
+
 - **Part 4's retired fields (B-166, 2026-11-02).** The board post's `ontology` and course
   entries' `route_choices` and `report_horizon_h`, the heartbeat's `uses`, the claim's and a
   `prefer` entry's `bills`, the advance's and end's `taken`, and a reading's `nonce` and
@@ -3035,9 +3471,6 @@ working until the stated condition holds, then removes it.
   and a grant's type-less legacy capability (`agent-venue`) satisfies it. A course leaves the
   window when an accepted snapshot first carries its file with types. Stop when no registered
   course reads through `ROLES` (the **Courses** view shows it): remove `ROLES`.
-- **Legacy schema forms (R-BTN-108).** A contract output whose `schema` is a file path is read
-  as `<course>:<leg>.<output>@<contract version>` with no base. Stop when no registered course
-  file uses a path.
 - **Bearer-key migration (R-BTN-117).** The bearer tokens and `BATON_KEYS` seed keys the code
   accepted become API-key credentials, granted on each repository they heartbeated or claimed on
   in the 30 days before, with the capabilities they declared there and `accepted_at` set to the

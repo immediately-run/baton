@@ -18,7 +18,7 @@ runners to work on. Nothing else supervises a leg's process. One Baton is one te
 **Names.** A **ticket** is the unit Baton hands out, `<repository id>:<local id>` to Baton
 (R-BTN-47). A **course** is the process it follows: **stations**, where a ticket rests and a
 hand-off is written, joined by **legs**, one step each (§5). A **claim** is a runner's lease
-on one ticket, running its legs one at a time (§9); a **suspension** ends a claim
+on one ticket, running its legs one at a time; a runner may hold several (§9, R-BTN-4); a **suspension** ends a claim
 `suspended:<station>` (R-BTN-71), unlike a condition's `suspend` disposition, which waits
 inside the claim (R-BTN-162). A **runner** is a process that claims and runs legs: an agent
 harness session through its sidecar, or a CLI runner (§8). The **sync** reads git and posts the repository's **board** (§4).
@@ -95,7 +95,8 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
     ticket dropped without `closed` is R-BTN-147's.
   - **Progress is not staleness.** Facts lagging the holder, readiness the latest snapshot has
     not caught up with, or a station or leg the course file lacks (R-BTN-64) leave the claim
-    alone.
+    alone. A new version of a held ticket leaves the claim alone too: R-BTN-198 says what the
+    runner does with it, after R-BTN-5's check at the claim's version.
   - A ticket gone from git loses its `tickets` row; its claims, events and course history stay.
 - **R-BTN-39 (where a ticket is: Baton's course history).** Baton is the one authority on a
   ticket's course history (R-BTN-81) and on its position: its station, its path (the legs run,

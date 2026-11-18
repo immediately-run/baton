@@ -1,0 +1,39 @@
+---
+title: "B-257 — An implement leg can answer 'already delivered': a person confirms, and no attempt is spent"
+id: B-257
+project: baton
+status: done
+updated: 2026-11-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "B-228 was already on main; three implement legs found it and each was counted a failure. Add a delivered answer that moves the ticket to a person's confirmation"
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/268
+depends_on: []
+---
+
+**What:** an implement leg that finds the ticket already delivered has no outcome to report, so the course counts it as a failure. B-228 was implemented on main by the commit that filed it (8565aa7, 2026-11-10). Three implement legs found this and pushed notes saying so (`claude/B-228-already-on-main`, `claude/B-228-already-delivered`). Each, correctly following its contract, opened no PR, and each was released `cannot-finish:transient`. The ticket loops, spends attempts, and ends up held, while the truth is "done, a person should confirm".
+
+- Give the implement leg an answer for "already delivered at `<sha>`": it names the commit(s) and the evidence (the tests run), and moves the ticket to a station where a person confirms and closes it. It does not loop back to implement and does not count as a failed attempt.
+- The confirmation is the person's. The leg's claim alone never closes a ticket.
+- Without a pushed branch, the evidence goes into the end record (Baton) rather than a branch made only to carry a note.
+
+**Done when:** a scenario where the implement leg answers "delivered" moves the ticket to the confirming station with no attempt spent, the evidence visible where a person decides; the person's confirmation closes it; the same answer on a ticket whose named commit is not on the default branch is refused.
+
+### Trust
+
+Input: the leg's answer and the commit it names. Baton checks the named commit is on the default branch before accepting the answer. The rest of the evidence is shown to the person and is never trusted on its own.
+
+### Invariants
+
+- A ticket is closed only by a person's confirmation or a merged PR, never by a leg's word alone.
+- R-BTN-23: a "delivered" answer is not a failure and spends no attempt.
+
+## Status
+
+_filed 2026-11-17._

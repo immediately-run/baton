@@ -352,7 +352,8 @@ function translateStep(step, P, env, k) {
         if (!silent(d.worker)) return { reject: `claim ${id}'s fence timed out while worker ${d.worker} was heard from` };
         tick();
         acts.push(`fenceTimeout(${m})`);
-      } else return { reject: `claim ${id}'s fence cleared by ${origin}` };
+      } else if (/\/fence-clear$/.test(origin)) acts.push(`adminFenceClear(${m})`);
+      else return { reject: `claim ${id}'s fence cleared by ${origin}` };
     }
     if (!c.confirmed && d.confirmed && /\/resolve$/.test(origin)) acts.push(`ownerResolve(${m})`);
   }

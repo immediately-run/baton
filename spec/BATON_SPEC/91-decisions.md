@@ -59,7 +59,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose one validated `course.json` per course, a closed graph Baton validates but never interprets, with advances checked as edges, over vouches, guards or YAML. Deadlines, expiries and completion tables are not guards: they read Baton's own clock and child stations, not git (2026-10-14; R-BTN-69, R-BTN-70).
 - Chose a `version` per course, with `min_runner_version` and a test kit, over a fleet-wide skills version (2026-10-14; R-BTN-22, R-BTN-65).
 - Chose a runner that runs one script per leg in a worktree at the claim's commit, with the graph as the course logic, over one per-course runner module (2026-10-14, 2026-10-19; R-BTN-72, R-BTN-133).
-- Chose one runner per checkout serving every course it declares — its heartbeat carries them all, the claim answer's `course_id` chooses what it loads — with one leg at a time as its only limit, at least for now, over one runner and one clone per course (2026-10-22; B-103, R-BTN-72).
+- Chose one runner per checkout serving every course it declares — its heartbeat carries them all, the claim answer's `course_id` chooses what it loads — its claims each running one leg at a time, over one runner and one clone per course (2026-10-22; B-103, R-BTN-72).
 - Chose a leg that names the station it reached and the leg it queues, recorded by Baton after its evidence is pushed, over inferring the next leg (2026-10-15, 2026-10-31; R-BTN-81, R-BTN-83).
 - Chose pointers and digests of leg inputs and outputs, validated by the runner, over Baton storing or validating content (2026-10-15; R-BTN-82, R-BTN-84).
 - Chose validation against both a schema and its base, with a conservative static refinement check, over full JSON Schema: refinement would be undecidable (2026-10-17; R-BTN-108).
@@ -75,7 +75,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 **Tickets, time and parallelism**
 
 - Chose child tickets as the only parallelism over several positions in one ticket (BPMN tokens, an OR-join): one holder, the fence and git-first records depend on one position (2026-10-15, 2026-10-20; R-BTN-4, R-BTN-86, R-BTN-165).
-- Chose one active claim per runner and per ticket (2026-10-13; R-BTN-4).
+- Chose one active claim per ticket, and per runner up to the lower of its declared `concurrency` and its grant's `max_claims`, each claim in a clone of its own under the runner's one lease, over one claim per runner and over lanes (several runner identities inside one process), so a waiting leg holds only its own claim and one runner per host owns the host's queue, resources and sandboxes (2026-11-08 and 2026-11-17, the owner: "I don't want lanes"; R-BTN-4, R-BTN-58, R-BTN-72). Reversed 2026-10-13's one claim per runner.
 - Chose a runner-declared lease timeout, clamped to 15 minutes – 24 hours, over a per-claim duration (2026-10-13; R-BTN-9).
 - Chose sidecar heartbeats with fencing over heartbeats from the agent thread (2026-10-13; R-BTN-6, R-BTN-7, R-BTN-19).
 - Chose reaping (the alarm for a silent runner, a force-reap for a hung one) over a release message to a dead runner (2026-10-13; R-BTN-19).
@@ -92,13 +92,15 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose to merge repositories by `weight` and courses by place in their own order over comparing scores across courses (2026-10-14; R-BTN-61).
 - Chose `max_queue` as a warning that closes a course's intake as advice over a refusing bound, which could deadlock a loop (2026-10-15; R-BTN-79).
 - Chose a blocked edge (`released:blocked`, no attempt spent, bounded by `max_blocked`, blocked once every usable instance is `unavailable`) over a `blocked` station or treating capacity as an error (2026-10-17; R-BTN-126; amended 2026-11-02, B-166 part 4: every runner granted on a repository has the same usable instances, so the block is the same for each).
+- Chose a leg's capability block as a request the runner confirms with that capability's own check, run outside the leg, and a resource reading only from a runner check bound to the account, short-lived and countered by any passing runner over another runner's reading but never over an administrator's or instrument's, over trusting the leg's report under any executor or confirming it through a bound condition's handler course (2026-11-15, the owner; R-BTN-126, R-BTN-121, R-BTN-76).
 - Chose one `requires` per leg, stored as blocks and answered by `baton leg why`, with one primitive per kind of prerequisite (2026-10-17, 2026-10-19; R-BTN-120, R-BTN-132).
 - Chose `not_before` written to git, with schedules in leg scripts and recurring jobs as series of child tickets; durations Baton measures on its own clock are timers, never a schedule (2026-10-15, 2026-10-20; R-BTN-89, R-BTN-167).
 - Chose, under `cooperative`, to call what Baton owns — positions, course history, holds, bars, run counts — a coordination record, and to carry no mechanism whose only purpose is to catch a pusher going round it: no position discrepancy on Needs you, no implied-station comparison, no held snapshots that tighten, no loosening notice on a machine-key post, no marker attestations or foreign-write notice. Under `protected` the same state is a boundary, enforced by the forge and the trusted runners (2026-11-01, the owner, "Remove it"; R-BTN-39, R-BTN-46, R-BTN-66). Reversed 2026-10-16's and 2026-10-18's choices.
 - Chose the course file to travel with every sync over a hash with the body only on change (2026-10-16; R-BTN-69).
 - Chose owner state exported and imported, not mirrored to git, where agents could change it (2026-10-15; R-BTN-88).
 - Chose one Baton per team at a stated, load-tested envelope over sharding (2026-10-15; R-BTN-87).
-- Chose to list B-129's `position-disagrees` only among the dashboard's discrepancies over listing it under Needs you as the ticket asked: the 2026-11-01 ruling keeps position discrepancies off Needs you (2026-11-03, the owner, "Keep your Decision"; R-BTN-85, R-BTN-39). Chose to let that discrepancy fire on every posted `available` past the start, a release that kept its PRs included, over telling the two apart by a field the ticket source posts for core or by core reading `prs` (R-BTN-50, R-BTN-33): the extra entries are a dashboard list that adopts nothing, and they end when R3-1266 moves the claim onto Baton (2026-11-03, the owner, "Accept the extra entries"; R-BTN-85). Chose two narrow exceptions to core reading nothing opaque, each written in its rule, over posting the git-lock status as a filter field and serving resume records whole for the CLI to prune: `display.status` for `position-disagrees` beside `display.project` (R-BTN-33), and a resume record's `branches` and `prs` for the history read (R-BTN-50, R-BTN-24) (2026-11-03, the owner, "Write narrow exceptions").
+- Chose to list B-129's `position-disagrees` only on the dashboard's Sync screen (§11.4) over listing it under Needs you as the ticket asked: the 2026-11-01 ruling keeps position discrepancies off Needs you (2026-11-03, the owner, "Keep your Decision"; R-BTN-85, R-BTN-39). Chose to let that discrepancy fire on every posted `available` past the start, a release that kept its PRs included, over telling the two apart by a field the ticket source posts for core or by core reading `prs` (R-BTN-50, R-BTN-33): the extra entries are a dashboard list that adopts nothing, and they end when R3-1266 moves the claim onto Baton (2026-11-03, the owner, "Accept the extra entries"; R-BTN-85). Chose two narrow exceptions to core reading nothing opaque, each written in its rule, over posting the git-lock status as a filter field and serving resume records whole for the CLI to prune: `display.status` for `position-disagrees` beside `display.project` (R-BTN-33), and a resume record's `branches` and `prs` for the history read (R-BTN-50, R-BTN-24) (2026-11-03, the owner, "Write narrow exceptions").
+- Chose to prune a purged ticket's claims, legs and activities with R-BTN-149's retention, each claim once nothing else names it and it is not held, over keeping every claim forever: an open ticket still reads its own (R-BTN-24, R-BTN-106), and a table that only grows makes every read over it grow too — production passed the platform's daily read limit on 2026-11-14 (2026-11-15; R-BTN-149, B-238). Chose to test a live runner as `last_seen_at + lease_timeout_ms > now`, R-BTN-9's lease rearranged, so the live set is a range of one index and never a read of every session R-BTN-3 keeps (2026-11-15; B-236).
 
 **Conditions, calls, deadlines and cancellation**
 
@@ -134,6 +136,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 
 **Runners, people and surfaces**
 
+- Chose a state version every write moves, liveness excepted, and a per-runner in-memory memo of "nothing eligible" until it moves or a clock deadline passes, over a cheaper candidate query alone: idle runners beating every 2 minutes each read ~6k rows a beat and took the free tier's 5,000,000 `rows_read` a day on 2026-11-14 and 15; the memo is lost with the object, and is never an answer computing would not give (2026-11-15; R-BTN-196, B-237).
 - Chose sessions that report moves to their runner over sessions holding a claim credential (2026-10-17; R-BTN-106).
 - Chose one executor seam — every leg and every call into repository code through a versioned module whose code the runner's host picks (`builtin`, `home`, `home-signed`, `pinned`), Baton recording its source, digest and `provides` and matching only names — over a closed list of isolation modes in the spec, Baton prescribing placement, or a repository-selected hook a host did not opt into; cloud sessions and attached sessions are executors Baton ships, still never a child holding a scoped claim token (2026-11-08, the owner; R-BTN-107).
 - Chose a check leg's withheld credentials as the capability `checks:withheld-credentials`, of a type declared `"from": "executor"` that only an executor's `provides` can declare, over the retired built-in `runner:session` or a name a grant or `runner.json` could declare, so a `builtin` runner never runs a check leg (2026-11-09, the owner; R-BTN-114, R-BTN-121, R-BTN-107).
@@ -211,3 +214,51 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   bound to loopback (B-182's decision, option (a)): slightly fiddly once — a second OS user for
   the runners' keys — and no spec change; a later ticket can loosen it if (a) proves too awkward
   in practice (2026-11-12, B-182; R-BTN-105, `docs/runbooks/local-home.mdx`).
+- Chose the V2 dashboard as a walk down the entity tree — sign in, pick a repository, one entity
+  per screen, its controls the registry actions `ui.view` places there — over standalone console
+  screens, so what a session sees and what it can do come from one definition (2026-11-09, the
+  owner, handing over the mockup; R-BTN-129, §11.4).
+- Chose React and TypeScript with a build step — one bundle built from this repository, loading
+  nothing from another origin — over the dashboard's dependency-free rule (2026-11-09, the
+  owner; §12.3, §11.4).
+- Chose Board, Tickets, Conditions and the overview strip over Running, Ready and Needs you as
+  screens: the task answers stay one glance away on the strip, and every screen is one entity
+  (2026-11-09, the owner; §11.4).
+- Chose V2 replacing V1 outright at `/`, no transition, over a gradual one: nobody uses the V1
+  dashboard (2026-11-09, the owner, "the transition doesn't need to be smooth"; §11.4).
+- Chose the timeline per runner on its page over a fleet-wide one (2026-11-09, the owner;
+  §11.4).
+- Chose runners grouped by hostname as R-BTN-3 says — the state each card's mark — over
+  grouped by state as the mockup draws them (2026-11-09, the owner; R-BTN-3, §11.4).
+- Chose to build none of the mockup's elements for which no fact exists: Schemas (no read
+  exists; B-54's renderers), Providers and Suspensions (B-142 retired their tables; availability
+  is a reading on `/instances`), Accept history (R-BTN-85 adopts git's value at once), Stream
+  stdout/stderr (R-BTN-128: a log is its directory), the runner's model (R-BTN-3 names none) and
+  "Workers" (B-68: runners) (2026-11-09, the owner; §11.4).
+- Chose the tenant screens read-only, each naming the CLI command that changes it, over the
+  brief's controls: nothing changes authority from a cookie, and the tenant's export stays the
+  CLI's alone (2026-11-09, the owner; R-BTN-155, §11.4).
+- Chose `ticket.route` and `ticket.adopt` to stay the CLI's, named as text on the ticket page,
+  over session actions for them (2026-11-09, the owner; R-BTN-83, R-BTN-39, §11.4).
+- Chose Stop as one click — the session's release message, no dialog, no code, `confirm: true`
+  staying the CLI's and the owner route's — over a confirm dialog (2026-11-09, the owner;
+  R-BTN-155, §11.4).
+- Chose to keep `GET /v1/admin/state`'s shape, built by one named core function with each
+  section equal to the matching entity read's first page at the same instant, over retiring it
+  with `ui.state`: a terminal keeps one request (2026-11-09, the owner; R-BTN-57, R-BTN-179,
+  S-BTN-170; B-216 builds it).
+- Chose to keep the held board post's Accept on Sync, unconfirmed — it accepts a post the sync
+  already made — over auto-accept alone (2026-11-09, the owner; §11.4; B-201 files its row).
+- Chose one unit test over `src/dashboard/**` refusing the markup-parsing APIs, over ESLint
+  scoped to the dashboard (2026-11-09, the owner; §12.3, G-BTN-13).
+- Chose no staging check in this project — B-216's post-merge check runs against production,
+  the only deployment anyone uses — over checking the deploy on staging or deploying staging
+  first: this project checks nothing on staging, and the staging instance itself goes with the
+  one-instance decision above (2026-11-09, the owner, "we don't need staging at all"; B-216).
+- Chose a per-tenant request counter with a 5-minute mean over amending R-BTN-87 to live counts
+  alone, so the envelope's figures are shown as stated (2026-11-09, the owner; R-BTN-87, §11.4;
+  B-202 builds it).
+- Chose a person joining the leg's own agent session in its harness's UI, asked by an `interact` condition carrying the run's session link and sent from Baton's list by a delivery runner, with autonomous legs that fail rather than ask, over pausing, hibernating or answering such requests in Baton (2026-11-14, the owner: "we need to remove concepts"; R-BTN-195, R-BTN-69, R-BTN-107).
+- Chose a floor and a recommendation of client versions, stated by Baton on every response and set by the deploy, with a floor that rises only after 14 days' notice and clients that never update themselves, over a single required version or an auto-updating CLI, so runners and people update at their own pace (2026-11-17, the owner: "would allow runners and users interacting with the server using the CLI to update at their own pace"; R-BTN-197).
+- Chose to keep a failed leg's last output — the agent's last lines in the leg's failure and the runner's log, its last line masked as the end's `detail` — over keeping nothing on an agent's exit 0 or parsing that output to choose the end: a sandbox is gone with its claim, and an agent's words are shown, never read (2026-11-17; R-BTN-131, §9.4, B-256).
+- Chose leg events — typed events Baton tells a running leg, sharing the condition type grammar: `ticket.changed`, on which the leg's course continues (the default; the leg may read the new version once the runner has re-verified it) or restarts the claim, and `release` with its reason — over reusing conditions for the inbound direction, pushing ticket text to a running agent, or letting every edit end the claim (2026-11-15, the owner: "can we notify the agent of the update and let it decide if it wants to re-read the ticket body or not?"; R-BTN-198, R-BTN-35, R-BTN-119).

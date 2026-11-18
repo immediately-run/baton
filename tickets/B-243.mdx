@@ -1,0 +1,53 @@
+---
+title: B-243 — A materialized ready queue for available work
+id: B-243
+project: baton
+status: available
+updated: 2026-11-15
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: ready_legs maintained on every write, so recommendations and claim are an indexed range read (rows_read)
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-239
+---
+
+**Depends on:** B-239 (the normalized eligibility tables).
+
+**What:** a materialized ready queue so available work is one indexed range read.
+
+- `ready_legs(ticket_id PK, repository_id, course_id, leg, expedite, to_end, rank, ready_since, tier_position, retry_after)` with an index in R-BTN-61's order, and `ready_leg_needs(ticket_id, capability)`.
+- A row exists only when every ticket-side check passes (leg ready; no open, unconfirmed or fence-pending claim; no hold or block; not a person's leg; repository cut over; a sync since the last end). `retry_after` stays a clock-checked column.
+- Maintained by one `refreshReady(ticketId)` at the end of each writer's transaction (sync, claim/finish/confirm/fence-clear, overrides, blocks, course registry, cutover/retire).
+- Worker-side checks stay a small join (via B-239's tables). Keep the gate re-check; add a test-only consistency check (old query vs table); rebuild at migration. Amend §7.2 and §13.
+
+**Target:** candidates ≈ 100–300 rows. **Risk:** a missing row silently hides work — the consistency test is required.
+
+**Why:** on 2026-11-14 production exceeded Cloudflare's free-tier Durable Objects limit of
+5,000,000 `rows_read`/day at 21:41Z; every runner call returned 500 until the 00:00Z reset.
+Measured on a production-sized local state (180 tickets, 600 claims, ~3k events) with
+workerd's `SqlStorageCursor.rowsRead`: `GET /v1/ui/state` ≈ 14.4k rows per 10 s poll
+(≈ 3·events + 2–5k), recommendations ≈ 3.7k, claim ≈ 3.8–4k, alarm ≈ 0.8–1.3k per minute,
+`POST /v1/sync/board` 4–5k rows over ~2.5k statements. This ticket is one of B-235–B-243,
+the owner's 2026-11-15 plan to bound what each read costs.
+
+**Done when:** the named calls' rows_read, measured the same way in a test (cloudflare host),
+is at or below the target, `EXPLAIN QUERY PLAN` shows the intended index where one is named,
+and behaviour is unchanged (the existing scenarios pass).
+
+### Trust
+
+No new input: indexes, tables and queries over data Baton already stores; no field, file, commit trailer or request is added.
+
+### Invariants
+
+- §7.2 (the candidate query mirrors gatesFor), R-BTN-61 (ordering), R-BTN-19 (fencing), rule 3 (one claim per ticket): the gate re-check stays authoritative, and a required consistency test compares the old query with the table on every scenario step.
+
+## Status
+
+_filed 2026-11-15._

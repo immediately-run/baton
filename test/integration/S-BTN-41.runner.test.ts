@@ -1266,7 +1266,11 @@ describe('S-BTN-41 the runner', () => {
       // no hand-off) — the merge leg's evidence line lands well before its process exits, so
       // stopping on it races the very end this test reads (a loaded machine widens the window).
       const done = runner.work();
-      await until(async () => rows(`SELECT status FROM claims WHERE ticket_id = 'docs:T-1' AND status = 'completed'`));
+      // Wait for the end the test asserts, not the merge leg's last evidence line: the leg
+      // writes its evidence before its process exits, and stopping between the two kills it as
+      // a lost lease (a loaded machine widens that window — found when B-173's scenarios joined
+      // the suite).
+      await until(async () => lines.filter((l) => l.includes('docs:T-1 done at')));
       runner.stop();
       await done;
       const outcome = lines.join('\n');

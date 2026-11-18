@@ -1,0 +1,50 @@
+---
+title: "B-236 — Partial indexes for the alarm's and the runner calls' claim and worker lookups"
+id: B-236
+project: baton
+status: done
+updated: 2026-11-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: Claims, workers and waiting next-leg indexes so the alarm and worker authentication read tens of rows, not tables (rows_read)
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/246
+depends_on: []
+---
+
+**What:** partial indexes for the predicates live queries and the alarm filter on.
+
+- claims: `(ended_at) WHERE status='reaped' AND fence_pending=1`; `(ended_at) WHERE status='completed' AND confirmed_at IS NULL`; `(worker_id, claimed_at)`; `(deadline_at) WHERE status='active' AND deadline_at IS NOT NULL`.
+- workers: `(credential_id, secret_hash)` (workerApi.ts worker lookup on every runner call); liveness as an expression index `(last_seen_at + lease_timeout_ms) WHERE reaped_at IS NULL`, with LIVE rewritten to `last_seen_at + lease_timeout_ms > :now` (blocks.ts live-worker sets).
+- ticket_next_legs: `(waiting_since) WHERE state='waiting'` for the alarm's 72 h stall check; drop the near-useless `next_legs_ready`.
+
+**Target:** alarm < 100 rows per tick.
+
+**Why:** on 2026-11-14 production exceeded Cloudflare's free-tier Durable Objects limit of
+5,000,000 `rows_read`/day at 21:41Z; every runner call returned 500 until the 00:00Z reset.
+Measured on a production-sized local state (180 tickets, 600 claims, ~3k events) with
+workerd's `SqlStorageCursor.rowsRead`: `GET /v1/ui/state` ≈ 14.4k rows per 10 s poll
+(≈ 3·events + 2–5k), recommendations ≈ 3.7k, claim ≈ 3.8–4k, alarm ≈ 0.8–1.3k per minute,
+`POST /v1/sync/board` 4–5k rows over ~2.5k statements. This ticket is one of B-235–B-243,
+the owner's 2026-11-15 plan to bound what each read costs.
+
+**Done when:** the named calls' rows_read, measured the same way in a test (cloudflare host),
+is at or below the target, `EXPLAIN QUERY PLAN` shows the intended index where one is named,
+and behaviour is unchanged (the existing scenarios pass).
+
+### Trust
+
+No new input: indexes, tables and queries over data Baton already stores; no field, file, commit trailer or request is added.
+
+### Invariants
+
+- R-BTN-19 (fencing) and the reaper's lease rule: the rewritten LIVE predicate is algebraically the same (`now - last_seen_at < lease` ⇔ `last_seen_at + lease > now`); the alarm-reaper tests check it.
+
+## Status
+
+_filed 2026-11-15._

@@ -47,6 +47,9 @@ export interface Brief {
   /** The leg's environment as R-BTN-144 lists it — the executor decides what reaches the session. */
   env: Record<string, string>;
   reads_only?: boolean;
+  /** R-BTN-195 (B-234): the leg never asks for a person — a hint for the executor's brief, as
+   *  `reads_only` is: the runner's raise check enforces it, whatever the executor does with it. */
+  autonomous?: boolean;
 }
 
 export interface StartOptions {
@@ -85,6 +88,11 @@ export interface Handle {
   session_id: string;
   /** The session's link, reported as R-BTN-113 says. */
   link?: string | null;
+  /** R-BTN-195 (B-234): the ending posted on the leg's channel, as a promise the runner hands
+   *  the session — `end` resolves at it, so a session that does not exit when its agent is done
+   *  (one a person can join) ends at its posted result, after which the runner calls `stop`.
+   *  Absent on a session with no channel. */
+  posted?: Promise<{ result: unknown }> | null;
   [k: string]: unknown;
 }
 
@@ -99,6 +107,12 @@ export interface Executor {
   stop(h: Handle, reason: string): Promise<void>;
   end(h: Handle): Promise<{ status: string; result: unknown }>;
   salvage(h: Handle): Promise<{ sha: string; ref: string } | null>;
+  /** R-BTN-72 (B-188), optional: reconnect to a session a runner started before it restarted,
+   *  from the handle data its state file kept — the live handle, or null when the session cannot
+   *  be reached. An executor without it cannot be reattached to: the runner ends such a claim
+   *  `released:cannot-finish:transient`. `builtin` does not offer it (its sessions are the dead
+   *  runner's children). */
+  reattach?(saved: Record<string, unknown>): Promise<Handle | null>;
 }
 
 /** Context a pinned bundle's factory receives from the runner. */
@@ -195,9 +209,19 @@ export function builtinExecutor(): Executor {
     },
     async end(h) {
       const s = sessions.get(h.session_id);
-      if (s) await Promise.all([...s.running].map((r) => r.result));
-      sessions.delete(h.session_id);
-      return { status: 'ended', result: null };
+      // R-BTN-107/R-BTN-195: a session that does not exit when its agent is done — one a person
+      // can join — ends at the result posted on its channel: the runner hands that promise on
+      // the handle, and `end` resolves at it rather than at the calls, which a person inside
+      // the session keeps alive. The session itself stays for the `stop` that follows (the
+      // contract's ladder): the group dies there, whatever it still holds.
+      const posted = h.posted ?? null;
+      let endedBy = 'calls' as 'calls' | 'posted';
+      if (s) {
+        const calls = Promise.all([...s.running].map((r) => r.result)).then(() => 'calls' as const);
+        const ending = posted ? posted.then(() => 'posted' as const) : null;
+        endedBy = ending ? await Promise.race([calls, ending]) : await calls;
+      }
+      return { status: 'ended', result: endedBy === 'posted' ? (await posted)?.result ?? null : null };
     },
     async salvage() {
       return null; // B-186; `builtin`'s environment outlives the leg, so the runner may do it
@@ -279,5 +303,6 @@ export async function loadExecutor(source: string, host: ExecutorHost): Promise<
   for (const p of ex.provides ?? []) {
     if (typeof p !== 'string' || p.startsWith('runner:')) throw new Error(`the executor provides ${JSON.stringify(p)}: a provides name is a capability name and never starts runner: (R-BTN-107)`);
   }
-  return { ...ex, source: 'pinned', digest, provides: [...(ex.provides ?? [])], start: ex.start.bind(ex), exec: ex.exec.bind(ex), stop: ex.stop.bind(ex), end: ex.end.bind(ex), salvage: (ex.salvage ?? (async () => null)).bind(ex) };
+  return { ...ex, source: 'pinned', digest, provides: [...(ex.provides ?? [])], start: ex.start.bind(ex), exec: ex.exec.bind(ex), stop: ex.stop.bind(ex), end: ex.end.bind(ex), salvage: (ex.salvage ?? (async () => null)).bind(ex),
+    ...(typeof ex.reattach === 'function' ? { reattach: ex.reattach.bind(ex) } : {}) };
 }

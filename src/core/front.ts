@@ -3,29 +3,38 @@
 // forwards the API to the core — through the Durable Object on Cloudflare, through the request
 // queue locally (R-BTN-55). Every response leaves with the security headers.
 import { API_KEY, readCapped, verifyOwner, verifyRequest, verifySyncCredential, verifyWorker, checkStateChanging, withBody } from './auth';
-import { BatonError, NO_STORE, SESSION_COOKIE, errorResponse, noStore, withSecurityHeaders } from './http';
+import { BatonError, CLIENT_HEADER, NO_STORE, SESSION_COOKIE, VERSIONS_HEADER, clientTooOld, errorResponse, noStore, servedClientVersions, withClientVersions, withSecurityHeaders } from './http';
 import { MAX_DELIVERY, pickDelivery, verifyDelivery } from './webhook';
+import { clientVersionOf, compareVersions, maxVersion, parseClientVersions } from '../shared/versions.mjs';
 import type { Config } from './ports';
-import page from '../ui/index.html';
-import style from '../ui/app.css';
-import script from '../ui/app.js';
+import { ID_SEGMENT, isScreenPath } from './screens';
+import page from '../dashboard/dist/index.html';
+import style from '../dashboard/dist/app.css';
+import script from '../dashboard/dist/app.js';
 
 /** How the front reaches the one core (§3): the request carries only the principal headers
  *  the front set. */
 export type Forward = (req: Request) => Promise<Response>;
 
-const STATIC: Record<string, [string, string]> = {
-  '/': [page, 'text/html; charset=utf-8'],
-  '/login': [page, 'text/html; charset=utf-8'],
-  '/ui/app.css': [style, 'text/css; charset=utf-8'],
-  '/ui/app.js': [script, 'text/javascript; charset=utf-8'],
+/** The dashboard's two code assets (B-193): the one bundle `npm run build:ui` builds and this
+ *  Worker and the local host embed as text (R-BTN-55) — never Workers assets. */
+const ASSETS: Record<string, [string, string]> = {
+  '/dashboard/app.css': [style, 'text/css; charset=utf-8'],
+  '/dashboard/app.js': [script, 'text/javascript; charset=utf-8'],
 };
-/** What anyone may fetch: the dashboard and login pages and the code they run. The two pages
- *  are the same bytes and hold no data (R-BTN-57's one-time link is opened before any session
- *  exists); an unauthenticated browser gets the page all the same — the app itself says what
- *  it needs (`baton admin open`) and recovers when the session cookie lands — while every
- *  data call under `/v1/ui` keeps its principal and its refusal (R-BTN-16). */
-const PUBLIC = new Set(['/', '/login', '/ui/app.css', '/ui/app.js']);
+const PAGE: [string, string] = [page, 'text/html; charset=utf-8'];
+
+/** What anyone may fetch: the shell — `/`, `/login`, every §11.4 screen path with its
+ *  parameters id-shaped (src/core/screens.ts), and `/conditions/{id}`, B-195's redirect address
+ *  served as the shell until the redirect lands — and its two assets. The pages are one set of
+ *  bytes and hold no data (R-BTN-57's one-time link is opened before any session exists); an
+ *  unauthenticated browser gets the page all the same — the app itself says what it needs
+ *  (`baton admin open`) and recovers when the session cookie lands — while every data call
+ *  under `/v1/ui` keeps its principal and its refusal (R-BTN-16). */
+function isShell(pathname: string): boolean {
+  return pathname === '/' || pathname === '/login' || isScreenPath(pathname)
+    || (pathname.startsWith('/conditions/') && ID_SEGMENT.test(pathname.slice('/conditions/'.length)));
+}
 
 function cookie(req: Request, name: string): string | null {
   for (const part of (req.headers.get('Cookie') ?? '').split(';')) {
@@ -191,7 +200,9 @@ async function route(req: Request, env: Config, to: Forward): Promise<Answer> {
   // §12.8 (B-145): its signed policy read, for the same principals (R-BTN-189). R-BTN-181 (B-7's
   // slice): the attestation write signs the same way — the core checks the writer it names.
   // B-126 (R-BTN-194): a ticket itself, `GET …/tickets/{ticket}`, read like its blocks.
-  if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|board|policy|attestations|tickets\/[^/]+(\/(blocks|history))?)$/.test(pathname)) {
+  // B-190 (R-BTN-84): one leg's runs, `GET …/legs/{leg}/runs`, read the same three ways — the
+  // core refuses a worker's (§14: an owner's or an administrator's read).
+  if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|board|policy|attestations|conditions|tickets\/[^/]+(\/(blocks|history|legs\/[^/]+\/runs))?)$/.test(pathname)) {
     return under('private', async () => {
       if (isSigned(req)) return forwardSigned(req, env, to);
       // R-BTN-159: a worker's (or, on the reads, an owner's or administrator's) API key.
@@ -221,26 +232,22 @@ async function route(req: Request, env: Config, to: Forward): Promise<Answer> {
       return forward(req, to, {});
     });
   }
-  if (PUBLIC.has(pathname)) return { res: serve(pathname, req), cache: 'public' };
-  // A session's own routes — `/v1/ui/*` — and an exotic `/ui/` path that is not one of the
-  // public files: the principal decides whether even the not-found is named (the dashboard's
-  // own pages are in `PUBLIC`, above).
-  if (pathname.startsWith('/v1/ui/') || pathname.startsWith('/ui/')) {
+  if (ASSETS[pathname] || isShell(pathname)) return { res: serve(pathname, req), cache: 'public' };
+  // A session's own routes — `/v1/ui/*` — until B-203 retires them with V1's state read: the
+  // principal decides whether even the not-found is named (the dashboard's own pages are in the
+  // public branch, above).
+  if (pathname.startsWith('/v1/ui/')) {
     return under('private', async () => {
       const principal = await dashboardPrincipal(req, env);
-      if (pathname.startsWith('/v1/ui/')) {
-        if (req.method !== 'GET' && req.method !== 'HEAD') checkStateChanging(req, env);
-        return forward(req, to, principal);
-      }
-      const ok = await forward(new Request(new URL('/v1/ui/session', req.url)), to, principal);
-      return ok.ok ? serve(pathname, req) : ok;
+      if (req.method !== 'GET' && req.method !== 'HEAD') checkStateChanging(req, env);
+      return forward(req, to, principal);
     });
   }
   throw refuse('not-found', 'no such route', 'public');
 }
 
 function serve(pathname: string, req: Request): Response {
-  const file = STATIC[pathname];
+  const file = ASSETS[pathname] ?? (isShell(pathname) ? PAGE : undefined);
   if (!file || req.method !== 'GET') throw new BatonError('not-found', 'no such page');
   return new Response(file[0], { headers: { 'Content-Type': file[1], 'Cache-Control': NO_STORE } });
 }
@@ -253,11 +260,39 @@ function forward(req: Request, to: Forward, principal: Record<string, string>): 
   return to(new Request(req, { headers }));
 }
 
+/** The `recommended` the core last stated on an answer that passed through here (R-BTN-197,
+ *  B-254). The front reads nothing of the store — on the Worker the instance's settings live in
+ *  the object, a subrequest away — so it learns the instance's raised `recommended` from the
+ *  core's own answers, which read it, and states what it learned on the responses it builds
+ *  itself: the `client-too-old` refusal and its own refusals, front-level answers an old client
+ *  or a stranger reads. Until the first answer teaches it, the code's own default — the raise
+ *  reaches every isolate with the first request it forwards. `min` it never learns: the floor
+ *  is the code's constant (the env's own word under the test bindings), never the store's. */
+let learnedRecommended: string | null = null;
+
 /** A request from outside, answered: both hosts' entry point. Every answer leaves with the
  *  security headers and, when its route decided so, `Cache-Control: no-store` (R-BTN-16). */
 export async function front(req: Request, env: Config, to: Forward): Promise<Response> {
   let res: Response;
   let cache: Answer['cache'] = 'public';
+  // R-BTN-197: the one check that comes before every other — the client's own statement of its
+  // version, read before the request's signature is checked and before anything of it is read or
+  // written, so an old client gets this one answer and never a failure of a request shape it no
+  // longer matches. A request without the header compares as `0.0.0`. The floor is the code's
+  // constant (a test binding raises it for the suite, §13a); `recommended` is what the front has
+  // learned of the instance's raise, the code's default until an answer teaches it, never below
+  // the floor.
+  const floor = servedClientVersions(env);
+  const served = { min: floor.min, recommended: maxVersion(learnedRecommended ?? floor.recommended, floor.min) };
+  const api = new URL(req.url).pathname.startsWith('/v1/');
+  if (api) {
+    const client = clientVersionOf(req.headers.get(CLIENT_HEADER)) ?? '0.0.0';
+    if (compareVersions(client, served.min) < 0) {
+      if (req.body && !req.bodyUsed) req.body.cancel().catch(() => {});
+      const e = clientTooOld(client, served.min, served.recommended);
+      return withSecurityHeaders(noStore(withClientVersions(errorResponse(e.code, e.message, e.extra), served)));
+    }
+  }
   try {
     ({ res, cache } = await route(req, env, to));
   } catch (e) {
@@ -265,6 +300,15 @@ export async function front(req: Request, env: Config, to: Forward): Promise<Res
     if (req.body && !req.bodyUsed) req.body.cancel().catch(() => {});
     cache = classOf(e) ?? 'public';
     res = e instanceof BatonError ? errorResponse(e.code, e.message, e.extra) : errorResponse('internal', 'internal error');
+  }
+  // R-BTN-197: every response under /v1 carries the versions Baton serves, a refusal included.
+  // A forwarded answer carries the core's own — which read the instance's raised `recommended`
+  // — and teaches this front its value; what the front built itself is filled, set-if-absent,
+  // from what it serves.
+  if (api) {
+    const stated = parseClientVersions(res.headers.get(VERSIONS_HEADER));
+    if (stated) learnedRecommended = stated.recommended;
+    res = withClientVersions(res, served);
   }
   return withSecurityHeaders(cache === 'private' ? noStore(res) : res);
 }

@@ -24,7 +24,7 @@ is stale. Never edit it by hand.
 | [`02-deployments.md`](BATON_SPEC/02-deployments.md) | **2. Deployments: tenants, hosts and the service** | — |
 | | 2.1 The service | R-BTN-37, R-BTN-32, R-BTN-55, R-BTN-2 |
 | | 2.2 Tenants | R-BTN-135, R-BTN-136, R-BTN-137, R-BTN-56 |
-| | 2.3 Capacity and admission | R-BTN-87, R-BTN-149 |
+| | 2.3 Capacity and admission | R-BTN-87, R-BTN-196, R-BTN-149 |
 | [`03-repositories-and-forges.md`](BATON_SPEC/03-repositories-and-forges.md) | **3. Repositories and forges** | — |
 | | 3.1 The registry | R-BTN-47, R-BTN-92, R-BTN-138, R-BTN-61 |
 | | 3.2 Who may post a board | R-BTN-93, R-BTN-15, R-BTN-156 |
@@ -62,7 +62,7 @@ is stale. Never edit it by hand.
 | | 6.10 How a leg runs: the course's choice | — |
 | | 6.11 Capacity: exclusive use of a capability *(proposal — B-106)* | R-BTN-178 |
 | [`07-conditions.md`](BATON_SPEC/07-conditions.md) | **7. Conditions** | — |
-| | 7.1 Raising a condition | R-BTN-160, R-BTN-125 |
+| | 7.1 Raising a condition | R-BTN-160, R-BTN-125, R-BTN-195 |
 | | 7.2 Handlers | R-BTN-161, R-BTN-162 |
 | | 7.3 The debugger and Baton's own conditions | R-BTN-163 |
 | | 7.4 Retries | R-BTN-122, R-BTN-23 |
@@ -71,6 +71,7 @@ is stale. Never edit it by hand.
 | | 7.7 Cancellation | R-BTN-168 |
 | | 7.8 The outbox | R-BTN-171 |
 | | 7.9 Standard handler courses | R-BTN-169 |
+| | 7.10 Leg events | R-BTN-198 |
 | [`08-runners.md`](BATON_SPEC/08-runners.md) | **8. Runners** | — |
 | | 8.1 Runners, heartbeats and the doorbell | R-BTN-3, R-BTN-9, R-BTN-14, R-BTN-91 |
 | | 8.2 Keys and grants | R-BTN-102, R-BTN-146, R-BTN-117 |
@@ -91,7 +92,7 @@ is stale. Never edit it by hand.
 | [`11-people.md`](BATON_SPEC/11-people.md) | **11. People: administrators, owners and their surfaces** | — |
 | | 11.1 Keys | R-BTN-13, R-BTN-159 |
 | | 11.2 Administrators and owners | R-BTN-57, R-BTN-58 |
-| | 11.3 The registry, the CLI and MCP | R-BTN-129, R-BTN-127, R-BTN-130, R-BTN-154 |
+| | 11.3 The registry, the CLI and MCP | R-BTN-129, R-BTN-127, R-BTN-197, R-BTN-130, R-BTN-154 |
 | | 11.4 The dashboard | R-BTN-155 |
 | [`12-security.md`](BATON_SPEC/12-security.md) | **12. Security** | — |
 | | 12.1 Principals | R-BTN-179 |
@@ -299,6 +300,10 @@ is stale. Never edit it by hand.
 | R-BTN-192 | the fact reader: forge facts a trusted runner attests, with no course code | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-193 | git is never a lock or a counter | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
 | R-BTN-194 | every ticket carries who last wrote it | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-195 | an interaction request asks a person into the leg's session | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
+| R-BTN-196 | an idle runner's beat reads about nothing | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
+| R-BTN-197 | Baton states the client versions it serves | [`11-people.md`](BATON_SPEC/11-people.md) |
+| R-BTN-198 | leg events: what Baton tells a running leg | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 
 ## Scenarios
 
@@ -480,6 +485,19 @@ is stale. Never edit it by hand.
 | S-BTN-218 | owner-signed briefs and the control record (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-219 | require_signed_control (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-220 | ticket provenance (B-126) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-221 | the screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-222 | an interaction request | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-223 | a leg's capability request is confirmed by the runner | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-224 | a runner's readings of an account | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-225 | the home in force (B-121) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-226 | a pathless ticket's file for its legs (B-252) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-227 | the client versions Baton serves (B-254) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-228 | the runner says when its CLI is not a pinned commit (B-253) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-229 | several claims per runner (B-188) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-230 | the run-tests gate on PRs outside the home (B-255) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-231 | a failed leg keeps what its agent last said (B-256) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-232 | a ticket already delivered (B-257) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-233 | leg events (B-260) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
@@ -631,3 +649,4 @@ is stale. Never edit it by hand.
 | G-BTN-166 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-167 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-168 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-169 | [`15-verification.md`](BATON_SPEC/15-verification.md) |

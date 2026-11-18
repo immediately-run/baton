@@ -7,7 +7,7 @@ import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { LOCAL_LOADERS, uiScriptAsText } from './bundle.mjs';
+import { LOCAL_LOADERS, dashboardScriptAsText } from './bundle.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const OUT = join(ROOT, 'dist');
@@ -15,7 +15,9 @@ const src = (path) => JSON.stringify(join(ROOT, path));
 
 /** Each on-demand bundler cli/baton.mjs imports, as the module it would have bundled. */
 const PREBUILT = {
-  'baton-run.mjs': `export { runMain } from ${src('src/runner/main.ts')};`,
+  'baton-run.mjs': `export { runMain } from ${src('src/runner/main.ts')};
+export { replayMain } from ${src('src/runner/replay.ts')};`,
+  'baton-leg.mjs': `export { raiseMain } from ${src('src/runner/leg.ts')};`,
   'baton-cli.mjs': `export { initMain, migrateMarkersMain, parseSyncArgs, syncMain } from ${src('src/defaults/cli.ts')};
 export { ticketsMain } from ${src('src/defaults/tickets.ts')};
 export { requestMain } from ${src('src/defaults/request.ts')};`,
@@ -47,7 +49,7 @@ await build({
   target: 'node22',
   packages: 'external',
   loader: { ...LOCAL_LOADERS, '.json': 'json', '.txt': 'text' },
-  plugins: [prebuilt, uiScriptAsText],
+  plugins: [prebuilt, dashboardScriptAsText],
   logLevel: 'warning',
 });
 // The runner spawns its leg process by path (src/runner/runner.ts LEG_PROCESS), beside the bundle.

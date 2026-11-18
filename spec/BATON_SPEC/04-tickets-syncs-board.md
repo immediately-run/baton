@@ -88,8 +88,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
     orders two versions and never reads one as a time (values 4). The **version contract**: a
     ticket's version changes exactly when something a runner reads of it changes — its body, exit
     criteria, filter fields, closure. A source that bumps it for anything else (a comment, a
-    watcher) stales claims for nothing; one that misses a change lets a runner work a ticket that
-    moved. A digest of what `read` returns, optionally prefixed by the store's own stamp
+    watcher) stales claims, and tells running legs their ticket changed (R-BTN-198), for nothing;
+    one that misses a change lets a runner work a ticket that moved. A digest of what `read` returns, optionally prefixed by the store's own stamp
     (`<updatedAt>:<digest>`), is recommended over a timestamp alone, which collides within its
     resolution.
   - **How the source reads** (B-183). The default export may declare `versions` — `"pinned"`
@@ -100,7 +100,15 @@ live solely in Baton, and both are exportable (R-BTN-88).
     staleness protection, so the CLI refuses at load a source that declares `versions` without
     exporting `read`, rather than run its claims with no re-verification at all. A source that
     declares neither is read as declaring nothing: its tickets keep `path` required
-    and no claim is re-verified by version. `tickets(ctx)` reads its store after the observation
+    and no claim is re-verified by version. A ticket posted with no `path` has no file in the checkout,
+    so its source's `read` should return `ticket` as markdown text — a frontmatter block with the
+    keys the markdown source reads (`id`, `title`, `repos`, `prs`, … — the table below), then the
+    body — because the legs read it as the ticket file: when the claim's re-verification read
+    returns a string for a pathless ticket, the runner writes it, mode 0600, into the claim's
+    scratch directory, removed at the claim's end, and hands its absolute path to every leg as
+    `ctx.ticket.file`; the CLI's stubs read the ticket's `repos:` from it and name it in
+    `BATON_TICKET_FILE` (B-252). A `ticket` of any other shape, or a ticket with a `path`, gives
+    the legs no `file`. `tickets(ctx)` reads its store after the observation
     number was handed out and sees every write made before it (§4.3, R-BTN-62); `ctx.versions`
     carries each live ticket's last accepted version as the observation returned it, and a
     source whose store can tell a stale read — a lagging replica — refuses to post a ticket whose
@@ -328,7 +336,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
      next_leg, running?}` from Baton's course history (R-BTN-39); a ticket absent from it is at its
      course's `start` — `versions`, each live ticket's last accepted version (B-183), Baton's own
      record returned to the posting credential only, as `positions` is, for the source's code to
-     judge its store's read against — and `unconfirmed`, every unconfirmed end's `{ticket, claim, evidence?}`
+     judge its store's read against — `legs`, the runs claims finished with evidence, newest
+     first, each `{ticket, leg, claim_nonce, evidence, reached}`: the station function judges a
+     marker by them and places a `create-pr` ticket whose `implement` reached `delivered`
+     (R-BTN-131) — and `unconfirmed`, every unconfirmed end's `{ticket, claim, evidence?}`
      with the `ended_at_sha` it named (R-BTN-10) — before it reads anything else;
   2. fetches and sets `new` to `origin/<default branch>` (the registered branch), then reads PRs
      and code repositories, so everything posted was read after the number was handed out — the
@@ -571,7 +582,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
   - **Served.** `last_written_by` is Baton's own record, never the post's, and no input of
     `row_hash`. It rides the ticket, beside its `brief`, in the board read (§11), the
     dashboard's ready rows, the recommendations, the claim answer — whose runner prints both at
-    the claim — and the ticket read (`GET /v1/repositories/{repository}/tickets/{ticket}`;
+    the claim — each heartbeat's claims and `baton leg ticket` (R-BTN-198), and the ticket read (`GET /v1/repositories/{repository}/tickets/{ticket}`;
     `baton ticket show` prints them first), so a privileged session sees whose words steer the
     ticket before it reads them.
   - **No notice.** Under `cooperative` Baton carries no foreign-write notice (R-BTN-66, the
@@ -616,6 +627,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
     never against git: a ticket with no file — a `changes` check ticket (R-BTN-114) — and a claim
     of the `cancel` leg Baton queued (R-BTN-168), whose ticket may already be withdrawn or closed
     in git.
+  - **After this check**, a version that moves under the claim is read again as R-BTN-198 says:
+    the version, closure and tier, not readiness.
   - **A ticket Baton has not seen cannot be claimed.** A claim naming it is `not-eligible`
     (`unknown-ticket`, §9.1). It is claimable after the first accepted post that names it, which
     the forge's notification (R-BTN-73, R-BTN-95) or a runner's `ls-remote` poll (R-BTN-105) make
@@ -657,7 +670,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
   block or unblocking; a condition opened or closed; a person leg's question posted, answered or
   expired (R-BTN-116); a call settled; a supersession; an outbox entry queued, delivered or
   confirmed (R-BTN-171); inputs given and outputs reported (an `inputs` row names its
-  `leg_run_inputs` rows); `spawned`; `discrepancy`.
+  `leg_run_inputs` rows); `spawned`; a held ticket's version changed (`ticket-changed`,
+  R-BTN-198); `discrepancy`.
   - Rows hold names, ids, versions, pointers and digests only (R-BTN-33); `detail_json` at most
     2 KB.
   - It is the ticket's course history (R-BTN-39): the position Baton holds is its latest
@@ -677,7 +691,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
   | sub | when |
   |---|---|
-  | `position-disagrees` | a posted ticket whose `status` is `available` while the same post places it past its course's start (R-BTN-74), core's witness being a non-empty path (B-129); judged on those two alone, since core reads no course field (R-BTN-50), so a release that kept its PRs logs it too; once per station; both values are positions, never a PR list (R-BTN-33): logged and listed among the dashboard's discrepancies, nothing adopted, never on Needs you |
+  | `position-disagrees` | a posted ticket whose `status` is `available` while the same post places it past its course's start (R-BTN-74), core's witness being a non-empty path (B-129); judged on those two alone, since core reads no course field (R-BTN-50), so a release that kept its PRs logs it too; once per station; both values are positions, never a PR list (R-BTN-33): logged and listed on the dashboard's Sync screen (§11.4), nothing adopted, never on Needs you |
   | `bars-mismatch` | posted bars lack a tag the holder declared (R-BTN-63) |
   | `closed-under-claim` | a ticket closed while a claim is active on it, a claim of its `cancel` leg excepted (R-BTN-168) |
   | `spawned-unposted` | a reported child the first snapshot after the end does not post (R-BTN-86) |

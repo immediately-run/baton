@@ -32,22 +32,22 @@ function repo(): { dir: string; origin: string } {
   return { dir, origin };
 }
 
-const run = (dir: string, argv: string[]): { code: number | null; out: string[]; threw?: string } => {
+const run = async (dir: string, argv: string[]): Promise<{ code: number | null; out: string[]; threw?: string }> => {
   const out: string[] = [];
   try {
-    return { code: requestMain(argv, { root: dir, log: (l) => out.push(l), warn: (l) => out.push(l) }), out };
+    return { code: await requestMain(argv, { root: dir, log: (l) => out.push(l), warn: (l) => out.push(l) }), out };
   } catch (e) {
     return { code: null, out, threw: (e as Error).message };
   }
 };
 
 describe('B-98 round 4: the fixes reach the real command', () => {
-  it('a value the source would misread is quoted with ONE pair — a backslash inside it survives (3-r1-3)', () => {
+  it('a value the source would misread is quoted with ONE pair — a backslash inside it survives (3-r1-3)', async () => {
     const { dir, origin } = repo();
     try {
       // Opens with `#`, so it must be quoted; carries a backslash, which a JSON escape would double.
       const said = '#4 then C:\\dir\\sub must stay literal';
-      expect(run(dir, ['--course', 'create-spec', said]).code).toBe(0);
+      expect((await run(dir, ['--course', 'create-spec', said])).code).toBe(0);
       const text = git(origin, 'show', 'main:tickets/B-1.mdx');
       expect(text).toContain('description: "');
       expect(text).not.toContain('\\\\\\\\');
@@ -58,7 +58,7 @@ describe('B-98 round 4: the fixes reach the real command', () => {
   });
 
 
-  it('a refusal names the branch the ticket would land on, never a throwaway directory (3-r1-1)', () => {
+  it('a refusal names the branch the ticket would land on, never a throwaway directory (3-r1-1)', async () => {
     const { dir } = repo();
     try {
       // The caller's own copy lists no course at all; the landing branch decides.
@@ -66,7 +66,7 @@ describe('B-98 round 4: the fixes reach the real command', () => {
       git(dir, 'add', '-A');
       git(dir, 'commit', '-q', '-m', 'no courses');
       git(dir, 'push', '-q', 'origin', 'main');
-      const r = run(dir, ['--course', 'create-spec', 'A sentence.']);
+      const r = await run(dir, ['--course', 'create-spec', 'A sentence.']);
       expect(r.threw).toMatch(/^origin\/main: /);
       expect(r.threw).not.toMatch(/\/tmp\//);
     } finally {
@@ -74,11 +74,11 @@ describe('B-98 round 4: the fixes reach the real command', () => {
     }
   });
 
-  it('-- ends the flags but a flag before it still applies (3-r1-2)', () => {
+  it('-- ends the flags but a flag before it still applies (3-r1-2)', async () => {
     const { dir, origin } = repo();
     try {
       // The order the help line shows: the sentence after --, the flag before it.
-      const r = run(dir, ['--course', 'create-spec', '--', '-v flag means verbose here']);
+      const r = await run(dir, ['--course', 'create-spec', '--', '-v flag means verbose here']);
       expect(r.threw).toBeUndefined();
       expect(r.code).toBe(0);
       expect(parseFrontmatter(git(origin, 'show', 'main:tickets/B-1.mdx'))!.title).toContain('-v flag means verbose here');

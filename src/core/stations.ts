@@ -23,6 +23,19 @@ export interface Seen {
   bars: Record<string, string[]>;
 }
 
+/** A queued or next leg as `ticket_next_legs` holds it. */
+type NextRow = { leg: string; state: string; waiting_on: string | null; ready_since: number | null; waiting_since: number | null };
+
+/** What a post finds stored for one live ticket before it applies its station (B-241): read for
+ *  the whole repository in three queries, not seven per ticket, so a post whose tickets did not
+ *  move reads its rows once and writes nothing. */
+interface Stored {
+  course_id: string;
+  station: { station: string; path: string; path_len: number; to_end: number; next_leg: string | null; next_source: string; handoff_url: string | null; observation: number; person_expires_at: number | null } | null;
+  next: NextRow[];
+  bars: { leg: string; tag: string }[];
+}
+
 /** A wait Baton stores itself (R-BTN-78's `BATON_WAITS`), not one a sync posts. */
 function batonWait(on: string | null | undefined): boolean {
   return on != null && (BATON_WAITS as readonly string[]).includes(on);
@@ -87,13 +100,18 @@ export class Stations {
     // leaves unchanged keeps its own, older `observation`, so the repository's stands for it.
     const placedBefore = this.rows<{ n: number | null }>('SELECT stations_observation AS n FROM board_head WHERE repository_id = ?', repo)[0]?.n ?? 0;
     this.exec('UPDATE board_head SET stations_observation = ? WHERE repository_id = ?', observation, repo);
+    // B-241: the repository's stored stations, next legs and bars, and its required bars, read
+    // once for the post; each ticket's writes touch only its own rows, so what was read for the
+    // others stays true while the loop runs.
+    const stored = this.storedOf(repo);
+    const required = this.c.requiredBars?.(repo) ?? [];
     for (const [local, st] of stations) {
       const id = qualify(repo, local);
-      const t = this.rows<{ course_id: string }>('SELECT course_id FROM tickets WHERE id = ?', id)[0];
+      const t = stored.get(id);
       if (!t) continue;
       const g = this.graph(repo, t.course_id);
       const unknown = !g ? 'no course in force' : this.unknownNames(g, st);
-      const prevRow = this.rows<{ path: string; station: string; observation: number; next_source: string }>('SELECT path, station, observation, next_source FROM ticket_stations WHERE ticket_id = ?', id)[0];
+      const prevRow = t.station;
       const prev = prevRow ? (JSON.parse(prevRow.path) as Step[]) : null;
       if (unknown) {
         this.clear(id);
@@ -130,7 +148,7 @@ export class Stations {
       // file from its start.
       const fine = prev ? extendsPath(g!, prev, st.path, g!.start) || st.path.length < prev.length : onGraph(g!, st.path);
       if (!fine) this.offGraph(repo, id, { observation, why: prev ? 'the path does not extend the previous one by edges' : 'the path does not follow the course file from its start', path: st.path, previous: prev });
-      this.write(id, g!, st, sha, observation, at, this.c.requiredBars?.(repo) ?? [], t.course_id);
+      this.write(id, g!, st, sha, observation, at, required, t);
       // R-BTN-81: git moved the ticket and no claim said so — someone else's work.
       if (prevRow && (prevRow.station !== st.station || prevRow.path !== JSON.stringify(st.path)) && !this.claimMoved(id, st.station, Math.max(prevRow.observation, placedBefore))) {
         this.c.history?.record(id, { kind: 'git-moved', reached: st.station, next_leg: st.next_leg, detail: { from: prevRow.station, to: st.station, path: st.path, observation, next_source: st.next_source } });
@@ -143,6 +161,28 @@ export class Stations {
         qualify(repo, c.id), c.as, observation, at);
     }
     return seen;
+  }
+
+  /** Every live ticket of the repository with its stored station, next legs and bars (B-241).
+   *  A ticket's id is `<repository>:<local id>`, so the repository's rows of a table keyed by
+   *  ticket are the key range from `<repository>:` up to `<repository>;` (';' follows ':'). */
+  private storedOf(repo: string): Map<string, Stored> {
+    const out = new Map<string, Stored>(this.rows<{ id: string; course_id: string; station: string | null; path: string; path_len: number; to_end: number;
+      next_leg: string | null; next_source: string; handoff_url: string | null; observation: number; person_expires_at: number | null }>(
+      `SELECT t.id, t.course_id, s.station, s.path, s.path_len, s.to_end, s.next_leg, s.next_source, s.handoff_url, s.observation, s.person_expires_at
+       FROM tickets t LEFT JOIN ticket_stations s ON s.ticket_id = t.id WHERE t.repository_id = ?`, repo)
+      .map(({ id, course_id, ...s }) => [id, { course_id, station: s.station == null ? null : (s as NonNullable<Stored['station']>), next: [], bars: [] }]));
+    for (const n of this.rows<NextRow & { ticket_id: string }>(
+      `SELECT ticket_id, leg, state, waiting_on, ready_since, waiting_since FROM ticket_next_legs
+       WHERE ticket_id >= ? || ':' AND ticket_id < ? || ';' ORDER BY ticket_id, leg`, repo, repo)) {
+      const { ticket_id, ...row } = n;
+      out.get(ticket_id)?.next.push(row);
+    }
+    for (const b of this.rows<{ ticket_id: string; leg: string; tag: string }>(
+      `SELECT ticket_id, leg, tag FROM ticket_bars WHERE ticket_id >= ? || ':' AND ticket_id < ? || ';' ORDER BY ticket_id, leg, tag`, repo, repo)) {
+      out.get(b.ticket_id)?.bars.push({ leg: b.leg, tag: b.tag });
+    }
+    return out;
   }
 
   /** A live ticket is not closed: a closure row of a ticket that returned is deleted. */
@@ -211,10 +251,12 @@ export class Stations {
     }
   }
 
-  /** §14 Needs you (R-BTN-83): tickets whose queued leg waits on `course-changed`. */
+  /** §14 Needs you (R-BTN-83): tickets whose queued leg waits on `course-changed` — read from
+   *  the waiting legs (`next_legs_waiting`, B-240; the CROSS JOIN keeps that order), not by
+   *  probing every station. */
   needsYou() {
     return {
-      course_changed: this.rows(`SELECT n.ticket_id, n.leg, n.waiting_since FROM ticket_stations s JOIN ticket_next_legs n ON n.ticket_id = s.ticket_id AND n.leg = s.next_leg
+      course_changed: this.rows(`SELECT n.ticket_id, n.leg, n.waiting_since FROM ticket_next_legs n CROSS JOIN ticket_stations s ON n.ticket_id = s.ticket_id AND n.leg = s.next_leg
                                  WHERE n.state = 'waiting' AND n.waiting_on = 'course-changed' ORDER BY n.waiting_since, n.ticket_id`),
     };
   }
@@ -231,17 +273,15 @@ export class Stations {
   /** Store where a snapshot places the ticket, writing only what changed (R-BTN-70): the sync
    *  re-posts every live ticket on every push and every refresh, and rows rewritten unchanged
    *  are what spend a plan's rows written (R-BTN-2; S-BTN-188). */
-  private write(id: string, g: Graph, given: PostedStation, sha: string, observation: number, at: number, required: RequiredBar[], course: string) {
+  private write(id: string, g: Graph, given: PostedStation, sha: string, observation: number, at: number, required: RequiredBar[], was: Stored) {
+    const course = was.course_id;
     // R-BTN-64: legs the snapshot names by an old name are stored under the current one.
     const name = (leg: string) => resolveLeg(g, leg) ?? leg;
     const st = { ...given, next_leg: given.next_leg == null ? null : name(given.next_leg), next: given.next.map((n) => ({ ...n, leg: name(n.leg) })) };
-    type NextRow = { leg: string; state: string; waiting_on: string | null; ready_since: number | null; waiting_since: number | null };
-    const before = new Map(this.rows<NextRow>(
-      'SELECT leg, state, waiting_on, ready_since, waiting_since FROM ticket_next_legs WHERE ticket_id = ?', id).map((r) => [r.leg, r]));
+    const before = new Map(was.next.map((r) => [r.leg, r]));
     const row = [st.station, JSON.stringify(st.path), st.path.length, g.toEnd.get(st.station) ?? 0, st.next_leg, st.next_source, st.handoff_url ?? null];
-    const stored = this.rows<{ station: string; path: string; path_len: number; to_end: number; next_leg: string | null; next_source: string; handoff_url: string | null }>(
-      'SELECT station, path, path_len, to_end, next_leg, next_source, handoff_url FROM ticket_stations WHERE ticket_id = ?', id)[0];
-    if (!stored || Object.values(stored).some((v, i) => v !== row[i])) {
+    const stored = was.station;
+    if (!stored || [stored.station, stored.path, stored.path_len, stored.to_end, stored.next_leg, stored.next_source, stored.handoff_url].some((v, i) => v !== row[i])) {
       this.exec(`INSERT INTO ticket_stations (ticket_id, station, path, path_len, to_end, next_leg, next_source, handoff_url, snapshot_sha, observation)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (ticket_id) DO UPDATE SET station = excluded.station, path = excluded.path, path_len = excluded.path_len,
@@ -258,7 +298,8 @@ export class Stations {
     {
       const def = st.next_leg != null ? g.legs.get(st.next_leg) : undefined;
       const wanted = def?.person && def.expires != null ? at + def.expires.afterS * 1000 : null;
-      const have = this.rows<{ at: number | null }>('SELECT person_expires_at AS at FROM ticket_stations WHERE ticket_id = ?', id)[0]?.at ?? null;
+      // The upsert above never writes the instant, and a new row starts without one.
+      const have = stored?.person_expires_at ?? null;
       // §6.4: the clock restarts only when the ticket's station changes — the station's, with
       // the queued leg, is the change that matters (a route re-queues at the same station); the
       // row's other columns (`handoff_url`, `next_source`, the path's spelling) restart nothing,
@@ -305,7 +346,7 @@ export class Stations {
         id, n.leg, n.state, n.waiting_on, n.ready_since, n.waiting_since);
     }
     const bars = new Set(Object.entries(st.bars).flatMap(([leg, tags]) => tags.map((tag) => JSON.stringify([leg, tag]))));
-    for (const b of this.rows<{ leg: string; tag: string }>('SELECT leg, tag FROM ticket_bars WHERE ticket_id = ?', id)) {
+    for (const b of was.bars) {
       if (!bars.delete(JSON.stringify([b.leg, b.tag]))) this.exec('DELETE FROM ticket_bars WHERE ticket_id = ? AND leg = ? AND tag = ?', id, b.leg, b.tag);
     }
     for (const b of bars) {

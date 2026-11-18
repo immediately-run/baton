@@ -11,17 +11,30 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateCourse } from '../core/course';
-import { graphOf, onGraph, resolvePath, type Graph, type Step } from '../core/graph';
+import { graphOf, onGraph, resolvePath, signatureOf, type Graph, type Step } from '../core/graph';
+import { signatureConditions } from '../core/conditionTypes';
 import { checkPayload, DEFAULT_COURSE } from '../core/board';
+import { baseChain, checkSchemaSet, parseSchemaId, POST_STATES_MAX, refinementGaps, type Schema } from '../shared/schema.mjs';
+import { stdSchema } from '../shared/std.mjs';
 import { builtIn } from '../defaults/courses';
+import { courseSchemas } from '../defaults/cli';
 import { parseSource } from '../defaults/course-source';
 import { LocalHost } from './host';
 import { openStore } from './store';
 
-export type KitRule = 'course' | 'accepted' | 'legs-scripts' | 'min-worker-version' | 'moves-back' | 'generic-run' | 'no-op' | 'instructions';
+export type KitRule = 'course' | 'accepted' | 'legs-scripts' | 'min-worker-version' | 'moves-back' | 'generic-run' | 'no-op' | 'instructions'
+  | 'schema' | 'entry' | 'spawns';
 export interface KitViolation {
   rule: KitRule;
   message: string;
+}
+
+/** A schema as the sync posts it and the kit reads it (R-BTN-108): `<course>:<name>@<n>`, the
+ *  SHA-256 of its file, and the schema itself. */
+export interface KitSchema {
+  id: string;
+  digest: string;
+  schema: unknown;
 }
 
 /** The versions a course is posted under (`.baton/baton.json`, R-BTN-51); null where unknown. */
@@ -51,6 +64,16 @@ export interface KitInput {
    *  the course has none. B-102's rule reads them: the implement and fix instructions carry the
    *  shared-file line, the one place the agents read it. */
   instructions?: { name: string; text: string }[] | null;
+  /** R-BTN-134, R-BTN-108 (B-52): the course's schemas, `schemas/<name>@<n>.json` in its course
+   *  directory, read by the same `courseSchemas` the sync's post spreads in — null when the
+   *  course posts none, so a constructed input runs no schema rule. */
+  schemas?: KitSchema[] | null;
+  /** R-BTN-111 (B-52): the repository's other listed courses, each with its file (null when the
+   *  checkout holds none — the sync refuses such a listing, so the kit reports it only where its
+   *  own rules read it), its schemas and its versions, which the `spawns` check, the signature
+   *  print and the kit's own registry post read — a post of one course alone could not resolve
+   *  what the repository's schemas resolve together. */
+  others?: { id: string; file: unknown | null; schemas: KitSchema[]; versions: Versions | null }[];
   /** The repository's leg overrides, `legs/<leg>.run.mjs` (R-BTN-131, B-33): each leg name and
    *  whether its module exports `run`, and whether `legs/<leg>.mjs` loads it (`loaded`; a leg
    *  script from before overrides does not). Absent or empty when there are none. */
@@ -91,14 +114,20 @@ export function removed(base: unknown, proposed: unknown): { stations: string[];
   };
 }
 
-/** The static rules: the file's own (R-BTN-69), the leg scripts, and a removal's version raise. */
+/** The static rules: the file's own (R-BTN-69), the leg scripts, a removal's version raise, the
+ *  schemas (R-BTN-108) with the refinement report, the entry contracts (R-BTN-109) and the
+ *  spawns contracts (R-BTN-111). */
 export function staticViolations(k: KitInput): KitViolation[] {
   const out: KitViolation[] = validateCourse(k.proposed).map((v) => ({ rule: 'course', message: `${v.path}: ${v.message} (${v.rule})` }));
+  for (const v of legacyPathReport(k)) out.push(v);
   if (out.length) return out;
   if (k.legScripts) {
-    const legs = Object.keys(asRecord(asRecord(k.proposed).legs));
+    const all = asRecord(asRecord(k.proposed).legs);
+    const legs = Object.keys(all);
     const scripts = k.legScripts.map((x) => x.name);
-    for (const l of legs.filter((x) => !scripts.includes(x))) out.push({ rule: 'legs-scripts', message: `leg ${l} has no legs/${l}.mjs` });
+    // A person's leg (R-BTN-116) is answered, never run: it needs no script (B-257's `confirm`).
+    const runs = legs.filter((x) => asRecord(all[x]).kind !== 'person');
+    for (const l of runs.filter((x) => !scripts.includes(x))) out.push({ rule: 'legs-scripts', message: `leg ${l} has no legs/${l}.mjs` });
     for (const s of scripts.filter((x) => !legs.includes(x))) out.push({ rule: 'legs-scripts', message: `legs/${s}.mjs is no leg of the course` });
     // §6.13: "The test kit fails a script without all three" (round 1, 1-A-9).
     for (const x of k.legScripts) {
@@ -136,6 +165,146 @@ export function staticViolations(k: KitInput): KitViolation[] {
       }
     }
   }
+  out.push(...schemaViolations(k), ...entryViolations(k), ...spawnsViolations(k));
+  return out;
+}
+
+/** The schemas a kit run resolves ids through (R-BTN-108): the course's own, the repository's
+ *  other courses', and the `std:` library — the pool the core's registry builds over a post,
+ *  before anything only Baton's store holds. */
+function schemaPool(k: KitInput): { resolve: (id: string) => Schema | null } {
+  const pool = new Map<string, unknown>();
+  for (const s of [...(k.schemas ?? []), ...(k.others ?? []).flatMap((o) => o.schemas)]) pool.set(s.id, s.schema);
+  return { resolve: (id: string) => (pool.has(id) ? (pool.get(id) as Schema) : stdSchema(id)) };
+}
+
+/**
+ * B-52, R-BTN-108: the kit's schema rules over the course's schemas — each inside the subset,
+ * every `$ref` and `x-baton-base` resolving among the repository's schemas and the `std:`
+ * library, no cycle — and the static refinement report: for each schema with an
+ * `x-baton-base`, every place it does not provably refine its base, each reported with its
+ * keyword (S-BTN-65: a refinement dropping `head_sha` from `required` is reported, naming
+ * `required`). Runs only when the kit read schemas: a course with none posts none.
+ */
+export function schemaViolations(k: KitInput): KitViolation[] {
+  const out: KitViolation[] = [];
+  if (!k.schemas) return out;
+  const { resolve } = schemaPool(k);
+  // The same meter the sync's post draws on, so a course of costly patterns fails here as there.
+  const meter = { steps: POST_STATES_MAX };
+  for (const f of checkSchemaSet(Object.fromEntries(k.schemas.map((s) => [s.id, s.schema])), resolve, { meter })) {
+    out.push({ rule: 'schema', message: `${f.id}${f.path ? ` ${f.path}` : ''}: ${f.message}` });
+  }
+  for (const s of k.schemas) {
+    const baseId = asRecord(s.schema)['x-baton-base'];
+    if (typeof baseId !== 'string') continue;
+    const base = resolve(baseId);
+    if (!base) continue; // unresolved is the set check's own report
+    for (const g of refinementGaps(s.schema, base, resolve)) {
+      out.push({ rule: 'schema', message: `${s.id}${g.path ? ` ${g.path}` : ''} does not refine ${baseId} — ${g.message}${g.keyword ? ` (keyword: ${g.keyword})` : ''}` });
+    }
+  }
+  return out;
+}
+
+/**
+ * B-52, R-BTN-109: entry against contracts. Every `entry` schema is posted or `std:` (the
+ * core's own rule at a post; here over the same pool), and every leg arriving at a station
+ * declares outputs that can meet its requirements: an output of the name, whose schema is the
+ * required one or a refinement of it by the posted base chains — the identity the core's
+ * `checkEntry` enforces at an arrival, checked statically here.
+ */
+export function entryViolations(k: KitInput): KitViolation[] {
+  const out: KitViolation[] = [];
+  const { resolve } = schemaPool(k);
+  const g = graphOf(k.proposed);
+  const outputsOf = (leg: string): Record<string, { schema?: unknown }> => asRecord(asRecord(asRecord(asRecord(k.proposed).legs)[leg]).outputs);
+  for (const [station, reqs] of g.entry) {
+    for (const [i, r] of reqs.entries()) {
+      if (!resolve(r.schema)) out.push({ rule: 'entry', message: `stations.${station}.entry.${i}.schema: ${r.schema} is not posted or in the std: library` });
+    }
+    for (const [leg, l] of g.legs) {
+      if (!l.to.includes(station)) continue;
+      for (const r of reqs) {
+        const declared = outputsOf(leg)[r.output];
+        if (declared === undefined || typeof declared.schema !== 'string') {
+          out.push({ rule: 'entry', message: `legs.${leg} arrives at ${station}, whose entry requires the output ${r.output} (${r.schema}); it declares no such output (R-BTN-109)` });
+        } else if (declared.schema !== r.schema && !baseChain(declared.schema, resolve).includes(r.schema)) {
+          out.push({ rule: 'entry', message: `legs.${leg}'s output ${r.output} is ${declared.schema}, which is not ${r.schema} or a refinement of it, as ${station}'s entry requires (R-BTN-109)` });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * B-52, R-BTN-111: a leg's `spawns` against each course it names — what it `provides` must meet
+ * that course's input, its `start` station's `entry`; `"*"` is checked against every course the
+ * repository lists other than the leg's own. A named course the repository does not list is a
+ * fault of the file; one whose file the checkout holds none of is the sync's refusal, reported
+ * here because the contract cannot be read. A child filed on another course is a script fault,
+ * which no static rule sees.
+ */
+export function spawnsViolations(k: KitInput): KitViolation[] {
+  const out: KitViolation[] = [];
+  const others = k.others ?? [];
+  const files = new Map(others.map((o) => [o.id, o.file]));
+  const meet = (leg: string, provides: string[], id: string, input: { output: string; schema: string }[]) => {
+    for (const r of input) {
+      if (!provides.includes(r.output)) {
+        out.push({ rule: 'spawns', message: `legs.${leg}.spawns provides no ${r.output}, which ${id}'s input requires (${r.schema}) (R-BTN-111)` });
+      }
+    }
+  };
+  for (const [leg, l] of Object.entries(asRecord(asRecord(k.proposed).legs))) {
+    const raw = asRecord(l);
+    if (!('spawns' in raw)) continue;
+    const sp = asRecord(raw.spawns);
+    const provides = names(sp.provides).filter((x) => typeof x === 'string');
+    const named = names(sp.course);
+    if (sp.course === '*') {
+      for (const o of others) {
+        if (o.file == null) continue; // the sync's own refusal names the missing file
+        meet(leg, provides, o.id, signatureOf(o.file).input);
+      }
+      continue;
+    }
+    for (const id of named) {
+      if (!files.has(id) && id !== k.course) {
+        out.push({ rule: 'spawns', message: `legs.${leg}.spawns names the course ${id}, which .baton/baton.json does not list (R-BTN-111)` });
+        continue;
+      }
+      const file = id === k.course ? k.proposed : files.get(id);
+      if (file == null) {
+        out.push({ rule: 'spawns', message: `legs.${leg}.spawns names the course ${id}, whose file .baton/courses/${id}/course.json the checkout holds none of — the contract cannot be checked (R-BTN-111)` });
+        continue;
+      }
+      meet(leg, provides, id, signatureOf(file).input);
+    }
+  }
+  return out;
+}
+
+/** The closed legacy window (history, Migrations: Legacy schema forms, deleted with the close):
+ *  an output `schema` that is a relative path is a `shape` violation like any other non-id
+ *  string, and this report names the id to write in its place — the path was read as
+ *  `<course>:<leg>.<output>@<contract version>`, so that is the id to post at `schemas/` of the
+ *  course directory and name instead. Reported beside the refusal, so a file still carrying one
+ *  is fixed in one reading. */
+function legacyPathReport(k: KitInput): KitViolation[] {
+  const isPath = (v: unknown): v is string =>
+    typeof v === 'string' && v.length > 0 && v.length <= 200 && v.split('/').every((seg) => /^[A-Za-z0-9._-]+$/.test(seg) && seg !== '.' && seg !== '..');
+  const out: KitViolation[] = [];
+  for (const [leg, l] of Object.entries(asRecord(asRecord(k.proposed).legs))) {
+    const version = asRecord(l).version;
+    const at = Number.isInteger(version) ? (version as number) : 0;
+    for (const [name, o] of Object.entries(asRecord(asRecord(l).outputs))) {
+      const s = asRecord(o).schema;
+      if (!isPath(s) || parseSchemaId(s)) continue;
+      out.push({ rule: 'schema', message: `legs.${leg}.outputs.${name}.schema: "${s}" is the legacy path form, which the closed window no longer reads — write "${k.course}:${leg}.${name}@${at}" in its place, posting the schema at schemas/${leg}.${name}@${at}.json of the course directory (R-BTN-108)` });
+    }
+  }
   return out;
 }
 
@@ -170,7 +339,9 @@ export function shortestRoute(g: Graph): Step[] | null {
         return route;
       }
       for (const [leg, l] of [...g.legs].sort(([a], [b]) => (a < b ? -1 : 1))) {
-        if (!l.from.includes(s)) continue;
+        // A person's leg is answered, never advanced into (R-BTN-116, rule person): the generic
+        // run is a runner's, so its route takes runner legs alone (B-257's `confirm`).
+        if (!l.from.includes(s) || l.person) continue;
         for (const to of l.to) if (!prev.has(to)) { prev.set(to, { from: s, step: { leg, reached: to } }); next.push(to); }
       }
     }
@@ -203,8 +374,10 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
   await host.start();
   const out: KitViolation[] = [];
   const version = k.proposedVersions ?? { version: 1, min_worker_version: 1 };
-  const entry = (course: unknown, v: Versions) => ({ id: k.course, version: v.version, min_worker_version: v.min_worker_version, skill: k.course,
-    course, step_kinds: ['other'], branch_pattern: 'claude/{ticket}-*' });
+  // B-52: each post's registry entry, the shape the sync's own post gives a course — its
+  // schemas included, read by the same `courseSchemas` (R-BTN-108, R-BTN-134).
+  const entry = (id: string, course: unknown, v: Versions, schemas: KitSchema[]) => ({ id, version: v.version, min_worker_version: v.min_worker_version, skill: id,
+    course, step_kinds: ['other'], branch_pattern: 'claude/{ticket}-*', ...(schemas.length ? { schemas } : {}) });
   const ticket = (id: string) => ({ id, course_id: k.course, path: `tickets/${id}.md`, title: id, tier: 'routine', requires: [], operator_only: false,
     expedite: false, depends_on: [], blocked_by: [], repos: [], rank: 1 });
   let n = 0;
@@ -224,10 +397,16 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
   };
   try {
     const proposed = graphOf(k.proposed);
+    // The registry of each post: the other listed courses beside the one under test — their
+    // files as the working tree holds them — and its own schemas spread in (R-BTN-108).
+    const registry = (ownCourse: unknown, v: Versions, schemas: KitSchema[]): unknown[] => [
+      ...(k.others ?? []).filter((o) => o.file != null).map((o) => entry(o.id, o.file, o.versions ?? { version: 1, min_worker_version: 1 }, o.schemas)),
+      entry(k.course, ownCourse, v, schemas),
+    ];
     // The base file first, with the live tickets where it placed them; then the proposed one.
-    if (k.base) await post([entry(k.base, k.baseVersions ?? version)], Object.fromEntries((k.live ?? []).filter((t) => onGraph(graphOf(k.base), t.path)).map((t) => [t.id, placedAt(graphOf(k.base), t.path)])));
+    if (k.base) await post(registry(k.base, k.baseVersions ?? version, []), Object.fromEntries((k.live ?? []).filter((t) => onGraph(graphOf(k.base), t.path)).map((t) => [t.id, placedAt(graphOf(k.base), t.path)])));
     const route = shortestRoute(proposed) ?? [];
-    await post([entry(k.proposed, version)], { 'KIT-1': placedAt(proposed, []) });
+    await post(registry(k.proposed, version, k.schemas ?? []), { 'KIT-1': placedAt(proposed, []) });
     const refused = core.courses.refusals().filter((r) => r.course_id === k.course);
     for (const r of refused) for (const v of r.violations) out.push({ rule: 'accepted', message: `the core refuses the file: ${v.path}: ${v.message} (${v.rule})` });
     if (refused.length) return out;
@@ -243,17 +422,21 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     const tx = <T>(f: () => T) => core.store.transaction(f);
     const claim = tx(() => core.claims.claim(hb.worker_id, { request_id: 'test-course-1', ticket_id: `${REPO}:KIT-1` })) as { claim_id?: number; code?: string; message?: string };
     if (!claim.claim_id) return [{ rule: 'generic-run', message: `the claim at ${proposed.start} was refused: ${claim.code ?? ''} ${claim.message ?? ''}`.trim() }];
+    // R-BTN-109: an arrival at a station with an `entry` must carry each output it names — the
+    // generic run gives one by pointer (a git: uri the kit's own commit answers for), which the
+    // arrival check reads by name and schema as a holder's would be.
+    const outputsAt = (station: string) => (proposed.entry.get(station) ?? []).map((r) => ({ name: r.output, schema: r.schema, uri: `git:kit/kit@${SHA(999)}:kit/${r.output}` }));
     let at = proposed.start;
     for (const step of route) {
       clock += 60_000;
-      const r = tx(() => core.claims.advance(hb.worker_id, claim.claim_id!, { leg: step.leg, ...(at === proposed.start ? {} : { reached: at }) })) as { ok?: boolean; code?: string; rule_code?: string };
+      const r = tx(() => core.claims.advance(hb.worker_id, claim.claim_id!, { leg: step.leg, ...(at === proposed.start ? {} : { reached: at, outputs: outputsAt(at) }) })) as { ok?: boolean; code?: string; rule_code?: string };
       if (!r.ok) return [{ rule: 'generic-run', message: `advance into ${step.leg} from ${at} was refused: ${r.code ?? ''} ${r.rule_code ?? ''}`.trim() }];
       at = step.reached;
     }
     clock += 60_000;
-    const end = tx(() => core.claims.end(hb.worker_id, claim.claim_id!, { end_reason: 'done', reached: at, ended_at_sha: SHA(999) })) as { ok?: boolean; code?: string };
+    const end = tx(() => core.claims.end(hb.worker_id, claim.claim_id!, { end_reason: 'done', reached: at, ended_at_sha: SHA(999), outputs: outputsAt(at) })) as { ok?: boolean; code?: string };
     if (!end.ok) return [{ rule: 'generic-run', message: `the done end at ${at} was refused: ${end.code ?? ''}` }];
-    const posted = await post([entry(k.proposed, version)], { 'KIT-1': placedAt(proposed, route) });
+    const posted = await post(registry(k.proposed, version, k.schemas ?? []), { 'KIT-1': placedAt(proposed, route) });
     if (!posted.confirmed) out.push({ rule: 'generic-run', message: `the done end at ${at} was not confirmed by a snapshot placing the ticket there` });
   } catch (e) {
     out.push({ rule: 'generic-run', message: `the local host failed: ${(e as Error).message}` });
@@ -362,6 +545,35 @@ export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
   }
 }
 
+/** B-52 (R-BTN-111, with B-234's condition half): the signature lines `baton course test`
+ *  prints — the course's **input** (its `start` station's entry), its **output** (each `end`
+ *  station's entry) and the conditions its legs may raise — and, for each course its legs'
+ *  `spawns` name, that course's signature beside it: the two contracts a spawn composes
+ *  against, read in one place (S-BTN-80: both signatures printed). */
+export function signatureLines(k: KitInput): string[] {
+  const reqs = (r: { output: string; schema: string }[]) => (r.length ? r.map((x) => `${x.output}=${x.schema}`).join(', ') : '(none)');
+  const of = (id: string, file: unknown): string[] => {
+    const s = signatureOf(file);
+    const c = signatureConditions(file);
+    return [
+      `signature: ${id} input ${reqs(s.input)}`,
+      ...s.output.map((e) => `signature: ${id} output ${e.station} ${reqs(e.entry)}`),
+      `signature: ${id} conditions ${[...c.standard, ...c.declared].join(', ')}`,
+      ...c.narrowed.map((n) => `signature: ${id} legs.${n.leg} conditions ${n.types.length ? n.types.join(', ') : '(none)'}`),
+    ];
+  };
+  const out = of(k.course, k.proposed);
+  const named = new Set<string>();
+  for (const l of Object.values(asRecord(asRecord(k.proposed).legs))) {
+    for (const id of names(asRecord(asRecord(l).spawns).course)) if (id !== '*' && id !== k.course) named.add(id);
+  }
+  for (const id of [...named].sort()) {
+    const file = (k.others ?? []).find((o) => o.id === id)?.file;
+    if (file != null) out.push(...of(id, file));
+  }
+  return out;
+}
+
 /** The whole kit over in-memory inputs. */
 export async function checkCourse(k: KitInput): Promise<KitViolation[]> {
   const s = staticViolations(k);
@@ -378,13 +590,24 @@ export async function readInputs(root: string, course: string, opts: { base?: st
   const file = join(dir, 'course.json');
   if (!existsSync(file)) throw new Error(`${file}: no such course file`);
   const proposed = JSON.parse(readFileSync(file, 'utf8'));
-  const versionsOf = (json: unknown): Versions | null => {
-    const c = (asRecord(json).courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === course);
+  const versionsOf = (json: unknown, id: string): Versions | null => {
+    const c = (asRecord(json).courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === id);
     return c && Number.isInteger(c.version) && Number.isInteger(c.min_worker_version) ? { version: c.version, min_worker_version: c.min_worker_version } : null;
   };
   const batonJson = join(root, '.baton', 'baton.json');
   const settings = existsSync(batonJson) ? asRecord(JSON.parse(readFileSync(batonJson, 'utf8'))) : {};
-  const proposedVersions = versionsOf(settings);
+  const proposedVersions = versionsOf(settings, course);
+  // B-52 (R-BTN-134, R-BTN-108): the course's schemas, from `schemas/` of its course directory
+  // through the same `courseSchemas` the sync's post spreads in — one reader, one path — and
+  // the repository's other listed courses beside it, whose files, schemas and versions the
+  // spawns check, the signature print and the kit's own registry post read. A sourced course's
+  // schemas sit in its source's directory, which B-43 wires to `courseSchemas`.
+  const schemas = courseSchemas(root, course).schemas ?? null;
+  const others = ((settings.courses as unknown[] | undefined) ?? []).map(asRecord).map((x) => x.id).filter((id): id is string => typeof id === 'string')
+    .filter((id) => id !== course).map((id) => {
+      const otherFile = join(root, '.baton', 'courses', id, 'course.json');
+      return { id, file: existsSync(otherFile) ? JSON.parse(readFileSync(otherFile, 'utf8')) : null, schemas: courseSchemas(root, id).schemas ?? [], versions: versionsOf(settings, id) };
+    });
   // The course entry's source (B-33), where it names one: the standard course whose files the
   // repository scaffolds, however the course is filed here.
   const entry = (settings.courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === course);
@@ -409,7 +632,7 @@ export async function readInputs(root: string, course: string, opts: { base?: st
       return JSON.parse(git('show', `${opts.base}:${path}`));
     };
     base = show(`.baton/courses/${course}/course.json`);
-    baseVersions = versionsOf(show('.baton/baton.json'));
+    baseVersions = versionsOf(show('.baton/baton.json'), course);
   }
   const legsDir = join(dir, 'legs');
   let legScripts: KitInput['legScripts'] = null;
@@ -442,5 +665,5 @@ export async function readInputs(root: string, course: string, opts: { base?: st
     live = Object.entries(asRecord(b.stations)).filter(([id]) => (courseOf.get(id) ?? course) === course)
       .map(([id, st]) => ({ id, path: (asRecord(st).path as Step[] | undefined) ?? [] }));
   }
-  return { course, proposed, base, proposedVersions, baseVersions, root, source: courseSource, legScripts, overrides, instructions, live };
+  return { course, proposed, base, proposedVersions, baseVersions, root, source: courseSource, legScripts, overrides, instructions, schemas, others, live };
 }

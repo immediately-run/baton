@@ -28,6 +28,8 @@
     "test"
   ],
   "exclude": [
+    "src/dashboard",
+    "test/ui",
     "test/global-setup.ts",
     "test/lib",
     "src/local",
@@ -40,14 +42,22 @@
     "test/integration/S-BTN-210.exec-calls.test.ts",
     "test/unit/boundary-host.test.ts",
     "test/unit/cli.test.ts",
+    "test/unit/homes.test.ts",
+    "test/integration/S-BTN-225.homes.test.ts",
+    "test/integration/S-BTN-226.pathless-ticket-file.test.ts",
     "test/unit/sign.test.ts",
     "test/unit/runner-main.test.ts",
+    "test/unit/runner-clipin.test.ts",
     "test/unit/runner-bundle.test.ts",
     "test/unit/runner-mask.test.ts",
     "test/integration/S-BTN-41.runner.test.ts",
     "test/integration/S-BTN-202.runner-scope.test.ts",
     "test/integration/S-BTN-26.runner.test.ts",
+    "test/integration/S-BTN-227.runner.test.ts",
     "test/integration/S-BTN-21.machine-lock.test.ts",
+    "test/integration/S-BTN-222.runner-half.test.ts",
+    "test/integration/S-BTN-229.runner-half.test.ts",
+    "test/integration/S-BTN-77.runner-half.test.ts",
     "test/unit/check-traces.test.ts",
     "test/unit/test-course.test.ts",
     "test/unit/stats-size.test.ts",
@@ -66,6 +76,8 @@
     "test/unit/request.test.ts",
     "test/unit/request-round2.test.ts",
     "test/unit/request-round4.test.ts",
+    "test/unit/request-protected.test.ts",
+    "test/unit/forge.test.ts",
     "test/integration/S-BTN-175.request.test.ts",
     "test/integration/S-BTN-172.ticket-check.test.ts",
     "test/integration/S-BTN-174.create-spec.test.ts",
@@ -78,6 +90,8 @@
     "test/integration/S-BTN-156.sync-key.test.ts",
     "test/integration/S-BTN-157.busy-sync.test.ts",
     "test/integration/S-BTN-207.ticket-versions-sync.test.ts",
+    "test/integration/S-BTN-48.replay.test.ts",
+    "test/unit/runner-replay.test.ts",
     "test/integration/S-BTN-214.local-home.test.ts",
     "test/integration/S-BTN-216.ids-decide.test.ts",
     "test/integration/S-BTN-217.cross-host-pushers.test.ts",
@@ -88,6 +102,7 @@
     "test/unit/signed-control.test.ts",
     "test/integration/S-BTN-219.require-signed-control.test.ts",
     "test/unit/dependency-hygiene.test.ts",
-    "test/unit/start-runner.test.ts"
+    "test/unit/start-runner.test.ts",
+    "test/unit/dashboard-poll.test.ts"
   ]
 }

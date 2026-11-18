@@ -158,6 +158,10 @@ async function drive(r: Run, before: any, after: any, action: string, p: Record<
       await heartbeat(r, w, { fenced: { claim_id: r.claims.get(Number(fenced![0])), terminated: true } });
       return;
     }
+    case 'adminFenceClear': {
+      await owner(r, `/v1/ui/claims/${r.claims.get(p.i)}/fence-clear`, { confirm: true });
+      return;
+    }
     case 'alarmReap':
     case 'fenceTimeout':
       await tick();

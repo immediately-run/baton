@@ -36,6 +36,12 @@ describe('decide: the four result shapes', () => {
     expect(decide({ suspend: true, reached: 'pr-open' }, g, 'review', 'pr-open')).toEqual({
       kind: 'suspend', reached: 'pr-open', next: null,
     });
+    // B-257: a suspension carries its detail to the end, as a done end does (a `delivered`
+    // answer's commit and evidence); an empty one is dropped.
+    expect(decide({ suspend: true, reached: 'reviewed', next: 'fix', detail: 'delivered at 8565aa7: 47 passed' }, g, 'review', 'pr-open')).toEqual({
+      kind: 'suspend', reached: 'reviewed', next: 'fix', detail: 'delivered at 8565aa7: 47 passed',
+    });
+    expect(decide({ suspend: true, reached: 'reviewed', next: 'fix', detail: '' }, g, 'review', 'pr-open')).not.toHaveProperty('detail');
   });
 
   it('an end result ends done', () => {

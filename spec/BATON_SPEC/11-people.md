@@ -110,9 +110,9 @@ is summarized in the principal table (§12.1).
     - freeze, seal, export and import (R-BTN-88);
     - bind a sign-in code to an administrator's session, confirm that session's actions, and
       end every session, owners' included (R-BTN-155);
-    - read everything, including any claim's leg runs (R-BTN-128), and what the dashboard
-      draws — `GET /v1/admin/state`, the same answer an administrator's session reads from
-      `GET /v1/ui/state`, with no session and so no sign-in (B-118).
+    - read everything, including any claim's leg runs (R-BTN-128), and the state in one
+      request for a terminal — `GET /v1/admin/state`, built of the same functions the entity
+      reads use (R-BTN-179, B-216), with no session and so no sign-in (B-118).
 
     Each act is an `admin` event. No administrator action is reachable to a delegated key, which
     is an owner's (R-BTN-130, R-BTN-186).
@@ -149,7 +149,7 @@ is summarized in the principal table (§12.1).
     owner may:
     - grant a runner key access with the capabilities it may use (a capability, or a whole type
       `<type>:*`, R-BTN-121; never a role name, R-BTN-157) and its
-      `max_tier` (`runner_grants`); revoke a grant; set a grant's `sync` flag and see each key's
+      `max_tier` and `max_claims` (`runner_grants`, R-BTN-4); revoke a grant; set a grant's `sync` flag and see each key's
       span (R-BTN-146);
     - add and remove owners, never the last;
     - register and revoke sync and mirror keys (R-BTN-93) and check-runners (R-BTN-114); mint and revoke registration tokens (R-BTN-117) and MCP keys
@@ -208,11 +208,17 @@ is summarized in the principal table (§12.1).
       `ticket.unhold` (`hold: false`: an approver on `approvers.policy`, a session of one, or the
       delegated key that set the hold, R-BTN-186) and `ticket.cancel`, and a body matching none or
       several is `invalid-params`.
-    - `ui` is the dashboard control (§11.4) and, where the dashboard calls the action through a
-      `/v1/ui/*` route of its own (`/v1/ui/resync`, `/v1/ui/overrides/{ticket}`,
-      `/v1/ui/conditions/{condition}/resolve`, and `/v1/ui/messages`, which is `leg.stop`'s for
-      `kind: release` and its own actions' for the other kinds, told apart by `match`), that
-      route: an entry may carry both an `http` and a `ui` route, and the router serves both.
+    - `ui` is `{view: [<screen id>…], route?}` — the screens of §11.4 that draw the action as a
+      control, and, where the dashboard calls it through a `/v1/ui/*` route of its own
+      (`/v1/ui/resync`, `/v1/ui/overrides/{ticket}`, `/v1/ui/conditions/{condition}/resolve`,
+      and `/v1/ui/messages`, which is `leg.stop`'s for `kind: release` and its own actions' for
+      the other kinds, told apart by `match`), that route: an entry may carry both an `http` and
+      a `ui` route, and the router serves both. A screen id is `root`, `tenant/<segment>` or
+      `repository/<segment>[/{param}]`, exactly §11.4's list, held in one data file
+      (`src/core/screens.ts`) the front, the client router and `check:actions` read. `view` is
+      set only on an entry whose `callers` include `session`; `check:actions` fails a `view`
+      naming no screen or an entry no session can call, and lists, never failing, a screen no
+      control names.
     - `delegated` is what a delegated key (R-BTN-130) may do with the action, as R-BTN-186
       rules: `true` for a read whose `callers` include `owner`, and for a tightening —
       `ticket.hold`, `ticket.cancel`, `leg.stop`, `owner.bar.add`; `own` for the undoing of the
@@ -247,7 +253,9 @@ is summarized in the principal table (§12.1).
     `delegated` mark disagrees with R-BTN-186, or a command's example does not parse against its
     arguments.
   - **What can I do.** `GET /v1/actions` answers the caller's own entries, each with its `input`
-    schema. `baton help` with a key and MCP's `tools/list` read it. A caller is never shown an
+    schema — to a session, its entries as the registry holds them, minus `delegated`, with `ui`
+    (a delegated key is `unauthenticated` there, R-BTN-130). `baton help` with a key, the
+    dashboard and MCP's `tools/list` read it. A caller is never shown an
     action it cannot take.
 
 - **R-BTN-127 (the CLI is a tree of nouns and verbs).**
@@ -269,12 +277,33 @@ is summarized in the principal table (§12.1).
     (R-BTN-137); a human-only key is mapped only where its custody allows (R-BTN-185),
     else given as `-i`. A command whose caller is an approver list tries the roles the list in
     force names (R-BTN-188). No key for the role exits 2, naming the role.
+  - **Homes.** `~/.config/baton/homes.json`, beside `keys.json` (R-BTN-137), names the CLI's
+    homes — `{default?: <name>, homes: {<name>: {origin, repository, checkout?}}}`, the name
+    matching a repository id's pattern (R-BTN-47) and defaulting to the repository id (B-121).
+    A home is a convenience, never a boundary: it grants nothing, and every request is still
+    signed and checked as without it. `baton home list | use <name> | add [<name>]
+    --repository <id> [--origin <url>] [--checkout <path>] | remove <name> | show` manage it —
+    local commands, no request (`add` with `--checkout` reads the origin from the checkout's
+    `.baton/baton.json` `baton_url`, R-BTN-56, and refuses an `--origin` that differs; without
+    one, `--origin` is required; `use` refuses an unknown name, listing the file's). The home
+    in force — `--home <name|path>` (a value containing `/` or naming an existing directory is
+    a path, read as its checkout), then `BATON_HOME`, then the file's `default` — supplies the
+    repository a command's omitted `<repository>` names and the one a bare ticket id is read
+    in, and the origin a missing `--url`/`BATON_URL` calls. A `<repository>` positional or a
+    qualified ticket id always wins over all three; a bare ticket id resolves in the home in
+    force, and the unique-among-the-key's-repositories reading applies only when none is. A
+    home in force whose origin differs from `--url`/`BATON_URL` exits 2, naming both — the CLI
+    never guesses across origins (R-BTN-56) — and with homes and none in force, a command that
+    needs a repository exits 2, listing them, never picking one. `baton run` and `baton runner
+    start` keep their `--home`: a name resolves to its home's `checkout`, and a home with no
+    `checkout` exits 2, naming the home.
   - **The tree.** `leg` and `ticket` act on work, with whatever key the caller holds;
     `decision` and `attestation` are a person's statements, and `human-key` the human-only
-    identity's (R-BTN-185); `repo`, `course`, `runner`, `key` and `server` run the repository's
-    and the machine's side; `owner` and `admin` manage a
+    identity's (R-BTN-185); `repo`, `course`, `runner`, `home`, `key` and `server` run the
+    repository's and the machine's side — `home` names the CLI's configuration, never a
+    request; `owner` and `admin` manage a
     repository and the instance. `<repository>` is omitted where the key file maps one
-    repository, or the ticket names it.
+    repository, the home in force names one (B-121), or the ticket names it.
 
     | Command | Calls | Signs as |
     |---|---|---|
@@ -283,7 +312,7 @@ is summarized in the principal table (§12.1).
     | `leg runs <ticket> [<leg>]` | `leg.runs`: `GET …/legs/{leg}/runs` | owner, or administrator |
     | `leg replay <ticket> <leg> [--run <n>] [--against <sha>]` | `leg.runs`, then local (R-BTN-84) | owner, or administrator |
     | `leg stop <ticket>` | `leg.stop`: `POST /v1/owner/{repository}/tickets/{ticket}/release` `{reason: "requested", confirm: true}` (R-BTN-119) | owner |
-    | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise`, `await` | the local channel (R-BTN-106, R-BTN-160, R-BTN-162) | the runner |
+    | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise`, `await`, `events`, `ticket` | the local channel (R-BTN-106, R-BTN-160, R-BTN-162, R-BTN-198) | the runner |
     | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | `ticket.blocked`, `repo.blocked`: the blocks routes (R-BTN-75) | owner, or runner granted on the repository |
     | `ticket history <ticket>` | `ticket.history`: `GET …/tickets/{ticket}/history` (R-BTN-81) | owner, or runner granted on the repository |
     | `ticket hold <ticket>`, `ticket unhold <ticket>`, `ticket expedite <ticket> [--clear]`, `ticket cancel <ticket>` | `ticket.hold`, `ticket.unhold`, `ticket.expedite`, `ticket.cancel`: `POST /v1/owner/{repository}/overrides/{ticket}` (R-BTN-12, §6.8) | owner; `unhold` an approver on `approvers.policy` (R-BTN-186) |
@@ -306,9 +335,10 @@ is summarized in the principal table (§12.1).
     | `runner register --token <t> --name <name> [--key ssh\|api]` | `POST /v1/register` (R-BTN-117) | the token |
     | `runner accept-grant <repository> [--confirm]`, `runner decline-grant <repository>` | `runner.grant.accept`, `runner.grant.decline` (R-BTN-146) | runner, key alone |
     | `key create <file>` | local (R-BTN-159) | — |
+    | `home list`, `home use <name>`, `home add [<name>] --repository <id> [--origin <url>] [--checkout <path>]`, `home remove <name>`, `home show` | local: `~/.config/baton/homes.json`, the home in force (B-121) | — |
     | `server start --db <file> --admin-keys <file> […]` | local: starts the local host (R-BTN-56, R-BTN-158) | — |
     | `owner grant list <repository>` | `owner.grant.list`: `GET /v1/owner/{repository}/grants` (R-BTN-179, R-BTN-146) | owner |
-    | `owner grant add <repository> --key <pub> --capabilities <a,b> [--hostname <h>] [--label <l>] [--max-tier <t>] [--confirm-span]`, or `--api-key --name <name>` | `owner.grant.add`: `POST /v1/owner/{repository}/grants` (R-BTN-58, R-BTN-146, R-BTN-159) | an approver on `approvers.members` |
+    | `owner grant add <repository> --key <pub> --capabilities <a,b> [--hostname <h>] [--label <l>] [--max-tier <t>] [--max-claims <n>] [--confirm-span]`, or `--api-key --name <name>` | `owner.grant.add`: `POST /v1/owner/{repository}/grants` (R-BTN-58, R-BTN-146, R-BTN-159, R-BTN-4) | an approver on `approvers.members` |
     | `owner grant revoke <repository> <fingerprint>` | `owner.grant.revoke` (R-BTN-58) | an approver on `approvers.members` |
     | `owner grant role <repository> <fingerprint> --role runner\|trusted-runner [--domain <label>] [--checker]` | `owner.grant.role`: `PUT …/grants/{fingerprint}/role` (R-BTN-180) | an approver on `approvers.roles` |
     | `owner grant flags <repository> <fingerprint> --sync\|--no-sync` | `owner.grant.flags`: `PUT …/grants/{fingerprint}/flags` (R-BTN-146) | owner; `--sync` an approver on `approvers.policy` |
@@ -326,13 +356,13 @@ is summarized in the principal table (§12.1).
     | `admin repo list` | `admin.repo.list`: `GET /v1/admin/repositories` (R-BTN-179) | administrator |
     | `admin repo add <forge path> --owner-key <pub> […]`, `admin repo set <id> […]`, `admin repo retire <id>` | `admin.repo.add`, `admin.repo.set`, `admin.repo.retire`: `POST /v1/admin/repositories` (R-BTN-47, R-BTN-138) | administrator |
     | `admin repo resync <repository> --force [<sha>]` | `admin.repo.resync`: `POST /v1/admin/repositories/{repository}/resync` (R-BTN-11) | administrator |
-    | `admin grant add <repository> --key <pub> --capabilities <a,b> […]` | `admin.grant.add`: `POST /v1/admin/grants` (R-BTN-57, R-BTN-188) | administrator |
+    | `admin grant add <repository> --key <pub> --capabilities <a,b> […] [--max-claims <n>]` | `admin.grant.add`: `POST /v1/admin/grants` (R-BTN-57, R-BTN-188, R-BTN-4) | administrator |
     | `admin key revoke <fingerprint>`, `admin key hostname <fingerprint> <hostname>` | `admin.key.revoke`; `admin.key.hostname`, `POST /v1/admin/grants` by `match` (R-BTN-57) | administrator |
     | `admin keys set --file <path>`, `admin forge-secrets set --file <path>` | local: the secret sink (R-BTN-136) | administrator |
     | `admin github-app create --org <org>`, `admin check-app create --org <org> --key-out <path>` | local: GitHub's manifest flow, then the secret sink or `admin.settings.set` (R-BTN-57, §12.7) | administrator |
     | `admin probe add --key <pub> --label <l>`, `admin resource add <name> […]`, `admin instance add <name> […]`, `admin reading set <instance> […]` | `admin.probe.add`, `admin.resource.add`, `admin.instance.add`, `admin.reading.set`: `POST /v1/admin/probes`, `…/resources`, `…/instances`, `…/readings` (R-BTN-76, R-BTN-101) | administrator |
     | `admin capacity set <capability> <n>`, `admin capacity set <capability> --clear` | `admin.capacity.set`: `PUT /v1/admin/capacities` (R-BTN-178) | administrator |
-    | `admin settings set [--link-hosts …] [--session-hosts …] [--check-app-id <id>]` | `admin.settings.set`: `PUT /v1/admin/settings` (R-BTN-112, R-BTN-113, §12.7) | administrator |
+    | `admin settings set [--link-hosts …] [--session-hosts …] [--check-app-id <id>] [--recommended-client <version>]` | `admin.settings.set`: `PUT /v1/admin/settings` (R-BTN-112, R-BTN-113, R-BTN-197, §12.7) | administrator |
     | `admin freeze`, `admin unfreeze`, `admin seal`, `admin export [--with-history]`, `admin import <file>` | `admin.freeze`, `admin.unfreeze`, `admin.seal`, `admin.export`, `admin.import` (R-BTN-88) | administrator |
     | `admin state` | `admin.state`: `GET /v1/admin/state` (R-BTN-57, R-BTN-179) | administrator |
     | `admin open`, `admin confirm <code>`, `admin sessions revoke --all` | an administrator's dashboard sign-in, confirmations and sessions (R-BTN-155) | administrator |
@@ -356,6 +386,40 @@ is summarized in the principal table (§12.1).
     help` reads `GET /v1/actions` and marks the commands that key may run. An unknown word
     suggests the nearest name. Every command that reads a route takes `--json` and prints the
     route's JSON as is; `leg log --json` prints frames as JSON lines.
+
+- **R-BTN-197 (Baton states the client versions it serves).** Every client of the API is the
+  CLI — a person's command, a runner, a sync — and each says which version it is; Baton says which
+  versions it serves, so clients update at their own pace inside a window the deployment sets.
+  - **The client says what it is.** Every request the CLI sends carries `Baton-Client:
+    baton/<version>`, its package's version; a CLI run from a git working tree (B-138's `--dev`,
+    a runner following a branch) adds `+dev` (`baton/0.1.4+dev`). A request without the header
+    is compared as `0.0.0`.
+  - **Baton says what it serves.** Every response under `/v1`, a refusal included, carries
+    `Baton-Client-Versions: min=<version>, recommended=<version>`.
+    - `min` is the oldest client whose requests the deployed code still reads: a constant in
+      Baton's code, raised only in the change that drops what an older client sends, so the
+      deploy sets it and no setting does.
+    - `recommended` is at or above `min`. The code sets its default; an administrator may raise
+      it (`admin settings set --recommended-client <version>`, R-BTN-127), never below the
+      code's default.
+    - Versions compare by semver precedence; `+dev` takes no part in the comparison.
+  - **Below `min` is one refusal.** A request from a client below `min` is answered
+    `client-too-old` (§14), naming the client's version, `min` and `recommended`, before its
+    signature is checked and before anything is read or written, so an old client gets that
+    answer and never a failure of a request shape it no longer matches. No other answer depends
+    on the client's version.
+  - **`min` rises only after notice.** A change that raises `min` to a version lands only once
+    `recommended` has been that version or higher on the deployment for at least 14 days.
+  - **Below `recommended` is a warning.** The CLI prints `baton: this CLI is <version>; Baton
+    recommends <recommended> and refuses below <min>` once per command, and a runner once at
+    start and again whenever the header's values change. Every runner call records its
+    `Baton-Client` as the runner's `client_version` (§13.3, a filter field, R-BTN-33), and Needs
+    you lists each live runner whose `client_version` is below `recommended`, with its version.
+  - **A refused runner stops; no client updates itself.** A runner answered `client-too-old`
+    takes no claim, logs the refusal with the versions, and exits non-zero; a claim it held ends
+    as its lease lapses (R-BTN-9). No client installs, fetches or switches its version on
+    Baton's answer, and the header carries version numbers only, never a location or a
+    package: installing a release stays the operator's act (R-BTN-107, B-138).
 
 - **R-BTN-130 / R-BTN-154 (Baton serves MCP; a delegated key reaches what R-BTN-186 admits).**
   - **The MCP key is a delegated key** (R-BTN-186). It acts as an owner of one repository, for
@@ -498,8 +562,8 @@ is summarized in the principal table (§12.1).
     Not confirmed, because they stop or slow work and Stop must stay one click: setting a hold,
     cancel, Stop and other `release` messages, a resync, a status request; nor resolving a
     condition, which a signed-in owner or administrator answers in one step (`POST
-    /v1/ui/conditions/{condition}/resolve`, R-BTN-163); nor a person leg's answer from Needs you
-    (§11.4, R-BTN-116), an OAuth request, its status, a denial or an approval naming no
+    /v1/ui/conditions/{condition}/resolve`, R-BTN-163); nor a person leg's answer from the
+    Conditions screen (§11.4, R-BTN-116), an OAuth request, its status, a denial or an approval naming no
     destructive action (`BATON_MCP_OAUTH_SPEC` §5), or `ui.logout`. The list above is the whole
     list.
   - **What the confirmation protects.** A same-user process can read a browser's cookie jar, so
@@ -508,49 +572,115 @@ is summarized in the principal table (§12.1).
     that a same-user process can reach confirms as well, which is why R-BTN-57 keeps
     administrator and owner keys out of agents' reach.
 
-- **The views.** At the origin's `/`, behind a dashboard session, polling `GET /v1/ui/state`
-  every 10 seconds; all text through `textContent` (§12.3). An owner's session's state holds
-  only its repositories: their tickets, claims, conditions and history, and the runners granted
-  on them; Instances and Capacity, which are tenant-wide, are an administrator's.
-  - **Runners** — by name: alive or dead, harness, tier ceiling, capabilities (declared, and granted per repository, R-BTN-174), tags, courses,
-    lease timeout, last seen, last activity, the claim held, current activity, transcript link,
-    executor (source, digest and `provides`, R-BTN-107), credential kind and registering token.
-  - **Timeline** — a swimlane per alive runner over 24 hours: claims as bars, activities nested
-    under them by kind, failed ones marked; a segment shows its label, detail and transcript;
-    leg runs link their `session_url` (R-BTN-113) and show their log directory (R-BTN-128) and their executor digest, environment and instance (R-BTN-107) as text.
-  - **Running** — each active claim's event timeline and reap deadline; **stalled** when the
-    runner is alive but `last_activity_at` is over 2 hours old; a leg waiting on a condition
-    shows `condition-wait`; session links and log directories as on the Timeline.
-  - **Ready** — the matching order with each ticket's `requires`, tier and eligible alive
-    runners, and **ready but nobody can take it** with the failed rule.
-  - **Instances** — the instance view (R-BTN-99) and the day's request and row-write counts.
-  - **Needs you** — Baton's debugger: the open conditions and the queued person legs §7 lists
-    there (R-BTN-163), ordered by severity then age, each with its restarts or options, its
+- **The screens.** The dashboard is a walk down the entity tree the REST API, the CLI and MCP
+  already draw (R-BTN-129): sign in, pick a repository, and every screen after that is one
+  entity, every value it draws reaching it as a text node or through R-BTN-112's `ui` renderer
+  (§12.3). `/` holds the caller's repositories — every registered one for an administrator's
+  session, the key's own for an owner's, each with its head, mode, ready count and open
+  conditions; nothing else is tenant-scoped for an owner. `/login` is R-BTN-155's sign-in page.
+  Under `/repositories/{repository}`: `/board`, `/tickets`, `/tickets/{ticket}`, `/goals`,
+  `/courses`, `/courses/{course}`, `/conditions`, `/conditions/{condition}`, `/runners`,
+  `/runners/{runner}` (the runner's id, never its name — a host runs several sessions),
+  `/grants`, `/owners`, `/tokens`, `/mcp-keys`, `/sync-keys`, `/check-runners`, `/policy`,
+  `/settings`, `/bars`, `/consents`, `/attestations`, `/sync`. The tenant screens —
+  `/repositories`, `/instances`, `/resources`, `/capacities`, `/settings`, `/state`,
+  `/sessions` — are an administrator's session only.
+  - **`/board`** — the repository's live claims: each one's event timeline and reap deadline,
+    **stalled** where its runner is alive but `last_activity_at` is over 2 hours old,
+    `condition-wait` where the leg waits on a condition, with session links (R-BTN-113) and log
+    directories (R-BTN-128).
+  - **`/tickets`** — every ticket under its state word (below), Ready in the matching order with
+    each ticket's `requires`, tier and eligible alive runners, and **ready but nobody can take
+    it** with the failed rule.
+  - **`/tickets/{ticket}`** — the ticket as Baton holds it: its station and path, the claim's
+    legs since, what a suspended ticket waits for, its newest hand-off, blocks, queued leg and
+    its source (R-BTN-83), parent and children, and history with input and output pointers
+    (R-BTN-81, R-BTN-82).
+  - **`/goals`** — the repository's goals, as the ticket source posts them.
+  - **`/courses`** — each course of the repository as stations and legs, every leg drawn as an
+    edge with its state (ready, running, blocked by kind and when found, backing off) in colour
+    and a text label, never a blocked station (R-BTN-126), with `off-graph` transitions and
+    course stats.
+  - **`/courses/{course}`** — the one course: the tickets on it, each at its station and on its
+    path as Baton holds them, and each leg's queue depth against `max_queue` and the intake
+    state (R-BTN-79).
+  - **`/conditions`** — the debugger (R-BTN-163): the open conditions and the queued person legs
+    §7 lists there, ordered by severity then age, each with its restarts or options, its
     question's link, and the tickets it would unblock; a person leg's entry takes the answer
     where the policy admits an `owner` writer, else names `baton decision answer` (R-BTN-116).
-  - **Resolve** — `/conditions/<condition_id>`, the page a delivery runner links to
-    (R-BTN-163): the one condition, its detail and restarts; choosing a restart is
-    `ticket.resolve` for a signed-in owner of its repository or an administrator. Signed out, the
-    page asks for sign-in and returns to itself.
-  - **Capacity** — the request rate and live counts against the envelope (R-BTN-87).
-  - **Courses** — each course file as stations and legs, every leg drawn as an edge with its
-    state (ready, running, blocked by kind and when found, backing off) in colour and a text
-    label, never a blocked station (R-BTN-126); per ticket its station and path as Baton holds them, the
-    claim's legs since, what a suspended ticket waits for, its newest hand-off, blocks, queued
-    leg and its source (R-BTN-83), parent and children, history with input and output pointers
-    (R-BTN-81, R-BTN-82); each leg's queue depth against `max_queue` and the intake state
-    (R-BTN-79); `off-graph` transitions; course stats.
-  - **Discrepancies** — every place git disagreed with Baton (R-BTN-85), by kind and age, with Baton's
-    value, git's, the observation and a link to the ticket's history.
+  - **`/conditions/{condition}`** — the Resolve page (R-BTN-163): the one condition, its detail
+    and restarts; choosing a restart is `ticket.resolve` for a signed-in owner of its repository
+    or an administrator.
+  - **`/runners`** — the runners granted on the repository, grouped by hostname (R-BTN-3), each
+    card marked with its state: alive or dead, harness, tier ceiling, capabilities (declared,
+    and granted per repository, R-BTN-174), tags, courses, lease timeout, last seen, last
+    activity, the claim held, current activity, transcript link, executor (source, digest and
+    `provides`, R-BTN-107), credential kind and registering token.
+  - **`/runners/{runner}`** — the one runner: a 24-hour timeline, claims as bars, activities
+    nested under them by kind, failed ones marked; a segment shows its label, detail and
+    transcript; leg runs link their `session_url` (R-BTN-113) and show their log directory
+    (R-BTN-128) and their executor digest, environment and instance (R-BTN-107) as text.
+  - **`/grants`, `/owners`, `/tokens`, `/mcp-keys`, `/sync-keys`, `/check-runners`** — the
+    repository's credentials: the grants with the keys that hold them and their spans
+    (R-BTN-146), the owner keys (R-BTN-58), the registration tokens (R-BTN-117), the MCP keys
+    (R-BTN-130), the sync and mirror keys (R-BTN-93), the check-runners (R-BTN-114).
+  - **`/policy`, `/settings`, `/bars`, `/consents`, `/attestations`** — the repository's
+    governance: the policy with its version log and computed guarantees (R-BTN-188, R-BTN-189),
+    the owner settings (R-BTN-66), the bars in force or scheduled (R-BTN-67), the `code_repos`
+    consents (R-BTN-140), the attestations (R-BTN-181).
+  - **`/sync`** — the repository's sync: every place git disagreed with Baton (R-BTN-85), by
+    kind and age, with Baton's value, git's, the observation and a link to the ticket's history.
+  - **The tenant screens** — the registry with each repository's head, mode and owners
+    (R-BTN-179); the instance view and the day's request and row-write counts (R-BTN-99); the
+    registered resources, their instances and readings, and the instrument keys (R-BTN-76,
+    R-BTN-101); each capability's seats held with the holding claims (R-BTN-178); the instance
+    settings — `link_hosts`, `session_hosts`, `check_app_id` (R-BTN-112, R-BTN-113, §12.7); the
+    tenant at one request — the live counts and the request rate against the envelope, and
+    storage (R-BTN-87); the dashboard sessions (R-BTN-155).
+
+  The rules, each stated once here:
+  - **The rule.** A screen is drawn from one entity's REST reads — the §14 rows whose callers
+    admit `session` (B-192) — and its controls are the registry actions whose `ui.view` names it
+    (R-BTN-129).
+  - **The strip.** Every repository screen carries running now · ready · needs you, linking to
+    `/board`, `/tickets` and `/conditions`, and the repository's mode where it is not cut over.
+  - **Polling.** Every screen polls its reads each 10 seconds with `If-None-Match`, paused while
+    the page is hidden, its freshness shown; while the answers are unchanged the interval doubles,
+    to at most 60 seconds, and a changed answer or the page shown again brings it back to 10
+    (B-242: every poll costs reads); the one exception is the confirmation-code dialog,
+    which polls its screen's reads every 5 seconds for the code's two minutes (R-BTN-155).
+  - **Refusals.** On the repository and owner reads, a repository the caller cannot read — or
+    none — answers `forbidden` for every principal (B-192 changes the reads that answer
+    `not-found` today), and the screen says "This repository is not yours or does not exist"
+    with a link to `/`; an entity id not found in a readable repository answers `not-found` and
+    the screen says "No such ticket" — condition, runner, course alike: one component, one
+    wording.
+  - **Target-dependent controls.** An action whose answer depends on the target's policy
+    (`ticket.unhold`, a person leg's answer, `attestation.add`) is drawn only where the read
+    says the caller may take it — `allowed: [<action id>]`, or `answerable`, or
+    `writable_types`, computed by `authorize` with the session as principal — and the app never
+    reads the policy to decide.
+  - **Ticket state.** One word per ticket, from `unconfirmed`, `running`, `waiting-person`,
+    `held`, `blocked`, `backing-off`, `suspended`, `ready`, `closed`, in that precedence, with
+    `reasons` listing every other that applies; the Tickets tabs are Ready, Running, Blocked
+    (`held`, `blocked`, `waiting-person`, `backing-off`, `suspended` — a held ticket counts
+    under Blocked), Unconfirmed, and Closed today (`closed` in the last 24 hours) — the same
+    words `docs/context/vocabulary.mdx` defines.
+  - **Stop.** The session's Stop is one click — `POST /v1/ui/messages` `{kind: "release"}`, no
+    dialog, no code — with `confirm: true` the CLI's and the owner route's; the confirmed-action
+    list is R-BTN-155's, unchanged.
 - **The actions.** Every control calls a registry action through `authorize`, a destructive one
-  with `confirm: true` from its dialog (§12.2). Unconfirmed, a session views, holds, cancels,
+  with `confirm: true` from its dialog (§12.2) — Stop alone drawn as one click, with neither
+  dialog nor code (the Stop rule above). Unconfirmed, a session views, holds, cancels,
   stops a leg (`POST /v1/ui/messages` `{kind: "release", payload: {ticket_id, reason:
   "requested"}}`, R-BTN-119), resyncs a repository (`POST /v1/ui/resync`), requests status,
-  resolves a condition and answers a person's leg from Needs you (`attestation.add`, R-BTN-116:
+  resolves a condition and answers a person's leg from the Conditions screen
+  (`attestation.add`, R-BTN-116:
   the answer is what the person came to give, and the policy's writer list bounds it); the
   actions R-BTN-155 lists need its code confirmed, and no other does, so the dashboard is no
   standalone console. An owner's session does these only on its
   repositories, and the administrator's controls (cutover, force-reap, a fence clear, a forced resync (R-BTN-11),
-  completions, adoptions) are not drawn for it. Repositories, owners, grants, MCP keys,
-  instrument keys and bars are shown read-only.
+  completions, adoptions) are not drawn for it. The credential, governance and tenant screens
+  are read-only, each naming the CLI command that changes what it shows: nothing changes
+  authority from a cookie (R-BTN-155), and the tenant's export stays the CLI's alone.
 

@@ -590,7 +590,7 @@ module baton {
   // confirms a done only by an end station or a closure (R-BTN-10, G-BTN-44). (R3-1244: the
   // scenario traces found the model narrower than the spec here; it required an end station.)
   // @impl src/core/claims.ts#end
-  // @impl pending — attempts and backoff per leg (R-BTN-122, B-11); `blocked` logged when an end leaves the ticket blocked (R-BTN-75 as amended by R3-1254, B-26)
+  // @impl pending — attempts and backoff per leg (R-BTN-122, B-11)
   action endClaim(w: str, kind: str, reached: bool): bool = all {
     workerCanAct(w), workerClaim(w).size() == 1,
     val c = theClaim(w)
@@ -771,7 +771,7 @@ module baton {
   // R-BTN-4, §6.6: the alarm reaps a claim whose lease ran out — its worker dead or silent; a
   // failed attempt on the claim's leg (§7.4, R-BTN-122), and an end (R-BTN-75).
   // @impl src/core/claims.ts#alarm
-  // @impl pending — the attempt counted per leg (R-BTN-122, B-11); `blocked` logged when the reap leaves the ticket blocked (R-BTN-75 as amended by R3-1254, B-26)
+  // @impl pending — the attempt counted per leg (R-BTN-122, B-11)
   action alarmReap(i: int): bool = all {
     st.claims.keys().contains(i),
     val c = st.claims.get(i)
@@ -817,6 +817,24 @@ module baton {
       // releases the reaped claim's seats (R-BTN-178)
       st' = settle(st.with("claims", st.claims.set(i, c.with("fencePending", false)))
                     .with("seats", st.seats.set(i, Set())), Set()),
+    },
+  }
+  // R-BTN-19: an administrator clears a pending fence at once (B-171) — the third way a fence
+  // ends, beside the worker's report and its deadline above. An owner act, so it draws on the
+  // budget; whatever the worker does meanwhile, nothing extends a fence and the clear needs
+  // nothing of the worker. The ticket stops being held (R-BTN-75) and the claim's seats free
+  // (R-BTN-178), as at the deadline; the worker may still act until its own lease check
+  // (R-BTN-26) stops it, which the model keeps through the worker's own fence check.
+  // @impl src/core/claims.ts#fenceClear
+  action adminFenceClear(i: int): bool = all {
+    st.ownerBudget > 0,
+    st.claims.keys().contains(i),
+    val c = st.claims.get(i)
+    all {
+      c.status == "reaped", c.fencePending,
+      st' = settle(st.with("claims", st.claims.set(i, c.with("fencePending", false)))
+                    .with("seats", st.seats.set(i, Set()))       // R-BTN-178
+                    .with("ownerBudget", st.ownerBudget - 1), Set()),
     },
   }
   // R-BTN-6, R-BTN-26: the worker learns its lease is lost, kills its tool calls and reports.
@@ -1050,7 +1068,7 @@ module baton {
       claim(w, t),
       pushEvidence(w, b), advance(w, leg, holderBars), endClaim(w, kind, b), endBlocked(w, blockKind, d),
       heartbeat(w), sleep(w), wake(w), tick, timeUp, alarmReap(i),
-      crash(w), reapDead(w), forceReap(w), fenceCleared(w), fenceTimeout(i),
+      crash(w), reapDead(w), forceReap(w), fenceCleared(w), fenceTimeout(i), adminFenceClear(i),
       setHold(t, b), setOwnerBar(tag, applies), liftOwnerBars, ownerResolve(i),
       foreignPush(t, leg), regress(t), withdraw(t), gitDepends(t, d, b), gitDecides(t, decisionLeg, b),
       retryElapse(t, leg), provisionalLapses(t, leg),

@@ -3,7 +3,7 @@ title: "B-150 — Fold the spec's six italic patch notes into their rules: R-BTN
 id: B-150
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-17
 repos:
   - baton
 tags:
@@ -53,3 +53,5 @@ folds them.
 - [ ] `npm test` green
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): R-BTN-161 and R-BTN-165 say their `proposed` exception in their bodies and R-BTN-173 is retired, so `PATCH_NOTES_ALLOWED` is `['R-BTN-171']`; R-BTN-35 and R-BTN-116 were folded earlier. R-BTN-171 remains, part 2's.)_
+
+_(2026-11-17: an implement leg looked and found the ticket already delivered — no PR opened. R-BTN-171, the last of the six, is in §7.8's body by the restructure's part 2 (B-166, [#159](https://github.com/immediately-run/baton/pull/159), `530e03b`, 2026-11-02), which also emptied `PATCH_NOTES_ALLOWED` in `scripts/check-spec.mjs`; `npm run check:spec` passes today (174 requirements, no rule head carrying a patch note). Each fold is named in the history entry of the change that made it — [#150](https://github.com/immediately-run/baton/pull/150) for R-BTN-35 and R-BTN-116, part 1 for R-BTN-161, R-BTN-165 and R-BTN-173's retirement, part 2 for R-BTN-171 — so no one entry names the six: the folding happened under other tickets' PRs, as the note above records. `npm test` on today's main fails one test, `test/unit/safe-render.test.ts` on `tickets/B-257.mdx`'s unclosed `<sha>` (the owner's filing of 2026-11-17, unrelated to this spec-only ticket); the other 2299 pass. A person confirms and closes (B-257's flow).)_

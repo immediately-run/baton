@@ -1,0 +1,77 @@
+---
+title: "B-245 — The runner confirms a leg's block — capability checks outside the leg, bound account readings, and countering"
+id: B-245
+project: baton
+status: available
+updated: 2026-11-15
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: critical
+description: "Build the runner's half of the amended R-BTN-126 and R-BTN-121: a leg's capability request confirmed by the capability's own check, resource requests carrying only a bound check's reading, runner.json `instance`, check scheduling and isolation, and runner readings renewed and countered (S-BTN-223, S-BTN-224, G-BTN-169). Requires: B-21."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-21
+---
+
+**Brief:** the owner, 2026-11-15: the sandboxed leg is the first to notice a provider is spent, "but we can't take its reading at face value"; the runner needs a trusted verification of the claim, and then submits it to Baton.
+**Spec:** [BATON_SPEC §6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) [R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) (the runner confirms a leg's request), [§5.6](../spec/BATON_SPEC/05-courses.md#sec-5-6) [R-BTN-121](../spec/BATON_SPEC/05-courses.md#sec-5-6) (checks, `instance`), [§6.3](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3) [R-BTN-76](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3) (runner-credential readings), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) [R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-223](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-224](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-169](../spec/BATON_SPEC/15-verification.md#gates).
+**Depends on:** B-21 (the server's `released:blocked` end and the runner's `LegError` and channel forms).
+
+### Why
+
+On 2026-11-15 the zai coding plan's weekly limit ran out and one runner spent an attempt on seven tickets in six minutes. R-BTN-126 now says a `capability` or `resource` prerequisite a leg names is a request the runner confirms with its own check, and that a reading reaching Baton is one a runner check printed, never the leg's. Baton's side is unchanged; this ticket builds the runner's side.
+
+### What to build
+
+1. **Confirmation.** After the leg's session stops and before `handoff`, a `capability` request runs that capability's `check`: failing (or past 60 s) ends `released:blocked` on it; passing, or no check configured, ends `released:cannot-finish:transient` and logs the request. A request for a name the executor `provides` is not confirmed; only the executor's own end blocks on it (R-BTN-107).
+2. **Resource requests.** The end stands as the leg asked. Every check bound to an instance serving `ref` runs together; the end carries the first failing one's reading, the leg's named instance preferred. Drop everything the leg sent besides `kind`, `ref`, `instance` and `commit`; remove `LegError`'s `reading` and the channel's `--until`, `--valid-for` and `--detail`.
+3. **`runner.json`.** Add `instance` to a capability. Runs: at start, before each claim, every `every_s` while idle, and on a request; one run per capability in flight, shared by every waiting request; in a directory the runner owns, never a checkout or a leg's working directory, with the runner's environment; 60 s bound, a timeout a failure. After a failure, keep running every `every_s` and declare again at the first pass at least `every_s` later.
+4. **The line and readings.** Parse one JSON line `{available: false, until?, valid_for?, detail?}` from a failing check, `{available: false}` when it prints none; log it without `instance`. With `instance`: report it as a `state` reading, `valid_for` ≤ 1 h, `until` clamped to the reading's end, renewed at each failing run and at least every half `valid_for`; carried by the confirming end, else `POST /v1/runner/readings`.
+5. **Countering.** While a bound check passes, no administrator's or instrument key's `available: false` reading of the instance is in force, and the latest reading in force is a runner credential's `available: false`, post `{available: true}`, at most once an hour per countered runner. Read writers from the served readings (R-BTN-99, R-BTN-181).
+6. **Logs.** Every request, check run, confirmation, refusal and post in the runner log, masked (R-BTN-144); nothing the leg wrote reaches Baton.
+
+### Do not
+
+- Forward any reading, `until`, `valid_for` or `detail` a leg sends.
+- Run a check in a checkout, in a leg's working directory, or anywhere a leg can write.
+- Counter an administrator's or an instrument key's reading.
+- Change Baton's handling of a `blocked` end (B-21's).
+
+- **Provider exhaustion spends no attempt** (moved here from B-256 by the owner's ruling of 2026-11-17). On 2026-11-16 a review leg failed because DeepInfra's balance was exhausted ("Reviewer B's model (deepinfra) failed for lack of balance") and the leg ended `cannot-finish:transient`, spending the ticket's attempt. Per R-BTN-122 a provider at capacity is a blocked prerequisite: the runner confirms it with its own check and the leg ends `released:blocked` on the provider key, never a retry. Include the case where the exhaustion happens inside a sub-agent and the harness (`opencode run`) still exits 0 — B-256's findings. Done when a test shows a provider-exhaustion failure blocking on the key without spending the ticket's attempt.
+
+### Trust
+
+- **New input: a check's stdout line**, written by the host's own check command (the operator's configuration), run outside every leg in a directory the runner owns. The runner parses one JSON line, bounded, validated against the resource's `detail` schema before posting; anything else is logged and ignored.
+- **`runner.json`'s `instance`**, the operator's file on the host. Baton authenticates the resulting reading by the runner's credential and checks the instance lists a repository the key is granted on (R-BTN-76).
+- **What the leg sends** (`kind`, `ref`, `instance`, `commit`) is untrusted: it selects which check runs and which instance is preferred, never what is reported; a leg's reading fields are dropped.
+
+### Invariants
+
+- R-BTN-126: a leg's capability request ends blocked only when the runner's own check confirms it; nothing the leg sends is forwarded — the runner builds the end itself.
+- R-BTN-76 / R-BTN-181: a runner reading is within a runner credential's bounds and never counters an administrator's or instrument key's reading — the counter condition reads the served writers.
+- R-BTN-107: the confirmation adds no executor interface; executor-provided names block only by the executor's own end.
+- R-BTN-144: check output and requests in the runner log are masked.
+
+### Tests
+
+- S-BTN-223 and S-BTN-224 as integration scenarios on both hosts; G-BTN-169.
+- S-BTN-91, S-BTN-92 and S-BTN-94 still pass with the runner's confirmation in the path.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts
+- [ ] merged under the review gate
+
+### Not in scope
+
+- Keeping a provider's reset beyond the clamped `until` visible in views (the clamp hides a far reset; a follow-up once a resource schema can carry it).
+
+## Status
+
+_filed 2026-11-15._

@@ -7,7 +7,9 @@
 // to the default branch from a throwaway worktree at the freshly fetched head, so the caller's
 // branch and working tree are never touched; a push refused because the branch moved is fetched
 // again and retried; `claim` refuses a ticket that is not available or whose dependencies are not
-// done; `new` takes the next free id on the head it pushes to. What is new is that all of it is
+// done; `new` takes the next free id on the head it pushes to. Every commit carries the provenance
+// trailers `TICKET_TRAILERS` holds, after a blank line (B-16) — docs' `CLAIM_TRAILERS`' shape —
+// and `TICKET_REQUIRE_TRAILERS=1` refuses a command without them. What is new is that all of it is
 // CONFIGURED — the items folder, the id prefix, the legacy patterns still accepted, the default
 // project and the tags come from `.baton/baton.json` (tickets-config.ts) — that `new` writes the
 // conventional body rather than a placeholder, that it judges what it wrote before pushing, and
@@ -23,6 +25,7 @@ import { checkPayload, dependsCycles } from '../core/board';
 import { checkTicketsMain, dependsLine } from './tickets-check';
 import { accepts, accepting, allocates, allocatingPrefix, GITHUB_PR, LIVE_STATUSES, readSettingsJson, readTicketSettings, requiresFrom, TAGS, type Status, type TicketSettings } from './tickets-config';
 import { addPr, idOf, locate, nextNumber, prsOf, scalar, setKey } from './tickets-file';
+import { openRequestNumbers } from './request-branches';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
 import { appendStatus, filingDate, firstCommit, historyEntries, rereadMismatch, rereadNote, rulesConfig, sectionGaps, sectionHint, sectionsSince, staleIds, staleList, staleRules, unshallow } from './tickets-rules';
@@ -71,6 +74,11 @@ export interface TicketsIo {
   offline?: boolean;
   /** The fetch the reads use, for a test's stand-in. */
   fetchImpl?: typeof fetch;
+  /** The provenance trailers every commit's message carries (B-16): a stand-in for
+   *  `TICKET_TRAILERS`. */
+  trailers?: string;
+  /** `TICKET_REQUIRE_TRAILERS=1` (B-16): a stand-in for the flag — refuse empty trailers. */
+  requireTrailers?: boolean;
 }
 
 /** What one try of a command does in the worktree, and the commit's subject it lands with. */
@@ -83,6 +91,23 @@ interface Change {
   move: { from: string; to: string }[];
 }
 
+/** The message a ticket command's commit lands with (B-16): the command's own message, then the
+ *  provenance trailers `TICKET_TRAILERS` holds, after a blank line — the one shape git reads as
+ *  trailers, the shape docs' `claim.sh` appends `CLAIM_TRAILERS` in, and the handoff's commit
+ *  rule: the agent-provenance trailers, then `Claude-Session` and `Co-Authored-By`. The value is
+ *  taken whole — baton computes no trailers of its own and calls nothing to default them
+ *  (R3-1268: no `agent-provenance.mjs`, no docs dependency). With `TICKET_REQUIRE_TRAILERS=1` and
+ *  the value empty, the message is refused: the agent workflow sets the variable, and a commit
+ *  that cannot be attributed is not made. */
+export function ticketCommitMessage(message: string, trailers: string, requireTrailers = false): string {
+  const lines = trailers.trim();
+  if (!lines) {
+    if (requireTrailers) throw new Error("TICKET_REQUIRE_TRAILERS=1, but TICKET_TRAILERS is empty — set it to the session's provenance lines (the agent-provenance trailers, then Claude-Session and Co-Authored-By), or unset TICKET_REQUIRE_TRAILERS to commit without them");
+    return message;
+  }
+  return `${message}\n\n${lines}`;
+}
+
 /** Run `change(worktree)` on a fresh head and push its commit, retrying on a lost race. The
  *  worktree is the mechanism request.ts's `fileRequest` uses, for the reason it uses it: the
  *  caller's branch, HEAD and working tree are never written, a command that fails leaves the
@@ -93,6 +118,10 @@ function transact(root: string, io: TicketsIo, describe: string, change: (dir: s
   const warn = io.warn ?? ((l: string) => process.stderr.write(`${l}\n`));
   const remote = io.remote ?? 'origin';
   const branch = io.branch ?? defaultBranch(root);
+  // B-16: the trailers every commit this command lands carry, read once before the loop; the
+  // refusal — required and empty — comes of ticketCommitMessage, at the commit itself.
+  const trailers = (io.trailers ?? process.env.TICKET_TRAILERS ?? '').trim();
+  const requireTrailers = io.requireTrailers ?? process.env.TICKET_REQUIRE_TRAILERS === '1';
   for (let attempt = 1; attempt <= TICKET_TRIES; attempt++) {
     git(root, 'fetch', '-q', remote, branch);
     const dir = mkdtempSync(join(tmpdir(), 'baton-tickets-'));
@@ -134,7 +163,9 @@ function transact(root: string, io: TicketsIo, describe: string, change: (dir: s
         warn(`… ${describe}: nothing to commit — a peer landed the same change; retrying (${attempt}/${TICKET_TRIES})`);
         continue;
       }
-      git(dir, 'commit', '-q', '-m', message);
+      // The message git commits is the command's with its trailers (B-16); the success line
+      // below prints the command's own subject, which the trailers never touch.
+      git(dir, 'commit', '-q', '-m', ticketCommitMessage(message, trailers, requireTrailers));
       try {
         git(dir, 'push', '-q', remote, `HEAD:refs/heads/${branch}`);
         if (!io.quiet) log(`✓ ${message.split('\n')[0]} — pushed as ${git(dir, 'rev-parse', '--short', 'HEAD')}`);
@@ -310,7 +341,9 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
     // A done ticket is written at its archive path, and the live file moved there: the move
     // alone would commit the file as it was, without the status and the PR.
     if (takeover) pushed = { prs: prsOf(text), path: found.path };
-    if (status === 'done') return { message, write: [{ path: to, text }], move: [{ from, to }] };
+    // One directory deeper, a relative link climbs one level more: `../spec/…` from the live
+    // file is `../../spec/…` from archive/ (B-26, B-188, B-228 each broke check:wiki on main).
+    if (status === 'done') return { message, write: [{ path: to, text: deepenRelativeLinks(text) }], move: [{ from, to }] };
     return { message, write: [{ path: from, text }], move: [] };
   });
   // The takeover hands the session Baton's position (B-129): the station, the ready leg, each
@@ -499,7 +532,11 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
     const files = readItems(dir, items);
     const read = sourceAt(dir, settings);
     const prefix = `${allocatingPrefix(settings)}-`;
-    const id = `${prefix}${nextNumber(files, settings, prefix)}`;
+    // R-BTN-131, B-174: the open request branches' ids count too — a request still waiting on its
+    // `baton-request/<ID>` branch holds its id, and no allocator hands it out again. The head the
+    // filing sits on is the worktree's own (the fetched default branch).
+    const openRequests = openRequestNumbers(dir, remote, items, prefix, git(dir, 'rev-parse', 'HEAD'), io.warn);
+    const id = `${prefix}${Math.max(nextNumber(files, settings, prefix), ...openRequests.map((n) => n + 1))}`;
     // The prefix's pattern may name ids `new` cannot allocate (a fixed count, `\d{7}`): it says so
     // rather than write a wrong one.
     if (!allocates(settings, id)) throw new Error(`new allocates ${prefix}<n>, but ${prefix}'s pattern in .baton/baton.json is \`${settings.prefixes[prefix]}\` — write the pattern's number as \\d+, or name another ticket_prefix`);
@@ -844,6 +881,11 @@ export function ticketsHelp(): string[] {
     'at the freshly fetched head: your own branch and working tree are never touched, and a push',
     'refused because the branch moved is retried on the new head.',
     '',
+    'Every commit carries the provenance lines TICKET_TRAILERS holds, after a blank line (B-16) —',
+    'the agent-provenance trailers, then Claude-Session and Co-Authored-By, as docs claim.sh takes',
+    'CLAIM_TRAILERS; baton computes none itself. With TICKET_REQUIRE_TRAILERS=1, a command without',
+    'them refuses rather than push a commit that cannot be attributed.',
+    '',
     'claim asks Baton first (B-129): before it writes, it reads the ticket from Baton with the',
     'key -i names (or BATON_KEY_FILE) — the board for the station and ready leg, the history for',
     'the path, the branch-holder query for the branch — and continues the ticket where Baton',
@@ -992,4 +1034,10 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   moveTicket(root, at, id, status as Status, flags.pr, command === 'claim', baton, flags.note, reread);
   if (at.offline && command === 'claim') warn(`… ${id}: claimed on git's word alone (--offline) — Baton's position is unknown, not refuted; the frontmatter may say available of work Baton still holds`);
   return 0;
+}
+
+/** A ticket's relative Markdown links rewritten for a file one directory deeper: `](../x` and
+ * `](./x` gain a level; absolute URLs, anchors and bare sibling names are left as written. */
+export function deepenRelativeLinks(text: string): string {
+  return text.replace(/\]\((\.\.?\/)/g, (_m, lead: string) => `](${lead === './' ? '../' : '../../'}`);
 }

@@ -17,7 +17,7 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 `@immediately-run/baton` is the `baton` command, published from this repository:
 
 ```sh
-npx --yes @immediately-run/baton@0.1.3 run   # a runner (§6.13), with BATON_KEY_FILE set
+npx --yes @immediately-run/baton@0.1.4 run   # a runner (§6.13), with BATON_KEY_FILE set
 ```
 
 From the package, `baton run`, `baton repo init`, `baton decision list` and the
@@ -69,9 +69,9 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/core/auth.ts` | JWT verification (R-BTN-15, R-BTN-16); the one verifier of signed requests, SSHSIG over RFC 9421 (R-BTN-13); worker tokens against `TOKEN_HASHES` during the transition |
 | `src/cloudflare/` | The Cloudflare host: the Worker (`worker.ts`) and the `Baton` Durable Object (`baton.ts`), wiring `ctx.storage`, the alarm and `waitUntil` into the ports |
 | `src/local/` | The local host: `node:sqlite` as the `Store` (`store.ts`), one queue for every request and alarm tick (`queue.ts`), a timer as the alarm (`host.ts`), `node:http` (`server.ts`), the command line (`main.ts`); the course test kit (`testCourse.ts`, R3-1248) |
-| `src/runner/` | `baton run`'s worker loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`) and the CLI entry (`main.ts`) |
+| `src/runner/` | `baton run`'s worker loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`), the CLI entry (`main.ts`) and `baton leg replay` (§9.8 R-BTN-84, `replay.ts`) |
 | `src/migrations/` | Numbered schema migrations, applied before the object serves |
-| `src/ui/` | The dashboard: one HTML page, one stylesheet, one ES module (`textContent` only) |
+| `src/dashboard/` | The dashboard (BATON-UI-V2): React 19 and TypeScript, no other runtime dependency, built by `npm run build:ui` (esbuild) into `src/dashboard/dist/` (gitignored) — one bundle served as text by both hosts (R-BTN-55), never Workers assets |
 | `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list` (`decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
 | `src/shared/` | **Vendored** from docs `scripts/lib/` — never edit here (R-BTN-37); `batonSync.mjs` is the board sync's own decision code, which S-BTN-13 drives. Except two of Baton's own, which every part imports: `schema.mjs`, the one validator of leg outputs and readings (R-BTN-108: the subset, the linear-time pattern engine, the refinement check), and `std.mjs`, the `std:` library (R-BTN-110) |
 | `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
@@ -101,14 +101,26 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   Baton — the core accepts the file, the live tickets FILE places keep their paths, a removal raised
   `min_worker_version`, each `legs/` script pairs with a leg and exports `run`, `handoff` and
   `close`, and a ticket runs the shortest route to a confirmed done. Exit 1 names each violation.
-- `npm run typecheck` — the Worker, the local host and the Node scripts.
+- `npm run typecheck` — the Worker, the local host, the Node scripts and the dashboard.
+- `npm run build:ui` — the dashboard's one esbuild bundle into `src/dashboard/dist/` (gitignored):
+  `app.js` and `app.css` with `index.html` copied beside them, served as text by both hosts and
+  embedded in the published CLI. `npm test`, `npm run typecheck`, `npm run dev`,
+  `npm run start:local` and `npm run build:cli` build it first (their `pre*` scripts), so a clean
+  checkout works — and when `node_modules` does not hold what the lockfile locks for
+  `package.json` (a tree restored from an older lockfile), `build:ui` installs the lockfile first
+  (`npm ci --ignore-scripts`, B-132), so a stale one heals.
 - `npm run model:links`, `npm run traces` — the code against the formal model (R3-1244; `model/README.md`).
   `npm run test:full` runs both after the suite, and the model's own checks; `npm run model:pr` and
   `model:full` run `traces` too, on a fresh set.
 - `node cli/baton.mjs tickets new|claim|set|done` — file, claim and move tickets with git as the
   lock, each one commit pushed straight to the default branch from a throwaway worktree (B-112;
   `baton tickets --help`, and the generated `tickets/HOW-TICKETS-WORK.md`), until Baton claims
-  them (R3-1266). `claim` asks Baton first (B-129): with the session's key (`-i KEY`, else
+  them (R3-1266). Every commit the commands push carries the provenance trailers `TICKET_TRAILERS`
+  holds, appended after a blank line (B-16) — the handoff's commit rule: the agent-provenance
+  trailers, then `Claude-Session` and `Co-Authored-By`, taken whole as docs' `claim.sh` takes
+  `CLAIM_TRAILERS` and baton computes none of its own — and with `TICKET_REQUIRE_TRAILERS=1`, a
+  command without trailers refuses rather than push a commit that cannot be attributed. `claim`
+  asks Baton first (B-129): with the session's key (`-i KEY`, else
   `BATON_KEY_FILE`) it reads the ticket's position from Baton's board and history, continues a
   ticket past its course's start where Baton holds it (the PRs written back, the position
   printed) instead of starting over — overriding only a false `available`, never the git lock or

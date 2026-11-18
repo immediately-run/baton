@@ -2,8 +2,8 @@
 // R-BTN-131; B-29, B-35): a repository whose ticket names two other repositories in `repos:` — its
 // home (docs) gets no PR — syncs against a recorded GitHub. Must hold: the sync reads the home
 // and the two repositories the live ticket names, and no other; the ticket is placed from their
-// PRs; the run-tests gate, which cannot reach PRs outside the home, asks the owner rather than
-// loop, and the owner's skip through Baton queues the round (B-110 round 1, finding 2); a verdict
+// PRs; the run-tests gate, which cannot test PRs outside the home itself, is decided by their own
+// CI — green queues the round with nothing asked of the owner (B-255, S-BTN-230); a verdict
 // written on one PR moves the whole change to `reviewed`; one PR merged leaves it
 // short of `merged`; both merged ends it. Node only: it writes a real repository and runs git.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -13,8 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
-import { ORIGIN, keyCall, rows, setAdminKeys, setClock, syncToken } from '../helpers';
-import { makeKey } from '../lib/sshKeys';
+import { ORIGIN, rows, setClock, syncToken } from '../helpers';
 import { githubFake } from '../githubFake';
 
 const T0 = Date.parse('2026-10-18T12:00:00Z');
@@ -77,21 +76,12 @@ describe('S-BTN-106 a ticket\'s PRs in other repositories', () => {
     // Each owned PR's detail is one GraphQL query for its repository, never four REST reads (B-35).
     expect(asked.filter((k) => k.startsWith('graphql ')).sort()).toEqual(['graphql o/sdk 3', 'graphql o/site 3']);
     expect(asked.filter((k) => /\/(pulls|issues)\/3\/|\/check-runs/.test(k))).toEqual([]);
-    // B-110 round 1, finding 2: the run-tests gate tests the home repository's PR branch, and
-    // A-1's PRs are all elsewhere — so rather than loop the gate to its budget with no marker
-    // any PR reads, the sync asks the owner, who waives the gate through Baton.
-    expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'run-tests' });
-    expect(await rows('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ?', 'docs:A-1')).toEqual([{ leg: 'run-tests', state: 'waiting', waiting_on: 'owner' }]);
-    expect(await rows('SELECT decision_id, leg, question FROM ticket_decisions WHERE ticket_id = ?', 'docs:A-1')).toEqual([
-      { decision_id: 'run-tests-unreachable', leg: 'run-tests', question: 'The test gate cannot run on o/site#3, o/sdk#3 — skip it for this ticket?' },
-    ]);
-    const admin = await makeKey('ssh-ed25519', 'admin');
-    const owner = await makeKey('ssh-ed25519', 'docs-owner');
-    await setAdminKeys(admin);
-    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
-    expect((await keyCall(owner, '/v1/owner/docs/tickets/A-1/resolve', { decision: 'run-tests-unreachable', answer: 'skip' })).status).toBe(200);
-    await sync();
-    expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'review' }); // the gate waived, the round queued
+    // B-255 (S-BTN-230): the run-tests gate tests the home repository's PR branch, and A-1's PRs
+    // are all elsewhere — so their own CI is the gate: every check green on both heads, the round
+    // queues, and the owner is asked nothing.
+    expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'review' });
+    expect(await rows('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ?', 'docs:A-1')).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
+    expect(await rows('SELECT decision_id FROM ticket_decisions WHERE ticket_id = ?', 'docs:A-1')).toEqual([]);
 
     // The review wrote its verdict line on the SDK's PR alone: the change is reviewed.
     // Its author can push to the SDK (R-BTN-139, B-119): the verdict counts.

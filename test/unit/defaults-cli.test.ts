@@ -556,7 +556,7 @@ describe('baton repo init, through the built CLI', () => {
     expect(settings.agent_command).not.toMatch(/[<>|]/);
     expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -712,6 +712,12 @@ describe('baton repo init, through the built CLI', () => {
       // No such PR: the leg fails naming the pattern it looked for, not trusting exit 0 (B-81).
       writeFileSync(answer, '[]');
       await expect(stub.run(ctx)).rejects.toThrow('no open PR on a branch matching claude/A-1-* for ticket A-1 exists in the checkout’s repository');
+      // B-256 (S-BTN-231): the failure says what an agent that exited 0 last said — nothing, here — and an
+      // agent that explained itself (2026-11-16's "already delivered" legs) is quoted, both streams.
+      await expect(stub.run(ctx)).rejects.toThrow(/or the leg fails here; the agent printed nothing$/);
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'sh -c "echo working; echo A-1 is already delivered on main, so no PR; echo provider said: insufficient balance >&2"' }));
+      const explained = { ...ctx, snapshot: { sha: commitAll(root) } };
+      await expect(stub.run(explained)).rejects.toThrow(/no open PR on a branch matching claude\/A-1-\*[^\n]*; the agent's last output:\n {2}working\n {2}A-1 is already delivered on main, so no PR\n {2}provider said: insufficient balance$/);
       // A forge that cannot be read fails the leg naming that, too.
       writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\necho "no git remotes found" >&2\nexit 1\n');
       await expect(stub.run(ctx)).rejects.toThrow('cannot verify A-1’s PR — no repository the ticket reads could be read: the checkout’s repository (gh pr list --state open --limit 300 --json number,headRefName,headRefOid failed: no git remotes found)');
@@ -721,6 +727,52 @@ describe('baton repo init, through the built CLI', () => {
       rmSync(fakeBin, { recursive: true, force: true });
       writeFileSync(settingsFile, scaffolded);
       commitAll(root);
+    }
+  });
+
+  it('the implement stub takes a delivered answer only for a commit on the default branch: delivered, confirm next, the commit its evidence (B-257, S-BTN-232)', async () => {
+    const g = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const origin = mkdtempSync(join(tmpdir(), 'baton-delivered-origin-'));
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const scaffolded = readFileSync(settingsFile, 'utf8');
+    const main = g('rev-parse', 'HEAD');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' });
+    g('remote', 'add', 'origin', origin);
+    try {
+      g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+      // A commit on a side branch only: not delivered, whatever the agent says.
+      g('checkout', '-q', '-b', 'claude/A-1-side');
+      writeFileSync(join(root, 'side.txt'), 'side\n');
+      const side = commitAll(root);
+      g('push', '-q', 'origin', 'HEAD:refs/heads/claude/A-1-side');
+      g('checkout', '-q', 'main');
+      // The agent: `echo` prints its words, the ticket, the leg and the checkout after them — the
+      // last line opens with `delivered <sha>`, the rest is its evidence.
+      const stubFor = async (sha: string) => {
+        writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: `echo delivered ${sha.slice(0, 9)} vitest 47 passed` }));
+        const snapshot = { sha: commitAll(root) };
+        g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+        const stub = await load(join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs'));
+        return { stub, ctx: { ticket: { id: 'A-1' }, leg: 'implement', checkout: root, snapshot, default_branch: 'main' } };
+      };
+      const { stub, ctx } = await stubFor(main);
+      const result = await stub.run(ctx);
+      expect(result).toMatchObject({ suspend: true, reached: 'delivered', next: 'confirm', delivered: main });
+      expect(result.detail).toMatch(new RegExp(`^delivered at ${main.slice(0, 10)}: vitest 47 passed A-1 implement `));
+      // The runner's own reading of it: a suspension at an outcome of implement, confirm queued.
+      expect(decide(result, graphOf(CREATE_PR_COURSE), 'implement', 'filed')).toMatchObject({ kind: 'suspend', reached: 'delivered', next: 'confirm', detail: result.detail });
+      // Its close pushes nothing and names the commit as the end's evidence.
+      expect(await stub.close(ctx, result)).toBe(main);
+      // A commit not on main refuses the answer: the leg fails, naming it.
+      const off = await stubFor(side);
+      await expect(off.stub.run(off.ctx)).rejects.toThrow(`the implement agent answered delivered at ${side.slice(0, 9)}, which is not on main — refused`);
+    } finally {
+      writeFileSync(settingsFile, scaffolded);
+      g('checkout', '-q', 'main');
+      g('reset', '-q', '--hard', main);
+      g('branch', '-q', '-D', 'claude/A-1-side');
+      g('remote', 'remove', 'origin');
+      rmSync(origin, { recursive: true, force: true });
     }
   });
 
@@ -811,6 +863,14 @@ describe('baton repo init, through the built CLI', () => {
       await expect(stub.run(ctx('reviewed'))).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not "reviewed"');
       await expect(stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot: { sha: main } })).rejects.toThrow('the run-tests gate runs at pr-open or fixed, not null');
       await expect(stub.run({ ...ctx('pr-open'), ticket: { id: 'A-2' } })).rejects.toThrow('no branch matching claude/A-2-* in the home repository');
+      // B-255 (S-BTN-230): no PR branch at home and a ticket whose repos: names another
+      // repository — its PRs are there, gated by their own CI: nothing runs, no marker, the claim
+      // suspends at its station with the round queued, and the close pushes nothing.
+      const ticketFile = join(bin, 'A-2.md');
+      writeFileSync(ticketFile, '---\nid: A-2\ntitle: In the monorepo\nrepos: [acme/monorepo]\n---\n');
+      const deferred = await stub.run({ ...ctx('fixed'), ticket: { id: 'A-2', file: ticketFile } });
+      expect(deferred).toEqual({ reached: 'fixed', next: 'review', suspend: true, tests: 'ci', repositories: ['acme/monorepo'] });
+      expect(stub.close(ctx('fixed'), deferred)).toBeNull();
       // No worktree is left behind.
       expect(g('worktree', 'list').split('\n')).toHaveLength(1);
     } finally {
@@ -856,6 +916,11 @@ describe('baton repo init, through the built CLI', () => {
       // A fix that pushed reaches fixed.
       expect(await stub.run(ctx('fixed', pushing))).toEqual({ reached: 'fixed', next: 'run-tests' });
       expect(execFileSync('git', ['-C', origin, 'rev-parse', 'refs/heads/claude/A-1-fix'], { encoding: 'utf8' }).trim()).not.toBe(head);
+      // B-255: a ticket whose repos: names another repository may be red on that repository's
+      // CI, and its fix may push there alone — where this check cannot see — so it is not made.
+      const ticketFile = join(scratch, 'A-1.md');
+      writeFileSync(ticketFile, '---\nid: A-1\ntitle: Also in the monorepo\nrepos: [acme/monorepo]\n---\n');
+      expect(await stub.run({ ...ctx('fixed', quiet), ticket: { id: 'A-1', file: ticketFile } })).toEqual({ reached: 'fixed', next: 'run-tests' });
     } finally {
       g('reset', '-q', '--hard', main);
       g('remote', 'remove', 'origin');
@@ -2567,12 +2632,12 @@ export async function run(ctx, standard) {
   }, 120_000);
 });
 
-describe('courseSchemas: the sync posts a course\'s schemas (R-BTN-108)', () => {
-  it('reads .baton/schemas/<course>/<name>@<n>.json as <course>:<name>@<n>, with the SHA-256 of its bytes', () => {
+describe('courseSchemas: the sync posts a course\'s schemas (R-BTN-108, R-BTN-134)', () => {
+  it('reads <course dir>/schemas/<name>@<n>.json as <course>:<name>@<n>, with the SHA-256 of its bytes', () => {
     const root = mkdtempSync(join(tmpdir(), 'baton-schemas-'));
     try {
       expect(courseSchemas(root, 'roadmap-pr')).toEqual({});
-      const dir = join(root, '.baton', 'schemas', 'roadmap-pr');
+      const dir = join(root, '.baton', 'courses', 'roadmap-pr', 'schemas');
       mkdirSync(dir, { recursive: true });
       const text = '{ "type": "object" }\n';
       writeFileSync(join(dir, 'findings@2.json'), text);
@@ -2580,7 +2645,14 @@ describe('courseSchemas: the sync posts a course\'s schemas (R-BTN-108)', () => 
       writeFileSync(join(dir, 'findings.json'), '{}');
       expect(courseSchemas(root, 'roadmap-pr')).toEqual({ schemas: [{ id: 'roadmap-pr:findings@2', digest: createHash('sha256').update(text).digest('hex'), schema: { type: 'object' } }] });
       writeFileSync(join(dir, 'broken@1.json'), '{');
-      expect(() => courseSchemas(root, 'roadmap-pr')).toThrow(/broken@1.json is not JSON/);
+      expect(() => courseSchemas(root, 'roadmap-pr')).toThrow(/schemas\/broken@1\.json is not JSON/);
+      // The old location, `.baton/schemas/<course>/`, is read no more (B-52): a repository that
+      // still keeps schemas there posts none of them.
+      const old = join(root, '.baton', 'schemas', 'roadmap-pr');
+      mkdirSync(old, { recursive: true });
+      writeFileSync(join(old, 'left@1.json'), '{ "type": "object" }\n');
+      rmSync(join(dir, 'broken@1.json'));
+      expect(courseSchemas(root, 'roadmap-pr')).toEqual({ schemas: [{ id: 'roadmap-pr:findings@2', digest: createHash('sha256').update(text).digest('hex'), schema: { type: 'object' } }] });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

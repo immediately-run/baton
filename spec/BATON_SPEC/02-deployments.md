@@ -228,6 +228,17 @@ process for development and CI. Nothing crosses a tenant.
     caps at twice it do. `npm run test:load` proves it (§15).
   - Beyond the envelope the answer is another Baton: repositories partition across Batons
     (R-BTN-56).
+- **R-BTN-196 (an idle runner's beat reads about nothing).** Every write to a tenant's state
+  moves one counter, `state_version`, in the write's own commit. Liveness does not: a runner's
+  `last_seen_at` and `last_activity_at`, which its calls and heartbeats set, and request nonces
+  (R-BTN-13) — what they decide (live, stalled) is the clock's, so a reader that shows it adds
+  the clock. A runner's recommendations or claim that find nothing eligible for it are
+  remembered, per runner and in memory only, while `state_version` stands and until the earliest
+  instant the clock alone could change the answer — a backoff's `retry_after` (rule 10), an owner
+  bar's `starts_at` or `ends_at` (R-BTN-67), an instance's `until` (R-BTN-76) — and at most
+  10 minutes; an idle beat then reads a handful of rows. The answer remembered is always the one
+  computing it gives (R-BTN-61, R-BTN-72): a heartbeat that changes what the runner declares is a
+  write.
 - **R-BTN-149 (hard caps per repository).** Safety limits at twice the envelope; none refuses
   lease upkeep.
 
@@ -247,16 +258,24 @@ process for development and CI. Nothing crosses a tenant.
   - Retention: runner rows unseen for 30 days lose their capability, tag, course and report
     rows; the alarm deletes `board_snapshots` older than 90 days (never the head's) and
     repository `events` older than 90 days below every live repository's mirror's
-    `mirror_acked_seq` (a retired repository's events below none).
+    `mirror_acked_seq` (a retired repository's events below none; a mirror's
+    `GET /v1/sync/events` acknowledges the cursor it reads from), then the claims of a ticket
+    whose history R-BTN-81 purged, with their legs, activities and the rows that name them — a
+    claim still held (R-BTN-39), or named by an event, a condition or a scope finding, waits
+    and its ticket is tried again a day later. The alarm deletes at most 1,000 rows a tick,
+    oldest first, each prune through an index, so a tick with nothing to delete reads a few rows.
 - **Admission.** The Worker turns away what the object need not see:
   - A signed route (`/v1/runner/*`, `/v1/repositories/*`, `/v1/probe/*`,
     `/v1/owner/*`, `/v1/admin/*`) with no or a malformed signature, a stale `created` or a
     foreign `@authority` is refused before the object; key and nonce checks run inside it.
     Other routes are checked first in the Worker too: `/v1/sync/*` a CI identity token or a
-    signature (a sync key's or a machine key's; key checks in the object, R-BTN-93); `/` and `/v1/ui/*` a dashboard session; `POST /v1/login` a
+    signature (a sync key's or a machine key's; key checks in the object, R-BTN-93); `/v1/ui/*` a
+    dashboard session; `POST /v1/login` a
     pending sign-in (R-BTN-155); `POST /v1/github/webhook` `X-Hub-Signature-256` (R-BTN-73);
-    `POST /v1/forges/{repository}/notify` its forge's verifier (R-BTN-95). The static pages
-    `/login` and `/oauth/authorize` need no session; `/.well-known/oauth-*` and `/v1/oauth/*`
+    `POST /v1/forges/{repository}/notify` its forge's verifier (R-BTN-95). The static pages —
+    `/login`, `/oauth/authorize` and the shell at `/`, every §11.4 screen path and the
+    redirect's own address `/conditions/{condition}` (R-BTN-163), which serves the shell to
+    the signed-out — need no session; `/.well-known/oauth-*` and `/v1/oauth/*`
     take no credential and fall under the per-IP rule, and `POST /v1/mcp`'s bearer is checked
     in the object (R-BTN-130, `BATON_MCP_OAUTH_SPEC` §13).
   - A per-IP rule (a Workers rate-limit binding keyed `<host>|<ip>`) applies only to

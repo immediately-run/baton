@@ -3,7 +3,7 @@
 // tokens bound to their project, branch and role, and migration 0012 on a deployed database.
 import { describe, it, expect } from 'vitest';
 import { env, runInDurableObject } from 'cloudflare:test';
-import { fileUrl, isForgePath, isPullRequestUrl, isWebBase, transcriptUrl } from '../../src/core/links';
+import { fileUrl, isForgePath, isPullRequestUrl, isWebBase, SESSION_HOSTS, sessionLinkWhy, transcriptUrl } from '../../src/core/links';
 import { underWebBase } from '../../src/shared/links.mjs';
 import { checkRegistration } from '../../src/core/registry';
 import { MIGRATIONS } from '../../src/migrations';
@@ -155,6 +155,22 @@ describe('GitLab CI tokens (R-BTN-93)', () => {
     expect((await call('/v1/sync/events?after=0', { headers: { Authorization: `Bearer ${await gitlabToken({}, { role: 'mirror' })}` } })).status).toBe(403);
     await withCore((c) => c.store.exec(`UPDATE repositories SET ci_identity = '{"kind":"gitlab-ci","issuer":"https://gitlab.test","mirror":true}' WHERE id = 'lab'`));
     expect((await call('/v1/sync/events?after=0', { headers: { Authorization: `Bearer ${await gitlabToken({}, { role: 'mirror' })}` } })).status).toBe(200);
+  });
+});
+
+describe('the session hosts an instance allowlists (R-BTN-113, B-234)', () => {
+  it('BATON_SESSION_HOSTS as a comma-separated or JSON list, a quoted bare host included', () => {
+    expect(SESSION_HOSTS.of({})).toEqual(['claude.ai']); // the default, and when set empty
+    expect(SESSION_HOSTS.of({ BATON_SESSION_HOSTS: '' })).toEqual(['claude.ai']);
+    expect(SESSION_HOSTS.of({ BATON_SESSION_HOSTS: 'claude.ai, ses.example ' })).toEqual(['claude.ai', 'ses.example']);
+    expect(SESSION_HOSTS.of({ BATON_SESSION_HOSTS: '["a.example","B.example"]' })).toEqual(['a.example', 'b.example']);
+    // A JSON string — the quoted bare host an administrator who quoted one value wrote — is
+    // the list it spells, never raw text whose quote characters no URL hostname matches.
+    expect(SESSION_HOSTS.of({ BATON_SESSION_HOSTS: '"sessions.example"' })).toEqual(['sessions.example']);
+    expect(SESSION_HOSTS.of({ BATON_SESSION_HOSTS: '"a.example,b.example"' })).toEqual(['a.example', 'b.example']);
+    // A link's host is judged against the list as parsed above (R-BTN-113: drop, never refuse).
+    expect(sessionLinkWhy('https://sessions.example/s/1', SESSION_HOSTS.of({ BATON_SESSION_HOSTS: '"sessions.example"' }))).toBe(null);
+    expect(sessionLinkWhy('https://elsewhere.example/s/1', SESSION_HOSTS.of({ BATON_SESSION_HOSTS: '"sessions.example"' }))).toMatch(/not among/);
   });
 });
 

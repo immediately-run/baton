@@ -275,6 +275,10 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     expect(lines.join('\n')).toContain('failed');
     expect(lines.join('\n')).toContain('***');
     expect(lines.join('\n')).not.toContain(refresh);
+    // B-256 (S-BTN-231): Baton's end record carries the failure's last line as its detail, masked the same way.
+    const [end] = await rows<{ end_detail: string | null }>('SELECT end_detail FROM claims ORDER BY id DESC LIMIT 1');
+    expect(end.end_detail).toContain('the leg failed with ***');
+    expect(end.end_detail).not.toContain(refresh);
   }, 60_000);
 
   it('masks a private key a leg prints over several lines whole (B-169, R-BTN-144 class 6)', async () => {

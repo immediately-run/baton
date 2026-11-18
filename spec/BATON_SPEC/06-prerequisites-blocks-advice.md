@@ -171,16 +171,18 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
     the claim ends **`released:blocked`** with `prerequisite: {kind, ref}`. In that transaction:
     - `resource` — `ref` a registered resource, optionally with `reading: {instance, available:
       false, until?, valid_for?, detail?}` for an instance serving `ref` that the runner may
-      report on. Baton stores the reading as the runner's (R-BTN-76), adds `(ticket, leg, ref)`
+      report on (below). Baton stores the reading as the runner's (R-BTN-76), adds `(ticket, leg, ref)`
       to `leg_needs` with source `end` if the posted needs lack it, stamps the need's
       `found_at`, then writes the `resource` row against the counts — so the leg is blocked once
       every one of the repository's usable instances of `ref` is `unavailable`, for every runner
-      alike. A reading failing its envelope, bounds or one-a-minute limit is
-      dropped and logged `reading-refused`; the end stands. An `end`-sourced need and its row go
+      alike. A reading failing its envelope, bounds or one-a-minute limit, or naming an instance
+      not serving `ref` or not reportable, is dropped and logged `reading-refused`; the end
+      stands. An `end`-sourced need and its row go
       when the leg next ends other than `blocked` on that resource, or after 7 days, and posts
       never remove it; the `found_at` stamp clears at that same end.
     - `capability` — `ref` a capability the runner declared and says it lost (R-BTN-174). This
-      is the runner's own statement, never checked. Baton removes it from the runner's declared set
+      is the runner's own statement, which Baton never checks; a leg's request for it is
+      confirmed first (below). Baton removes it from the runner's declared set
       and updates `fleet_capabilities` in the same transaction, so rule 4 refuses this runner at
       once. The runner declares it again
       once its check passes (R-BTN-121), or, for a name its executor `provides`, once the executor
@@ -188,8 +190,8 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
     - `ticket` (`ref` in R-BTN-75's form, same repository) — the leg writes the `depends_at`
       entry to git first and the end carries `commit`; Baton writes a provisional row.
     - `condition` and `call` — per R-BTN-162 and R-BTN-165.
-  - **Invalid.** A bad kind or `ref`, a capability the `capability` bullet does not admit, a reading for an instance
-    not serving `ref` or not reportable, or a `ticket` end without `commit`: Baton
+  - **Invalid.** A bad kind or `ref`, a capability the `capability` bullet does not admit, or a
+    `ticket` end without `commit`: Baton
     records `released:cannot-finish:transient` (a failed attempt) in the same transaction and
     answers `invalid-prerequisite`. The runner makes the same checks first.
   - **Bounded, not failed.** A valid `blocked` end is not a failed attempt, not a run for
@@ -199,11 +201,27 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
     the ticket (`hold_reason: blocked-exhausted`) and raises `baton.retries` listing each end's
     prerequisite. A runner with more than 20 blocked ends across tickets in 24 hours raises
     `baton.blocked-ends`.
-  - **How a leg says so.** A script throws `LegError(type, message, {prerequisite, reading?,
+  - **How a leg says so.** A script throws `LegError(type, message, {prerequisite, instance?,
     commit?})`; a session sends `baton leg release --blocked --kind <kind> --ref <ref>
-    [--instance <i>] [--until <RFC 3339>] [--valid-for <s>] [--detail <json>] [--commit <sha>]`
-    on the local channel (R-BTN-106). An error naming a prerequisite is a block, never a retry,
-    and the runner never waits in the claim for a prerequisite to return.
+    [--instance <i>] [--commit <sha>]` on the local channel (R-BTN-106). An error naming a
+    prerequisite is a request for a blocked end, never retried in the claim, and the runner never
+    waits in the claim for a prerequisite to return.
+  - **The runner confirms a leg's request** after the leg's session stops and before `handoff`,
+    with its own check (R-BTN-121):
+    - `capability`: the leg names a capability it requires, and that capability's `check` runs.
+      A failing check confirms the request, and the claim ends blocked on it. A passing check, or
+      a name with no check configured, does not: the claim ends
+      `released:cannot-finish:transient`, a failed attempt (R-BTN-122), and the leg log records
+      the request. A name the runner's executor `provides` has no runner check; only an end the
+      executor itself makes blocks on it (R-BTN-107), and a leg's request for it is not
+      confirmed.
+    - `resource`: the end stands as the leg asked, with no reading of its own. The check of
+      every capability the runner's configuration binds to an instance serving `ref` runs
+      (R-BTN-121), together, and the end carries the reading of the first that fails, the
+      instance the leg names preferred.
+    - Whatever reading, `until`, `valid_for` or `detail` a leg sends is never forwarded.
+    - `ticket`, `condition` and `call` need no check: a snapshot confirms the first
+      (provisional rows, R-BTN-75), and Baton holds the others.
   - **`found`.** A row a `blocked` end writes is `during-run`, as is every `resource` row for a
     need carrying `found_at`; every other row, including one present at the claim's start, is
     `before-start`.
@@ -261,9 +279,9 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
     instance and the account instances that serve R and list the repository; every runner
     granted there has the same ones. What a single runner can reach — its own subscription, a
     device on its host — is its own business: it declares a capability for it (R-BTN-121), and a
-    leg that finds it spent ends `released:blocked` on that `capability` (R-BTN-126), which the
-    runner's check must then fail until the line recovers — otherwise the leg comes straight back
-    to it — or the runner suspends on what it reads (R-BTN-40).
+    leg that finds it spent asks to end `released:blocked` on that `capability` (R-BTN-126), and
+    the capability's check keeps it undeclared until the line recovers (R-BTN-121) — or the
+    runner suspends on what it reads (R-BTN-40).
   - **Who reports.** A runner credential (machine key or API key, R-BTN-117), `POST
     /v1/runner/readings`: any account instance listing a repository its key is granted on —
     sharing an account trusts every listed repository's runners. An instrument key (`POST
@@ -272,15 +290,15 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
     any registered instance, as one more instrument, writer class `admin` (R-BTN-181).
   - **Readings** name their `detail`'s schema (≤ 4 KB, R-BTN-108's validator). A `state`
     reading `{instance, available, until?, valid_for, detail?}` has `valid_for` ≤ 24 hours
-    (default 1 hour) and `until` no later than its end; an unavailable reading with `until`
+    (default 1 hour), ≤ 1 hour from a runner credential, and `until` no later than its end; an unavailable reading with `until`
     lapses at the earlier of the two. A runner posts one on meeting a limit (the reset as
-    `until`) and on succeeding after one. A `measure` reading carries `detail` only, `valid_for`
+    `until`) and on succeeding after one (R-BTN-121). A `measure` reading carries `detail` only, `valid_for`
     ≤ 31 days, and never affects state. A runner session posts at most one reading per instance
     a minute.
   - **Kept per instrument** (R-BTN-181's supersession). Per instance: the latest reading of each
     instrument — an administrator, a runner session by its `runners` row, or an instrument key —
     each lapsing on its own; at most 8 instruments per credential, a ninth replacing that
-    credential's oldest. All readings in force are served (R-BTN-99); core never sums them.
+    credential's oldest. All readings in force are served, each with its writer (R-BTN-99, R-BTN-181); core never sums them.
   - **State**: the most recently observed `state` reading in force, else `unknown`. `unknown`
     blocks only a requirement with `missing: block` (R-BTN-181); otherwise advice fails open.
     Each change is a `resource` event. An instance `unknown` 24 hours while a posted leg needs it
@@ -302,11 +320,13 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
     `unavailable` for that requirement.
 ### 6.4 People
 
-A person is reached one way: a **person's leg**, a leg of the course that no runner may run and
+A course waits on a person one way: a **person's leg**, a leg of the course that no runner may run and
 that arrives when a person answers it with a `std:decision@1` (R-BTN-116). A question a running
 leg asks is a `hitl` condition whose handler course asks it through a person's leg (R-BTN-161,
 R-BTN-169); a decision a ticket source records in its own form is the question of a person's leg
 its course already has. Baton's own conditions are answered on their resolve page (R-BTN-163).
+A leg that wants a person in its agent session, waiting on no answer, raises `interact`
+(R-BTN-195).
 
 - **R-BTN-116 (a person's leg: the one way a course waits on a person).** A leg may be `"kind":
   "person"` with `"asks": <label>` (who answers; matches `^[a-z][a-z0-9-]{0,31}$`). No runner is
@@ -549,8 +569,8 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     a ticket in git and reopening it clears nothing. A ticket re-filed under a new id is a new
     ticket and carries no hold (only a renumbering at the same path does, R-BTN-147): a hold
     binds a ticket only as firmly as git keeps its id, and that residual risk is accepted.
-    Owners see it: the dashboard's **Courses** view lists every closed or dropped ticket that
-    keeps a hold, with its reason, beside the new ticket, and a drop raises
+    Owners see it: the dashboard's course screens (§11.4) list every closed or dropped ticket
+    that keeps a hold, with its reason, beside the new ticket, and a drop raises
     `baton.ticket-dropped`.
 
 ### 6.9 Messages
@@ -566,7 +586,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   acknowledged, so a lost response loses none; the runner acts on a message `id` once, then
   acknowledges. A ring (R-BTN-91)
   only prompts that heartbeat.
-- **`release`.** The runner stops the leg at its next safe point — at once for `requested`, `floor`,
+- **`release`.** The runner stops the leg (told why first, R-BTN-198) at its next safe point — at once for `requested`, `floor`,
   `owner-cancel` and `superseded` (R-BTN-119, R-BTN-168) — leaves its work in git with the
   hand-off (R-BTN-44; none for `superseded`), ends the claim `released:<reason>` (§9) and acknowledges. A delivered
   `release` unacknowledged for 2 hours is reaped by the alarm with a fence (R-BTN-19); a
@@ -584,8 +604,9 @@ itself asks its provider. No Baton channel carries `rank`'s advice to the leg: i
 runner that ranked, and a course that wants its leg to act on the same readings computes from
 them again in its own leg code. Core resolves no route, delivers no advice about one and records no route taken: a
 time-of-day price, a fallback provider or a subscription's limit is a rule in the course, and a
-new provider needs no change to Baton. A leg that finds a provider unusable mid-run may report it
-as a `resource` block with a reading (R-BTN-126), or stop declaring the capability (R-BTN-121).
+new provider needs no change to Baton. A leg that requires an ability (R-BTN-174) may fall back
+from one provider to another within its run (R-BTN-122), and asks to end blocked on the
+capability or resource when none is usable (R-BTN-126).
 ### 6.11 Capacity: exclusive use of a capability *(proposal — B-106)*
 
 - **R-BTN-178 (a capability with a capacity has that many seats).** Some things a leg uses take

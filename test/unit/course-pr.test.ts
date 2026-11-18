@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { CREATE_PR_COURSE, REVIEW_PR_COURSE, branchMatches, matchPatterns, prRefs, stationsPr, stationsReviewPr, ticketOwns, type BatonRecord, type PrFact } from '../../src/defaults/course-pr';
 import type { BranchCommit, RecordedLeg } from '../../src/defaults/pr-markers';
-import { ticketRepositories, verifyPrOpen, type PrExec } from '../../src/defaults/pr-verify';
+import { deliveredDetail, findDelivered, ticketRepositories, verifyDelivered, verifyPrOpen, type PrExec } from '../../src/defaults/pr-verify';
 import type { SourceTicket as PostedTicket } from '../../src/defaults/tickets-markdown';
 
 const T0 = 1_000_000;
@@ -315,19 +315,64 @@ describe('create-pr: the run-tests gate (B-110)', () => {
     expect(out.markers).toEqual([{ ticket: 'A', leg: 'run-tests', ref: sha(2), claim_nonce: 'n2' }]);
   });
 
-  it('a gate that cannot reach the change asks the owner rather than looping (finding 2); skip waives it', () => {
-    // The ticket's PR is in a code repository: the stub tests the home repository's branch, so no
-    // marker would ever land where this PR reads it.
+  it('S-BTN-230: a PR outside the home is gated by its own CI, never the owner (B-255); skip still waives', () => {
+    // The ticket's PR is in a code repository (B-182's plain-git home): the stub tests the home
+    // repository's branch, so the forge's checks on the PR's head are its gate.
     const elsewhere = { repository: 'o/code', url: 'https://github.com/o/code/pull/1' };
-    const onCode = (answers: BatonRecord['answers'] = []) => stationsPr({ tickets: [ticket('A', { repos: ['o/code'] })], facts: [pr({ number: 1, commits: head, ...elsewhere })], closed: new Set(), graph, repository: 'o/home', baton: { legs: [], answers } }).stations.A;
-    const asked = onCode();
-    expect(asked).toMatchObject({ station: 'pr-open', next: [{ leg: 'run-tests', state: 'waiting', waiting_on: 'owner' }] });
-    expect(asked.decisions).toEqual([{ id: 'run-tests-unreachable', leg: 'run-tests', asks: 'owner', url: 'https://github.com/o/code/pull/1', question: 'The test gate cannot run on o/code#1 — skip it for this ticket?', options: [{ id: 'skip' }] }]);
-    // The owner's skip, through Baton: the round queues as before the gate.
-    expect(onCode([{ ticket: 'A', decision: 'run-tests-unreachable', answer: 'skip' }]).next).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
-    // Two PRs in the home repository: the stub tests one branch, so the owner is asked too.
+    const onCode = (checks: (string | null)[], answers: BatonRecord['answers'] = []) => stationsPr({ tickets: [ticket('A', { repos: ['o/code'] })], facts: [pr({ number: 1, commits: head, checks, ...elsewhere })], closed: new Set(), graph, repository: 'o/home', baton: { legs: [], answers } }).stations.A;
+    // Green on every check (neutral and skipped judge nothing): the round queues, no decision.
+    const green = onCode(['success', 'neutral', 'SKIPPED']);
+    expect(green).toMatchObject({ station: 'pr-open', path: [{ leg: 'implement', reached: 'pr-open' }], next: [{ leg: 'review', state: 'ready', waiting_on: null }] });
+    expect(green.decisions).toBeUndefined();
+    // Any concluded red routes to fix, like a red marker — even with other checks still running.
+    for (const red of ['failure', 'cancelled', 'timed_out', 'action_required', 'startup_failure', 'stale']) {
+      expect(onCode(['success', red, null]).next).toEqual([{ leg: 'fix', state: 'ready', waiting_on: null }]);
+    }
+    // Still running, or nothing reported yet (CI registers after the push): the round waits on
+    // ci, a short wait — never on the owner.
+    expect(onCode(['success', null])).toMatchObject({ next: [{ leg: 'review', state: 'waiting', waiting_on: 'ci' }] });
+    expect(onCode([])).toMatchObject({ next: [{ leg: 'review', state: 'waiting', waiting_on: 'ci' }] });
+    expect(onCode([]).decisions).toBeUndefined();
+    // The owner's skip, given before, still waives the gate: the round reads the checks as ever.
+    expect(onCode(['failure'], [{ ticket: 'A', decision: 'run-tests-unreachable', answer: 'skip' }]).next).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
+    // After fix pushed and its CI went green, the round queues at fixed as at pr-open.
+    const reviewed = { checks: ['success'], reviews: [{ author: 'r', state: 'CHANGES_REQUESTED' as const, submittedAt: T0 }], pushes: [T0 - 1000, T0 + 10], pushedAt: T0 + 10 };
+    expect(stationsPr({ tickets: [ticket('A', { repos: ['o/code'] })], facts: [pr({ number: 1, ...reviewed, ...elsewhere })], closed: new Set(), graph, repository: 'o/home', baton: { legs: [] } }).stations.A)
+      .toMatchObject({ station: 'fixed', next: [{ leg: 'review', state: 'ready', waiting_on: null }] });
+    // Two PRs in the home repository: the stub tests one branch, so the owner is still asked.
     const two = stationsPr({ tickets: [ticket('A')], facts: [pr({ number: 1, head: 'claude/A-1', commits: head }), pr({ number: 2, head: 'claude/A-2', commits: head })], closed: new Set(), graph, repository: 'o/home', baton: { legs: [] } }).stations.A;
     expect(two.next).toEqual([{ leg: 'run-tests', state: 'waiting', waiting_on: 'owner' }]);
+    expect(two.decisions?.[0]).toMatchObject({ id: 'run-tests-unreachable', question: 'The test gate cannot run on o/home#1, o/home#2 — skip it for this ticket?', options: [{ id: 'skip' }] });
+  });
+
+  it('S-BTN-230: a home PR beside a sibling PR passes only when the home marker and the sibling CI are both green (B-255)', () => {
+    const sib = (checks: (string | null)[]) => pr({ number: 7, head: 'claude/A-7', repository: 'o/code', checks, url: 'https://github.com/o/code/pull/7' });
+    const mixed = (homeCommits: BranchCommit[], legs: RecordedLeg[], checks: (string | null)[]) => stationsPr({
+      tickets: [ticket('A', { repos: ['o/code'] })],
+      facts: [pr({ number: 1, pushes: homeCommits.map((c) => c.at), pushedAt: Math.max(...homeCommits.map((c) => c.at)), commits: homeCommits }), sib(checks)],
+      closed: new Set(), graph, repository: 'o/home', baton: { legs },
+    }).stations.A;
+    const green = [...head, marker(2, T0, 1, 'green')];
+    const red = [...head, marker(2, T0, 1, 'red')];
+    // Home gate open: the tests run first, unless the sibling's CI is already red.
+    expect(mixed(head, [], ['success']).next).toEqual([{ leg: 'run-tests', state: 'ready', waiting_on: null }]);
+    expect(mixed(head, [], [null]).next).toEqual([{ leg: 'run-tests', state: 'ready', waiting_on: null }]);
+    expect(mixed(head, [], ['failure']).next).toEqual([{ leg: 'fix', state: 'ready', waiting_on: null }]);
+    // Home red: fix, whatever the sibling says.
+    expect(mixed(red, [recorded(2)], ['success']).next).toEqual([{ leg: 'fix', state: 'ready', waiting_on: null }]);
+    // Home green: the sibling's CI decides — red fix, running ci, green review.
+    expect(mixed(green, [recorded(2)], ['failure']).next).toEqual([{ leg: 'fix', state: 'ready', waiting_on: null }]);
+    expect(mixed(green, [recorded(2)], [null]).next).toEqual([{ leg: 'review', state: 'waiting', waiting_on: 'ci' }]);
+    expect(mixed(green, [recorded(2)], []).next).toEqual([{ leg: 'review', state: 'waiting', waiting_on: 'ci' }]);
+    const both = mixed(green, [recorded(2)], ['success']);
+    expect(both.next).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
+    expect(both.decisions).toBeUndefined();
+  });
+
+  it('a home PR alone reads exactly as before: its own checks never route to fix (B-255 leaves it be)', () => {
+    const commits = [...head, marker(2, T0, 1, 'green')];
+    expect(place(commits, [recorded(2)], { checks: ['failure'] }).next).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
+    expect(place(commits, [recorded(2)], { checks: [] }).next).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
   });
 });
 
@@ -496,6 +541,14 @@ describe('the implement stub\'s PR verification (B-81)', () => {
     );
   });
 
+  it('a repos: entry naming the checkout\'s own repository is the home, read and named once (B-256)', () => {
+    const { run, repos } = bound({ '': '[]' });
+    expect(() => verifyPrOpen(ask({ repositories: ['immediately-run/baton', 'Immediately-Run/Baton'] }), run)).toThrow(
+      /exists in immediately-run\/baton — open one/,
+    );
+    expect(repos).toEqual([null]);
+  });
+
   it('a previous branch pattern still matches (R-BTN-51)', () => {
     const { run } = bound({ '': pr(4, 'glm/B-81-old') });
     expect(verifyPrOpen(ask({ branchPatterns: ['claude/{ticket}-*', 'glm/{ticket}-*'] }), run)).toBeUndefined();
@@ -551,5 +604,78 @@ describe('the implement stub\'s PR verification (B-81)', () => {
     expect(ticketRepositories('---\nid: B-81\n---\n', map)).toEqual([]);
     expect(ticketRepositories(null, map)).toEqual([]);
     expect(ticketRepositories('---\nrepos: [docs]\n---\n')).toEqual([]); // no map, nothing to resolve through
+  });
+});
+
+// B-257 (S-BTN-232): an implement run that answered `delivered` places the ticket at
+// `delivered`, its person leg `confirm` queued — from Baton's record, never from git.
+describe('a ticket already delivered (B-257)', () => {
+  const graph = CREATE_PR_COURSE as unknown as Parameters<typeof stationsPr>[0]['graph'];
+  const SHA = 'a'.repeat(40);
+  const leg = (reached: string, l = 'implement', t = 'A', nonce = 'n'): RecordedLeg => ({ ticket: t, leg: l, claim_nonce: nonce, evidence: SHA, reached });
+  const place = (legs: RecordedLeg[], facts: PrFact[] = [], g = graph) => stationsPr({ tickets: [ticket('A')], facts, closed: new Set(), graph: g, baton: { legs } }).stations.A;
+  const loop = [{ leg: 'implement', reached: 'delivered' }, { leg: 'confirm', reached: 'filed' }];
+
+  it('the newest implement run reached delivered and no PR stands: delivered, confirm queued for the person', () => {
+    expect(place([leg('delivered')])).toMatchObject({
+      station: 'delivered', path: [{ leg: 'implement', reached: 'delivered' }], next_leg: 'confirm', next: [{ leg: 'confirm', state: 'ready', waiting_on: null }],
+    });
+    // Another ticket's record, or another leg's, places nothing.
+    expect(place([leg('delivered', 'implement', 'B'), leg('delivered', 'fix')])).toMatchObject({ station: 'filed', path: [] });
+  });
+
+  it('a person sent it back: each delivered pass rides the path, so it extends the one Baton holds', () => {
+    // Newest first: delivered again after one send-back.
+    expect(place([leg('delivered', 'implement', 'A', 'n2'), leg('delivered')])).toMatchObject({ station: 'delivered', path: [...loop, { leg: 'implement', reached: 'delivered' }] });
+    // Sent back, then an implement run that opened a PR (closed since): filed after the loop.
+    expect(place([leg('pr-open', 'implement', 'A', 'n2'), leg('delivered')])).toMatchObject({ station: 'filed', path: loop, next_leg: 'implement' });
+    // ...and with its PR open, the PR's own walk after the loop.
+    const open = place([leg('pr-open', 'implement', 'A', 'n2'), leg('delivered')], [{ number: 1, head: 'claude/A-1', state: 'open', pushedAt: T0, checks: ['success'], reviews: [] }]);
+    expect(open.path.slice(0, 3)).toEqual([...loop, { leg: 'implement', reached: 'pr-open' }]);
+  });
+
+  it('a course with no person leg confirm, or a Baton whose record carries no reached, places as before', () => {
+    expect(place([leg('delivered')], [], { legs: {} })).toMatchObject({ station: 'filed', path: [] });
+    expect(place([{ ticket: 'A', leg: 'implement', claim_nonce: 'n', evidence: SHA }])).toMatchObject({ station: 'filed', path: [] });
+  });
+});
+
+describe('the delivered answer, read and verified (B-257)', () => {
+  const FULL = '8565aa7'.padEnd(40, 'c');
+  const OFF = 'deadbee'.padEnd(40, 'd');
+  const run = (fetchFails = false): PrExec => (cmd, args) => {
+    const line = args.join(' ');
+    if (line === 'fetch -q origin +refs/heads/main:refs/remotes/origin/main') {
+      if (fetchFails) throw new Error('no route');
+      return '';
+    }
+    if (line === 'rev-parse --verify --quiet 8565aa7^{commit}') return `${FULL}\n`;
+    if (line === 'rev-parse --verify --quiet deadbee^{commit}') return `${OFF}\n`;
+    if (line === `merge-base --is-ancestor ${FULL} refs/remotes/origin/main`) return '';
+    throw new Error(`${cmd} ${line}: not in the fixture`);
+  };
+
+  it('reads the last line that opens with delivered and commits; prose mentioning the word is no answer', () => {
+    expect(findDelivered('working…\ndelivered 8565aa7 runner-main.test.ts 47 passed, typecheck clean\n\nsummary after it\n'))
+      .toEqual({ shas: ['8565aa7'], evidence: 'runner-main.test.ts 47 passed, typecheck clean', line: 'delivered 8565aa7 runner-main.test.ts 47 passed, typecheck clean' });
+    expect(findDelivered('delivered 8565aa7,deadbee,8565aa7 tests green')!.shas).toEqual(['8565aa7', 'deadbee']);
+    expect(findDelivered('I delivered the feature in #12\ndelivered the feature\nhttps://github.com/o/r/pull/3')).toBeNull();
+    expect(() => findDelivered('delivered 8565aa7')).toThrow('with no evidence');
+  });
+
+  it('each commit must be on the default branch as origin has it: one that is not, or unknown, refuses the answer', () => {
+    expect(verifyDelivered({ checkout: '/c', shas: ['8565aa7'], branch: 'main' }, run())).toEqual([FULL]);
+    expect(() => verifyDelivered({ checkout: '/c', shas: ['8565aa7', 'deadbee'], branch: 'main' }, run())).toThrow('the implement agent answered delivered at deadbee, which is not on main — refused');
+    expect(() => verifyDelivered({ checkout: '/c', shas: ['0000000'], branch: 'main' }, run())).toThrow('names no commit this checkout knows');
+    expect(() => verifyDelivered({ checkout: '/c', shas: ['8565aa7'], branch: 'main' }, run(true))).toThrow('fetching main from origin failed: no route');
+    expect(() => verifyDelivered({ checkout: '/c', shas: ['8565aa7'], branch: '-x' }, run())).toThrow('is no branch name');
+  });
+
+  it("the end's detail is §10.4 free text of at most 200 characters", () => {
+    expect(deliveredDetail([FULL], 'runner-main.test.ts <47> passed {ok}')).toBe('delivered at 8565aa7ccc: runner-main.test.ts 47 passed ok');
+    const long = deliveredDetail([FULL, OFF], 'x'.repeat(400));
+    expect(long.length).toBe(200);
+    expect(long.endsWith('…')).toBe(true);
+    expect(/[<>{}\u0000-\u001f]/.test(deliveredDetail([FULL], 'a\tb<c>'))).toBe(false);
   });
 });

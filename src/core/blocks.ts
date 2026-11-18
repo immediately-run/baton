@@ -144,8 +144,12 @@ export const BLOCK_SQL = {
   page: 'SELECT id, blocked_since FROM tickets WHERE repository_id = ? AND blocked_since IS NOT NULL AND id > ? ORDER BY id LIMIT ?',
 } as const;
 
-/** The SQL test of a live worker (§5): alive, not reaped, its key in force. */
-const LIVE = `w.reaped_at IS NULL AND w.kind != 'legacy' AND :now - w.last_seen_at < w.lease_timeout_ms AND c.revoked_at IS NULL`;
+/** The SQL test of a live worker (§5): alive, not reaped, its key in force. B-236: the lease is
+ *  written `last_seen_at + lease_timeout_ms > now` — R-BTN-9's `now - last_seen_at < lease`,
+ *  rearranged — so the live set is a range of `workers_live` and never a read of every runner
+ *  session (R-BTN-3 keeps them all). A query ordering by `w.id` writes `+w.id`, which keeps
+ *  the planner from walking the whole table in id order to save a sort of the few live ones. */
+const LIVE = `w.reaped_at IS NULL AND w.kind != 'legacy' AND w.last_seen_at + w.lease_timeout_ms > :now AND c.revoked_at IS NULL`;
 
 export class Blocks {
   constructor(private readonly c: Ctx) {}
@@ -191,7 +195,8 @@ export class Blocks {
    * its last row change (R-BTN-75; B-49): a fleet coming back to a ticket that needs a capability
    * and an unavailable resource clears one row and writes the other, and the ticket was blocked
    * throughout. A batch inside a batch joins it. `held` is not deferred: a claim's start or end
-   * is its own silent transition (R-BTN-77).
+   * is its own transition — a start silent, an end an event that wakes no one (R-BTN-77;
+   * R-BTN-75 as amended by R3-1254, B-26).
    */
   batch<T>(fn: () => T): T {
     if (this.pending) return fn();
@@ -313,7 +318,9 @@ export class Blocks {
   }
 
   /** A claim started, ended, was confirmed or its fence cleared: whether the ticket is held
-   *  changed, and only that (R-BTN-75). A start or an end is silent (R-BTN-77). */
+   *  changed, and only that (R-BTN-75). A start is silent (R-BTN-77); an end, a confirmation and
+   *  a fence clear are events — an end is never an unblocking, and one that leaves the ticket
+   *  blocked logs `blocked` (R-BTN-75 as amended by R3-1254, B-26). */
   held(ticketId: string, silent: boolean) {
     this.evaluate(ticketId, [], silent);
   }
@@ -499,6 +506,38 @@ export class Blocks {
     const dropped: string[] = [];
     const home = this.rows<{ id: string }>('SELECT id FROM repositories WHERE id = ?', repo)[0];
     const registered = new Set(this.rows<{ name: string }>('SELECT name FROM external_resources').map((r) => r.name));
+    // B-241: what the repository's tickets hold — their owner-answered decisions, needs and the
+    // sync's decisions — read once for the post, not three times per ticket; each ticket's
+    // writes below touch only its own rows.
+    // A ticket's id is `<repository>:<local id>`: the repository's rows are a key range.
+    const mine = `ticket_id >= ? || ':' AND ticket_id < ? || ';'`;
+    const byTicket = <T extends { ticket_id: string }>(list: T[]) => {
+      const out = new Map<string, Omit<T, 'ticket_id'>[]>();
+      for (const { ticket_id, ...rest } of list) {
+        const l = out.get(ticket_id);
+        if (l) l.push(rest);
+        else out.set(ticket_id, [rest]);
+      }
+      return out;
+    };
+    const answeredAll = byTicket(this.rows<{ ticket_id: string; decision_id: string }>(
+      `SELECT ticket_id, decision_id FROM decision_answers WHERE ${mine}`, repo, repo));
+    const needsAll = byTicket(this.rows<{ ticket_id: string; leg: string; resource: string }>(
+      `SELECT ticket_id, leg, resource FROM leg_needs WHERE ${mine} ORDER BY ticket_id, leg, resource`, repo, repo));
+    const decisionsAll = byTicket(this.rows<{ ticket_id: string; decision_id: string; leg: string; asks: string; url: string | null; question: string | null; options_json: string | null }>(
+      `SELECT ticket_id, decision_id, leg, asks, url, question, options_json FROM ticket_decisions WHERE ${mine} AND source = 'sync' ORDER BY ticket_id, decision_id`, repo, repo));
+    // R-BTN-92's link bases, read only when a ticket posts a decision, and once per distinct
+    // `repos:` list (B-241) — the home's forge and code repositories are the post's own.
+    let reposOf: Map<string, string> | null = null;
+    const bases = new Map<string, { forge: Forge; webBase: string }[]>();
+    const basesOf = (id: string) => {
+      if (!home) return [];
+      reposOf ??= new Map(this.rows<{ id: string; repos: string }>('SELECT id, repos FROM tickets WHERE repository_id = ?', repo).map((t) => [t.id, t.repos]));
+      const key = reposOf.get(id) ?? '[]';
+      let b = bases.get(key);
+      if (!b) bases.set(key, (b = ticketRepositories(this.c.store, home.id, JSON.parse(key) as string[])));
+      return b;
+    };
     for (const local of live) {
       const id = qualify(repo, local);
       const st = stations.get(local) ?? null;
@@ -510,23 +549,22 @@ export class Blocks {
         else if (!registered.has(r)) dropped.push(`${id}:needs:${r}:unregistered`);
       }
       const needs = (st?.next ?? []).flatMap((n) => (n.needs ?? []).filter((r) => RESOURCE_NAME.test(r)).map((r) => `${n.leg}\u0000${r}`)).sort();
-      const repos = home ? this.ticketRepos(id, home) : [];
+      const repos = () => basesOf(id);
       // B-110: a decision the owner has answered (`decision_answers`) is never posted open again —
       // a sync that read its observation before the answer would otherwise reopen it.
-      const answered = new Set(this.rows<{ decision_id: string }>('SELECT decision_id FROM decision_answers WHERE ticket_id = ?', id).map((r) => r.decision_id));
+      const answered = new Set((answeredAll.get(id) ?? []).map((r) => r.decision_id));
       const decisions = (st?.decisions ?? []).filter((d) => {
         if (answered.has(d.id)) return false;
         if (!d.id.startsWith('baton:')) return true;
         dropped.push(`${id}:decision:${d.id}`);
         return false;
       }).map((d) => ({
-        id: d.id, leg: d.leg && legs.has(d.leg) ? d.leg : '', asks: d.asks, url: d.url && repos.some((b) => underWebBase(d.url!, b.webBase)) ? d.url : null,
+        id: d.id, leg: d.leg && legs.has(d.leg) ? d.leg : '', asks: d.asks, url: d.url && repos().some((b) => underWebBase(d.url!, b.webBase)) ? d.url : null,
         question: d.question ?? null, options: d.options?.length ? JSON.stringify(d.options.map((o) => ({ id: o.id, ...(o.grants ? { grants: { leg: o.grants.leg, runs: o.grants.runs } } : {}) }))) : null,
       }))
         .sort((a, b) => (a.id < b.id ? -1 : 1));
-      const haveNeeds = this.rows<{ leg: string; resource: string }>('SELECT leg, resource FROM leg_needs WHERE ticket_id = ? ORDER BY leg, resource', id).map((n) => `${n.leg}\u0000${n.resource}`).sort();
-      const haveDecisions = this.rows<{ decision_id: string; leg: string; asks: string; url: string | null; question: string | null; options_json: string | null }>(
-        `SELECT decision_id, leg, asks, url, question, options_json FROM ticket_decisions WHERE ticket_id = ? AND source = 'sync' ORDER BY decision_id`, id);
+      const haveNeeds = (needsAll.get(id) ?? []).map((n) => `${n.leg}\u0000${n.resource}`).sort();
+      const haveDecisions = decisionsAll.get(id) ?? [];
       const needsChanged = haveNeeds.join('\n') !== needs.join('\n');
       const decisionsChanged = JSON.stringify(haveDecisions.map((d) => ({ id: d.decision_id, leg: d.leg, asks: d.asks, url: d.url, question: d.question, options: d.options_json }))) !== JSON.stringify(decisions);
       if (needsChanged) {
@@ -585,9 +623,9 @@ export class Blocks {
     for (const w of this.named<{ id: number }>(
       `SELECT w.id FROM workers w JOIN credentials c ON c.id = w.credential_id
        WHERE ${LIVE}
-         AND NOT EXISTS (SELECT 1 FROM claims k WHERE k.worker_id = w.id AND k.status = 'active')
+         AND (SELECT COUNT(*) FROM claims k WHERE k.worker_id = w.id AND k.status = 'active') < w.concurrency  -- B-188: a worker with room, not only an idle one
          AND (NOT COALESCE(${grantedKeySql('c.created_by')}, 0) OR EXISTS (SELECT 1 FROM worker_grants g WHERE g.credential_id = w.credential_id AND g.repository_id = :repo AND g.revoked_at IS NULL))
-       ORDER BY w.id`, { now, repo })) {
+       ORDER BY +w.id`, { now, repo })) {
       if (!this.c.fits(w.id, ticket)) continue;
       const pending = this.rows<{ id: number; payload_json: string }>(`SELECT id, payload_json FROM messages WHERE to_worker_id = ? AND kind = 'unblocked' AND status = 'pending' ORDER BY id DESC LIMIT 1`, w.id)[0];
       if (pending) {
@@ -643,7 +681,7 @@ export class Blocks {
     const now = this.c.now();
     const all = this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL').map((r) => r.id);
     return this.named<{ id: number; credential_id: string; created_by: string | null }>(
-      `SELECT w.id, w.credential_id, c.created_by, c.allowed_capabilities FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} AND (:only IS NULL OR w.id = :only) ORDER BY w.id`, { now, only })
+      `SELECT w.id, w.credential_id, c.created_by, c.allowed_capabilities FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} AND (:only IS NULL OR w.id = :only) ORDER BY +w.id`, { now, only })
       .map((w) => {
         // R-BTN-58: a key an owner or administrator granted works where it is granted; another
         // (a bearer token, a BATON_KEYS seed key) is bounded by its allow-list on every
@@ -785,7 +823,7 @@ export class Blocks {
    *  workers, never of the board). */
   liveChanged(): boolean {
     const now = this.c.now();
-    const ids = this.named<{ id: number }>(`SELECT w.id FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} ORDER BY w.id`, { now }).map((w) => w.id);
+    const ids = this.named<{ id: number }>(`SELECT w.id FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} ORDER BY +w.id`, { now }).map((w) => w.id);
     return this.rows<{ value: string }>(`SELECT value FROM baton_settings WHERE key = 'fleet_live'`)[0]?.value !== JSON.stringify(ids);
   }
 
@@ -962,21 +1000,35 @@ export class Blocks {
   /** The dashboard: each repository's blocked tickets with their blocks (§14). A decision block
    *  carries its computed options (B-133): what answering each one does, beside the question. */
   view() {
-    return this.rows<{ id: string; repository_id: string; blocked_since: number }>(
-      'SELECT id, repository_id, blocked_since FROM tickets WHERE blocked_since IS NOT NULL ORDER BY repository_id, blocked_since, id LIMIT 500')
-      .map((t) => ({
-        ticket_id: t.id, repository_id: t.repository_id, since: t.blocked_since,
-        blocks: this.blockRows(t.id).map((b) => {
-          if (b.kind !== 'decision') return b as Block;
-          const d = this.rows<{ asks: string; question: string | null; options_json: string | null }>(
-            'SELECT asks, question, options_json FROM ticket_decisions WHERE ticket_id = ? AND decision_id = ?', t.id, b.ref)[0];
-          if (!d) return b as Block;
-          let options: { id: string; grants?: { leg: string; runs: number } }[] | null = null;
-          try {
-            options = d.options_json ? (JSON.parse(d.options_json) as { id: string; grants?: { leg: string; runs: number } }[]) : null;
-          } catch { /* stored by Blocks.posted from a checked post: never malformed */ }
-          return { ...b, asks: d.asks, ...(d.question != null ? { question: d.question } : {}), options: decisionOptionActions(b.ref, options) } as Block;
-        }),
-      }));
+    const tickets = this.rows<{ id: string; repository_id: string; blocked_since: number }>(
+      'SELECT id, repository_id, blocked_since FROM tickets WHERE blocked_since IS NOT NULL ORDER BY repository_id, blocked_since, id LIMIT 500');
+    // B-240: the listed tickets' blocks and decisions in one query each, not one per ticket and
+    // per decision block — each ticket's blocks in `BLOCK_SQL.rows`' order.
+    const ids = JSON.stringify(tickets.map((t) => t.id));
+    const blocks = new Map<string, Block[]>();
+    for (const b of this.rows<{ ticket_id: string; kind: BlockKind; leg: string; ref: string; since: number; until: number | null }>(
+      'SELECT ticket_id, kind, leg, ref, since, until FROM ticket_blocks WHERE ticket_id IN (SELECT value FROM json_each(?)) ORDER BY ticket_id, kind, ref, leg', ids)) {
+      const row = { kind: b.kind, ...(b.leg ? { leg: b.leg } : {}), ref: b.ref, since: b.since, ...(b.until != null ? { until: b.until } : {}) } as Block;
+      const list = blocks.get(b.ticket_id);
+      if (list) list.push(row);
+      else blocks.set(b.ticket_id, [row]);
+    }
+    const decisions = new Map(this.rows<{ ticket_id: string; decision_id: string; asks: string; question: string | null; options_json: string | null }>(
+      'SELECT ticket_id, decision_id, asks, question, options_json FROM ticket_decisions WHERE ticket_id IN (SELECT value FROM json_each(?))', ids)
+      .map((d) => [`${d.ticket_id}\u0000${d.decision_id}`, d]));
+    return tickets.map((t) => ({
+      ticket_id: t.id, repository_id: t.repository_id, since: t.blocked_since,
+      blocks: (blocks.get(t.id) ?? []).map((b) => {
+        if (b.kind !== 'decision') return b;
+        const d = decisions.get(`${t.id}\u0000${b.ref}`);
+        if (!d) return b;
+        let options: { id: string; grants?: { leg: string; runs: number } }[] | null = null;
+        try {
+          options = d.options_json ? (JSON.parse(d.options_json) as { id: string; grants?: { leg: string; runs: number } }[]) : null;
+        } catch { /* stored by Blocks.posted from a checked post: never malformed */ }
+        return { ...b, asks: d.asks, ...(d.question != null ? { question: d.question } : {}), options: decisionOptionActions(b.ref, options) } as Block;
+      }),
+    }));
   }
+
 }

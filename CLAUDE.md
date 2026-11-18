@@ -67,6 +67,8 @@ decision there is a change to Baton, not a change in Baton.
 - **Log what a run taught.** When operating Baton (an instance, a runner, a sync) surprises
   you, append one dated entry to `docs/lessons.mdx` — evidence links, one bold lesson,
   what changed — and read that page before the next operational work.
+- **Supervising the runners?** Read `AGENTS.md`, *The supervising agent*: every intervention
+  goes into `docs/interventions.mdx`.
 
 ## Commands
 
