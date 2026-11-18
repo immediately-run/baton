@@ -363,3 +363,42 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   checks that gate main (`test`), not for a run that holds a release for the owner's approval,
   or the `release` job no longer blocks the run's conclusion. The leg prints a line at least
   every few minutes while it waits, so a wait is not read as idle. *No ticket yet.*
+
+## 2026-11-18 06:24 — B-150, B-175 and B-176 completed by hand; bering's grant raised
+
+- **Host:** bering
+- **Tickets:** B-150, B-175 (PR #232), B-176 (PR #236)
+- **Why it was needed:** after the outage both bering runners sat idle for six hours, and
+  runner-2's screen still ended with the outage's `internal error` lines, which read as stuck. It
+  was healthy, heartbeating silently with nothing to claim: the grant's `max_tier: judgement`
+  reached only three tickets, and each was blocked in a way no runner could clear.
+  - **B-175** was held by claim 185's end, unconfirmed since 2026-11-13. That merge leg ended
+    `done` after 18m39s (about 3½ minutes of work, then the 15-minute idle watchdog) without
+    merging #232. The create-pr merge stub returns `{ reached: 'merged' }` whenever its agent
+    exits 0 *or* the watchdog concludes it idle, and never asks the forge whether the PR merged
+    (`src/defaults/courses.ts`'s `merge` position; `src/defaults/cli.ts`'s generated stub). Baton
+    correctly refused to confirm a `done` whose ticket git still showed open (R-BTN-10), and after
+    6 hours the end can only be confirmed or released by an administrator. Nothing told anyone.
+    The approved PR had meanwhile fallen into conflict with main.
+  - **B-176** was held by claim 240's review end (2026-11-17 18:04), left unconfirmed when the
+    supervisor's renumbering push moved the branch. #236 then conflicted with main again (B-174's
+    request fallback), and its rule id R-BTN-198 had been taken again, by B-260 — the very
+    collision B-176 builds the allocator to prevent.
+  - **B-150** was on a `baton:retries` hold. Its work had been delivered on 2026-11-02 by 530e03b
+    (B-166's spec restructure emptied `PATCH_NOTES_ALLOWED`), so every implement attempt found
+    nothing to do and exited clean with no PR — read as `cannot-finish:transient`. After the
+    owner's retry at 06:32, another host's runner (worker 45) spent one more attempt the same way.
+- **Resolution:** at the owner's word: bering's grant raised to `max_tier: critical` (06:31; both
+  runners claimed B-113 and B-242 at once); B-150's hold retried, then archived as delivered
+  (36ca1a9). #232: main merged in (two additive conflicts), CI green, merged (77f73d8), archived
+  (31184f5). #236: main merged in by a subagent (B-174's reserved-namespace walk generalised to
+  B-176's namespaces; both id-allocation paths kept), its rule renumbered to R-BTN-199, CI green
+  after one re-run of the S-BTN-229 flake, merged (850649f), archived (bb8de3d). Claims 185 and
+  240 remain unconfirmed on the dashboard for an administrator; their tickets are closed.
+- **Autonomous handling:** the merge stub verifies the PR is merged (the forge, or the merge
+  commit on the default branch) before it reaches `merged`, and an idle conclusion without that
+  verification fails the leg instead of ending `done`. An end Baton will not confirm reaches the
+  owner the hour it turns 6 hours old (the owner channel). A runner that has logged an error
+  logs one line when calls succeed again, and says why it is idle. B-257's `already-delivered`
+  marker covers B-150's case once every host runs it. *No ticket yet* for the merge
+  verification.
