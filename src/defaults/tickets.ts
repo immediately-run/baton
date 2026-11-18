@@ -33,7 +33,7 @@ import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { claimMismatch, formatTicket, ticketPathsUnder, ticketPrView } from '../shared/ticketPr.mjs';
 import { defaultBranch } from './request';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { remoteSlug } from './cli';
+import { remoteSlug, ownRepositoryId } from './cli';
 import { builtIn, DEFAULT_COURSE } from './courses';
 import { holderRefusal, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
 import { batonTarget, fallbackNote, floorFor, nextMain, parseKind, takeNumber } from './sequences';
@@ -410,9 +410,21 @@ function handoffLines(o: { id: string; prs: string[]; baton: BatonPosition | nul
  * 1 in a throwaway clone, its own `.baton/baton.json` naming its items folder, and the same
  * rule decides there: archived, or live `done`/`superseded`. The claim is git-only here — no
  * forge, no Baton — so what git holds is what there is; a dependency the target does not hold
- * refuses the claim naming it, as the board post would (§4.4). */
+ * refuses the claim naming it, as the board post would (§4.4).
+ *
+ * The posting repository's own id spelled qualified (`baton:B-1` in baton's own checkout,
+ * §3.1) is the local id's own dependency read as itself: this checkout's archive and status
+ * answer it, never a depth-1 clone of the repository's own remote — so an `--offline` claim
+ * carrying one stays offline (round 1). */
 function isDone(dir: string, settings: TicketSettings, id: string): boolean {
+  const own = id.includes(':') ? ownRepositoryId(dir, readSettingsJson(dir).repos ?? {}) : null;
+  if (own != null && id.startsWith(`${own}:`)) return isDoneLocal(dir, settings, id.slice(own.length + 1));
   if (id.includes(':')) return isDoneElsewhere(dir, id);
+  return isDoneLocal(dir, settings, id);
+}
+
+/** `isDone`'s local half: this checkout's items folder, its archive and its live statuses. */
+function isDoneLocal(dir: string, settings: TicketSettings, id: string): boolean {
   const items = (settings.items ?? 'tickets').replace(/\/$/, '');
   const found = locate(items, id, fileAt(dir));
   if (!found) return false;
@@ -665,12 +677,16 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
     const updates = withMentions ? reverseMentions(files, id, deps) : [];
     const after = [...files.filter((f) => !updates.some((u) => u.path === f.path)), ...updates, { path: `${id}.mdx`, text }];
     // The board's own reading of what the commit would leave: one post, validated here rather
-    // than by a sync that a broken filing would wedge.
+    // than by a sync that a broken filing would wedge — this repository's own id spelled
+    // qualified (§3.1, B-113 round 1) read as the local id alone in the cycle graph, as the
+    // board's own judgment reads it.
     const posted = ticketsMarkdown(after, { items, repos: readSettingsJson(dir).repos });
-    const cycle = dependsCycles(posted.tickets.map((x) => ({ id: x.id, depends_on: x.depends_on ?? [] })))[0];
+    const ownId = ownRepositoryId(dir, readSettingsJson(dir).repos ?? {});
+    const selfAsLocal = (d: string): string => ownId != null && d.startsWith(`${ownId}:`) ? d.slice(ownId.length + 1) : d;
+    const cycle = dependsCycles(posted.tickets.map((x) => ({ id: x.id, depends_on: (x.depends_on ?? []).map(selfAsLocal) })))[0];
     if (cycle) throw new Error(`${id}: a dependency cycle: ${cycle.join(' → ')}`);
     try {
-      checkPayload({ sha: '0'.repeat(40), parent_sha: null, observation: 1, tickets: posted.tickets, closed: posted.closed });
+      checkPayload({ sha: '0'.repeat(40), parent_sha: null, observation: 1, tickets: posted.tickets, closed: posted.closed }, ownId ?? undefined);
     } catch (e) {
       throw new Error(`${id}: the board would refuse the filing: ${(e as Error).message}`);
     }

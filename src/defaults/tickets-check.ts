@@ -20,6 +20,7 @@ import { pathToFileURL } from 'node:url';
 import { bodyDependencies, checkPayload, dependsCycle, dependsCycles } from '../core/board';
 import { LOCAL_ID } from '../core/validate'; // the board's own grammar, cited below (§4.4)
 import { readItems } from './read-items';
+import { ownRepositoryId } from './remote-slug';
 import { atOrAbove, filedDate, filingDate, firstCommits, historyEntries, isShallow, missingSections, rulesConfig, sectionGaps, sectionHint, sectionsDate, sectionsExempt, sectionsFromId, sectionsSince, staleRules, staleSummary, type RulesConfig, type StaleRule } from './tickets-rules';
 import { parseFrontmatter, ticketsMarkdown, type MarkdownFile, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
@@ -158,11 +159,16 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
   // The board post's validation, run here so a pull request fails instead of the sync: the one
   // throw it makes is one finding — the validator names its field (`tickets[3].tier: …`) — at
   // `board`, or, a cycle, at the first ticket's file, which the author opens.
+  // B-113 (§3.1, round 1): this repository's own id spelled qualified reads as the local id
+  // alone — in the cycle graph here, in `checkPayload` (which the board's own judgment passes
+  // the repository's id), and in the known-ticket finding below.
+  const ownId = ownRepositoryId(root, used.repos ?? {});
+  const selfAsLocal = (d: string): string => ownId != null && d.startsWith(`${ownId}:`) ? d.slice(ownId.length + 1) : d;
   const liveIds = new Set(result.tickets.map((t) => t.id));
   for (const c of result.closed) liveIds.delete(c.id);
   const live = result.tickets.filter((t) => liveIds.has(t.id));
   const fileOf = new Map(result.tickets.map((t) => [t.id, t.path]));
-  const loops = dependsCycles(live.map((t) => ({ id: t.id, depends_on: t.depends_on ?? [] })));
+  const loops = dependsCycles(live.map((t) => ({ id: t.id, depends_on: (t.depends_on ?? []).map(selfAsLocal) })));
   const cycles = loops.map((loop) => `a dependency cycle: ${loop.join(' → ')}`);
   // Each cycle is checked first so that its finding takes a file, and the board's own answer for
   // it — the same sentence, after `tickets.depends_on:` — is then not printed a second time (the
@@ -170,7 +176,7 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
   // not stop the rest: the validator is one throw, and the findings after it are the same post's.
   for (const [i, message] of cycles.entries()) findings.push({ path: fileOf.get(loops[i][0]) ?? 'board', message });
   try {
-    checkPayload({ sha: '0'.repeat(40), parent_sha: null, observation: 1, tickets: result.tickets, closed: result.closed });
+    checkPayload({ sha: '0'.repeat(40), parent_sha: null, observation: 1, tickets: result.tickets, closed: result.closed }, ownId ?? undefined);
   } catch (e) {
     const message = (e as Error).message ?? String(e);
     if (!cycles.some((cycle) => message.includes(`: ${cycle}`))) findings.push({ path: 'board', message });
@@ -192,10 +198,14 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
   };
   // A qualified id (B-113) names another repository's ticket: not this repository's to check —
   // `baton tickets claim` resolves it through the repos map, the sync's dependencies read
-  // against its board, and the post's judgment refuses what neither resolves.
+  // against its board, and the post's judgment refuses what neither resolves. This
+  // repository's own id spelled qualified is the local id's own (§3.1), checked as one.
   for (const t of live) {
     const at = t.path ?? (used.items ?? 'tickets');
-    for (const dep of t.depends_on ?? []) if (!dep.includes(':') && !known.has(dep)) add({ path: at, message: `depends_on names ${dep}, which is neither live nor closed` });
+    for (const dep of t.depends_on ?? []) {
+      const local = dep.includes(':') ? (ownId != null && dep.startsWith(`${ownId}:`) ? dep.slice(ownId.length + 1) : null) : dep;
+      if (local != null && !known.has(local)) add({ path: at, message: `depends_on names ${dep}, which is neither live nor closed` });
+    }
   }
 
   // The markdown source's body line (B-111): `**Depends on:**` names exactly `depends_on`.

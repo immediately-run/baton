@@ -2729,4 +2729,37 @@ describe('readBoard resolves qualified dependencies against their boards (B-113)
     expect(none.asked).toEqual([]);
     expect(none.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
   }, 30_000);
+
+  it('a self-qualified dependency — the checkout\'s own id, `.git` and all — reads as its local id, never asked of the read (round 1)', async () => {
+    // Round 1's case: the map named the own repository with a `.git` suffix (or not at all), so
+    // `docs:T-9` posted by docs was sent to the read — which refused it as another
+    // repository's, failing the whole run for a spelling §3.1 permits.
+    dir = mkdtempSync(join(tmpdir(), 'baton-b113-'));
+    gitInit(dir);
+    mkdirSync(join(dir, 'tickets'), { recursive: true });
+    writeFileSync(join(dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\ndepends_on:\n  - docs:T-9\n---\n');
+    writeFileSync(join(dir, 'tickets', 'T-9.mdx'), '---\nid: T-9\ntitle: Nine\n---\n');
+    execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git'], { stdio: 'ignore' });
+    expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
+    const settings = join(dir, '.baton', 'baton.json');
+    const json = JSON.parse(readFileSync(settings, 'utf8')) as Record<string, unknown>;
+    writeFileSync(settings, JSON.stringify({ ...json, repos: { docs: 'immediately-run/docs.git' } }, null, 2));
+    commitAll(dir);
+    const facts = join(dir, 'facts.json');
+    writeFileSync(facts, '[]');
+    const args = parseSyncArgs(['--root', dir, '--url', 'https://baton.test', '--facts', facts, '--token', 't1'], {});
+    // T-9 live and open: the local rule holds the leg, and the read is asked nothing.
+    const open = answering(false);
+    expect(await syncMain({ ...args, transport: open.transport, log: () => {} })).toBe(0);
+    expect(open.asked).toEqual([]);
+    expect(open.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'waiting', waiting_on: 'dependencies' }]);
+    // T-9 closed done in this checkout's own reading: its qualified spelling is done here — the
+    // read's answer (still not done, one post behind) is never asked for.
+    writeFileSync(join(dir, 'tickets', 'T-9.mdx'), '---\nid: T-9\ntitle: Nine\nstatus: done\n---\n');
+    commitAll(dir);
+    const done = answering(false);
+    expect(await syncMain({ ...args, transport: done.transport, log: () => {} })).toBe(0);
+    expect(done.asked).toEqual([]);
+    expect(done.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
+  }, 30_000);
 });

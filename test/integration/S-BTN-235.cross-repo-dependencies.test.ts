@@ -6,10 +6,12 @@
 // not the dependent's — is refused naming the consent route, accepted the moment the target's
 // owners consent (`POST /v1/owner/{target}/dependency-consents`), refused again after `withdraw`,
 // each change a `dependency-consent` event; a cycle through two boards is refused as one board's
-// is, named as its path with qualified ids; the sync's dependencies read answers the target's
-// standing `{done, withdrawn, closed, station, url}` — the url built from the target's
-// registration — with the post's own refusals, the unconsented one `forbidden`; `blocked_by`
-// stays local. Runs on both hosts.
+// is, named as its path with qualified ids, and a one-board cycle however its edges are spelled
+// is refused as one board's own (round 1: a self-qualified edge reads as its local id); the
+// sync's dependencies read answers the target's standing `{done, withdrawn, closed, station,
+// url}` — the url built from the target's registration, null for a closed target, and a
+// self-qualified id answered against the posting repository's own board — with the post's own
+// refusals, the unconsented one `forbidden`; `blocked_by` stays local. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, keyCall, rows, setAdminKeys, setClock, syncCall, syncToken } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
@@ -112,6 +114,27 @@ describe('S-BTN-235 dependencies on another repository\'s tickets', () => {
     expect(await rows<{ depends_on: string }>(`SELECT depends_on FROM tickets WHERE id = 'docs:T-9'`)).toEqual([{ depends_on: '[]' }]);
   });
 
+  it('refuses a one-board cycle however its edges are spelled: a self-qualified edge reads as its local id (round 1)', async () => {
+    // Before round 1, both cycle checks missed this loop — the one-board graph keyed bare local
+    // ids, and the cross-board walk skipped what it detected as one board's own — leaving a live
+    // cycle that held every ticket on it waiting on the other forever (§3.1, §4.4).
+    const both = new Git().add('T-1', { depends_on: ['docs:T-2'] }).add('T-2', { depends_on: ['docs:T-1'] });
+    expect(await both.post()).toMatchObject({ status: 400, code: 'invalid-params', message: 'tickets.depends_on: a dependency cycle: T-1 → T-2 → T-1' });
+    // The mixed spelling — one edge bare, one self-qualified — is the same loop; so is a
+    // self-dependency spelled self-qualified.
+    const mixed = new Git().add('T-3', { depends_on: ['T-4'] }).add('T-4', { depends_on: ['docs:T-3'] });
+    expect(await mixed.post()).toMatchObject({ status: 400, code: 'invalid-params', message: 'tickets.depends_on: a dependency cycle: T-3 → T-4 → T-3' });
+    const self = new Git().add('T-5', { depends_on: ['docs:T-5'] });
+    expect(await self.post()).toMatchObject({ status: 400, code: 'invalid-params', message: 'tickets.depends_on: a dependency cycle: T-5 → T-5' });
+    expect(await rows(`SELECT count(*) AS n FROM tickets WHERE repository_id = 'docs' AND local_id IN ('T-1','T-3','T-5')`)).toEqual([{ n: 0 }]);
+    // Another repository's qualified edge, even naming a live ticket there, is no node of the
+    // one-board graph: the post stands, as before.
+    const baton = new Git(await batonToken()).add('B-1', { repos: ['immediately-run/baton'] });
+    expect((await baton.post()).status).toBe(200);
+    const foreign = new Git().add('T-6', { depends_on: ['baton:B-1'] });
+    expect((await foreign.post()).status).toBe(200);
+  });
+
   it('answers the sync\'s dependencies read against the target\'s board, its url from the registration, and refuses what the post would', async () => {
     const baton = new Git(await batonToken()).add('B-1', { repos: ['immediately-run/baton'] });
     expect((await baton.post()).status).toBe(200);
@@ -135,15 +158,22 @@ describe('S-BTN-235 dependencies on another repository\'s tickets', () => {
         station: 'filed', url: 'https://github.com/immediately-run/ops/blob/main/content/roadmap/B-1.mdx',
       }],
     });
-    // Done there is done here: the target closing `done` turns the answer, and a withdrawn
-    // target is closed but not done.
+    // Done there is done here: the target closing `done` turns the answer — and its `url` is
+    // null, for the archive moved its file along a path no closing keeps (round 1); a
+    // withdrawn target is closed but not done.
     ops.close('B-1', 'done');
     expect((await ops.post()).status).toBe(200);
-    const done = (await (await fhCall('/v1/sync/dependencies', { ids: ['ops:B-1'] })).json()) as { dependencies: { ticket: string; done: boolean; closed: boolean; station: string | null }[] };
-    expect(done.dependencies[0]).toMatchObject({ ticket: 'ops:B-1', done: true, closed: true, station: null });
-    // The read answers qualified ids of other repositories; a local one is the caller's own.
+    const done = (await (await fhCall('/v1/sync/dependencies', { ids: ['ops:B-1'] })).json()) as { dependencies: { ticket: string; done: boolean; closed: boolean; station: string | null; url: string | null }[] };
+    expect(done.dependencies[0]).toMatchObject({ ticket: 'ops:B-1', done: true, closed: true, station: null, url: null });
+    // A bare local id is no qualified id. A self-qualified one — the posting repository's own id
+    // spelled out (§3.1) — is answered against that same board, read as the local id alone, so a
+    // checkout whose repos map names no id of its own still syncs (round 1).
     expect((await fhCall('/v1/sync/dependencies', { ids: ['F-1'] })).status).toBe(400);
-    expect((await fhCall('/v1/sync/dependencies', { ids: ['fieldhouse:F-1'] })).status).toBe(400);
+    expect((await fhCall('/v1/sync/dependencies', { ids: ['fieldhouse:F-99'] })).status).toBe(400);
+    const fh = new Git(await fhToken()).add('F-1');
+    expect((await fh.post()).status).toBe(200);
+    const own = (await (await fhCall('/v1/sync/dependencies', { ids: ['fieldhouse:F-1'] })).json()) as { dependencies: { ticket: string; done: boolean; url: string }[] };
+    expect(own.dependencies[0]).toMatchObject({ ticket: 'fieldhouse:F-1', done: false, url: 'https://github.com/immediately-run/fieldhouse/blob/main/content/roadmap/F-1.mdx' });
   });
 
   it('keeps blocked_by local: a qualified id there is refused as a shape error', async () => {

@@ -37,7 +37,7 @@ import { clampUnsignedList, marksOf, signedControlOf, unsignedAgentConfig } from
 import { nodeKeygen } from '../shared/commitSign.mjs';
 import type { PostedControl } from '../core/board';
 import { readTicketSettings } from './tickets-config';
-import { remoteSlug } from './remote-slug';
+import { ownRepositoryId, remoteSlug } from './remote-slug';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 
 // LC_ALL=C on every git call (B-93, round 4): git translates its messages, and the two shapes
@@ -96,7 +96,9 @@ export function plainGitRemote(url: string): boolean {
 // remoteSlug lives in remote-slug.ts (a leaf, so the runner's bundle can resolve a named home
 // without this file's whole graph, B-121); re-exported here, where it has always been imported
 // from (tickets.ts, the sync and `--pin`'s self-resolution below). The doc comment above is its.
-export { remoteSlug };
+// ownRepositoryId (B-113) lives beside it, for every default that asks which qualified id is
+// this checkout's own.
+export { remoteSlug, ownRepositoryId };
 
 /** The baton package's root: the nearest directory above this module whose package.json is
  * `@immediately-run/baton`. Found by walking up, because this module runs both as source
@@ -315,15 +317,12 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   // against its board — the dependencies read, after the number as everything this run posts is
   // (§4.3) — and one done there is done here, so the station functions gate on it as on a local
   // one (R-BTN-120). The posting repository's own id spelled qualified (`docs:R3-1` posted by
-  // docs) is the local id's own dependency read as itself: the repos map names this checkout's
-  // registered id (the short name its forge path maps to), and a done local target marks its
-  // qualified spelling done. A read that refuses — an unregistered repository, an unknown
-  // ticket, a less visible target without its owners' consent — fails the run here, before the
-  // forge is read, with the same words the post would be refused with.
-  const ownRepoId = Object.entries(batonJson.repos ?? {}).find(([, path]) => {
-    const slug = remoteSlug(root)?.toLowerCase();
-    return slug != null && path.toLowerCase() === slug;
-  })?.[0] ?? null;
+  // docs) is the local id's own dependency read as itself (§3.1): the repos map names this
+  // checkout's registered id (the short name its forge path maps to, `.git` and case aside), and
+  // a done local target marks its qualified spelling done. A read that refuses — an unregistered
+  // repository, an unknown ticket, a less visible target without its owners' consent — fails the
+  // run here, before the forge is read, with the same words the post would be refused with.
+  const ownRepoId = ownRepositoryId(root, batonJson.repos ?? {});
   const qualified = [...new Set(result.tickets.filter((t) => !closedIds.has(t.id)).flatMap((t) => t.depends_on.filter((d) => d.includes(':'))))];
   if (ownRepoId != null && qualified.some((d) => d.startsWith(`${ownRepoId}:`))) {
     for (const d of qualified) {

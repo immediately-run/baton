@@ -1,11 +1,12 @@
 // dependencies.ts — a ticket's dependency on another repository's ticket (BATON_SPEC §3.1
 // R-BTN-47 *Relations stay home* as relaxed, §4.4; B-113): `depends_on` may name a ticket of a
 // repository registered with the same Baton by its qualified id `<repository id>:<local id>`;
-// an unqualified id stays local, and `parent` (so `blocked_by`) still stays home. The board post
-// refuses what it cannot resolve — an unregistered repository, an id neither live nor closed
-// there, a dependency on a less visible repository without its owner's consent — and refuses a
-// cycle that runs through two boards, named as its path with qualified ids. The sync resolves
-// its qualified dependencies against the target's board through the dependencies read
+// an unqualified id stays local, and `parent` (so `blocked_by`) still stays home — and a
+// repository naming its own id qualified is read as it reads the local id alone (§3.1). The
+// board post refuses what it cannot resolve — an unregistered repository, an id neither live
+// nor closed there, a dependency on a less visible repository without its owner's consent — and
+// refuses a cycle that runs through two boards, named as its path with qualified ids. The sync
+// resolves its qualified dependencies against the target's board through the dependencies read
 // (`POST /v1/sync/dependencies`), so a station function gates on it as on a local one
 // (R-BTN-120). Pure checks first, store reads below them, the way codeRepos.ts splits its own.
 import { BatonError } from './http';
@@ -109,24 +110,29 @@ export function checkCrossRepository(sql: Sql, repo: string, live: DepGraph): vo
  *  repositories): the post's live tickets and every touched repository's stored ones, qualified
  *  edges followed across boards, the cycle named as its path with qualified ids. An edge to a
  *  closed or unknown ticket is no cycle here, as within one board (§4.4); a loop one board holds
- *  alone was refused when that board was posted (B-111). */
+ *  alone, however its edges are spelled, was refused when that board was posted (B-111, with
+ *  §3.1's self-qualified read). A graph over more boards than `BOARDS_MAX` is refused here
+ *  too: it is out of scale, named as the board that crossed the bound. */
 export function checkCrossBoardCycle(sql: Sql, repo: string, live: DepGraph): void {
   // The graph: one node per qualified id, its dependencies qualified — the posting repository's
   // from the post itself, every other touched one from its stored rows. A qualified edge into a
-  // board not yet loaded grows the set, until no new one is named or the bound is reached.
+  // board not yet loaded grows the set, until no new one is named or the bound refuses it (a
+  // graph over more boards than BOARDS_MAX is out of scale, and refused as one — round 1, which
+  // found the bound written but never thrown: a cycle through the 33rd board went unseen).
   const graph = new Map<string, string[]>();
   const loaded = new Set<string>([repo]);
   const load = (r: string, rows: readonly { id: string; depends_on: readonly string[] }[]): void => {
     for (const t of rows) graph.set(qualify(r, t.id), (t.depends_on ?? []).map((d) => (d.includes(':') ? d : qualify(r, d))));
   };
   load(repo, live);
-  for (let grew = true; grew && loaded.size < BOARDS_MAX;) {
+  for (let grew = true; grew;) {
     grew = false;
     for (const deps of graph.values()) {
       for (const dep of deps) {
         if (!dep.includes(':') || graph.has(dep)) continue;
         const target = repositoryOf(dep);
         if (loaded.has(target)) continue;
+        if (loaded.size >= BOARDS_MAX) throw new BatonError('invalid-params', `tickets.depends_on: a dependency graph over more than ${BOARDS_MAX} repositories is out of scale, and ${dep} takes it to ${loaded.size + 1} (B-113)`);
         loaded.add(target);
         load(target, sliceOf(sql, target).live.map((t) => ({ id: t.local, depends_on: JSON.parse(t.depends_on) as string[] })));
         grew = true;
@@ -135,7 +141,8 @@ export function checkCrossBoardCycle(sql: Sql, repo: string, live: DepGraph): vo
   }
   // The walk: iterative depth-first, `dependsCycles`' shape — a legal board may be one
   // 10 000-long chain, which recursion cannot walk. Only a cycle over two or more repositories
-  // is named here; one board's own loop was its own post's `checkPayload` refusal.
+  // is named here: one board's own loop, however its edges are spelled, was that board's own
+  // post's refusal — `checkPayload` reads a self-qualified edge as its local id (§3.1, round 1).
   const state = new Map<string, 'open' | 'closed'>();
   for (const root of [...graph.keys()].sort()) {
     if (state.has(root)) continue;
@@ -184,18 +191,21 @@ export interface ResolvedDependency {
   withdrawn: boolean;
   closed: boolean;
   station: string | null;
-  /** The target file's URL from its repository's registration; null on a `git` repository. */
+  /** The target file's URL from its repository's registration; null on a `git` repository and
+   *  for a closed target — its file moved to the target's archive, whose path the closing keeps
+   *  nowhere, so the read answers no link rather than a guess (round 1). */
   url: string | null;
 }
 
 /** The sync's dependencies read (B-113, §4.3): resolve each qualified id the posting
- *  repository's tickets name against its target's board — the same refusals the post would
- *  make (`forbidden` for a missing consent, so the sync fails on it before it reads the forge),
- *  the doneness the station functions gate on. */
+ *  repository's tickets name against its target's board — a self-qualified one (the posting
+ *  repository's own id spelled out, §3.1) against that same board, read as the local id alone,
+ *  so a CLI whose repos map cannot name its own repository still syncs (round 1) — with the
+ *  same refusals the post would make (`forbidden` for a missing consent, so the sync fails on
+ *  it before it reads the forge), and the doneness the station functions gate on. */
 export function resolveDependencies(sql: Sql, repo: string, ids: readonly string[]): ResolvedDependency[] {
   return [...new Set(ids)].sort().map((id) => {
     if (!TICKET_ID.test(id)) throw new BatonError('invalid-params', `${id} is not a qualified id <repository>:<local> (B-113)`);
-    if (!isCrossRepository(id, repo)) throw new BatonError('invalid-params', `${id}: the dependencies read answers qualified ids of other repositories (B-113)`);
     const target = repositoryOf(id);
     const registration = liveRepository(sql, id);
     const slice = sliceOf(sql, target);
@@ -213,7 +223,7 @@ export function resolveDependencies(sql: Sql, repo: string, ids: readonly string
       withdrawn: closedAs === 'withdrawn',
       closed: closedAs != null,
       station,
-      url: fileUrl(registration.forge, registration.web_base, registration.default_branch, row?.path ?? `tickets/${local}.mdx`),
+      url: row ? fileUrl(registration.forge, registration.web_base, registration.default_branch, row.path) : null,
     };
   });
 }

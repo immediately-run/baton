@@ -225,6 +225,33 @@ describe('checkTickets: the markdown source’s **Depends on:** line (check.depe
     expect((await checkTickets(unMapped, {}, { depends_line: true })).findings).toEqual([]);
   });
 
+  it('a self-qualified id — the own repository\'s, `.git` and all — is checked as a local one, and a self-qualified cycle is named (B-113 round 1)', async () => {
+    // The repos map names this checkout's own repository by its origin, with the `.git` suffix
+    // round 1 found unmatched: `fieldhouse:A-2` here is the local A-2 (§3.1), so a known one is
+    // no finding and an unknown one is, where before every colon-bearing id skipped the check.
+    const own = (files: Record<string, string>): string => {
+      const dir = repo(files, { repos: {} });
+      execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/immediately-run/fieldhouse.git'], { stdio: 'ignore' });
+      writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ items: 'tickets', default_course: 'create-pr', repos: { fieldhouse: 'immediately-run/fieldhouse.git' } }, null, 2));
+      return dir;
+    };
+    const ok = own({
+      'tickets/A-1.md': ticket('id: A-1\ndepends_on: [fieldhouse:A-2]'),
+      'tickets/A-2.md': ticket('id: A-2'),
+    });
+    expect((await checkTickets(ok)).findings).toEqual([]);
+    const unknown = own({
+      'tickets/A-1.md': ticket('id: A-1\ndepends_on: [fieldhouse:A-9]'),
+    });
+    expect(lines(await checkTickets(unknown))).toEqual(['tickets/A-1.md: depends_on names fieldhouse:A-9, which is neither live nor closed']);
+    // One edge self-qualified, one bare: the one-board cycle, named as its path.
+    const loop = own({
+      'tickets/A-1.md': ticket('id: A-1\ndepends_on: [fieldhouse:A-2]'),
+      'tickets/A-2.md': ticket('id: A-2\ndepends_on: [A-1]'),
+    });
+    expect(lines(await checkTickets(loop))).toEqual(['tickets/A-1.md: a dependency cycle: A-1 → A-2 → A-1']);
+  });
+
   it('a line naming an id depends_on does not, and depends_on naming one the line does not, are both findings', async () => {
     const dir = repo({
       'tickets/A-1.md': ticket('id: A-1\ndepends_on: [A-2]', 'Prose, with a **Depends on:** mention in it — not the line.\n\n**Depends on:** A-3, A-4\n\nMore prose.\n'),

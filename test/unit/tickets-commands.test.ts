@@ -384,6 +384,37 @@ describe('baton tickets claim | set | done (B-112)', () => {
     expect(run(f.dir, 'claim', 'B-13', '--offline').err).toContain('ghost: the baton.json repos map does not resolve it');
   }, 60_000);
 
+  it('a self-qualified dependency reads as its local id: the same checkout answers it, offline and all (B-113 round 1)', () => {
+    // The repos map names the own repository — by its bare origin path, as a checkout on a local
+    // remote reads it — so `baton:B-1` in baton's own checkout is the local B-1 (§3.1): the
+    // archive and the live status answer it, never a depth-1 clone of the repository's own
+    // remote (which `--offline` could not take anyway).
+    const depends = (id: string, dep: string) => ticket(id).replace('**Depends on:** none.', `**Depends on:** ${dep}.`).replace('depends_on: []', `depends_on:\n  - ${dep}`);
+    const f = repo({ existing: {
+      'tickets/B-1.mdx': ticket('B-1').replace('status: available', 'status: superseded'),
+      'tickets/B-2.mdx': ticket('B-2'),
+      'tickets/B-9.mdx': depends('B-9', 'baton:B-1'),
+      'tickets/B-10.mdx': depends('B-10', 'baton:B-2'),
+    } });
+    writeFileSync(join(f.dir, '.baton', 'baton.json'), `${JSON.stringify({ items: 'tickets', default_course: 'create-pr', repos: { baton: f.origin }, ticket_prefix: 'B', legacy_ids: ['R3-\\d+'], project: 'baton' }, null, 2)}\n`);
+    git(f.dir, 'add', '-A');
+    git(f.dir, 'commit', '-qm', 'name the own repository in the repos map');
+    git(f.dir, 'push', '-q', 'origin', 'HEAD:main');
+    // Locally superseded is done, locally open is not — the same rule as a bare local id.
+    expect(run(f.dir, 'claim', 'B-9', '--offline').code).toBe(0);
+    expect(run(f.dir, 'claim', 'B-10', '--offline').err).toBe('baton: B-10 depends on baton:B-2, not done yet\n');
+    // And `new` refuses a filing whose self-qualified dependency loops: the next free id is
+    // B-11, and B-11 waiting on baton:B-11 is the self-dependency, refused before the push
+    // (round 1 — the board's own judgment, made here).
+    const loop = run(f.dir, 'new', '--direct', '--title', 'a self loop', '--depends-on', 'baton:B-11');
+    expect(loop.code).toBe(2);
+    expect(loop.err.split('\n').find((l) => l.startsWith('baton:'))).toBe('baton: B-11: a dependency cycle: B-11 → B-11');
+    // A map naming no id of its own cannot tell the spelling from another repository's: the
+    // claim says so, naming the fix, as it does for any repository the map does not resolve.
+    const unnamed = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/B-9.mdx': depends('B-9', 'baton:B-1') } });
+    expect(run(unnamed.dir, 'claim', 'B-9', '--offline').err).toContain('baton: the baton.json repos map does not resolve it');
+  }, 60_000);
+
   it('dependencyRemote reads the repos map: a forge path is GitHub\'s, a remote as written', async () => {
     const { dependencyRemote } = await import('../../src/defaults/tickets');
     expect(dependencyRemote({ baton: 'immediately-run/baton' }, 'baton')).toBe('https://github.com/immediately-run/baton');

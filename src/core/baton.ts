@@ -571,7 +571,9 @@ export class BatonCore {
           const retired = retiredBoardFields(body);
           let p: BoardPayload;
           try {
-            p = checkPayload(body);
+            // The posting repository's id reads a self-qualified `depends_on` entry as the local
+            // id alone in the one-board cycle graph (§3.1, B-113 round 1).
+            p = checkPayload(body, repo.id);
           } catch (e) {
             // A refused post uses its number too (R-BTN-62), malformed or not, so the sync's
             // next run is not held off as busy for ten minutes.

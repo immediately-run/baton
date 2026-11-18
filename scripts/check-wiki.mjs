@@ -153,8 +153,13 @@ async function checkBundle(root) {
     if (!Array.isArray(deps)) { fail(file, 'depends_on is not a list'); continue; }
     for (const dep of deps) {
       // B-113: a qualified id (`baton:B-111`) names another repository's ticket — resolved by
-      // Baton against that repository's board, never looked for in this bundle.
-      if (String(dep).includes(':')) continue;
+      // Baton against that repository's board, never looked for in this bundle (an unknown
+      // repository is the board's to refuse). Its shape is still this check's (round 1): `:B-1`,
+      // `a:b:c` and `NotARepo:x` fail here as the board post's own DEPENDENCY_ID would.
+      if (String(dep).includes(':')) {
+        if (!/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(dep))) fail(file, `depends_on ${dep} is not a qualified id <repository>:<ticket>`);
+        continue;
+      }
       if (!idPattern.test(String(dep))) fail(file, `depends_on ${dep} is not a ticket id`);
       else if (!tickets.has(dep)) fail(file, `depends_on ${dep}, which is not a ticket here`);
       else if (dep === id) fail(file, 'depends on itself');

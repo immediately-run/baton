@@ -6,7 +6,7 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
-import { ASKS, COURSE_ID as LEG_ID, DECISION_GRANT_MAX, DECISION_ID, DECISION_OPTION, DECISION_OPTIONS_MAX, DECISION_QUESTION, DECISIONS_MAX, DEPENDENCY_ID, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE } from './validate';
+import { ASKS, COURSE_ID as LEG_ID, DECISION_GRANT_MAX, DECISION_ID, DECISION_OPTION, DECISION_OPTIONS_MAX, DECISION_QUESTION, DECISIONS_MAX, DEPENDENCY_ID, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE, repositoryOf } from './validate';
 import type { Step } from './graph';
 
 /** One factory-state item, as the sync posts it (`docs/scripts/factory-state.mjs`). Only the
@@ -278,8 +278,11 @@ export function retiredBoardFields(body: unknown): string[] {
 
 /** Validate the snapshot's shape before anything is written; refuses rather than guesses. A post
  *  is the normative shape (`tickets`, `closed`, `stations`, §7.1) or the interim one docs posts
- *  until R3-1233 (`state.items`, `ready`), never both. */
-export function checkPayload(body: unknown): BoardPayload {
+ *  until R3-1233 (`state.items`, `ready`), never both. `repo`, the posting repository's id,
+ *  reads a self-qualified `depends_on` entry (its own id spelled out) as the local id alone in
+ *  the one-board cycle graph (§3.1, B-113 round 1); a caller that names none — a test kit —
+ *  leaves every qualified edge to the cross-board walk, as before. */
+export function checkPayload(body: unknown, repo?: string): BoardPayload {
   const p = body as BoardPayload;
   if (!p || typeof p !== 'object') throw new BatonError('invalid-params', 'a JSON object is required');
   if (typeof p.sha !== 'string' || !SHA.test(p.sha)) throw new BatonError('invalid-params', 'sha must be a 40-hex commit');
@@ -299,9 +302,9 @@ export function checkPayload(body: unknown): BoardPayload {
   }
   if (p.tickets !== undefined) {
     if (p.state !== undefined || p.ready !== undefined) throw new BatonError('invalid-params', 'a post is either the normative tickets or the interim state.items, not both');
-    checkNormative(p);
+    checkNormative(p, repo);
   } else {
-    checkInterim(p);
+    checkInterim(p, repo);
   }
   if (p.force !== undefined && typeof p.force !== 'boolean') throw new BatonError('invalid-params', 'force must be a boolean');
   // `min_skills_version` is gone (R-BTN-22: each course's version is the skills version); a
@@ -373,7 +376,14 @@ export function checkPayload(body: unknown): BoardPayload {
  *  interim post still sends short names. */
 const REPO = /^[A-Za-z0-9._-]{1,100}(\/[A-Za-z0-9._-]{1,100}){0,3}$/;
 
-function checkInterim(p: BoardPayload) {
+/** A `depends_on` entry as the one-board cycle graph takes it (B-113 round 1, §3.1): the
+ *  posting repository's own id spelled qualified (`docs:T-2` posted by docs) is read as it reads
+ *  the local id alone, so a loop however spelled is a node and an edge of this graph; another
+ *  repository's qualified edge is no node of it — the cross-board walk judges it (§4.4). */
+const selfAsLocal = (repo: string | undefined, d: string): string =>
+  repo != null && d.includes(':') && repositoryOf(d) === repo ? d.slice(d.indexOf(':') + 1) : d;
+
+function checkInterim(p: BoardPayload, repo?: string) {
   if (!p.state || !Array.isArray(p.state.items)) throw new BatonError('invalid-params', 'state.items is required');
   if (!Array.isArray(p.ready) || !p.ready.every((id) => typeof id === 'string' && ID.test(id))) throw new BatonError('invalid-params', 'ready must be the rankReady id list');
   if (p.closed !== undefined || p.stations !== undefined) throw new BatonError('invalid-params', 'closed and stations come with the normative tickets');
@@ -402,7 +412,9 @@ function checkInterim(p: BoardPayload) {
   for (const id of p.ready) if (!seen.has(id)) throw new BatonError('invalid-params', `ready names ${id}, which is not in state.items`);
   // B-111: the interim shape carries `dependsOn` too, and a loop is a loop whichever shape posts
   // it — no ticket source can hold its tickets out of the default order unseen (§4.4, round 1).
-  const loop = dependsCycle(p.state.items.map((it) => ({ id: it.id, depends_on: it.dependsOn ?? [] })));
+  // B-113 round 1: a self-qualified edge reads as its local id (§3.1), so a loop however
+  // spelled is named here; another repository's qualified edge is no node of this graph.
+  const loop = dependsCycle(p.state.items.map((it) => ({ id: it.id, depends_on: (it.dependsOn ?? []).map((d) => selfAsLocal(repo, d)) })));
   if (loop) throw new BatonError('invalid-params', `state.items: a dependency cycle: ${loop.join(' → ')}`);
 }
 
@@ -423,7 +435,7 @@ const WAITING_ON = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 const OPTION_ID = LEG_ID;
 const isObjArr = (v: unknown, max: number) => Array.isArray(v) && v.length <= max;
 
-function checkNormative(p: BoardPayload) {
+function checkNormative(p: BoardPayload, repo?: string) {
   const fail = (field: string, why: string): never => {
     throw new BatonError('invalid-params', `${field}: ${why}`);
   };
@@ -539,10 +551,11 @@ function checkNormative(p: BoardPayload) {
   // unseen. After `closed` is seen, so the graph is the live one exactly. B-113: a cycle that
   // runs through two boards is refused the same way at the post's judgment, where the other
   // boards are read (`checkCrossBoardCycle`, §4.4) — this check holds one board's own graph,
-  // and a qualified edge is no node of it.
+  // and another repository's qualified edge is no node of it; this repository's own id spelled
+  // qualified is (§3.1, round 1: `T-1 depends_on: [docs:T-2]` posted by docs is the local edge).
   const live = new Set(p.tickets!.map((t) => t.id));
   for (const c of p.closed ?? []) live.delete(c.id);
-  const loop = dependsCycle(p.tickets!.filter((t) => live.has(t.id)).map((t) => ({ id: t.id, depends_on: t.depends_on })));
+  const loop = dependsCycle(p.tickets!.filter((t) => live.has(t.id)).map((t) => ({ id: t.id, depends_on: t.depends_on.map((d) => selfAsLocal(repo, d)) })));
   if (loop) fail('tickets.depends_on', `a dependency cycle: ${loop.join(' → ')}`);
   if (p.stations !== undefined) {
     if (!isObj(p.stations) || Object.keys(p.stations).length > TICKETS_MAX) fail('stations', 'must be an object of local ids');
