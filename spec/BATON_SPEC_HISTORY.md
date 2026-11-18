@@ -3286,6 +3286,29 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   ticket is held for a person as at any leg's bound, and not counting the run would let such
   edits restart a leg without limit. A flip back to the version last verified restarts nothing.
 
+- **2026-11-18 — §14's `/v1/ui/state` row amended, S-BTN-235 added: the dashboard poll's ETag
+  (B-242).**
+  Rules changed: §14's `GET /v1/ui/state` row. The dashboard's own state read answers a strong
+  `ETag` — R-BTN-196's `state_version` (B-237's counter, one primary-key row), the caller, and
+  a coarse clock bucket — built after the principal is decided and before the read runs, so a
+  poll whose `If-None-Match` names it answers `304` with no body having read the version row
+  alone: measured on a production-sized state (180 tickets, ~600 claims, ~3k events) with
+  workerd's `SqlStorageCursor.rowsRead`, the unchanged poll reads 3 rows — the version, the
+  session and the request's own upkeep — against the full read's ~8.2k. The bucket is a minute:
+  liveness moves no version (R-BTN-196), yet the state shows what the clock decides (alive,
+  stalled, `reap_at`, the time windows), so the clock is folded in coarsely — a lease is never
+  under 15 minutes, and liveness lags at most a bucket, far inside the scale it decides; within
+  a bucket a steady heartbeat changes nothing. The caller is an input so one session's `304` is
+  never another's; `*` matches nothing (it asks whether the resource exists, not whether this
+  caller holds today's answer) and the weak `W/` spelling matches, as a poller may echo one. The
+  incident: production passed Cloudflare's free-tier 5,000,000 `rows_read`/day on 2026-11-14 and
+  15, `GET /v1/ui/state` alone reading ~14.4k rows a 10 s poll. B-242's UI half — polling only
+  while visible, backing off while unchanged — served V1's dashboard and retired with it
+  (B-193); V2's polling layer (B-221) is specified to the same shape in §11.4. The ETag itself
+  is built by one helper (`src/core/stateVersion.ts`) every polled read reuses — B-205's, for
+  each of V2's session-readable GETs, whose convention this row states for the one route that
+  has it today. The scenario is S-BTN-235.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

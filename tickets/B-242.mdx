@@ -4,7 +4,7 @@ id: B-242
 project: baton
 order: 1
 status: available
-updated: 2026-11-17
+updated: 2026-11-18
 repos:
   - baton
 tags:
@@ -55,3 +55,12 @@ _2026-11-16: the remaining half serves V1's `GET /v1/ui/state`, which V2's cutov
 (B-203, B-216). The same mechanism — an ETag from `state_version`, the caller and a clock bucket,
 compared before the read runs — is B-205's for every V2 read; build it here as a helper B-205
 reuses (`src/core/stateVersion.ts`), not as code private to `/v1/ui/state`._
+
+_2026-11-18: the ETag half built — `stateEtag`/`ifNoneMatch` in `src/core/stateVersion.ts`
+(SHA-256 over the version, the caller, the route and a one-minute clock bucket,
+`CLOCK_BUCKET_MS`), served by `GET /v1/ui/state` after the principal and before the read runs
+(S-BTN-235, test/integration/B-242.ui-state-etag.test.ts). Measured on the cloudflare host over
+the production-sized state (180 tickets, 600 claims, ~3k events): the unchanged poll reads 3 rows
+(the version row, the session lookup, the request's alarm upkeep) where the full read reads ~8.2k;
+a write or a new bucket serves the full state again. §14's `/v1/ui/state` row and S-BTN-235 state
+it; the history entry names the decisions (the bucket's minute, `*` matching nothing)._
