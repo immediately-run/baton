@@ -2,8 +2,8 @@
 title: "B-174 — The request command where the default branch is protected: decide by the forge's answer and open a PR"
 id: B-174
 project: baton
-status: available
-updated: 2026-11-02
+status: done
+updated: 2026-11-18
 repos:
   - baton
 tags:
@@ -70,3 +70,6 @@ S-BTN-175 as extended, green in `npm test`.
   default remote, and `--remote` naming a github.com remote engages the adapter there (the
   liberal, safe direction; with `--remote` elsewhere and `origin` on github.com it does not
   engage, exactly as the rule says).
+- 2026-11-18: merged — PR #276 (review round 2 approved; its one non-blocking should-fix, the
+  host reader and the slug reader disagreeing on `ssh://` remotes so the PR-open call fails
+  gracefully there, is recorded in the round-2 review for whoever next touches R-BTN-131).
