@@ -9,7 +9,7 @@ repos:
   - baton
 tags:
   - roadmap-item
-description: A write-version ETag makes an unchanged poll cost about one row; hidden tabs stop polling (rows_read)
+description: A write-version ETag makes an unchanged poll cost a handful of constant rows; hidden tabs stop polling (rows_read)
 topics:
   - baton
 owns: {}
@@ -24,7 +24,8 @@ depends_on: []
 - Clock-dependent fields (alive, stalled, reap_at, the time windows) must still refresh: include a coarse time bucket in the ETag, or have the UI recompute them.
 - The UI polls only while visible (`document.visibilityState`), and backs off when unchanged.
 
-**Target:** an unchanged poll ≈ 1 row.
+**Target:** an unchanged poll ≈ a handful of constant rows — the version row, the session
+lookup, the request's upkeep — never the state.
 
 **Why:** on 2026-11-14 production exceeded Cloudflare's free-tier Durable Objects limit of
 5,000,000 `rows_read`/day at 21:41Z; every runner call returned 500 until the 00:00Z reset.
@@ -65,3 +66,12 @@ the production-sized state (180 tickets, 600 claims, ~3k events): the unchanged 
 (the version row, the session lookup, the request's alarm upkeep) where the full read reads ~8.2k;
 a write or a new bucket serves the full state again. §14's `/v1/ui/state` row and S-BTN-235 state
 it; the history entry names the decisions (the bucket's minute, `*` matching nothing)._
+
+_2026-11-18, round 2 (the first review): the bucket is five minutes, not one — §11.4 doubles a
+screen's poll interval while unchanged to at most 60 s, and a bucket at the cap lands every
+backed-off poll in a fresh bucket, a full read each time, so the bucket sits above the cap
+(`CLOCK_BUCKET_MS`'s comment says it stays there). With it: the Target line above restated as one
+criterion with S-BTN-235's handful; `If-None-Match: *` pinned by a test; the rows_read guard
+pinned on both sides and the second poll bounded, not equated (a background alarm may read in one
+window); §14's row names the route among the ETag's inputs; and the lease floor's citation
+corrected — §8's R-BTN-9, not §6.8._

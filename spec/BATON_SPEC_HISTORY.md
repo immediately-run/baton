@@ -3294,11 +3294,16 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   poll whose `If-None-Match` names it answers `304` with no body having read the version row
   alone: measured on a production-sized state (180 tickets, ~600 claims, ~3k events) with
   workerd's `SqlStorageCursor.rowsRead`, the unchanged poll reads 3 rows — the version, the
-  session and the request's own upkeep — against the full read's ~8.2k. The bucket is a minute:
-  liveness moves no version (R-BTN-196), yet the state shows what the clock decides (alive,
-  stalled, `reap_at`, the time windows), so the clock is folded in coarsely — a lease is never
-  under 15 minutes, and liveness lags at most a bucket, far inside the scale it decides; within
-  a bucket a steady heartbeat changes nothing. The caller is an input so one session's `304` is
+  session and the request's own upkeep — against the full read's ~8.2k. The bucket is five
+  minutes: liveness moves no version (R-BTN-196), yet the state shows what the clock decides
+  (alive, stalled, `reap_at`, the time windows), so the clock is folded in coarsely — a lease
+  is never under 15 minutes, and liveness lags at most a bucket, a third of that floor, far
+  inside the scale it decides; within a bucket a steady heartbeat changes nothing. A minute
+  first, corrected in this PR's review: §11.4 doubles a screen's poll interval while unchanged
+  to at most 60 seconds, and a bucket at the cap lands every backed-off poll in the bucket
+  after its tag's — a full read each poll, the `304` never taken, the ETag inert at the one
+  cadence it is for — so the bucket sits above the cap, and `CLOCK_BUCKET_MS`'s comment says
+  it stays there. The caller is an input so one session's `304` is
   never another's; `*` matches nothing (it asks whether the resource exists, not whether this
   caller holds today's answer) and the weak `W/` spelling matches, as a poller may echo one. The
   incident: production passed Cloudflare's free-tier 5,000,000 `rows_read`/day on 2026-11-14 and

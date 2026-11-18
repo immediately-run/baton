@@ -133,11 +133,13 @@ export function stateVersion(store: Store): number {
 /** B-242: how long a poller may be answered `304` on the clock's own motion. Liveness writes
  *  no version (above), yet what the clock decides — alive, stalled, `reap_at`, a time window —
  *  still has to refresh, so an ETag whose read shows any of it folds in the coarse bucket its
- *  instant falls in. A minute: the dashboard polls every 10 s backing off to 60 (§11.4), so an
- *  unchanged tab is served the read about once a bucket and `304` for every poll between, and
- *  what the clock decides lags at most a bucket — far inside the scale it decides, a lease
- *  never being under 15 minutes (§6.8). */
-export const CLOCK_BUCKET_MS = 60_000;
+ *  instant falls in. Five minutes, comfortably above §11.4's poll cap: the dashboard polls
+ *  every 10 s backing off to at most 60, and the bucket must outlast the interval — a bucket
+ *  at the cap lands every backed-off poll in the bucket after its tag's, a full read each
+ *  time and the `304` never taken — so keep this above whatever the poller's interval caps at.
+ *  What the clock decides then lags at most a bucket, a third of the 15 minutes a lease is
+ *  never under (§8's R-BTN-9) — far inside the scale it decides. */
+export const CLOCK_BUCKET_MS = 300_000;
 
 /** The bucket `at` falls in — the ETag's clock half (B-242). */
 export const clockBucket = (at: number): number => Math.floor(at / CLOCK_BUCKET_MS);

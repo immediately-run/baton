@@ -18,14 +18,16 @@
 //      of rows (`SqlStorageCursor.rowsRead`), not thousands.
 // Runs on both hosts (the rows_read case on Cloudflare only).
 import { describe, it, expect, beforeEach } from 'vitest';
+import { CLOCK_BUCKET_MS } from '../../src/core/stateVersion';
 import { HOST, Git, adminSession, beat, call, cutover, register, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-15T12:00:00Z');
 const M = 60_000;
-/** T0 is a bucket boundary (a whole minute): +30 s stays in T0's bucket, +61 s leaves it. */
-const IN_BUCKET = T0 + 30_000;
-const NEXT_BUCKET = T0 + 61_000;
+/** T0 is a whole minute, and so a boundary of `CLOCK_BUCKET_MS` (whole minutes): half a
+ *  bucket later stays in T0's bucket, a bucket and a minute leaves it. */
+const IN_BUCKET = T0 + CLOCK_BUCKET_MS / 2;
+const NEXT_BUCKET = T0 + CLOCK_BUCKET_MS + M;
 
 let admin: TestKey;
 let second: TestKey;
@@ -111,6 +113,9 @@ describe('B-242 the dashboard poll’s ETag', () => {
     expect(await (plain.clone()).json()).toMatchObject({ server_time: T0 });
     const other = await poll('"deadbeef"');
     expect(other.status).toBe(200);
+    // `*` asks whether the resource exists, not whether this caller holds today's answer: it
+    // matches nothing, and the poll is served in full as ever (§14).
+    expect((await poll('*')).status).toBe(200);
     // The weak spelling of the tag matches, as a poller may echo one (§14's weak comparison).
     const weak = await poll(`W/${(await poll()).headers.get('ETag')}`);
     expect(weak.status).toBe(304);
@@ -163,10 +168,15 @@ describe.runIf(HOST === 'cloudflare')('B-242 an unchanged poll reads about one r
       + `unchanged poll ${unchanged.read} rows over ${unchanged.n} statements, again ${later.read}`);
     expect(unchanged.out.status).toBe(304);
     expect(unchanged.out.headers.get('ETag')).toBe(etag);
-    // The write moved nothing since: both unchanged polls agree, and cost the version row (plus
-    // the principal's session and the request's own alarm upkeep), never the state.
-    expect(later.read).toBe(unchanged.read);
-    expect(unchanged.read).toBeLessThanOrEqual(8);
+    // The write moved nothing since: every unchanged poll costs the version row — plus the
+    // principal's session and the request's own alarm upkeep — and never the state. The guard
+    // is two-sided: above zero, so the version read still goes through the measured store, and
+    // at a handful, so a doubling of the poll's cost fails. The second poll is bounded, not
+    // equated: workerd may run an overdue alarm in the background between the two measurements
+    // (the cloudflare host's own header says it may), and its reads land in one window alone.
+    expect(unchanged.read).toBeGreaterThan(0);
+    expect(unchanged.read).toBeLessThanOrEqual(5);
+    expect(later.read).toBeLessThan(full.read / 4);
     expect(full.read).toBeGreaterThan(unchanged.read * 100);
 
     // A write or a new bucket serves the read again — the 304 never outlives its inputs.
