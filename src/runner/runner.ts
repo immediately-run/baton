@@ -378,6 +378,15 @@ export class Runner {
   private draining = false;
   private lostLease = false;
   private toAck: number[] = [];
+  /** R-BTN-77: the cues (`unblocked`, `wind-down`) acknowledged at the beat that carried them,
+   *  whether or not a claim is running — they act on the runner, not on a claim, so nothing is
+   *  gained by holding them to a claim's end, and until acknowledged Baton delivers them again
+   *  with every beat (found live 2026-11-18: one `unblocked` logged on each of a 40-minute leg's
+   *  beats). */
+  private ackNow: number[] = [];
+  /** The message ids already logged, so a message Baton delivers again before its acknowledgement
+   *  lands (a release held for its claim's end) is logged once, not on every beat. Bounded. */
+  private seenMessages = new Set<number>();
   /** R-BTN-19 (B-188): the claims the runner knows it lost, whose fences the next heartbeat
    *  clears — one entry per claim. */
   private fences: number[] = [];
@@ -878,29 +887,33 @@ export class Runner {
       const about = target?.ticket || m.payload?.ticket_id || (live.length === 1 ? live[0].ticket || live[0].inflight?.ticket : '') || this.state.get().claim?.ticket_id || '';
       // 2026-10-24: every message is logged on receipt — a release or cue the runner acts on
       // silently was the hardest class to debug from the log alone.
-      this.log(`baton: message ${m.kind}${m.payload?.reason ? ` (${m.payload.reason})` : ''} received${about ? ` for ${about}` : ''}`);
+      if (!this.seenMessages.has(m.id)) {
+        this.seenMessages.add(m.id);
+        if (this.seenMessages.size > 1000) this.seenMessages.delete(this.seenMessages.values().next().value as number);
+        this.log(`baton: message ${m.kind}${m.payload?.reason ? ` (${m.payload.reason})` : ''} received${about ? ` for ${about}` : ''}`);
+      }
       if (m.kind === 'release') {
         // A release message's payload reason is one of §6.5's own ('requested', 'owner-cancel',
         // 'provider-suspended') — it names the end directly. (A releasing owner bar arrives
         // the same way, as a release message — §11's heartbeat bars carry no release flag.)
         // One for a ticket no claim here holds is acknowledged with the idle beat.
         if (target) {
-          target.toAck.push(m.id);
+          if (!target.toAck.includes(m.id)) target.toAck.push(m.id);
           this.signalSlot(target, 'release', `released:${m.payload?.reason ?? 'requested'}`);
-        } else {
+        } else if (!this.toAck.includes(m.id)) {
           this.toAck.push(m.id);
         }
       } else if (m.kind === 'unblocked') {
         // R-BTN-77, §9: the idle wait ends with the next claim attempt, and the cue is acknowledged
         // so it is not delivered again with every beat.
         this.unblocked = true;
-        this.toAck.push(m.id);
+        if (!this.ackNow.includes(m.id)) this.ackNow.push(m.id);
       } else if (m.kind === 'wind-down') {
         // B-109: the owner's wind-down sets the same drain flag SIGTERM does — every leg in
         // flight completes, each claim ends at its boundary with its hand-off, the runner exits
         // without claiming again. drain() is idempotent: a second wind-down changes nothing.
         this.drain(`the owner's wind-down message`);
-        this.toAck.push(m.id);
+        if (!this.ackNow.includes(m.id)) this.ackNow.push(m.id);
       }
     }
     // R-BTN-6 (B-188): a claim Baton lists that this runner's state does not hold — a lost state
@@ -916,6 +929,7 @@ export class Runner {
         await this.endQuietly(id, { end_reason: 'released:lease-lost', next: null });
       }
     }
+    for (const id of this.ackNow.splice(0)) await this.o.api.ack(id).catch(() => {});
     if (!live.length) for (const id of this.toAck.splice(0)) await this.o.api.ack(id).catch(() => {});
   }
 
