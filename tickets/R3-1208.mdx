@@ -3,7 +3,7 @@ title: "R3-1208 — [OP] Provision Baton on Cloudflare: Worker route, Access, se
 id: R3-1208
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-18
 repos:
   - docs
 tags:
@@ -16,7 +16,8 @@ topics:
   - baton
   - infra
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/280
 depends_on:
   - R3-1207
   - R3-1222
@@ -128,3 +129,5 @@ _(2026-11-01: the dispatch credentials move out of Baton (BATON_SPEC [R-BTN-94](
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) reverses the note of 2026-11-01: `BATON_GITHUB_APP_KEY` stays a Worker secret and Baton dispatches workflows itself (B-160, B-152 superseded; R-BTN-94, §12.7). The checklist's App step provisions the key through the secret sink, as `baton admin github-app create` now does (R-BTN-57).)_
 
 _(2026-11-09: the staging deployment is retired — B-224, the owner: a home repository binds to one Baton, and every registered one binds to production, so staging held nothing and tested nothing. This ticket provisions production only; the staging Worker, route and Access application it once named are B-225's to delete.)_
+
+_(2026-11-18: the repository half of the restated provision — no Access var set — lands with the PR below: the vars the October leg committed (`baton#18`) are removed from `wrangler.toml`, whose `[vars]` every deploy rewrites onto the Worker, and the read that remains in the code refuses cleanly when they are absent, until `B-46` removes it. The owner's console steps — the Access application covering only the dashboard's pages, `POST /v1/login` and `/v1/ui/*`, the `BATON_ADMIN_KEYS` secret, the App and `BATON_GITHUB_WEBHOOK_SECRET`, the API token, the docs variable — are no agent's to run (B-225's Trust: no agent holds them, and the repository's rules keep one from acting on deploys and credentials); the live checks are R3-1209's.)_

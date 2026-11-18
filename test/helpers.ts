@@ -36,7 +36,9 @@ export function gitlabToken(over: Record<string, unknown> = {}, opts: { issuer?:
 
 /** A Cloudflare Access token for `email`. */
 export function accessToken(email = 'owner@example.com', opts: { audience?: string } = {}) {
-  return sign({ email }, { issuer: `https://${env.ACCESS_TEAM_DOMAIN}`, audience: opts.audience ?? env.ACCESS_AUD });
+  // The Access settings are optional on Config since R3-1208's provision set none; the test
+  // bindings configure them (as TEST_SIGNING_JWK above), so the signer asserts them.
+  return sign({ email }, { issuer: `https://${env.ACCESS_TEAM_DOMAIN!}`, audience: opts.audience ?? env.ACCESS_AUD! });
 }
 
 export function call(path: string, init: RequestInit = {}) {

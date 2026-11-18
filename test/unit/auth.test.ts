@@ -82,6 +82,19 @@ describe('the owner principal (R-BTN-16)', () => {
     expect((await as(await syncToken())).status).toBe(401);
   });
 
+  it('refuses an assertion cleanly when no Access setting is configured — never an internal error (R3-1208, restated 2026-10-20)', async () => {
+    // The provision sets no Access var, so the deployed Worker runs without them while this
+    // read remains (B-46 removes it): an Access-fronted browser still sends the assertion, and
+    // it must meet the same refusal it meets with the settings present but refusing — a
+    // TypeError from the settings read would answer `internal error` instead. Driven at the
+    // code's client floor like the signature tests below, so the raw request is not refused
+    // for its client first.
+    const noAccess = { ...envAtCodesFloor, ACCESS_TEAM_DOMAIN: undefined, ACCESS_AUD: undefined, OWNER_EMAILS: undefined } as typeof env;
+    const res = await front(new Request(`${ORIGIN}/v1/ui/state`, { headers: { 'Cf-Access-Jwt-Assertion': await accessToken() } }), noAccess, async () => new Response('{}'));
+    expect(res.status).toBe(403);
+    expect(await code(res)).toBe('forbidden');
+  });
+
   it('serves the page to a browser with no principal at all: it is the login page\'s bytes, and the data stays refused (R-BTN-16, R-BTN-57)', async () => {
     // The exact report from the field: a browser past Cloudflare Access, no Baton session,
     // administrators configured — it must meet a page that says what to do, not a JSON error.
@@ -122,6 +135,14 @@ describe('the test key exists only in the test bindings (§13a)', () => {
   it('wrangler.toml defines none of them', () => {
     const toml = inject('wranglerToml');
     for (const name of ['BATON_TEST_BINDINGS', 'TEST_OIDC_JWKS', 'TEST_ACCESS_JWKS', 'TEST_SIGNING_JWK', 'TEST_MIN_CLIENT']) expect(toml).not.toContain(name);
+  });
+
+  it('wrangler.toml defines no Access setting either: the provision sets none (R3-1208, restated 2026-10-20; R-BTN-16)', () => {
+    // Every deploy rewrites the Worker's vars from this file, so what it does not name the
+    // deployment does not carry. The October leg committed the owner's Access identifiers;
+    // the restatement reversed that, and this holds the line until B-46 removes the read.
+    const toml = inject('wranglerToml');
+    for (const name of ['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'OWNER_EMAILS']) expect(toml).not.toContain(name);
   });
 
   it('without BATON_TEST_BINDINGS the test key set is ignored: verification goes to the remote key set', async () => {

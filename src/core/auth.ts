@@ -127,13 +127,15 @@ export async function verifySyncCredential(req: Request, env: Config): Promise<S
 /**
  * The owner principal (R-BTN-16): the Access JWT in `Cf-Access-Jwt-Assertion`, verified
  * against the team's certs with the application's `aud`, for an email in OWNER_EMAILS.
- * Returns that email.
+ * Returns that email. No deployment configures Access (R3-1208's restatement, 2026-10-20), so
+ * the settings may be absent — an assertion arriving at such an instance is refused here,
+ * never an internal error, until B-46 removes this read outright.
  */
 export async function verifyOwner(req: Request, env: Config): Promise<string> {
   const token = req.headers.get('Cf-Access-Jwt-Assertion') ?? '';
   if (!token) throw new BatonError('unauthenticated', 'Cloudflare Access is required');
   const team = env.ACCESS_TEAM_DOMAIN;
-  const owners = env.OWNER_EMAILS.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const owners = (env.OWNER_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (!team || !env.ACCESS_AUD || !owners.length) throw new BatonError('forbidden', 'Access is not configured');
   const keys = testKeys(env, env.TEST_ACCESS_JWKS) ?? remote(`https://${team}/cdn-cgi/access/certs`);
   let claims: Record<string, unknown>;
