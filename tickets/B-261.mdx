@@ -1,0 +1,42 @@
+---
+title: "B-261 — The Workers view's transcript and status-report walks read rows nothing prunes — bound them"
+id: B-261
+project: baton
+status: available
+updated: 2026-11-18
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "B-250's workersView walks transcripts, pending_transcripts and every status_report message each poll; nothing prunes those tables, so the poll's rows_read grows without bound over the object's life — an owner decision: retention for old pointers and reports, or serving the latest only for recently-seen workers"
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**What:** B-250 (PR #281) made the dashboard's Workers view read one statement per list, however many workers were ever registered. Three of those lists are whole-table walks keyed by nothing — `transcripts`, `pending_transcripts`, and `messages WHERE kind = 'status_report'` through 0060's partial `messages_reports` — because the only key a latest-per-worker read has is the workers ever registered, the very count B-250 stopped paying. Nothing prunes those tables: R-BTN-149's retention ([§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3), src/core/retention.ts) deletes a long-unseen runner's declarations, events and snapshots past 90 days, and the claims of purged tickets with their transcripts — a kept claim's transcript pointers stay forever, and no `DELETE FROM messages` exists at all; the only `pending_transcripts` delete is linking (src/core/claims.ts). The view's `rows_read` per poll therefore grows with those tables over the object's life, on the same road to Cloudflare's free-tier cap of 5,000,000 `rows_read`/day that production passed on 2026-11-14 and 2026-11-15 (B-250's Why). The B-240 harness state (300 old workers carrying no transcripts or reports) stays inside the 500-row target; months of history do not.
+
+- **An owner decision first, before the build:** bound the tables (retention for old transcript pointers and status reports), or bound the serving (the latest transcript and report served only for recently-seen workers, so the three reads key by a bounded worker set). Retention makes an old worker's `transcript_url` and `last_report` null — a behaviour change with its own scenario and dashboard reading; bounded serving changes what old workers are served without deleting anything.
+- **The retention option** follows B-238's shape: bounded batches in the alarm (at most `RETENTION_BATCH` rows a tick), oldest first, each prune through an index, a tick with nothing to delete reading a few rows. Consider whether B-259's export-before-delete applies here as it does to events: the owner may want old pointers and reports exported before deletion.
+- **The bounded-serving option** keys the three reads by the recently-seen set (the `workers_live` partial index's set), nulling the latest-of fields beyond it; the served rows themselves stay, as R-BTN-3 and the dashboard's every-row rendering keep them.
+
+**Target:** the Workers view's `rows_read` per poll is bounded by a constant on a state with months of transcript and report history — independent of those tables' sizes.
+
+**Why:** the `rows_read`/day cap is what took production down on 2026-11-14 and 2026-11-15; B-235–B-250 bounded the statements and the per-worker reads, and this is the remainder.
+
+**Done when:** a test seeds transcript and report history past the chosen bound and asserts the view's reads stay at that bound (the same statement capture B-250's tests use), with the served `workers` JSON equal to what the rows inside the bound serve and the rows outside it documented (nulls or exports); EXPLAIN shows no walk the bound cannot pay for.
+
+### Trust
+
+No new input: rows Baton already stores. The bound is the instance's own policy — a constant or a setting, never a request field.
+
+### Invariants
+
+- R-BTN-3: runner rows are never deleted; whatever this prunes is pointers and messages, never a worker row.
+- R-BTN-149's retention keeps its own terms — batches, oldest first, through an index, a tick with nothing to delete reading a few rows; this extends its lists on the same terms.
+
+## Status
+
+_filed 2026-11-18._
