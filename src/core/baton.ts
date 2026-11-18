@@ -6,7 +6,7 @@
 // reach it only through the front, which has verified the principal — all but a signed
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
 import { MIGRATIONS } from '../migrations';
-import { versionedStore, type VersionedStore } from './stateVersion';
+import { versionedStore, clockBucket, ifNoneMatch, stateEtag, type VersionedStore } from './stateVersion';
 import { BatonError, CLIENT_HEADER, errorResponse, json, servedClientVersions, withClientVersions } from './http';
 import { checkPayload, DEFAULT_COURSE, retiredBoardFields, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
@@ -624,8 +624,19 @@ export class BatonCore {
         if (!owner && !(await this.admin.adminFingerprints()).size) owner = req.headers.get('X-Baton-Owner');
         if (!owner) throw new BatonError('unauthenticated', 'the dashboard session ended or is unknown');
         if (req.method === 'GET' && url.pathname === '/v1/ui/session') return json({ ok: true });
+        // B-242 (R-BTN-196): the poll's ETag, decided after the principal and before the read
+        // runs — the version row it hashes is an unchanged poll's whole cost, and a matching
+        // `If-None-Match` answers `304` with that ETag and no body. The state shows what the
+        // clock decides (alive, stalled, `reap_at`, the time windows), so the coarse bucket is
+        // an input; the caller is one too. The helper is B-205's for every read a session polls.
+        if (req.method === 'GET' && url.pathname === '/v1/ui/state') {
+          const etag = stateEtag(this.store, owner, '/v1/ui/state', clockBucket(this.now()));
+          if (ifNoneMatch(req, etag)) return new Response(null, { status: 304, headers: { ETag: etag } });
+          const res = json(this.uiState());
+          res.headers.set('ETag', etag);
+          return res;
+        }
       }
-      if (req.method === 'GET' && url.pathname === '/v1/ui/state') return json(this.uiState());
       // R-BTN-181's envelope (§14), B-7's slice: `POST /v1/repositories/{repository}/attestations`
       // with a `std:decision@1` — a person's answer to the ticket's queued person leg
       // (R-BTN-116), what `baton decision answer` writes (R-BTN-127). An owner key of the

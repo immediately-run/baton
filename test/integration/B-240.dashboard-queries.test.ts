@@ -228,7 +228,8 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     }
     const large = await quiet(session);
     expect(large.length).toBe(small.length);
-    expect(large.length).toBeLessThanOrEqual(80);
+    // 80 of B-240's joined reads, plus the one version row B-242's ETag reads before them.
+    expect(large.length).toBeLessThanOrEqual(81);
     // The joined reads, explained: each searches an index and none scans its table.
     const lookups = large.filter((l) => /FROM (claims|activities|transcripts|events|ticket_next_legs n|ticket_stations s JOIN ticket_next_legs n)\b/.test(l.sql) && /json_each|fence_pending|confirmed_at IS NULL AND ended_at <=|waiting_on = 'policy'|waiting_on = 'course-changed'/.test(l.sql));
     expect(lookups.length).toBeGreaterThanOrEqual(9);
