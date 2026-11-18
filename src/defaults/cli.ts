@@ -123,6 +123,9 @@ interface CourseEntry {
   id: string;
   version: number;
   min_runner_version?: number;
+  /** B-68's dual-read window: an older file spells the floor `min_worker_version` — this
+   *  repository's own still does — read beside the new name until B-69 retires it. */
+  min_worker_version?: number;
   skill?: string;
   step_kinds?: string[];
   branch_pattern?: string;
@@ -163,8 +166,9 @@ interface BatonJson {
 const defaultSkill = (course: string): string => `baton-${course}`;
 
 /** The `courses` entry `baton repo init` writes: every R-BTN-51 field, so a repository edits
- * them where the spec says rather than discovering them. */
-function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source'>> {
+ * them where the spec says rather than discovering them. Never `min_worker_version`: init
+ * writes the new name only; the window is on the read (above). */
+function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
   return { id: course, version: 1, min_runner_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
@@ -399,7 +403,9 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     courseData[c.id] = out.course_data;
     registry.push({
       ...courseSchemas(root, c.id),
-      id: c.id, version: c.version, min_runner_version: c.min_runner_version ?? c.version, skill: c.skill ?? defaultSkill(c.id), course,
+      // B-68's window: a file still carrying `min_worker_version` keeps its floor — the new
+      // name wins when both are set — instead of silently falling back to `version`.
+      id: c.id, version: c.version, min_runner_version: c.min_runner_version ?? c.min_worker_version ?? c.version, skill: c.skill ?? defaultSkill(c.id), course,
       step_kinds: c.step_kinds ?? Object.keys(course.legs ?? {}),
       branch_pattern: branchPatterns[0], ...(c.previous_branch_pattern ? { previous_branch_pattern: c.previous_branch_pattern } : {}),
       // B-182 (R-BTN-134): what the course's entry declares it reads — `prs` when this sync reads

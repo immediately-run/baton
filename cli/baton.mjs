@@ -415,7 +415,9 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       // repository's, never one it declares.
       const { flags, positional } = parseArgs(rest.slice(1), [], ['scope', 'schema'], 1);
       if (!flags.scope) throw new Error('baton admin resource add NAME names its --scope (account or service, R-BTN-76)');
-      if (flags.scope === 'runner' || flags.scope === 'host') throw new Error(`--scope ${flags.scope} is retired: a resource is account or service, and a runner uses its repository's instances (R-BTN-76, B-168)`);
+      // B-68's window: `worker` stays a retired scope beside `runner` until B-69 takes the old
+      // spelling away, so the window's callers still meet the "is retired" message.
+      if (flags.scope === 'runner' || flags.scope === 'worker' || flags.scope === 'host') throw new Error(`--scope ${flags.scope} is retired: a resource is account or service, and a runner uses its repository's instances (R-BTN-76, B-168)`);
       if (flags.scope !== 'account' && flags.scope !== 'service') throw new Error('--scope must be account or service (R-BTN-76)');
       return { method: 'POST', path: '/v1/admin/resources', body: { name: need(positional[0], 'the resource name'), scope: flags.scope, detail_schema: jsonArg(need(flags.schema, '--schema'), readJson) } };
     }

@@ -113,7 +113,7 @@ describe('the cloud runner script (B-115)', () => {
 
   it('every failing check exits non-zero naming itself', () => {
     const cases: { name: string; make: () => ReturnType<typeof world>; env: Record<string, string | undefined>; args?: string[]; names: RegExp }[] = [      { name: 'no credential', make: () => world(), env: { BATON_KEY: undefined }, names: /no credential: set BATON_KEY/ },
-      { name: 'BATON_KEY_FILE names no file', make: () => world(), env: { BATON_KEY: undefined, BATON_KEY_FILE: '/nonexistent/baton_worker' }, names: /BATON_KEY_FILE \(\/nonexistent\/baton_worker\) does not exist/ },
+      { name: 'BATON_KEY_FILE names no file', make: () => world(), env: { BATON_KEY: undefined, BATON_KEY_FILE: '/nonexistent/baton_runner' }, names: /BATON_KEY_FILE \(\/nonexistent\/baton_runner\) does not exist/ },
       { name: 'no BATON_HOSTNAME', make: () => world(), env: { BATON_HOSTNAME: undefined }, names: /BATON_HOSTNAME is not set/ },
       { name: 'no CLAUDE_CODE_SESSION_ID', make: () => world(), env: { CLAUDE_CODE_SESSION_ID: undefined }, names: /CLAUDE_CODE_SESSION_ID is not set/ },
       { name: 'a session id a session_name may not be', make: () => world(), env: { CLAUDE_CODE_SESSION_ID: 'bad id!' }, names: /CLAUDE_CODE_SESSION_ID is not a session_name/ },

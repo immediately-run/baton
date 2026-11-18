@@ -20,7 +20,7 @@ import type { Deprecated } from './deprecated';
 import type { Store } from './ports';
 
 /** R-BTN-76: at most one reading per runner, instance and kind a minute. */
-export const WORKER_READING_EVERY_MS = 60_000;
+export const RUNNER_READING_EVERY_MS = 60_000;
 
 export interface Ctx {
   store: Store;
@@ -212,7 +212,7 @@ export class Resources {
    * writer class `admin` — no precedence. A reading's `nonce` and `signature` are its retired
    * signature (R-BTN-181), read and ignored while the history's Migrations entry lasts.
    */
-  // @model reading sha256:8ef2d969ae9f
+  // @model reading sha256:e0d1aece2ff1
   post(who: Instrument, body: unknown, repos: string[] | null) {
     const readings = checkReadings(body, VALID_FOR.state_s);
     return this.c.store.transaction(() => {
@@ -241,7 +241,7 @@ export class Resources {
           }
         }
         if (who.kind === 'runner' && this.rows(`SELECT 1 FROM instance_readings WHERE instance = ? AND source = ? AND kind = ? AND observed_at > ?`,
-          r.instance, source, r.kind, now - WORKER_READING_EVERY_MS).length) {
+          r.instance, source, r.kind, now - RUNNER_READING_EVERY_MS).length) {
           refused.push({ instance: r.instance, code: 'rate-limited' });
           continue;
         }
@@ -320,7 +320,7 @@ export class Resources {
 
   /** The alarm's share: lapsed readings are dropped (every reading in force is kept, R-BTN-101),
    *  and the states they held change. Returns when the next one lapses. */
-  // @model readingLapses sha256:a39be26a5cc2
+  // @model readingLapses sha256:aec1a39a8e0e
   alarm(): number | null {
     const now = this.c.now();
     const lapsed = this.rows<{ instance: string }>('SELECT DISTINCT instance FROM instance_readings WHERE lapses_at <= ?', now).map((r) => r.instance);

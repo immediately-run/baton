@@ -17,7 +17,7 @@ import script from '../dashboard/dist/app.js';
 export type Forward = (req: Request) => Promise<Response>;
 
 /** The dashboard's two code assets (B-193): the one bundle `npm run build:ui` builds and this
- *  Runner and the local host embed as text (R-BTN-55) — never Runners assets. */
+ *  Worker and the local host embed as text (R-BTN-55) — never Workers assets. */
 const ASSETS: Record<string, [string, string]> = {
   '/dashboard/app.css': [style, 'text/css; charset=utf-8'],
   '/dashboard/app.js': [script, 'text/javascript; charset=utf-8'],

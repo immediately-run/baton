@@ -20,7 +20,7 @@ function remote(url: string): JWTVerifyGetKey {
   return set;
 }
 
-/** The test key set, honoured ONLY under the test bindings (§15): the deployed Runner has no
+/** The test key set, honoured ONLY under the test bindings (§15): the deployed Worker has no
  *  BATON_TEST_BINDINGS, so no test key can ever verify there. */
 function testKeys(env: Config, jwks: string | undefined): JWTVerifyGetKey | null {
   if (env.BATON_TEST_BINDINGS !== 'true' || !jwks) return null;
@@ -80,7 +80,7 @@ export type SyncCredential =
   | { kind: 'gitlab'; issuer: string; project_path: string; ref: string; ref_type: string; role: 'sync' | 'mirror' };
 
 /** The GitLab issuers the deployment names (R-BTN-94's `BATON_FORGE_SECRETS`, `gitlab_issuer`): the
- *  Runner fetches a key set for these only, never for a token's own `iss`. */
+ *  Worker fetches a key set for these only, never for a token's own `iss`. */
 export function gitlabIssuers(env: Config): string[] {
   let entries: Record<string, { forge?: unknown; gitlab_issuer?: unknown }> = {};
   try {
@@ -158,7 +158,7 @@ export function checkStateChanging(req: Request, env: Config): void {
 }
 
 /** The runner principal (§10.1, R-BTN-13): a bearer token whose SHA-256 is one of the
- *  `TOKEN_HASHES` Runner secret's values (`{credential id: hex}`). Returns that credential id.
+ *  `TOKEN_HASHES` Worker secret's values (`{credential id: hex}`). Returns that credential id.
  *  Revoking a token is deleting its hash; the credential's policy (hostname, allowed
  *  capabilities) is the `CREDENTIALS` secret, which the object mirrors into `credentials`. */
 export async function verifyRunner(req: Request, env: Config): Promise<string> {

@@ -1,6 +1,6 @@
 # gen.py — test/fixtures/sshsig/ssh-keygen.json: requests signed by OpenSSH's own `ssh-keygen -Y sign`
 # (ed25519 and P-256 keys made for the run and thrown away), so the verifier is proven against
-# the tool workers sign with, not only the test signer (R3-1239). Run from a scratch directory.
+# the tool runners sign with, not only the test signer (R3-1239). Run from a scratch directory.
 import subprocess, json, base64, hashlib, os
 created = 1792065600  # 2026-10-15T12:00:00Z
 out = {}

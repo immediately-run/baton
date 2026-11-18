@@ -51,7 +51,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
 
 ## Who decides what
 
-- **Baton holds the lock; it does not police the work.** A refusal keeps cooperating workers
+- **Baton holds the lock; it does not police the work.** A refusal keeps cooperating runners
   from colliding; a capability, `human-operator` included, is a runner's own statement; Baton's
   permissions cover only its own state — who takes a repository's leases, who changes its
   settings (values 12). A threat that needs a runner stopped belongs to the deployment, the
@@ -95,7 +95,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
   in its path or on its branch — or it does not exist. This retired `markers.jsonl`
   (B-100) and shapes every course since; the audit that stated it is
   [`docs/review/parallel-collaboration-2026-10-22.mdx`](../review/parallel-collaboration-2026-10-22.mdx).
-- **Several dozen parallel workers** — humans and agents — are the load the architecture
+- **Several dozen parallel runners** — humans and agents — are the load the architecture
   is for, provided they work separate tickets.
 - **Parallelism is horizontal: many legs, each in its own session.** A runner may hold several
   claims, each running its ticket's legs one at a time in an executor session of its own and a

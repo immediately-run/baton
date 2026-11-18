@@ -15,7 +15,7 @@
 // already timed out, the model's forceReap and fenceTimeout in one step — so generated traces
 // force-reap only a runner Baton still hears from.
 module replay {
-  import baton(TICKETS = Set("t1", "t2"), WORKERS = Set("w1", "w2", "w3"), SLOTS = Set(1, 2),
+  import baton(TICKETS = Set("t1", "t2"), RUNNERS = Set("w1", "w2", "w3"), SLOTS = Set(1, 2),
                MAX_CLAIMS = 6, GIT_BUDGET = 2, OWNER_BUDGET = 2,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
                REQUIRED = Set("fix", "merge"), MAX_TIME = 24,
@@ -29,7 +29,7 @@ module replay {
   // the tick each sync run took its number at
   var numbered: int -> int
 
-  action rinit = all { initWith(WORKERS.mapBy(w => 0)), seen' = WORKERS.mapBy(w => 0), numbered' = SLOTS.mapBy(s => 0) }
+  action rinit = all { initWith(RUNNERS.mapBy(w => 0)), seen' = RUNNERS.mapBy(w => 0), numbered' = SLOTS.mapBy(s => 0) }
   action called(w: str): bool = all { seen' = seen.set(w, st.now), numbered' = numbered }
   action quiet: bool = all { seen' = seen, numbered' = numbered }
   action takes(s: int): bool = all { seen' = seen, numbered' = numbered.set(s, st.now) }
@@ -45,7 +45,7 @@ module replay {
   def lapsedFences: Set[int] = claimsWhere(c => c.status == "reaped" and c.fencePending and c.leaseUntil <= st.now)
 
   action rstep = {
-    nondet w = WORKERS.oneOf()
+    nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()
     nondet leg = LEGS.oneOf()
     nondet s = SLOTS.oneOf()
@@ -90,7 +90,7 @@ module replay {
     } else LEGS
 
   action rprogress = {
-    nondet w = WORKERS.oneOf()
+    nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()
     nondet leg = legChoices(w).oneOf()
     nondet kind = Set("done", "suspended", "release").oneOf()
@@ -118,7 +118,7 @@ module replay {
   // Fences: a force-reap of a live runner, then either its fence-cleared report or its silence
   // past the lease (R-BTN-19) — the paths rstep reaches too rarely to test.
   action rfence = {
-    nondet w = WORKERS.oneOf()
+    nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()
     nondet leg = legChoices(w).oneOf()
     nondet i = 1.to(MAX_CLAIMS).oneOf()
@@ -141,7 +141,7 @@ module replay {
   // so the required bar is met (R-BTN-67), and a done only at an end station — the runs that
   // reach fix, merge and a confirmed done, which random ends cut short elsewhere.
   action rlegs = {
-    nondet w = WORKERS.oneOf()
+    nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()
     nondet leg = legChoices(w).oneOf()
     nondet postBars = TICKETS.setOfMaps(FAMILIES.powerset().exclude(Set(Set()))).oneOf()

@@ -101,3 +101,9 @@ early, with a window so no running runner breaks.
 _(filed 2026-10-20 with the current-state spec, PR #71)_
 
 _(2026-11-18: rules re-read at claim: R-BTN-3 (amended 2026-11-09))_
+
+_(2026-11-18, review round 1: the Tests item's "S-BTN-30 gains a case" is carried by the new
+S-BTN-236 instead — the coverage grew past S-BTN-30's signed requests into the dual-read
+window's refusals and migration 0061's row preservation, and §15 keeps one row per subject, so
+the window got a scenario of its own; the asked-for heartbeat pair — `X-Runner-Secret` and
+`X-Worker-Secret`, only the old one setting `legacy_names_at` — is S-BTN-236's first case.)_

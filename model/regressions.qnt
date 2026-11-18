@@ -1,7 +1,7 @@
 // One deterministic run per defect the BATON_SPEC reviews found, each asserting that the
 // spec as merged does not reach it (R3-1243 "Tests"). `npm run model` runs them.
 module regressions {
-  import baton(TICKETS = Set("t1", "t2"), WORKERS = Set("w1", "w2", "w3"), SLOTS = Set(1, 2),
+  import baton(TICKETS = Set("t1", "t2"), RUNNERS = Set("w1", "w2", "w3"), SLOTS = Set(1, 2),
                MAX_CLAIMS = 6, GIT_BUDGET = 2, OWNER_BUDGET = 2,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
                REQUIRED = Set("fix", "merge"), MAX_TIME = 12,
@@ -17,7 +17,7 @@ module regressions {
   val c2 = st.claims.get(2)
   val NONE: Set[str] = Set()
   // a deterministic start: no runner's clock drifts
-  action start: bool = initWith(WORKERS.mapBy(w => 0))
+  action start: bool = initWith(RUNNERS.mapBy(w => 0))
   // start `l` and push its evidence so it lands; a writing leg bars family b (w1 is family a)
   action leg(w: str, l: str): bool =
     advance(w, l, if (REQUIRED.contains(l)) Set("family:b") else NONE)
@@ -269,7 +269,7 @@ module regressions {
   // The drift edge: a runner whose clock runs MAX_DRIFT behind may act until its clock
   // reaches lease end − MARGIN, which is still before Baton's reap.
   run driftEdgeTest =
-    initWith(WORKERS.mapBy(w => if (w == "w1") MAX_DRIFT else 0))
+    initWith(RUNNERS.mapBy(w => if (w == "w1") MAX_DRIFT else 0))
       .then(claim("w1", "t1")).then(advance("w1", "implement", NONE))
       .then(tick).then(tick)
       .then(pushEvidence("w1", true))

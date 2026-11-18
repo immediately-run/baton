@@ -38,12 +38,12 @@ and with what is at stake:
 - **Anything in git can be rewritten by a push.** Once agents can push, a record kept only in git
   can be edited by the very agent it is meant to constrain: who approved a change, which review
   counted, what the rules are. A compromised runner included.
-- **Nobody can see the factory.** Which workers are up, what each could take, what is running and
+- **Nobody can see the factory.** Which runners are up, what each could take, what is running and
   what needs a person is pieced together after the fact, or not at all.
 
 ## What Baton gives a team
 
-- **One fenced lease per ticket.** A worker claims a ticket and keeps it by heartbeat. A worker that goes silent loses the claim when its lease runs out, and a fence stops
+- **One fenced lease per ticket.** A runner claims a ticket and keeps it by heartbeat. A runner that goes silent loses the claim when its lease runs out, and a fence stops
   a revived one from writing.
 - **People and agents on one course.** Agents run legs. A person takes part in two ways: by
   working a leg at a runner that declares `human-operator`, or by answering a person leg, the one
@@ -58,9 +58,9 @@ and with what is at stake:
   nowhere. If Baton loses that state, it fails closed: the work is reviewed and approved again,
   never restored from git (the owner, 2026-10-28).
 - **Gates protect the lock; the rest is advice.** Baton refuses only what would make cooperating
-  workers collide, or take work they have said they cannot do: a second holder, a missing
-  capability or seat, a tier above the worker's ceiling, a barred tag. Everything else it offers
-  in a default order that a worker may override, and every override is logged.
+  runners collide, or take work they have said they cannot do: a second holder, a missing
+  capability or seat, a tier above the runner's ceiling, a barred tag. Everything else it offers
+  in a default order that a runner may override, and every override is logged.
 - **A live view.** Workers, claims, timelines, what is ready, what is blocked and what needs a
   person, all on one dashboard, along with the course's own record of how long things take. Advice
   is never older than the last write Baton accepted for the runner reading it. Fleet-wide views
@@ -74,7 +74,7 @@ a threat model of its own. Both ends run the same core. What differs is the repo
 on which refs, who approves what, and whose attestations count (BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 
 - **The simple end.** The `cooperative` preset and the standard courses: leases, courses and the
-  live view, for workers that cooperate. At this end, owner bars and positions are a
+  live view, for runners that cooperate. At this end, owner bars and positions are a
   coordination record, not a boundary, and no guarantee is required.
 - **The strict end.** The `protected` and `protected-hardware` presets turn the same state into a
   boundary. Trusted runners land only what the policy's attestations allow. Reviews count only
@@ -94,7 +94,7 @@ them itself: immediately.run's courses are Fieldhouse's (the owner, 2026-10-29).
 ## Who it is for
 
 Teams of people, agents or both that work on the same repositories, from a solo developer with a
-handful of agents to a factory of several dozen workers. It also serves the operator, who needs
+handful of agents to a factory of several dozen runners. It also serves the operator, who needs
 to see at a glance what the team is doing and what it needs from a person.
 
 ## What it is not
@@ -108,9 +108,9 @@ to see at a glance what the team is doing and what it needs from a person.
   matches but never grants or checks. A threat that needs a runner stopped belongs to the
   sandbox, the forge or the credential proxy. The one exception is the trusted-runner merge a
   policy opts into. A repository chooses to adopt Baton; once it has, Baton's refusals bind every
-  worker that uses it, and a worker that ignores them is outside the factory, not stopped by it
+  runner that uses it, and a runner that ignores them is outside the factory, not stopped by it
   (the owner, 2026-10-22).
-- **Not a workflow engine.** A course says where a ticket may go next; workers decide how to run
+- **Not a workflow engine.** A course says where a ticket may go next; runners decide how to run
   each leg. Baton runs no repository code. For durable execution of your own code, use something
   like Temporal ([compared](../compared-to-temporal.mdx)).
 - **Not tied to GitHub.** Any git forge, or a plain git server, will do.

@@ -2,7 +2,7 @@
 // instance of the model (instances.qnt fixes the sizes).
 module properties {
   const P_TICKETS: Set[str]
-  const P_WORKERS: Set[str]
+  const P_RUNNERS: Set[str]
   const P_SLOTS: Set[int]
   const P_MAX_CLAIMS: int
   const P_GIT_BUDGET: int
@@ -17,7 +17,7 @@ module properties {
   // one to explore rule 11, `small` none (capacity off, the proof's shape unchanged).
   const P_CAPPED: Set[str]
   const P_SEATCAP: str -> int
-  import baton(TICKETS = P_TICKETS, WORKERS = P_WORKERS, SLOTS = P_SLOTS,
+  import baton(TICKETS = P_TICKETS, RUNNERS = P_RUNNERS, SLOTS = P_SLOTS,
                MAX_CLAIMS = P_MAX_CLAIMS, GIT_BUDGET = P_GIT_BUDGET,
                OWNER_BUDGET = P_OWNER_BUDGET,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
@@ -44,7 +44,7 @@ module properties {
   //     fence, so the clear (an owner act too) is never enabled.
   // `npm run model` simulates `safety` with the full `step` on `sim`, which has all of them.
   action pverify = {
-    nondet w = WORKERS.oneOf()
+    nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()
     nondet leg = LEGS.oneOf()
     nondet s = SLOTS.oneOf()
@@ -73,12 +73,12 @@ module properties {
   // What makes `pverify` the same as `step`: one ticket, no fleet, nothing declared, and an
   // owner budget of 1 — spent by the force-reap that raises a fence, so the clear never has any.
   // A constant, so it holds in every state or none; the proof checks it beside `safety`.
-  val verifyShape = TICKETS.size() == 1 and not(FLEET) and WORKERS.forall(w => DECLARED.get(w) == Set()) and OWNER_BUDGET == 1
+  val verifyShape = TICKETS.size() == 1 and not(FLEET) and RUNNERS.forall(w => DECLARED.get(w) == Set()) and OWNER_BUDGET == 1
 
   // R-BTN-4, R-BTN-19, R-BTN-26: at most one live holder per ticket — an active claim, or a
   // force-reaped one whose runner has not cleared its fence — and one active claim per runner.
   val oneLiveHolderPerTicket = TICKETS.forall(t => activeOf(t).size() + fencedOf(t).size() <= 1)
-  val oneClaimPerRunner = WORKERS.forall(w => runnerClaim(w).size() <= 1)
+  val oneClaimPerRunner = RUNNERS.forall(w => runnerClaim(w).size() <= 1)
 
   // R-BTN-62: accepted observations strictly increase; none exceeds what was handed out.
   val observationsIncrease =

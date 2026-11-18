@@ -2,7 +2,7 @@
 // mode. Kept apart from properties.qnt because their fairness terms inline whole actions per
 // runner and ticket, which made the safety proof's input too large for Apalache.
 module liveness {
-  import baton(TICKETS = Set("t1"), WORKERS = Set("w1", "w2"), SLOTS = Set(1),
+  import baton(TICKETS = Set("t1"), RUNNERS = Set("w1", "w2"), SLOTS = Set(1),
                MAX_CLAIMS = 3, GIT_BUDGET = 1, OWNER_BUDGET = 1,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
                REQUIRED = Set("fix", "merge"), MAX_TIME = 12,
@@ -24,7 +24,7 @@ module liveness {
   def fencesBeyondHorizon(t: str): bool =
     fencedOf(t).forall(i => st.claims.get(i).leaseUntil > MAX_TIME)
   temporal fencesClear =
-    (weakFair(tick, st) and WORKERS.forall(w => weakFair(fenceCleared(w), st))
+    (weakFair(tick, st) and RUNNERS.forall(w => weakFair(fenceCleared(w), st))
       and 1.to(MAX_CLAIMS).forall(i => weakFair(fenceTimeout(i), st))) implies
       always(TICKETS.forall(t => fencedOf(t).size() > 0
         implies eventually(fencedOf(t).size() == 0 or fencesBeyondHorizon(t))))
@@ -45,16 +45,16 @@ module liveness {
   temporal barsLiftClaimable =
     weakFair(liftOwnerBars, st) implies
       always(TICKETS.forall(t =>
-        (WORKERS.exists(w => claimableButForOwner(t, w)) and WORKERS.forall(w => not(claimableBy(t, w))))
-          implies eventually(WORKERS.exists(w => claimableBy(t, w))
-                             or not(WORKERS.exists(w => claimableButForOwner(t, w))))))
+        (RUNNERS.exists(w => claimableButForOwner(t, w)) and RUNNERS.forall(w => not(claimableBy(t, w))))
+          implies eventually(RUNNERS.exists(w => claimableBy(t, w))
+                             or not(RUNNERS.exists(w => claimableButForOwner(t, w))))))
   // R-BTN-45: a free runner able to claim a ticket — with claim ids left — sees it claimed
   // (by itself or another), stop being claimable, or the runner sleeps or dies. A claim is one
   // step since R-BTN-98 retired the hook, so weak fairness of it is enough (R3-1254; it was
   // strong fairness of the hook's ordering finish, baton#10 round 3, 3-A-1).
   temporal readyIsClaimed =
-    WORKERS.forall(w => TICKETS.forall(t => weakFair(claim(w, t), st))) implies
-      TICKETS.forall(t => WORKERS.forall(w =>
+    RUNNERS.forall(w => TICKETS.forall(t => weakFair(claim(w, t), st))) implies
+      TICKETS.forall(t => RUNNERS.forall(w =>
         always((runnerFree(w) and claimableBy(t, w) and st.nextId <= MAX_CLAIMS) implies
           eventually(activeOf(t).size() > 0 or not(claimableBy(t, w))
                      or not(st.up.get(w)) or st.asleep.get(w)))))

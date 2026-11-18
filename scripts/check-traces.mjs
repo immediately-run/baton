@@ -140,7 +140,7 @@ export function translate(trace) {
   const claimIds = Object.keys(states.at(-1)?.claims ?? {}).length;
   const consts = {
     TICKETS: `Set(${T.map(q).join(', ')})`,
-    WORKERS: `Set(${WS.map(q).join(', ')})`,
+    RUNNERS: `Set(${WS.map(q).join(', ')})`,
     SLOTS: 'Set(1, 2)',
     MAX_CLAIMS: claimIds + 2,
     GIT_BUDGET: 100000,
@@ -469,7 +469,7 @@ function expectations(Q, env, T, W) {
 
 const header = (consts) => `module replay {
   import baton(${Object.entries(consts).map(([k, v]) => `${k} = ${v}`).join(', ')}).* from "../../../model/baton"
-  action start: bool = initWith(WORKERS.mapBy(w => 0))
+  action start: bool = initWith(RUNNERS.mapBy(w => 0))
 `;
 const chain = (steps, upto, withExpect = true) => {
   let s = '    start';

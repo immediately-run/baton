@@ -26,7 +26,7 @@
 module baton {
   // ---- sizes, set by the instance (instances.qnt; regressions.qnt) ----
   const TICKETS: Set[str]
-  const WORKERS: Set[str]
+  const RUNNERS: Set[str]
   const SLOTS: Set[int]          // sync runs that may overlap (§4.3)
   const MAX_CLAIMS: int          // bounds the state space
   const GIT_BUDGET: int          // foreign pushes, regressions and withdrawals per run
@@ -337,7 +337,7 @@ module baton {
   // §5: live while its last authenticated call — a heartbeat (a fence report rides one), a claim,
   // an advance, an end — is within its lease timeout. Only a heartbeat recounts; any other call
   // that revives a lapsed runner waits for the alarm's check (`alarmLive`), as in core.
-  pure def liveIn(s: State): Set[str] = WORKERS.filter(w => s.now < s.lastSeen.get(w) + TIMEOUT)
+  pure def liveIn(s: State): Set[str] = RUNNERS.filter(w => s.now < s.lastSeen.get(w) + TIMEOUT)
   // R-BTN-75: a capability no live runner both declares and is granted
   pure def capRowsFor(s: State, live: Set[str], t: str): Set[str] =
     REQUIRES.get(t).filter(c => not(live.exists(w => s.declared.get(w).contains(c) and GRANTED.get(w).contains(c))))
@@ -448,7 +448,7 @@ module baton {
   // ---- init ----
   // @impl external — an empty Baton, migrated (src/core/baton.ts#start)
   action init = {
-    nondet d = WORKERS.setOfMaps(0.to(MAX_DRIFT)).oneOf()
+    nondet d = RUNNERS.setOfMaps(0.to(MAX_DRIFT)).oneOf()
     initWith(d)
   }
   // @impl external — an empty Baton, migrated, with each runner's clock drift
@@ -463,25 +463,25 @@ module baton {
       postedDeps: TICKETS.mapBy(t => Set()), postedDecisions: TICKETS.mapBy(t => Set()),
       attempts: TICKETS.mapBy(t => LEGS.mapBy(l => 0)), retryRows: TICKETS.mapBy(t => Set()),
       retryAfter: TICKETS.mapBy(t => LEGS.mapBy(l => 0)), blockedEnds: TICKETS.mapBy(t => LEGS.mapBy(l => 0)),
-      provs: Set(), blocked: TICKETS.mapBy(t => REQUIRES.get(t).exists(c => not(WORKERS.exists(w =>
+      provs: Set(), blocked: TICKETS.mapBy(t => REQUIRES.get(t).exists(c => not(RUNNERS.exists(w =>
                                      DECLARED.get(w).contains(c) and GRANTED.get(w).contains(c))))),
       claims: Map(), nextId: 1,
       seats: Map(),
       held: TICKETS.mapBy(t => false), ownerBars: Set(), ownerBudget: OWNER_BUDGET,
-      up: WORKERS.mapBy(w => true), pushed: WORKERS.mapBy(w => false),
-      asleep: WORKERS.mapBy(w => false), localClaim: WORKERS.mapBy(w => 0),
-      localLease: WORKERS.mapBy(w => 0), drift: d, now: 0,
+      up: RUNNERS.mapBy(w => true), pushed: RUNNERS.mapBy(w => false),
+      asleep: RUNNERS.mapBy(w => false), localClaim: RUNNERS.mapBy(w => 0),
+      localLease: RUNNERS.mapBy(w => 0), drift: d, now: 0,
       syncs: SLOTS.mapBy(s => { phase: "idle", obs: 0, git: TICKETS.mapBy(t => List()),
                                 gone: TICKETS.mapBy(t => false), bars: TICKETS.mapBy(t => Set()),
                                 queued: TICKETS.mapBy(t => ""), voided: false,
                                 deps: TICKETS.mapBy(t => Set()), decisions: TICKETS.mapBy(t => Set()), version: 0 }),
       accepted: List(), gitRegressedEver: TICKETS.mapBy(t => false),
       actedAfterLoss: false,
-      lastEvent: TICKETS.mapBy(t => if (REQUIRES.get(t).exists(c => not(WORKERS.exists(w =>
+      lastEvent: TICKETS.mapBy(t => if (REQUIRES.get(t).exists(c => not(RUNNERS.exists(w =>
                                      DECLARED.get(w).contains(c) and GRANTED.get(w).contains(c))))) "blocked" else ""),
       unpairedUnblock: false, events: 0,
-      lastSeen: WORKERS.mapBy(w => 0), declared: DECLARED, fleetLive: WORKERS,
-      capRows: TICKETS.mapBy(t => REQUIRES.get(t).filter(c => not(WORKERS.exists(w =>
+      lastSeen: RUNNERS.mapBy(w => 0), declared: DECLARED, fleetLive: RUNNERS,
+      capRows: TICKETS.mapBy(t => REQUIRES.get(t).filter(c => not(RUNNERS.exists(w =>
                                      DECLARED.get(w).contains(c) and GRANTED.get(w).contains(c))))),
       unavailable: RESOURCES.mapBy(x => 0), endNeeds: TICKETS.mapBy(t => Set()),
       resRows: TICKETS.mapBy(t => Set()), lost: TICKETS.mapBy(t => Set()),
@@ -1046,7 +1046,7 @@ module baton {
 
   // @impl external — the model's scheduler: every actor
   action step = {
-    nondet w = WORKERS.oneOf()
+    nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()
     nondet leg = LEGS.oneOf()
     nondet s = SLOTS.oneOf()
@@ -1092,7 +1092,7 @@ module baton {
   // of `step`, so a violation here is a real one.
   // @impl external — the model's scheduler: the happy path's actors
   action progressStep = {
-    nondet w = WORKERS.oneOf()
+    nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()
     nondet leg = LEGS.oneOf()
     nondet postBars = TICKETS.setOfMaps(Set(Set("family:b"))).oneOf()

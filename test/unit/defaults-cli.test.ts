@@ -429,6 +429,47 @@ describe('syncMain’s busy retry (B-89, R-BTN-62)', () => {
   });
 });
 
+describe('the sync reads a course floor spelled either way (B-68’s window)', () => {
+  /** A scaffolded repository, as the B-88 block's: one ticket, an origin, no course code. */
+  const scaffold = async (): Promise<string> => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-b68-'));
+    gitInit(dir);
+    mkdirSync(join(dir, 'tickets'), { recursive: true });
+    writeFileSync(join(dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\n---\n');
+    execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git'], { stdio: 'ignore' });
+    expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
+    commitAll(dir);
+    writeFileSync(join(dir, '.baton', 'facts.json'), '[]');
+    return dir;
+  };
+  /** One sync's posted registry, from a transport answering the three calls and keeping the board's body. */
+  const registryOf = async (dir: string): Promise<Record<string, unknown>[]> => {
+    let board: Record<string, unknown> = {};
+    const transport = async (req: Request): Promise<Response> => {
+      const path = new URL(req.url).pathname;
+      if (path === '/v1/sync/observation') return new Response(JSON.stringify({ sha: null, observation: 1, bars: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (path === '/v1/sync/board') board = await req.json() as Record<string, unknown>;
+      return new Response(JSON.stringify({ sha: null }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    expect(await syncMain({ root: dir, url: 'https://baton.test', factsFile: join(dir, '.baton', 'facts.json'), token: 't', transport, log: () => {} })).toBe(0);
+    return board.registry as Record<string, unknown>[];
+  };
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('a file still carrying min_worker_version keeps its floor, and the new name wins when both are set', async () => {
+    dir = await scaffold();
+    const settingsFile = join(dir, '.baton', 'baton.json');
+    // The old spelling alone: without the window the entry would silently post `version` (3) as
+    // its floor, changing rule 9's minimum hands-up on the next sync.
+    writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), courses: [{ id: 'create-pr', version: 3, min_worker_version: 2 }] }));
+    expect(await registryOf(dir)).toMatchObject([{ id: 'create-pr', version: 3, min_runner_version: 2 }]);
+    // Both spellings: the new one wins, as the server's own dual read resolves them (courses.ts).
+    writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), courses: [{ id: 'create-pr', version: 3, min_runner_version: 1, min_worker_version: 2 }] }));
+    expect(await registryOf(dir)).toMatchObject([{ id: 'create-pr', version: 3, min_runner_version: 1 }]);
+  }, 120_000);
+});
+
 describe('syncOnce’s confirm-only re-post (B-183, review round 1)', () => {
   /** `syncOnce` with every effect injected (the module is pure): a head, a payload and an
    * ancestry the test scripts, recording the one board post. */

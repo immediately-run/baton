@@ -99,7 +99,7 @@ export interface Config {
   ACCESS_AUD?: string;
   OWNER_EMAILS?: string;
   /** `{credential id: SHA-256 of its token}` and `{credential id: {hostname, allowed_capabilities}}`
-   *  (R-BTN-13; R3-1208 sets them as Runner secrets). */
+   *  (R-BTN-13; R3-1208 sets them as Worker secrets). */
   TOKEN_HASHES?: string;
   CREDENTIALS?: string;
   /** R-BTN-13 as amended (R3-1239): the runner keys, a JSON array of `{key, name,
