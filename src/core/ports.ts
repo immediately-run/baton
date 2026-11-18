@@ -92,9 +92,12 @@ export interface Config {
    *  array of `POST /v1/admin/repositories` bodies less their owner keys. Each binds its own
    *  sync and mirror workflow to its board (R-BTN-15). */
   BATON_REPOSITORIES?: string;
-  ACCESS_TEAM_DOMAIN: string;
-  ACCESS_AUD: string;
-  OWNER_EMAILS: string;
+  /** R-BTN-16, as amended 2026-10-20: Access is hardening in front of the dashboard that Baton
+   *  never reads, and no deployment sets these (R3-1208's provision sets none). B-46 removes
+   *  the one read that remains. */
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
+  OWNER_EMAILS?: string;
   /** `{credential id: SHA-256 of its token}` and `{credential id: {hostname, allowed_capabilities}}`
    *  (R-BTN-13; R3-1208 sets them as Worker secrets). */
   TOKEN_HASHES?: string;
