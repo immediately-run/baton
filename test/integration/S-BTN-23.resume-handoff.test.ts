@@ -4,7 +4,7 @@
 // W1's branch and PR; the hand-off is a comment on the primary PR, never in the diff, and Baton
 // holds only its URL. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { advance, claimItem, cutover, endClaim, Git, placed, register, setClock, workerCall } from '../helpers';
+import { advance, claimItem, cutover, endClaim, Git, placed, register, setClock, runnerCall } from '../helpers';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const PR = 'https://github.com/immediately-run/docs/pull/41';
@@ -23,7 +23,7 @@ describe('S-BTN-23 resume from a hand-off document', () => {
     const w1 = await register('vm-a');
     const { json: c } = await claimItem('vm-a', w1.secret);
     await advance('vm-a', w1.secret, c.claim_id, { leg: 'implement' });
-    await workerCall('/v1/runner/activities', { secret: w1.secret, body: { activities: [
+    await runnerCall('/v1/runner/activities', { secret: w1.secret, body: { activities: [
       { id: 'p1', claim_id: c.claim_id, kind: 'push', source: 'skill', started_at: T0, ended_at: T0, outcome: 'succeeded', detail: { branch: 'claude/t-1-fixture' } },
       { id: 'o1', claim_id: c.claim_id, kind: 'open-pr', source: 'skill', started_at: T0, ended_at: T0, outcome: 'succeeded', detail: { pr: PR } },
     ] } });

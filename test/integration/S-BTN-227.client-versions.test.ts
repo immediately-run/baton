@@ -15,7 +15,7 @@
 // The runner's own half — the warning, the refusal, the exit — is S-BTN-227.runner.test.ts
 // (Node only).
 import { describe, it, expect, beforeEach } from 'vitest';
-import { claimItem, course, cutover, Git, hbBody, HOST, keyCall, ORIGIN, rawCall, rows, setAdminKeys, setClock, sha256, syncToken, tick, withCore, workerCall, SSH_KEYS } from '../helpers';
+import { claimItem, course, cutover, Git, hbBody, HOST, keyCall, ORIGIN, rawCall, rows, setAdminKeys, setClock, sha256, syncToken, tick, withCore, runnerCall, SSH_KEYS } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-17T10:00:00Z');
@@ -65,10 +65,10 @@ describe(`S-BTN-227 the client versions Baton serves (${HOST})`, () => {
       }
     }
     // Before the signature is checked (the signed requests above were well formed) and before
-    // anything is read or written: no nonce row, no event, no credential or worker row.
+    // anything is read or written: no nonce row, no event, no credential or runner row.
     expect(await rows('SELECT COUNT(*) AS n FROM request_nonces')).toEqual([{ n: 0 }]);
     expect(await rows<{ n: number }>('SELECT COUNT(*) AS n FROM events')).toEqual([{ n: eventsBefore }]);
-    expect(await rows('SELECT COUNT(*) AS n FROM workers')).toEqual([{ n: 0 }]);
+    expect(await rows('SELECT COUNT(*) AS n FROM runners')).toEqual([{ n: 0 }]);
   });
 
   it('clients at min and above are served — +dev no part of the comparison — and every /v1 response carries the versions', async () => {
@@ -113,15 +113,15 @@ describe(`S-BTN-227 the client versions Baton serves (${HOST})`, () => {
 
   it('every runner call records its Baton-Client, and Needs you lists a live runner below the recommendation', async () => {
     const secret = 's-227';
-    const first = await workerCall('/v1/runner/heartbeat', { cred: 'vm-a', body: hbBody('vm-a', { secret_hash: await sha256(secret) }), client: 'baton/0.1.4' });
+    const first = await runnerCall('/v1/runner/heartbeat', { cred: 'vm-a', body: hbBody('vm-a', { secret_hash: await sha256(secret) }), client: 'baton/0.1.4' });
     expect(first.status).toBe(200);
-    const id = ((await first.json()) as { worker_id: number }).worker_id;
-    expect(await rows('SELECT client_version FROM workers WHERE id = ?', id)).toEqual([{ client_version: '0.1.4' }]);
+    const id = ((await first.json()) as { runner_id: number }).runner_id;
+    expect(await rows('SELECT client_version FROM runners WHERE id = ?', id)).toEqual([{ client_version: '0.1.4' }]);
     // The last call's statement is the one recorded — a later call at another version moves it.
-    await workerCall('/v1/runner/mode?repository=docs', { cred: 'vm-a', secret, method: 'GET', client: 'baton/0.1.4+dev' });
-    expect(await rows('SELECT client_version FROM workers WHERE id = ?', id)).toEqual([{ client_version: '0.1.4+dev' }]);
-    await workerCall('/v1/runner/heartbeat', { cred: 'vm-a', secret, body: hbBody('vm-a'), client: 'baton/0.1.4' });
-    expect(await rows('SELECT client_version FROM workers WHERE id = ?', id)).toEqual([{ client_version: '0.1.4' }]);
+    await runnerCall('/v1/runner/mode?repository=docs', { cred: 'vm-a', secret, method: 'GET', client: 'baton/0.1.4+dev' });
+    expect(await rows('SELECT client_version FROM runners WHERE id = ?', id)).toEqual([{ client_version: '0.1.4+dev' }]);
+    await runnerCall('/v1/runner/heartbeat', { cred: 'vm-a', secret, body: hbBody('vm-a'), client: 'baton/0.1.4' });
+    expect(await rows('SELECT client_version FROM runners WHERE id = ?', id)).toEqual([{ client_version: '0.1.4' }]);
     // Below the code's recommended (0.1.5) the live runner is listed, with its version.
     const listed = await withCore((c) => c.uiState().needs_you.stale_clients as { hostname: string; session_name: string; client_version: string; recommended: string }[]);
     expect(listed).toEqual([{ hostname: 'vm-a', session_name: 's-vm-a', client_version: '0.1.4', recommended: '0.1.5' }]);
@@ -136,12 +136,12 @@ describe(`S-BTN-227 the client versions Baton serves (${HOST})`, () => {
     // update that moved it back), and every call of its own is refused before anything is read
     // or written.
     const secret = 's-227b';
-    const boot = await workerCall('/v1/runner/heartbeat', { cred: 'vm-b', body: hbBody('vm-b', { secret_hash: await sha256(secret) }), client: 'baton/0.1.4' });
+    const boot = await runnerCall('/v1/runner/heartbeat', { cred: 'vm-b', body: hbBody('vm-b', { secret_hash: await sha256(secret) }), client: 'baton/0.1.4' });
     expect(boot.status).toBe(200);
     const claim = await claimItem('vm-b', secret, {}, 'baton/0.1.4');
     expect(claim.status).toBe(200);
     const claimId = claim.json.claim_id as number;
-    const beat = await workerCall('/v1/runner/heartbeat', { cred: 'vm-b', secret, body: hbBody('vm-b'), client: 'baton/0.1.3' });
+    const beat = await runnerCall('/v1/runner/heartbeat', { cred: 'vm-b', secret, body: hbBody('vm-b'), client: 'baton/0.1.3' });
     const refused = await beat.json() as Record<string, any>;
     expect([beat.status, refused.code, refused.client, refused.min, refused.recommended]).toEqual([426, 'client-too-old', '0.1.3', '0.1.4', '0.1.5']);
     // No claim is taken by the refused client, and the claim it held stands untouched.

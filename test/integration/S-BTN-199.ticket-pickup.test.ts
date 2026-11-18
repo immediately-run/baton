@@ -14,7 +14,7 @@
 // course field and stores no PR list (R-BTN-50, R-BTN-33), so a release that kept its PRs logs
 // one too. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, advance, claimItem, cutover, endClaim, Git, keyCall, placed, register, rows, sessionCall, setAdminKeys, setClock, workerCall } from '../helpers';
+import { adminSession, advance, claimItem, cutover, endClaim, Git, keyCall, placed, register, rows, sessionCall, setAdminKeys, setClock, runnerCall } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall, HOST } from '#host';
 import { ORIGIN } from '../helpers';
@@ -41,15 +41,15 @@ beforeEach(async () => {
   expect((await keyCall(admin, '/v1/admin/grants', { repository: 'docs', public_key: reader.publicKey, hostname: 'pickup-vm', capabilities: ['create-pr'] })).status).toBe(200);
 });
 
-/** A legacy worker's claim on `ticket` (§13 step 3's shape, as the cutover import makes it): a
+/** A legacy runner's claim on `ticket` (§13 step 3's shape, as the cutover import makes it): a
  *  holder with no lease the alarm would end. */
 async function legacyClaim(ticket: string) {
   await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('legacy', 'legacy', '[]', 'legacy') ON CONFLICT (id) DO NOTHING`);
-  await rows(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+  await rows(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
               VALUES ('legacy', ?, 'x', 'legacy', 'claude-code', 'legacy', 'critical', 0, '', ?, ?)`, `item-${ticket.split(':')[1]}`, T0, T0);
-  const worker = (await rows<{ id: number }>(`SELECT id FROM workers WHERE kind = 'legacy' ORDER BY id DESC LIMIT 1`))[0].id;
-  await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status) VALUES (?, ?, ?, 'abc123', '', ?, 'active')`, ticket, worker, `legacy:${ticket}`, T0);
-  return worker;
+  const runner = (await rows<{ id: number }>(`SELECT id FROM runners WHERE kind = 'legacy' ORDER BY id DESC LIMIT 1`))[0].id;
+  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status) VALUES (?, ?, ?, 'abc123', '', ?, 'active')`, ticket, runner, `legacy:${ticket}`, T0);
+  return runner;
 }
 
 /** T-1's implement claim, run by `cred`: it pushes a branch and opens #109, reaches pr-open with
@@ -58,7 +58,7 @@ async function implementAndRelease(cred: 'vm-a' | 'vm-b', ticket: string, branch
   const w = await register(cred);
   const c = (await claimItem(cred, w.secret, { ticket_id: ticket })).json;
   await advance(cred, w.secret, c.claim_id, { leg: 'implement' });
-  await workerCall('/v1/runner/activities', { cred, secret: w.secret, body: { activities: [
+  await runnerCall('/v1/runner/activities', { cred, secret: w.secret, body: { activities: [
     { id: `p-${ticket}`, claim_id: c.claim_id, kind: 'push', source: 'skill', started_at: T0, ended_at: T0, outcome: 'succeeded', detail: { branch } },
     { id: `o-${ticket}`, claim_id: c.claim_id, kind: 'open-pr', source: 'skill', started_at: T0, ended_at: T0, outcome: 'succeeded', detail: { pr } },
   ] } });
@@ -87,7 +87,7 @@ describe('S-BTN-199 the git-lock pickup asks Baton', () => {
     const board = await read(reader, '/v1/repositories/docs/board');
     expect(board.status).toBe(200);
     expect(board.json.ready.find((t: Record<string, unknown>) => t.local_id === 'T-2')).toMatchObject({ station: 'pr-open', leg: 'review' });
-    expect(board.json.holders).toEqual([{ ticket_id: 'docs:T-2', worker_id: w2.id, hostname: 'vm-b', session_name: 'claude-review', lease_ends_at: T0 + 3_600_000 }]);
+    expect(board.json.holders).toEqual([{ ticket_id: 'docs:T-2', runner_id: w2.id, hostname: 'vm-b', session_name: 'claude-review', lease_ends_at: T0 + 3_600_000 }]);
 
     // The history's `resume` is the PR a false `prs: []` lost, and the branch to continue on.
     const history = await read(reader, '/v1/repositories/docs/tickets/docs:T-1/history');
@@ -106,11 +106,11 @@ describe('S-BTN-199 the git-lock pickup asks Baton', () => {
     expect((await endClaim('vm-b', w2.secret, t2.id, { end_reason: 'suspended:pr-open', reached: 'pr-open', next: 'review' })).status).toBe(200);
     expect((await read(reader, '/v1/repositories/docs/board')).json.holders).toEqual([]);
 
-    // A legacy worker's claim (the cutover import's) is a holder too — with no lease the alarm
+    // A legacy runner's claim (the cutover import's) is a holder too — with no lease the alarm
     // would end, so `lease_ends_at` is null — and a claim through git is refused by it.
     const legacy = await legacyClaim('docs:T-2');
     expect((await read(reader, '/v1/repositories/docs/board')).json.holders).toEqual([
-      { ticket_id: 'docs:T-2', worker_id: legacy, hostname: 'legacy', session_name: 'item-T-2', lease_ends_at: null }]);
+      { ticket_id: 'docs:T-2', runner_id: legacy, hostname: 'legacy', session_name: 'item-T-2', lease_ends_at: null }]);
   });
 
   it('the history\'s resume keeps the PR when the newest ended claim is a review that pushed nothing (B-91\'s shape)', async () => {

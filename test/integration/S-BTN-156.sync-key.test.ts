@@ -164,7 +164,7 @@ describe('S-BTN-156 a board posted by a sync key', () => {
   });
 
   it('an API-key file passed as --sync-key is refused by name, before any call is made', async () => {
-    // R-BTN-159's API key is a worker's credential, and `verifySyncCredential` denies it on the
+    // R-BTN-159's API key is a runner's credential, and `verifySyncCredential` denies it on the
     // sync's routes: the operator hears why the file is wrong instead of a bearer the server
     // rejects. The file exists and reads as a key to nothing else, so the refusal is by name.
     await later();
@@ -182,7 +182,7 @@ describe('S-BTN-156 a board posted by a sync key', () => {
     try {
       const args = parseSyncArgs(['--root', dir, '--url', ORIGIN, '--facts', facts, '--sync-key', file], process.env);
       await expect(syncMain({ ...args, transport: (req) => (calls++, hostCall(req)), log: () => {} }))
-        .rejects.toThrow(/--sync-key .*apikey: an API key is a worker's credential, not a sync key/);
+        .rejects.toThrow(/--sync-key .*apikey: an API key is a runner's credential, not a sync key/);
     } finally {
       for (const [k, v] of [['ACTIONS_ID_TOKEN_REQUEST_URL', saved.url], ['ACTIONS_ID_TOKEN_REQUEST_TOKEN', saved.token], ['BATON_SYNC_KEY', saved.sync], ['BATON_SYNC_TOKEN', saved.bearer]] as const) {
         if (v !== undefined) process.env[k] = v;

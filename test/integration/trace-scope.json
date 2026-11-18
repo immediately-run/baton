@@ -51,7 +51,7 @@
     "at": 5,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   },
-  "S-BTN-37.course-renames › S-BTN-37 a course changes under a claim (renames) > a removal raises min_worker_version: the claim there ends course-changed, old workers stop; a loop with no max_runs is refused": {
+  "S-BTN-37.course-renames › S-BTN-37 a course changes under a claim (renames) > a removal raises min_runner_version: the claim there ends course-changed, old runners stop; a loop with no max_runs is refused": {
     "at": 8,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   },
@@ -59,13 +59,13 @@
     "at": 8,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   },
-  "S-BTN-38.course-stats › S-BTN-38 a course measures itself > a key granted on docs reads its course record — aggregates and ids, no worker; an ops-only key is forbidden": {
+  "S-BTN-38.course-stats › S-BTN-38 a course measures itself > a key granted on docs reads its course record — aggregates and ids, no runner; an ops-only key is forbidden": {
     "at": 19,
     "reason": "docs:T-2's posted path review is off the course graph (§5.3: git can hold it; Baton logs off-graph — not modelled)"
   },
   "S-BTN-39.limits › S-BTN-39 limits agents cannot change > an owner bar on every course, claims only, from +1 h: new Go claims are refused, a held one still advances": {
     "at": 6,
-    "reason": "worker 1 advances with other tags than at its first claim (the model’s TAGS are constant)"
+    "reason": "runner 1 advances with other tags than at its first claim (the model’s TAGS are constant)"
   },
   "S-BTN-40.slow-syncs › S-BTN-40 slow and stale syncs, end to end > a closure reported before the claim’s latest advance does not confirm a later done: only a newer one does": {
     "at": 7,
@@ -87,11 +87,11 @@
     "at": 3,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   },
-  "S-BTN-64.isolation › S-BTN-64 isolation floors > only the session worker is offered the leg; the others’ claims and advances into it are refused, rule isolation": {
+  "S-BTN-64.isolation › S-BTN-64 isolation floors > only the session runner is offered the leg; the others’ claims and advances into it are refused, rule isolation": {
     "at": 1,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   },
-  "S-BTN-64.isolation › S-BTN-64 isolation floors > the declaration is the worker’s latest heartbeat: one that stops declaring session is refused": {
+  "S-BTN-64.isolation › S-BTN-64 isolation floors > the declaration is the runner’s latest heartbeat: one that stops declaring session is refused": {
     "at": 1,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   },

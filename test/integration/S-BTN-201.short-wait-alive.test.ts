@@ -26,7 +26,7 @@ import { Runner } from ${JSON.stringify(join(ROOT, 'src/runner/runner'))};
 const home = ${JSON.stringify(join(bundleDir, 'home'))};
 const r = new Runner({ api: { setSecret: () => {} } as never, home, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
   session: 'waitout', courses: [], stateFile: join(home, 's.json'), beatEvery: 50, log: () => {} });
-const state: Record<string, unknown> = { worker_id: 1, claim: null };
+const state: Record<string, unknown> = { runner_id: 1, claim: null };
 (r as unknown as { state: unknown }).state = { get: () => state, set: () => {}, spool: join(home, 'spool.jsonl') };
 (r as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'baton:B-x', child: null, waiters: [] };
 const leg = (r as unknown as { waitOut(leg: string, course: unknown): Promise<string> });
@@ -42,7 +42,7 @@ afterAll(() => {
   if (bundleDir) rmSync(bundleDir, { recursive: true, force: true });
 });
 
-// The Workers project's filesystem is a memfs with no child processes; this scenario is Node's.
+// The Runners project's filesystem is a memfs with no child processes; this scenario is Node's.
 const nodeOnly = !(globalThis as { navigator?: { userAgent?: string } }).navigator?.userAgent?.includes('Cloudflare');
 describe.skipIf(!nodeOnly)('S-BTN-201 the runner outlives its short waits', () => {
   it('a runner holding a short wait stays a process: no silent exit-0 mid-claim', async () => {

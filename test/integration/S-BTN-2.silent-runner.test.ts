@@ -1,9 +1,9 @@
-// S-BTN-2 silent runner reaped (BATON_SPEC §15), the server half: a worker's sidecar dies and
+// S-BTN-2 silent runner reaped (BATON_SPEC §15), the server half: a runner's sidecar dies and
 // the clock passes its lease timeout. Must hold: reaped exactly at the timeout; the item is
-// re-issued; the dead session can no longer act on it (its heartbeat is worker-reaped, and the
+// re-issued; the dead session can no longer act on it (its heartbeat is runner-reaped, and the
 // holder query its pre-push hook asks names another holder). The client half is R3-1213's.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { beat, claimItem, claimRow, cutover, payload, refresh, register, rows, setClock, syncCall, tick, workerCall } from '../helpers';
+import { beat, claimItem, claimRow, cutover, payload, refresh, register, rows, setClock, syncCall, tick, runnerCall } from '../helpers';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-13T12:00:00Z');
@@ -32,7 +32,7 @@ describe('S-BTN-2 silent runner reaped (server half)', () => {
     await tick();
     expect(await claimRow(c.claim_id)).toMatchObject({ status: 'reaped', end_reason: 'reaped:silent', fence_pending: 0 });
     expect(await rows(`SELECT kind, actor FROM events WHERE claim_id = ? ORDER BY seq`, c.claim_id)).toEqual([
-      { kind: 'claimed', actor: `worker:${dead.id}` }, { kind: 'reaped', actor: 'alarm' }, { kind: 'override', actor: 'baton' }]);
+      { kind: 'claimed', actor: `runner:${dead.id}` }, { kind: 'reaped', actor: 'alarm' }, { kind: 'override', actor: 'baton' }]);
 
     // A reap for silence is a failed attempt (R-BTN-23): the item is re-issued after its
     // 1-hour backoff, with the dead claim's resume record.
@@ -48,9 +48,9 @@ describe('S-BTN-2 silent runner reaped (server half)', () => {
 
     // The dead session, resumed: its heartbeat is refused, and its pre-push hook's holder query
     // (token alone) finds another live holder.
-    expect((await beat('vm-a', dead.secret)).json.code).toBe('worker-reaped');
-    expect(await (await workerCall('/v1/runner/tickets/docs:R3-9001/holder', { cred: 'vm-a' })).json()).toEqual({ held_by_other: true, fence_pending: false });
+    expect((await beat('vm-a', dead.secret)).json.code).toBe('runner-reaped');
+    expect(await (await runnerCall('/v1/runner/tickets/docs:R3-9001/holder', { cred: 'vm-a' })).json()).toEqual({ held_by_other: true, fence_pending: false });
     // The new holder asking about its own item is not "another".
-    expect(await (await workerCall('/v1/runner/tickets/docs:R3-9001/holder', { cred: 'vm-b', secret: live.secret })).json()).toEqual({ held_by_other: false, fence_pending: false });
+    expect(await (await runnerCall('/v1/runner/tickets/docs:R3-9001/holder', { cred: 'vm-b', secret: live.secret })).json()).toEqual({ held_by_other: false, fence_pending: false });
   });
 });

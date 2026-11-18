@@ -17,7 +17,7 @@
 // read and the hash are the script's actual path. Nothing contacts a Baton.
 import { describe, it, expect } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 
@@ -30,7 +30,10 @@ const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).ver
  *  git checkout as the runner's --home. `stale` lays the transition's IR_BATON_* credential
  *  spelling — a release that predates the interface this script speaks (0.1.2's shape). */
 function world(stale = false) {
-  const dir = mkdtempSync(join(tmpdir(), 'baton-start-'));
+  // macOS exposes /var through the canonical /private/var path. The script intentionally uses
+  // physical paths (`pwd -P`/realpath); make the fixture's expected paths physical too. Linux's
+  // temporary directory is already canonical, so this is a no-op there.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'baton-start-')));
   const home = join(dir, 'home');          // the operator's HOME: the install lives under it
   const checkout = join(dir, 'checkout');  // the runner's working checkout (--home)
   const bin = join(dir, 'bin');

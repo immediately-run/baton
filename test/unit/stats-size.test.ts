@@ -12,14 +12,14 @@ describe('the course record at size', () => {
     const { store } = openStore(':memory:');
     for (const m of MIGRATIONS) store.script(m.sql);
     store.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('c', 'h', '[]')`);
-    store.exec(`INSERT INTO workers (id, credential_id, hostname, session_name, harness, kind, secret_hash, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+    store.exec(`INSERT INTO runners (id, credential_id, hostname, session_name, harness, kind, secret_hash, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
                 VALUES (1, 'c', 'h', 's', 'claude-code', 'vm', 'x', 'critical', 900000, 'x', 0, 0)`);
     const T0 = Date.parse('2026-10-01T00:00:00Z');
     store.transaction(() => {
       for (let i = 0; i < 8000; i++) {
         const t = `docs:T-${i % 2000}`;
         const at = T0 + i * 60_000;
-        store.exec(`INSERT INTO claims (id, ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason, station, course_id, offered_ready_since)
+        store.exec(`INSERT INTO claims (id, ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason, station, course_id, offered_ready_since)
                     VALUES (?, ?, 1, ?, 'abcdef', '', ?, 'released', ?, 'released:requested', 'pr-open', 'roadmap-pr', ?)`, i + 1, t, `r${i}`, at, at + 30_000, at - 60_000);
         store.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, to_station, started_at, started_observation, finished_at) VALUES (?, 1, 'implement', 'filed', 'pr-open', ?, 0, ?)`, i + 1, at + 1_000, at + 10_000);
         store.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, started_at, started_observation, abandoned_at) VALUES (?, 2, 'review', 'pr-open', ?, 0, ?)`, i + 1, at + 11_000, at + 30_000);

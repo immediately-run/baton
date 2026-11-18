@@ -69,35 +69,35 @@ async function opsGit() {
   return g;
 }
 
-/** A worker call signed by `key`, with its secret after the first heartbeat. */
-async function workerAs(key: TestKey, path: string, body?: unknown, secret?: string) {
+/** A runner call signed by `key`, with its secret after the first heartbeat. */
+async function runnerAs(key: TestKey, path: string, body?: unknown, secret?: string) {
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
-  const req = await signedRequest(key, ORIGIN + path, { created, body: body === undefined ? undefined : JSON.stringify(body), headers: secret ? { 'X-Worker-Secret': secret } : {} });
+  const req = await signedRequest(key, ORIGIN + path, { created, body: body === undefined ? undefined : JSON.stringify(body), headers: secret ? { 'X-Runner-Secret': secret } : {} });
   const res = await hostCall(req);
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 
-/** Register a granted key as a worker declaring the lab; returns its id and secret. */
+/** Register a granted key as a runner declaring the lab; returns its id and secret. */
 async function up(key: TestKey, hostname: string, name: string, repository: string, over: Record<string, unknown> = {}) {
   const secret = `secret-${name}`;
-  const hb = await workerAs(key, '/v1/runner/heartbeat', {
+  const hb = await runnerAs(key, '/v1/runner/heartbeat', {
     hostname, session_name: name, harness: 'opencode', kind: 'vm', billing: {}, capabilities: [CAP],
     tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository, course: 'rdp-course', version: 1 }],
     secret_hash: await sha256(secret), ...over,
   });
   expect(hb.status).toBe(200);
-  return { id: hb.json.worker_id as number, secret };
+  return { id: hb.json.runner_id as number, secret };
 }
 
-const claimAs = (key: TestKey, secret: string, body: Record<string, unknown>) => workerAs(key, '/v1/runner/claim', { request_id: requestId(), ...body }, secret);
-const advanceAs = (key: TestKey, secret: string, claimId: number, body: Record<string, unknown>) => workerAs(key, `/v1/runner/claims/${claimId}/advance`, body, secret);
-const endAs = (key: TestKey, secret: string, claimId: number, body: Record<string, unknown>) => workerAs(key, `/v1/runner/claims/${claimId}/end`, body, secret);
+const claimAs = (key: TestKey, secret: string, body: Record<string, unknown>) => runnerAs(key, '/v1/runner/claim', { request_id: requestId(), ...body }, secret);
+const advanceAs = (key: TestKey, secret: string, claimId: number, body: Record<string, unknown>) => runnerAs(key, `/v1/runner/claims/${claimId}/advance`, body, secret);
+const endAs = (key: TestKey, secret: string, claimId: number, body: Record<string, unknown>) => runnerAs(key, `/v1/runner/claims/${claimId}/end`, body, secret);
 
 /** The capabilities a claim holds seats on, in id order. */
 const seatsOf = async (claimId: number) => (await rows<{ capability: string }>('SELECT capability FROM claim_seats WHERE claim_id = ? ORDER BY capability', claimId)).map((r) => r.capability);
-/** What a worker is recommended, in order (R-BTN-45). */
-const recommendedBy = (workerId: number) => withCore((core) => (core.claims as unknown as { recommendations: (id: number, l: number) => { recommendations: { ticket_id: string }[] } })
-  .recommendations(workerId, 10).recommendations.map((r) => r.ticket_id));
+/** What a runner is recommended, in order (R-BTN-45). */
+const recommendedBy = (runnerId: number) => withCore((core) => (core.claims as unknown as { recommendations: (id: number, l: number) => { recommendations: { ticket_id: string }[] } })
+  .recommendations(runnerId, 10).recommendations.map((r) => r.ticket_id));
 
 /** docs' board, kept for the mid-leg snapshot of the third test. */
 let docs: Git;
@@ -217,7 +217,7 @@ describe('S-BTN-21 capacity (R-BTN-178)', () => {
     // W2 is still refused, the fence-pending holder keeping its seat.
     expect((await claimAs(w2, W2.secret, { ticket_id: 'ops:RDP-OPS' })).status).toBe(409);
     // The sidecar reports the fence: the seat releases with it.
-    const cleared = await workerAs(w1, '/v1/runner/heartbeat', {
+    const cleared = await runnerAs(w1, '/v1/runner/heartbeat', {
       hostname: 'vm-12', session_name: 'w1', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [CAP],
       tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'rdp-course', version: 1 }],
       fenced: { claim_id: c1.json.claim_id, terminated: true },

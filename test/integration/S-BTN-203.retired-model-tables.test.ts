@@ -7,7 +7,7 @@
 // endpoint answers `not-found`; and the live schema holds none of the tables the migration
 // dropped, so no row of them reaches the core. The heartbeat's window half — a sidecar still
 // posting `model_provider_id`, `billing`, `usage` and `rate_limits` accepted with them ignored —
-// is S-BTN-203's unit half in test/unit/workers.test.ts. Runs on both hosts.
+// is S-BTN-203's unit half in test/unit/runners.test.ts. Runs on both hosts.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { Git, ownerCall, ORIGIN, payload, register, rows, setClock, syncCall } from '../helpers';
 
@@ -22,7 +22,7 @@ const ownerPost = (path: string, body: unknown = {}) =>
   ownerCall(path, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify(body) });
 const retiredTables = () =>
   rows<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN
-    ('model_providers', 'provider_models', 'peak_schedules', 'provider_suspensions', 'worker_providers', 'usage_reports', 'rate_limit_events')
+    ('model_providers', 'provider_models', 'peak_schedules', 'provider_suspensions', 'runner_providers', 'usage_reports', 'rate_limit_events')
     ORDER BY name`);
 
 describe('S-BTN-203 the retired model tables', () => {

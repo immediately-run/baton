@@ -365,7 +365,7 @@ describe('migrateMarkersMain (B-100)', () => {
     mkdirSync(join(dir, 'tickets'), { recursive: true });
     mkdirSync(join(dir, '.baton', 'courses', 'bug-report'), { recursive: true });
     writeFileSync(join(dir, '.baton', 'courses', 'bug-report', 'course.json'), JSON.stringify(BUG_REPORT_COURSE));
-    writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ items: 'tickets', default_course: 'bug-report', courses: [{ id: 'bug-report', version: 1, min_worker_version: 1 }] }));
+    writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ items: 'tickets', default_course: 'bug-report', courses: [{ id: 'bug-report', version: 1, min_runner_version: 1 }] }));
     writeFileSync(join(dir, 'tickets', 'b1.md'), '---\nid: B-1\ntitle: The save button\ncourse: bug-report\n---\n\n## trace\n\nThe work.\n');
     writeFileSync(join(dir, 'tickets', 'b2.md'), '---\nid: B-2\ntitle: Folded already\nstatus: done\ncourse: bug-report\n---\n\n## trace\n\nThe work.\n');
     writeFileSync(join(dir, 'tickets', 'b3.md'), '---\nid: B-3\ntitle: A PR ticket\ncourse: create-pr\n---\n');

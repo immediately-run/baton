@@ -1,8 +1,8 @@
 // S-BTN-220 ticket provenance (BATON_SPEC §4.4 R-BTN-194, §3.3 R-BTN-73; B-126): who last wrote
-// each ticket. Must hold: a ticket whose body the worker identity pushed is served with that
+// each ticket. Must hold: a ticket whose body the runner identity pushed is served with that
 // pusher — the push delivery's immutable `sender.id` and its login, never the commit author —
 // and, beside it, B-127's brief mark naming the owner key that signed the brief; a later push by
-// the worker replaces both; a change no delivery accounts for (none seen, or one past the
+// the runner replaces both; a change no delivery accounts for (none seen, or one past the
 // recording bounds) is `pusher-unknown`, never credited to an owner; and the record rides the
 // board read, the dashboard's ready rows, the recommendations, the claim answer and the ticket
 // read. Provenance is information only: no event is raised, nothing is held (the owner,
@@ -12,7 +12,7 @@ import { captureDispatches, claimItem, cutover, Git, keyCall, placed, recommende
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-13T12:00:00Z');
-/** The forge user id the scenario's worker identity pushes as. */
+/** The forge user id the scenario's runner identity pushes as. */
 const WORKER_ID = 424242;
 /** The owner key that signed the brief, as B-127's mark names it. */
 const FP = 'SHA256:' + 'k'.repeat(43);
@@ -57,14 +57,14 @@ const lw = async (id = 'docs:T-1') => {
 };
 
 describe('S-BTN-220 ticket provenance', () => {
-  it('a ticket body pushed by the worker is served with that pusher and the brief’s signer, everywhere a ticket is served; a later push replaces both', async () => {
+  it('a ticket body pushed by the runner is served with that pusher and the brief’s signer, everywhere a ticket is served; a later push replaces both', async () => {
     const git = new Git();
     git.add('T-1', {}, placed('filed', [], [['implement', 'ready']]));
     await git.post();
     // A first snapshot has no range: nothing is recorded.
     expect(await lw()).toBeNull();
 
-    // The worker identity pushes the ticket's body; the sync posts the head with the brief's
+    // The runner identity pushes the ticket's body; the sync posts the head with the brief's
     // mark (B-127: an owner key signed the commit that last changed the brief).
     const first = shaAfter(git);
     await webhookCall('push', pushOf(git.head!, first, WORKER_ID, 'immediately-run-worker', ['content/roadmap/T-1.mdx']));
@@ -91,7 +91,7 @@ describe('S-BTN-220 ticket provenance', () => {
     const claim = await claimItem('vm-a', one.secret, { ticket_id: 'docs:T-1' });
     expect(claim.json).toMatchObject(want);
 
-    // A later push by the worker, its brief now unsigned, replaces both.
+    // A later push by the runner, its brief now unsigned, replaces both.
     const second = shaAfter(git);
     await setClock(T0 + 120_000);
     await webhookCall('push', pushOf(first, second, WORKER_ID, 'immediately-run-worker', ['content/roadmap/T-1.mdx']));
@@ -116,7 +116,7 @@ describe('S-BTN-220 ticket provenance', () => {
     // An unchanged ticket no traced commit touched records nothing.
     expect(await lw('docs:T-2')).toBeNull();
 
-    // A traced push of T-2 by the worker, then one past the recording bounds (31 commits): the
+    // A traced push of T-2 by the runner, then one past the recording bounds (31 commits): the
     // newer push may have changed T-2's file, so its writer is unknown, not the older pusher.
     const traced = shaAfter(git);
     await webhookCall('push', pushOf(git.head!, traced, WORKER_ID, 'immediately-run-worker', ['content/roadmap/T-2.mdx']));

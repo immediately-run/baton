@@ -43,7 +43,7 @@ export const EXAMPLE_TICKETS = ['R3-9'];
 export const COURSE_IDS = ['R-BTN-21', 'R-BTN-27', 'R-BTN-42', 'R-BTN-43', 'R-BTN-49'];
 
 /** The requirement ids the spec defines: each `**R-BTN-n` that opens a rule, and each bold rule
- *  title followed by its id (`- **The worker declares its own lease timeout** (R-BTN-9)`). */
+ *  title followed by its id (`- **The runner declares its own lease timeout** (R-BTN-9)`). */
 export function definedIds(spec) {
   return new Set([
     ...[...spec.matchAll(/\*\*(R-BTN-\d+)\b/g)].map((m) => m[1]),

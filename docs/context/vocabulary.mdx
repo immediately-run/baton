@@ -32,12 +32,12 @@ station** finishes the ticket.
 **Path.** The legs a ticket has run and the stations they reached, as Baton recorded them: its
 **course history**, which git never writes.
 
-**Worker.** An agent session on a machine, identified by its key. It declares capabilities,
+**Runner.** An agent session on a machine, identified by its key. It declares capabilities,
 a tier ceiling, tags and the courses it can run.
 
-**Capability.** A name a worker declares (`key:anthropic`, `capability:code-generation-llm`) and
+**Capability.** A name a runner declares (`key:anthropic`, `capability:code-generation-llm`) and
 a leg requires; Baton matches the two by name and derives nothing. What the keys and tools a
-worker holds amount to is the worker's own statement, and which model and key a leg uses is the
+runner holds amount to is the runner's own statement, and which model and key a leg uses is the
 course's choice, in its ranking code and instructions (R-BTN-174, §6.10).
 
 **Executor, provides.** The module a CLI runner starts every leg and runs every call into
@@ -54,21 +54,21 @@ its leg starts, for each such capability rule 4 matched for that leg (the ticket
 the leg's), and a claim past capacity is refused (R-BTN-178). Not the tenant's capacity envelope
 (R-BTN-87), which no claim is refused by.
 
-**Claim.** A worker's lease on one ticket. It runs one or more legs and ends **done**,
+**Claim.** A runner's lease on one ticket. It runs one or more legs and ends **done**,
 **suspended** at a station, or **released**.
 
-**Lease, heartbeat, reap, fence.** A claim lives while its worker heartbeats. A silent worker
-is **reaped** at its lease; a **fence** stops a revived worker from writing.
+**Lease, heartbeat, reap, fence.** A claim lives while its runner heartbeats. A silent runner
+is **reaped** at its lease; a **fence** stops a revived runner from writing.
 
 **Gate.** A rule Baton enforces for safety: one holder, capabilities and their capacity, tier, grants, barred
 tags. Everything else is **advice**.
 
-**Tag, barred tag.** Short strings a course gives workers (`family:glm`). A leg can bar tags,
-so some workers may not run it.
+**Tag, barred tag.** Short strings a course gives runners (`family:glm`). A leg can bar tags,
+so some runners may not run it.
 
 **Owner bar, required bar.** Limits a repository's owners set in Baton, which no push changes:
 tags barred across courses, and bars every leg must carry. Under `cooperative` they, like every
-position and count Baton owns, are a **coordination record** for workers that cooperate — a
+position and count Baton owns, are a **coordination record** for runners that cooperate — a
 pusher can re-file a ticket or edit its course and Baton does not try to notice; under
 `protected` the forge and the trusted runners make the same state a boundary (R-BTN-66).
 
@@ -113,7 +113,7 @@ course that handles a leg's condition (R-BTN-160, R-BTN-161). A **leg event** go
 cancelled; Baton alone queues it, and the ticket is withdrawn when it ends (R-BTN-168).
 
 **Administrator, owner, grant.** Administrators run the instance; each repository's owners
-grant worker keys access to it.
+grant runner keys access to it.
 
 **Action, registry.** Everything a credential can ask Baton to do is one action in one registry,
 named `<noun>.<verb>`, with the principals that may call it; the API, the CLI, the dashboard and

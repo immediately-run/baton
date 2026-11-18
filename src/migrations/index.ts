@@ -58,6 +58,7 @@ import workerProfile from './0056_worker_profile.sql';
 import severalClaims from './0057_several_claims.sql';
 import clientVersions from './0058_client_versions.sql';
 import sequences from './0059_sequences.sql';
+import runners from './0061_runners.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -187,4 +188,6 @@ export const MIGRATIONS: Migration[] = [
   // 0059 is B-176's (the per-repository, per-kind sequences, and the `sequence` event kind),
   // renumbered at the merge behind main's 0048–0058, its events CHECK the union with B-234's.
   { id: 59, sql: sequences },
+  // 0061 is B-68's implementation-wide worker → runner migration; 0060 belongs to B-259.
+  { id: 61, sql: runners },
 ];

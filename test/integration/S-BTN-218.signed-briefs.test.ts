@@ -11,7 +11,7 @@
 // and each runner's own verification of the named commits) is test/unit/signed-control.test.ts
 // and S-BTN-219.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, adminSession, course, cutover, keyCall, observe, payload, register, rows, sessionCall, setAdminKeys, setClock, syncCall, ticket, placed, workerCall, withCore } from '../helpers';
+import { Git, adminSession, course, cutover, keyCall, observe, payload, register, rows, sessionCall, setAdminKeys, setClock, syncCall, ticket, placed, runnerCall, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-06T12:00:00Z');
@@ -188,9 +188,9 @@ describe(`S-BTN-218 owner-signed briefs and the signed-control record`, () => {
     expect((await git.post({ control: gated() })).status).toBe(200);
     expect((await keyCall(owner, '/v1/owner/docs/settings', { require_signed_control: true }, 'PUT')).status).toBe(200);
     await cutover();
-    const worker = await register('vm-a');
+    const runner = await register('vm-a');
     const rid = `s202-pair-${Math.random().toString(16).slice(2)}`;
-    const claim = () => workerCall('/v1/runner/claim', { cred: 'vm-a', secret: worker.secret, body: { request_id: rid, ticket_id: 'docs:T-1' } });
+    const claim = () => runnerCall('/v1/runner/claim', { cred: 'vm-a', secret: runner.secret, body: { request_id: rid, ticket_id: 'docs:T-1' } });
     const first = await claim();
     expect(first.status).toBe(200);
     const firstJson = (await first.json()) as { claim_id: number; snapshot_sha: string; control: { required: boolean; agent_command: { read: string } } };
@@ -227,9 +227,9 @@ describe(`S-BTN-218 owner-signed briefs and the signed-control record`, () => {
     } });
     expect((await git.post({ control: own(SHA) })).status).toBe(200);
     await cutover();
-    const worker = await register('vm-a');
+    const runner = await register('vm-a');
     const rid = `s218-off-${Math.random().toString(16).slice(2)}`;
-    const claim = () => workerCall('/v1/runner/claim', { cred: 'vm-a', secret: worker.secret, body: { request_id: rid, ticket_id: 'docs:T-1' } });
+    const claim = () => runnerCall('/v1/runner/claim', { cred: 'vm-a', secret: runner.secret, body: { request_id: rid, ticket_id: 'docs:T-1' } });
     // The setting is off: the answer gates nothing — but the pairing is stored all the same.
     const first = await claim();
     expect(first.status).toBe(200);

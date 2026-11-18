@@ -6,7 +6,7 @@
 //
 // The projection is the model's state, nothing more (the item's decision): the head's
 // observation numbers, each ticket of the model's repository and course as the head posts it,
-// claims with their legs, holds, owner bars, the workers' tags and the required bar — read from
+// claims with their legs, holds, owner bars, the runners' tags and the required bar — read from
 // the Store, never from wall-clock time (the scenarios' fake clock is the model's clock, and the
 // model's time is abstract). What the model abstracts (other repositories, other courses — its
 // README's "Not modelled") is left out of the projection, not out of the trace: a step on them
@@ -30,7 +30,7 @@ export interface TicketView {
 }
 export interface ClaimView {
   ticket: string;
-  worker: number;
+  runner: number;
   status: string;
   endReason: string | null;
   station: string;
@@ -53,11 +53,11 @@ export interface Projection {
   claims: Record<string, ClaimView>;
   held: Record<string, boolean>;
   ownerBars: { tag: string; applies: string; course: string; legs: string[] }[];
-  workers: Record<string, string[]>;
+  runners: Record<string, string[]>;
   required: { course: string; leg: string; except?: string[]; tag_prefix: string }[];
   /** Courses of the model's repository whose file is not the model's (R-BTN-64: not modelled). */
   courseFile: string | null;
-  /** Each worker's last call and lease, by the core's clock: the checker's evidence that an
+  /** Each runner's last call and lease, by the core's clock: the checker's evidence that an
    *  alarm reap or fence timeout came after the lease ran out. Not a reason to record a step. */
   liveness: Record<string, { lastSeen: number; lease: number }>;
 }
@@ -85,17 +85,17 @@ export function projectState(store: Store, now: number): Projection {
     tickets[c.ticket_id] = { present: false, path: [], queued: null, closed: c.closed_as, bars: {}, tier: null, status: null };
   }
   const claims: Record<string, ClaimView> = {};
-  for (const c of rows<{ id: number; ticket_id: string; worker_id: number; status: string; end_reason: string | null; station: string | null; leg: string | null;
+  for (const c of rows<{ id: number; ticket_id: string; runner_id: number; status: string; end_reason: string | null; station: string | null; leg: string | null;
     start_path: string; claim_observation: number; end_observation: number | null; regressed_since: number | null; ended_regressed: number;
     confirmed_at: number | null; fence_pending: number; course_id: string | null }>(
-    `SELECT id, ticket_id, worker_id, status, end_reason, station, leg, start_path, claim_observation, end_observation, regressed_since, ended_regressed,
+    `SELECT id, ticket_id, runner_id, status, end_reason, station, leg, start_path, claim_observation, end_observation, regressed_since, ended_regressed,
             confirmed_at, fence_pending, course_id FROM claims ORDER BY id`)) {
     if (!inScope(c.ticket_id) || (c.course_id ?? MODEL_COURSE) !== MODEL_COURSE) continue;
     const legs = rows<{ leg: string; to_station: string | null; bars: string; finished_at: number | null; abandoned_at: number | null }>(
       'SELECT leg, to_station, bars, finished_at, abandoned_at FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id);
     const running = legs.find((l) => l.to_station == null && l.abandoned_at == null && l.finished_at == null);
     claims[String(c.id)] = {
-      ticket: c.ticket_id, worker: c.worker_id, status: c.status, endReason: c.end_reason, station: c.station ?? '', leg: c.leg ?? '',
+      ticket: c.ticket_id, runner: c.runner_id, status: c.status, endReason: c.end_reason, station: c.station ?? '', leg: c.leg ?? '',
       finished: legs.filter((l) => l.to_station != null).map((l) => l.leg), legBars: running ? (JSON.parse(running.bars) as string[]) : [],
       startPath: legsOf(c.start_path), claimObs: c.claim_observation, endObs: c.end_observation ?? -1,
       regressed: c.regressed_since != null, endedRegressed: c.ended_regressed === 1, confirmed: c.confirmed_at != null, fencePending: c.fence_pending === 1,
@@ -107,20 +107,20 @@ export function projectState(store: Store, now: number): Projection {
     `SELECT tag, applies, course, legs FROM owner_bars WHERE repository_id = ? AND lifted_at IS NULL AND starts_at <= ? AND (ends_at IS NULL OR ends_at > ?)
        AND (course = '*' OR course = ?) ORDER BY id`, MODEL_REPOSITORY, now, now, MODEL_COURSE)
     .map((b) => ({ tag: b.tag, applies: b.applies, course: b.course, legs: JSON.parse(b.legs) as string[] }));
-  const workers: Record<string, string[]> = {};
+  const runners: Record<string, string[]> = {};
   const liveness: Projection['liveness'] = {};
-  for (const w of rows<{ id: number; last_seen_at: number; lease_timeout_ms: number }>('SELECT id, last_seen_at, lease_timeout_ms FROM workers ORDER BY id')) {
-    workers[String(w.id)] = [];
+  for (const w of rows<{ id: number; last_seen_at: number; lease_timeout_ms: number }>('SELECT id, last_seen_at, lease_timeout_ms FROM runners ORDER BY id')) {
+    runners[String(w.id)] = [];
     liveness[String(w.id)] = { lastSeen: w.last_seen_at, lease: w.lease_timeout_ms };
   }
-  for (const t of rows<{ worker_id: number; tag: string }>('SELECT worker_id, tag FROM worker_tags ORDER BY worker_id, tag')) (workers[String(t.worker_id)] ??= []).push(t.tag);
+  for (const t of rows<{ runner_id: number; tag: string }>('SELECT runner_id, tag FROM runner_tags ORDER BY runner_id, tag')) (runners[String(t.runner_id)] ??= []).push(t.tag);
   const repo = rows<{ required_bars: string | null }>('SELECT required_bars FROM repositories WHERE id = ?', MODEL_REPOSITORY)[0];
   const course = rows<{ course_json: string }>('SELECT course_json FROM courses WHERE repository_id = ? AND id = ?', MODEL_REPOSITORY, MODEL_COURSE)[0];
   return {
     counter: head?.last_handed_out ?? 0,
     lastAccepted: head?.observation ?? 0,
     outstanding: head?.handed_out_at != null && now - head.handed_out_at < 10 * 60_000,
-    tickets, claims, held, ownerBars, workers,
+    tickets, claims, held, ownerBars, runners,
     required: repo?.required_bars ? JSON.parse(repo.required_bars) : [],
     courseFile: course?.course_json ?? null,
     liveness,
@@ -230,7 +230,7 @@ export function recordingStore(inner: Store, origin: () => Origin | null, now: (
 }
 
 function empty(): Projection {
-  return { counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], workers: {}, required: [], courseFile: null, liveness: {} };
+  return { counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: {}, required: [], courseFile: null, liveness: {} };
 }
 
 // ── ITF (https://apalache-mc.org/docs/adr/015adr-trace.html) ─────────────────────────────

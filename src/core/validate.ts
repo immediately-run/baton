@@ -1,4 +1,4 @@
-// validate.ts — every rule for untrusted worker and owner input (BATON_SPEC §10.4, §6.8, §6.9,
+// validate.ts — every rule for untrusted runner and owner input (BATON_SPEC §10.4, §6.8, §6.9,
 // §5). One module, called by every endpoint before any write (R3-1211); a value that fails is
 // refused with `invalid-params` naming the field, never trimmed into shape.
 import { BatonError, RECOMMENDED_CLIENT } from './http';
@@ -36,7 +36,7 @@ export const GIT_REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
 export const GIT_BRANCH = /^(?!.*\.\.)(?!.*@\{)(?![/.])(?!.*[/.]$)[^\u0000-\u0020\u007f~^:?*[\\]{1,255}$/;
 /** Repositories one heartbeat may name a tier ceiling for (spec-silent, recorded on R3-1231). */
 export const TIER_CEILINGS_MAX = 64;
-/** A course's `version` and a worker's declared one: non-negative, at most this. */
+/** A course's `version` and a runner's declared one: non-negative, at most this. */
 export const COURSE_VERSION_MAX = 1_000_000_000;
 /** Courses in one registry, and courses one heartbeat declares (spec-silent, recorded on R3-1231). */
 export const COURSES_MAX = 64;
@@ -49,7 +49,7 @@ export const qualify = (repository: string, local: string) => `${repository}:${l
 export const repositoryOf = (ticketId: string) => ticketId.slice(0, ticketId.indexOf(':'));
 export const localOf = (ticketId: string) => ticketId.slice(ticketId.indexOf(':') + 1);
 
-/** A repository named by a worker or the owner (`?repository=`, a cutover, a held accept). */
+/** A repository named by a runner or the owner (`?repository=`, a cutover, a held accept). */
 export function checkRepositoryId(v: unknown, field = 'repository'): string {
   if (typeof v !== 'string' || !REPOSITORY_ID.test(v)) throw new BatonError('invalid-params', `${field}: must be a repository id`);
   return v;
@@ -135,7 +135,7 @@ export interface Heartbeat {
   /** Per repository (R-BTN-66): `{repository: tier}`, checked against each ladder at the heartbeat. */
   tier_ceilings: Record<string, string>;
   lease_timeout_s: number;
-  /** The courses the worker's checkouts run, at their versions (R-BTN-22, R-BTN-48): rule 9. */
+  /** The courses the runner's checkouts run, at their versions (R-BTN-22, R-BTN-48): rule 9. */
   courses: { repository: string; course: string; version: number }[];
   last_activity_at?: number;
   test_harness: boolean;
@@ -145,7 +145,7 @@ export interface Heartbeat {
   concurrency: number;
   transcripts: TranscriptReport[];
   transcript_refusals: { index: number; code: string; message: string }[];
-  /** R-BTN-103: the repositories and `asks` this session delivers notices for, as a worker courier,
+  /** R-BTN-103: the repositories and `asks` this session delivers notices for, as a runner courier,
    *  and the entries refused as malformed. */
   couriers: { entries: { repository: string; asks: string[] }[]; refused: { repository: string; code: string }[] };
   /** §12.8 (B-145, R-BTN-180): the protection checker's reports, one per repository; the core
@@ -175,7 +175,7 @@ export interface Heartbeat {
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number; claim_id?: number }
 
-/** §6.6 R-BTN-9: the worker declares its lease timeout, clamped to [900, 86400] s, default 900. */
+/** §6.6 R-BTN-9: the runner declares its lease timeout, clamped to [900, 86400] s, default 900. */
 export const clampLease = (s: unknown) => (typeof s === 'number' && Number.isFinite(s) ? Math.min(86400, Math.max(900, Math.round(s))) : 900);
 
 /** R-BTN-4 (B-188): the most claims a runner may declare it runs at once, and a grant allow. */
@@ -279,7 +279,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
       .map((e) => ({ claim_id: e.claim_id, seq: e.seq })),
     profile,
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
-    // heartbeat would stop last_seen_at and get a live worker reaped.
+    // heartbeat would stop last_seen_at and get a live runner reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
   };
 }
@@ -391,7 +391,7 @@ export function checkDetail(kind: string, detail: unknown, field: string): Recor
     if (type === NUM && (typeof v !== 'number' || !Number.isFinite(v))) bad(`${field}.${k}`, 'must be a number');
     if (type === BOOL && typeof v !== 'boolean') bad(`${field}.${k}`, 'must be a boolean');
     // The shape here; whose pull request it is — the claim's home repository or one of its
-    // `repos:`, by R-BTN-92's link rule — is checked where the claim is known (WorkerApi).
+    // `repos:`, by R-BTN-92's link rule — is checked where the claim is known (RunnerApi).
     if (type === PR && (typeof v !== 'string' || v.length > 1000 || !v.startsWith('https://'))) bad(`${field}.${k}`, 'must be a pull request URL');
     if (type === TEXT) freeText(v, `${field}.${k}`, 200);
   }
@@ -433,21 +433,21 @@ export function checkActivity(a: unknown, field: string): ActivityReport {
 
 export const RELEASE_REASONS = ['requested', 'owner-cancel', 'provider-suspended'] as const;
 
-export function checkMessage(body: unknown): { to_worker_id: number; kind: 'release' | 'status_request' | 'wind-down'; payload: Record<string, unknown> | null } {
+export function checkMessage(body: unknown): { to_runner_id: number; kind: 'release' | 'status_request' | 'wind-down'; payload: Record<string, unknown> | null } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
-  if (!isInt(b.to_worker_id) || (b.to_worker_id as number) <= 0) bad('to_worker_id', 'must be a worker id');
-  if (b.kind === 'status_request') return { to_worker_id: b.to_worker_id as number, kind: 'status_request', payload: null };
+  if (!isInt(b.to_runner_id) || (b.to_runner_id as number) <= 0) bad('to_runner_id', 'must be a runner id');
+  if (b.kind === 'status_request') return { to_runner_id: b.to_runner_id as number, kind: 'status_request', payload: null };
   // B-109: an owner's wind-down — the graceful face of the reap, delivered by the heartbeat
   // and acknowledged like any message; the runner drains, completing its leg first.
-  if (b.kind === 'wind-down') return { to_worker_id: b.to_worker_id as number, kind: 'wind-down', payload: null };
+  if (b.kind === 'wind-down') return { to_runner_id: b.to_runner_id as number, kind: 'wind-down', payload: null };
   if (b.kind !== 'release') bad('kind', "must be 'release', 'status_request' or 'wind-down'");
   const p = b.payload;
   if (!isObj(p)) bad('payload', 'a release names {ticket_id, reason}');
   const x = p as Record<string, unknown>;
   const ticket_id = matches(TICKET_ID, 'payload.ticket_id')(x.ticket_id);
   if (!RELEASE_REASONS.includes(x.reason as never)) bad('payload.reason', `must be one of ${RELEASE_REASONS.join(', ')}`);
-  return { to_worker_id: b.to_worker_id as number, kind: 'release', payload: { ticket_id, reason: x.reason } };
+  return { to_runner_id: b.to_runner_id as number, kind: 'release', payload: { ticket_id, reason: x.reason } };
 }
 
 export function checkShadowReport(body: unknown) {
@@ -485,7 +485,7 @@ export function checkClaim(body: unknown): { request_id: string; ticket_id: stri
   };
 }
 
-/** A URL a worker or sync points at (a hand-off comment, a review): https, at most 1000
+/** A URL a runner or sync points at (a hand-off comment, a review): https, at most 1000
  *  characters, no whitespace or control character. Shown as text and linked only through
  *  `httpsLink` (§10.4). */
 export const isHttpsPointer = (v: unknown): v is string =>
@@ -1178,7 +1178,7 @@ const CHANNEL = /^[A-Za-z0-9][A-Za-z0-9 ._:@/-]{0,63}$/;
 /** A heartbeat's `couriers` (R-BTN-103): `[{repository, asks: [<label>]}]`, absent for none. As
  *  with `transcripts`, a list that is not one, or is over its bound, refuses the heartbeat; an entry that
  *  fails its own check — a repository id, a label, a repeat — is returned refused and reported,
- *  never refusing the heartbeat, which would stop `last_seen_at` and get a live worker reaped. */
+ *  never refusing the heartbeat, which would stop `last_seen_at` and get a live runner reaped. */
 export function checkCouriers(v: unknown): { entries: { repository: string; asks: string[] }[]; refused: { repository: string; code: string }[] } {
   if (v === undefined) return { entries: [], refused: [] };
   if (!Array.isArray(v) || v.length > COURIERS_MAX) bad('couriers', `must be a list of at most ${COURIERS_MAX}`);

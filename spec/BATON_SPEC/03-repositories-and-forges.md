@@ -307,7 +307,7 @@ repository reachable over SSH is enough (R-BTN-105).
   want; it never computes or carries state. Besides the want a delivery produces two things:
   a GitHub push's record for ticket provenance (B-126, R-BTN-194, below), and the scope
   cross-check (B-134, §12.9): a push by a worker pusher of the owners'
-  `worker_pushers` setting to a repository no open claim's scope covers records an
+  `runner_pushers` setting to a repository no open claim's scope covers records an
   `unclaimed-write` finding from the delivery's own fields — no repository content is read
   (an open claim is one still holding its ticket, as rule 3 reads it: active, or completed
   and unconfirmed, or reaped fence-pending, so a delivery of an ordinary leg-end push that

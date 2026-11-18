@@ -4,7 +4,7 @@
 // `{course: roadmap-pr, leg: *, except: [implement, review, adjudicate], tag_prefix: family:}`,
 // `retry` of one backoff, and a grant `max_tier` of routine; an agent then commits a sync that
 // drops every `family:` bar, a `baton.json` with no backoff, and a ticket re-tiered `routine` from
-// `critical`. Must hold: from +1 h Go workers are refused new claims `barred-tag` while a held Go
+// `critical`. Must hold: from +1 h Go runners are refused new claims `barred-tag` while a held Go
 // claim still advances; the `chore` bar bars no `roadmap-pr` leg; the next snapshot's `fix` and
 // `merge` legs are stored `waiting` on `policy` and listed under Needs you; the retry policy is
 // the owner's; the re-tiered ticket is offered to the routine-capped key (a ticket's tier is
@@ -29,9 +29,9 @@ const uiState = async () => (await (await sessionCall(await adminSession(admin),
 
 const own = (path: string, body: unknown, method?: string) => keyCall(owner, `/v1/owner/docs${path}`, body, method);
 
-async function workerAs(key: TestKey, path: string, body?: unknown, secret?: string) {
+async function runnerAs(key: TestKey, path: string, body?: unknown, secret?: string) {
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
-  const req = await signedRequest(key, ORIGIN + path, { created, body: body === undefined ? undefined : JSON.stringify(body), headers: secret ? { 'X-Worker-Secret': secret } : {} });
+  const req = await signedRequest(key, ORIGIN + path, { created, body: body === undefined ? undefined : JSON.stringify(body), headers: secret ? { 'X-Runner-Secret': secret } : {} });
   const res = await hostCall(req);
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
@@ -56,7 +56,7 @@ beforeEach(async () => {
 describe('S-BTN-39 limits agents cannot change', () => {
   it('an owner bar on every course, claims only, from +1 h: new Go claims are refused, a held one still advances', async () => {
     expect((await own('/bars', { course: '*', tag: 'account:go_plus', applies: 'claim', starts_at: T0 + H, reason: 'go-quota' })).status).toBe(200);
-    // Scheduled, not yet in force: the observation shows it, and a Go worker still claims.
+    // Scheduled, not yet in force: the observation shows it, and a Go runner still claims.
     const go1 = await register('vm-a', { tags: ['account:go_plus'] });
     const held = await claimItem('vm-a', go1.secret, { ticket_id: 'docs:T-1' });
     expect(held.status).toBe(200);
@@ -69,7 +69,7 @@ describe('S-BTN-39 limits agents cannot change', () => {
     // Claims only: the held Go claim advances.
     expect((await advance('vm-a', go1.secret, held.json.claim_id, { leg: 'implement' })).json).toMatchObject({ ok: true, station: 'filed' });
     expect((await advance('vm-a', go1.secret, held.json.claim_id, { reached: 'pr-open', leg: 'review' })).json).toMatchObject({ ok: true, station: 'pr-open' });
-    // Another worker is not barred.
+    // Another runner is not barred.
     const other = await register('test', { tags: ['account:other'] });
     expect((await claimItem('test', other.secret, { ticket_id: 'docs:T-2' })).status).toBe(200);
   });
@@ -137,8 +137,8 @@ describe('S-BTN-39 limits agents cannot change', () => {
     const k = await makeKey('ssh-ed25519', 'k');
     expect((await own('/grants', { public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue'], max_tier: 'routine' })).status).toBe(200);
     const secret = 'secret-k';
-    expect((await workerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret), tier_ceiling: 'critical' }))).json).toMatchObject({ worker_id: expect.any(Number) });
-    expect((await workerAs(k, '/v1/runner/claim', { request_id: 'req-k-critical', ticket_id: 'docs:T-4' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 5 });
+    expect((await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret), tier_ceiling: 'critical' }))).json).toMatchObject({ runner_id: expect.any(Number) });
+    expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-critical', ticket_id: 'docs:T-4' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 5 });
     // An agent re-tiers T-4 in git: the tier is git's, and the grant's cap now admits it.
     git.add('T-4', { rank: 4, tier: 'routine' });
     expect(await git.post()).toMatchObject({ status: 200 });
@@ -146,7 +146,7 @@ describe('S-BTN-39 limits agents cannot change', () => {
     expect(state.ready.find((t: { id: string }) => t.id === 'docs:T-4')).toMatchObject({ tier: 'routine', changed_in: git.head });
     // The dashboard's limits show the grant's cap by name.
     expect(state.limits.grants).toEqual([expect.objectContaining({ repository_id: 'docs', hostname: 'k-host', max_tier: 'routine' })]);
-    expect((await workerAs(k, '/v1/runner/claim', { request_id: 'req-k-routine', ticket_id: 'docs:T-4' }, secret)).json).toMatchObject({ ticket_id: 'docs:T-4' });
+    expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-routine', ticket_id: 'docs:T-4' }, secret)).json).toMatchObject({ ticket_id: 'docs:T-4' });
   });
   it('a bar that releases holders sends each tagged holder one release, once; the end it asks for is no failed attempt', async () => {
     const dispatched = await captureDispatches();
@@ -206,14 +206,14 @@ describe('S-BTN-39 limits agents cannot change', () => {
     expect(JSON.parse(refused[0].violations)).toEqual([expect.objectContaining({ rule: 'required-bar', path: 'legs.fix' })]);
   });
 
-  it('the heartbeat carries the bars of the worker’s repositories only', async () => {
+  it('the heartbeat carries the bars of the runner’s repositories only', async () => {
     const opsOwner = await makeKey('ssh-ed25519', 'ops-owner');
     expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', owner_keys: [opsOwner.publicKey] })).status).toBe(200);
     expect((await keyCall(opsOwner, '/v1/owner/ops/bars', { course: '*', tag: 'account:x', applies: 'claim', reason: 'ops-only' })).status).toBe(200);
     expect((await own('/bars', { course: '*', tag: 'account:y', applies: 'claim', reason: 'docs-only' })).status).toBe(200);
     const k = await makeKey('ssh-ed25519', 'k');
     await own('/grants', { public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue'] });
-    const hb = await workerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256('s') }));
+    const hb = await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256('s') }));
     expect(hb.json.bars).toEqual([expect.objectContaining({ repository: 'docs', tag: 'account:y' })]);
   });
 });

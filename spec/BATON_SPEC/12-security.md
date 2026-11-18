@@ -1022,7 +1022,7 @@ carries it, and two halves report what a leg did outside it:
   those sources exist, and an `egress` action is judged against nothing meanwhile (no host
   scope is defined); the source that fills the shape arrives with the scope for it.
 - **The scope cross-check is the control.** Every push delivery (R-BTN-73) whose pusher the
-  pushed repository's owners named in their `worker_pushers` setting is checked against the
+  pushed repository's owners named in their `runner_pushers` setting is checked against the
   claims open at the time — a claim still holding its ticket as rule 3 reads it (active, or
   completed and unconfirmed, or reaped fence-pending), so the delivery of an ordinary final
   push (R-BTN-8: the push precedes the end) that lands after the claim's `end()` still finds
