@@ -1238,6 +1238,33 @@ describe('S-BTN-41 the runner', () => {
     expect(await rows(`SELECT status FROM messages WHERE kind = 'unblocked'`)).toEqual([{ status: 'acknowledged' }]);
   }, 30_000);
 
+  it('an unblocked message that arrives while a leg runs is acknowledged at that beat and logged once (R-BTN-77)', async () => {
+    // Found live 2026-11-18: the acknowledgement waited for the claim's end, so Baton delivered
+    // the cue again with every beat of a 40-minute leg and the runner logged it each time.
+    const lines: string[] = [];
+    home.leg('build', `await new Promise((resolve) => setTimeout(resolve, 3000));
+  out(ctx, 'build ran');
+  return { reached: 'built', next: 'check' };`);
+    home.leg('check', `out(ctx, 'check ran');
+  return { reached: 'checked', next: 'merge' };`);
+    home.leg('merge', `out(ctx, 'merge ran');
+  return { reached: 'merged' };`, true);
+    const runner = makeRunner({ log: (l: string) => lines.push(l), now: () => Date.now() });
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    const done = runner.work();
+    await until(async () => lines.filter((l) => l.includes("docs:T-1's build has run")));
+    const [{ id: worker }] = await rows<{ id: number }>('SELECT id FROM workers');
+    await rows(`INSERT INTO messages (kind, payload_json, from_principal, to_worker_id, sent_at, status) VALUES ('unblocked', '{"tickets":[]}', 'baton', ?, ?, 'pending')`, worker, Date.now());
+    // Acknowledged while the build leg still runs — not held for the claim's end.
+    await until(async () => (await rows<{ status: string }>(`SELECT status FROM messages WHERE kind = 'unblocked'`)).filter((r) => r.status === 'acknowledged'));
+    expect(lines.join('\n')).not.toContain('build ran');
+    await until(async () => lines.filter((l) => l.includes('docs:T-1 done at')));
+    runner.stop();
+    await done;
+    expect(lines.filter((l) => l.includes('baton: message unblocked received'))).toHaveLength(1);
+  }, 30_000);
+
   // B-108 — the runner's liveness line: while a leg runs, each beat says how long and how live,
   // so a wedge forms in the log instead of silence. The stub concludes the agent; this line
   // only makes the wait visible.
