@@ -340,3 +340,26 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
 - **Resolution:** reported to the owner at 01:19; these are the owner's decisions.
 - **Autonomous handling:** as in 2026-11-15: the runner logs why it is idle, and an owner channel
   carries the holds and unconfirmed ends. *No ticket yet.*
+
+## 2026-11-18 04:18 — B-174's merge leg broke main, then waited on the npm release gate
+
+- **Host:** bering (runner-1), GitHub Actions
+- **Tickets:** B-174 (PR #276)
+- **Why it was needed:** the merge leg merged #276 at 04:20 and then archived the ticket by hand
+  with git, straight on main (97a3625). It committed the `git mv` without the staged edits
+  (`status: done`, the status entry), so `check:wiki` failed on main. The agent could not fetch
+  the CI logs (the log host failed TLS from the sandbox), re-ran the job as a flake, then
+  reproduced the failure in a clean checkout and pushed the fix (e94e048) at 04:51. It then waited
+  in a silent loop for main's `ci` run to finish. That run's `release` job waited on the `npm`
+  environment's approval until 05:22, so after 15 quiet minutes the runner ended the leg
+  `agent_concluded_idle` (05:06). The ticket still closed `done at merged`. It is the same gate
+  that held B-193's merge leg on 2026-11-17. The supervisor read the leg's archive to explain the
+  idle end. The archive also showed the collector's `opencode session list` going through the
+  agent shim and trying a second server on the leg's port; fieldhouse #33 fixes that.
+- **Resolution:** none needed for B-174, which merged and was archived. Main was red for about 30
+  minutes.
+- **Autonomous handling:** the merge leg archives a ticket with `baton tickets done`, which
+  writes the archive commit whole, and never with hand-run git. A merge leg waits only for the
+  checks that gate main (`test`), not for a run that holds a release for the owner's approval,
+  or the `release` job no longer blocks the run's conclusion. The leg prints a line at least
+  every few minutes while it waits, so a wait is not read as idle. *No ticket yet.*
