@@ -20,6 +20,12 @@ import { pathToFileURL } from 'node:url';
 const [, , call, script] = process.argv;
 const stop = new AbortController();
 
+// macOS injects this CoreFoundation implementation detail into every new process even when the
+// parent supplies an otherwise empty environment (`env -i node …`). A replay's contract is the
+// explicit allowlist assembled by replayEnvironment; remove the host-added name before any
+// repository module loads. It is absent on Linux, and ordinary non-replay legs are unchanged.
+if (process.env.BATON_REPLAY === '1') delete process.env.__CF_USER_TEXT_ENCODING;
+
 const finish = (out, code) => {
   writeSync(1, `\n${JSON.stringify(out)}\n`);
   process.exit(code);

@@ -37,6 +37,11 @@ function world(overrides: { claude?: string; gh?: string; node?: string; originN
   stub('claude', overrides.claude ?? 'echo ready');
   stub('gh', overrides.gh ?? 'exit 0');
   if (overrides.node != null) stub('node', overrides.node);
+  // `setsid` is supplied by util-linux in the Linux cloud container, but macOS has no native
+  // command. Keep Linux exercising the real detach operation; on other development hosts a
+  // transparent test shim preserves argv/process lifetime so the rest of the launch contract is
+  // still tested without weakening cloud-runner.sh's production preflight.
+  if (spawnSync('sh', ['-c', 'command -v setsid >/dev/null 2>&1']).status !== 0) stub('setsid', 'exec "$@"');
   // The origin every GitHub-shaped check reads: a bare `docs.git`, seeded with one commit, and
   // a clean clone of it as the runner's home checkout.
   const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
