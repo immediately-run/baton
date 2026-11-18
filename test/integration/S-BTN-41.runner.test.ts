@@ -1260,7 +1260,11 @@ describe('S-BTN-41 the runner', () => {
       home.commit();
       await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
       // work() runs the heartbeat interval, so beats land while the leg runs — as `baton run`
-      // does; runOnce alone beats only between claims.
+      // does; runOnce alone beats only between claims. The runner is stopped only once the
+      // claim has completed: a `stop()` while a leg still runs is a hard stop, which kills the
+      // leg's group at once and ends the claim `released:lease-lost` (R-BTN-24's designed path,
+      // no hand-off) — the merge leg's evidence line lands well before its process exits, so
+      // stopping on it races the very end this test reads (a loaded machine widens the window).
       const done = runner.work();
       // Wait for the end the test asserts, not the merge leg's last evidence line: the leg
       // writes its evidence before its process exits, and stopping between the two kills it as
