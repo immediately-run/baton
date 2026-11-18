@@ -317,8 +317,11 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   Before the outage, B-171's review passed and its merge leg merged #273 at 20:53, both without
   their leg instructions (see 20:18). The agent merged main into a branch that conflicted (it
   edited the deleted `src/ui/app.js`). The merge commit's deploy succeeded (dc9b280, 21:07).
-- **Resolution:** none yet. The quota resets at 00:00 UTC. Then the sync must run again for
-  dc9b280 (re-run 44174192358, or the next push), so that Baton records B-171's merge.
+- **Resolution:** none yet. The quota resets at 00:00 UTC, but at 00:17 on 2026-11-18 every
+  call still failed (the runners' heartbeats and the owner-key `board` read), so either the cause
+  is not the daily quota or the reset did not clear it; the owner was alerted to check
+  Cloudflare. Once Baton answers, the sync must run again for dc9b280 (re-run 44174192358, or
+  the next push), so that Baton records B-171's merge.
 - **Autonomous handling:** as in 2026-11-15 — Baton counts its reads against the day's budget
   and warns before the quota runs out (*no ticket yet*). The read cuts still open are B-239,
   B-243 and B-250, and B-242, B-240 and B-250 are prioritised for the dashboard poll's reads. A
