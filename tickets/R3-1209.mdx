@@ -3,7 +3,7 @@ title: "R3-1209 — Verify: Baton read-only view on baton.immediately.run"
 id: R3-1209
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-18
 repos:
   - docs
 tags:
@@ -60,7 +60,7 @@ None to write. The automated half is S-BTN-13 in CI, on both hosts, for the comm
 
 - [ ] **live leg** (`human-operator`): `https://baton.immediately.run/` asks for the owner's sign-in (Access where configured, then R-BTN-155's code) and then shows the Ready view; another account is refused
 - [ ] **live leg** (`human-operator`): the Ready view's snapshot sha equals `git rev-parse origin/main` within one sync, and for `routine`, `judgement` and `critical` its order equals the course's own claim order at that sha (the compare tool exits 0)
-- [ ] the latest `baton-deploy` run's test job shows `S-BTN-13` green
+- [x] the latest `baton-deploy` run's test job shows `S-BTN-13` green — 2026-11-18: run 44385914655 on `8ed626dd` (main's tip, the commit that deployed) is green in both `test` and `deploy`; the test job runs `npm run test:no-quint`, the whole suite, and S-BTN-13 passed on both hosts at that sha in this leg's checkout (`npx vitest run test/integration/S-BTN-13.board-ordering.test.ts --project cloudflare --project local`: 2 files, 4 tests green — GitHub's raw run logs are unreachable from the sandbox, so the job's green conclusion plus the same suite at the same sha locally is the evidence)
 - [ ] `npm run verify` green
 
 ## Status
@@ -70,3 +70,5 @@ _(filed 2026-10-13)_
 _(2026-10-20: rescoped to the current-state spec, PR #71 — the exit is §16.2 step 1 as written, and the Providers check is dropped.)_
 
 _(2026-11-09: the staging deployment is retired — B-224, the owner: a home repository binds to one Baton, and every registered one binds to production, so staging held nothing and tested nothing. S-BTN-13 runs in CI's test job before the deploy; nothing runs against a deployed Worker.)_
+
+_(2026-11-18: the sitting's agent half is done and the live half is the owner's, as the ticket's `Requires` splits it. Criterion 3 is checked above with its evidence. Criterion 4 is red on docs' main as of this leg: docs `ci` run 44352313747 (head `045cad68`, 2026-11-18 16:52 UTC) fails in its `verify` job on `check:archive`'s `R3-1350.mdx:92` unmarked-deferral — B-261 tracks it, and the fix is docs roadmap curation, the docs owner's judgement; the sitting re-runs `npm run verify` once docs' main is green. Criteria 1–2 are untouched: this leg's sandbox cannot reach `baton.immediately.run` (R3-1208's leg found the same fence) and holds no owner credential — the sign-in, the Ready view read and the compare run are the owner's sitting; the compare tool is still `node scripts/baton-sync.mjs --compare`, R3-1216's swap not having landed.)_
