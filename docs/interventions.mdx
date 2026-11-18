@@ -317,13 +317,26 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   Before the outage, B-171's review passed and its merge leg merged #273 at 20:53, both without
   their leg instructions (see 20:18). The agent merged main into a branch that conflicted (it
   edited the deleted `src/ui/app.js`). The merge commit's deploy succeeded (dc9b280, 21:07).
-- **Resolution:** none yet. The quota resets at 00:00 UTC, but at 00:17 on 2026-11-18 every
-  call still failed (the runners' heartbeats and the owner-key `board` read), so either the cause
-  is not the daily quota or the reset did not clear it; the owner was alerted to check
-  Cloudflare. Once Baton answers, the sync must run again for dc9b280 (re-run 44174192358, or
-  the next push), so that Baton records B-171's merge.
+- **Resolution:** Baton answered again from about 00:38 UTC on 2026-11-18 (at 00:17 every call
+  still failed, so the owner was alerted to check Cloudflare; the cause is unconfirmed). The
+  reaper ended B-171's merge leg `reaped:silent` at 00:40. The scheduled sync of dc9b280 at 00:17
+  had failed too; at 01:18 the supervisor re-ran it (44206539698), which succeeded, and Baton
+  recorded B-171's merge.
 - **Autonomous handling:** as in 2026-11-15 — Baton counts its reads against the day's budget
   and warns before the quota runs out (*no ticket yet*). The read cuts still open are B-239,
   B-243 and B-250, and B-242, B-240 and B-250 are prioritised for the dashboard poll's reads. A
   deploy that raises reads per beat should show it before it merges. A failed sync is retried
   once Baton answers again, without waiting for a push. *No ticket yet.*
+
+## 2026-11-18 00:38 — runners idle after the outage, with routine work on the board
+
+- **Host:** bering
+- **Tickets:** B-175, B-176, B-174
+- **Why it was needed:** once Baton answered again, both runners heartbeated quietly and claimed
+  nothing. The routine tier, the only one their grants reach that had work, listed B-175 (merge),
+  B-176 (run-tests) and B-174. `baton blocked` shows an unconfirmed end on B-175 (claim 185) and
+  B-176 (claim 240); B-174 shows nothing, so it is probably on a `baton:retries` hold, which that
+  command does not show. As before, the runner logs nothing about why it is idle.
+- **Resolution:** reported to the owner at 01:19; these are the owner's decisions.
+- **Autonomous handling:** as in 2026-11-15: the runner logs why it is idle, and an owner channel
+  carries the holds and unconfirmed ends. *No ticket yet.*
