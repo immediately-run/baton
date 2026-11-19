@@ -50,7 +50,7 @@ export interface HistoryEntry {
 }
 
 /** The line that names the rule ids an entry amended when its title names none (R-BTN-74; the
- *  same grammar as scripts/check-spec.mjs's `rulesChangedLine`, which fails a new entry without
+ *  same grammar scripts/check-spec.mjs reads, which fails a new entry without
  *  either): `Rules changed: R-BTN-74, R-BTN-51.`, or `Rules changed: none.` */
 const RULES_CHANGED = /^\s*Rules changed:\s*(.*?)\s*$/;
 

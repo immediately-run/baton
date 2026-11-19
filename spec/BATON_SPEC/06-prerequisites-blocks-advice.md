@@ -41,12 +41,17 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
     true` (closed `done` at any end station, kept as `closed_tickets.final_station` and
     `final_path`), `"withdrawn": true` or `"closed": true` (closed either way). A withdrawn ticket meets only `withdrawn` and
     `closed`; `"skip_withdrawn": true` drops it from the selection instead. An empty selection holds only with `"allow_empty": true`. Entries select
-    tickets of the same repository (R-BTN-86); Baton evaluates them from the stations and paths
+    tickets of the same repository (R-BTN-86) — a posted `depends_at` entry may name another
+    repository's ticket by its qualified id (B-113, §3.1), and such a prerequisite resolves
+    against **that** repository's board: done, reached or at a leg, as for a local one, the
+    visibility and consent rule (§3.1) gating it. Baton evaluates them from the stations and paths
     it stores. `baton course test` checks that each named station exists in the selectable
     course.
   - **The ticket source decides which dependencies are open** and posts only those; Baton keeps
     no second dependency store. The default markdown source translates `depends_on: [<id>]` to
-    `{ticket: <id>, done: true, leg: <start_leg>}`. `parent` is a link, never a block; a leg
+    `{ticket: <id>, done: true, leg: <start_leg>}` — a qualified id as written (B-113), resolved
+    against its target's board by the sync's dependencies read (§4.4), so a station function
+    gates on it as on a local one. `parent` is a link, never a block; a leg
     that waits for children it starts is a call leg (R-BTN-165).
   - **Unmeetable entries fail closed.** A `parent` entry with no parent, a `posted` id Baton
     has not seen, or an entry a withdrawn ticket leaves unmet keeps its block and raises
@@ -605,7 +610,7 @@ time-of-day price, a fallback provider or a subscription's limit is a rule in th
 new provider needs no change to Baton. A leg that requires an ability (R-BTN-174) may fall back
 from one provider to another within its run (R-BTN-122), and asks to end blocked on the
 capability or resource when none is usable (R-BTN-126).
-### 6.11 Capacity: exclusive use of a capability *(proposal — B-106)*
+### 6.11 Capacity: exclusive use of a capability
 
 - **R-BTN-178 (a capability with a capacity has that many seats).** Some things a leg uses take
   one client at a time, or a few: an RDP session to a machine, a device on a bench, a licence.

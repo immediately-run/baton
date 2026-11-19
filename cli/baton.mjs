@@ -30,6 +30,9 @@
 //   baton admin -i KEY capacity set <capability> --clear [--yes]             (R-BTN-178)
 //   baton admin -i KEY capacity list
 //   baton admin -i KEY settings set [--link-hosts a,b|none] [--session-hosts a,b|none] [--check-app-id ID|none]
+//   baton admin -i KEY freeze | unfreeze | seal                          (R-BTN-88, §4.8: the move)
+//   baton admin -i KEY export [--with-history]                           the owner state, written mode 0600
+//   baton admin -i KEY import FILE                                       into an empty Baton, from an export
 //                [--recommended-client VER|none]
 //                — the instance settings (B-4, R-BTN-113, §13.1): each flag replaces its own
 //                whole; none clears one to what stands without it (session_hosts: the deploy's
@@ -409,6 +412,22 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       // B-118: the dashboard's state, read with the key — no session, no Access login.
       parseArgs(rest, [], [], 0);
       return { method: 'GET', path: '/v1/admin/state' };
+    }
+    // R-BTN-88 (§4.8, R3-1258): the move — freeze, unfreeze, seal, export, import. Each is one
+    // signed request; the export is read (mode 0600 by the writer), the import one file in.
+    if (cmd === 'freeze' || cmd === 'unfreeze' || cmd === 'seal') {
+      const { flags } = parseArgs(rest, [], [], 0);
+      if (Object.keys(flags).length) throw new Error(`baton admin ${cmd} takes no flags`);
+      return { method: 'POST', path: `/v1/admin/${cmd}`, body: {} };
+    }
+    if (cmd === 'export') {
+      const { flags } = parseArgs(rest, ['with-history'], [], 0);
+      return { method: 'GET', path: `/v1/admin/export${flags['with-history'] ? '?with_history=1' : ''}`, file: `baton-owner-state-${new Date().toISOString().replace(/[:.]/g, '-')}.json` };
+    }
+    if (cmd === 'import') {
+      const { flags, positional } = parseArgs(rest, [], [], 1);
+      void flags;
+      return { method: 'POST', path: '/v1/admin/import', readFile: need(positional[0], 'the export file') };
     }
     if (cmd === 'resource' && rest[0] === 'add') {
       // R-BTN-76 (B-168): two scopes — `account` and `service`; a runner's instances are its
@@ -1290,12 +1309,29 @@ export async function main(argv) {
   // §12.2: a destructive action with no preflight read — retiring a repository — asks the same
   // way: --yes answers beforehand, a terminal decides, a pipe refuses.
   if (p.confirm && !(await confirmAsk(p.confirm.question, p.confirm.yes, process.stdout, process.stdin))) return 1;
+  // R-BTN-88 (§4.8, R3-1258): `admin import FILE` — the export file is the request's body, read
+  // and parsed here (a file that is not JSON is the caller's error, in the CLI's words).
+  if (p.readFile) {
+    const raw = readFileSync(p.readFile, 'utf8');
+    try {
+      p.body = JSON.parse(raw);
+    } catch {
+      throw new Error(`${p.readFile} is not JSON: the import posts a baton.owner-state/v1 export`);
+    }
+  }
   const { status, json, text } = await send(url, p, keyFile);
   // A 2xx whose body is not JSON — an intermediary's login page, an HTML error, an empty body —
   // is a refusal, never success (B-80): the command fails, showing what arrived.
   if (status >= 200 && status < 300 && json === null) {
     process.stderr.write(`baton: ${status} answered no JSON — the request never reached Baton. It answered:\n${arrived(text)}\n`);
     return 1;
+  }
+  // R-BTN-88: `admin export [--with-history]` — the owner state lands in its file, mode 0600
+  // (§4.8: it names every key, grant and secret hash), and the terminal sees where.
+  if (status >= 200 && status < 300 && p.file) {
+    writeFileSync(p.file, `${JSON.stringify(json, null, 2)}\n`, { mode: 0o600 });
+    process.stdout.write(`baton: owner state written to ${p.file} (mode 0600) — events_seq ${json.events_seq}, ${Object.keys(json.sections).length} sections\n`);
+    return 0;
   }
   if (role === 'admin' && args[0] === 'open' && json?.url) process.stdout.write(`${json.url}\n`);
   else if (role === 'ticket' && args[0] === 'show' && json && status >= 200 && status < 300) {

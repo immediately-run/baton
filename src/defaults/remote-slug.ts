@@ -62,3 +62,17 @@ export function remoteSlug(root: string, remote: string = 'origin'): string | nu
     throw new Error(`git remote get-url ${remote} failed in ${root}${status != null ? ` (exit ${status})` : ''}: ${said.trim() || 'no stderr'}`);
   }
 }
+
+/** B-113 (§3.1): this checkout's own repository id, as `.baton/baton.json`'s `repos` map names
+ *  it — the entry whose forge path is the checkout's origin, both read as `slugOfUrl` reads a
+ *  remote (so a `.git` suffix, a URL prefix and case differ nothing), or null when the checkout
+ *  has no origin to match or the map names no such entry. A repository naming its own id
+ *  qualified (`baton:B-1` in baton's own checkout) is read as it reads the local id alone —
+ *  the sync's dependencies read, the claim's dependency walk and the ticket check all ask this
+ *  which ids are that spelling (round 1: a `.git` suffix on the map's value, or a map naming
+ *  no entry of its own, left the id to be read as another repository's). */
+export const ownRepositoryId = (root: string, repos: Record<string, string>): string | null => {
+  const slug = remoteSlug(root)?.toLowerCase();
+  if (slug == null) return null;
+  return Object.entries(repos).find(([, path]) => slugOfUrl(path).toLowerCase() === slug)?.[0] ?? null;
+};

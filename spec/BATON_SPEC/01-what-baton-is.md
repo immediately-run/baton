@@ -9,7 +9,7 @@ Git keeps every durable record; Baton keeps only what git cannot hold without be
 server — who holds which ticket now, which runners are alive and what they may do — and the
 limits agents must not change. A ticket follows a **course** whose logic is code in its home
 repository; Baton knows only the course's contract (§5), runs no repository code (R-BTN-98)
-and writes no git itself (R-BTN-171). The division of labor is fixed (the owner, 2026-10-22):
+and writes no git itself (R-BTN-171). The division of labor is fixed:
 the **runner** is responsible for the leg processes — launching them, terminating them when
 necessary, and realizing they are stuck; **Baton** is responsible for collecting information
 (the ticket sync, instruments' metrics, claims) and recommending pending ticket legs for
@@ -43,7 +43,7 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   across concurrent branches is one Baton hands out (B-176). Git records the work; it never decides
   who holds something or which number is next. Writing a status to git and counting on a refused
   push to stop a second writer, or choosing the next number by scanning branches, is not how Baton
-  is meant to be used (the owner, 2026-11-03).
+  is meant to be used.
   - **Legacy, phased out as soon as possible.** Until the work that retires each lands, these stay,
     each marked legacy where it is specified and never extended or copied into a new mechanism:
     - the git-lock ticket commands — `baton ticket claim | set | done` writing `status:` and

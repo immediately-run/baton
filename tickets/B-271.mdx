@@ -1,0 +1,68 @@
+---
+title: "B-271 — Shrink the formal model to a design-time core: retire the proof, the trace check, the stamps and the report gate"
+id: B-271
+project: baton
+status: available
+updated: 2026-11-19
+tags:
+  - roadmap-item
+description: "The owner's decision of 2026-11-19: keep baton.qnt, the properties, regressions and witnesses and a one-minute check; retire verify, full, liveness, the trace check, model-report and the @model stamps; replace replay.qnt with a property test over the real core; amend R-BTN-68 and value 10"
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-19, on the architecture review's question of whether to retire the
+Quint model: "shrink the formal model". Keep a design-time core that checks in about a minute;
+retire the proof, the trace check, the hash stamps and the report gate.
+
+From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
+
+**Why:** the model found two spec defects and two code defects in its first six days and nothing
+since. Nothing is proved: the bounded check reaches depth 4 on one ticket. No Quint runs in CI or
+in `npm test`, and `npm run test:full` takes hours. One invariant, `oneClaimPerRunner`
+(`model/properties.qnt`), contradicts [BATON_SPEC §9.1](../spec/BATON_SPEC/09-claims.md#sec-9-1) ([R-BTN-4](../spec/BATON_SPEC/09-claims.md#sec-9-1)) since B-188 let a runner hold
+several claims.
+
+### What to build
+
+1. Fix or drop `oneClaimPerRunner` so the model agrees with R-BTN-4.
+2. Keep `model/baton.qnt`, `properties.qnt`, `regressions.qnt`, `witnesses.qnt`, `check.mjs`
+   and the `sim` instance. `npm run model:quick` is the one model command.
+3. Add a property test over the real core on the local host asserting the nine interleaving
+   invariants `replay.qnt` checks today; then retire `replay.qnt`.
+4. Retire `verify.mjs`, `full.mjs`, `liveness.qnt`, `lightQuestion.qnt`, the `small` instance,
+   `check-traces.mjs` and `trace-scope.json`, `model-report.mjs`, `check-model-links.mjs` and the
+   25 `@model` stamps in `src/`, and the npm scripts that run them (`test:full` included).
+5. Amend the spec in the same pull request: [BATON_SPEC §15](../spec/BATON_SPEC/15-verification.md#sec-15) ([R-BTN-68](../spec/BATON_SPEC/15-verification.md#sec-15)) says what is now checked
+   and that nothing is proved; [§16.1](../spec/BATON_SPEC/16-adoption.md#sec-16-1)'s cutover precondition and the Decisions entry that names
+   the proof follow it. Amend `docs/context/values.mdx` (value 10), the architecture page's "the
+   formal model names the code", and the Commands line of `CLAUDE.md`.
+6. Close B-37 and B-50 as superseded; narrow R3-1254 to what remains.
+
+**For the owner to land, not the runner:** removing the model-report workflow and adding
+`model:quick` to CI on changes under `model/` are edits to `.github/workflows/`. The leg prepares
+the diff and stops for the owner there.
+
+**Done when:** `npm test` needs no JVM and names no Quint; CI checks the model in about a minute
+on changes under `model/`; no document claims a proof.
+
+### Trust
+
+No new input. The change removes checks and their scripts and amends prose; nothing a runner or
+an owner sends is read differently. The workflow edits are the owner's own.
+
+### Invariants
+
+- [BATON_SPEC §15](../spec/BATON_SPEC/15-verification.md#sec-15) ([R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15)): every behaviour change names its scenario. Unchanged, and now the
+  only gate on the core's behaviour, so the property test of step 3 lands before `replay.qnt`
+  goes.
+- The four defects the model found stay covered: each keeps its regression in
+  `regressions.qnt` or a scenario that names it.
+- `src/shared/` and the migrations are not touched.
+
+## Status
+
+_filed 2026-11-19._

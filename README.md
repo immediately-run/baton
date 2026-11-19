@@ -1,6 +1,6 @@
 # Baton
 
-The immediately.run factory's live state — work-item leases, workers, providers and the
+The immediately.run factory's live state — work-item leases, runners, providers and the
 dashboard at `https://baton.immediately.run` — on a Cloudflare Worker and one SQLite
 Durable Object.
 
@@ -21,7 +21,7 @@ npx --yes @immediately-run/baton@0.1.4 run   # a runner (§6.13), with BATON_KEY
 ```
 
 From the package, `baton run`, `baton repo init`, `baton decision list` and the
-`baton admin|owner|worker …` API client work. Init names the commit the package was built from
+`baton admin|owner …` API client work. Init names the commit the package was built from
 (`dist/build.json`) as its courses' source and its workflow's pin, and copies the leg stubs and
 instructions `build:cli` prebuilt into `dist/defaults/`, so it needs no checkout and no esbuild.
 `--eject` copies prebuilt defaults the same way.
@@ -44,10 +44,10 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | Path | What |
 |---|---|
 | `src/core/` | Everything Baton decides, on either host (R-BTN-55): no platform import, checked by `test/unit/boundary-host.test.ts` |
-| `src/core/ports.ts` | The platform services core takes: `Store`, `Scheduler`, `Clock`, `AdminKeys`, `HookRunner`, `Dispatch`, `Gate`, and the instance's `Config` |
-| `src/core/front.ts` | What stands in front of the core: verifies the principal (OIDC for the sync, Access for the owner, a signed request's shape for a worker, the App's signature for a webhook), sets the R-BTN-16 headers, serves the dashboard, forwards the API |
+| `src/core/ports.ts` | The platform services core takes: `Store`, `Scheduler`, `Clock`, `AdminKeys` (and `HumanKeys`, the same shape), `HookRunner`, `Dispatch`, `Gate`, and the instance's `Config` |
+| `src/core/front.ts` | What stands in front of the core: verifies the principal (OIDC for the sync, Access for the owner, a signed request's shape for a runner, the App's signature for a webhook), sets the R-BTN-16 headers, serves the dashboard's static files, forwards the API |
 | `src/core/baton.ts` | The core: migrations, board sync (§7.1), routing, the alarm, the dashboard state |
-| `src/core/workerApi.ts` | The worker API (§11): heartbeat and registration, activities, messages, mode and shadow reports, the Workers view |
+| `src/core/runnerApi.ts` | The runner API (§8): heartbeat and registration, activities, messages, mode and shadow reports, the Runners view |
 | `src/core/claims.ts` | The lease (§6, R3-1212): claim and end, matching (§7.2 rules 1–9 via `isEligible`), the alarm's reaps, the fence before re-issue, confirmations, git winning over a stale claim, the Running / Timeline / Needs you data |
 | `src/core/attempts.ts` | Pure: the retry policy (§6.10 R-BTN-23) — which ends count, backoff, holds, the review-capacity run, the resume record (R-BTN-24) |
 | `src/core/admin.ts` | Administrators and owners (R-BTN-57/-58, R-BTN-66/-67): repositories, probes, grants, owners, owner bars, required bars, `retry`, `transcript_repos`, login links and dashboard sessions — the one set of validated functions the signed `/v1/admin/*` and `/v1/owner/*` routes and the `baton` CLI share |
@@ -56,22 +56,43 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/core/blocks.ts` | Why a ticket cannot move (§2g R-BTN-75, -77, -78): the one writer of `ticket_blocks` and `blocked_since`, the fleet counts, the `unblocked` messages and dispatch, and the `blocks` and `blocked` queries |
 | `src/core/notices.ts` | Requests for people, in the retired sense of R-BTN-80 and R-BTN-103 (notice couriers, `/v1/courier/*`); the spec's replacement is R-BTN-163 — a `baton.*` condition on its resolve page and a delivery runner that reads `GET …/conditions` — and the code tickets remove this module with it |
 | `src/core/history.ts` | Each ticket's history and Baton's disagreements with git (R-BTN-81, R-BTN-85): the one writer of `ticket_history`, `GET …/tickets/{ticket}/history`, the 90-day purge, and the `discrepancy` event and row logged before a snapshot's value is adopted |
-| `src/core/resources.ts` | External resources, their account instances, a worker's `uses`, the readings of workers, probes and administrators, and each instance's state (R-BTN-76, R-BTN-101) |
+| `src/core/resources.ts` | External resources (scope `account` or `service`), their account instances, the readings of runners, probes and administrators, and each instance's state (R-BTN-76, R-BTN-101) |
 | `src/core/detailSchema.ts` | Pure: R-BTN-76's JSON Schema subset, interpreted (no code generation), for a reading's `detail` |
-| `src/core/validate.ts` | Pure: every worker- and owner-supplied field checked before any write (§10.4) |
+| `src/core/validate.ts` | Pure: every runner- and owner-supplied field checked before any write (§10.4) |
 | `src/core/webhook.ts` | GitHub App deliveries (R-BTN-73): `X-Hub-Signature-256` before anything is read, the one parser of R-BTN-73's fields, repeat and own-work drops, the repository map, one sync dispatch per repository per 30 seconds plus a trailing one |
 | `src/core/observations.ts` | The per-repository observation counter (R-BTN-62): `POST /v1/sync/observation` hands out the next number (`sync-busy` while one is outstanding, void after 10 minutes); a board post's number is used once and must be above the last accepted reading's |
-| `src/core/courses.ts` | The course registry each sync posts (R-BTN-48): its shape check, each course file judged by `validateCourse` (a failing one keeps the previous and is listed under Needs you, R-BTN-69), the `min_worker_version` rule 9 reads and each leg's expanded `requires` rule 4 and rule 11 read |
+| `src/core/courses.ts` | The course registry each sync posts (R-BTN-48): its shape check, each course file judged by `validateCourse` (a failing one keeps the previous and is listed under Needs you, R-BTN-69), the `min_runner_version` rule 9 reads (the older `min_worker_version` is still accepted) and each leg's expanded `requires` rule 4 and rule 11 read |
 | `src/core/course.ts` | Pure: `validateCourse`, every way a course file breaks R-BTN-69's rules (stations reachable, an end from everywhere, cycles bounded, `start_leg`, inputs) |
 | `src/core/queues.ts` | Legs are queues (R-BTN-79): the one writer of `leg_queues` — each ticket counted in its queued leg's queue while no claim holds it, moved in the transaction that changes it; a depth over `max_queue` logs `queue-over` and raises `baton.queue-over` (R-BTN-163; the code still queues the retired notice), and closes the course's intake (advice, never a gate) |
 | `src/core/stats.ts` | A course's own record (§2d, R3-1248): `GET /v1/repositories/{repository}/stats` — per station and leg wait and run times, ends by reason and detail, suspensions, advice overridden, `off-graph` and foreign writes; aggregates and ids only |
 | `src/core/board.ts` | Pure: snapshot validation, the `tickets` row an item becomes, peaks, prices |
-| `src/core/auth.ts` | JWT verification (R-BTN-15, R-BTN-16); the one verifier of signed requests, SSHSIG over RFC 9421 (R-BTN-13); worker tokens against `TOKEN_HASHES` during the transition |
+| `src/core/auth.ts` | JWT verification (R-BTN-15, R-BTN-16); the one verifier of signed requests, SSHSIG over RFC 9421 (R-BTN-13); runner bearer tokens against `TOKEN_HASHES` during the transition |
+| `src/core/stations.ts` | Where each ticket is, as its repository's sync places it (R-BTN-70, R-BTN-39): a cache each accepted snapshot overwrites, never computed; it notices an `off-graph` path and hands the claims what changed |
+| `src/core/graph.ts` | Pure: a course file read as a graph (R-BTN-63/-64/-70/-71) — a leg's edge, the runs made of a leg, whether one path extends another, the legs from a station to an end, renamed names |
+| `src/core/gates.ts` | Pure: what stays a gate (§7.2, R-BTN-45) — the rules refused at a claim and at an advance, in one function; the matching query in `claims.ts` is its mirror |
+| `src/core/conditions.ts` | The raised conditions Baton holds (R-BTN-160, R-BTN-195, R-BTN-163's list): a runner's report of each raise, the Needs-you and list reads, and the closes |
+| `src/core/conditionTypes.ts` | Pure: a condition's type vocabulary (R-BTN-160, R-BTN-195) — the grammar, the standard table, a type's disposition and the raise check |
+| `src/core/questions.ts` | A person's leg and its question (§6.4 R-BTN-116): stored while the ticket's queued leg is a person's, listed under Needs you, answered by a `std:decision@1` applied as the leg's arrival (R-BTN-39) |
+| `src/core/policy.ts` | The repository policy (§12.8 R-BTN-188, R-BTN-189): the knobs, presets, guarantees, approver lists and floors, the append-only `repository_policies` log, the protection reports (R-BTN-180) and the policy pins (R-BTN-182) |
+| `src/core/codeRepos.ts` | The owners' code repositories (§3.4 R-BTN-140): the stored list and its pure checks, paths unique case-insensitively (R-BTN-92) |
+| `src/core/provenance.ts` | Who last wrote each ticket (§4.4 R-BTN-194): `last_written_by`, read from the App's push deliveries (R-BTN-73), `pusher-unknown` when none accounts for a change; information only |
+| `src/core/scope.ts` | A leg's scope audit (B-134): a runner's `scope-exceeded` report judged against the claim's scope, and `unclaimed-write` for a push no open claim's scope covers |
+| `src/core/sequences.ts` | The per-repository, per-kind sequences (§4.3 R-BTN-199): the next ticket, rule, scenario, gate or migration number, `max(stored, floor) + 1` in one transaction |
+| `src/core/stateVersion.ts` | `state_version` (§3 R-BTN-196): the `Store` wrapper that moves one counter with every write to Baton's state, liveness beats and request nonces aside |
+| `src/core/retention.ts` | Retention (R-BTN-149): the alarm's batched prunes of old events and board snapshots, unseen runners' rows and purged tickets' claims |
+| `src/core/instanceSettings.ts` | The administrators' instance settings (§13.1, R-BTN-57): `link_hosts`, `session_hosts` and `check_app_id` behind `PUT /v1/admin/settings`; `session_hosts` is what R-BTN-113's link rule reads |
+| `src/core/mirror.ts` | What the git mirror reads and reports (§12, R-BTN-36): the event feed `GET /v1/sync/events`, the foreign-claim report, the workflows dispatched after a transition |
+| `src/core/links.ts` | Link shapes (§2k R-BTN-92): forge paths, `web_base`, pull-request URLs, transcript repositories and file pages, on the one link rule in `src/shared/links.mjs` |
+| `src/core/screens.ts` | The dashboard's one table of screens (§11.4): each path the front serves the shell at, its `ui.view` id (R-BTN-129) and the session role that may open it (R-BTN-155) |
+| `src/core/http.ts` | Responses, errors and the R-BTN-16 headers (§10.5, §11), and the client versions stated on every `/v1` response (R-BTN-197) |
+| `src/core/deprecated.ts` | The one writer of `deprecated-field` events (R-BTN-132's window): a retired field accepted and ignored, logged once per field, actor and day |
+| `src/core/db.ts` | Shared helpers: the event log's one insert (`logEvent`), random hex, run ids (R-BTN-63), recognising a unique-index refusal |
+| `src/core/text.ts` | Pure: §10.4's free text as one predicate (`isFreeText`) — a length, no control characters, none of `< > { }` |
 | `src/cloudflare/` | The Cloudflare host: the Worker (`worker.ts`) and the `Baton` Durable Object (`baton.ts`), wiring `ctx.storage`, the alarm and `waitUntil` into the ports |
 | `src/local/` | The local host: `node:sqlite` as the `Store` (`store.ts`), one queue for every request and alarm tick (`queue.ts`), a timer as the alarm (`host.ts`), `node:http` (`server.ts`), the command line (`main.ts`); the course test kit (`testCourse.ts`, R3-1248) |
-| `src/runner/` | `baton run`'s worker loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`), the CLI entry (`main.ts`) and `baton leg replay` (§9.8 R-BTN-84, `replay.ts`) |
+| `src/runner/` | `baton run`'s runner loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`), the CLI entry (`main.ts`) and `baton leg replay` (§9.8 R-BTN-84, `replay.ts`) |
 | `src/migrations/` | Numbered schema migrations, applied before the object serves |
-| `src/dashboard/` | The dashboard (BATON-UI-V2): React 19 and TypeScript, no other runtime dependency, built by `npm run build:ui` (esbuild) into `src/dashboard/dist/` (gitignored) — one bundle served as text by both hosts (R-BTN-55), never Workers assets |
+| `src/dashboard/` | The dashboard (BATON-UI-V2): today only the shell B-193 built — one page saying "Baton dashboard — sign in", with no sign-in flow, router, polling or controls — in React 19 and TypeScript, no other runtime dependency, built by `npm run build:ui` (esbuild) into `src/dashboard/dist/` (gitignored) — one bundle served as text by both hosts (R-BTN-55), never Workers assets. B-193 deleted the old dashboard on 2026-11-13; its screens return with B-206, B-207 and B-208, on the reads of B-194 and B-195 |
 | `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list` (`decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
 | `src/shared/` | **Vendored** from docs `scripts/lib/` — never edit here (R-BTN-37); `batonSync.mjs` is the board sync's own decision code, which S-BTN-13 drives. Except two of Baton's own, which every part imports: `schema.mjs`, the one validator of leg outputs and readings (R-BTN-108: the subset, the linear-time pattern engine, the refinement check), and `std.mjs`, the `std:` library (R-BTN-110) |
 | `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
@@ -94,12 +115,17 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   `npm run test:full`, in `npm run model:pr` (about half an hour), whose report a PR
   that changes what the model checks read (the model, the core, the scenarios, …) carries in its
   body, and in the weekly `npm run model:full` on `main` (about three hours).
+- `npm run test:load` — the load test (§15, R-BTN-87): the envelope's mix — 50 runners, 20
+  repositories, a 5,000-ticket board post, 1,000,000 seeded history rows, bursts — on the local
+  host, failing on any error or route over its latency budget and reporting the figures it
+  reached (G-BTN-77). The Cloudflare budgets are read on production's own `capacity` log and
+  live figures (B-224), never from a staging run.
 - `npm run start:local -- --db <path> --port <n>` — Baton as a local process (below).
 - `node cli/baton.mjs test-course <repository root> <course> [--base REF|none] [--board FILE]` — the course test kit
   (§2d, R-BTN-64/-65): the working tree's `.baton/` against REF's (default `origin/HEAD`, else
   `origin/main`; none resolving is an error, `--base none` skips the removal rule), run on a local
   Baton — the core accepts the file, the live tickets FILE places keep their paths, a removal raised
-  `min_worker_version`, each `legs/` script pairs with a leg and exports `run`, `handoff` and
+  `min_runner_version`, each `legs/` script pairs with a leg and exports `run`, `handoff` and
   `close`, and a ticket runs the shortest route to a confirmed done. Exit 1 names each violation.
 - `npm run typecheck` — the Worker, the local host, the Node scripts and the dashboard.
 - `npm run build:ui` — the dashboard's one esbuild bundle into `src/dashboard/dist/` (gitignored):
@@ -154,7 +180,8 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   repository command, not an API call: the push triggers the sync, the board places the ticket, and
   the next claim starts the course. The course's file must say `starts_from: request`.
   `docs/standard-courses.mdx` has the pattern.
-- `npm run vendor` — re-copy `baton.mjs`, `vocabulary.mjs` and `sessionUsage.mjs` from a sibling `../docs`
+- `npm run vendor` — re-copy the files `src/shared/manifest.json` lists (`baton.mjs`, `vocabulary.mjs`,
+  `sessionUsage.mjs`, `batonSync.mjs`, `ticketPr.mjs`) from a sibling `../docs`
   checkout (or `DOCS_DIR`) and rewrite `src/shared/manifest.json`. Do this in a PR here after
   docs changes any of them.
 - `npm run fixtures` — regenerate `test/fixtures/boards.json` with the real docs
@@ -187,9 +214,9 @@ lists them, and each folder's `immediately.run.json` opens it with the viewer it
 
 Pages are MDX, so `<` and `{` in prose go in backticks or are escaped (`\<`, `\{`).
 
-## Worker credentials
+## Runner credentials
 
-A worker's identity is an SSH key (R-BTN-13 as amended; R3-1239): `ssh-ed25519`,
+A runner's identity is an SSH key (R-BTN-13 as amended; R3-1239): `ssh-ed25519`,
 `ecdsa-sha2-nistp256` or their `sk-` FIDO forms. Every `/v1/runner/*` call carries an RFC 9421
 `Signature-Input` and `Signature` covering `@method`, `@authority`, `@path`, `@query` and
 `content-digest` (the empty string's digest when there is no body), with `created`, `nonce`,
@@ -201,7 +228,7 @@ that key in 10 minutes. The front checks the shape, `@authority` and the digest 
 object; the object checks the clock, the key, the signature and the nonce.
 
 A repository's owner grants a key (below); until then, or for a machine no owner has granted, the
-secret `BATON_KEYS` seeds worker keys at start:
+secret `BATON_KEYS` seeds runner keys at start:
 `[{"key": "ssh-ed25519 AAAA… comment", "name": "<the one hostname it registers>",
 "allowed_capabilities": ["capability", …]}]`. A seeded key the list no longer names is revoked,
 for good; a machine whose key is lost gets a new one. An unset `BATON_KEYS` changes nothing (`[]`
@@ -211,9 +238,9 @@ Needs you.
 **The transition.** A request with no signature headers may still use a bearer token: the
 secrets `TOKEN_HASHES` (`{"<credential>": "<sha256 of its token>"}`) and `CREDENTIALS`
 (`{"<credential>": {"hostname": "…", "allowed_capabilities": ["capability", …]}}`); removing a
-credential's hash revokes it on its next call. Bearer tokens go once every worker signs.
+credential's hash revokes it on its next call. Bearer tokens go once every runner signs.
 
-After the first heartbeat a worker also presents the per-session secret it registered
+After the first heartbeat a runner also presents the per-session secret it registered
 (R-BTN-14). Only the credential named `test` may send `test_harness` (R-BTN-32).
 
 ## Administrators and owners
@@ -221,7 +248,7 @@ After the first heartbeat a worker also presents the per-session secret it regis
 Whoever deploys Baton is its administrator (R-BTN-57): the secret `BATON_ADMIN_KEYS` (locally
 `--admin-keys`) lists their keys, one per line, read on every request. Owners are per
 repository (R-BTN-58), named by an administrator when it registers the repository. Each
-administrator, owner and worker holds an SSH key or an API key, their choice (R-BTN-159). An SSH
+administrator, owner and runner holds an SSH key or an API key, their choice (R-BTN-159). An SSH
 key signs every request and reveals nothing reusable. An API key is a shared secret sent as a
 bearer: easier to set up, but anyone who reads one request holds it until it is revoked. `baton
 key create FILE` makes an API key on your machine. `FILE` holds the key (`-i FILE`, or a runner's
@@ -247,14 +274,14 @@ baton owner -i ~/.config/baton/docs_owner settings docs --required-bar '*' --cou
                                                --retry 1h,4h --max-failed 3
 ```
 
-`--url` (or `BATON_URL`) picks the Baton. A key holds one role — administrator, owner, worker,
-probe or sync — and a key in a second is `conflict`. A granted key works only where it
+`--url` (or `BATON_URL`) picks the Baton. A key holds one role — administrator, owner, runner,
+probe, courier or sync — and a key in a second is `conflict`. A granted key works only where it
 is granted, with what that repository granted (rules 4 and 7) and under its `max_tier`; only an
 administrator grants `human-operator`, or takes over a `BATON_KEYS`-seeded key. Owner bars join the posted barred tags of their course
 (or every course, `*`), at claims and, with `--applies claim+advance`, advances; a leg missing a
 required bar's tag prefix waits on `policy` under Needs you. Tiers, `retry` and
-`transcript_repos` come only from Baton: a snapshot changes none of them. The dashboard shows them
-under Limits, read-only.
+`transcript_repos` come only from Baton: a snapshot changes none of them. The dashboard, a shell
+today (Layout, `src/dashboard/`), does not show them.
 
 The dashboard takes the `__Host-baton_session` cookie a login link sets (12 hours; it ends when
 its key leaves `BATON_ADMIN_KEYS`). Cloudflare Access may stand in front as extra hardening; on its
@@ -265,21 +292,21 @@ administrators — so set that secret, then log in with `baton admin open`.
 
 A repository is a forge path, a remote and a forge (BATON_SPEC §2k R-BTN-92): `forge` is `github`,
 `gitlab`, `gitea` or `git`; `github` holds the forge path (`owner/name`, up to four segments on
-GitLab); `remote` is what its sync and workers clone; `web_base` is its page, from which every link
+GitLab); `remote` is what its sync and runners clone; `web_base` is its page, from which every link
 Baton accepts or draws is built (`src/core/links.ts`). A `git` repository has no `web_base` and no
 links. `BATON_REPOSITORIES` entries take `forge`, `remote`, `web_base`, `ci_identity` and
 `sync_keys`; a GitHub entry may leave them out.
 
 A sync or mirror authenticates (R-BTN-93) with a **sync key** — an SSH key registered for one
-repository in one role, signing as workers do — or a CI identity token: GitHub Actions OIDC from
+repository in one role, signing as runners do — or a CI identity token: GitHub Actions OIDC from
 the repository's `sync_workflow`/`mirror_workflow`, or a GitLab CI `id_tokens` JWT whose audience
 is `<origin>#sync` or `<origin>#mirror`, from an issuer `BATON_FORGE_SECRETS` lists
 (`{"<repository>": {"forge": "gitlab", "gitlab_issuer": "https://gitlab.example.com"}}`). A key
-holds one role: a sync key is never a worker's, nor the reverse. Register one with
+holds one role: a sync key is never a runner's, nor the reverse. Register one with
 `baton admin repo add … --sync-key <the key's .pub>` (or `repo set <id> --add-sync-key`), beside
 the CI identity when the repository has one, and post its board without CI by
 `baton repo sync --sync-key FILE` — or `BATON_SYNC_KEY=FILE`, which is the same flag from the
-environment (B-88). The flag signs the sync's observation, head and board calls as a worker signs;
+environment (B-88). The flag signs the sync's observation, head and board calls as a runner signs;
 it is the path for a repository without Actions, or for bootstrapping a first board.
 
 ## Stations and legs
@@ -336,7 +363,7 @@ npm run start:local -- --db ./baton.db --port 8787 [--origin <url>] [--admin-key
 - `--config` names a JSON object holding the Worker's other variables and secrets — `OIDC_*`,
   `BATON_REPOSITORIES`, `ACCESS_*`, `OWNER_EMAILS`, `BATON_KEYS`, `TOKEN_HASHES`,
   `CREDENTIALS`, `BATON_GITHUB_WEBHOOK_SECRET`, `GITHUB_DISPATCH_TOKEN` — as strings. Without it every principal is unconfigured: the sync
-  and the owner are refused and no worker token is known, so the example above serves only
+  and the owner are refused and no runner token is known, so the example above serves only
   refusals. Nothing is read from `.dev.vars`, and the test bindings are refused.
 
 One queue runs every request and alarm tick one at a time, as the Durable Object does. A local
@@ -353,6 +380,32 @@ Edit on the account, plus Zone: Read and Workers Routes: Edit on the `immediatel
 
 With a sibling docs checkout present, the suite also fails when `src/shared/` or the board
 fixtures have drifted from docs.
+
+## Moving a Baton (R-BTN-88)
+
+Owner state — the settings, keys, grants, bars, holds and closed tickets git does not hold —
+moves between Batons as one file; the tickets and readiness rebuild from git at the target's
+first sync. The tenant's administrator drives it (BATON_SPEC §4.8):
+
+1. `baton admin -i KEY freeze` — new claims and owner writes are refused `frozen`; the work
+   holding claims drains, its lease upkeep untouched. `baton admin -i KEY unfreeze` undoes it
+   before the seal.
+2. Let the claims drain and the mirrors catch up (`GET /v1/sync/events` acknowledges each
+   mirror's cursor), then `baton admin -i KEY seal`. A seal with work left is `conflict`,
+   naming the claims and the lagging mirrors; an administrator's fence clear runs while frozen.
+   From the seal the source logs nothing and serves nothing but an administrator's read.
+3. `baton admin -i KEY export [--with-history]` — `baton.owner-state/v1`, deterministic, its
+   digest over the RFC 8785 canonical JSON of the rest; the CLI writes it mode `0600`.
+   `--with-history` adds the ticket history and the outputs and inputs replay reads.
+4. Provision the target (a FRESH Baton — the import is into an empty one), then
+   `baton admin -i KEY import FILE`. One transaction: the digest and the schema version are
+   checked, every row through the write path's invariants, the runners resume unkeyed, the
+   event sequence continues from the source's, and each repository's first snapshot applies the
+   ticket-scoped rows (holds and overrides) to the tickets it posts — or drops and logs the
+   ones it does not.
+5. Keep the origin (move DNS), or give each repository the new `baton_url` and repoint every
+   sidecar — signatures are bound to the origin. The sealed source never serves again; an
+   abandoned move is finished by importing into a fresh Baton at the source's origin.
 
 ## Releasing the CLI
 

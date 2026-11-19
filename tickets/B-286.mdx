@@ -1,0 +1,49 @@
+---
+title: "B-286 — src/shared says what it is: the vendored files move to src/vendor, and the owner decides who owns baton.mjs"
+id: B-286
+project: baton
+status: available
+updated: 2026-11-19
+repos:
+  - baton
+  - docs
+tags:
+  - roadmap-item
+description: "Five vendored files sit under a name that reads as shared code; move them to src/vendor with the manifest and hash check, and decide whether Baton or docs is the source now that the spec lives here"
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**What:** `src/shared/` holds five vendored files under a name that reads as "shared code, edit
+here". The spec moved into this repository, so the direction of vendoring may now be backwards
+for `baton.mjs`.
+
+From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
+
+### What to build
+
+1. Move the five vendored files to `src/vendor/`, with the manifest and the suite's hash check.
+2. Put the decision to the owner, with the cost of each side: does Baton now own `baton.mjs`,
+   with docs vendoring from it? [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) ([R-BTN-37](../spec/BATON_SPEC/02-deployments.md#sec-2-1)) is amended either way to say which
+   repository is the source.
+
+**Done when:** no directory named `shared` holds vendored code, and R-BTN-37 names the source of
+each file.
+
+### Trust
+
+Vendored files are another repository's code running in the core. The hash check is the control:
+the move keeps the manifest and the failing test, and changes no file's content.
+
+### Invariants
+
+- R-BTN-37: a vendored copy matches its manifest's hash or the suite fails.
+- No vendored file is edited by hand here: change the source, then `npm run vendor`.
+- [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) ([R-BTN-55](../spec/BATON_SPEC/02-deployments.md#sec-2-1)): the vendored modules load on both hosts.
+
+## Status
+
+_filed 2026-11-19._

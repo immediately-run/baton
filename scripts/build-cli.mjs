@@ -18,9 +18,13 @@ const PREBUILT = {
   'baton-run.mjs': `export { runMain } from ${src('src/runner/main.ts')};
 export { replayMain } from ${src('src/runner/replay.ts')};`,
   'baton-leg.mjs': `export { raiseMain } from ${src('src/runner/leg.ts')};`,
-  'baton-cli.mjs': `export { initMain, migrateMarkersMain, parseSyncArgs, syncMain } from ${src('src/defaults/cli.ts')};
+  // Every name cli/baton.mjs takes from ../scripts/baton-cli.mjs: one missing here is `… is not a
+  // function` in the published package only, where the checkout's bundler exports it
+  // (scripts/check-package.mjs compares the two lists).
+  'baton-cli.mjs': `export { initMain, migrateMarkersMain, parseSyncArgs, syncMain, verifyConfigMain } from ${src('src/defaults/cli.ts')};
 export { ticketsMain } from ${src('src/defaults/tickets.ts')};
-export { requestMain } from ${src('src/defaults/request.ts')};`,
+export { requestMain } from ${src('src/defaults/request.ts')};
+export { homeMain, resolveHomes } from ${src('src/defaults/homes.ts')};`,
   'bundle.mjs': `const ENTRIES = { 'src/local/testCourse.ts': () => import(${src('src/local/testCourse.ts')}) };
 export async function bundleLocal(entry) {
   const load = ENTRIES[entry];

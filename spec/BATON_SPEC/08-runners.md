@@ -262,7 +262,7 @@ the runner's credentials under any other executor is that executor's, never Bato
     binds, is answered its credential's allow-list, as it always declared. A runner whose
     declaration lacks a capability a leg of its course requires says so once, in one line, at
     startup — the missing ones and `missing-capability` (rule 4) — and a runner whose grant allows
-    nothing says that instead of idling in silence. A worker registered before the answer carried
+    nothing says that instead of idling in silence. A runner registered before the answer carried
     `grant` asks by declaring nothing on its next beat, so the answer fills the declaration in.
     The identity banner `baton runner start` logs at startup names the declaration this way: the granted
     name (`grant`, or `grant:*` read as the grant) where no flag was given, the flag's own list
@@ -281,8 +281,7 @@ the runner's credentials under any other executor is that executor's, never Bato
     stalled remote therefore
     fails the leg within the bound — `close` throws on the killed push, the runner's two retries
     are each bounded too, and then the leg ends `released:cannot-finish:transient` — rather than
-    blocking the runner for hours. Nothing on the heartbeat path runs a git without a bound. **A runner's death always leaves a line:** on SIGTERM, SIGINT, SIGHUP (B-109: a closed
-    terminal's hangup, found live 2026-10-24),
+    blocking the runner for hours. Nothing on the heartbeat path runs a git without a bound. **A runner's death always leaves a line:** on SIGTERM, SIGINT, SIGHUP (a closed terminal's hangup),
     an uncaught exception or an unhandled rejection it logs every claim it holds, each with its
     leg in flight, and the time of its last answered beat before the process goes, so "died tracelessly" cannot
     happen. **The immediate stop is a safe point (B-109):** SIGINT, SIGHUP and a second SIGTERM
@@ -625,8 +624,7 @@ the runner's credentials under any other executor is that executor's, never Bato
     0600 key file, and deletes them from its environment before loading any repository code. No
     leg, `close`, `handoff` or `rank.mjs` inherits them; `rank.mjs` too runs, by the executor's
     `exec` (R-BTN-107), with the leg environment.
-  - **What a leg's environment holds.** The `BATON_*` names below are the only names: the
-    transition's `IR_BATON_*` aliases were removed by the release that closed B-97 (2026-10-22),
+  - **What a leg's environment holds.** The `BATON_*` names below are the only names: no `IR_BATON_*` alias exists,
     so the runner reads no such spelling and sets the leg markers under these names alone.
 
     | Variable | Value |

@@ -67,9 +67,10 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
   are conditions over the policy, and Baton enforces the policy's `floors` ([R-BTN-189](../../spec/BATON_SPEC/12-security.md#sec-12-8)); what Baton
   cannot observe stays the deployment's.
 - **One registry, one check; the credential decides, never the channel.** Every action a
-  credential can take is one entry in one registry, with the principals that may call it, and
-  the API, the CLI, the dashboard and MCP are generated from it behind one `authorize`
-  (BATON_SPEC [R-BTN-129](../../spec/BATON_SPEC/11-people.md#sec-11-3)). A dashboard session is one principal carrying its key's role; an MCP
+  credential can take is to be one entry in one registry, with the principals that may call it,
+  and the API, the CLI, the dashboard and MCP generated from it behind one `authorize`
+  (BATON_SPEC [R-BTN-129](../../spec/BATON_SPEC/11-people.md#sec-11-3)). The registry is not built yet (B-25): today each route in
+  `src/core/baton.ts` checks its own principal, so a new route follows its neighbours. A dashboard session is one principal carrying its key's role; an MCP
   key is a delegated key acting as an owner, narrowed to what [R-BTN-186](../../spec/BATON_SPEC/12-security.md#sec-12-8) admits — tighten, and
   undo its own (the owner, 2026-10-27 and 2026-11-01). No surface carries a rule of its own.
 - **Advice is fresh for the reader, bounded for the fleet.** A write Baton accepts — a board,

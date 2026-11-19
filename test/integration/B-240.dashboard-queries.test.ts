@@ -228,8 +228,10 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     }
     const large = await quiet(session);
     expect(large.length).toBe(small.length);
-    // 80 of B-240's joined reads, plus the one version row B-242's ETag reads before them.
-    expect(large.length).toBeLessThanOrEqual(81);
+    // 80 of B-240's joined reads, the one version row B-242's ETag reads before them, and
+    // R3-1258's fixed Capacity statements: the envelope's two counted figures, the maintained
+    // two's one row, the day's usage row read — and the request's own usage write in the tail.
+    expect(large.length).toBeLessThanOrEqual(89);
     // The joined reads, explained: each searches an index and none scans its table.
     const lookups = large.filter((l) => /FROM (claims|activities|transcripts|events|ticket_next_legs n|ticket_stations s JOIN ticket_next_legs n)\b/.test(l.sql) && /json_each|fence_pending|confirmed_at IS NULL AND ended_at <=|waiting_on = 'policy'|waiting_on = 'course-changed'/.test(l.sql));
     expect(lookups.length).toBeGreaterThanOrEqual(9);
@@ -244,9 +246,10 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     const a = await register('vm-a');
     await fill(a.id, tickets.slice(0, 4));
     // The statements over claims, activities and transcripts — the event windows are B-235's,
-    // and the Runners view's per-runner reads (its current activity, its latest transcript)
-    // are not this ticket's.
-    const read = (log: Captured[]) => log.filter((l) => /\b(claims|activities|transcripts)\b/.test(l.sql) && !/\bFROM events\b/.test(l.sql) && !/\bWHERE runner_id = \?/.test(l.sql))
+    // and the Runners view's own reads (its claims, its open activities, its latest transcript,
+    // now one query per list) are B-250's, not this ticket's.
+    const read = (log: Captured[]) => log.filter((l) => /\b(claims|activities|transcripts)\b/.test(l.sql) && !/\bFROM events\b/.test(l.sql) && !/\bWHERE runner_id = \?/.test(l.sql)
+      && !/FROM claims WHERE status = 'active' ORDER BY claimed_at, id$/.test(l.sql) && !/FROM activities WHERE ended_at IS NULL$/.test(l.sql) && !/AS t FROM (pending_)?transcripts$/.test(l.sql))
       .reduce((s, l) => s + (l.cursor.rowsRead ?? 0), 0);
     await state(session); // the session's first read does its own one-time work
     const before = await quiet(session);

@@ -20,17 +20,33 @@ export interface MarkdownFile {
 }
 
 /** A ticket as a ticket source posts it (§7.1): the generic fields core reads, plus the
- * fields core stores unread — the opaque `course` fields, `parent` (R-BTN-86) and `not_before`
- * (R-BTN-89). Typed here, in course code, so `src/core/` gains no line (S-BTN-43). */
+ * fields core stores unread — the opaque `course` fields and `not_before` (R-BTN-89). `parent`
+ * (R-BTN-86) is PostedTicket's own since R3-1258, read and stored by the snapshot; typed there,
+ * so `src/core/` gains no line (S-BTN-43). */
 export interface SourceTicket extends PostedTicket {
   course?: Record<string, unknown>;
-  parent?: string;
   not_before?: unknown;
 }
 
 export interface TicketsResult {
   tickets: SourceTicket[];
   closed: { id: string; as: 'done' | 'withdrawn' }[];
+}
+
+/** A ticket source (R-BTN-74, §4.2): what a repository's `.baton/tickets.mjs` default-exports,
+ *  and what the markdown default is. The contract a new source — a tracker, another file layout —
+ *  is written to; `baton tickets check` is its conformance run. The module is the repository's
+ *  own code, so each reader still checks the members it calls at run time (readBoard, the
+ *  runner's read): this type guides an author and is never a cast over a loaded module. */
+export interface TicketSource {
+  /** The live tickets and the ones closed since, read from `ctx.root` under `ctx.settings`. */
+  tickets(ctx: { root: string; settings: MarkdownSettings; versions?: unknown }): Promise<TicketsResult> | TicketsResult;
+  /** Whether a ticket's `version` pins its content (`pinned`: read at the version) or only
+   *  marks a moment (`current`: read now, compared). Absent: the source declares nothing. */
+  versions?: 'pinned' | 'current' | null;
+  /** One ticket as the leg reads it, at `version` for a pinned source. Required of a source
+   *  that declares `versions`. */
+  read?(id: string, o?: { version?: string | null; checkout?: string }): Promise<{ version?: string; ticket: unknown }>;
 }
 
 /** Frontmatter: a `---`-fenced block of `key: value` lines, each value text (unquoted, never

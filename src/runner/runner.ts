@@ -744,6 +744,10 @@ export class Runner {
       throw e;
     }
     let answer: Record<string, any>;
+    // R-BTN-26: the lease this beat renews counts from when the beat left, never from when its
+    // answer was read — Baton counts from no later than its receipt, so the later reading would
+    // have the runner believe in a lease Baton has already ended.
+    const sentAt = this.now();
     try {
       answer = await this.o.api.heartbeat(body);
     } catch (e) {
@@ -836,7 +840,7 @@ export class Runner {
       this.lostLease = false;
     }
     this.state.set({
-      runner_id: answer.runner_id, incarnation: answer.incarnation, last_ok: this.now(),
+      runner_id: answer.runner_id, incarnation: answer.incarnation, last_ok: sentAt,
       lease_timeout_s: answer.lease_timeout_s ?? s.lease_timeout_s,
     });
     // R-BTN-19: the fences this beat carried cleared with it.

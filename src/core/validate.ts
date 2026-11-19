@@ -44,6 +44,10 @@ export const COURSES_MAX = 64;
 export const LOCAL_ID = new RegExp(`^${LOCAL_SRC}$`);
 /** A ticket's qualified id, `<repository>:<local>`: what Baton's API, events and dashboard use. */
 export const TICKET_ID = new RegExp(`^(${REPOSITORY_SRC}):(${LOCAL_SRC})$`);
+/** B-113 (§4.4): what one `depends_on` entry may be — a local id of the posting repository, or
+ *  a ticket of another registered repository named by its qualified id (`baton:B-111`). `parent`
+ *  and `blocked_by` stay local (§3.1, R-BTN-47). */
+export const DEPENDENCY_ID = new RegExp(`^(?:${REPOSITORY_SRC}:${LOCAL_SRC}|${LOCAL_SRC})$`);
 /** A qualified ticket id and its two halves. Every caller holds an id `TICKET_ID` accepted. */
 export const qualify = (repository: string, local: string) => `${repository}:${local}`;
 export const repositoryOf = (ticketId: string) => ticketId.slice(0, ticketId.indexOf(':'));
@@ -575,6 +579,11 @@ export interface End {
   exit_status: number | null;
   /** R-BTN-113 (B-4): the session link of the leg this end finishes, as an advance carries one. */
   session_url: string | null;
+  /** R-BTN-86 (§4.6, R3-1258): the local ids of the child tickets the ending leg filed in git,
+   *  reported with a `suspended:<station>` or a `released:` end alone — `done` with it is
+   *  `invalid-params`, here before any write. Each id by the ticket-id rule (§12.3); at most
+   *  50; never the parent's own (the claims check that, which knows the ticket). */
+  spawned: string[] | null;
 }
 
 /** One action of a leg-end scope report (B-134): the kind of evidence and what it touched — a
@@ -661,6 +670,8 @@ const exitStatus = (v: unknown): number => {
  *  course-defined `detail` (§10.4 free text core stores and shows but never reads); `reached`, the
  *  station the claim rests at (R-BTN-71); `next`, the queued leg (R-BTN-83); and an optional
  *  pointer to the evidence, pushed first (R-BTN-8). */
+/** R-BTN-86 (§4.6, R3-1258): the `spawned` report's bound — at most 50 children an end may name. */
+export const SPAWNED_MAX = 50;
 /** A capability or holding name as a declaration carries it (R-BTN-121; R-BTN-174's branch:
  * a lost holding may be any typed label, `model:glm-5.3` included). */
 export const CAPABILITY_NAME = new RegExp(`^(?:${NAME.source}|${HOLDING.source.slice(1, -1)})$`);
@@ -706,7 +717,24 @@ export function checkEnd(body: unknown): End {
     prerequisite = { kind: 'capability', ref: (p as { ref: string }).ref };
   }
   retiredFields(b);
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url) };
+  // R-BTN-86 (§4.6, R3-1258): the `spawned` report — local ids of the children the ending leg
+  // filed in git, validated before any write. `done` takes none (the ticket closes; its children
+  // are superseded by the close, R-BTN-168), and a `released:` owner-bar end is a release like
+  // any other: both shapes carry it. At most 50, each by the ticket-id rule, each once; whether
+  // one names the ending ticket itself the claims judge, which know the ticket.
+  let spawned: string[] | null = null;
+  if (b.spawned !== undefined && b.spawned !== null) {
+    if (!Array.isArray(b.spawned) || b.spawned.length > SPAWNED_MAX) bad('spawned', `must be a list of at most ${SPAWNED_MAX} local ticket ids (R-BTN-86)`);
+    const seen = new Set<string>();
+    for (const [i, id] of (b.spawned as unknown[]).entries()) {
+      if (typeof id !== 'string' || !LOCAL_ID.test(id)) bad(`spawned[${i}]`, `must be a local ticket id (R-BTN-86)`);
+      if (seen.has(id as string)) bad(`spawned[${i}]`, `${id} appears twice`);
+      seen.add(id as string);
+    }
+    spawned = b.spawned as string[];
+    if (reason === 'done') bad('spawned', 'a done end spawns nothing — its open children are superseded by the close (R-BTN-86, R-BTN-168)');
+  }
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned };
 }
 
 export interface Advance {
@@ -774,7 +802,6 @@ export interface SequenceTake {
   floor: number | null;
   forTicket: string | null;
 }
-
 /** The `next` request's body, validated before any SQL (§12.3): `floor` a non-negative integer,
  *  `for` a local ticket id; unknown fields refused. */
 export function checkSequenceTake(v: unknown): SequenceTake {
@@ -789,6 +816,18 @@ export function checkSequenceTake(v: unknown): SequenceTake {
   }
   const forTicket = optional(r.for, matches(LOCAL_ID, 'for')) ?? null;
   return { floor, forTicket };
+}
+
+/** B-113 (§4.3): what the sync's dependencies read (`POST /v1/sync/dependencies`) carries —
+ *  `{ids: [<qualified id>…]}`, the `depends_on` entries of other repositories the posting
+ *  repository's tickets name. The ids themselves are judged where they are resolved
+ *  (dependencies.ts); this holds the body's shape alone. */
+export function checkDependenciesRead(v: unknown): string[] {
+  if (!isObj(v)) bad('body', 'must be {ids: [<repository>:<local>…]}');
+  const r = v as Record<string, unknown>;
+  for (const k of Object.keys(r)) if (k !== 'ids') bad(k, 'is not a dependencies-read field');
+  if (!Array.isArray(r.ids) || r.ids.length > 500 || !r.ids.every((x) => typeof x === 'string')) bad('ids', 'must be a list of at most 500 qualified ids');
+  return r.ids as string[];
 }
 
 /** B-190: `run_inputs` as the advance carries it (§13.5 `leg_run_inputs`): pointers and digests
@@ -859,6 +898,8 @@ const carriedSessionUrl = (v: unknown): string | null =>
 export function checkAdvance(body: unknown): Advance {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
+  // R-BTN-86 (§4.6): `spawned` rides an END alone — an advance starts a leg, it files nothing.
+  if (b.spawned !== undefined) bad('spawned', 'rides an end with suspended:<station> or released:, never an advance (R-BTN-86)');
   const leg = matches(COURSE_ID, 'leg')(b.leg);
   const reached = optional(b.reached, matches(COURSE_ID, 'reached')) ?? null;
   const evidence = b.evidence === undefined || b.evidence === null ? null : isPointer(b.evidence) ? (b.evidence as string) : bad('evidence', 'must be a commit sha or an https URL of at most 1000 characters');
