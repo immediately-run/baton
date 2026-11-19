@@ -83,7 +83,7 @@ describe('the owner principal (R-BTN-16)', () => {
   });
 
   it('refuses an assertion cleanly when no Access setting is configured — never an internal error (R3-1208, restated 2026-10-20)', async () => {
-    // The provision sets no Access var, so the deployed Worker runs without them while this
+    // The provision sets no Access var, so the deployed Runner runs without them while this
     // read remains (B-46 removes it): an Access-fronted browser still sends the assertion, and
     // it must meet the same refusal it meets with the settings present but refusing — a
     // TypeError from the settings read would answer `internal error` instead. Driven at the

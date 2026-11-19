@@ -1,6 +1,6 @@
 // courses.ts — the course registry each repository's sync posts with its board (BATON_SPEC §2a
 // R-BTN-48, §2e R-BTN-69, §7.1, R-BTN-22, R-BTN-65). Baton keeps one row per (repository,
-// course): its version, the version a worker must declare (rule 9), its skill and its course
+// course): its version, the version a runner must declare (rule 9), its skill and its course
 // file. A posted file that fails `validateCourse` keeps the previous one in force and is listed
 // under Needs you; with no previous one there is nothing to keep, so the post is refused.
 import { validateCourse, type CourseViolation } from './course';
@@ -58,7 +58,7 @@ export interface RegistryEntry {
   /** Over COURSE_FILE_MAX_BYTES: refused as a course, its file set aside unread. */
   oversized: boolean;
   version: number;
-  min_worker_version: number;
+  min_runner_version: number;
   skill: string;
   course: unknown;
   step_kinds: string[];
@@ -173,8 +173,14 @@ export function checkRegistry(v: unknown): RegistryEntry[] {
     if (seen.has(id)) bad(`${at}.id`, `repeats ${id}`);
     seen.add(id);
     if (!int(r.version, 0, COURSE_VERSION_MAX)) bad(`${at}.version`, 'must be a non-negative integer');
-    // R-BTN-65: a worker is never asked for a version the course has not reached.
-    if (!int(r.min_worker_version, 0, r.version as number)) bad(`${at}.min_worker_version`, 'must be an integer from 0 to version');
+    // R-BTN-65 and B-68's dual-read window. A sync may send the historical spelling until B-69;
+    // sending both is harmless only when they agree.
+    const legacyMin = r.min_worker_version;
+    if (r.min_runner_version !== undefined && legacyMin !== undefined && r.min_runner_version !== legacyMin) {
+      bad(`${at}.min_runner_version`, 'differs from min_worker_version');
+    }
+    const minRunnerVersion = r.min_runner_version ?? legacyMin;
+    if (!int(minRunnerVersion, 0, r.version as number)) bad(`${at}.min_runner_version`, 'must be an integer from 0 to version');
     if (typeof r.skill !== 'string' || !SKILL.test(r.skill)) bad(`${at}.skill`, 'must be a skill name');
     if (!Array.isArray(r.step_kinds) || r.step_kinds.length > STEP_KINDS_MAX || !r.step_kinds.every((k) => typeof k === 'string' && COURSE_ID.test(k))
       || new Set(r.step_kinds).size !== r.step_kinds.length) {
@@ -228,7 +234,7 @@ export function checkRegistry(v: unknown): RegistryEntry[] {
       oversized: size > COURSE_FILE_MAX_BYTES,
       id,
       version: r.version as number,
-      min_worker_version: r.min_worker_version as number,
+      min_runner_version: minRunnerVersion as number,
       skill: r.skill as string,
       course: r.course,
       step_kinds: r.step_kinds as string[],
@@ -243,7 +249,7 @@ export interface CourseRow {
   repository_id: string;
   id: string;
   version: number;
-  min_worker_version: number;
+  min_runner_version: number;
   skill: string;
 }
 
@@ -327,12 +333,12 @@ export class Courses {
         continue;
       }
       this.c.store.exec(
-        `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, person_legs_json, step_kinds, min_worker_version, branch_pattern, previous_branch_pattern, facts)
+        `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, person_legs_json, step_kinds, min_runner_version, branch_pattern, previous_branch_pattern, facts)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (repository_id, id) DO UPDATE SET version = excluded.version, skill = excluded.skill, course_json = excluded.course_json,
            leg_capabilities_json = excluded.leg_capabilities_json,
            person_legs_json = excluded.person_legs_json,
-           step_kinds = excluded.step_kinds, min_worker_version = excluded.min_worker_version,
+           step_kinds = excluded.step_kinds, min_runner_version = excluded.min_runner_version,
            branch_pattern = excluded.branch_pattern, previous_branch_pattern = excluded.previous_branch_pattern,
            facts = excluded.facts`,
         // §12.1's `courses` row holds the validated file as the repository posted it — its
@@ -343,7 +349,7 @@ export class Courses {
         // `graphOf` reads (`legNeedsOf`), for the candidate query's SQL — a view, kept in step with
         // the file by being written in the same statement. So is R-BTN-116's view (`personLegsOf`):
         // the person legs the candidate query's SQL leaves out, as rule `person` refuses them.
-        repo, e.id, e.version, e.skill, JSON.stringify(e.course), JSON.stringify(legNeedsOf(e.course)), JSON.stringify(personLegsOf(e.course)), JSON.stringify(e.step_kinds), e.min_worker_version,
+        repo, e.id, e.version, e.skill, JSON.stringify(e.course), JSON.stringify(legNeedsOf(e.course)), JSON.stringify(personLegsOf(e.course)), JSON.stringify(e.step_kinds), e.min_runner_version,
         e.branch_pattern, e.previous_branch_pattern, JSON.stringify(e.facts));
       this.c.store.exec('DELETE FROM course_refusals WHERE repository_id = ? AND course_id = ?', repo, e.id);
       // Immutable: a schema already held has the same digest (schemaViolations), so it is kept.
@@ -410,12 +416,12 @@ export class Courses {
   }
 
   get(repo: string, id: string): CourseRow | null {
-    return this.rows<CourseRow>('SELECT repository_id, id, version, min_worker_version, skill FROM courses WHERE repository_id = ? AND id = ?', repo, id)[0] ?? null;
+    return this.rows<CourseRow>('SELECT repository_id, id, version, min_runner_version, skill FROM courses WHERE repository_id = ? AND id = ?', repo, id)[0] ?? null;
   }
 
   /** Every course in force, by repository then id: the dashboard's and rule 9's view. */
   all(): CourseRow[] {
-    return this.rows<CourseRow>('SELECT repository_id, id, version, min_worker_version, skill FROM courses ORDER BY repository_id, id');
+    return this.rows<CourseRow>('SELECT repository_id, id, version, min_runner_version, skill FROM courses ORDER BY repository_id, id');
   }
 
   /** Needs you (R-BTN-69): each refused course file, the one in force staying. */

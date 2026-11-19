@@ -242,7 +242,7 @@ describe('S-BTN-189 the repository policy', () => {
     expect(hbJson.policies.docs.guarantees_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(hbJson.policies.docs.floors_hash).toMatch(/^[0-9a-f]{64}$/);
     const claim = await hostCall(await signedRequest(w, ORIGIN + '/v1/runner/claim', {
-      created, method: 'POST', headers: { 'X-Worker-Secret': secret }, body: JSON.stringify({ request_id: 'req-s189-1' }),
+      created, method: 'POST', headers: { 'X-Runner-Secret': secret }, body: JSON.stringify({ request_id: 'req-s189-1' }),
     }));
     const claimJson = (await claim.json()) as Record<string, any>;
     expect(claimJson.policy_hash).toBe(hbJson.policies.docs.policy_hash);
@@ -259,8 +259,8 @@ describe('S-BTN-189 the repository policy', () => {
     for (const [k, host] of [[r1, 'runner-1-host'], [r2, 'runner-2-host']] as const) {
       expect((await keyCall(owner, `/v1/owner/ops/grants`, { public_key: k.publicKey, hostname: host, capabilities: ['agent-venue'] })).status).toBe(200);
     }
-    await rows(`UPDATE worker_grants SET trust_level = 'trusted', trust_domain = 'host-a' WHERE credential_id = ?`, r1.fingerprint);
-    await rows(`UPDATE worker_grants SET trust_level = 'untrusted', trust_domain = 'host-a' WHERE credential_id = ?`, r2.fingerprint);
+    await rows(`UPDATE runner_grants SET trust_level = 'trusted', trust_domain = 'host-a' WHERE credential_id = ?`, r1.fingerprint);
+    await rows(`UPDATE runner_grants SET trust_level = 'untrusted', trust_domain = 'host-a' WHERE credential_id = ?`, r2.fingerprint);
     const { version, doc } = await policyRow('ops').then((r) => ({ version: r.version, doc: JSON.parse(r.policy_json) }));
     // grants.trusted_domain: separate — the trusted grant's domain is shared with another grant,
     // untrusted included (round 1, finding 6: the untrusted one was skipped before).
@@ -274,7 +274,7 @@ describe('S-BTN-189 the repository policy', () => {
     // The second grant gone, a courier in a domain of its own — registered once per ask, two
     // rows — does not refuse the change against itself: a courier is not a grant, and one
     // courier is one courier.
-    await rows(`UPDATE worker_grants SET revoked_at = ? WHERE credential_id = ?`, Date.now(), r2.fingerprint);
+    await rows(`UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ?`, Date.now(), r2.fingerprint);
     const courier = await makeKey('ssh-ed25519', 'courier');
     expect((await as(owner, '/v1/owner/ops/couriers', { public_key: courier.publicKey, asks: ['owner', 'hi'], trust_level: 'untrusted', trust_domain: 'host-b' })).status).toBe(200);
     const ok = await as(owner, '/v1/owner/ops/policy', { base_version: version, policy: { ...doc, grants: { ...doc.grants, one_per_domain: true, trusted_domain: 'separate' } } }, 'PUT');
@@ -342,7 +342,7 @@ async function addHumanOwner(repository: string) {
  *  (R-BTN-180 — the role's own routes are B-147's, so the scenario writes it as its grant). */
 async function makeChecker(repository: string) {
   expect((await keyCall(owner, `/v1/owner/${repository}/grants`, { public_key: checkerKey.publicKey, hostname: 'checker-host', capabilities: ['agent-venue'] })).status).toBe(200);
-  await rows('UPDATE worker_grants SET role = ? WHERE credential_id = ? AND repository_id = ?', 'protection-checker', checkerKey.fingerprint, repository);
+  await rows('UPDATE runner_grants SET role = ? WHERE credential_id = ? AND repository_id = ?', 'protection-checker', checkerKey.fingerprint, repository);
 }
 
 /** The checker's heartbeat, carrying its protection report. */

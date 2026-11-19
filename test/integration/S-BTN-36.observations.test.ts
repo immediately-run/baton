@@ -44,7 +44,7 @@ describe('S-BTN-36 (observation half)', () => {
     const { secret } = await register('vm-a');
     const { json: c } = await claimItem('vm-a', secret, { ticket_id: 'docs:R3-9001' });
     const n = (await observe()).json.observation; // the sync's run starts reading…
-    await endClaim('vm-a', secret, c.claim_id, { end_reason: 'done', ended_at_sha: sha.A }); // …and the worker ends meanwhile
+    await endClaim('vm-a', secret, c.claim_id, { end_reason: 'done', ended_at_sha: sha.A }); // …and the runner ends meanwhile
     const confirm = [{ claim_id: c.claim_id, sha: sha.A }];
     expect(await (await syncCall('/v1/sync/board', { ...payload(sha.A, sha.A, board.states.A, { confirmations: confirm }), observation: n })).json()).toMatchObject({ ok: true, confirmed: 0 });
     expect((await claimRow(c.claim_id)).confirmed_at).toBeNull();

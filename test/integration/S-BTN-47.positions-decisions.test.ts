@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, adminSession, course, cutover, keyCall, observe, placed, rows, sessionCall, setAdminKeys, setClock, tick } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
-import { grantedWorker, signed } from '../lib/fleet';
+import { grantedRunner, signed } from '../lib/fleet';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
@@ -83,8 +83,8 @@ describe('S-BTN-47 positions, course changes and the dead-ticket queue', () => {
     expect(await nextLegs('J')).toEqual([{ leg: 'adjudicate', state: 'waiting', waiting_on: 'course-changed' }]);
     expect(await rows(`SELECT kind FROM events WHERE ticket_id = 'docs:J' AND kind = 'off-graph'`)).toEqual([]);
     expect((await needsYou()).course_changed).toEqual([{ ticket_id: 'docs:J', leg: 'adjudicate', waiting_since: T0 + 2 * MIN }]);
-    // A worker is never offered it.
-    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue']);
+    // A runner is never offered it.
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue']);
     expect((await w.call('/v1/runner/claim', { request_id: 'req-claim-j', ticket_id: 'docs:J' })).status).toBe(409);
     // The sync's own fix — git posts J at reviewed queued for merge — clears the wait.
     git.place('J', placed('reviewed', REVIEWED, [['merge', 'ready']], { bars: { merge: ['family:glm'] } }));
@@ -94,7 +94,7 @@ describe('S-BTN-47 positions, course changes and the dead-ticket queue', () => {
   });
 
   it('retries spent raise baton:retries with an owner notice; a posted baton: id is dropped; resolve retry unblocks', async () => {
-    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue']);
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue']);
     const c = await w.call('/v1/runner/claim', { request_id: 'req-claim-r', ticket_id: 'docs:R' });
     expect(c.status).toBe(200);
     expect((await w.call('/v1/runner/claims/' + c.json.claim_id + '/advance', { leg: 'implement' })).status).toBe(200);
@@ -154,7 +154,7 @@ describe('S-BTN-47 positions, course changes and the dead-ticket queue', () => {
   // limit, with the grants: an advance refused without a grant, accepted with one, refused again
   // once the grant is spent.
   it('a posted decision is answered with baton owner resolve, its option\'s grant lifting max_runs by exactly what it says, leg by leg', async () => {
-    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue']);
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue']);
     const c = await w.call('/v1/runner/claim', { request_id: 'req-claim-a', ticket_id: 'docs:A' });
     expect(c.status).toBe(200);
     const adv = (body: Record<string, unknown>) => w.call(`/v1/runner/claims/${c.json.claim_id}/advance`, body);

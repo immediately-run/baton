@@ -37,7 +37,7 @@ import { clampUnsignedList, marksOf, signedControlOf, unsignedAgentConfig } from
 import { nodeKeygen } from '../shared/commitSign.mjs';
 import type { PostedControl } from '../core/board';
 import { readTicketSettings } from './tickets-config';
-import { remoteSlug } from './remote-slug';
+import { ownRepositoryId, remoteSlug } from './remote-slug';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 
 // LC_ALL=C on every git call (B-93, round 4): git translates its messages, and the two shapes
@@ -96,7 +96,9 @@ export function plainGitRemote(url: string): boolean {
 // remoteSlug lives in remote-slug.ts (a leaf, so the runner's bundle can resolve a named home
 // without this file's whole graph, B-121); re-exported here, where it has always been imported
 // from (tickets.ts, the sync and `--pin`'s self-resolution below). The doc comment above is its.
-export { remoteSlug };
+// ownRepositoryId (B-113) lives beside it, for every default that asks which qualified id is
+// this checkout's own.
+export { remoteSlug, ownRepositoryId };
 
 /** The baton package's root: the nearest directory above this module whose package.json is
  * `@immediately-run/baton`. Found by walking up, because this module runs both as source
@@ -122,6 +124,9 @@ const prebuilt = (...path: string[]): string => join(packageRoot(), 'dist', 'def
 interface CourseEntry {
   id: string;
   version: number;
+  min_runner_version?: number;
+  /** B-68's dual-read window: an older file spells the floor `min_worker_version` — this
+   *  repository's own still does — read beside the new name until B-69 retires it. */
   min_worker_version?: number;
   skill?: string;
   step_kinds?: string[];
@@ -163,9 +168,10 @@ interface BatonJson {
 const defaultSkill = (course: string): string => `baton-${course}`;
 
 /** The `courses` entry `baton repo init` writes: every R-BTN-51 field, so a repository edits
- * them where the spec says rather than discovering them. */
-function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source'>> {
-  return { id: course, version: 1, min_worker_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
+ * them where the spec says rather than discovering them. Never `min_worker_version`: init
+ * writes the new name only; the window is on the read (above). */
+function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
+  return { id: course, version: 1, min_runner_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
 export interface SyncArgs {
@@ -185,7 +191,7 @@ export interface SyncArgs {
    * Defaults to `BUSY_RETRY_S`. */
   busyRetryS?: number;
   /** The repository's sync key (B-88, R-BTN-93): the key file the three calls are signed
-   * with, as a worker's are. Set, it is the sync's credential — the no-CI path. */
+   * with, as a runner's are. Set, it is the sync's credential — the no-CI path. */
   syncKey?: string;
   transport?: Transport;
   auth?: Auth;
@@ -261,9 +267,20 @@ interface Board {
   statusOf: (id: string) => string | null;
 }
 
+/** One dependency the sync's dependencies read answered (B-113): the qualified id and whether it
+ *  is done on its own board. */
+export interface ResolvedDep {
+  ticket: string;
+  done: boolean;
+}
+
 /** Read the board from the checkout as it stands: the tickets and stations from the
- * repository's own code or the CLI's defaults, the registry from `baton.json`'s courses. */
-async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void, record?: BatonRecord): Promise<Board> {
+ *  repository's own code or the CLI's defaults, the registry from `baton.json`'s courses.
+ *  `resolveDeps` (B-113) resolves the qualified `depends_on` entries of other repositories the
+ *  live tickets name against their boards — the read a sync makes after its number, as every
+ *  input it posts is (§4.3); its doneness joins `done`, so each course's station function gates
+ *  on a cross-repository dependency as on a local one (R-BTN-120). */
+async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void, record?: BatonRecord, resolveDeps?: (ids: readonly string[]) => Promise<readonly ResolvedDep[]>): Promise<Board> {
   const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
 
   // The ticket source: the repository's own, else the markdown default. B-183 (R-BTN-74): a
@@ -299,6 +316,28 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   }
   const closedIds = new Set(result.closed.map((c) => c.id));
   const doneIds = new Set(result.closed.filter((c) => c.as === 'done').map((c) => c.id));
+
+  // B-113: the qualified dependencies the live tickets name. Another repository's resolve
+  // against its board — the dependencies read, after the number as everything this run posts is
+  // (§4.3) — and one done there is done here, so the station functions gate on it as on a local
+  // one (R-BTN-120). The posting repository's own id spelled qualified (`docs:R3-1` posted by
+  // docs) is the local id's own dependency read as itself (§3.1): the repos map names this
+  // checkout's registered id (the short name its forge path maps to, `.git` and case aside), and
+  // a done local target marks its qualified spelling done. A read that refuses — an unregistered
+  // repository, an unknown ticket, a less visible target without its owners' consent — fails the
+  // run here, before the forge is read, with the same words the post would be refused with.
+  const ownRepoId = ownRepositoryId(root, batonJson.repos ?? {});
+  const qualified = [...new Set(result.tickets.filter((t) => !closedIds.has(t.id)).flatMap((t) => t.depends_on.filter((d) => d.includes(':'))))];
+  if (ownRepoId != null && qualified.some((d) => d.startsWith(`${ownRepoId}:`))) {
+    for (const d of qualified) {
+      if (d.startsWith(`${ownRepoId}:`) && doneIds.has(d.slice(ownRepoId.length + 1))) doneIds.add(d);
+    }
+  }
+  const foreign = qualified.filter((d) => ownRepoId == null || !d.startsWith(`${ownRepoId}:`));
+  if (foreign.length) {
+    if (!resolveDeps) throw new Error(`tickets name cross-repository dependencies (${foreign.join(', ')}) that this run cannot resolve — the sync's dependencies read was not given (B-113)`);
+    for (const d of await resolveDeps(foreign)) if (d.done) doneIds.add(d.ticket);
+  }
 
   // Every live ticket's course must be one this repository lists (R-BTN-74: a ticket on a course
   // with no station function fails the sync — nothing is posted).
@@ -399,7 +438,9 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     courseData[c.id] = out.course_data;
     registry.push({
       ...courseSchemas(root, c.id),
-      id: c.id, version: c.version, min_worker_version: c.min_worker_version ?? c.version, skill: c.skill ?? defaultSkill(c.id), course,
+      // B-68's window: a file still carrying `min_worker_version` keeps its floor — the new
+      // name wins when both are set — instead of silently falling back to `version`.
+      id: c.id, version: c.version, min_runner_version: c.min_runner_version ?? c.min_worker_version ?? c.version, skill: c.skill ?? defaultSkill(c.id), course,
       step_kinds: c.step_kinds ?? Object.keys(course.legs ?? {}),
       branch_pattern: branchPatterns[0], ...(c.previous_branch_pattern ? { previous_branch_pattern: c.previous_branch_pattern } : {}),
       // B-182 (R-BTN-134): what the course's entry declares it reads — `prs` when this sync reads
@@ -714,7 +755,12 @@ export async function syncMain(args: SyncArgs): Promise<number> {
         git(root, 'checkout', '-q', '--detach', 'FETCH_HEAD');
       }
       // baton.json too is read at the commit posted.
-      board = await readBoard(root, JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson, args, log, record);
+      // B-113: the qualified dependencies of other repositories resolve against their boards —
+      // one read after the number, its doneness joining the `done` the station functions gate on.
+      board = await readBoard(root, JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson, args, log, record, async (ids) => {
+        const answer = await api.dependencies([...ids]);
+        return (Array.isArray(answer.dependencies) ? answer.dependencies : []).map((d) => ({ ticket: String(d.ticket), done: d.done === true }));
+      });
       return git(root, 'rev-parse', 'HEAD');
     },
     readHead: () => asResult(() => api.head()),
@@ -771,19 +817,19 @@ function bearerAuth(token: string | null): Auth {
   if (!token) {
     throw new Error(`no sync credential: run in the sync workflow (id-token: write), pass --sync-key FILE (or set ${SYNC_KEY_ENV}), pass --token, or set BATON_SYNC_TOKEN`);
   }
-  return (_m, _u, _b, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
+  return (_m, _u, _b, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) });
 }
 
 /** A sync key (B-88, R-BTN-93): the file's key signs the three sync calls, through the runner's
- * own helper (`envAuth`, imported and not copied), so a sync signs exactly as a worker does. The
+ * own helper (`envAuth`, imported and not copied), so a sync signs exactly as a runner does. The
  * file is an SSH key — a private key, or a `.pub` whose private half an `ssh-agent` holds; an API
- * key — a worker's credential, never a sync's — is refused by name here instead of being spent as
+ * key — a runner's credential, never a sync's — is refused by name here instead of being spent as
  * a bearer the server would deny. */
 function syncKeyAuth(file: string): Auth {
-  // R-BTN-159's API key (`cli/sign.mjs`): a worker's credential, never a sync's — `envAuth` would
+  // R-BTN-159's API key (`cli/sign.mjs`): a runner's credential, never a sync's — `envAuth` would
   // spend it as a bearer the sync routes deny, so it is refused by name.
   if (existsSync(file) && API_KEY.test(readFileSync(file, 'utf8').trim())) {
-    throw new Error(`--sync-key ${file}: an API key is a worker's credential, not a sync key — register an SSH key (\`baton admin repo add --sync-key <key.pub>\`) and pass its private file`);
+    throw new Error(`--sync-key ${file}: an API key is a runner's credential, not a sync key — register an SSH key (\`baton admin repo add --sync-key <key.pub>\`) and pass its private file`);
   }
   let auth: Auth;
   try {

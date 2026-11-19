@@ -4,11 +4,11 @@
 // and `ops:T-1` are distinct tickets; `ops`' sync token cannot post `docs`' board; head, cutover
 // and events are each repository's own; every `docs` candidate ranks above every `ops` one; W1
 // (roadmap-pr only) is never offered `ops`' tickets; a `runbook` change raising
-// `min_worker_version` stops W2 there until it declares that version; a branch both `T-1`s map to
+// `min_runner_version` stops W2 there until it declares that version; a branch both `T-1`s map to
 // is refused while either is held. The recommendation clauses — each repository in its own
 // hook's or default order, the per-group limit with 60 ready docs legs — are R3-1232's.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { beat, captureDispatches, claimItem, claimRow, course, cutover, endClaim, ORIGIN, ownerCall, payload, recommended, register, rows, setClock, syncCall, syncToken, withCore, workerCall } from '../helpers';
+import { beat, captureDispatches, claimItem, claimRow, course, cutover, endClaim, ORIGIN, ownerCall, payload, recommended, register, rows, setClock, syncCall, syncToken, withCore, runnerCall } from '../helpers';
 
 const board = inject('board');
 const sha = board.shas;
@@ -35,7 +35,7 @@ const opsBoard = {
   ready: ['R3-9001', 'T-1'],
   registry: [runbook()],
 };
-/** W2 (R-BTN-48): declares both repositories' courses; the default worker, W1, docs' alone. */
+/** W2 (R-BTN-48): declares both repositories' courses; the default runner, W1, docs' alone. */
 const BOTH = { courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }, { repository: 'ops', course: 'runbook', version: 1 }] };
 const OPS_SHA = 'f'.repeat(40);
 const owner = (path: string, body: unknown) =>
@@ -84,9 +84,9 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     const { secret } = await register('vm-a', BOTH);
     const sent = await captureDispatches();
     expect((await owner('/v1/ui/cutover', { repository: 'ops', confirm: true })).status).toBe(200);
-    const modeOf = async (repository: string) => (await (await workerCall(`/v1/runner/mode?repository=${repository}`, { secret })).json()) as { mode: string };
+    const modeOf = async (repository: string) => (await (await runnerCall(`/v1/runner/mode?repository=${repository}`, { secret })).json()) as { mode: string };
     expect([(await modeOf('docs')).mode, (await modeOf('ops')).mode]).toEqual(['shadow', 'cut-over']);
-    expect((await workerCall('/v1/runner/mode?repository=nope', { secret })).status).toBe(400); // not registered
+    expect((await runnerCall('/v1/runner/mode?repository=nope', { secret })).status).toBe(400); // not registered
     // A docs ticket by name is not-cut-over; an open claim gets ops' first.
     expect((await claimItem('vm-a', secret, { ticket_id: 'docs:R3-9001' })).json.code).toBe('not-cut-over');
     const c = await claimItem('vm-a', secret);
@@ -204,16 +204,16 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     await opsCall('/v1/sync/board', payload('e'.repeat(40), OPS_SHA, { items: [inProgress], ready: [] }));
     expect((await owner('/v1/ui/cutover', { repository: 'docs', confirm: true })).status).toBe(200);
     expect((await owner('/v1/ui/cutover', { repository: 'ops', confirm: true })).status).toBe(200);
-    const names = await rows<{ ticket_id: string; session_name: string }>(`SELECT c.ticket_id, w.session_name FROM claims c JOIN workers w ON w.id = c.worker_id ORDER BY c.ticket_id`);
+    const names = await rows<{ ticket_id: string; session_name: string }>(`SELECT c.ticket_id, w.session_name FROM claims c JOIN runners w ON w.id = c.runner_id ORDER BY c.ticket_id`);
     expect(names.map((n) => n.ticket_id)).toEqual(['docs:R3-9001', 'ops:R3-9001']);
     expect(names[1].session_name).toMatch(/^item-R3-9001-[0-9a-f]{6}$/);
     const { secret } = await register('vm-a', BOTH);
     for (const t of ['docs:R3-9001', 'ops:R3-9001']) {
-      expect((await workerCall('/v1/runner/adopt', { secret, body: { ticket_id: t } })).status).toBe(200);
+      expect((await runnerCall('/v1/runner/adopt', { secret, body: { ticket_id: t } })).status).toBe(200);
     }
   });
 
-  it('R-BTN-48: a worker gets only tickets of courses it declares; ops raising min_worker_version stops only ops’', async () => {
+  it('R-BTN-48: a runner gets only tickets of courses it declares; ops raising min_runner_version stops only ops’', async () => {
     await cutover(1, 'docs');
     await cutover(1, 'ops');
     const w1 = await register('vm-b'); // docs' roadmap-pr only
@@ -226,9 +226,9 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     await rows(`UPDATE ticket_next_legs SET state = 'waiting' WHERE ticket_id LIKE 'docs:%'`);
     expect(await claimItem('vm-b', w1.secret)).toMatchObject({ status: 404, json: { code: 'no-eligible-ticket' } });
     await rows(`UPDATE ticket_next_legs SET state = 'ready' WHERE ticket_id IN (SELECT id FROM tickets WHERE repository_id = 'docs' AND rank IS NOT NULL)`);
-    // A runbook change older workers would misbehave under.
+    // A runbook change older runners would misbehave under.
     await opsCall('/v1/sync/board', payload('e'.repeat(40), OPS_SHA, { ...opsBoard, registry: [runbook(2)] }));
-    expect((await beat('vm-a', w2.secret, BOTH)).json.stale_courses).toEqual([{ repository: 'ops', course: 'runbook', version: 1, min_worker_version: 2 }]);
+    expect((await beat('vm-a', w2.secret, BOTH)).json.stale_courses).toEqual([{ repository: 'ops', course: 'runbook', version: 1, min_runner_version: 2 }]);
     expect((await candidates(w2.id)).filter((t) => t.startsWith('ops:'))).toEqual([]);
     expect((await candidates(w2.id)).some((t) => t.startsWith('docs:'))).toBe(true);
     await beat('vm-a', w2.secret, { courses: [BOTH.courses[0], { ...BOTH.courses[1], version: 2 }] });
@@ -264,7 +264,7 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     expect(await rows(`SELECT count(*) AS n FROM courses WHERE repository_id = 'other'`)).toEqual([{ n: 0 }]);
   });
 
-  it('§6.3: a branch both repositories’ T-1 map to is refused while either is held by another worker', async () => {
+  it('§6.3: a branch both repositories’ T-1 map to is refused while either is held by another runner', async () => {
     const code = { repos: ['immediately-run/sandbox'] }; // a code repository both tickets list
     const docsItems = [...(board.states.A.state.items as Record<string, unknown>[]), { ...fixture, id: 'T-1', title: 'docs: T-1', ...code }];
     await syncCall('/v1/sync/board', payload(sha.B, sha.A, { ...board.states.A, state: { items: docsItems }, ready: [...board.states.A.ready, 'T-1'] }));
@@ -273,7 +273,7 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     const w1 = await register('vm-b');
     const w2 = await register('vm-a', BOTH);
     const ask = async (branch: string, secret?: string, repo = 'immediately-run/sandbox') =>
-      (await workerCall(`/v1/runner/branch-holder?repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`, { cred: secret === w2.secret ? 'vm-a' : 'vm-b', secret })).json();
+      (await runnerCall(`/v1/runner/branch-holder?repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`, { cred: secret === w2.secret ? 'vm-a' : 'vm-b', secret })).json();
     expect(await ask('claude/T-1-fix')).toEqual({ tickets: ['docs:T-1', 'ops:T-1'], held_by_other: false, fence_pending: false });
     expect((await claimItem('vm-a', w2.secret, { ticket_id: 'ops:T-1' })).status).toBe(200);
     expect(await ask('claude/T-1-fix', w1.secret)).toMatchObject({ held_by_other: true });
@@ -289,7 +289,7 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     // branch maps to both — the collision failing safe.
     expect(await ask('claude/R3-9001-x', undefined, 'immediately-run/docs')).toMatchObject({ tickets: ['docs:R3-9001', 'ops:R3-9001'] });
     for (const bad of ['repo=x&branch=claude/T-1-x', 'repo=immediately-run/sandbox&branch=a..b']) {
-      expect((await workerCall(`/v1/runner/branch-holder?${bad}`, { cred: 'vm-b' })).status).toBe(400);
+      expect((await runnerCall(`/v1/runner/branch-holder?${bad}`, { cred: 'vm-b' })).status).toBe(400);
     }
   });
 
@@ -300,7 +300,7 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     await cutover(1, 'ops');
     const w2 = await register('vm-a', BOTH);
     const ask = async (branch: string) =>
-      (await workerCall(`/v1/runner/branch-holder?repo=immediately-run/ops&branch=${encodeURIComponent(branch)}`, { cred: 'vm-b' })).json();
+      (await runnerCall(`/v1/runner/branch-holder?repo=immediately-run/ops&branch=${encodeURIComponent(branch)}`, { cred: 'vm-b' })).json();
     expect(await ask('work/T-1')).toMatchObject({ tickets: ['ops:T-1'] });
     expect(await ask('claude/T-1-x')).toMatchObject({ tickets: ['ops:T-1'] }); // the previous pattern
     const { json: c } = await claimItem('vm-a', w2.secret, { ticket_id: 'ops:T-1' });

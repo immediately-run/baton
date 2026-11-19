@@ -60,7 +60,7 @@ export async function close() { return 'https://example.test/close'; }
       const api = new BatonApi({
         url: 'https://baton.test',
         transport: (req) => hostCall(req),
-        auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+        auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
       });
       const runner = new Runner({
         api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', capabilities: ['key:zai'],

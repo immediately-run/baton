@@ -1,0 +1,107 @@
+---
+title: "B-263 — Remove signed control: no commit signature is verified (the 2026-11-19 amendment)"
+id: B-263
+project: baton
+status: available
+updated: 2026-11-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1263
+tier: judgement
+description: "The spec verifies no commit signature since 2026-11-19: require_signed_control, the board post's control record, the brief mark, the runner's signature walk, the home-signed executor source and the owner sign / verify-config tooling are retired. Remove the code, the tests and the runbook, drop the stored fields in a new migration, and serve last_written_by alone. Blocked on the deployment's forge gate existing wherever the setting is on today (none, the owner 2026-11-19)."
+topics:
+  - baton
+  - security
+owns: {}
+prs: []
+depends_on:
+  - B-264
+---
+
+**Brief:** see the description. The owner's ruling ("Retire it everywhere") and its reasons are in
+`spec/BATON_SPEC_HISTORY.md`'s 2026-11-19 entry.
+
+**Depends on:** B-264, so a `protected` home has the `out-of-course` finding before the
+`unsigned-control` notice goes.
+
+**Spec:** [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md) ([R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md)),
+[§4.4](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4) ([R-BTN-194](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4), the board post),
+[§6.8](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8) ([R-BTN-12](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8)),
+[§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3)),
+[§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-4)),
+[§11.1](../spec/BATON_SPEC/11-people.md#sec-11-1) ([R-BTN-13](../spec/BATON_SPEC/11-people.md#sec-11-1)),
+[§13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§14](../spec/BATON_SPEC/14-api.md#sec-14).
+
+### What to build
+
+The spec is the authority; where this list and a rule differ, the rule wins.
+
+1. **The setting.** Remove `require_signed_control` from the owner settings, the CLI
+   (`baton owner settings --require-signed-control`), the observation and the registry of
+   actions.
+2. **The sync.** Stop computing the `control` record, the group walks and the brief marks; the
+   board post carries neither `control` nor a ticket's `brief` (§4.4). Whether a post
+   from an older CLI that still carries them is refused or read without them is decided here,
+   with the client version Baton requires (R-BTN-197), and written into §4.4 by this ticket's PR
+   before the code: the spec states neither today.
+3. **The core.** Drop the `unsigned-control` event and its window, the claim's stored record
+   (`claims.control_json`), the fail-closed "no signed version" refusal and `register_moved`.
+   Serve `last_written_by` (with `human`, once B-264 has built it) and no brief mark on the
+   claim answer, the heartbeat's claims, the board read and the ticket read.
+4. **The runner.** Remove the signature verification and the recomputed walk before loading
+   (`src/defaults/signed-control.ts`, its callers, and `src/shared/commitSign.mjs` with its
+   `.d.mts`, changed in docs and re-vendored); `agent_command`, the overrides, `rank.mjs`
+   and the leg scripts load from the claim's snapshot (R-BTN-133, R-BTN-143). Remove the
+   `home-signed` executor source: a runner configured with it refuses to start, as with any
+   source it does not know. The runner prints `last_written_by` at the claim, no mark.
+5. **`EXPEDITE`** counts as the snapshot carries it (R-BTN-12).
+6. **Tooling and pages.** Remove `baton owner sign` and `baton owner verify-config`, the
+   runbook `docs/runbooks/owner-signed-control.mdx` and its links, and the retired passages of
+   `docs/security-model.mdx`, `docs/runbooks/compromised-runner.mdx` and
+   `docs/runbooks/owner-key-loss.mdx` that describe running code.
+7. **The schema.** A new numbered migration (its number from `baton tickets next migration`)
+   drops what 0040 and 0041 added and the `events_unsigned_control` index; no old migration is
+   edited.
+8. **Tests.** Delete `test/integration/S-BTN-218.signed-briefs.test.ts`,
+   `S-BTN-219.require-signed-control.test.ts` and `test/unit/signed-control.test.ts`; take
+   S-BTN-218 and S-BTN-219 out of `RETIRED_TESTS_ALLOWED` (`scripts/check-spec.mjs`); bring
+   S-BTN-209, S-BTN-220 and S-BTN-233's tests to their rows as amended.
+9. **`CLAUDE.md` in each home**: baton's reads a brief by `last_written_by.human`; check the docs
+   and Fieldhouse homes' copies say the same, and ask their owners where they do not.
+
+### Trust
+
+No new input. This ticket removes inputs: the board post's `control` and `brief` fields (written
+by whoever may post the board, reach 7), the owner setting `require_signed_control` (an owner
+key), and commit signatures (anyone who pushes, reach 1). What remains is `last_written_by`,
+Baton's own record from the forge's push deliveries (R-BTN-194), which no post and no pusher
+writes. Removing the runner's verification widens what a push to a `cooperative` home's default
+branch executes on its runners (reach 1) to what it was before B-127: that is the ruling, and a
+home that needs the protection applies a policy under which `control-paths-human` holds.
+
+### Invariants
+
+- R-BTN-143: a runner runs only code the default branch holds. The on-branch check stays and is
+  the only check before a leg tree is made; no code path that skipped it for a "signed" commit
+  may survive the removal.
+- R-BTN-33: filter fields only. Dropping `control_json` and the brief mark removes stored
+  fields and adds none.
+- R-BTN-194: `last_written_by` is no input of `row_hash`; removing the mark beside it must not
+  change any row's hash for a ticket whose file did not change (test: a re-post after the
+  upgrade materializes nothing).
+- Migrations are append-only: one new file, nothing edited.
+- R-BTN-31: S-BTN-209, S-BTN-220, S-BTN-233.
+
+### Exit criteria
+
+- No code path verifies a commit signature; `grep -ri 'signed.control\|commitSign\|unsigned-control'
+  src cli test --exclude-dir=migrations` finds nothing.
+- `npm test` green with S-BTN-218 and S-BTN-219's files deleted and `RETIRED_TESTS_ALLOWED`
+  back to its two older entries.
+- A home with `require_signed_control` stored `on` upgrades without a refused claim.
+
+## Status
+
+_filed 2026-11-19._

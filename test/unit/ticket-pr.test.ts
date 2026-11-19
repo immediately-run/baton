@@ -29,7 +29,7 @@ function repo(files: Record<string, string>, files2: Record<string, string>, mes
   dirs.push(dir);
   const git = (...a: string[]) => execFileSync('git', ['-C', dir, ...a], { stdio: 'ignore' });
   git('init', '-q', '-b', 'main');
-  git('config', 'user.email', 'worker@immediately.run');
+  git('config', 'user.email', 'runner@immediately.run');
   git('config', 'user.name', 'immediately-run-worker');
   mkdirSync(join(dir, '.baton'), { recursive: true });
   writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ items: 'tickets', default_course: 'create-pr', repos: {} }));
@@ -93,7 +93,7 @@ describe('B-133: the ticket-PR view', () => {
     const printed = r.lines.join('\n');
     expect(printed).toMatch(/EXPEDITE: false → true  \[control\]/);
     expect(printed).toMatch(/control field EXPEDITE changed/);
-    expect(printed).toMatch(/immediately-run-worker <worker@immediately\.run> \(committed by immediately-run-worker <worker@immediately\.run>\)/);
+    expect(printed).toMatch(/immediately-run-worker <runner@immediately\.run> \(committed by immediately-run-worker <runner@immediately\.run>\)/);
     expect(printed).toMatch(/status-only: no/);
   });
 

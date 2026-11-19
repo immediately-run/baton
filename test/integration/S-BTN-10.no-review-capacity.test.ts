@@ -40,7 +40,7 @@ describe('S-BTN-10 no reviewer capacity', () => {
     expect(await recommended(w2.id)).toEqual([]);
     expect((await claimItem('vm-b', w2.secret, { ticket_id: 'docs:T-1' })).json).toMatchObject({ code: 'not-eligible', rule: 1, rule_code: 'not-ready' });
     // The seats free up: the sync posts review ready, and the ticket is recommended again — the
-    // same worker included — at pr-open, review queued, with no owner action.
+    // same runner included — at pr-open, review queued, with no owner action.
     git.place('T-1', placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]));
     await git.refresh();
     expect(await recommended(w2.id)).toEqual(['docs:T-1']);

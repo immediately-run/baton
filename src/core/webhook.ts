@@ -225,7 +225,7 @@ export type DeliveryOutcome =
 
 export class Webhooks {
   constructor(private readonly c: { store: Store; now: () => number; /** B-134: the forge
-   *  cross-check — a push by a named worker pusher to a repository no open claim covers (rule
+   *  cross-check — a push by a named runner pusher to a repository no open claim covers (rule
    *  3's reading of still holding, as `openScopes` reads it) raises `unclaimed-write`. */
    scope?: { pushDelivery(d: Delivery): void } }) {}
 

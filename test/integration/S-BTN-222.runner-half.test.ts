@@ -198,7 +198,7 @@ const newRunner = (home: string, log: (l: string) => void, over: Record<string, 
       if (onBeat && new URL(req.url).pathname === '/v1/runner/heartbeat') onBeat(await req.clone().json() as Record<string, any>);
       return hostCall(req);
     },
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   }),
   home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', capabilities: ['key:zai'],
   session: `b234-${Math.random().toString(16).slice(2, 8)}`, courses: [{ course: 'roadmap-pr', version: 3 }, { course: 'timeout-pr', version: 1 }],

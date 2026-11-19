@@ -1,4 +1,4 @@
-// S-BTN-1 claim race (BATON_SPEC §15): two workers claim the same item at once, and a lost
+// S-BTN-1 claim race (BATON_SPEC §15): two runners claim the same item at once, and a lost
 // claim response is retried. Must hold: one holder; the retry returns the same claim.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { beat, claimItem, cutover, payload, register, requestId, rows, setClock, syncCall } from '../helpers';
@@ -12,7 +12,7 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-1 claim race', () => {
-  it('two workers asking for the next item at once: one holds it, the other gets the next one; a retried request is the same claim', async () => {
+  it('two runners asking for the next item at once: one holds it, the other gets the next one; a retried request is the same claim', async () => {
     const a = await register('vm-a');
     const b = await register('vm-b');
     const ra = { request_id: requestId() };
@@ -29,7 +29,7 @@ describe('S-BTN-1 claim race', () => {
     expect((await beat('vm-a', a.secret)).json.claim.id).toBe(x.json.claim_id);
   });
 
-  it('two workers naming the same item at once: exactly one holder', async () => {
+  it('two runners naming the same item at once: exactly one holder', async () => {
     const a = await register('vm-a');
     const b = await register('vm-b');
     const both = await Promise.all([claimItem('vm-a', a.secret, { ticket_id: 'docs:R3-9002' }), claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9002' })]);

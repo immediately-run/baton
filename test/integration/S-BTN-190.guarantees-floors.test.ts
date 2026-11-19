@@ -44,13 +44,13 @@ async function runnerBeat(secret: string | null, over: Record<string, unknown> =
 /** The runner sessions that already established their secret. */
 const runnerSessions = new Set<string>();
 
-/** A runner heartbeat under `session` (a fresh worker of the same credential), establishing
+/** A runner heartbeat under `session` (a fresh runner of the same credential), establishing
  *  its own secret on the first beat. */
 async function runnerBeatAs(session: string, secret: string, over: Record<string, unknown> = {}) {
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
   const known = runnerSessions.has(session);
   const res = await hostCall(await signedRequest(runnerKey, ORIGIN + '/v1/runner/heartbeat', {
-    created, ...(known ? { headers: { 'X-Worker-Secret': secret } } : {}),
+    created, ...(known ? { headers: { 'X-Runner-Secret': secret } } : {}),
     body: JSON.stringify({ hostname: 'runner-host', session_name: session, harness: 'opencode', kind: 'vm', billing: {}, capabilities: ['agent-venue'], tier_ceiling: 'critical', lease_timeout_s: 900, ...(known ? {} : { secret_hash: await sha256Of(secret) }), courses: [{ repository: 'ops', course: 'roadmap-pr', version: 3 }], ...over }),
   }));
   if (res.status === 200) runnerSessions.add(session);
@@ -70,7 +70,7 @@ async function checkerBeatAs(session: string, secret: string, repository: string
   // `legs` is the heartbeat member §14 defines (R-BTN-190): B-140's checker sends it, so the
   // report carries it (round 1, finding 15).
   const res = await hostCall(await signedRequest(checkerKey, ORIGIN + '/v1/runner/heartbeat', {
-    created, ...(checkerSessions.has(session) ? { headers: { 'X-Worker-Secret': secret } } : {}),
+    created, ...(checkerSessions.has(session) ? { headers: { 'X-Runner-Secret': secret } } : {}),
     body: JSON.stringify({ hostname: 'checker-host', session_name: session, harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], tier_ceiling: 'critical', lease_timeout_s: 900, ...(checkerSessions.has(session) ? {} : { secret_hash: await sha256Of(secret) }), courses: [], protection: [{ repository, matched, reading_hash: readingHash, legs: { count: 2, tickets: 5 } }] }),
   }));
   if (res.status === 200) checkerSessions.add(session);
@@ -118,7 +118,7 @@ async function protectedSigned() {
 
 async function makeChecker() {
   expect((await keyCall(owner, '/v1/owner/ops/grants', { public_key: checkerKey.publicKey, hostname: 'checker-host', capabilities: ['agent-venue'] })).status).toBe(200);
-  await rows('UPDATE worker_grants SET role = ? WHERE credential_id = ? AND repository_id = ?', 'protection-checker', checkerKey.fingerprint, 'ops');
+  await rows('UPDATE runner_grants SET role = ? WHERE credential_id = ? AND repository_id = ?', 'protection-checker', checkerKey.fingerprint, 'ops');
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
   await hostCall(await signedRequest(checkerKey, ORIGIN + '/v1/runner/heartbeat', {
     created, body: JSON.stringify({ hostname: 'checker-host', session_name: 'checker', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [], tier_ceiling: 'critical', lease_timeout_s: 900, secret_hash: await sha256Of(CHECKER_SECRET), courses: [] }),
@@ -161,7 +161,7 @@ async function registerRunner() {
   expect((await keyCall(owner, '/v1/owner/ops/grants', { public_key: runnerKey.publicKey, hostname: 'runner-host', capabilities: ['agent-venue'] })).status).toBe(200);
   const first = await runnerBeatAs('runner', 'runner-secret');
   expect(first.status).toBe(200);
-  return first.json.worker_id as number;
+  return first.json.runner_id as number;
 }
 
 describe('S-BTN-190 guarantees and floors', () => {
@@ -285,7 +285,7 @@ describe('S-BTN-190 guarantees and floors', () => {
     const { hash } = (await rows<{ hash: string }>('SELECT hash FROM repository_policies WHERE repository_id = ? ORDER BY version DESC LIMIT 1', 'ops'))[0];
     // R-BTN-189 names trusted runners (round 1, finding 18): mark the runner's grant trusted —
     // B-147's trust routes are not built, so the scenario writes the row as its approver would.
-    await rows('UPDATE worker_grants SET trust_level = ?, trust_domain = ? WHERE credential_id = ? AND repository_id = ?', 'trusted', 'runner-host', runnerKey.fingerprint, 'ops');
+    await rows('UPDATE runner_grants SET trust_level = ?, trust_domain = ? WHERE credential_id = ? AND repository_id = ?', 'trusted', 'runner-host', runnerKey.fingerprint, 'ops');
     // A pin of the wrong hash: stored, the condition opens, and the runner acts on nothing.
     await runnerBeat('runner-secret', { policy_pins: [{ repository: 'ops', hash: 'e'.repeat(64) }] });
     expect((await rows(`SELECT count(*) AS n FROM policy_conditions WHERE repository_id = 'ops' AND type = 'baton.policy-unpinned' AND closed_at IS NULL`))[0].n).toBe(1);
@@ -312,14 +312,14 @@ describe('S-BTN-190 guarantees and floors', () => {
     await protectedSigned();
     const { hash } = (await rows<{ hash: string }>('SELECT hash FROM repository_policies WHERE repository_id = ? ORDER BY version DESC LIMIT 1', 'ops'))[0];
     // Trusted, pinning the wrong hash: stored, open, refusing.
-    await rows('UPDATE worker_grants SET trust_level = ?, trust_domain = ? WHERE credential_id = ? AND repository_id = ?', 'trusted', 'runner-host', runnerKey.fingerprint, 'ops');
+    await rows('UPDATE runner_grants SET trust_level = ?, trust_domain = ? WHERE credential_id = ? AND repository_id = ?', 'trusted', 'runner-host', runnerKey.fingerprint, 'ops');
     await runnerBeat('runner-secret', { policy_pins: [{ repository: 'ops', hash: 'e'.repeat(64) }] });
     expect((await rows(`SELECT count(*) AS n FROM policy_conditions WHERE repository_id = 'ops' AND type = 'baton.policy-unpinned' AND closed_at IS NULL`))[0].n).toBe(1);
     expect((await claimAsRunner()).json.rule_code).toBe('policy-unpinned');
     // The demotion — the cooperative → protected trust clearing, or B-147's later route: the
     // stored row stays, but it no longer refuses the runner's claims, and nothing is left that
     // only a re-trusted grant could close.
-    await rows('UPDATE worker_grants SET trust_level = ? WHERE credential_id = ? AND repository_id = ?', 'untrusted', runnerKey.fingerprint, 'ops');
+    await rows('UPDATE runner_grants SET trust_level = ? WHERE credential_id = ? AND repository_id = ?', 'untrusted', runnerKey.fingerprint, 'ops');
     await refreshOps();
     const claim = await claimAsRunner();
     expect(claim.json.ticket_id).toBe('ops:R3-9001');
@@ -335,7 +335,7 @@ async function claimAsRunner() {
 async function claimAs(session: string, secret: string) {
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
   const res = await hostCall(await signedRequest(runnerKey, ORIGIN + '/v1/runner/claim', {
-    created, method: 'POST', headers: { 'X-Worker-Secret': secret }, body: JSON.stringify({ request_id: `req-${session}-${Math.random().toString(16).slice(2)}`, ...(session === 'runner' ? {} : {}) }),
+    created, method: 'POST', headers: { 'X-Runner-Secret': secret }, body: JSON.stringify({ request_id: `req-${session}-${Math.random().toString(16).slice(2)}`, ...(session === 'runner' ? {} : {}) }),
   }));
   void session;
   return { status: res.status, json: (await res.json()) as Record<string, any> };

@@ -6,7 +6,7 @@
 // the claims of a ticket whose history R-BTN-81 purged go with their legs and activities once
 // their events have gone — an open ticket's claims stay (R-BTN-24, R-BTN-106). Runs on both hosts.
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { Git, advance, claimItem, cutover, endClaim, mirrorCall, register, rows, setClock, tick, withCore, workerCall } from '../helpers';
+import { Git, advance, claimItem, cutover, endClaim, mirrorCall, register, rows, setClock, tick, withCore, runnerCall } from '../helpers';
 
 const T0 = Date.parse('2026-08-01T12:00:00Z');
 const DAY = 86_400_000;
@@ -120,7 +120,7 @@ describe('S-BTN-225 R-BTN-149 retention', () => {
 
   it('a runner unseen 30 days loses its capability, tag and course rows and keeps its row', async () => {
     const quiet = await register('vm-a', { tags: ['gpu'] });
-    const deps = async (id: number) => Promise.all(['worker_capabilities', 'worker_tags', 'worker_courses'].map((t) => count(`SELECT COUNT(*) AS n FROM ${t} WHERE worker_id = ?`, id)));
+    const deps = async (id: number) => Promise.all(['runner_capabilities', 'runner_tags', 'runner_courses'].map((t) => count(`SELECT COUNT(*) AS n FROM ${t} WHERE runner_id = ?`, id)));
     const before = await deps(quiet.id);
     expect(before.every((n) => n > 0)).toBe(true);
     await setClock(T0 + 29 * DAY);
@@ -130,7 +130,7 @@ describe('S-BTN-225 R-BTN-149 retention', () => {
     await setClock(T0 + 31 * DAY);
     await tick();
     expect(await deps(quiet.id)).toEqual([0, 0, 0]);
-    expect(await count('SELECT COUNT(*) AS n FROM workers WHERE id = ?', quiet.id)).toBe(1);
+    expect(await count('SELECT COUNT(*) AS n FROM runners WHERE id = ?', quiet.id)).toBe(1);
     expect((await deps(live.id)).every((n) => n > 0)).toBe(true);
     // The second runner falls silent too, later: the prune goes on from where it stopped.
     await setClock(T0 + 61 * DAY);
@@ -143,7 +143,7 @@ describe('S-BTN-225 R-BTN-149 retention', () => {
     const run = async (ticket: string, end: Record<string, unknown> = { end_reason: 'released:requested', reached: 'pr-open', next: 'review' }) => {
       const c = (await claimItem('vm-a', w.secret, { ticket_id: ticket })).json;
       await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' });
-      await workerCall('/v1/runner/activities', { secret: w.secret, body: { activities: [
+      await runnerCall('/v1/runner/activities', { secret: w.secret, body: { activities: [
         { id: `p-${ticket}`, claim_id: c.claim_id, kind: 'push', source: 'skill', started_at: T0, ended_at: T0, outcome: 'succeeded', detail: { branch: `claude/${ticket}` } },
       ] } });
       expect((await endClaim('vm-a', w.secret, c.claim_id, end)).status).toBe(200);

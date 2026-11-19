@@ -24,7 +24,7 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 | `properties.qnt` | the safety invariants, conjoined as `safety` (in four groups, `safetyA`…`safetyD`), over any instance; `pverify`, the proof's step, and `verifyShape`, what makes it `step` on `small` |
 | `liveness.qnt` | the liveness properties under weak fairness, over `small` (kept apart: their fairness terms made Apalache's input too large) |
 | `witnesses.qnt` | the reachability witnesses, each an invariant that must fail |
-| `instances.qnt` | `sim` (R3-1243's bounds: 3 workers, 2 tickets, 2 overlapping sync runs) and `small` (2 workers, 1 ticket, 1 sync run, for Apalache) |
+| `instances.qnt` | `sim` (R3-1243's bounds: 3 runners, 2 tickets, 2 overlapping sync runs) and `small` (2 runners, 1 ticket, 1 sync run, for Apalache) |
 | `regressions.qnt` | one deterministic run per defect the reviews found (75), each asserting the merged spec does not reach it |
 | `replay.qnt` | the traces `test/model/replay.test.ts` drives the core with (R3-1244): `sim`'s instance, every action the harness can make the core take |
 | `check.mjs` | `npm run model` and `npm run model:quick` |
@@ -93,7 +93,7 @@ The model checks the design; three checks hold the code to it.
 
 - **Correspondence markers** (`npm run model:links`, `scripts/check-model-links.mjs`, in `npm
   test`). Each action names its implementation above it — `// @impl src/core/<file>.ts#<fn>`, or
-  `// @impl external — <who>` for a step only the environment takes (a worker's push, git, time)
+  `// @impl external — <who>` for a step only the environment takes (a runner's push, git, time)
   — and each implementing function names the action back with a hash of the action's text,
   `// @model <action> sha256:<12 hex>`. A model change fails the check, naming the functions to
   re-check; re-stamping the hash (`node scripts/check-model-links.mjs --stamp` prints them) is
@@ -107,7 +107,7 @@ The model checks the design; three checks hold the code to it.
 - **Scenario traces** (`npm run traces`, `scripts/check-traces.mjs`, in `npm test`). Every S-BTN
   scenario's run on the local host is recorded, one step per request or alarm tick, with the
   state projection after it (`test/integration/trace.ts`: observation numbers, the model's
-  repository's tickets as posted, claims and their legs, holds, owner bars, workers' tags, the
+  repository's tickets as posted, claims and their legs, holds, owner bars, runners' tags, the
   required bar). Each trace replays as a deterministic Quint run: Baton's action with the
   environment's steps that make it possible, then the projection the model must reach. A
   rejection names the scenario, the step, the model action and the field. A step the model has
@@ -123,16 +123,16 @@ The model checks the design; three checks hold the code to it.
   host, comparing its projection with the trace's state after every step. `REPLAY_TRACES` sets
   the count.
 
-To replay scenarios with their own workers and required bar, `FAMILIES`, `TAGS`, `REQUIRED` and
+To replay scenarios with their own runners and required bar, `FAMILIES`, `TAGS`, `REQUIRED` and
 `MAX_TIME` are constants of `baton.qnt`; every checked instance keeps R3-1243's values.
 
 **Where code and model differ, and why it is safe.** Baton renews a lease on every
-authenticated call, not only on heartbeats and claims (it reaps later); it force-reaps a worker
+authenticated call, not only on heartbeats and claims (it reaps later); it force-reaps a runner
 already silent past its lease without a fence (R-BTN-19's fence, already timed out: the model's
 `forceReap` and `fenceTimeout` in one step); its one alarm reaps every lapsed lease at once; it
 voids an observation number by its clock alone. `replay.qnt` draws only traces in which these
 coincide with the model's single steps, and says so. The model keeps a reaped claim's leg as its
-worker's view; Baton keeps no worker's view, so a leg is compared while its claim is active.
+runner's view; Baton keeps no runner's view, so a leg is compared while its claim is active.
 Each post the replay sends carries the queued leg the model's sync read (R-BTN-83), and the
 scenario traces read it from `ticket_stations.next_leg`, so both compare it after every step.
 
@@ -163,20 +163,20 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   ticket closed (§11, R-BTN-72), which Baton cannot see — and is confirmed only by an end
   station or a closure (R-BTN-10). *(R3-1244's scenario traces found the model requiring an end
   station, narrower than the spec; `progressStep` keeps the runner's own rule, so its runs still
-  reach merges.)* Every end — a worker's, a reap, a stale release — clears the claim's
+  reach merges.)* Every end — a runner's, a reap, a stale release — clears the claim's
   regression flag and records it as `endedRegressed` (§4: `regressed_since` "cleared … at the
   end"; R3-1254's model-based tests found the model keeping it).
 - **Time and the lease** (§6.3, §6.6, R-BTN-4, R-BTN-6, R-BTN-19, R-BTN-26): abstract ticks;
   a claim's lease lasts `TIMEOUT` ticks from the last heartbeat and the alarm reaps it then —
-  its worker dead, or alive and silent (asleep). A worker acts on the claim *it believes* it
+  its runner dead, or alive and silent (asleep). A runner acts on the claim *it believes* it
   holds, and its own fence check stops it `MARGIN` ticks before its lease ends by its own
-  clock, which runs up to `MAX_DRIFT` behind Baton's. The owner force-reaps a live worker's
-  claim, which stays fenced — the ticket not re-issued — until that worker reports
+  clock, which runs up to `MAX_DRIFT` behind Baton's. The owner force-reaps a live runner's
+  claim, which stays fenced — the ticket not re-issued — until that runner reports
   `fence-cleared`, has been silent (dead or asleep) past its timeout, measured in ticks
   from its last heartbeat (`fenceTimeout`; round 2, 2-A-0), or an administrator clears it
   at once (`adminFenceClear`, B-171).
 - **The sync** (§4.3, R-BTN-62): number, then read, then post, as three actions, so every
-  interleaving with workers and git is explored — with at most one reading in flight per
+  interleaving with runners and git is explored — with at most one reading in flight per
   repository: a second number is refused while one is outstanding, and a voided number's post
   is refused (R-BTN-62 as amended 2026-10-15, after this model found the overlap); the barred tags it posts are any set
   consistent with the contract (course logic is nondeterministic, R-BTN-50). A post is accepted
@@ -220,22 +220,22 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   ticket. `resource` and `capability` blocked ends are `endBlockedOn` (*The fleet*, below).
 
 - **The fleet** (R3-1254 part 2b; R-BTN-75, R-BTN-76, R-BTN-121, §6.6 rule 4): Baton records
-  each worker's last authenticated call — a heartbeat (an idle worker heartbeats too; a fence
-  report rides one), a claim, an advance, an end (§5, §11) — and what it declares; a worker is
+  each runner's last authenticated call — a heartbeat (an idle runner heartbeats too; a fence
+  report rides one), a claim, an advance, an end (§5, §11) — and what it declares; a runner is
   live while that call is within `TIMEOUT`. Only a heartbeat recounts, the fence report's
-  included: any other call that revives a lapsed worker waits for the alarm's check, as in core. **Rule 4**: a claim, and each advance,
-  needs the ticket's `requires` within what the worker declares and is granted. A **`capability`
-  row** stands on the whole ticket for a capability no live worker both declares and is granted;
+  included: any other call that revives a lapsed runner waits for the alarm's check, as in core. **Rule 4**: a claim, and each advance,
+  needs the ticket's `requires` within what the runner declares and is granted. A **`capability`
+  row** stands on the whole ticket for a capability no live runner both declares and is granted;
   the rows are stored and rewritten where R-BTN-75 says the counts change — a heartbeat from a
-  worker that was not live or whose declared set changed (`declare`: its check failed, or passes
+  runner that was not live or whose declared set changed (`declare`: its check failed, or passes
   again), the alarm finding the live set changed (`alarmLive`), and a `capability` blocked end
   (`endBlockedOn`), which drops the capability from the runner's declared set in its
-  transaction. A force-reap changes no worker's liveness (core marks only a worker already silent
+  transaction. A force-reap changes no runner's liveness (core marks only a runner already silent
   past its lease reaped), so it recounts nothing. **Resources**: each is one `service` instance,
   `unavailable` for `READING_TTL` ticks after a reading (`reading`) or a `resource` blocked end,
   until an `available` reading or the lapse (`readingLapses`); a leg's needs are the course's and
   the sync's, plus a `resource` end's `end`-sourced need. A **`resource` row** stands on a leg
-  that needs an `unavailable` resource while some worker is live to answer; it counts toward
+  that needs an `unavailable` resource while some runner is live to answer; it counts toward
   `blocked_since` and gates nothing — advice (R-BTN-45): a claim into it is granted.
   **`answer_lost`** (R-BTN-77 as amended by R3-1251): a recount whose fleet is empty drops the
   `resource` rows, silently, and the ticket remembers them; blocked again only on rows it lost
@@ -256,16 +256,16 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
 | Property | Requirement |
 |---|---|
 | `oneLiveHolderPerTicket` — an active claim or a fenced, force-reaped one; never two | R-BTN-4, R-BTN-19, R-BTN-26 |
-| `oneClaimPerWorker` | R-BTN-4 |
+| `oneClaimPerRunner` | R-BTN-4 |
 | `observationsIncrease` | R-BTN-62 |
 | `confirmationAfterEnd` — no end confirmed by an observation not greater than its own | R-BTN-10, R-BTN-62 |
 | `confirmedIsInGit` — monotone confirmation: a confirmed suspension's path is in git unless git since regressed | R-BTN-10, R-BTN-71 |
 | `staleOnlyWhenTakenAway` | R-BTN-35 |
 | `regressedOnlyWhenGitRegressed` — lag is never a regression | §2e |
 | `boundedLoops` — no claim runs a leg past its `max_runs` | R-BTN-63, R-BTN-69 |
-| `writingLegsBarred` — every writing leg started under the required bar, by a worker of no barred family | R-BTN-45, R-BTN-60, R-BTN-67 |
+| `writingLegsBarred` — every writing leg started under the required bar, by a runner of no barred family | R-BTN-45, R-BTN-60, R-BTN-67 |
 | `gatesHeld` — every claim and advance was granted with every gate in force holding (hold, barred tags, required bar, rule 4, the queued leg, and the leg's rows: an unmet prerequisite at a claim, an open decision, a retry backoff, a provisional row), recorded at the grant apart from the guard | R-BTN-45, R-BTN-83, R-BTN-120, R-BTN-122, R-BTN-126, rules 1, 3, 8 |
-| `noActAfterLoss` — no worker pushes for a claim the alarm reaped (unfenced) | R-BTN-6, R-BTN-26 |
+| `noActAfterLoss` — no runner pushes for a claim the alarm reaped (unfenced) | R-BTN-6, R-BTN-26 |
 | `noStuckTicket` — no deadlock: a ticket git has not finished or withdrawn, once the syncs are idle and the head matches git, is held, fenced, owner-held, its queued leg waiting on `policy`, blocked (a row, listed by R-BTN-75) or held off by a provisional row (R-BTN-126), flagged, or claimable | §9.6, R-BTN-10, R-BTN-35, R-BTN-67, R-BTN-75, R-BTN-83, R-BTN-126 |
 | `blockedIsStored` — `blocked_since` is what the rows, the queued leg and the held state say, after every transaction | R-BTN-75 |
 | `unblockedFollowsBlocked` — every `unblocked` event follows a `blocked` one | R-BTN-77, R-BTN-75 as amended by R3-1254 |
@@ -274,7 +274,7 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
 | `attemptsBounded`, `blockedEndsBounded` — at most `MAX_ATTEMPTS` failed attempts, and `MAX_BLOCKED` blocked ends and the one that holds, per ticket and leg between hold lifts | R-BTN-122, R-BTN-126 |
 
 **Liveness** — `fencesClear`, `endsResolveWithOwner` (implied by the owner's fairness alone, by design: §9.6), `barsLiftClaimable`, `readyIsClaimed` — is stated
-in `liveness.qnt` under weak fairness of each resolving step, per worker. The item's fifth,
+in `liveness.qnt` under weak fairness of each resolving step, per runner. The item's fifth,
 a held history accepted within 24 hours, is not stated: held histories are not modelled. See
 *Checked how* for what has been run.
 
@@ -295,8 +295,8 @@ the ticket blocked; R-BTN-75 is amended, B-26 built it in core, and
 - restoring the fifth revision's regression rule fails `lostPushIsNotRegressionTest`;
 - dropping the first advance's `not-queued` check fails `claimOfferedQueuedLegOnlyTest`;
 - judging rule 8 on any ready leg, not the queued one, fails `barredQueuedLegRefusesClaimTest`;
-- keeping the regression flag past an end, at any one of the four ends — a worker's, an alarm reap, a
-  force-reap, a stale release — fails that end's run (`workerEndClearsRegressedTest`,
+- keeping the regression flag past an end, at any one of the four ends — a runner's, an alarm reap, a
+  force-reap, a stale release — fails that end's run (`runnerEndClearsRegressedTest`,
   `alarmReapClearsRegressedTest`, `forceReapClearsRegressedTest`, `staleReleaseClearsRegressedTest`);
 - dropping the fence from the claim gate fails `forceReapFencesTest`;
 - dropping the advance's gate guard reaches a `gateViolation` (`gatesHeld`);
@@ -329,14 +329,14 @@ the ticket blocked; R-BTN-75 is amended, B-26 built it in core, and
   `answerLostThenAnotherBlockLogsTheOwedFirstTest`; a reblock on rows it did not lose fails
   `answerLostBackOnMoreThanItLostIsLoggedTest`; the owed `unblocked` logged while a claim holds
   the ticket fails `answerLostSettledSilentlyWhileHeldTest`; a lost need never gone fails
-  `answerLostSettlesWhenTheLegMovesPastTest`; a row counting a worker that declares a
+  `answerLostSettlesWhenTheLegMovesPastTest`; a row counting a runner that declares a
   capability without a grant fails `capabilityRowFollowsTheFleetTest`;
   an advance, an end or a blocked end that does not count as a call fails
   `anAdvanceKeepsItLiveTest`, `anEndKeepsItLiveTest` or `aBlockedEndKeepsItLiveTest`; a fence report
   that does not recount fails `aFenceReportRecountsTest`; a reblock weighed on every leg — more than
   core, which weighs only the next legs — fails `answerLostJudgedOnTheQueuedLegTest`; a course whose end is not terminal passes
   `courseOk` and fails `courseRulesRefuseTest`;
-- `MAX_DRIFT = 3`, above `MARGIN = 2`, lets a reaped worker push (`noActAfterLoss`); at
+- `MAX_DRIFT = 3`, above `MARGIN = 2`, lets a reaped runner push (`noActAfterLoss`); at
   `MAX_DRIFT = 2` it cannot — the spec's assumption is drift ≤ the margin.
 
 ## Checked how
@@ -369,19 +369,19 @@ depth 5 back, and with it the `unblocked` event.
 
 ## Bounds and assumptions
 
-- `sim`: 3 workers (two of family `a`, one of `b`), 2 tickets, 2 overlapping sync runs, at most
+- `sim`: 3 runners (two of family `a`, one of `b`), 2 tickets, 2 overlapping sync runs, at most
   6 claims, 2 git events and 2 owner acts per run; `MAX_ATTEMPTS = 2`, `BACKOFF = 2` ticks,
   `MAX_BLOCKED = 1`, `PROV_TTL = 4` ticks; each ticket's source may name the other ticket `at`
-  `reviewed`, having `reached` `pr-open`, or `done`, on the whole ticket or on `merge`. `small`: 2 workers, 1 ticket, 1 sync run, 3
+  `reviewed`, having `reached` `pr-open`, or `done`, on the whole ticket or on `merge`. `small`: 2 runners, 1 ticket, 1 sync run, 3
   claims, 1 git event, 1 owner act. The fleet: on `sim`, `t1` requires nothing (so an emptied
   fleet can lose its answer), `t2` `db:orders:rw` (declared by `w2`, which is not granted it, and by
   `w3`, which is), and `implement` needs the resource `llm`; `small` has none of it.
 - **Time** is abstract ticks: `TIMEOUT = 4`, `MARGIN = 2`, `MAX_DRIFT = 1`, at most 12 ticks
   a run. The 30-minute regression flag and the 6-hour unconfirmed flag are "eventually".
-  **The drift assumption**, checked: R-BTN-6's fence holds while the worker's lag is at most
-  the margin (4 minutes in the spec); above it, a reaped worker can push. R-BTN-6 computes
-  `now − last_ok` on the worker's own clock, so a constant clock offset cancels; what
-  `MAX_DRIFT` really bounds is how far the worker's `last_ok` lags Baton's renewal plus its
+  **The drift assumption**, checked: R-BTN-6's fence holds while the runner's lag is at most
+  the margin (4 minutes in the spec); above it, a reaped runner can push. R-BTN-6 computes
+  `now − last_ok` on the runner's own clock, so a constant clock offset cancels; what
+  `MAX_DRIFT` really bounds is how far the runner's `last_ok` lags Baton's renewal plus its
   clock's rate skew over one lease (round 2, 2-A-5) — modelled, equivalently, as a clock
   running behind.
 
@@ -389,7 +389,7 @@ depth 5 back, and with it the `unblocked` event.
 
 - **Held histories** (R-BTN-11): a force-pushed history's held posts refresh stations exactly as
   a refresh does here; the 24-hour acceptance is an owner/clock event with no new interleaving.
-- **More than one repository** (R-BTN-61): repositories share no state but workers and the
+- **More than one repository** (R-BTN-61): repositories share no state but runners and the
   order; the merge across them is advice, not safety.
 - **Course changes and renames** (R-BTN-64): a renamed name resolves to the same edge; a removed
   one ends the claim `released:course-changed`, a release the model already has.
@@ -409,7 +409,7 @@ depth 5 back, and with it the `unblocked` event.
   modelled state as it was (R3-1255; R3-1254 may model them).
 - **Tiers and grants beyond rule 4** (rules 5–7), and **isolation floors** (R-BTN-107): column
   comparisons with no interleaving of their own — a leg's `isolation: session` against the
-  worker's latest declared mode; matching tests cover them (G-BTN-40, S-BTN-64). Rule 4 is
+  runner's latest declared mode; matching tests cover them (G-BTN-40, S-BTN-64). Rule 4 is
   modelled (R3-1254 part 2b).
 - **What a runner has is its declarations** (R-BTN-174, B-167): `DECLARED`, bounded by
   `GRANTED`, is the whole of rule 4's input — nothing is derived, so there is no set to keep
@@ -425,9 +425,9 @@ depth 5 back, and with it the `unblocked` event.
   leg, the same check, and types and roles are the course file's acceptance (`baton course
   test`), not an interleaving.
 - **Resources' scopes, instances and readings' precedence** (R-BTN-76, R-BTN-101): each resource
-  is one `service` instance. Account and worker instances, `uses`, the administrator's reading
-  over an instrument's, `unknown` and the per-worker answer each choose which reading is in
-  force, with no interleaving of their own; the fleet's answer is still "a live worker could use
+  is one `service` instance. Account and runner instances, `uses`, the administrator's reading
+  over an instrument's, `unknown` and the per-runner answer each choose which reading is in
+  force, with no interleaving of their own; the fleet's answer is still "a live runner could use
   an instance that is not `unavailable`". The needs are constant per leg, and an `end`-sourced
   need is never dropped (at the leg's next other end, or after 7 days): a lost need is gone
   when its leg is no longer the queued leg, which is how a moved ticket settles its record.
@@ -439,18 +439,18 @@ depth 5 back, and with it the `unblocked` event.
   core logs the owed `unblocked` and a `blocked` where the model is silent, and keeps a lost need
   on another next leg pending where the model settles it. No run reaches that case yet: it needs
   a station with several next legs and a need on one that is not queued.
-- **A worker reaped by the alarm** (`workers.reaped_at`): core's alarm times out a lapsed
-  worker's fence in the same transaction that drops it from the live set, and refuses its later
-  heartbeats until it re-keys. The model's alarm acts in separate steps and keeps no worker
-  record, so it admits a fence report after the live set dropped the worker — a superset of
+- **A runner reaped by the alarm** (`runners.reaped_at`): core's alarm times out a lapsed
+  runner's fence in the same transaction that drops it from the live set, and refuses its later
+  heartbeats until it re-keys. The model's alarm acts in separate steps and keeps no runner
+  record, so it admits a fence report after the live set dropped the runner — a superset of
   core's interleavings, which the safety properties tolerate.
-- **Other causes of a recount** (R-BTN-75, R-BTN-58): a worker registering, a grant made,
+- **Other causes of a recount** (R-BTN-75, R-BTN-58): a runner registering, a grant made,
   changed or revoked, a credential revoked (`LIVE` drops it), and a post changing a ticket's
   `requires` or needs. Each is fixed here — `GRANTED`, `REQUIRES` and `NEEDS` are
-  constants, every worker registered at the start — so the rows change only through
+  constants, every runner registered at the start — so the rows change only through
   declarations, liveness and the ends above.
 - **R-BTN-39** (where a ticket is, replayed from git) is the sync's `syncRead` taking any git
-  state as given; **R-BTN-40** (suspend rather than wait on the lease) is a worker's choice, so
+  state as given; **R-BTN-40** (suspend rather than wait on the lease) is a runner's choice, so
   `endClaim(…, "suspended", …)` may happen at any point — both are modelled as nondeterminism,
   not as rules of their own.
 - **Baton-raised decisions** (R-BTN-78): `baton:retries` on an `attempts-exhausted` or

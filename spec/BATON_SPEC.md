@@ -37,7 +37,7 @@ is stale. Never edit it by hand.
 | | 4.4 The board post | R-BTN-194 |
 | | 4.5 Reading the ticket | R-BTN-5, R-BTN-34 |
 | | 4.6 Children | R-BTN-86 |
-| | 4.7 History and discrepancies | R-BTN-81, R-BTN-85 |
+| | 4.7 History and discrepancies | R-BTN-81, R-BTN-85, R-BTN-200 |
 | | 4.8 Owner state | R-BTN-88 |
 | [`05-courses.md`](BATON_SPEC/05-courses.md) | **5. Courses** | — |
 | | 5.1 Course directories and sources | R-BTN-134 |
@@ -75,7 +75,7 @@ is stale. Never edit it by hand.
 | [`08-runners.md`](BATON_SPEC/08-runners.md) | **8. Runners** | — |
 | | 8.1 Runners, heartbeats and the doorbell | R-BTN-3, R-BTN-9, R-BTN-14, R-BTN-91 |
 | | 8.2 Keys and grants | R-BTN-102, R-BTN-146, R-BTN-117 |
-| | 8.3 The runner | R-BTN-72, R-BTN-106, R-BTN-107, R-BTN-123, R-BTN-113 |
+| | 8.3 The runner | R-BTN-72, R-BTN-106, R-BTN-107, R-BTN-123, R-BTN-113, R-BTN-201 |
 | | 8.4 Where and how a leg runs | R-BTN-143, R-BTN-133, R-BTN-144, R-BTN-145, R-BTN-119 |
 | | 8.5 A running leg's output | R-BTN-128 |
 | [`09-claims.md`](BATON_SPEC/09-claims.md) | **9. Claims** | — |
@@ -102,7 +102,7 @@ is stale. Never edit it by hand.
 | | 12.5 The local host and bearers | R-BTN-158 |
 | | 12.6 Capability roles and links | R-BTN-157 |
 | | 12.7 Baton's GitHub App | — |
-| | 12.8 The repository policy and its guarantees *(proposal — B-127, B-131, B-133, B-136, B-137, B-139, B-140, B-145, B-146, B-147)* | R-BTN-188, R-BTN-189, R-BTN-180, R-BTN-181, R-BTN-191, R-BTN-192, R-BTN-182, R-BTN-183, R-BTN-184, R-BTN-185, R-BTN-186, R-BTN-187 |
+| | 12.8 The repository policy and its guarantees *(proposal — B-131, B-133, B-136, B-137, B-139, B-140, B-145, B-146, B-147)* | R-BTN-188, R-BTN-189, R-BTN-180, R-BTN-181, R-BTN-191, R-BTN-192, R-BTN-182, R-BTN-183, R-BTN-184, R-BTN-185, R-BTN-186, R-BTN-187 |
 | | 12.9 A leg's scope *(B-134)* | — |
 | [`13-data-model.md`](BATON_SPEC/13-data-model.md) | **13. Data model** | — |
 | | 13.1 Repositories, courses and tenant settings | — |
@@ -205,7 +205,7 @@ is stale. Never edit it by hand.
 | R-BTN-85 | every disagreement with git is logged | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-86 | tickets are sequential; child tickets are how work runs in parallel | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-87 | the capacity envelope: one Baton per team, not sharded | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
-| R-BTN-88 | owner state and course history are exportable; git holds the work | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-88 | owner state and course history are exportable; the ticket source and git hold the work | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-89 | a queued leg may wait for a time | [`06-prerequisites-blocks-advice.md`](BATON_SPEC/06-prerequisites-blocks-advice.md) |
 | R-BTN-90 | the deadline in a claim | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-91 | the doorbell: a ring, while the heartbeat stays the truth | [`08-runners.md`](BATON_SPEC/08-runners.md) |
@@ -274,14 +274,14 @@ is stale. Never edit it by hand.
 | R-BTN-158 | the local host, and bearers over `http` | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-159 | an SSH key or an API key, the holder's choice | [`11-people.md`](BATON_SPEC/11-people.md) |
 | R-BTN-160 | conditions: typed, declared, raised by any leg | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
-| R-BTN-161 | bindings choose a handler course; the handler is a ticket file | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
+| R-BTN-161 | bindings choose a handler course; the handler is a ticket | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-162 | a suspended leg waits in its claim, then blocks; it resumes with a restart | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-163 | the debugger: unhandled conditions, waiting people, and core's own | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-165 | a call leg runs a course and waits for it | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-167 | two clocks on a leg: a deadline on its run, and the stalled notice | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-168 | supersession, lifetime and the cancel leg | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-169 | standard handler courses: `ask`, `deliver` and `announce` | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
-| R-BTN-171 | every git write and check run Baton intends goes through one outbox, which runners deliver | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
+| R-BTN-171 | every git write, check run and ticket-store write Baton intends goes through one outbox, which runners deliver | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-174 | capabilities are matched by name; what a runner has is its own statement | [`05-courses.md`](BATON_SPEC/05-courses.md) |
 | R-BTN-178 | a capability with a capacity has that many seats | [`06-prerequisites-blocks-advice.md`](BATON_SPEC/06-prerequisites-blocks-advice.md) |
 | R-BTN-179 | the state is readable with a key; B-90 | [`12-security.md`](BATON_SPEC/12-security.md) |
@@ -305,6 +305,8 @@ is stale. Never edit it by hand.
 | R-BTN-197 | Baton states the client versions it serves | [`11-people.md`](BATON_SPEC/11-people.md) |
 | R-BTN-198 | leg events: what Baton tells a running leg | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-199 | Baton hands out every identifier that concurrent branches write to git | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-200 | a ticket source that shows positions shows Baton's | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-201 | a launcher starts sessions; Baton reserves nothing for them | [`08-runners.md`](BATON_SPEC/08-runners.md) |
 
 ## Scenarios
 
@@ -483,8 +485,6 @@ is stale. Never edit it by hand.
 | S-BTN-215 | code repository settings refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-216 | the ids decide for a code repository | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-217 | pushers across hosts | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-218 | owner-signed briefs and the control record (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-219 | require_signed_control (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-220 | ticket provenance (B-126) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-221 | the screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-222 | an interaction request | [`15-verification.md`](BATON_SPEC/15-verification.md) |
@@ -501,6 +501,12 @@ is stale. Never edit it by hand.
 | S-BTN-233 | leg events (B-260) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-234 | Baton hands out the identifiers (B-176) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-235 | the dashboard poll's ETag (B-242) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-236 | runner names (B-68) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-237 | a ticket source that shows positions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-238 | a launcher | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-239 | a control path changed outside a course | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-240 | unlisted repositories and the `builtin` executor are the policy's | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-241 | dependencies on another repository's tickets (B-113) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
@@ -653,3 +659,6 @@ is stale. Never edit it by hand.
 | G-BTN-167 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-168 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-169 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-170 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-171 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-172 | [`15-verification.md`](BATON_SPEC/15-verification.md) |

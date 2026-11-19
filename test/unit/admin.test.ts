@@ -7,14 +7,14 @@ import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import chore from '../fixtures/courses/chore/course.json';
 import { requiredBarCovers, isOwnerBarReason, checkRetry } from '../../src/core/admin';
 import { graphOf } from '../../src/core/graph';
-import { accessToken as accessTokenFor, adminSession, ownerCall, workerCall, call, captureDispatches, claimItem, hbBody, ORIGIN, sessionCall, sha256, tick, withCore, course, cutover, Git, keyCall, placed, recommended, register, rows, setAdminKeys, setClock } from '../helpers';
+import { accessToken as accessTokenFor, adminSession, ownerCall, runnerCall, call, captureDispatches, claimItem, hbBody, ORIGIN, sessionCall, sha256, tick, withCore, course, cutover, Git, keyCall, placed, recommended, register, rows, setAdminKeys, setClock } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 let admin: TestKey;
 let owner: TestKey;
-let worker: TestKey;
+let runner: TestKey;
 let git: Git;
 const REGISTER = { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml' };
 const code = async (p: Promise<{ status: number; json: Record<string, any> }>) => {
@@ -28,7 +28,7 @@ beforeEach(async () => {
   await setClock(T0);
   admin = await makeKey('ssh-ed25519', 'admin');
   owner = await makeKey('ssh-ed25519', 'owner');
-  worker = await makeKey('ssh-ed25519', 'worker');
+  runner = await makeKey('ssh-ed25519', 'runner');
   await setAdminKeys(admin);
   git = new Git().add('T-1');
   await git.post();
@@ -67,23 +67,23 @@ describe('R-BTN-57: administrators', () => {
   it('a change refuses bad weights and tiers; tiers recompute a grant’s max_tier by name', async () => {
     expect(await code(adm('/repositories', { id: 'docs', weight: -1 }))).toBe('invalid-params');
     expect(await code(adm('/repositories', { id: 'docs', tiers: ['a', 'a'] }))).toBe('invalid-params');
-    await own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: [], max_tier: 'judgement' });
+    await own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: [], max_tier: 'judgement' });
     expect(await code(adm('/repositories', { id: 'docs', tiers: ['trivial', 'routine', 'judgement', 'critical'] }))).toBe(200);
-    expect(await rows('SELECT max_tier FROM worker_grants')).toEqual([{ max_tier: 2 }]);
+    expect(await rows('SELECT max_tier FROM runner_grants')).toEqual([{ max_tier: 2 }]);
   });
 
-  it('a probe key is one role: an owner or worker key is refused', async () => {
+  it('a probe key is one role: an owner or runner key is refused', async () => {
     expect(await code(adm('/probes', { public_key: owner.publicKey, label: 'p', instances: [] }))).toBe('conflict');
-    await own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: [] });
-    expect(await code(adm('/probes', { public_key: worker.publicKey, label: 'p', instances: [] }))).toBe('conflict');
+    await own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: [] });
+    expect(await code(adm('/probes', { public_key: runner.publicKey, label: 'p', instances: [] }))).toBe('conflict');
     expect(await code(adm('/probes', { public_key: (await makeKey('ssh-ed25519', 'p')).publicKey, label: '', instances: [] }))).toBe('invalid-params');
   });
 
   it('revoking an unknown key is not-found; a revoked key is never granted again', async () => {
     expect(await code(adm('/keys/SHA256%3Annnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn/revoke', {}))).toBe('not-found');
-    await own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: [] });
-    expect(await code(adm(`/keys/${encodeURIComponent(worker.fingerprint)}/revoke`, {}))).toBe(200);
-    expect(await code(own('/grants', { public_key: worker.publicKey, capabilities: [] }))).toBe('conflict');
+    await own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: [] });
+    expect(await code(adm(`/keys/${encodeURIComponent(runner.fingerprint)}/revoke`, {}))).toBe(200);
+    expect(await code(own('/grants', { public_key: runner.publicKey, capabilities: [] }))).toBe('conflict');
   });
 
   it('an unknown login token is refused (single use and expiry: S-BTN-32)', async () => {
@@ -94,46 +94,46 @@ describe('R-BTN-57: administrators', () => {
 
 describe('R-BTN-58: owners', () => {
   it('a grant takes human-operator from an owner like any capability (B-104), and refuses an unknown key without a hostname, a taken hostname, another hostname, a bad max_tier', async () => {
-    expect(await code(own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: ['human-operator'] }))).toBe(200);
+    expect(await code(own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: ['human-operator'] }))).toBe(200);
     // An unknown key without a hostname is still malformed (R-BTN-58) — a fresh key for it,
-    // since the grant above made `worker` known.
+    // since the grant above made `runner` known.
     const unknown = await makeKey('ssh-ed25519', 'b104-unknown');
     expect(await code(own('/grants', { public_key: unknown.publicKey, capabilities: [] }))).toBe('invalid-params');
-    expect(await code(own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: [], max_tier: 'epic' }))).toBe('invalid-params');
-    expect(await code(own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: ['Bad Name'] }))).toBe('invalid-params');
-    expect(await code(own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: ['agent-venue'] }))).toBe(200);
-    expect(await code(own('/grants', { public_key: worker.publicKey, hostname: 'w-other', capabilities: [] }))).toBe('conflict');
+    expect(await code(own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: [], max_tier: 'epic' }))).toBe('invalid-params');
+    expect(await code(own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: ['Bad Name'] }))).toBe('invalid-params');
+    expect(await code(own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: ['agent-venue'] }))).toBe(200);
+    expect(await code(own('/grants', { public_key: runner.publicKey, hostname: 'w-other', capabilities: [] }))).toBe('conflict');
     const twin = await makeKey('ssh-ed25519', 'twin');
     expect(await code(own('/grants', { public_key: twin.publicKey, hostname: 'w-host', capabilities: [] }))).toBe('conflict');
     // An administrator may rename it.
-    expect(await code(adm('/grants', { repository: 'docs', public_key: worker.publicKey, hostname: 'w-other', capabilities: ['human-operator'] }))).toBe(200);
+    expect(await code(adm('/grants', { repository: 'docs', public_key: runner.publicKey, hostname: 'w-other', capabilities: ['human-operator'] }))).toBe(200);
     // B-104: human-operator is granted like any capability, so an owner's re-grant replaces
     // the set as any re-grant does — and grants it back the same way.
-    expect(await code(own('/grants', { public_key: worker.publicKey, capabilities: ['llm-call'] }))).toBe(200);
-    expect(JSON.parse((await rows<{ capabilities: string }>('SELECT capabilities FROM worker_grants'))[0].capabilities)).toEqual(['llm-call']);
-    expect(await code(own('/grants', { public_key: worker.publicKey, capabilities: ['llm-call', 'human-operator'] }))).toBe(200);
-    expect(JSON.parse((await rows<{ capabilities: string }>('SELECT capabilities FROM worker_grants'))[0].capabilities)).toContain('human-operator');
+    expect(await code(own('/grants', { public_key: runner.publicKey, capabilities: ['llm-call'] }))).toBe(200);
+    expect(JSON.parse((await rows<{ capabilities: string }>('SELECT capabilities FROM runner_grants'))[0].capabilities)).toEqual(['llm-call']);
+    expect(await code(own('/grants', { public_key: runner.publicKey, capabilities: ['llm-call', 'human-operator'] }))).toBe(200);
+    expect(JSON.parse((await rows<{ capabilities: string }>('SELECT capabilities FROM runner_grants'))[0].capabilities)).toContain('human-operator');
     // Stored expanded: a role as its capabilities.
-    expect(await rows('SELECT hostname FROM credentials WHERE id = ?', worker.fingerprint)).toEqual([{ hostname: 'w-other' }]);
+    expect(await rows('SELECT hostname FROM credentials WHERE id = ?', runner.fingerprint)).toEqual([{ hostname: 'w-other' }]);
   });
 
   it('one role per key: an owner’s or administrator’s key is never granted', async () => {
     expect(await code(own('/grants', { public_key: owner.publicKey, hostname: 'o-host', capabilities: [] }))).toBe('conflict');
     expect(await code(own('/grants', { public_key: admin.publicKey, hostname: 'a-host', capabilities: [] }))).toBe('conflict');
-    await own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: [] });
-    expect(await code(own('/owners', { public_key: worker.publicKey }))).toBe('conflict');
+    await own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: [] });
+    expect(await code(own('/owners', { public_key: runner.publicKey }))).toBe('conflict');
     expect(await code(own('/owners', { public_key: admin.publicKey }))).toBe('conflict');
   });
 
   it('a grant on a retired repository is not-found; a key whose only repository it was owns none (B-173)', async () => {
-    expect(await code(own(`/grants/${encodeURIComponent(worker.fingerprint)}/revoke`, {}))).toBe('not-found');
+    expect(await code(own(`/grants/${encodeURIComponent(runner.fingerprint)}/revoke`, {}))).toBe('not-found');
     const opsOwner = await makeKey('ssh-ed25519', 'ops-owner');
     await adm('/repositories', { ...REGISTER, owner_keys: [opsOwner.publicKey] });
     await adm('/repositories', { id: 'ops', retire: true, confirm: true });
     // R-BTN-47 with R-BTN-155: an authenticated principal naming it is told not-found; a key
     // whose only repositories are retired owns nothing, so it is no principal at all.
-    expect(await code(keyCall(admin, '/v1/owner/ops/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: [] }))).toBe('not-found');
-    expect(await code(keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: [] }))).toBe('unauthenticated');
+    expect(await code(keyCall(admin, '/v1/owner/ops/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: [] }))).toBe('not-found');
+    expect(await code(keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: [] }))).toBe('unauthenticated');
   });
 
   it('owners: never the last; removing a non-owner is not-found', async () => {
@@ -242,22 +242,22 @@ describe('round 1: one role per key, revocations that stay, bars that name what 
     expect(await code(keyCall(second, '/v1/owner/docs/bars', { course: '*', tag: 'a:b', applies: 'claim', reason: 'x' }))).toBe('unauthenticated');
   });
 
-  it('a key added to BATON_ADMIN_KEYS after it was an owner or a worker acts as neither (1-A-7)', async () => {
-    await own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: ['agent-venue'] });
-    await setAdminKeys(admin, owner, worker);
+  it('a key added to BATON_ADMIN_KEYS after it was an owner or a runner acts as neither (1-A-7)', async () => {
+    await own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: ['agent-venue'] });
+    await setAdminKeys(admin, owner, runner);
     expect(await code(own('/bars', { course: '*', tag: 'a:b', applies: 'claim', reason: 'x' }))).toBe('forbidden');
     const created = Math.floor((await withCore((c) => c.now())) / 1000);
-    const res = await hostCall(await signedRequest(worker, `${ORIGIN}/v1/runner/heartbeat`, { created, body: JSON.stringify(hbBody('vm-a', { hostname: 'w-host', session_name: 'w', secret_hash: await sha256('s') })) }));
+    const res = await hostCall(await signedRequest(runner, `${ORIGIN}/v1/runner/heartbeat`, { created, body: JSON.stringify(hbBody('vm-a', { hostname: 'w-host', session_name: 'w', secret_hash: await sha256('s') })) }));
     expect(res.status).toBe(403);
   });
 
   it('an owner grants no BATON_KEYS-seeded key; an administrator takes it over (1-B-0)', async () => {
-    await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, 'seeded', '["agent-venue"]', 'worker', ?, 'seed')`,
-      worker.fingerprint, worker.publicKey.split(' ').slice(0, 2).join(' '));
-    expect(await code(own('/grants', { public_key: worker.publicKey, capabilities: [] }))).toBe('conflict');
-    expect(await rows('SELECT created_by FROM credentials WHERE id = ?', worker.fingerprint)).toEqual([{ created_by: 'seed' }]);
-    expect(await code(adm('/grants', { repository: 'docs', public_key: worker.publicKey, capabilities: [] }))).toBe(200);
-    expect(await rows('SELECT created_by FROM credentials WHERE id = ?', worker.fingerprint)).toEqual([{ created_by: `admin:${admin.fingerprint}` }]);
+    await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, 'seeded', '["agent-venue"]', 'runner', ?, 'seed')`,
+      runner.fingerprint, runner.publicKey.split(' ').slice(0, 2).join(' '));
+    expect(await code(own('/grants', { public_key: runner.publicKey, capabilities: [] }))).toBe('conflict');
+    expect(await rows('SELECT created_by FROM credentials WHERE id = ?', runner.fingerprint)).toEqual([{ created_by: 'seed' }]);
+    expect(await code(adm('/grants', { repository: 'docs', public_key: runner.publicKey, capabilities: [] }))).toBe(200);
+    expect(await rows('SELECT created_by FROM credentials WHERE id = ?', runner.fingerprint)).toEqual([{ created_by: `admin:${admin.fingerprint}` }]);
   });
 
   it('an owner bar names a course the repository registers, and legs its file has (1-A-4)', async () => {
@@ -298,7 +298,7 @@ describe('round 2', () => {
   it('an administrator’s revoke of a token credential survives a later CREDENTIALS/TOKEN_HASHES edit (2-A-2)', async () => {
     const w = await register('vm-a');
     expect(await code(adm('/keys/vm-a/revoke', {}))).toBe(200);
-    const hb = () => workerCall('/v1/runner/heartbeat', { cred: 'vm-a', secret: w.secret, body: hbBody('vm-a') });
+    const hb = () => runnerCall('/v1/runner/heartbeat', { cred: 'vm-a', secret: w.secret, body: hbBody('vm-a') });
     const refused = (await hb()).status;
     expect(refused).not.toBe(200);
     // The secrets change: the mirror runs again, and the revoke stands.
@@ -325,11 +325,11 @@ describe('round 2', () => {
   });
 
   it('a granted key declares no course of a repository it is not granted (2-A-6)', async () => {
-    await own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: ['agent-venue'] });
+    await own('/grants', { public_key: runner.publicKey, hostname: 'w-host', capabilities: ['agent-venue'] });
     const created = Math.floor((await withCore((c) => c.now())) / 1000);
     const body = hbBody('vm-a', { hostname: 'w-host', session_name: 'w', secret_hash: await sha256('s'),
       courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }, { repository: 'ops', course: 'roadmap-pr', version: 3 }] });
-    const res = await hostCall(await signedRequest(worker, `${ORIGIN}/v1/runner/heartbeat`, { created, body: JSON.stringify(body) }));
+    const res = await hostCall(await signedRequest(runner, `${ORIGIN}/v1/runner/heartbeat`, { created, body: JSON.stringify(body) }));
     expect(res.status).toBe(403);
   });
 });

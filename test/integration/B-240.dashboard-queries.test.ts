@@ -1,12 +1,12 @@
 // B-240 — the dashboard's Running and Timeline in joined queries (BATON_SPEC §14's Running and
 // Timeline, §13's indexes; R-BTN-81's served shape). `GET /v1/ui/state` read one events and one
-// activities query per active claim, and per alive worker one claims query, per claim one
+// activities query per active claim, and per alive runner one claims query, per claim one
 // activities query and per activity one transcripts query — about 600 statements a poll on a
 // production-sized state, polled every 10 seconds (production passed Cloudflare's 5,000,000
 // rows_read/day on 2026-11-14). The answer is unchanged: the served `running` and `timeline` (B-4's leg runs included)
 // equal what the per-row reads built, re-run here as they were, across states that exercise
 // every tie and fallback (two claims claimed at one instant, activities started at one instant,
-// a claim's activity transcript before its session's, two session transcripts, a reaped worker,
+// a claim's activity transcript before its session's, two session transcripts, a reaped runner,
 // claims outside the window). The statement count no longer grows with the claims, activities
 // or lanes, the lookups search their indexes (migration 0055), and on the Cloudflare host a
 // state whose history is out of the window costs rows of its window, not of its history.
@@ -52,13 +52,13 @@ async function state(session: string): Promise<{ state: Record<string, any>; log
 async function oldRunning(now: number) {
   const out = [];
   for (const c of await rows<Record<string, any>>(
-    `SELECT c.id, c.ticket_id, c.worker_id, c.claimed_at, c.nonce, w.hostname, w.session_name, w.last_seen_at, w.last_activity_at,
+    `SELECT c.id, c.ticket_id, c.runner_id, c.claimed_at, c.nonce, w.hostname, w.session_name, w.last_seen_at, w.last_activity_at,
             w.lease_timeout_ms, w.kind, wi.title,
             (SELECT l.leg FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL
               ORDER BY l.seq DESC LIMIT 1) AS leg,
             (SELECT l.session_url FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL
               ORDER BY l.seq DESC LIMIT 1) AS session_url
-     FROM claims c JOIN workers w ON w.id = c.worker_id LEFT JOIN tickets wi ON wi.id = c.ticket_id
+     FROM claims c JOIN runners w ON w.id = c.runner_id LEFT JOIN tickets wi ON wi.id = c.ticket_id
      WHERE c.status = 'active' ORDER BY c.claimed_at`)) {
     const alive = c.kind !== 'legacy' && now - c.last_seen_at < c.lease_timeout_ms;
     out.push({
@@ -77,10 +77,10 @@ async function oldTimeline(now: number) {
   const from = now - 24 * H;
   const lanes = [];
   for (const l of await rows<Record<string, any>>(
-    `SELECT id, hostname, session_name FROM workers WHERE reaped_at IS NULL AND ? - last_seen_at < lease_timeout_ms ORDER BY hostname, id`, now)) {
+    `SELECT id, hostname, session_name FROM runners WHERE reaped_at IS NULL AND ? - last_seen_at < lease_timeout_ms ORDER BY hostname, id`, now)) {
     const claims = [];
     for (const c of await rows<Record<string, any>>(`SELECT id, ticket_id, claimed_at, ended_at, status, end_reason FROM claims
-                                WHERE worker_id = ? AND (ended_at IS NULL OR ended_at >= ?) ORDER BY claimed_at`, l.id, from)) {
+                                WHERE runner_id = ? AND (ended_at IS NULL OR ended_at >= ?) ORDER BY claimed_at`, l.id, from)) {
       const activities = [];
       for (const a of await rows<Record<string, any>>('SELECT id, kind, seq, label, started_at, ended_at, outcome, parent_id, detail_json FROM activities WHERE claim_id = ? ORDER BY started_at', c.id)) {
         const t = (await rows<{ repo: string; path: string }>(
@@ -119,53 +119,53 @@ async function sameAsBefore(session: string, now: number) {
 // ── the state ───────────────────────────────────────────────────────────────────────────────
 
 let n = 0;
-async function claim(worker: number, ticket: string, claimedAt: number, endedAt: number | null) {
+async function claim(runner: number, ticket: string, claimedAt: number, endedAt: number | null) {
   n++;
-  await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason)
-              VALUES (?, ?, ?, ?, '', ?, ?, ?, ?)`, ticket, worker, `b240:${n}`, `n${n}`, claimedAt, endedAt == null ? 'active' : 'released', endedAt,
+  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason)
+              VALUES (?, ?, ?, ?, '', ?, ?, ?, ?)`, ticket, runner, `b240:${n}`, `n${n}`, claimedAt, endedAt == null ? 'active' : 'released', endedAt,
   endedAt == null ? null : 'released:owner');
   return (await rows<{ id: number }>('SELECT MAX(id) AS id FROM claims'))[0].id;
 }
 
 /** Three activities, two started at one instant, the last still open. */
-async function activities(worker: number, claimId: number, at: number) {
+async function activities(runner: number, claimId: number, at: number) {
   for (const [i, [kind, started, ended]] of ([['implement', at, at + 60_000], ['push', at, at + 30_000], ['ci-wait', at + 120_000, null]] as const).entries()) {
-    await rows(`INSERT INTO activities (worker_id, id, claim_id, kind, label, source, started_at, ended_at, outcome, received_at, detail_json)
-                VALUES (?, ?, ?, ?, ?, 'skill', ?, ?, ?, ?, ?)`, worker, `a${claimId}-${i}`, claimId, kind, `${kind} ${i}`, started, ended,
+    await rows(`INSERT INTO activities (runner_id, id, claim_id, kind, label, source, started_at, ended_at, outcome, received_at, detail_json)
+                VALUES (?, ?, ?, ?, ?, 'skill', ?, ?, ?, ?, ?)`, runner, `a${claimId}-${i}`, claimId, kind, `${kind} ${i}`, started, ended,
     ended == null ? null : 'succeeded', started, JSON.stringify({ n: i }));
   }
 }
 
-async function transcript(worker: number, claimId: number, path: string, activity: string | null = null) {
-  await rows(`INSERT INTO transcripts (worker_id, claim_id, repo, path, role, activity_id, first_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    worker, claimId, TRANSCRIPTS, path, activity ? 'subagent' : 'session', activity, T0);
+async function transcript(runner: number, claimId: number, path: string, activity: string | null = null) {
+  await rows(`INSERT INTO transcripts (runner_id, claim_id, repo, path, role, activity_id, first_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    runner, claimId, TRANSCRIPTS, path, activity ? 'subagent' : 'session', activity, T0);
 }
 
 async function event(claimId: number, ticket: string, at: number, kind = 'advanced') {
   await rows(`INSERT INTO events (at, kind, actor, detail_json, ticket_id, claim_id, repository_id) VALUES (?, ?, 'test', '{}', ?, ?, 'docs')`, at, kind, ticket, claimId);
 }
 
-/** The window's claims for one worker — two claimed at one instant, one active — with their
+/** The window's claims for one runner — two claimed at one instant, one active — with their
  *  activities, transcripts and events, and one claim ended before the window. */
-async function fill(worker: number, tickets: string[], { active = true } = {}) {
-  const old = await claim(worker, tickets[0], T0 - 72 * H, T0 - 48 * H);
-  await activities(worker, old, T0 - 72 * H);
-  const a = await claim(worker, tickets[1], T0 - 5 * H, T0 - 4 * H);
-  const b = await claim(worker, tickets[2], T0 - 5 * H, T0 - 3 * H);
-  await activities(worker, a, T0 - 5 * H);
-  await activities(worker, b, T0 - 5 * H);
-  await transcript(worker, a, `claude-code/s-${a}-1.jsonl`);
-  await transcript(worker, a, `claude-code/s-${a}-2.jsonl`);
-  await transcript(worker, b, `claude-code/sub-${b}.jsonl`, `a${b}-1`);
-  await transcript(worker, b, `claude-code/s-${b}.jsonl`);
+async function fill(runner: number, tickets: string[], { active = true } = {}) {
+  const old = await claim(runner, tickets[0], T0 - 72 * H, T0 - 48 * H);
+  await activities(runner, old, T0 - 72 * H);
+  const a = await claim(runner, tickets[1], T0 - 5 * H, T0 - 4 * H);
+  const b = await claim(runner, tickets[2], T0 - 5 * H, T0 - 3 * H);
+  await activities(runner, a, T0 - 5 * H);
+  await activities(runner, b, T0 - 5 * H);
+  await transcript(runner, a, `claude-code/s-${a}-1.jsonl`);
+  await transcript(runner, a, `claude-code/s-${a}-2.jsonl`);
+  await transcript(runner, b, `claude-code/sub-${b}.jsonl`, `a${b}-1`);
+  await transcript(runner, b, `claude-code/s-${b}.jsonl`);
   for (const [seq, leg, finished] of [[2, 'review', null], [1, 'implement', T0 - 4 * H]] as const) {
     await rows(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, started_at, started_observation, finished_at, session_url)
                 VALUES (?, ?, ?, ?, 'filed', ?, 0, ?, ?)`, b, seq, `r-${b}-${seq}`, leg, T0 - 5 * H + seq, finished, seq === 1 ? 'https://claude.ai/code/s1' : null);
   }
   if (!active) return;
-  const c = await claim(worker, tickets[3], T0 - H, null);
-  await activities(worker, c, T0 - H);
-  await transcript(worker, c, `claude-code/sub-${c}.jsonl`, `a${c}-2`);
+  const c = await claim(runner, tickets[3], T0 - H, null);
+  await activities(runner, c, T0 - H);
+  await transcript(runner, c, `claude-code/sub-${c}.jsonl`, `a${c}-2`);
   for (const at of [T0 - H, T0 - H, T0 - 30 * 60_000]) await event(c, tickets[3], at);
 }
 
@@ -195,7 +195,7 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     await fill(a.id, tickets.slice(0, 4));
     await fill(b.id, tickets.slice(4, 8));
     await fill(gone.id, tickets.slice(8, 12), { active: false });
-    await rows('UPDATE workers SET reaped_at = ? WHERE id = ?', T0 - 1, gone.id);
+    await rows('UPDATE runners SET reaped_at = ? WHERE id = ?', T0 - 1, gone.id);
     const s = await sameAsBefore(session, T0);
     // The state exercises what it claims to: two lanes, the window's claims and its ties, an
     // activity's own transcript and the session's.
@@ -207,9 +207,9 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     expect(urls.filter((u: string | null) => u?.includes('/sub-'))).toHaveLength(4);
     expect(urls.filter((u: string | null) => u?.includes('-1.jsonl'))).toHaveLength(6);
     expect(urls.filter((u: string | null) => u == null)).toHaveLength(4);
-    // Later: the window moves past the ended claims and a lane's worker falls silent.
+    // Later: the window moves past the ended claims and a lane's runner falls silent.
     await setClock(T0 + 21 * H);
-    await rows('UPDATE workers SET last_seen_at = ? WHERE id = ?', T0 + 21 * H, a.id);
+    await rows('UPDATE runners SET last_seen_at = ? WHERE id = ?', T0 + 21 * H, a.id);
     session = await adminSession(admin); // a session lives 4 hours (R-BTN-155)
     await sameAsBefore(session, T0 + 21 * H);
   });
@@ -244,9 +244,10 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     const a = await register('vm-a');
     await fill(a.id, tickets.slice(0, 4));
     // The statements over claims, activities and transcripts — the event windows are B-235's,
-    // and the Workers view's per-worker reads (its current activity, its latest transcript)
-    // are not this ticket's.
-    const read = (log: Captured[]) => log.filter((l) => /\b(claims|activities|transcripts)\b/.test(l.sql) && !/\bFROM events\b/.test(l.sql) && !/\bWHERE worker_id = \?/.test(l.sql))
+    // and the Runners view's own reads (its claims, its open activities, its latest transcript,
+    // now one query per list) are B-250's, not this ticket's.
+    const read = (log: Captured[]) => log.filter((l) => /\b(claims|activities|transcripts)\b/.test(l.sql) && !/\bFROM events\b/.test(l.sql) && !/\bWHERE runner_id = \?/.test(l.sql)
+      && !/FROM claims WHERE status = 'active' ORDER BY claimed_at, id$/.test(l.sql) && !/FROM activities WHERE ended_at IS NULL$/.test(l.sql) && !/AS t FROM (pending_)?transcripts$/.test(l.sql))
       .reduce((s, l) => s + (l.cursor.rowsRead ?? 0), 0);
     await state(session); // the session's first read does its own one-time work
     const before = await quiet(session);
@@ -259,11 +260,11 @@ describe('B-240 Running and Timeline in joined queries', { timeout: 120_000 }, (
     await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < 400)
                 INSERT INTO claims (${claimCols.join(', ')}) SELECT ${claimCols.map((x) => (x === 'request_id' ? `request_id || '-' || k.i` : x === 'nonce' ? `nonce || '-' || k.i` : x)).join(', ')}
                 FROM claims, k WHERE claims.id = ?`, c);
-    await rows(`INSERT INTO activities (worker_id, id, claim_id, kind, label, source, started_at, ended_at, outcome, received_at, detail_json)
-                SELECT a.worker_id, a.id || '-' || c.id, c.id, a.kind, a.label, a.source, a.started_at, a.ended_at, a.outcome, a.received_at, a.detail_json
+    await rows(`INSERT INTO activities (runner_id, id, claim_id, kind, label, source, started_at, ended_at, outcome, received_at, detail_json)
+                SELECT a.runner_id, a.id || '-' || c.id, c.id, a.kind, a.label, a.source, a.started_at, a.ended_at, a.outcome, a.received_at, a.detail_json
                 FROM activities a, claims c WHERE a.claim_id = ? AND c.id > ?`, c, c);
-    await rows(`INSERT INTO transcripts (worker_id, claim_id, repo, path, role, activity_id, first_seen_at)
-                SELECT t.worker_id, c.id, t.repo, 'claude-code/s-' || c.id || '.jsonl', t.role, t.activity_id, t.first_seen_at FROM transcripts t, claims c WHERE t.claim_id = ? AND c.id > ?`, c, c);
+    await rows(`INSERT INTO transcripts (runner_id, claim_id, repo, path, role, activity_id, first_seen_at)
+                SELECT t.runner_id, c.id, t.repo, 'claude-code/s-' || c.id || '.jsonl', t.role, t.activity_id, t.first_seen_at FROM transcripts t, claims c WHERE t.claim_id = ? AND c.id > ?`, c, c);
     expect((await rows<{ n: number }>('SELECT COUNT(*) AS n FROM claims'))[0].n).toBeGreaterThan(400);
     const after = await quiet(session);
     expect(after.length).toBe(before.length);

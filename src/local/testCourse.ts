@@ -22,7 +22,7 @@ import { parseSource } from '../defaults/course-source';
 import { LocalHost } from './host';
 import { openStore } from './store';
 
-export type KitRule = 'course' | 'accepted' | 'legs-scripts' | 'min-worker-version' | 'moves-back' | 'generic-run' | 'no-op' | 'instructions'
+export type KitRule = 'course' | 'accepted' | 'legs-scripts' | 'min-runner-version' | 'moves-back' | 'generic-run' | 'no-op' | 'instructions'
   | 'schema' | 'entry' | 'spawns';
 export interface KitViolation {
   rule: KitRule;
@@ -40,7 +40,7 @@ export interface KitSchema {
 /** The versions a course is posted under (`.baton/baton.json`, R-BTN-51); null where unknown. */
 export interface Versions {
   version: number;
-  min_worker_version: number;
+  min_runner_version: number;
 }
 
 export interface KitInput {
@@ -102,7 +102,7 @@ export function legExports(mod: Record<string, unknown>): string[] {
 }
 
 /** The stations and legs of `base` the proposed file has neither under the same name nor through a
- *  `renamed_from` (R-BTN-64: a removal, which older workers would misbehave on). */
+ *  `renamed_from` (R-BTN-64: a removal, which older runners would misbehave on). */
 export function removed(base: unknown, proposed: unknown): { stations: string[]; legs: string[] } {
   const b = asRecord(base);
   const p = asRecord(proposed);
@@ -159,9 +159,9 @@ export function staticViolations(k: KitInput): KitViolation[] {
     if (r.stations.length || r.legs.length) {
       const what = [...r.stations.map((s) => `station ${s}`), ...r.legs.map((l) => `leg ${l}`)].join(', ');
       if (!k.proposedVersions || !k.baseVersions) {
-        out.push({ rule: 'min-worker-version', message: `removes ${what}, and .baton/baton.json gives no min_worker_version to show it raised (R-BTN-64, R-BTN-65)` });
-      } else if (k.proposedVersions.min_worker_version <= k.baseVersions.min_worker_version) {
-        out.push({ rule: 'min-worker-version', message: `removes ${what} but leaves min_worker_version at ${k.proposedVersions.min_worker_version}: older workers would misbehave (R-BTN-64, R-BTN-65)` });
+        out.push({ rule: 'min-runner-version', message: `removes ${what}, and .baton/baton.json gives no min_runner_version to show it raised (R-BTN-64, R-BTN-65)` });
+      } else if (k.proposedVersions.min_runner_version <= k.baseVersions.min_runner_version) {
+        out.push({ rule: 'min-runner-version', message: `removes ${what} but leaves min_runner_version at ${k.proposedVersions.min_runner_version}: older runners would misbehave (R-BTN-64, R-BTN-65)` });
       }
     }
   }
@@ -373,10 +373,10 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
   core.now = () => clock; // R-BTN-32: the kit's own clock, so the run is the same every time
   await host.start();
   const out: KitViolation[] = [];
-  const version = k.proposedVersions ?? { version: 1, min_worker_version: 1 };
+  const version = k.proposedVersions ?? { version: 1, min_runner_version: 1 };
   // B-52: each post's registry entry, the shape the sync's own post gives a course — its
   // schemas included, read by the same `courseSchemas` (R-BTN-108, R-BTN-134).
-  const entry = (id: string, course: unknown, v: Versions, schemas: KitSchema[]) => ({ id, version: v.version, min_worker_version: v.min_worker_version, skill: id,
+  const entry = (id: string, course: unknown, v: Versions, schemas: KitSchema[]) => ({ id, version: v.version, min_runner_version: v.min_runner_version, skill: id,
     course, step_kinds: ['other'], branch_pattern: 'claude/{ticket}-*', ...(schemas.length ? { schemas } : {}) });
   const ticket = (id: string) => ({ id, course_id: k.course, path: `tickets/${id}.md`, title: id, tier: 'routine', requires: [], operator_only: false,
     expedite: false, depends_on: [], blocked_by: [], repos: [], rank: 1 });
@@ -400,7 +400,7 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     // The registry of each post: the other listed courses beside the one under test — their
     // files as the working tree holds them — and its own schemas spread in (R-BTN-108).
     const registry = (ownCourse: unknown, v: Versions, schemas: KitSchema[]): unknown[] => [
-      ...(k.others ?? []).filter((o) => o.file != null).map((o) => entry(o.id, o.file, o.versions ?? { version: 1, min_worker_version: 1 }, o.schemas)),
+      ...(k.others ?? []).filter((o) => o.file != null).map((o) => entry(o.id, o.file, o.versions ?? { version: 1, min_runner_version: 1 }, o.schemas)),
       entry(k.course, ownCourse, v, schemas),
     ];
     // The base file first, with the live tickets where it placed them; then the proposed one.
@@ -416,11 +416,11 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     core.store.transaction(() => core.cutover.cutover('test-course', { repository: REPO, confirm: true }));
     const secret = 'test-course-secret';
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)))].map((b) => b.toString(16).padStart(2, '0')).join('');
-    const hb = await core.workers.heartbeat(CRED, null, { hostname: 'test-course', session_name: 'test-course', harness: 'claude-code', kind: 'vm', capabilities: ['agent-venue'],
+    const hb = await core.runners.heartbeat(CRED, null, { hostname: 'test-course', session_name: 'test-course', harness: 'claude-code', kind: 'vm', capabilities: ['agent-venue'],
       model_id: 'anthropic/kit',
-      tier_ceiling: 'critical', lease_timeout_s: 3600, secret_hash: hash, courses: [{ repository: REPO, course: k.course, version: version.version }] }) as { worker_id: number };
+      tier_ceiling: 'critical', lease_timeout_s: 3600, secret_hash: hash, courses: [{ repository: REPO, course: k.course, version: version.version }] }) as { runner_id: number };
     const tx = <T>(f: () => T) => core.store.transaction(f);
-    const claim = tx(() => core.claims.claim(hb.worker_id, { request_id: 'test-course-1', ticket_id: `${REPO}:KIT-1` })) as { claim_id?: number; code?: string; message?: string };
+    const claim = tx(() => core.claims.claim(hb.runner_id, { request_id: 'test-course-1', ticket_id: `${REPO}:KIT-1` })) as { claim_id?: number; code?: string; message?: string };
     if (!claim.claim_id) return [{ rule: 'generic-run', message: `the claim at ${proposed.start} was refused: ${claim.code ?? ''} ${claim.message ?? ''}`.trim() }];
     // R-BTN-109: an arrival at a station with an `entry` must carry each output it names — the
     // generic run gives one by pointer (a git: uri the kit's own commit answers for), which the
@@ -429,12 +429,12 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     let at = proposed.start;
     for (const step of route) {
       clock += 60_000;
-      const r = tx(() => core.claims.advance(hb.worker_id, claim.claim_id!, { leg: step.leg, ...(at === proposed.start ? {} : { reached: at, outputs: outputsAt(at) }) })) as { ok?: boolean; code?: string; rule_code?: string };
+      const r = tx(() => core.claims.advance(hb.runner_id, claim.claim_id!, { leg: step.leg, ...(at === proposed.start ? {} : { reached: at, outputs: outputsAt(at) }) })) as { ok?: boolean; code?: string; rule_code?: string };
       if (!r.ok) return [{ rule: 'generic-run', message: `advance into ${step.leg} from ${at} was refused: ${r.code ?? ''} ${r.rule_code ?? ''}`.trim() }];
       at = step.reached;
     }
     clock += 60_000;
-    const end = tx(() => core.claims.end(hb.worker_id, claim.claim_id!, { end_reason: 'done', reached: at, ended_at_sha: SHA(999), outputs: outputsAt(at) })) as { ok?: boolean; code?: string };
+    const end = tx(() => core.claims.end(hb.runner_id, claim.claim_id!, { end_reason: 'done', reached: at, ended_at_sha: SHA(999), outputs: outputsAt(at) })) as { ok?: boolean; code?: string };
     if (!end.ok) return [{ rule: 'generic-run', message: `the done end at ${at} was refused: ${end.code ?? ''}` }];
     const posted = await post(registry(k.proposed, version, k.schemas ?? []), { 'KIT-1': placedAt(proposed, route) });
     if (!posted.confirmed) out.push({ rule: 'generic-run', message: `the done end at ${at} was not confirmed by a snapshot placing the ticket there` });
@@ -475,7 +475,7 @@ export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
     git(false, 'init', '-q', '-b', 'main');
     git(false, 'remote', 'add', 'origin', 'https://127.0.0.1:1/kit/no-forge.git');
     mkdirSync(join(dir, '.baton'), { recursive: true });
-    writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ agent_command: 'true', courses: [{ id: k.course, version: 1, min_worker_version: 1 }] }));
+    writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ agent_command: 'true', courses: [{ id: k.course, version: 1, min_runner_version: 1 }] }));
     git(false, 'add', '-A');
     git(false, 'commit', '-qm', 'kit');
     const sha = git(true, 'rev-parse', 'HEAD').trim();
@@ -592,7 +592,7 @@ export async function readInputs(root: string, course: string, opts: { base?: st
   const proposed = JSON.parse(readFileSync(file, 'utf8'));
   const versionsOf = (json: unknown, id: string): Versions | null => {
     const c = (asRecord(json).courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === id);
-    return c && Number.isInteger(c.version) && Number.isInteger(c.min_worker_version) ? { version: c.version, min_worker_version: c.min_worker_version } : null;
+    return c && Number.isInteger(c.version) && Number.isInteger(c.min_runner_version) ? { version: c.version, min_runner_version: c.min_runner_version } : null;
   };
   const batonJson = join(root, '.baton', 'baton.json');
   const settings = existsSync(batonJson) ? asRecord(JSON.parse(readFileSync(batonJson, 'utf8'))) : {};

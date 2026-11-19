@@ -48,7 +48,7 @@ describe('R-BTN-81: the rows, the reader and the purge', () => {
     expect((await endClaim('vm-a', w.secret, c.claim_id, { end_reason: 'suspended:pr-open', reached: 'pr-open', next: 'review' })).status).toBe(200);
     const snapshot = (await rows<{ snapshot_sha: string }>('SELECT snapshot_sha FROM claims WHERE id = ?', c.claim_id))[0].snapshot_sha;
     expect((await history('A')).rows).toEqual([
-      expect.objectContaining({ kind: 'leg-finished', claim_id: c.claim_id, worker_id: w.id, leg: 'implement', run: 1, reached: 'pr-open', next_leg: 'review', snapshot_sha: snapshot, course_version: 3, at: T0 + MIN }),
+      expect.objectContaining({ kind: 'leg-finished', claim_id: c.claim_id, runner_id: w.id, leg: 'implement', run: 1, reached: 'pr-open', next_leg: 'review', snapshot_sha: snapshot, course_version: 3, at: T0 + MIN }),
       expect.objectContaining({ kind: 'leg-started', claim_id: c.claim_id, leg: 'implement', run: 1, snapshot_sha: snapshot, course_version: 3, detail: { from: 'filed' } }),
     ]);
     // The snapshot showing the claim's end moves A: the claim said so, so no git-moved row.
@@ -75,7 +75,7 @@ describe('R-BTN-81: the rows, the reader and the purge', () => {
     expect((await history('B')).rows.map((r: { kind: string }) => r.kind)).toEqual(['git-moved', 'leg-started']);
   });
 
-  it('pages newest first by id, at most 200; refuses a bad cursor or limit; a worker key not granted is forbidden', async () => {
+  it('pages newest first by id, at most 200; refuses a bad cursor or limit; a runner key not granted is forbidden', async () => {
     await withCore((core) => {
       core.store.transaction(() => {
         for (let i = 0; i < 205; i++) core.history.record('docs:A', { kind: 'git-moved', detail: { i } });

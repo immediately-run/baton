@@ -77,7 +77,7 @@ let repo: Repo;
 beforeEach(async () => {
   await setClock(T0);
   repo = new Repo();
-  gateWorker = null;
+  gateRunner = null;
 });
 afterEach(() => rmSync(repo.dir, { recursive: true, force: true }));
 
@@ -121,14 +121,14 @@ function fact(number: number, state: PrFact['state'], checks: (string | null)[],
 function rev(author: string, state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED', ago: number, body = ''): PrFact['reviews'][number] {
   return { author, state, submittedAt: T0 - ago, body };
 }
-let gateWorker: number | null = null;
+let gateRunner: number | null = null;
 /** Baton's record of each gate's run: a finished claim on T-1 whose run-tests leg passed the
  *  marker's sha as its evidence (what a runner's advance records, R-BTN-63). */
 async function recorded(...gates: Gate[]): Promise<void> {
-  gateWorker ??= (await register('vm-a')).id;
+  gateRunner ??= (await register('vm-a')).id;
   for (const g of gates) {
     if ((await rows('SELECT 1 FROM claims WHERE request_id = ?', `gate:${g.nonce}`)).length) continue;
-    await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason) VALUES ('docs:T-1', ?, ?, ?, '', 0, 'released', 1, 'released:requested')`, gateWorker, `gate:${g.nonce}`, g.nonce);
+    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason) VALUES ('docs:T-1', ?, ?, ?, '', 0, 'released', 1, 'released:requested')`, gateRunner, `gate:${g.nonce}`, g.nonce);
     const [{ id }] = await rows<{ id: number }>('SELECT id FROM claims WHERE request_id = ?', `gate:${g.nonce}`);
     await rows(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, to_station, started_at, started_observation, finished_at, evidence) VALUES (?, 1, 'run-tests', 'pr-open', 'pr-open', 0, 0, 1, ?)`, id, g.sha);
   }

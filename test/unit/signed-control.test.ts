@@ -130,7 +130,7 @@ describe('signedControlOf (B-127): what counts, first parents only', () => {
     const r = repo();
     r.write('.baton/baton.json', '{"agent_command":"signed one"}\n');
     const signedSha = r.commit({ sign: 'owner' });
-    r.write('.baton/baton.json', '{"agent_command":"pushed by the worker"}\n');
+    r.write('.baton/baton.json', '{"agent_command":"pushed by the runner"}\n');
     const unsignedSha = r.commit({});
     const sc = signedControlOf(unsignedSha, [owner.key], gitOf(r), nodeKeygen)!;
     expect(sc.groups.agent_command).toMatchObject({ read: signedSha, key: owner.key.fingerprint });
@@ -466,7 +466,7 @@ describe('marksOf (B-127 item 7): brief marks and the EXPEDITE gate', () => {
     r.write(TICKET, body('a brief', ['EXPEDITE']));
     const filed = r.commit({ sign: 'owner' });
     expect(marksOf(filed, [owner.key], [TICKET], gitOf(r), nodeKeygen).expedite.has(TICKET)).toBe(false);
-    // The worker removes the tag unsigned: the last signed state — present — stays in force.
+    // The runner removes the tag unsigned: the last signed state — present — stays in force.
     r.write(TICKET, body('a brief'));
     const removed = r.commit({});
     const marks = marksOf(removed, [owner.key], [TICKET], gitOf(r), nodeKeygen);

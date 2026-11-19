@@ -4,14 +4,13 @@ description: "BATON_SPEC — Open questions."
 ---
 ## Open questions
 
-- **§12.8's remaining items (the fifth adversarial review, 2026-10-29).** The amendment merged as a
+- **§12.8's remaining items.** The amendment merged as a
   proposal with these open; each is to be settled before the rule it names is built:
   - **Foreign-commit resets race honest work** (R-BTN-183): a reset can discard an honest leg's
     unreported pushes, and any runner can trigger one through the shared forge identity until B-131
     gives each claim its own push credential.
   - **A host-side signer** (R-FH-3), should signed authorship return: "signs only for the claim its
-    runner holds" would need defining per kind (requests, commits); the signer is not designed, and
-    `authorship: signed` left the specification with it (2026-11-01).
+    runner holds" would need defining per kind (requests, commits); the signer is not designed, and the specification has no `authorship: signed`.
   - **A human's wrong-head merge is caught after it lands** (R-BTN-184): the forge cannot refuse a
     human's merge of another head; whether trusted runners should revert it, or the human's merge
     should itself go through a pinned expected head, is open.
@@ -27,10 +26,7 @@ description: "BATON_SPEC — Open questions."
   - **Smaller items**: whether `human_only` keys registered while every approver was `owner` must be
     re-registered when one becomes `human`.
   - **`baton-deploy.yml`**, whose production job restores the npm cache the test job saved: tracked
-    in B-135 item 3 (the owner, 2026-10-29), so the deploy job restores no cache. (B-110 and the standard
-    `review.md` running tests in a review leg are no longer open: the standard courses are written
-    for the `cooperative` preset (R-BTN-131, 2026-10-29), and the courses that must not run branch code in a
-    review are the deployment's.)
+    in B-135 item 3, so the deploy job restores no cache.
 
 - **Confirmation by keys a same-user process can reach (R-BTN-155, R-BTN-159).** Any
   administrator or owner key, SSH or API, binds a sign-in code and confirms its session's

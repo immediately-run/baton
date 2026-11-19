@@ -36,7 +36,7 @@ settle — a constraint that forces it, a convention the repository has, a measu
 take — and say why in a line. What only the owner can weigh (cost, lock-in, who may use it, how
 much operations work they will carry) becomes a question.
 
-- **Shape** — the parts (client, server, workers, stores) and what each owns, as a short list
+- **Shape** — the parts (client, server, runners, stores) and what each owns, as a short list
   and one diagram in text.
 - **Where it runs** — hosting for each part, and why there; the environments (local, preview,
   production); how a change reaches production.

@@ -1,12 +1,12 @@
 // S-BTN-202 a leg's scope (BATON_SPEC §15 S-BTN-202, §12.9; B-134, OWASP ASI10 hole 7): a leg's
-// pushes outside its ticket's scope are reported and optionally held, and a worker push no open
+// pushes outside its ticket's scope are reported and optionally held, and a runner push no open
 // claim covers is found from the forge's own delivery. Must hold: the claim answer carries the
 // ticket's scope (its home and its `repos:`, a short name read under the home's owner as
 // R-BTN-92 reads it); a leg's report of an out-of-scope push raises one `scope-exceeded`
 // finding under Needs you and one event, an in-scope action none; with the owners'
 // `scope_policy: hold` the ticket is held `scope-exceeded` until an owner lifts the hold, and a
 // resolved finding leaves the listing; a push delivery by a login of the repository's
-// `worker_pushers` while no active claim covers it raises one `unclaimed-write` finding on the
+// `runner_pushers` while no active claim covers it raises one `unclaimed-write` finding on the
 // repository, one by an unnamed login none, and one covered by an open claim none. The runner's
 // half — reading the home checkout's refs around each leg — is unit-tested beside the runner.
 // Runs on both hosts.
@@ -126,11 +126,11 @@ describe('S-BTN-202 a leg\'s scope', () => {
     expect((await sessionCall(session, `/v1/ui/scope/${open[0].id}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status).toBe(404);
   });
 
-  it('a worker push no open claim covers is unclaimed-write; a covered one and an unnamed login\'s are nothing', async () => {
-    // docs' owners name the fleet's worker login; without a name the cross-check is off.
+  it('a runner push no open claim covers is unclaimed-write; a covered one and an unnamed login\'s are nothing', async () => {
+    // docs' owners name the fleet's runner login; without a name the cross-check is off.
     expect((await pushToDocs('immediately-run-worker', 'scope-off-0')).status).toBe(204);
     expect(await findings()).toEqual([]);
-    expect((await keyCall(docsOwner, '/v1/owner/docs/settings', { worker_pushers: ['immediately-run-worker'] }, 'PUT')).status).toBe(200);
+    expect((await keyCall(docsOwner, '/v1/owner/docs/settings', { runner_pushers: ['immediately-run-worker'] }, 'PUT')).status).toBe(200);
     // No claim is open: the push is uncovered.
     expect((await pushToDocs('immediately-run-worker', 'scope-unclaimed-1')).status).toBe(204);
     expect(await rows(`SELECT repository_id, ticket_id, json_extract(detail_json, '$.pusher') AS pusher FROM events WHERE kind = 'unclaimed-write'`)).toEqual([
@@ -200,15 +200,15 @@ describe('S-BTN-202 a leg\'s scope', () => {
   it('the scope settings are owners\' settings: their shapes are checked, and a hold that stops holding is a loosening an approver admits', async () => {
     expect((await syncCall('/v1/sync/board', payload(FIELDHOUSE_SHA, null, fieldhouseBoard(['F-1'], {})), await fieldhouseToken())).status).toBe(200);
     await cutover(1, 'fieldhouse');
-    for (const [body, field] of [[{ scope_policy: 'punish' }, 'scope_policy'], [{ scope_policy: 1 }, 'scope_policy'], [{ worker_pushers: 'x' }, 'worker_pushers'], [{ worker_pushers: ['a b'] }, 'worker_pushers'], [{ worker_pushers: ['x' + 'y'.repeat(100)] }, 'worker_pushers'], [{ worker_pushers: ['app[bot]x'] }, 'worker_pushers'], [{ worker_pushers: ['a[b]'] }, 'worker_pushers']] as const) {
+    for (const [body, field] of [[{ scope_policy: 'punish' }, 'scope_policy'], [{ scope_policy: 1 }, 'scope_policy'], [{ runner_pushers: 'x' }, 'runner_pushers'], [{ runner_pushers: ['a b'] }, 'runner_pushers'], [{ runner_pushers: ['x' + 'y'.repeat(100)] }, 'runner_pushers'], [{ runner_pushers: ['app[bot]x'] }, 'runner_pushers'], [{ runner_pushers: ['a[b]'] }, 'runner_pushers']] as const) {
       const res = await keyCall(fieldOwner, '/v1/owner/fieldhouse/settings', body, 'PUT');
       expect([JSON.stringify(body), res.status, res.json.message?.split(':')[0]]).toEqual([JSON.stringify(body), 400, field]);
     }
     // An app bot's `<app>[bot]` login — the identity per-claim push tokens (B-131) push as —
     // is a login the setting admits, like any human's.
-    expect((await keyCall(fieldOwner, '/v1/owner/fieldhouse/settings', { worker_pushers: ['fieldhouse-runner[bot]', 'immediately-run-worker'] }, 'PUT')).status).toBe(200);
-    expect(await rows<{ v: string }>('SELECT worker_pushers AS v FROM repositories WHERE id = ?', 'fieldhouse'))
-      .toEqual([{ v: '["fieldhouse-runner[bot]","immediately-run-worker"]' }]);
+    expect((await keyCall(fieldOwner, '/v1/owner/fieldhouse/settings', { runner_pushers: ['fieldhouse-worker[bot]', 'immediately-run-worker'] }, 'PUT')).status).toBe(200);
+    expect(await rows<{ v: string }>('SELECT runner_pushers AS v FROM repositories WHERE id = ?', 'fieldhouse'))
+      .toEqual([{ v: '["fieldhouse-worker[bot]","immediately-run-worker"]' }]);
     // Under the cooperative preset the owner is an approvers.policy approver (R-BTN-188), so the
     // owner's own loosening — hold back to report — is admitted; holding was tightening.
     expect((await keyCall(fieldOwner, '/v1/owner/fieldhouse/settings', { scope_policy: 'hold' }, 'PUT')).status).toBe(200);

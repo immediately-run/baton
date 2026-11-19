@@ -348,6 +348,81 @@ describe('baton tickets claim | set | done (B-112)', () => {
     expect(run(f.dir, 'claim', 'B-2', '--offline').code).toBe(0);
   }, 60_000);
 
+  it('a qualified dependency resolves through the repos map and gates the claim on the target\'s own board (B-113)', () => {
+    // The target repository: a bare git remote the repos map names by path, holding an archived
+    // done ticket (B-1), a live done one (B-2) and a live open one (B-3).
+    const target = tmp('baton-b113-target-');
+    execFileSync('git', ['init', '-q', '-b', 'main', target], { stdio: 'ignore' });
+    git(target, 'config', 'user.email', 'b113@test');
+    git(target, 'config', 'user.name', 'b113');
+    mkdirSync(join(target, '.baton'), { recursive: true });
+    writeFileSync(join(target, '.baton', 'baton.json'), JSON.stringify({ items: 'tickets', repos: {} }));
+    mkdirSync(join(target, 'tickets', 'archive'), { recursive: true });
+    writeFileSync(join(target, 'tickets', 'archive', 'B-1.mdx'), ticket('B-1').replace('status: available', 'status: done'));
+    writeFileSync(join(target, 'tickets', 'B-2.mdx'), ticket('B-2').replace('status: available', 'status: done'));
+    writeFileSync(join(target, 'tickets', 'B-3.mdx'), ticket('B-3'));
+    git(target, 'add', '-A');
+    git(target, 'commit', '-qm', 'target fixture');
+    const depends = (id: string, dep: string) => ticket(id).replace('**Depends on:** none.', `**Depends on:** ${dep}.`).replace('depends_on: []', `depends_on:\n  - ${dep}`);
+    const f = repo({
+      settings: { repos: { target: target } },
+      existing: {
+        'tickets/B-9.mdx': depends('B-9', 'target:B-1'),
+        'tickets/B-10.mdx': depends('B-10', 'target:B-2'),
+        'tickets/B-11.mdx': depends('B-11', 'target:B-3'),
+        'tickets/B-12.mdx': depends('B-12', 'target:B-99'),
+        'tickets/B-13.mdx': depends('B-13', 'ghost:B-1'),
+      },
+    });
+    // Archived there and live `done` there are done here: the claims go through.
+    expect(run(f.dir, 'claim', 'B-9', '--offline').code).toBe(0);
+    expect(run(f.dir, 'claim', 'B-10', '--offline').code).toBe(0);
+    // A live open target keeps the claim waiting; an unknown ticket and a repository the map
+    // does not name refuse, as the board post would (§4.4).
+    expect(run(f.dir, 'claim', 'B-11', '--offline').err).toBe('baton: B-11 depends on target:B-3, not done yet\n');
+    expect(run(f.dir, 'claim', 'B-12', '--offline').err).toContain('target:B-99, which is neither live nor archived on');
+    expect(run(f.dir, 'claim', 'B-13', '--offline').err).toContain('ghost: the baton.json repos map does not resolve it');
+  }, 60_000);
+
+  it('a self-qualified dependency reads as its local id: the same checkout answers it, offline and all (B-113 round 1)', () => {
+    // The repos map names the own repository — by its bare origin path, as a checkout on a local
+    // remote reads it — so `baton:B-1` in baton's own checkout is the local B-1 (§3.1): the
+    // archive and the live status answer it, never a depth-1 clone of the repository's own
+    // remote (which `--offline` could not take anyway).
+    const depends = (id: string, dep: string) => ticket(id).replace('**Depends on:** none.', `**Depends on:** ${dep}.`).replace('depends_on: []', `depends_on:\n  - ${dep}`);
+    const f = repo({ existing: {
+      'tickets/B-1.mdx': ticket('B-1').replace('status: available', 'status: superseded'),
+      'tickets/B-2.mdx': ticket('B-2'),
+      'tickets/B-9.mdx': depends('B-9', 'baton:B-1'),
+      'tickets/B-10.mdx': depends('B-10', 'baton:B-2'),
+    } });
+    writeFileSync(join(f.dir, '.baton', 'baton.json'), `${JSON.stringify({ items: 'tickets', default_course: 'create-pr', repos: { baton: f.origin }, ticket_prefix: 'B', legacy_ids: ['R3-\\d+'], project: 'baton' }, null, 2)}\n`);
+    git(f.dir, 'add', '-A');
+    git(f.dir, 'commit', '-qm', 'name the own repository in the repos map');
+    git(f.dir, 'push', '-q', 'origin', 'HEAD:main');
+    // Locally superseded is done, locally open is not — the same rule as a bare local id.
+    expect(run(f.dir, 'claim', 'B-9', '--offline').code).toBe(0);
+    expect(run(f.dir, 'claim', 'B-10', '--offline').err).toBe('baton: B-10 depends on baton:B-2, not done yet\n');
+    // And `new` refuses a filing whose self-qualified dependency loops: the next free id is
+    // B-11, and B-11 waiting on baton:B-11 is the self-dependency, refused before the push
+    // (round 1 — the board's own judgment, made here).
+    const loop = run(f.dir, 'new', '--direct', '--title', 'a self loop', '--depends-on', 'baton:B-11');
+    expect(loop.code).toBe(2);
+    expect(loop.err.split('\n').find((l) => l.startsWith('baton:'))).toBe('baton: B-11: a dependency cycle: B-11 → B-11');
+    // A map naming no id of its own cannot tell the spelling from another repository's: the
+    // claim says so, naming the fix, as it does for any repository the map does not resolve.
+    const unnamed = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/B-9.mdx': depends('B-9', 'baton:B-1') } });
+    expect(run(unnamed.dir, 'claim', 'B-9', '--offline').err).toContain('baton: the baton.json repos map does not resolve it');
+  }, 60_000);
+
+  it('dependencyRemote reads the repos map: a forge path is GitHub\'s, a remote as written', async () => {
+    const { dependencyRemote } = await import('../../src/defaults/tickets');
+    expect(dependencyRemote({ baton: 'immediately-run/baton' }, 'baton')).toBe('https://github.com/immediately-run/baton');
+    expect(dependencyRemote({ local: '/srv/git/local.git' }, 'local')).toBe('/srv/git/local.git');
+    expect(dependencyRemote({ ssh: 'git@github.com:immediately-run/baton.git' }, 'ssh')).toBe('git@github.com:immediately-run/baton.git');
+    expect(() => dependencyRemote({}, 'ghost')).toThrow('ghost: the baton.json repos map does not resolve it');
+  });
+
   it('set writes any live status and --pr adds the pull request once', () => {
     const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1') } });
     const url = 'https://github.com/immediately-run/baton/pull/40';
@@ -1067,7 +1142,7 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
   let keyFile: string;
 
   beforeEach(() => {
-    keyFile = join(tmp('baton-b129-key-'), 'worker.key');
+    keyFile = join(tmp('baton-b129-key-'), 'runner.key');
     mkdirSync(dirname(keyFile), { recursive: true });
     key = `bak_${'0'.repeat(16)}_${'a'.repeat(64)}`;
     writeFileSync(keyFile, `${key}\n`);
@@ -1109,15 +1184,15 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
     }
   }, 60_000);
 
-  it('the same state with a live claim by another worker refuses, naming the holder and the lease', async () => {
+  it('the same state with a live claim by another runner refuses, naming the holder and the lease', async () => {
     const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
     const leaseEnds = Date.parse('2026-10-27T11:00:00Z');
-    const baton = await fakeBaton({ ...B91, holders: [{ ticket_id: 'baton:B-91', worker_id: 7, hostname: 'host-3', session_name: 'claude-review', lease_ends_at: leaseEnds }] });
+    const baton = await fakeBaton({ ...B91, holders: [{ ticket_id: 'baton:B-91', runner_id: 7, hostname: 'host-3', session_name: 'claude-review', lease_ends_at: leaseEnds }] });
     try {
       const before = f.head().sha;
       const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', baton.url);
       expect(r.code).toBe(2);
-      expect(r.err).toBe(`baton: B-91 is held by host-3 · claude-review (worker 7), its lease ends 2026-10-27T11:00:00.000Z — its lease has not ended; it is released or reaped first (Baton's board, B-129)\n`);
+      expect(r.err).toBe(`baton: B-91 is held by host-3 · claude-review (runner 7), its lease ends 2026-10-27T11:00:00.000Z — its lease has not ended; it is released or reaped first (Baton's board, B-129)\n`);
       expect(f.head().sha).toBe(before);
     } finally {
       baton.close();
@@ -1375,19 +1450,19 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
   it('a holder whose lease has ended awaits reaping, and a legacy holder has no lease: both refuse, naming it', async () => {
     const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
     const ended = Date.parse('2026-10-27T11:00:00Z');
-    const stale = await fakeBaton({ ...B91, serverTime: ended + 60_000, holders: [{ ticket_id: 'baton:B-91', worker_id: 7, hostname: 'host-3', session_name: 'claude-review', lease_ends_at: ended }] });
+    const stale = await fakeBaton({ ...B91, serverTime: ended + 60_000, holders: [{ ticket_id: 'baton:B-91', runner_id: 7, hostname: 'host-3', session_name: 'claude-review', lease_ends_at: ended }] });
     try {
       const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', stale.url);
       expect(r.code).toBe(2);
-      expect(r.err).toBe("baton: B-91 is held by host-3 · claude-review (worker 7), its lease ended 2026-10-27T11:00:00.000Z and the claim awaits reaping; it is reaped first (Baton's board, B-129)\n");
+      expect(r.err).toBe("baton: B-91 is held by host-3 · claude-review (runner 7), its lease ended 2026-10-27T11:00:00.000Z and the claim awaits reaping; it is reaped first (Baton's board, B-129)\n");
     } finally {
       stale.close();
     }
-    const legacy = await fakeBaton({ ...B91, holders: [{ ticket_id: 'baton:B-91', worker_id: 3, hostname: 'legacy', session_name: 'item-B-91', lease_ends_at: null }] });
+    const legacy = await fakeBaton({ ...B91, holders: [{ ticket_id: 'baton:B-91', runner_id: 3, hostname: 'legacy', session_name: 'item-B-91', lease_ends_at: null }] });
     try {
       const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', legacy.url);
       expect(r.code).toBe(2);
-      expect(r.err).toBe("baton: B-91 is held by legacy · item-B-91 (worker 3), a claim with no lease to end (a legacy claim); it is released, adopted or reaped first (Baton's board, B-129)\n");
+      expect(r.err).toBe("baton: B-91 is held by legacy · item-B-91 (runner 3), a claim with no lease to end (a legacy claim); it is released, adopted or reaped first (Baton's board, B-129)\n");
     } finally {
       legacy.close();
     }

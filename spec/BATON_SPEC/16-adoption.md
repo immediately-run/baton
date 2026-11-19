@@ -25,8 +25,7 @@ R-BTN-188) stays legal in the stored policy versions and admits no credential, s
 key or identity remains (R-BTN-93); `baton repo protect --print` omits it, a new version naming
 it is refused `invalid-params` naming the knob, and the `cooperative` column becomes the other
 three writers — so no stored version changes meaning and no approver is bypassed; R-BTN-188's
-mark carries this past the deletion
-(the owner, 2026-11-01, B-165's review default).
+mark carries this past the deletion.
 
 A repository registered with no git claim protocol of its own starts cut over and needs
 nothing here. A repository that already coordinated through git — the reference deployment,

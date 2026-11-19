@@ -1,6 +1,6 @@
 // test-course.test.ts — `baton test-course` (BATON_SPEC §2d, R-BTN-64, R-BTN-65; R3-1248): the kit
 // over docs' real roadmap-pr course passes, and over each broken variant fails naming its rule —
-// a course file the core refuses, a removal that leaves min_worker_version, leg scripts that do
+// a course file the core refuses, a removal that leaves min_runner_version, leg scripts that do
 // not pair with the legs, and a live ticket the proposed file would move back. Node only: it runs
 // the local host.
 import { describe, it, expect, afterAll } from 'vitest';
@@ -20,7 +20,7 @@ const dirs: string[] = [];
 afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
 const input = (over: Partial<KitInput> = {}): KitInput => ({
-  course: 'roadmap-pr', proposed: roadmapPr, base: roadmapPr, proposedVersions: { version: 3, min_worker_version: 3 }, baseVersions: { version: 3, min_worker_version: 3 },
+  course: 'roadmap-pr', proposed: roadmapPr, base: roadmapPr, proposedVersions: { version: 3, min_runner_version: 3 }, baseVersions: { version: 3, min_runner_version: 3 },
   legScripts: null, live: null, ...over,
 });
 const { adjudicate: _a, ...legsWithout } = roadmapPr.legs;
@@ -47,15 +47,15 @@ describe('baton test-course', () => {
     expect(v.every((x) => x.rule === 'course')).toBe(true);
   }, 60_000);
 
-  it('a removal that leaves min_worker_version fails; raising it passes; a rename is no removal', async () => {
+  it('a removal that leaves min_runner_version fails; raising it passes; a rename is no removal', async () => {
     expect(removed(roadmapPr, WITHOUT_ADJUDICATE)).toEqual({ stations: ['adjudicated'], legs: ['adjudicate'] });
     const { fix, ...others } = roadmapPr.legs;
     expect(removed(roadmapPr, { ...roadmapPr, legs: { ...others, address: { ...fix, renamed_from: 'fix' } } })).toEqual({ stations: [], legs: [] });
-    const v = await checkCourse(input({ proposed: WITHOUT_ADJUDICATE, proposedVersions: { version: 4, min_worker_version: 3 } }));
-    expect(v).toEqual([expect.objectContaining({ rule: 'min-worker-version', message: expect.stringContaining('station adjudicated, leg adjudicate') })]);
-    expect(await checkCourse(input({ proposed: WITHOUT_ADJUDICATE, proposedVersions: { version: 4, min_worker_version: 4 } }))).toEqual([]);
+    const v = await checkCourse(input({ proposed: WITHOUT_ADJUDICATE, proposedVersions: { version: 4, min_runner_version: 3 } }));
+    expect(v).toEqual([expect.objectContaining({ rule: 'min-runner-version', message: expect.stringContaining('station adjudicated, leg adjudicate') })]);
+    expect(await checkCourse(input({ proposed: WITHOUT_ADJUDICATE, proposedVersions: { version: 4, min_runner_version: 4 } }))).toEqual([]);
     // with no versions known, a removal cannot be shown safe
-    expect(await checkCourse(input({ proposed: WITHOUT_ADJUDICATE, proposedVersions: null }))).toEqual([expect.objectContaining({ rule: 'min-worker-version' })]);
+    expect(await checkCourse(input({ proposed: WITHOUT_ADJUDICATE, proposedVersions: null }))).toEqual([expect.objectContaining({ rule: 'min-runner-version' })]);
   }, 60_000);
 
   it('leg scripts that do not pair one to one with the legs, or lack run, handoff and close, fail', async () => {
@@ -104,7 +104,7 @@ describe('baton test-course', () => {
 
   it('a live ticket the proposed file would move back fails, naming it', async () => {
     const live = [{ id: 'T-7', path: [{ leg: 'implement', reached: 'pr-open' }, { leg: 'review', reached: 'reviewed' }, { leg: 'adjudicate', reached: 'adjudicated' }] }];
-    const v = await checkCourse(input({ proposed: WITHOUT_ADJUDICATE, proposedVersions: { version: 4, min_worker_version: 4 }, live }));
+    const v = await checkCourse(input({ proposed: WITHOUT_ADJUDICATE, proposedVersions: { version: 4, min_runner_version: 4 }, live }));
     expect(v).toEqual([expect.objectContaining({ rule: 'moves-back', message: expect.stringContaining('T-7') })]);
   }, 60_000);
 
@@ -130,7 +130,7 @@ describe('baton test-course', () => {
     const legs = join(dir, '.baton/courses/roadmap-pr/legs');
     mkdirSync(legs, { recursive: true });
     writeFileSync(join(dir, '.baton/courses/roadmap-pr/course.json'), JSON.stringify(roadmapPr));
-    writeFileSync(join(dir, '.baton/baton.json'), JSON.stringify({ courses: [{ id: 'roadmap-pr', version: 1, min_worker_version: 1 }] }));
+    writeFileSync(join(dir, '.baton/baton.json'), JSON.stringify({ courses: [{ id: 'roadmap-pr', version: 1, min_runner_version: 1 }] }));
     const RULE = "a leg never edits a file another ticket's leg may edit";
     const write = (implement: string) => {
       for (const leg of Object.keys(roadmapPr.legs)) {
@@ -158,7 +158,7 @@ describe('baton test-course', () => {
       const legs = join(dir, '.baton', 'courses', course, 'legs');
       mkdirSync(legs, { recursive: true });
       writeFileSync(join(dir, '.baton', 'courses', course, 'course.json'), JSON.stringify(file));
-      writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ courses: [{ id: course, version: 3, min_worker_version: 3, ...(source ? { source } : {}) }] }));
+      writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ courses: [{ id: course, version: 3, min_runner_version: 3, ...(source ? { source } : {}) }] }));
       return legs;
     };
     const scripts = (legs: string, graph: Record<string, unknown>, run: string): void => {
@@ -195,7 +195,7 @@ describe('baton test-course', () => {
     const git = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { stdio: 'ignore' });
     git('init', '-q');
     mkdirSync(join(root, '.baton/courses/roadmap-pr/legs'), { recursive: true });
-    const baton = (min: number) => JSON.stringify({ courses: [{ id: 'roadmap-pr', version: min, min_worker_version: min }] });
+    const baton = (min: number) => JSON.stringify({ courses: [{ id: 'roadmap-pr', version: min, min_runner_version: min }] });
     writeFileSync(join(root, '.baton/courses/roadmap-pr/course.json'), JSON.stringify(roadmapPr));
     writeFileSync(join(root, '.baton/baton.json'), baton(3));
     git('add', '.');
@@ -208,7 +208,7 @@ describe('baton test-course', () => {
     writeFileSync(board, JSON.stringify({ tickets: [{ id: 'T-1', course_id: 'roadmap-pr' }, { id: 'C-1', course_id: 'chore' }],
       stations: { 'T-1': { path: [{ leg: 'implement', reached: 'pr-open' }] }, 'C-1': { path: [] } } }));
     const k = await readInputs(root, 'roadmap-pr', { base: 'HEAD', board });
-    expect(k).toMatchObject({ base: roadmapPr, proposed: WITHOUT_ADJUDICATE, baseVersions: { version: 3, min_worker_version: 3 }, proposedVersions: { version: 4, min_worker_version: 4 },
+    expect(k).toMatchObject({ base: roadmapPr, proposed: WITHOUT_ADJUDICATE, baseVersions: { version: 3, min_runner_version: 3 }, proposedVersions: { version: 4, min_runner_version: 4 },
       legScripts: [{ name: 'fix', exports: [], error: expect.any(String) }, { name: 'merge', exports: ['run', 'close'] }], live: [{ id: 'T-1', path: [{ leg: 'implement', reached: 'pr-open' }] }] });
     expect(await readInputs(root, 'roadmap-pr')).toMatchObject({ base: null, baseVersions: null, live: null });
     await expect(readInputs(root, 'chore')).rejects.toThrow(/no such course file/);
@@ -235,7 +235,7 @@ const writeCourse = (root: string, id: string, file: unknown, schemas: Record<st
   }
 };
 const writeBaton = (root: string, courses: string[]) => writeFileSync(join(root, '.baton', 'baton.json'),
-  JSON.stringify({ courses: courses.map((id) => ({ id, version: 1, min_worker_version: 1 })) }));
+  JSON.stringify({ courses: courses.map((id) => ({ id, version: 1, min_runner_version: 1 })) }));
 
 /** S-BTN-80's spawned course: a start that requires `brief`, ends `done` (which requires
  *  `result`) and `abandoned` (which requires nothing). */
@@ -344,7 +344,7 @@ describe('the kit\'s schema half (B-52)', () => {
     expect(lines.some((l) => l.startsWith('signature: spec conditions '))).toBe(true);
     expect(await checkCourse(k)).toEqual([]);
     // readInputs carried the other course, its schemas and its versions for the checks.
-    expect(k.others).toEqual([expect.objectContaining({ id: 'spec', file: SPEC, schemas: [expect.objectContaining({ id: 'spec:result@1' })], versions: { version: 1, min_worker_version: 1 } })]);
+    expect(k.others).toEqual([expect.objectContaining({ id: 'spec', file: SPEC, schemas: [expect.objectContaining({ id: 'spec:result@1' })], versions: { version: 1, min_runner_version: 1 } })]);
   }, 60_000);
 
   it('checks a leg\'s spawns against each course it names, and "*" against every other listed course (R-BTN-111)', async () => {

@@ -1,12 +1,12 @@
 // gates.ts — what stays a gate (BATON_SPEC §7.2, R-BTN-45): the rules refused at a claim and at an
-// advance whatever the worker decides, in one pure function. The matching query (claims.ts) is
+// advance whatever the runner decides, in one pure function. The matching query (claims.ts) is
 // its mirror, and G-BTN-40 checks the two against each other. Everything else Baton says about
 // scheduling — the order, the expedite lane's bound, a course's advice — is advice and never
 // refuses (`advice-overridden`). No rule reads what a leg, a station or a tag means.
 import { capabilitiesOf, fitsTier } from '../shared/vocabulary.mjs';
 
-/** Who asks: the worker as its heartbeat declared it (§5, R-BTN-60). */
-export interface GateWorker {
+/** Who asks: the runner as its heartbeat declared it (§5, R-BTN-60). */
+export interface GateRunner {
   /** Capability and role names as declared. */
   declared: string[];
   /** Its ceiling in the ticket's repository's ladder, resolved by the caller (R-BTN-66). */
@@ -65,7 +65,7 @@ export interface GateContext {
   claims: { status: string; confirmed_at: number | null; fence_pending: number }[];
   override: { hold: number; retry_after: number | null } | null;
   /** The ticket's course's (rule 9). */
-  minWorkerVersion: number;
+  minRunnerVersion: number;
   /** §6.7: the repository head's observation, and the newest `end_observation` of the ticket's
    *  claims (-1 with none): claimable only after a sync since the last end. */
   headObservation: number;
@@ -75,8 +75,8 @@ export interface GateContext {
   /** R-BTN-75, R-BTN-78: the ticket's stored `ticket` and `decision` blocks — the kinds that
    *  refuse (`leg` '' for the whole ticket). `capability` refuses through rule 4; `resource` is advice. */
   blocks?: { kind: string; leg: string }[];
-  /** R-BTN-106: the legs the asking worker's credential has run on the ticket, in any claim
-   *  (`claim_legs` through each claim's worker to its credential), as current leg names. */
+  /** R-BTN-106: the legs the asking runner's credential has run on the ticket, in any claim
+   *  (`claim_legs` through each claim's runner to its credential), as current leg names. */
   ranByKey?: string[];
   /** R-BTN-178 (§6.11): the capabilities with a capacity in rule 4's set for this leg, each with
    *  its capacity and the seats claims other than the asking one hold on it — a claim's own seat
@@ -109,13 +109,13 @@ export const GATE_CODES = {
 const refuse = (rule: GateRule, code: string = typeof rule === 'number' ? GATE_CODES[rule] : rule): GateVerdict => ({ ok: false, rule, code });
 
 /** Whether a claim row still holds its ticket (rule 3): active, completed but unconfirmed (§6.7),
- *  or reaped while its worker was alive and not yet fenced (R-BTN-19). */
+ *  or reaped while its runner was alive and not yet fenced (R-BTN-19). */
 export function claimHolds(c: { status: string; confirmed_at: number | null; fence_pending: number }): boolean {
   return c.status === 'active' || (c.status === 'completed' && c.confirmed_at == null) || (c.status === 'reaped' && !!c.fence_pending);
 }
 
 /**
- * Whether `worker` may take `leg` of `ticket` now, at a claim or at an advance, naming the first
+ * Whether `runner` may take `leg` of `ticket` now, at a claim or at an advance, naming the first
  * rule that refuses. At a claim: the leg is ready and a sync has run since the ticket's last end
  * (rule 1), the lease (3), the grant (7), capabilities (4), tier (5), operator-only (6), the
  * barred tags — posted and owner bars — (8), `chain` and `isolation` (§2m), the course version
@@ -126,7 +126,7 @@ export function claimHolds(c: { status: string; confirmed_at: number | null; fen
  * and rule 9 is not re-checked, so a course change never strands a claim halfway (R-BTN-22).
  * Rule 11 (R-BTN-178) holds at both: the seats other claims hold, never the asking one's own.
  */
-export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, phase: Phase, facts: GateContext): GateVerdict {
+export function gatesFor(runner: GateRunner, ticket: GateTicket, leg: GateLeg, phase: Phase, facts: GateContext): GateVerdict {
   // Rule 1's blocks (R-BTN-75, R-BTN-78): an open dependency refuses a claim; an open decision on
   // the whole ticket or on the leg refuses a claim of it and an advance into it — never fails open.
   const blocks = facts.blocks ?? [];
@@ -141,7 +141,7 @@ export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, p
   if (facts.override?.hold) return refuse(3, 'held');
 
   // Rule 7 (R-BTN-58): the key holds a grant for the ticket's repository.
-  const grant = worker.grants ? worker.grants[ticket.repository] ?? null : undefined;
+  const grant = runner.grants ? runner.grants[ticket.repository] ?? null : undefined;
   if (grant === null) return refuse(7);
 
   // Rule 4 (R-BTN-174): capabilities are matched by name against what the runner has for this
@@ -152,7 +152,7 @@ export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, p
   // only (§12.5), `human-operator` included as the literal R-BTN-121 compares — rule 6 is
   // retired, so it is met by declaring it and granted like any capability (R-BTN-121 as
   // amended).
-  const held = capabilitiesOf(worker.declared);
+  const held = capabilitiesOf(runner.declared);
   const granted = grant ? new Set(grant.capabilities) : null;
   // R-BTN-58: a grant entry `<type>:*` admits every holding of that type.
   const admits = (capability: string) => granted ? granted.has(capability) || granted.has(`${capability.split(':')[0]}:*`) : true;
@@ -163,28 +163,28 @@ export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, p
   }
 
   // Rule 5: the caller passes the lower of the declared ceiling and the grant's max_tier.
-  if (!fitsTier(ticket.tier, worker.tier_ceiling, ticket.tiers)) return refuse(5);
+  if (!fitsTier(ticket.tier, runner.tier_ceiling, ticket.tiers)) return refuse(5);
 
   // Rule 6 is retired (R-BTN-121 as amended): `human-operator` is a runner's own statement,
   // checked by rule 4 like any capability — declared by that name and granted by that name.
 
   const barred = new Set([...leg.bars, ...(phase === 'advance' ? facts.holderBars ?? [] : [])]);
-  if (worker.tags.some((t) => barred.has(t))) return refuse(8);
+  if (runner.tags.some((t) => barred.has(t))) return refuse(8);
 
   // R-BTN-106: the key that ran a leg this one names may not take it — at a claim or an advance.
   const ran = new Set(facts.ranByKey ?? []);
   if ((leg.noChainFrom ?? []).some((l) => ran.has(l))) return refuse('chain');
 
-  // R-BTN-107: a leg's isolation floor, against the worker's own word.
-  if (leg.isolation && (worker.isolation ?? 'process') !== leg.isolation) return refuse('isolation');
+  // R-BTN-107: a leg's isolation floor, against the runner's own word.
+  if (leg.isolation && (runner.isolation ?? 'process') !== leg.isolation) return refuse('isolation');
 
   // Rule `person` (R-BTN-116): a person's leg is answered by a person, never run — no runner may
   // claim it or advance into it, whatever else it holds.
   if (leg.person) return refuse('person');
 
   if (phase === 'claim') {
-    const declared = worker.courses.find((c) => c.repository === ticket.repository && c.course === ticket.course);
-    if (!declared || declared.version < facts.minWorkerVersion) return refuse(9);
+    const declared = runner.courses.find((c) => c.repository === ticket.repository && c.course === ticket.course);
+    if (!declared || declared.version < facts.minRunnerVersion) return refuse(9);
   }
 
   if (facts.override?.retry_after != null && facts.override.retry_after > facts.now) return refuse(10);

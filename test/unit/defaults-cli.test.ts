@@ -176,7 +176,7 @@ describe('syncMain’s sync key (B-88, R-BTN-93)', () => {
     expect(seen).toEqual([]);
   });
 
-  it('an API key in the --sync-key file is refused by name: a worker’s credential, never a sync’s', async () => {
+  it('an API key in the --sync-key file is refused by name: a runner’s credential, never a sync’s', async () => {
     dir = await scaffold();
     keyDir = mkdtempSync(join(tmpdir(), 'baton-b88-key-'));
     const file = join(keyDir, 'apikey');
@@ -185,7 +185,7 @@ describe('syncMain’s sync key (B-88, R-BTN-93)', () => {
     // Never spent as a bearer: `verifySyncCredential` denies an API key on the sync's routes, so
     // the operator hears why the file is wrong instead of the server's refusal.
     await expect(syncMain({ root: dir, url: 'https://baton.test', syncKey: file, transport, log: () => {} }))
-      .rejects.toThrow(/--sync-key .*apikey: an API key is a worker's credential, not a sync key/);
+      .rejects.toThrow(/--sync-key .*apikey: an API key is a runner's credential, not a sync key/);
     expect(seen).toEqual([]);
   });
 
@@ -429,6 +429,47 @@ describe('syncMain’s busy retry (B-89, R-BTN-62)', () => {
   });
 });
 
+describe('the sync reads a course floor spelled either way (B-68’s window)', () => {
+  /** A scaffolded repository, as the B-88 block's: one ticket, an origin, no course code. */
+  const scaffold = async (): Promise<string> => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-b68-'));
+    gitInit(dir);
+    mkdirSync(join(dir, 'tickets'), { recursive: true });
+    writeFileSync(join(dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\n---\n');
+    execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git'], { stdio: 'ignore' });
+    expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
+    commitAll(dir);
+    writeFileSync(join(dir, '.baton', 'facts.json'), '[]');
+    return dir;
+  };
+  /** One sync's posted registry, from a transport answering the three calls and keeping the board's body. */
+  const registryOf = async (dir: string): Promise<Record<string, unknown>[]> => {
+    let board: Record<string, unknown> = {};
+    const transport = async (req: Request): Promise<Response> => {
+      const path = new URL(req.url).pathname;
+      if (path === '/v1/sync/observation') return new Response(JSON.stringify({ sha: null, observation: 1, bars: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (path === '/v1/sync/board') board = await req.json() as Record<string, unknown>;
+      return new Response(JSON.stringify({ sha: null }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    expect(await syncMain({ root: dir, url: 'https://baton.test', factsFile: join(dir, '.baton', 'facts.json'), token: 't', transport, log: () => {} })).toBe(0);
+    return board.registry as Record<string, unknown>[];
+  };
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('a file still carrying min_worker_version keeps its floor, and the new name wins when both are set', async () => {
+    dir = await scaffold();
+    const settingsFile = join(dir, '.baton', 'baton.json');
+    // The old spelling alone: without the window the entry would silently post `version` (3) as
+    // its floor, changing rule 9's minimum hands-up on the next sync.
+    writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), courses: [{ id: 'create-pr', version: 3, min_worker_version: 2 }] }));
+    expect(await registryOf(dir)).toMatchObject([{ id: 'create-pr', version: 3, min_runner_version: 2 }]);
+    // Both spellings: the new one wins, as the server's own dual read resolves them (courses.ts).
+    writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), courses: [{ id: 'create-pr', version: 3, min_runner_version: 1, min_worker_version: 2 }] }));
+    expect(await registryOf(dir)).toMatchObject([{ id: 'create-pr', version: 3, min_runner_version: 1 }]);
+  }, 120_000);
+});
+
 describe('syncOnce’s confirm-only re-post (B-183, review round 1)', () => {
   /** `syncOnce` with every effect injected (the module is pure): a head, a payload and an
    * ancestry the test scripts, recording the one board post. */
@@ -556,7 +597,7 @@ describe('baton repo init, through the built CLI', () => {
     expect(settings.agent_command).not.toMatch(/[<>|]/);
     expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_runner_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -2270,8 +2311,8 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     expect(settings.default_course).toBe('create-pr');
     expect(settings.courses.map((c: { id: string }) => c.id)).toEqual(['create-pr', 'bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets']);
-    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_worker_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('bug-report') });
-    expect(settings.courses[5]).toEqual({ id: 'spec-to-tickets', version: 1, min_worker_version: 1, skill: 'baton-spec-to-tickets', step_kinds: ['decompose', 'check', 'file'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('spec-to-tickets') });
+    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_runner_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('bug-report') });
+    expect(settings.courses[5]).toEqual({ id: 'spec-to-tickets', version: 1, min_runner_version: 1, skill: 'baton-spec-to-tickets', step_kinds: ['decompose', 'check', 'file'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('spec-to-tickets') });
     for (const [course, legs] of [['bug-report', 6], ['decision', 2], ['review-pr', 2], ['draft-ticket', 3], ['spec-to-tickets', 3]] as const) {
       expect(readdirSync(join(root, '.baton', 'courses', course, 'legs')).length, course).toBe(legs * 2);
     }
@@ -2657,4 +2698,109 @@ describe('courseSchemas: the sync posts a course\'s schemas (R-BTN-108, R-BTN-13
       rmSync(root, { recursive: true, force: true });
     }
   });
+});
+
+describe('readBoard resolves qualified dependencies against their boards (B-113)', () => {
+  /** A repository whose one ticket waits on `baton:T-9`, `baton` named in the repos map. */
+  const scaffold = async (): Promise<string> => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-b113-'));
+    gitInit(dir);
+    mkdirSync(join(dir, 'tickets'), { recursive: true });
+    writeFileSync(join(dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\ndepends_on:\n  - baton:T-9\n---\n');
+    execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git'], { stdio: 'ignore' });
+    expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
+    // The repos map names the dependency's repository, as fieldhouse's will name baton.
+    const settings = join(dir, '.baton', 'baton.json');
+    const json = JSON.parse(readFileSync(settings, 'utf8')) as Record<string, unknown>;
+    writeFileSync(settings, JSON.stringify({ ...json, repos: { baton: 'immediately-run/baton' } }, null, 2));
+    commitAll(dir);
+    return dir;
+  };
+  /** A transport answering the sync's four calls, remembering the dependencies asked for and the
+   *  stations posted; `done` decides the dependency's standing on its own board. */
+  const answering = (done: boolean): { transport: Transport; asked: string[][]; stations: () => Record<string, { next: { leg: string; state: string; waiting_on?: string }[] }> } => {
+    const asked: string[][] = [];
+    let posted: Record<string, { next: { leg: string; state: string; waiting_on?: string }[] }> = {};
+    let observation = 0;
+    const transport: Transport = async (req) => {
+      const path = new URL(req.url).pathname;
+      const body = path.endsWith('/observation') || path.endsWith('/dependencies') || path.endsWith('/board')
+        ? JSON.parse(await req.clone().text() || '{}') as Record<string, unknown> : {};
+      const answer = path === '/v1/sync/observation' ? { sha: null, observation: ++observation }
+        : path === '/v1/sync/head' ? { sha: null }
+        : path === '/v1/sync/dependencies' ? { dependencies: (body.ids as string[]).map((t) => ({ ticket: t, done })) }
+        : { ok: true, upserted: 1, deleted: 0, confirmed: 0, stale_released: 0 };
+      if (path === '/v1/sync/dependencies') asked.push(body.ids as string[]);
+      if (path === '/v1/sync/board') posted = (body as { stations: typeof posted }).stations;
+      return new Response(JSON.stringify(answer), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    return { transport, asked, stations: () => posted };
+  };
+  let dir: string;
+  afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = undefined as unknown as string; });
+
+  it('a dependency not done on its board leaves the leg waiting on dependencies; done there readies it here', async () => {
+    dir = await scaffold();
+    const waiting = answering(false);
+    const facts = join(dir, 'facts.json');
+    writeFileSync(facts, '[]');
+    const args = parseSyncArgs(['--root', dir, '--url', 'https://baton.test', '--facts', facts, '--token', 't1'], {});
+    expect(await syncMain({ ...args, transport: waiting.transport, log: () => {} })).toBe(0);
+    expect(waiting.asked).toEqual([['baton:T-9']]);
+    expect(waiting.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'waiting', waiting_on: 'dependencies' }]);
+    // Ready, the waiting_on field is posted as null (stationOf fills it), never left out.
+    const ready = answering(true);
+    expect(await syncMain({ ...args, transport: ready.transport, log: () => {} })).toBe(0);
+    expect(ready.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
+  }, 30_000);
+
+  it('a ticket with no qualified dependency asks for none', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'baton-b113-'));
+    gitInit(dir);
+    mkdirSync(join(dir, 'tickets'), { recursive: true });
+    writeFileSync(join(dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\n---\n');
+    execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git'], { stdio: 'ignore' });
+    expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
+    commitAll(dir);
+    const none = answering(true);
+    const facts = join(dir, 'facts.json');
+    writeFileSync(facts, '[]');
+    const args = parseSyncArgs(['--root', dir, '--url', 'https://baton.test', '--facts', facts, '--token', 't1'], {});
+    expect(await syncMain({ ...args, transport: none.transport, log: () => {} })).toBe(0);
+    expect(none.asked).toEqual([]);
+    expect(none.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
+  }, 30_000);
+
+  it('a self-qualified dependency — the checkout\'s own id, `.git` and all — reads as its local id, never asked of the read (round 1)', async () => {
+    // Round 1's case: the map named the own repository with a `.git` suffix (or not at all), so
+    // `docs:T-9` posted by docs was sent to the read — which refused it as another
+    // repository's, failing the whole run for a spelling §3.1 permits.
+    dir = mkdtempSync(join(tmpdir(), 'baton-b113-'));
+    gitInit(dir);
+    mkdirSync(join(dir, 'tickets'), { recursive: true });
+    writeFileSync(join(dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\ndepends_on:\n  - docs:T-9\n---\n');
+    writeFileSync(join(dir, 'tickets', 'T-9.mdx'), '---\nid: T-9\ntitle: Nine\n---\n');
+    execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git'], { stdio: 'ignore' });
+    expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
+    const settings = join(dir, '.baton', 'baton.json');
+    const json = JSON.parse(readFileSync(settings, 'utf8')) as Record<string, unknown>;
+    writeFileSync(settings, JSON.stringify({ ...json, repos: { docs: 'immediately-run/docs.git' } }, null, 2));
+    commitAll(dir);
+    const facts = join(dir, 'facts.json');
+    writeFileSync(facts, '[]');
+    const args = parseSyncArgs(['--root', dir, '--url', 'https://baton.test', '--facts', facts, '--token', 't1'], {});
+    // T-9 live and open: the local rule holds the leg, and the read is asked nothing.
+    const open = answering(false);
+    expect(await syncMain({ ...args, transport: open.transport, log: () => {} })).toBe(0);
+    expect(open.asked).toEqual([]);
+    expect(open.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'waiting', waiting_on: 'dependencies' }]);
+    // T-9 closed done in this checkout's own reading: its qualified spelling is done here — the
+    // read's answer (still not done, one post behind) is never asked for.
+    writeFileSync(join(dir, 'tickets', 'T-9.mdx'), '---\nid: T-9\ntitle: Nine\nstatus: done\n---\n');
+    commitAll(dir);
+    const done = answering(false);
+    expect(await syncMain({ ...args, transport: done.transport, log: () => {} })).toBe(0);
+    expect(done.asked).toEqual([]);
+    expect(done.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
+  }, 30_000);
 });

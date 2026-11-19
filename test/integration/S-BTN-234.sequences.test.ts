@@ -135,8 +135,8 @@ describe('S-BTN-234 Baton hands out the identifiers (B-176)', () => {
     expect(await take(opsOwner, 'ops', 'rule', { for: 'not an id' })).toMatchObject({ status: 400, json: { code: 'invalid-params' } });
   });
 
-  it('a worker bearer token takes a number only where R-BTN-58 grants it — the bearer path checks the grant as the signed one does', async () => {
-    // The transition's live-worker bearer (front.ts's verifyWorker): no signature, no API key,
+  it('a runner bearer token takes a number only where R-BTN-58 grants it — the bearer path checks the grant as the signed one does', async () => {
+    // The transition's live-runner bearer (front.ts's verifyRunner): no signature, no API key,
     // the credential the token hashes name. Round 1, finding 1: this take was 200 whatever
     // the grants said, and its event logged a bare `runner` naming no caller.
     const bearerTake = () => hostCall(new Request(`${ORIGIN}/v1/repositories/ops/sequences/ticket-b/next`, {

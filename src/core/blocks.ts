@@ -55,8 +55,8 @@ export const TRANSITIVE_LEVELS = 5;
 export interface Ctx {
   store: Store;
   now: () => number;
-  /** Whether worker `id` would pass the claim gates for the ticket now (R-BTN-77's messages). */
-  fits: (workerId: number, ticketId: string) => boolean;
+  /** Whether runner `id` would pass the claim gates for the ticket now (R-BTN-77's messages). */
+  fits: (runnerId: number, ticketId: string) => boolean;
   /** R-BTN-80: a ticket's decisions were first stored, or closed — their notices follow, in the
    *  same transaction. */
   decisions?: { opened: (ticket: string, ids: string[]) => void; closed: (ticket: string, ids: string[]) => void };
@@ -110,9 +110,9 @@ export const BATON_WAITS = ['policy', 'course-changed', 'input-missing', 'input-
  *  ticket; queries that must exclude held tickets inline it. */
 export const HELD_CLAIMS_SQL = `(status = 'active' OR (status = 'completed' AND confirmed_at IS NULL) OR (status = 'reaped' AND fence_pending = 1))`;
 
-/** A live worker as the counts see it: the repositories its key works on, the capabilities it may
+/** A live runner as the counts see it: the repositories its key works on, the capabilities it may
  *  use in each (null: all it declares) and what it declares. */
-interface FleetWorker {
+interface FleetRunner {
   id: number;
   repos: Map<string, Set<string> | null>;
   caps: Set<string>;
@@ -125,8 +125,8 @@ interface ResourceInfo {
   instances: Map<string, string[]>;
 }
 
-/** What the per-worker answer reads (R-BTN-75, R-BTN-76): rows as the fleet's would be, for one. */
-export interface WorkerAnswer {
+/** What the per-runner answer reads (R-BTN-75, R-BTN-76): rows as the fleet's would be, for one. */
+export interface RunnerAnswer {
   blocks: Block[];
   noInstance: { leg: string; resource: string }[];
 }
@@ -144,9 +144,9 @@ export const BLOCK_SQL = {
   page: 'SELECT id, blocked_since FROM tickets WHERE repository_id = ? AND blocked_since IS NOT NULL AND id > ? ORDER BY id LIMIT ?',
 } as const;
 
-/** The SQL test of a live worker (§5): alive, not reaped, its key in force. B-236: the lease is
+/** The SQL test of a live runner (§5): alive, not reaped, its key in force. B-236: the lease is
  *  written `last_seen_at + lease_timeout_ms > now` — R-BTN-9's `now - last_seen_at < lease`,
- *  rearranged — so the live set is a range of `workers_live` and never a read of every runner
+ *  rearranged — so the live set is a range of `runners_live` and never a read of every runner
  *  session (R-BTN-3 keeps them all). A query ordering by `w.id` writes `+w.id`, which keeps
  *  the planner from walking the whole table in id order to save a sort of the few live ones. */
 const LIVE = `w.reaped_at IS NULL AND w.kind != 'legacy' AND w.last_seen_at + w.lease_timeout_ms > :now AND c.revoked_at IS NULL`;
@@ -256,7 +256,7 @@ export class Blocks {
       if (!t) continue;
       const cleared = [...c.cleared.values()];
       const added = [...c.added.values()];
-      // A `resource` row that went only because no live worker has a usable instance left (the
+      // A `resource` row that went only because no live runner has a usable instance left (the
       // fleet emptied overnight) — its leg still needs the resource, and the count says no one can
       // answer — is an answer lost, not a resource back: like a claim, it clears `blocked_since`
       // without an `unblocked`, and the ticket remembers what it lost, and since when it was
@@ -291,7 +291,7 @@ export class Blocks {
   }
 
   /** Whether a cleared `resource` row is an answer lost: the ticket's leg still needs the resource,
-   *  and the fleet's count for it says no live granted worker has a usable instance. */
+   *  and the fleet's count for it says no live granted runner has a usable instance. */
   private lostAnswer(id: string, c: Cleared): boolean {
     return this.rows(`SELECT 1 FROM leg_needs l JOIN resource_fleet f ON f.repository_id = l.repository_id AND f.resource = l.resource
                       WHERE l.ticket_id = ? AND l.leg = ? AND l.resource = ? AND (f.live_runner = 0 OR f.usable_instances = 0)`, id, c.leg ?? '', c.ref).length > 0;
@@ -335,7 +335,7 @@ export class Blocks {
       // Absent from the counts is zero: a count is written for every needed pair (`recount`).
       return this.rows<{ name: string }>(
         `SELECT r.name FROM ticket_requires r LEFT JOIN fleet_capabilities f ON f.repository_id = ? AND f.capability = r.name
-         WHERE r.ticket_id = ? AND COALESCE(f.workers, 0) = 0`, repo, id).map((r) => ({ kind, ref: r.name, leg: '', until: null }));
+         WHERE r.ticket_id = ? AND COALESCE(f.runners, 0) = 0`, repo, id).map((r) => ({ kind, ref: r.name, leg: '', until: null }));
     }
     if (kind === 'resource') {
       // No row while the repository has no live runner or no usable instance: unanswerable, so
@@ -384,7 +384,7 @@ export class Blocks {
       // A logged transition ends any lost answer: the events are paired again. A new block while
       // the evening's is still open (a lost answer, then a different block) first closes that one
       // with the `unblocked` it was owed — logged only: the ticket is blocked again at once, so
-      // no worker is woken and no trigger is sent (R-BTN-77 as amended by R3-1251).
+      // no runner is woken and no trigger is sent (R-BTN-77 as amended by R3-1251).
       const lostRows = silent ? null : this.rows<{ a: string | null }>('SELECT answer_lost AS a FROM tickets WHERE id = ?', id)[0]?.a;
       if (lostRows) logEvent(this.c.store, now, 'unblocked', 'baton', { ticket: id, cleared: (JSON.parse(lostRows) as LostAnswer).rows }, id);
       this.exec(`UPDATE tickets SET blocked_since = ?${silent ? '' : ', answer_lost = NULL'} WHERE id = ?`, since ?? now, id);
@@ -618,24 +618,24 @@ export class Blocks {
   private unblocked(repo: string, ticket: string, cleared: Cleared[]) {
     const now = this.c.now();
     const entry = { ticket_id: ticket, cleared };
-    // One pending `unblocked` message per alive, idle worker granted on the repository that the
+    // One pending `unblocked` message per alive, idle runner granted on the repository that the
     // ticket would now pass the gates for — updated in place, the oldest dropped past 20.
     for (const w of this.named<{ id: number }>(
-      `SELECT w.id FROM workers w JOIN credentials c ON c.id = w.credential_id
+      `SELECT w.id FROM runners w JOIN credentials c ON c.id = w.credential_id
        WHERE ${LIVE}
-         AND (SELECT COUNT(*) FROM claims k WHERE k.worker_id = w.id AND k.status = 'active') < w.concurrency  -- B-188: a worker with room, not only an idle one
-         AND (NOT COALESCE(${grantedKeySql('c.created_by')}, 0) OR EXISTS (SELECT 1 FROM worker_grants g WHERE g.credential_id = w.credential_id AND g.repository_id = :repo AND g.revoked_at IS NULL))
+         AND (SELECT COUNT(*) FROM claims k WHERE k.runner_id = w.id AND k.status = 'active') < w.concurrency  -- B-188: a runner with room, not only an idle one
+         AND (NOT COALESCE(${grantedKeySql('c.created_by')}, 0) OR EXISTS (SELECT 1 FROM runner_grants g WHERE g.credential_id = w.credential_id AND g.repository_id = :repo AND g.revoked_at IS NULL))
        ORDER BY +w.id`, { now, repo })) {
       if (!this.c.fits(w.id, ticket)) continue;
-      const pending = this.rows<{ id: number; payload_json: string }>(`SELECT id, payload_json FROM messages WHERE to_worker_id = ? AND kind = 'unblocked' AND status = 'pending' ORDER BY id DESC LIMIT 1`, w.id)[0];
+      const pending = this.rows<{ id: number; payload_json: string }>(`SELECT id, payload_json FROM messages WHERE to_runner_id = ? AND kind = 'unblocked' AND status = 'pending' ORDER BY id DESC LIMIT 1`, w.id)[0];
       if (pending) {
         const list = (JSON.parse(pending.payload_json) as { tickets: { ticket_id: string }[] }).tickets.filter((x) => x.ticket_id !== ticket);
         this.exec('UPDATE messages SET payload_json = ?, sent_at = ? WHERE id = ?', JSON.stringify({ tickets: [...list, entry].slice(-UNBLOCKED_MESSAGE_MAX) }), now, pending.id);
       } else {
         // A delivered one not yet acknowledged is superseded, not re-sent beside the new one: what
         // it named was a cue to ask for recommendations, which the new one is too (§9).
-        this.exec(`UPDATE messages SET status = 'expired' WHERE to_worker_id = ? AND kind = 'unblocked' AND status = 'delivered'`, w.id);
-        this.exec(`INSERT INTO messages (kind, payload_json, from_principal, to_worker_id, sent_at, status) VALUES ('unblocked', ?, 'baton', ?, ?, 'pending')`,
+        this.exec(`UPDATE messages SET status = 'expired' WHERE to_runner_id = ? AND kind = 'unblocked' AND status = 'delivered'`, w.id);
+        this.exec(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status) VALUES ('unblocked', ?, 'baton', ?, ?, 'pending')`,
           JSON.stringify({ tickets: [entry] }), w.id, now);
       }
     }
@@ -668,20 +668,20 @@ export class Blocks {
     return this.rows<{ d: number | null }>('SELECT MIN(due_at) AS d FROM unblocked_dispatch')[0]?.d ?? null;
   }
 
-  /** The alarm's share: a pending `unblocked` message whose worker stopped being alive expires. */
+  /** The alarm's share: a pending `unblocked` message whose runner stopped being alive expires. */
   expireMessages() {
     this.named(`UPDATE messages SET status = 'expired' WHERE kind = 'unblocked' AND status = 'pending'
-                AND to_worker_id NOT IN (SELECT w.id FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE})`, { now: this.c.now() });
+                AND to_runner_id NOT IN (SELECT w.id FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE})`, { now: this.c.now() });
   }
 
   // ── the fleet counts (R-BTN-75, R-BTN-76) ─────────────────────────────────────────────────
 
-  /** Every live worker — or only `only`, if it is live — with its repositories and capabilities. */
-  private fleet(only: number | null = null): FleetWorker[] {
+  /** Every live runner — or only `only`, if it is live — with its repositories and capabilities. */
+  private fleet(only: number | null = null): FleetRunner[] {
     const now = this.c.now();
     const all = this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL').map((r) => r.id);
     return this.named<{ id: number; credential_id: string; created_by: string | null }>(
-      `SELECT w.id, w.credential_id, c.created_by, c.allowed_capabilities FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} AND (:only IS NULL OR w.id = :only) ORDER BY +w.id`, { now, only })
+      `SELECT w.id, w.credential_id, c.created_by, c.allowed_capabilities FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} AND (:only IS NULL OR w.id = :only) ORDER BY +w.id`, { now, only })
       .map((w) => {
         // R-BTN-58: a key an owner or administrator granted works where it is granted; another
         // (a bearer token, a BATON_KEYS seed key) is bounded by its allow-list on every
@@ -693,17 +693,17 @@ export class Blocks {
         };
         const wildcards = (set: Set<string>, c: string) => set.has(c) || set.has(`${c.split(':')[0]}:*`);
         const repos = new Map<string, Set<string> | null>(granted
-          ? this.rows<{ repository_id: string; capabilities: string }>('SELECT repository_id, capabilities FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', w.credential_id)
+          ? this.rows<{ repository_id: string; capabilities: string }>('SELECT repository_id, capabilities FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', w.credential_id)
             .map((g) => {
               const caps = new Set(JSON.parse(g.capabilities) as string[]);
               // The wildcard admits the type's holdings — serve the expanded view.
-              return [g.repository_id, new Set([...caps, ...[...this.rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ?', w.id).map((r) => r.capability)].filter((c) => c.includes(':') && wildcards(caps, c))])] as [string, Set<string>];
+              return [g.repository_id, new Set([...caps, ...[...this.rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ?', w.id).map((r) => r.capability)].filter((c) => c.includes(':') && wildcards(caps, c))])] as [string, Set<string>];
             })
           : all.map((r) => [r, allowList()] as [string, Set<string>]));
         return {
           id: w.id,
           repos,
-          caps: new Set(this.rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ?', w.id).map((r) => r.capability)),
+          caps: new Set(this.rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ?', w.id).map((r) => r.capability)),
         };
       });
   }
@@ -722,19 +722,19 @@ export class Blocks {
 
   /** The repository's usable instances of `resource` (R-BTN-76): the `service` instance — its own —
    *  and the account instances that serve the resource and list the repository. Every runner
-   *  granted there has the same ones, so this takes no worker. */
+   *  granted there has the same ones, so this takes no runner. */
   private usable(repo: string, resource: string, info: ResourceInfo): string[] {
     if (info.scope === 'service') return [resource];
     return [...info.instances].filter(([, repos]) => repos.includes(repo)).map(([name]) => name);
   }
 
   /**
-   * Recount what changed: per (repository, capability) a ticket requires, the live workers granted
+   * Recount what changed: per (repository, capability) a ticket requires, the live runners granted
    * there that declare it; per (repository, resource) a posted leg needs, the repository's usable
-   * instances, how many are not `unavailable`, and whether a live worker is granted there. Only a
+   * instances, how many are not `unavailable`, and whether a live runner is granted there. Only a
    * count crossing zero, or the resource condition (`live_runner AND usable > 0 AND open = 0`)
    * flipping, rewrites the rows of exactly the tickets the indexes name. Cheap to call after
-   * anything that could move a count: a worker registering or changing what it declares, liveness
+   * anything that could move a count: a runner registering or changing what it declares, liveness
    * (the alarm), a reap, a grant, an instance's state, a resource or instance registered.
    */
   recount() {
@@ -745,7 +745,7 @@ export class Blocks {
   private recountRows() {
     const fleet = this.fleet();
     this.exec(`INSERT INTO baton_settings (key, value) VALUES ('fleet_live', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(fleet.map((w) => w.id)));
-    const capsOf = (w: FleetWorker, repo: string) => {
+    const capsOf = (w: FleetRunner, repo: string) => {
       const g = w.repos.get(repo);
       if (g === undefined) return null;
       // R-BTN-174: declarations alone — the grant bounds holdings (wildcards served expanded by
@@ -756,8 +756,8 @@ export class Blocks {
     // Capabilities.
     const needCaps = this.rows<{ repository_id: string; name: string }>(
       'SELECT DISTINCT t.repository_id, r.name FROM ticket_requires r JOIN tickets t ON t.id = r.ticket_id');
-    const haveCaps = new Map(this.rows<{ repository_id: string; capability: string; workers: number }>('SELECT repository_id, capability, workers FROM fleet_capabilities')
-      .map((f) => [`${f.repository_id}\u0000${f.capability}`, f.workers]));
+    const haveCaps = new Map(this.rows<{ repository_id: string; capability: string; runners: number }>('SELECT repository_id, capability, runners FROM fleet_capabilities')
+      .map((f) => [`${f.repository_id}\u0000${f.capability}`, f.runners]));
     const touched = new Set<string>();
     for (const n of needCaps) {
       const key = `${n.repository_id}\u0000${n.name}`;
@@ -765,8 +765,8 @@ export class Blocks {
       const before = haveCaps.get(key);
       haveCaps.delete(key);
       if (before === count) continue;
-      this.exec(`INSERT INTO fleet_capabilities (repository_id, capability, workers) VALUES (?, ?, ?)
-                 ON CONFLICT (repository_id, capability) DO UPDATE SET workers = excluded.workers`, n.repository_id, n.name, count);
+      this.exec(`INSERT INTO fleet_capabilities (repository_id, capability, runners) VALUES (?, ?, ?)
+                 ON CONFLICT (repository_id, capability) DO UPDATE SET runners = excluded.runners`, n.repository_id, n.name, count);
       if (before === undefined || (before === 0) !== (count === 0)) {
         for (const t of this.rows<{ id: string }>('SELECT t.id FROM ticket_requires r JOIN tickets t ON t.id = r.ticket_id WHERE r.name = ? AND t.repository_id = ?', n.name, n.repository_id)) touched.add(t.id);
       }
@@ -818,12 +818,12 @@ export class Blocks {
     if (needers.size) this.write(needers, ['resource']);
   }
 
-  /** Whether the set of live workers changed since the counts were last taken — time alone moves
+  /** Whether the set of live runners changed since the counts were last taken — time alone moves
    *  liveness, so the alarm asks this every tick and recounts only on a change (one read of the
-   *  workers, never of the board). */
+   *  runners, never of the board). */
   liveChanged(): boolean {
     const now = this.c.now();
-    const ids = this.named<{ id: number }>(`SELECT w.id FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} ORDER BY +w.id`, { now }).map((w) => w.id);
+    const ids = this.named<{ id: number }>(`SELECT w.id FROM runners w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} ORDER BY +w.id`, { now }).map((w) => w.id);
     return this.rows<{ value: string }>(`SELECT value FROM baton_settings WHERE key = 'fleet_live'`)[0]?.value !== JSON.stringify(ids);
   }
 
@@ -852,10 +852,10 @@ export class Blocks {
       .map((b) => ({ kind: b.kind, ...(b.leg ? { leg: b.leg } : {}), ref: b.ref, since: b.since, ...(b.until != null ? { until: b.until } : {}) }));
   }
 
-  /** One worker's `capability` and `resource` answer for a ticket, computed on the spot: rule 4's
+  /** One runner's `capability` and `resource` answer for a ticket, computed on the spot: rule 4's
    *  comparison against what it declares and is granted, and its own usable instances. */
-  forWorker(workerId: number, ticketId: string): WorkerAnswer {
-    const w = this.fleet(workerId)[0] ?? { id: workerId, repos: new Map<string, Set<string> | null>(), caps: new Set<string>() };
+  forRunner(runnerId: number, ticketId: string): RunnerAnswer {
+    const w = this.fleet(runnerId)[0] ?? { id: runnerId, repos: new Map<string, Set<string> | null>(), caps: new Set<string>() };
     const repo = repositoryOf(ticketId);
     const now = this.c.now();
     const g = w.repos.get(repo);
@@ -867,12 +867,12 @@ export class Blocks {
     const blocks: Block[] = this.rows<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ? ORDER BY name', ticketId)
       .filter((r) => !caps.has(r.name)).map((r) => ({ kind: 'capability' as const, ref: r.name, since: now }));
     const info = this.resources();
-    const noInstance: WorkerAnswer['noInstance'] = [];
+    const noInstance: RunnerAnswer['noInstance'] = [];
     for (const n of this.rows<{ leg: string; resource: string }>('SELECT leg, resource FROM leg_needs WHERE ticket_id = ? ORDER BY leg, resource', ticketId)) {
       const r = info.get(n.resource);
       if (!r) continue; // an unregistered name blocks nothing (R-BTN-76)
       const mine = this.usable(repo, n.resource, r);
-      // Only this worker's usable instances' states are read.
+      // Only this runner's usable instances' states are read.
       const stateOf = new Map(this.rows<{ instance: string; state: string; until: number | null }>(
         'SELECT instance, state, until FROM instance_states WHERE instance IN (SELECT value FROM json_each(?))', JSON.stringify(mine)).map((s) => [s.instance, s]));
       if (!mine.length) {
@@ -887,10 +887,10 @@ export class Blocks {
     return { blocks, noInstance };
   }
 
-  /** `GET …/tickets/{ticket}/blocks[?worker=me]` (R-BTN-75): the rows by primary key, and `other`
-   *  — what else keeps it from being offered that is not a block. With a worker, its own
+  /** `GET …/tickets/{ticket}/blocks[?runner=me]` (R-BTN-75): the rows by primary key, and `other`
+   *  — what else keeps it from being offered that is not a block. With a runner, its own
    *  `capability` and `resource` rows replace the fleet's. */
-  blocksOf(ticketId: string, workerId: number | null) {
+  blocksOf(ticketId: string, runnerId: number | null) {
     const t = this.rows<{ blocked_since: number | null }>('SELECT blocked_since FROM tickets WHERE id = ?', ticketId)[0];
     if (!t) throw new BatonError('not-found', `${ticketId} is not on the board`);
     const now = this.c.now();
@@ -907,7 +907,7 @@ export class Blocks {
       other.push({ kind: 'waiting_on', detail: { leg: n.leg, on: n.waiting_on } });
     }
     // R-BTN-67: an owner bar in force on the ticket's course (or every course) and on its queued
-    // leg (or every leg), whose tag every live worker granted on the repository carries.
+    // leg (or every leg), whose tag every live runner granted on the repository carries.
     const repo = repositoryOf(ticketId);
     const course = this.rows<{ course_id: string }>('SELECT course_id FROM tickets WHERE id = ?', ticketId)[0]?.course_id ?? null;
     const live = this.fleet().filter((w) => w.repos.has(repo));
@@ -917,23 +917,23 @@ export class Blocks {
            AND (course = '*' OR course = ?) ORDER BY id`, repo, now, now, course)) {
         const legs = JSON.parse(b.legs) as string[];
         if (legs.length && (queued == null || !legs.includes(queued))) continue;
-        if (live.every((w) => this.rows('SELECT 1 FROM worker_tags WHERE worker_id = ? AND tag = ?', w.id, b.tag).length)) other.push({ kind: 'bars', detail: { bar: b.id, tag: b.tag } });
+        if (live.every((w) => this.rows('SELECT 1 FROM runner_tags WHERE runner_id = ? AND tag = ?', w.id, b.tag).length)) other.push({ kind: 'bars', detail: { bar: b.id, tag: b.tag } });
       }
     }
     let blocked = t.blocked_since != null;
-    if (workerId != null) {
-      const mine = this.forWorker(workerId, ticketId);
+    if (runnerId != null) {
+      const mine = this.forRunner(runnerId, ticketId);
       blocks = [...blocks.filter((b) => b.kind !== 'capability' && b.kind !== 'resource'), ...mine.blocks];
       for (const n of mine.noInstance) other.push({ kind: 'no-instance', detail: n });
       blocked = !held.length && queued != null && blocks.some((b) => !b.leg || b.leg === queued);
     } else {
-      // R-BTN-76: with no live worker holding a usable instance the question has no answer.
+      // R-BTN-76: with no live runner holding a usable instance the question has no answer.
       for (const n of this.rows<{ leg: string; resource: string }>(
         `SELECT l.leg, l.resource FROM leg_needs l JOIN external_resources e ON e.name = l.resource
          LEFT JOIN resource_fleet f ON f.repository_id = l.repository_id AND f.resource = l.resource
          WHERE l.ticket_id = ? AND (COALESCE(f.live_runner, 0) = 0 OR COALESCE(f.usable_instances, 0) = 0) ORDER BY l.leg, l.resource`, ticketId)) other.push({ kind: 'no-instance', detail: n });
     }
-    return { blocked, ...(t.blocked_since != null && workerId == null ? { since: t.blocked_since } : {}), blocks, other };
+    return { blocked, ...(t.blocked_since != null && runnerId == null ? { since: t.blocked_since } : {}), blocks, other };
   }
 
   /** `GET …/blocked?on=<kind>:<ref>[&transitive=1]` (R-BTN-75): every ticket of the repository
@@ -984,7 +984,7 @@ export class Blocks {
     return { tickets, groups: [...groups.values()], ...(more ? { next_cursor: tickets.at(-1)!.ticket_id } : {}) };
   }
 
-  /** §14 Needs you: tickets blocked a day on a capability no live worker has, and instances
+  /** §14 Needs you: tickets blocked a day on a capability no live runner has, and instances
    *  `unknown` a day while a posted leg needs what they serve. */
   needsYou(now: number) {
     return {

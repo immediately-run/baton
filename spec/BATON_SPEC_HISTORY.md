@@ -3314,6 +3314,273 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   each of V2's session-readable GETs, whose convention this row states for the one route that
   has it today. The scenario is S-BTN-235.
 
+- **2026-11-19 — R-BTN-66, R-BTN-133, R-BTN-194, R-BTN-107, R-BTN-140, R-BTN-188, R-BTN-189,
+  R-BTN-184, R-BTN-183, R-BTN-182, R-BTN-198, R-BTN-47, R-BTN-92, R-BTN-96, R-BTN-139, R-BTN-141,
+  R-BTN-26, R-BTN-13, R-BTN-12, R-BTN-73 / R-BTN-95 and §12.9 amended; S-BTN-218 and S-BTN-219
+  retired; S-BTN-116, S-BTN-209, S-BTN-220, S-BTN-233, G-BTN-136 and G-BTN-168 amended;
+  S-BTN-239, S-BTN-240 and G-BTN-172 added: no commit signature is verified (B-263, B-264).**
+  Rules changed: R-BTN-66 (the owner-signed control inputs and `require_signed_control` are
+  gone), R-BTN-133 (the runner verifies no signature and loads from the claim's snapshot),
+  R-BTN-194 (the brief mark is gone; `last_written_by` carries `human`, decided when it is
+  recorded, and a brief is the owner's only where it is true), R-BTN-198 and §8.1's heartbeat
+  (the handed ticket carries no `brief`), R-BTN-13 (no `git`-namespace signature), R-BTN-12
+  (`EXPEDITE` is never a signed input), R-BTN-107 (no `home-signed` source; `builtin` is
+  refusable by policy, sidecars with it), R-BTN-182 (the one executor a policy may refuse a
+  trusted leg is `builtin`), R-BTN-183 (a merge leg's end names the merge result), R-BTN-140 (reach by name: a list-less home's, under the policy's
+  `repos.unlisted`), R-BTN-47, R-BTN-92, R-BTN-96, R-BTN-139, R-BTN-141, R-BTN-26 and
+  R-BTN-189 (each says "with reach" and cites R-BTN-140 where it said `code_repos`),
+  R-BTN-188 (the knobs `repos.unlisted` and `executor.builtin` and their dry run), §12.8's
+  list of what lies outside every guarantee (the deployment's forge gate; a session on the
+  human identity's forge credential), R-BTN-184 (the floor gains the rest of `.github/**`,
+  both other `CODEOWNERS` places and Codex's configuration, names agent and package
+  configuration at any depth, and states how a glob matches), R-BTN-73 / R-BTN-95 and §12.9
+  (the `out-of-course` finding), §4.4's board post (no `brief`, no `control`) and §4.3's
+  observation (`repos_unlisted`), §6.6's rule table (rule `executor`, and "with reach" in
+  rules 13 and `floor`), §13 and §14 (the fields that carried the record; `scope_findings`;
+  `stops.runners` and `stops.unreached`).
+  The adversarial review of 2026-11-18 (`spec/review/`) found that `require_signed_control`
+  promised more than it verified: R-BTN-66 named agent configuration, goals and `EXPEDITE`
+  among the inputs that count only when owner-signed, while only the four groups a runner
+  loads were verified (its SEC-3), and a merge could carry unsigned bytes past the first-parent
+  walk (its SEC-1). The owner's answer was to ask what the signature was for: "do we need
+  signature verification at all if we have controls in place to prevent untrusted commits to
+  main in the first place?" In the deployment that needs the protection, no leg holds a forge
+  credential: its writes pass a host-side gate, the merge runner's included, and board posts
+  come from a trusted process ("I don't think commits need to be signed as the board goes into
+  baton's db, not git"). What a signature still stopped was an agent session on a human's
+  forge credential, and the owner ruled that out of the model: "this is an unsupported
+  scenario in the 'protected' mode implemented in fieldhouse. Think of it as a 'break glass'
+  emergency option where an incident necessitates circumventing the normal factory workflow,
+  thus protections like siganture verifiction don't make sense." On whether to keep the
+  mechanism for `cooperative` homes: "Retire it everywhere. cooperative then openly means 'no
+  protection for control paths', and the spec loses a large mechanism."
+  So the spec verifies no commit signature. The brief mark goes with it: Baton records who last
+  pushed a ticket's file with `human`, true only for the policy's human identity, and a quote
+  is the owner's only there. A break-glass change is made visible and never
+  refused — the `out-of-course` finding, whose Needs-you line the owner worded ("Emergency
+  interactive session … this session was *not* a normal Fieldhouse process"; "'an interactive
+  session' is fine, no need to name the harness"). Two more of the review's findings were
+  decided with it, each as a policy knob because the owner wanted the restriction for the
+  protected case alone ("agreed for the fieldhouse case (cooperative case needs no git proxy
+  in the first place, so in that case this is unenforced)"): `repos.unlisted` settles the
+  review's FND-2 — R-BTN-140's by-name reading for a home with no list, against R-BTN-47's
+  "reach nothing" — by keeping that reading exactly as the code has it under `by-name` and
+  ending it under `none`; and `executor.builtin` lets a policy refuse the one executor that
+  keeps nothing apart. Neither knob is a guarantee's condition, so no stored floor breaks when
+  a deployment gains them. What the deployment makes true — the gate, per-leg credentials, what
+  each kind of leg may write — is its own specification's, named in §12.8's list. The code
+  that verified signatures stays until B-263 removes it, and its two scenario tests stay under
+  `RETIRED_TESTS_ALLOWED` until then; B-264 builds the knobs, `human` and the finding.
+  Review, round 1 (three fresh reviewers given the diff and the impact list: residue, security,
+  implementability; 27 findings, each checked against the text, none refuted). Fixed: the
+  brief rule's `tickets-approved` disjunct let a policy applied later vouch for words written
+  before it, and no leg could decide the rule, so Baton computes `human`; `by-name` as first
+  drafted reached every unlisted entry of every home, and is the list-less home's reading
+  again; rule `executor` applied at an advance with no stated outcome, and is the claim's
+  alone; R-BTN-107 still said no knob reads `source`; S-BTN-233 still expected the brief mark;
+  the rule table was cited as §6.9; `.gitmodules` had been added to the floor against
+  R-BTN-183's outright refusal and is out again; the deployment's gate, read literally,
+  refused every leg of a `**` repository and is the forge-executed paths alone; the finding's
+  paths are judged by the floor's outright globs, so a `**` repository raises nothing for its
+  ordinary merges; one finding per head; an owner resolves one only once listed.
+  Round 2 (two fresh reviewers: the new mechanisms, and whole-amendment consistency; 18
+  findings, none refuted). The finding's accounting was wrong twice over. Round 1's "any open
+  trusted claim" and round 2's first repair ("an arrival naming one of the delivery's
+  commits") each let a session on the human's credential hide a push behind any ticket's PR,
+  while the merge runner's own large merges were listed as emergencies. It is now a record
+  naming the delivery's head: a trusted leg's reported end, or a `pr-merged` arrival (round 3
+  took out a further condition, below). The delivery-chain-gap finding
+  could not be accounted and fired on webhook reordering; it is gone, and what the finding
+  does not see is listed in §12.9. `human` was computed at each read, so naming a human
+  identity later vouched for earlier pushes; it is decided when the record is made. Reach by
+  name could put a protected, unconsenting repository in a cooperative home's scope; it now
+  needs that repository's own `by-name`. The floor's grammar left nested agent and package
+  configuration outside it; those entries are any-depth. Five rules still defined reach as
+  `code_repos` membership, S-BTN-116 tested the opposite of S-BTN-240, a Decisions line still
+  said "no exception", and the seven re-read notes did not parse.
+  Round 3 (one fresh reviewer, the last round the process allows; 7 findings, one high, none
+  refuted). Round 2 had made the human's merge account only when it "left `human-merge` with
+  no discrepancy against the presented head": Baton records neither the presented head nor
+  the head a merge merged, a forge's merge commit never equals a PR's head, and the station's
+  name is the course's word, not core's — so the honest landing of a control path would have
+  been listed as an emergency every time. The condition is gone: a named fact reader's
+  `pr-merged` arrival naming the delivery's head accounts, from any station, and §12.9 says
+  what that costs. No rule made a merge leg report its merge commit; R-BTN-183 now does. A
+  cooperative home with reach to a protected repository could account that repository's
+  findings with its own trusted runner; a record now counts only from a runner granted
+  `trusted-runner` on the pushed repository, or the fact reader its own policy names. Round
+  3's repairs were not themselves reviewed.
+  Left open, for the owner. `human` says who landed a ticket's last change, not who wrote each
+  line: a runner-written quote in a pull request the human merges reads as the human's, and a
+  ticket change the merge runner lands with the human's `std:approval@1` reads as a claim. The
+  finding shows a control-path push that is no ticket's merge; a change pushed onto a ticket's
+  branch, or beneath its merge commit, and merged by hand is not shown, so it serves an honest
+  emergency and not a session that hides. Findings are listed only on the dashboard. A forced push back to
+  an older head, and a push whose delivery never arrives, raise nothing.
+- **2026-11-19 — R-BTN-200 and R-BTN-201 added; R-BTN-1, R-BTN-33, R-BTN-35, R-BTN-69, R-BTN-74,
+  R-BTN-85, R-BTN-86, R-BTN-88, R-BTN-115, R-BTN-161, R-BTN-165, R-BTN-168, R-BTN-171, R-BTN-188
+  and R-BTN-189 amended; S-BTN-237, S-BTN-238, G-BTN-170 and G-BTN-171 added: a ticket source as
+  a reader and a writer, a store that shows Baton's positions, and launchers.**
+  Rules changed: R-BTN-200 (new, §4.7), R-BTN-201 (new, §8.3), R-BTN-74 (the ticket source is a
+  reader and an optional writer; `show` and `note`; `source.writes` in the post, §4.4; `read`
+  returns no status or note, and the version contract excludes the writer's own writes; the
+  markdown source writes `[file, withdraw]`, `changes` is a reader alone), R-BTN-1 (tickets live
+  in the ticket source's store, git by default), R-BTN-33 (core reads `display.status` for
+  R-BTN-200 too; the dashboard links a ticket with a `path`), R-BTN-35 (a ticket gone from its
+  source), R-BTN-69 (the station field `display_status`), R-BTN-85 (the subs
+  `display-unconfirmed` and `display-unwritable`), R-BTN-86, R-BTN-161 and R-BTN-165 (children
+  and handler tickets are written to the ticket source, not git; a raise on a source with no
+  `file` fails), R-BTN-88 (tickets rebuilt from the ticket source and git; source entries not
+  exported), R-BTN-168 (a cancel on a source with no `withdraw` waits for the store's closure),
+  R-BTN-171 (the source kinds — `source-show`, `source-note` and a custom source's `withdraw` —
+  and the `source` class; ordering per class; a queued `withdraw` drops the ticket's queued
+  source entries; refusal and lateness of `source-show` and `source-note` are R-BTN-200's; the
+  withhold caveat), R-BTN-188 (the knob `outbox.source`; an ejected source needs a deliverer on
+  `outbox.source`, no longer on `outbox.git`), R-BTN-189 (`tickets-approved` needs the markdown
+  source), R-BTN-115 (`forge-check` is the one kind written to the forge outside git); also the §4
+  lede, R-BTN-127's `runner start` row, §13 (`board_head.source_writes`,
+  `tickets.display_refresh`, `outbox.kind`, `fields`, `delivered_ref`, the late clock), §14's
+  heartbeat and outbox claim, G-BTN-154, G-BTN-156, and the Decisions on git as the home of
+  ticket content, the two exceptions to core reading opaque values, and the outbox.
+  Driven by an adopter persona: an organization that plans in Linear, talks in Slack and runs
+  agents in Claude Code on the web sessions, prompted by a comparison with a software-factory
+  proposal that used an issue tracker as the human view and a controller that starts hosted
+  sessions. The owner's rulings: tickets may live outside git ("yes", 2026-11-19) — git stays
+  the ledger for the work's evidence, the ticket source becomes the ledger for tickets, and the
+  context pages (`architecture.mdx`, `vocabulary.mdx`, `product.mdx`) say so; Baton steers and
+  the tracker shows (option A, 2026-11-18), status moves made in the tracker steering a few
+  commands later (option B, not specified here); the source's interface named as a reader and
+  a writer (the owner's proposal, 2026-11-18); a status a person sets in the store shown again
+  by a generic core rule rather than left until the next move or caught by tracker code ("b",
+  2026-11-19), which narrows nothing in 2026-11-01's ruling, since a refresh catches no pusher;
+  and a launcher outside Baton for hosted sessions ("a is fine", 2026-11-18). The markdown
+  source exports no `show`, since a status written into git for people to read would bring back
+  the status-in-git pattern R-BTN-193 retires. Rejected: the executor starting hosted sessions,
+  since a session started by a provider's trigger offers no `stop` or `end` (R-BTN-107's
+  contract); launches queued as outbox entries, since Baton would decide when work runs
+  (R-BTN-45); R-BTN-85's `position-disagrees` as the drift signal, since it reads the markdown
+  source's `available` alone. A tracker source stays off `protected` with no new knob:
+  `outbox.source` admits no deliverer there, and an ejected source needs one (R-BTN-188); and
+  `tickets-approved` now requires the markdown source, whose tickets are files a human lands.
+  Slack as a notice channel needs no amendment: a delivery runner sends Needs you by any channel
+  and core names none (R-BTN-163). Answers taken in Slack, through the tracker, are a later
+  amendment. Design: `docs/plans/duvo-persona-integrations.mdx`.
+  Review: two adversarial reviews of the first draft, one for consistency and one for mechanism,
+  found, among others, that a refused or late status write held the ticket and raised a
+  condition; that the snapshot a move's own sync started read the store before the show was
+  delivered and posted a false drift and note; that a value the reader never posts back looped
+  forever; that the recommended `<updatedAt>:<digest>` version moved on the source's own
+  writes; that `show` could close a ticket and an unordered `withdraw` could be undone by a
+  later show; that a tracker source's `withdraw` was still a git write; that nothing bounded a
+  launcher's repeat starts or kept the hint out of the agent's prompt; that `interact` still
+  waits under a claim a paused session cannot hold; and that R-BTN-1, R-BTN-35, R-BTN-86,
+  R-BTN-88, R-BTN-161 and a Decision still placed tickets in git. Each is fixed above: judging
+  only snapshots observed after the delivery, three unconfirmed deliveries then a Sync-screen
+  discrepancy, refused or late source writes dropped, `read` free of status and notes, `show`
+  refusing a closing value, `withdraw` dropping queued source entries in the same class, the
+  launcher's own start record, an API key for agent-readable sessions, and suspend at once on a
+  host that pauses.
+
+- **2026-11-19 — the spec holds the current state only: every date, quotation of the owner and
+  replaced choice moved out of the section files into this history.**
+  Rules changed: none.
+  The owner, 2026-11-19, of Fieldhouse's spec and then of this one ("Baton's spec: it mixes
+  history into the spec text the same way" — "address these remaining concerns"): "Please
+  separate spec text (which only contains the current version of the spec, not deprecated claims
+  for history, no corrections) and the spec history file (a separate file which contains the
+  lineage of the current spec file's contents)." `docs/context/spec-writing.mdx`'s rule 4
+  already said so — "Current state only. Dates, rationale and rejected alternatives go to
+  `spec/BATON_SPEC_HISTORY.md`. A Decisions entry is one line and cites the rules it decides" —
+  and the section files did not keep it: 191 of the Decisions lines carried the date of the
+  decision, often the owner's words and sometimes "Reversed …" or "amended …"; some twenty
+  rules carried "(the owner, date)" or a quotation; the open questions told which had closed.
+  No rule changes meaning. What changed:
+  - **§ Decisions**: each line keeps the choice, what it was chosen over, its reason and the
+    rules it decides; the dates, the owner's words, ticket ids naming who asked, "Reversed …",
+    "amended …" and "which the history keeps" are gone.
+  - **Rules** in §1, §2, §3, §4, §5, §7, §8, §10, §12, §15 and §16 lose their inline
+    attributions and quotations; §8's list of a leg's environment says no `IR_BATON_*` alias
+    exists, in place of when the aliases were removed.
+  - **§ Open questions** drops the note of two items that are no longer open and the dates of
+    the others.
+  - **The front** carries today's date as its Updated line.
+  - **Dates that stay**, because each is a fact a rule states: the front's Updated line, the
+    span of §3's cron measurement, the cutoff dates `check:spec` reads (§4), and the MCP protocol revisions.
+  - **`npm run check:spec` now fails lineage in the spec text** — a calendar date outside those
+    stated facts, or the owner quoted (`lineage` in `scripts/check-spec.mjs`, with a unit
+    test) — so the separation is kept by a check, not by care.
+  Everything removed is kept verbatim under *Lineage moved out of the spec, 2026-11-19*, below
+  the Decisions in full. No review round was run: the change removes words and adds a check.
+
+- **2026-11-18 — §3.1 R-BTN-47, §4.2 R-BTN-74, §4.4, §6.1 R-BTN-120 and §11.3's owner routes
+  amended; S-BTN-241 added: dependencies on another repository's tickets (B-113).**
+  Rules changed: R-BTN-47 (*Relations stay home* relaxed for `depends_on` alone, with the
+  visibility-and-consent clause), R-BTN-74 (the markdown source posts qualified ids as written;
+  `baton ticket check` and the ticket commands take them), §4.4 (the post's judgment of a
+  qualified `depends_on` — unregistered and unknown targets refused, consent, the cross-board
+  cycle, the sync's dependencies read), R-BTN-120 (a qualified prerequisite resolves against the
+  target's board, as for a local one), §11.3 (the owner route
+  `POST /v1/owner/{repository}/dependency-consents`). Until now a wait on another repository's
+  ticket could only be written as prose (a `**Waits on:**` line), so nothing stopped a claim
+  before the other repository's work was done; a file URL was considered and rejected — a done
+  ticket moves to `archive/`, so the URL breaks exactly when the dependency is met. The owner,
+  2026-10-25, asked for a dependency that is not just a local id, and Baton already names
+  tickets by their qualified id (`docs:R3-1205`), so `depends_on` takes it. `parent` (so
+  `blocked_by`) stays home, and an unqualified id stays local. Visibility is judged over the
+  principals a board reaches — its owner keys and runner grants, an administrator's lowering
+  nothing — so a dependency on an equally visible target (the same owners, the instance's usual
+  shape) asks for nothing, and one on a less visible target needs the target repository owners'
+  consent, recorded as R-BTN-140's cross-repository consent is (its `code_repo_consents` table
+  itself still waits on its own ticket; `dependency_consents` is migration 0062). Round 1 of
+  its review closed a hole at the centre: a one-board cycle any of whose edges was spelled
+  self-qualified escaped both checks — the one-board graph keyed bare local ids, and the
+  cross-board walk detected the loop but skipped it as one board's own — so a self-qualified
+  edge now reads as its local id in the one-board graph (`checkPayload` takes the posting
+  repository's id), and everywhere else that reading belongs: the sync's dependencies read
+  answers a self-qualified id against the posting repository's own board (a checkout whose
+  `repos` map names no id of its own — no origin to match, or a `.git` suffix on the map's
+  value — no longer fails its run on one), `baton ticket claim` reads one from the same
+  checkout's archive and status, never a depth-1 clone of the repository's own remote, and
+  `baton ticket check` checks one as a local id. Round 1 also made the walk's bound real
+  (`BOARDS_MAX`, written as a refusal but never thrown, could be walked past within a pass)
+  and the read's `url` honest: null for a closed target, whose file the archive moved along a
+  path no closing keeps, rather than a guessed `tickets/<id>.mdx`. The ticket is
+  B-113; fieldhouse FLDH-27's wait becomes `depends_on: [baton:B-111, baton:B-112]` when the CLI
+  release carrying this is pinned.
+
+- **2026-11-18 — §13's Runners view indexes: the Runners view reads one query per list, however
+  many runners were ever registered (B-250).**
+  Rules changed: none; §13's index notes.
+  Following B-235–B-243 (the owner's 2026-11-15 plan to bound what each read costs after
+  production passed Cloudflare's free-tier limit of 5,000,000 Durable Object `rows_read`/day on
+  2026-11-14 and again on 2026-11-15), the dashboard's Runners view — `runnersView`, served by
+  `GET /v1/ui/state`'s `runners` — ran about six queries for *every* runner row ever
+  registered, reaped ones included (R-BTN-3 keeps the rows): the latest transcript (a UNION
+  over `transcripts` and `pending_transcripts`), `runner_capabilities`, the runner's declared
+  courses, its active claims, its newest open activity and its latest `status_report` — about
+  1.9k statements a poll (~3.6k rows_read) on the B-240 harness with 300 old runner rows. It
+  now reads one query per list — eight statements whatever the fleet's size — each covering a
+  set bounded without the runners' count: the declarations (R-BTN-149's retention prunes a
+  runner unseen 30 days), the active claims (`claims_active_by_runner`) and open activities
+  (`activities_open`) through their partial indexes, the status reports through migration
+  0063's partial `messages_reports`, and the transcripts and pending transcripts each walked
+  once — what the per-runner reads already walked in sum, a latest-per-runner read being
+  keyable by nothing but the runners registered, the very count this stops paying. The served
+  `runners` JSON is unchanged: a test compares it with what the per-runner reads built, re-run
+  as they were, across ties (two claims claimed at one instant, two open activities started
+  and received at one instant, a transcript re-reported under a second claim at the same
+  instant, two transcript pointers of one heartbeat's instant told out of lexical order beside
+  a pending pointer at that instant — the latest-transcript fold keeps the union read's own tie
+  rule: a linked pointer before a pending one at one instant, the lexicographically least
+  `(repo, path, claim_id)` within one table, the order its autoindexes fed the per-runner
+  read's sorter), fallbacks (an older pending pointer), a lapsed
+  lease with the claim still held, a reaped runner, a course no repository registered, and 300
+  unseen runners; on the Cloudflare host the view's reads measure 362 rows on that harness
+  state, inside the ticket's 500-row target. Migration 0063 also adds `runners_by_hostname` —
+  the view's own served order — without which the `ORDER BY hostname, id` sort reads every row
+  twice on the Cloudflare host; the timeline's lanes read stays pinned to `runners_live`
+  (0052), whose selective walk the new name-ordered index would otherwise displace.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -3386,6 +3653,8 @@ defined in docs' `BATON_ROADMAP_PR_COURSE` (check-spec's `COURSE_IDS`).
 | G-BTN-159 | the gate stratum is monotone in granted holdings | B-166 part 4 (2026-11-02, B-162) | G-BTN-5 |
 | G-BTN-160 | the evaluator agrees with clingo, bounded by counts | B-166 part 4 (2026-11-02, B-162) | — |
 | G-BTN-161 | a route choice's advice never refuses, identifiers only | B-166 part 4 (2026-11-02, B-162) | G-BTN-49 |
+| S-BTN-218 | owner-signed briefs and the control record | the 2026-11-19 amendment | nothing: no brief mark and no `control` record; `test/integration/S-BTN-218.signed-briefs.test.ts` tests retired behaviour until B-263 deletes it |
+| S-BTN-219 | `require_signed_control` | the 2026-11-19 amendment | nothing: no commit signature is verified; `test/integration/S-BTN-219.require-signed-control.test.ts` tests retired behaviour until B-263 deletes it |
 
 Parts retired from surviving rows: S-BTN-105 and G-BTN-124 keep only the override half (the rest
 became S-BTN-110 and G-BTN-129, 2026-10-19); S-BTN-95 and G-BTN-115 lost the legacy
@@ -3397,7 +3666,8 @@ block; G-BTN-87 delivery as a worker courier; G-BTN-120 S-BTN-60's half. The sec
 keys, R-BTN-159) is G-BTN-155. The schema review (2026-10-20) retired S-BTN-64's and S-BTN-123's
 `isolation` refusal (now rule 4's `missing-capability`), S-BTN-68's course-file `checks` proposal,
 G-BTN-127's `run` selector and G-BTN-152's "timing" qualifier (every retired course field is
-refused).
+refused). The 2026-11-19 amendment retired S-BTN-209's `home-signed` case, S-BTN-220's
+and S-BTN-233's brief mark, and G-BTN-168's `home-signed` host.
 
 ## Old § → new §
 
@@ -4919,6 +5189,508 @@ changes):
   in place of a name the executor states; and a course-only `agent_command` with the home's value
   read through a window, which would have broken every home that customizes a sourced course's
   command.
+
+## Lineage moved out of the spec, 2026-11-19
+
+What the 2026-11-19 entry "the spec holds the current state only" removed from the section
+files, verbatim. For a Decisions line: the line's opening words, then the text removed from it.
+For a rule: the file, the words before the removed text, then the text.
+
+**From § Decisions (`91-decisions.md`):**
+
+```text
+- Chose Baton as the only lock and the only counter — its lease decides who hold …
+    (2026-11-03, the owner, "I want the spec to be very clear that this is not how Baton is meant to be used. And it is merely a legacy to be phased out as soon as possible."; R-BTN-193, R-BTN-4, R-BTN-74, R-BTN-131)
+- Chose standard courses that assume no particular deployment and serve the simp …
+    (2026-10-29; R-BTN-131)
+- Chose a protected default branch that only a deterministic merge runner and hu …
+    (2026-10-28; R-BTN-180, R-BTN-182, R-BTN-183)
+- Chose to keep Baton cooperative on one trusted machine and leave enforcement t …
+    (2026-10-28; R-BTN-180)
+- Chose that courses and leg logic change outside Baton for now, by a human's pu …
+    (2026-10-28; R-BTN-184)
+- Chose human-only credentials for every human gate, over gates that accept the  …
+    (2026-10-27; R-BTN-185)
+- Chose human-only credentials for every human gate, over gates that accept the  …
+    (2026-11-01, the owner, "Only protected-signed"; R-BTN-189)
+- Chose to require of a human-only key only that it is used for nothing else and …
+    (2026-10-29; R-BTN-185)
+- Chose authority by credential, not channel, over MCP's closed list, keeping cr …
+    (2026-10-27; 2026-11-01, the owner, "Tighten, and undo own"; R-BTN-186)
+- Chose to run a sourced course's code from its source, the home referring to Ba …
+    (2026-10-28; R-BTN-134, B-139)
+- Chose to let a claim's branch append its leg's progress to its own ticket's `# …
+    (2026-10-28; R-BTN-184)
+- Chose attestations, typed facts a trusted writer makes (a human-only key, an o …
+    (2026-10-28; R-BTN-181)
+- Chose attestations, typed facts a trusted writer makes (a human-only key, an o …
+    (2026-11-01, the owner, B-165's review default and "Out of scope"; R-BTN-181)
+- Chose continuity — one unbroken chain of attested commit ranges, a foreign com …
+    (2026-10-28 and -29; 2026-11-01, the owner, "Remove until designed"; R-BTN-183)
+- Chose that a domain that runs a branch's code is one of its writers, so review …
+    (2026-10-29; R-BTN-183)
+- Chose to state each guarantee separately and let the repository choose, over o …
+    (2026-10-29; §12.8)
+- Chose a grant's role (`runner`, `trusted-runner`) and a domain label as the wh …
+    (2026-10-28 and -29; 2026-11-01, the owner, B-165's review default; R-BTN-180, R-BTN-183)
+- Chose two forge identities, a human-only identity that administers protected r …
+    (2026-10-28; R-BTN-180, R-BTN-185)
+- Chose to state that a compromised runner whose change persuades both reviewers …
+    (2026-10-28; R-BTN-183)
+- Chose to state that a compromised runner whose change persuades both reviewers …
+    (2026-10-31 and 2026-11-01, the owner; R-BTN-189)
+- Chose to gate only the loosening of a limit behind a human, leaving holds and  …
+    (2026-10-28; R-BTN-186)
+- Chose trusted runners, holding the only credential able to perform a sensitive …
+    (2026-10-28; R-BTN-182)
+- Chose trusted runners, holding the only credential able to perform a sensitive …
+    (2026-11-01, the owner, "Out of scope"; R-BTN-182, R-BTN-189)
+- Chose that ticket `tier` is not a protected input, on the precondition that no …
+    (2026-10-27; R-BTN-184: a ticket's frontmatter is a ticket change, never a control path)
+- Chose provenance alone for B-126 — each ticket served with who last pushed its …
+    (2026-11-13, the owner, applying the 2026-11-01 ruling "Remove it"; R-BTN-194, R-BTN-66)
+- Chose to verify no commit signature anywhere — who may land a path is the poli …
+    (2026-11-19, the owner; R-BTN-66, R-BTN-133, R-BTN-194, R-BTN-107)
+- Chose to make a break-glass change visible, as an `out-of-course` finding on a …
+    (2026-11-19, the owner; §12.9)
+- Chose two policy knobs, `repos.unlisted` and `executor.builtin`, over one rule …
+    (2026-11-19, the owner; R-BTN-140, R-BTN-107, R-BTN-188)
+- Chose to run checks only on the repository's own branches over a sandbox for f …
+    (2026-10-20; R-BTN-114)
+- Chose to answer a `baton.*` condition only through Baton's own authenticated s …
+    (2026-11-01, the owner, "No ticket file")
+- Chose to answer a `baton.*` condition only through Baton's own authenticated s …
+    (2026-10-20, revised the same day; R-BTN-163, R-BTN-63)
+- Chose no core default timers per tier: timers are the course's, and `baton.sta …
+    (2026-10-20; R-BTN-167)
+- Chose to keep dependencies within one repository (2026-10-20; R-BTN-120). - Ch …
+    (2026-10-20; R-BTN-120)
+- Chose to leave reviewer-independence seats and tags as cooperative checks, wit …
+    (2026-10-20; R-BTN-60, R-BTN-66)
+- Chose a Cloudflare Durable Object over SQLite on a home server: cloud sessions …
+    (2026-10-13; §2)
+- Chose one codebase with Cloudflare in production and a Node host for developme …
+    (2026-10-14; R-BTN-55, R-BTN-56)
+- Chose the ticket source as the home of every ticket's content and closure — gi …
+    (2026-11-19, the owner, "yes"; R-BTN-74)
+- Chose the ticket source as the home of every ticket's content and closure — gi …
+    (2026-10-13, 2026-10-15; reversed for course history 2026-10-26 and 2026-10-31, the owner; R-BTN-33, R-BTN-35, R-BTN-39)
+- Chose a ticket that is a course of legs and can suspend at a station over one  …
+    (2026-10-14, 2026-10-31; R-BTN-39)
+- Chose legs stateless at their boundaries (the branch, reviews, threads and a h …
+    (2026-10-14; R-BTN-44)
+- Chose a claim that goes stale only when git takes the ticket away over "stale  …
+    (2026-10-14; R-BTN-35)
+- Chose commit ancestry and Baton's own observation numbers over commit timestam …
+    (2026-10-13; R-BTN-10, R-BTN-62)
+- Chose to log every disagreement with git, both values, and to adopt git's valu …
+    (2026-10-15, 2026-10-31, 2026-11-01, 2026-11-03; R-BTN-85, R-BTN-39)
+- Chose a mirror that records a claim's status and time without the holder (2026 …
+    (2026-10-13; R-BTN-36)
+- Chose no git fallback after cutover: two lock servers allow two holders (2026- …
+    (2026-10-13; R-BTN-18)
+- Chose a minimal core that acts only on its own vocabulary over course posted d …
+    (2026-10-14; R-BTN-50)
+- Chose Baton as an advisor that gates only correctness and the owner's explicit …
+    (2026-10-14; R-BTN-45; amended 2026-11-02, B-166 part 4: a provider's capacity stays advice, and exclusive use of a capability is a gate, R-BTN-178)
+- Chose that Baton runs no repository code and runners rank (`rank.mjs`, from th …
+    (2026-10-16; R-BTN-98)
+- Chose provider usage, forecasts and model advice as course logic, with only me …
+    (2026-10-14, 2026-10-16; R-BTN-60, R-BTN-100, R-BTN-101; amended 2026-11-02, B-166 part 4: a claim's billing counts went with bills, a claim's reports carrying what it spends)
+- Chose cooperative gates over signed commits, a required lease check or per-run …
+    (2026-10-14, reaffirmed 2026-10-18; the detection of foreign markers that backed them was dropped 2026-11-01, R-BTN-46, R-BTN-66)
+- Chose to keep what agents must not change — owner bars, required bars, tiers,  …
+    (2026-10-14; R-BTN-66, R-BTN-67)
+- Chose owner and required bars that name a course (or `*`) over per-repository  …
+    (2026-10-14; R-BTN-67)
+- Chose one validated `course.json` per course, a closed graph Baton validates b …
+    (2026-10-14; R-BTN-69, R-BTN-70)
+- Chose a `version` per course, with `min_runner_version` and a test kit, over a …
+    (2026-10-14; R-BTN-22, R-BTN-65)
+- Chose a runner that runs one script per leg in a worktree at the claim's commi …
+    (2026-10-14, 2026-10-19; R-BTN-72, R-BTN-133)
+- Chose one runner per checkout serving every course it declares — its heartbeat …
+    (2026-10-22; B-103, R-BTN-72)
+- Chose a leg that names the station it reached and the leg it queues, recorded  …
+    (2026-10-15, 2026-10-31; R-BTN-81, R-BTN-83)
+- Chose pointers and digests of leg inputs and outputs, validated by the runner, …
+    (2026-10-15; R-BTN-82, R-BTN-84)
+- Chose validation against both a schema and its base, with a conservative stati …
+    (2026-10-17; R-BTN-108)
+- Chose entry requirements on stations over requirements on legs (2026-10-17; R- …
+    (2026-10-17; R-BTN-109)
+- Chose a shared `std:` schema library over formats defined in core (2026-10-17; …
+    (2026-10-17; R-BTN-110)
+- Chose declarative views Baton renders over course-shipped rendering code (2026 …
+    (2026-10-17; R-BTN-112)
+- Chose capability types declared in each course file, checked by the runner, ov …
+    (2026-10-17; R-BTN-121)
+- Chose replaceable per-repository ticket sources, with default sources in the C …
+    (2026-10-14; R-BTN-74)
+- Chose a course pinned to a source commit reachable from its default branch, re …
+    (2026-10-19; R-BTN-134)
+- Chose a read-only worktree per commit, installed with npm from the course dire …
+    (2026-10-19; R-BTN-133)
+- Chose planning as an ordinary course (`epic`) over a coordinator agent in core …
+    (2026-10-17; R-BTN-124)
+- Chose child tickets as the only parallelism over several positions in one tick …
+    (2026-10-15, 2026-10-20; R-BTN-4, R-BTN-86, R-BTN-165)
+- Chose one active claim per ticket, and per runner up to the lower of its decla …
+    (2026-11-08 and 2026-11-17, the owner: "I don't want lanes"; R-BTN-4, R-BTN-58, R-BTN-72)
+- Chose a runner-declared lease timeout, clamped to 15 minutes – 24 hours, over  …
+    (2026-10-13; R-BTN-9)
+- Chose sidecar heartbeats with fencing over heartbeats from the agent thread (2 …
+    (2026-10-13; R-BTN-6, R-BTN-7, R-BTN-19)
+- Chose reaping (the alarm for a silent runner, a force-reap for a hung one) ove …
+    (2026-10-13; R-BTN-19)
+- Chose `confirmed_at` over a `settled` claim status (2026-10-13; R-BTN-10). - C …
+    (2026-10-13; R-BTN-10)
+- Chose expedite as a property of the ticket over a message (2026-10-13; R-BTN-1 …
+    (2026-10-13; R-BTN-12)
+- Chose typed, timed activities over a free-text stage (2026-10-13; R-BTN-24). - …
+    (2026-10-13; R-BTN-24)
+- Chose transcript pointers reported by archivers over paths derived by conventi …
+    (2026-10-13; R-BTN-20)
+- Chose a closed world: a ticket is claimable only after a post names it, which  …
+    (2026-11-01, the owner, B-165's review default; R-BTN-5, R-BTN-73, R-BTN-105)
+- Chose stored, indexed block rows and an `unblocked` event over computing block …
+    (2026-10-15; R-BTN-75, R-BTN-77)
+- Chose one way to ask a person — a person's leg, answered by a `std:decision@1` …
+    (2026-11-01, the owner, "One primitive"; R-BTN-116, R-BTN-161, R-BTN-169)
+- Chose readings posted by instruments that lapse to `unknown` and fail open ove …
+    (2026-10-15; R-BTN-76, R-BTN-101)
+- Chose runners seeing their peers' claims and shared account readings per Baton …
+    (2026-10-16; R-BTN-99, R-BTN-101; amended 2026-11-02, B-166 part 4: billings left with bills)
+- Chose first come, first served for an account's room over weighting it by repo …
+    (2026-10-16; R-BTN-61)
+- Chose to merge repositories by `weight` and courses by place in their own orde …
+    (2026-10-14; R-BTN-61)
+- Chose `max_queue` as a warning that closes a course's intake as advice over a  …
+    (2026-10-15; R-BTN-79)
+- Chose a blocked edge (`released:blocked`, no attempt spent, bounded by `max_bl …
+    (2026-10-17; R-BTN-126; amended 2026-11-02, B-166 part 4: every runner granted on a repository has the same usable instances, so the block is the same for each)
+- Chose a leg's capability block as a request the runner confirms with that capa …
+    (2026-11-15, the owner; R-BTN-126, R-BTN-121, R-BTN-76)
+- Chose one `requires` per leg, stored as blocks and answered by `baton leg why` …
+    (2026-10-17, 2026-10-19; R-BTN-120, R-BTN-132)
+- Chose `not_before` written to git, with schedules in leg scripts and recurring …
+    (2026-10-15, 2026-10-20; R-BTN-89, R-BTN-167)
+- Chose, under `cooperative`, to call what Baton owns — positions, course histor …
+    (2026-11-01, the owner, "Remove it"; R-BTN-39, R-BTN-46, R-BTN-66)
+- Chose the course file to travel with every sync over a hash with the body only …
+    (2026-10-16; R-BTN-69)
+- Chose owner state exported and imported, not mirrored to git, where agents cou …
+    (2026-10-15; R-BTN-88)
+- Chose one Baton per team at a stated, load-tested envelope over sharding (2026 …
+    (2026-10-15; R-BTN-87)
+- Chose to list B-129's `position-disagrees` only on the dashboard's Sync screen …
+    (2026-11-03, the owner, "Keep your Decision"; R-BTN-85, R-BTN-39)
+- Chose to list B-129's `position-disagrees` only on the dashboard's Sync screen …
+    (2026-11-03, the owner, "Accept the extra entries"; R-BTN-85)
+- Chose to list B-129's `position-disagrees` only on the dashboard's Sync screen …
+    (2026-11-03, the owner, "Write narrow exceptions")
+- Chose to prune a purged ticket's claims, legs and activities with R-BTN-149's  …
+    (2026-11-15; R-BTN-149, B-238)
+- Chose to prune a purged ticket's claims, legs and activities with R-BTN-149's  …
+    (2026-11-15; B-236)
+- Chose a ticket source made of a reader and an optional writer — `file`, `withd …
+    (2026-11-18, the owner's proposal; R-BTN-74)
+- Chose a ticket source made of a reader and an optional writer — `file`, `withd …
+    (2026-11-19, the owner, "b"; R-BTN-200, R-BTN-171)
+- Chose conditions that the repository binds to handler courses (Common Lisp con …
+    (2026-10-20; R-BTN-160, R-BTN-161, R-BTN-163)
+- Chose bindings held in git with no owner setting: a person's answer is already …
+    (2026-10-20; R-BTN-161)
+- Chose a short wait in the claim, then a suspension, over always suspending or  …
+    (2026-10-20; R-BTN-162)
+- Chose to resume a withdrawn handler's leg with the default restart (2026-10-20 …
+    (2026-10-20; R-BTN-162)
+- Chose to refuse a post that does not descend from the head (`head-moved`) and  …
+    (2026-11-01, the owner, B-165's review default; R-BTN-11, R-BTN-147)
+- Chose a course's ordinary `cancel` leg, queued by Baton when a ticket is cance …
+    (2026-11-01, the owner, B-165's review default; R-BTN-168)
+- Chose retries as the built-in default handler of `error` over a retry course — …
+    (2026-10-20; R-BTN-122)
+- Chose per-leg retry policies, typed by the course as `interrupt` conditions an …
+    (2026-10-17; R-BTN-122)
+- Chose a deadline enforced by a release and then a fence, a timeout being a fai …
+    (2026-10-15, 2026-10-20, 2026-11-01; R-BTN-90, R-BTN-167)
+- Chose an outbox for git writes, check runs and ticket-store writes, delivered  …
+    (2026-10-20; R-BTN-171)
+- Chose an outbox for git writes, check runs and ticket-store writes, delivered  …
+    (2026-11-01, the owner, "Out of scope" and "Drop it"; R-BTN-94, R-BTN-171, §12.7)
+- Chose one outbox for git writes, check runs and ticket-store writes, delivered …
+    (2026-10-30; 2026-11-01, the owner, "Couriers into runners"; R-BTN-171, R-BTN-115)
+- Chose readings as attestations about a resource instance, with gate or advice  …
+    (2026-10-30; R-BTN-181, R-BTN-76)
+- Chose two resource scopes, `service` and `account`, every runner granted on a  …
+    (2026-11-01, the owner, B-165's review default; R-BTN-76)
+- Chose readings authenticated by the request that posts them, like every other  …
+    (2026-11-01, the owner, B-165's review default; R-BTN-76, R-BTN-181, R-BTN-188)
+- Chose one versioned policy document per repository, whose knobs presets fill,  …
+    (2026-10-30; R-BTN-188)
+- Chose guarantees as named conditions over the policy, with the policy's own `f …
+    (2026-10-30; 2026-11-01, the owner, B-165's review default; R-BTN-189)
+- Chose whose attestations count, and the merge criteria, as policy over course  …
+    (2026-10-30; R-BTN-181, R-BTN-188)
+- Chose a separate protection checker, a trusted runner that merges nothing and  …
+    (2026-10-30; R-BTN-180)
+- Chose to leave `refs/baton/*` outside every guarantee on GitHub, whose ruleset …
+    (2026-10-30; R-BTN-180)
+- Chose a `plain-git` preset, the `cooperative` values without what needs a forg …
+    (2026-10-31, the owner; R-BTN-188)
+- Chose the forge's PR conversation for leg state wherever there is a forge, and …
+    (2026-10-31, the owner; 2026-11-01, B-165's review default; R-BTN-190)
+- Chose a per-ticket leg-state branch, never merged, for state one leg hands the …
+    (2026-10-31, the owner; R-BTN-190)
+- Chose approver lists in the policy itself (`owner`, `human`, `key:<fingerprint …
+    (2026-10-31, the owner; R-BTN-188)
+- Chose one approver list for every policy change, `approvers.policy`, over clas …
+    (2026-10-31, the owner; R-BTN-188)
+- Chose that Baton stops a repository whose floored guarantee breaks, refusing c …
+    (2026-10-31, the owner; R-BTN-189)
+- Chose guarantees that include the guarantees they rest on (`tickets-approved`  …
+    (2026-10-30; R-BTN-189)
+- Chose to keep deployment duties Baton cannot observe (review legs run no branc …
+    (2026-10-30; §12.8)
+- Chose three sources of a queued leg (`holder`, `baton`, `owner`), a retry poli …
+    (2026-11-01, the owner, B-165's review default; R-BTN-83, R-BTN-122, R-BTN-167, R-BTN-90)
+- Not adopted: BPMN tokens and parallel gateways inside one ticket, BPMN as a fi …
+    (2026-10-20; R-BTN-160–R-BTN-168)
+- Chose a state version every write moves, liveness excepted, and a per-runner i …
+    (2026-11-15; R-BTN-196, B-237)
+- Chose sessions that report moves to their runner over sessions holding a claim …
+    (2026-10-17; R-BTN-106)
+- Chose one executor seam — every leg and every call into repository code throug …
+    (2026-11-08, the owner; R-BTN-107)
+- Chose a check leg's withheld credentials as the capability `checks:withheld-cr …
+    (2026-11-09, the owner; R-BTN-114, R-BTN-121, R-BTN-107)
+- Chose a leg's agent command as the first present of the home's per-leg `.baton …
+    (2026-11-09, the owner; R-BTN-131)
+- Chose a runner that refreshes a filling session under the same claim over losi …
+    (2026-10-17; R-BTN-123)
+- Chose stopping a leg through the authenticated release path over control from  …
+    (2026-10-17; R-BTN-119)
+- Chose a noun-verb CLI renamed outright over aliases (2026-10-17; R-BTN-127); a …
+    (2026-10-17; R-BTN-127)
+- Chose a noun-verb CLI renamed outright over aliases (2026-10-17; R-BTN-127); a …
+    (2026-11-02, B-166 part 3, B-157)
+- Chose writing each leg run's output as create-only chunks to an owners' bucket …
+    (2026-10-21, owner; R-BTN-128)
+- Chose one action registry from which REST, the CLI, the dashboard and a remote …
+    (2026-10-17, 2026-10-18; R-BTN-129, R-BTN-130, R-BTN-154)
+- Chose one action registry from which REST, the CLI, the dashboard and a remote …
+    (2026-11-01, the owner, "Tighten, and undo own"; 2026-11-02, B-166 part 3)
+- Chose a leg that waits on an effect git or the forge shows over waiting on "se …
+    (2026-10-17; R-BTN-116)
+- Chose check courses whose verdict is a command's exit status, posted under a d …
+    (2026-10-17, 2026-10-18; 2026-11-01, the owner, "Forge checks suffice"; R-BTN-114, R-BTN-153, R-BTN-183)
+- Chose either an SSH key (signatures) or an API key (a bearer) for every admini …
+    (2026-10-19; R-BTN-13, R-BTN-159)
+- Chose administrator keys anchored in the deployment's secret and owner and run …
+    (2026-10-14; R-BTN-57)
+- Chose owner dashboard sessions with a role of their own (`owner-session`), sco …
+    (owner decision, 2026-10-20; R-BTN-155, R-BTN-129)
+- Chose owner dashboard sessions with a role of their own (`owner-session`), sco …
+    (2026-11-02, B-166 part 3, the review's default under B-165)
+- Chose to keep a ticket's holds, cancel, attempts and backoff when it leaves th …
+    (owner decision, 2026-10-20; R-BTN-12)
+- Chose capabilities on each repository's grant over capabilities on the key (20 …
+    (2026-10-14; R-BTN-58)
+- Chose one machine key that may work, sync and report readings, a key granted o …
+    (2026-10-16, 2026-10-18; R-BTN-102, R-BTN-146)
+- Chose a pulled sync (Baton records a want; any runner pulls it) and a sync key …
+    (2026-10-16; R-BTN-93, R-BTN-94)
+- Chose forge webhooks that only trigger a sync over stations built from payload …
+    (2026-10-14; R-BTN-73)
+- Chose a merge's `pull_request` delivery to dispatch its repository's own sync, …
+    (2026-10-24; R-BTN-73, B-89)
+- Chose a passive plain git server, synced by runners (2026-10-16; R-BTN-105). - …
+    (2026-10-16; R-BTN-105)
+- Chose a hibernating WebSocket doorbell over server-sent events or push deliver …
+    (2026-10-15; R-BTN-91)
+- Chose one tenant per Baton, named by its origin, with a router for many tenant …
+    (2026-10-18; R-BTN-135–R-BTN-138)
+- Chose loopback binding by default for the local host, TLS being the operator's …
+    (2026-10-18; R-BTN-158)
+- Chose GitLab Developer (30) as the role that can push (2026-10-18; R-BTN-139). …
+    (2026-10-18; R-BTN-139)
+- Chose GitLab Developer (30) as the role that can push (2026-10-18; R-BTN-139). …
+    (2026-11-01, B-163; R-BTN-139, R-BTN-192)
+- Chose a Quint model checked on the author's machine and against every scenario …
+    (2026-10-14, 2026-10-20; R-BTN-68)
+- Chose driven, fake-clock integration scenarios in every behaviour change over  …
+    (2026-10-13; R-BTN-29–R-BTN-31)
+- Chose capabilities matched by name — a runner deciding for itself what the key …
+    (2026-11-01, the owner, "Nothing; move it out", B-162; R-BTN-174, R-BTN-98)
+- Chose a capacity on a capability, its seats stored when a leg starts for the c …
+    (2026-11-01, the owner, B-165's review default; R-BTN-178, R-BTN-121)
+- Chose, of the owner settings the whole-spec review called constants, to drop t …
+    (2026-11-01, the owner, B-165's review default; R-BTN-66)
+- Chose an adoption appendix that ends when docs retires its mirror — shadow mod …
+    (2026-11-01, the owner, B-165's review default; §16)
+- Chose `human-operator` as a runner's own statement, admitted by grants like an …
+    (2026-10-22; R-BTN-121, R-BTN-58)
+- Chose to skip an owner key an administrator revoked when the seed names it, ov …
+    (the owner, 2026-10-27; R-BTN-47, B-91 round six)
+- Chose the CLI's reads to return the dashboard's own queries behind the signed  …
+    (2026-10-24; B-90)
+- Chose Baton as the one authority on a ticket's position, git facts moving a ti …
+    (2026-10-31, the owner; R-BTN-35, R-BTN-39, R-BTN-10)
+- Chose every statement Baton receives about the work, whoever states it, to be  …
+    (2026-10-31, the owner; R-BTN-191)
+- Chose four nouns for everything that crosses Baton's boundary — attestations ( …
+    (2026-11-01, the owner; R-BTN-191)
+- Chose, under a policy admitting no `sync` arrival, a fact reader — the merge r …
+    (2026-11-01, the owner; R-BTN-192)
+- Chose to mask, besides the credentials the runner knows, every kept variable w …
+    (the last three added 2026-11-03, the owner)
+- Chose to mask, besides the credentials the runner knows, every kept variable w …
+    (2026-11-02, the owner, B-170; R-BTN-144)
+- Chose an administrator's confirmed fence clear over bounding `fence_deadline`: …
+    (2026-11-02, the owner, B-171; R-BTN-19)
+- Chose to let `baton ticket request` decide between a push and a PR by the forg …
+    (2026-11-02, the owner, B-174; R-BTN-131, R-BTN-180)
+- Chose to let `baton ticket request` decide between a push and a PR by the forg …
+    (2026-11-03, the owner)
+- Chose `timed_out` over `neutral` for a check command's timeout or `exec` error …
+    (2026-11-02, the owner, B-175; R-BTN-114, R-BTN-153)
+- Chose a two-step sign-in bind — the code's row previewed (role, client address …
+    (2026-11-03, B-172, written at the owner's request; R-BTN-155)
+- Chose a final retirement that ends everything scoped to the repository — sessi …
+    (2026-11-03, B-173, written at the owner's request; R-BTN-47)
+- Chose process guards in the ticket commands and checks over reviewers catching …
+    (2026-11-03, the owner, "I would like you to implement the process changes that prevent the sort of thrashing we are seeing now."; R-BTN-74, R-BTN-31)
+- Chose migration and scenario numbers taken as the next free one at merge, the  …
+    (2026-11-03, the owner, "Wouldn't it be simpler to solve this if Baton also handed out ticket IDs?"; R-BTN-31, §13)
+the domain rule for a sandboxing deployment, or a separate weaker guarantee (202 …
+    (2026-11-08, the owner: "yes", to the per-run label over the first two; 2026-11-09, the owner: "I accept all recommendations", collapsing the weaker `independent-runs` the first draft added, since its split rested on a leg being able to act as its runner; R-BTN-180, R-BTN-183, R-BTN-189)
+sandbox (2026-11-09, the owner: "I don't want the merge leg to be different from …
+    (2026-11-09, the owner: "I don't want the merge leg to be different from the other legs for the plain baton scenario"; R-BTN-182, §12.8)
+calling a tracker a cache git does not hold (2026-11-09, the owner, choosing B-1 …
+    (2026-11-09, the owner, choosing B-183's recommended wording: "The ticket source is the truth about tickets and git about the code and its evidence; Baton holds what no write may decide."; values 1, R-BTN-35, R-BTN-74)
+beside it (2026-11-09, the owner: "A home repo can be associated with one baton  …
+    (2026-11-09, the owner: "A home repo can be associated with one baton server … This leaves the staging instance with no connected repos, no data, and no reasonable way to test anything — might as well get rid of it entirely"; §2.1, §15, R-BTN-56)
+in practice (2026-11-12, B-182; R-BTN-105, `docs/runbooks/local-home.mdx`). - Ch …
+    (2026-11-12, B-182; R-BTN-105, `docs/runbooks/local-home.mdx`)
+screens, so what a session sees and what it can do come from one definition (202 …
+    (2026-11-09, the owner, handing over the mockup; R-BTN-129, §11.4)
+nothing from another origin — over the dashboard's dependency-free rule (2026-11 …
+    (2026-11-09, the owner; §12.3, §11.4)
+(2026-11-09, the owner; §11.4). - Chose V2 replacing V1 outright at `/`, no tran …
+    (2026-11-09, the owner; §11.4)
+dashboard (2026-11-09, the owner, "the transition doesn't need to be smooth"; §1 …
+    (2026-11-09, the owner, "the transition doesn't need to be smooth"; §11.4)
+- Chose the timeline per runner on its page over a fleet-wide one (2026-11-09, t …
+    (2026-11-09, the owner; §11.4)
+grouped by state as the mockup draws them (2026-11-09, the owner; R-BTN-3, §11.4 …
+    (2026-11-09, the owner; R-BTN-3, §11.4)
+"Workers" (B-68: runners) (2026-11-09, the owner; §11.4). - Chose the tenant scr …
+    (2026-11-09, the owner; §11.4)
+CLI's alone (2026-11-09, the owner; R-BTN-155, §11.4). - Chose `ticket.route` an …
+    (2026-11-09, the owner; R-BTN-155, §11.4)
+over session actions for them (2026-11-09, the owner; R-BTN-83, R-BTN-39, §11.4) …
+    (2026-11-09, the owner; R-BTN-83, R-BTN-39, §11.4)
+staying the CLI's and the owner route's — over a confirm dialog (2026-11-09, the …
+    (2026-11-09, the owner; R-BTN-155, §11.4)
+with `ui.state`: a terminal keeps one request (2026-11-09, the owner; R-BTN-57,  …
+    (2026-11-09, the owner; R-BTN-57, R-BTN-179, S-BTN-170; B-216 builds it)
+already made — over auto-accept alone (2026-11-09, the owner; §11.4; B-201 files …
+    (2026-11-09, the owner; §11.4; B-201 files its row)
+scoped to the dashboard (2026-11-09, the owner; §12.3, G-BTN-13). - Chose no sta …
+    (2026-11-09, the owner; §12.3, G-BTN-13)
+one-instance decision above (2026-11-09, the owner, "we don't need staging at al …
+    (2026-11-09, the owner, "we don't need staging at all"; B-216)
+alone, so the envelope's figures are shown as stated (2026-11-09, the owner; R-B …
+    (2026-11-09, the owner; R-BTN-87, §11.4; B-202 builds it)
+sees the ticket before it lands (2026-11-03, the owner, "Yes", to filing new tic …
+    (2026-11-03, the owner, "Yes", to filing new tickets in a PR before merge "now that they get ids from baton"; B-176; R-BTN-74, R-BTN-199)
+- Chose a person joining the leg's own agent session in its harness's UI, asked  …
+    (2026-11-14, the owner: "we need to remove concepts"; R-BTN-195, R-BTN-69, R-BTN-107)
+- Chose a floor and a recommendation of client versions, stated by Baton on ever …
+    (2026-11-17, the owner: "would allow runners and users interacting with the server using the CLI to update at their own pace"; R-BTN-197)
+- Chose to keep a failed leg's last output — the agent's last lines in the leg's …
+    (2026-11-17; R-BTN-131, §9.4, B-256)
+- Chose leg events — typed events Baton tells a running leg, sharing the conditi …
+    (2026-11-15, the owner: "can we notify the agent of the update and let it decide if it wants to re-read the ticket body or not?"; R-BTN-198, R-BTN-35, R-BTN-119)
+- Chose a launcher outside Baton that ranks `launch-candidates` and starts sessi …
+    (2026-11-18, the owner, "a is fine"; R-BTN-201, R-BTN-45, R-BTN-98, R-BTN-107)
+- Chose to state each guarantee separately and let the repository choose, over o …
+    ; since 2026-10-30 each is a condition
+- Chose one active claim per ticket, and per runner up to the lower of its decla …
+    Reversed 2026-10-13's one claim per runner.
+- Chose a closed world: a ticket is claimable only after a post names it, which  …
+    Reversed 2026-10-16's choice.
+- Chose one way to ask a person — a person's leg, answered by a `std:decision@1` …
+    Reversed 2026-10-15's and 2026-10-20's choices.
+- Chose, under `cooperative`, to call what Baton owns — positions, course histor …
+    Reversed 2026-10-16's and 2026-10-18's choices.
+- Chose to list B-129's `position-disagrees` only on the dashboard's Sync screen …
+    the 2026-11-01 ruling keeps position discrepancies off Needs you
+- Chose to prune a purged ticket's claims, legs and activities with R-BTN-149's  …
+    production passed the platform's daily read limit on 2026-11-14
+- Chose a ticket source made of a reader and an optional writer — `file`, `withd …
+    , so 2026-11-01's ruling stands
+- Chose a state version every write moves, liveness excepted, and a per-runner i …
+    on 2026-11-14 and 15;
+- Chose capabilities matched by name — a runner deciding for itself what the key …
+    It reverses the ontology and route-choice decisions of 2026-10-22, which the history keeps.
+- Chose a capacity on a capability, its seats stored when a leg starts for the c …
+    It replaces the seats on instances chosen 2026-10-22, which the history keeps; what it loses is
+- Chose one ticket, one PR, one merge for every standard course that writes work …
+    The owner, 2026-11-01: "Would it be possible to simplify the spec by eliminating this type of course entirely and tying every course to a ticket file in Git?"
+- Chose Baton as the one authority on a ticket's position, git facts moving a ti …
+    regression detection is retired, a disagreement being
+- Chose every statement Baton receives about the work, whoever states it, to be  …
+    `inputs.answers` is retired into the `attestations` entries
+```
+
+**From the rules and the open questions:**
+
+```text
+01-what-baton-is.md: … es no git itself (R-BTN-171). The division of labor is fixed
+    (the owner, 2026-10-22)
+01-what-baton-is.md: … by scanning branches, is not how Baton is meant to be used
+    (the owner, 2026-11-03)
+02-deployments.md: … and a staging instance would hold nothing and test nothing
+    (B-224; the owner, 2026-11-09)
+03-repositories-and-forges.md: … QLite or an export: Baton's server is trusted with them
+    (§12.8; the owner, 2026-11-01, "Drop it":
+04-tickets-syncs-board.md: … written on the `**Requires:**` line. - **The landing**
+    (B-176, the owner, 2026-11-03: "Yes" to filing new tickets in a PR)
+05-courses.md: … e server learns the leg ended as it learns every leg,
+    by the claim's end — the owner, 2026-10-22)
+07-conditions.md: … ket, queues no outbox entry and withdraws nothing for it
+    (the owner, 2026-11-01)
+07-conditions.md: … **Deliverers are runners.** No key role exists for delivery
+    (the owner, 2026-11-01, "Couriers into runners")
+08-runners.md: … 's death always leaves a line:** on SIGTERM, SIGINT, SIGHUP
+    (B-109: a closed terminal's hangup, found live 2026-10-24)
+08-runners.md: … ment holds.** The `BATON_*` names below are the only names:
+    the transition's `IR_BATON_*` aliases were removed by the release that closed B-97 (2026-10-22),
+10-checks.md: … ns from the protected default branch suffice without it
+    ("Forge checks suffice", the owner, 2026-11-01; R-BTN-183)
+12-security.md: … ver in the object (§2.1). Baton's server is trusted with it
+    (§12.8, the owner, 2026-11-01: a compromised
+12-security.md: … y-model.mdx`), is recovered by B-125's runbook, not resisted
+    (the owner, 2026-11-01, "Out of scope")
+12-security.md: … ranges says; commits carry no signature Baton requires
+    (the owner, 2026-11-01, "Remove until designed": a host-side signer
+12-security.md: … e, concluded `success` at `H` (never `neutral` or `skipped`)
+    ("Forge checks suffice", the owner, 2026-11-01)
+12-security.md: … nting, and may **tighten, and undo its own tightenings**
+    (the owner, 2026-11-01)
+15-verification.md: … able. **The report is advisory, never a merge requirement**
+    (the owner, 2026-11-06: a report costs
+16-adoption.md: … is bypassed; R-BTN-188's mark carries this past the deletion
+    (the owner, 2026-11-01, B-165's review default)
+92-open-questions.md: … estions." --- ## Open questions - **§12.8's remaining items
+    (the fifth adversarial review, 2026-10-29)
+92-open-questions.md: … er holds" would need defining per kind (requests, commits);
+    the signer is not designed, and `authorship: signed` left the specification with it (2026-11-01).
+92-open-questions.md: … job restores the npm cache the test job saved: tracked
+    in B-135 item 3 (the owner, 2026-10-29), so the deploy job restores no cache. (B-110 and the standard `review.md` running tests in a review leg are no longer open: the standard courses are written for the `cooperative` preset (R-BTN-131, 2026-10-29), and the courses that must not run branch code in a review are the deployment's.)
+```
 
 ## Review record
 

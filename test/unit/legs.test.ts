@@ -45,9 +45,9 @@ describe('§6.7, G-BTN-40: claimable again only after a sync since the last end'
     const { json: c } = await claimItem('vm-a', a.secret);
     await endClaim('vm-a', a.secret, c.claim_id, { end_reason: 'released:requested' });
     const agree = async () => withCore((o) => {
-      const k = o.claims as unknown as { candidates: (w: unknown, page: number) => { id: string }[]; worker: (id: number) => unknown;
+      const k = o.claims as unknown as { candidates: (w: unknown, page: number) => { id: string }[]; runner: (id: number) => unknown;
         item: (id: string) => unknown; gate: (w: unknown, item: unknown, leg: string, phase: string) => { ok: boolean; code?: string } };
-      const w = k.worker(b.id);
+      const w = k.runner(b.id);
       return { query: k.candidates(w, 0).map((r) => r.id), gate: k.gate(w, k.item('docs:T-1'), 'fix', 'claim') };
     });
     expect(await agree()).toEqual({ query: [], gate: { ok: false, rule: 1, code: 'awaiting-sync' } });
@@ -70,7 +70,7 @@ describe('the holder’s view and an ended claim', () => {
     expect((await advance('vm-a', w.secret, c.claim_id, { reached: 'fixed', leg: 'review' })).json.code).toBe('claim-ended');
   });
 
-  it('an advance by another worker is not-holder; a malformed one is invalid-params', async () => {
+  it('an advance by another runner is not-holder; a malformed one is invalid-params', async () => {
     const a = await register('vm-a');
     const b = await register('vm-b');
     const { json: c } = await claimItem('vm-a', a.secret);

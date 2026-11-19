@@ -9,7 +9,7 @@ export const ATTEMPTS_HOLD_AT = 3;
 
 /**
  * §6.10: whether an end counts as a failed attempt. A reap by the alarm for silence, any
- * `cannot-finish`, `lease-lost` once per distinct worker (`leaseLostBefore`: this worker
+ * `cannot-finish`, `lease-lost` once per distinct runner (`leaseLostBefore`: this runner
  * already has a counted lease-lost on the item since the last hold-lift) and a run the claim's
  * `deadline_s` took back (`leg-timeout`, R-BTN-90 — the ask of R-BTN-195 ends this way when
  * nobody joins). Nothing else — not an owner's force-reap, the unacknowledged-release reap, a

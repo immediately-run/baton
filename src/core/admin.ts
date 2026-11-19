@@ -3,7 +3,7 @@
 // either host (BATON_SPEC §10.6 R-BTN-57/-58, R-BTN-66/-67, R-BTN-16). Every limit the owners
 // need to hold against agents lives here, in SQLite, set by an administrator's or an owner's key:
 // grants, owners, owner bars and the settings — never read from a board post. Administrators are
-// BATON_ADMIN_KEYS alone. One key holds one role: administrator, owner, worker, probe, courier or
+// BATON_ADMIN_KEYS alone. One key holds one role: administrator, owner, runner, probe, courier or
 // sync key. Each act is an `admin` event; a bar change also dispatches the repository's sync.
 import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
@@ -17,7 +17,7 @@ import { checkRegistration, retiredPath, seedEntries, tierPosition, type Registr
 import { graphOf, resolveLeg, type Graph } from './graph';
 import { humanOnlyList, type ApproverEntry, type ApproverFacts, type Policies } from './policy';
 import type { Config, Store } from './ports';
-import { sha256Hex } from './workerApi';
+import { sha256Hex } from './runnerApi';
 
 /** A one-time link lives 5 minutes; a session 12 hours (R-BTN-57). */
 export const LOGIN_LINK_MS = 5 * 60_000;
@@ -456,9 +456,9 @@ export class Admin {
           this.exec('UPDATE tickets SET tier_position = ? WHERE id = ?', tierPosition(tiers, t.tier), t.id);
         }
         // A grant's max_tier was a position in the old ladder: kept by name where the new one has it.
-        for (const g of this.rows<{ credential_id: string; max_tier: number | null }>('SELECT credential_id, max_tier FROM worker_grants WHERE repository_id = ? AND max_tier IS NOT NULL', id)) {
+        for (const g of this.rows<{ credential_id: string; max_tier: number | null }>('SELECT credential_id, max_tier FROM runner_grants WHERE repository_id = ? AND max_tier IS NOT NULL', id)) {
           const name = old[g.max_tier!];
-          this.exec('UPDATE worker_grants SET max_tier = ? WHERE credential_id = ? AND repository_id = ?', name && tiers.includes(name) ? tiers.indexOf(name) : 0, g.credential_id, id);
+          this.exec('UPDATE runner_grants SET max_tier = ? WHERE credential_id = ? AND repository_id = ?', name && tiers.includes(name) ? tiers.indexOf(name) : 0, g.credential_id, id);
         }
       }
       for (const fp of remove) this.exec('UPDATE sync_keys SET revoked_at = ? WHERE fingerprint = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fp, id);
@@ -498,7 +498,7 @@ export class Admin {
                  WHERE id = ? AND retired_at IS NULL`, now, retiredPath(id), JSON.stringify(former), id);
       // R-BTN-93, R-BTN-58: its sync and mirror keys and its runner grants.
       this.exec('UPDATE sync_keys SET revoked_at = ? WHERE repository_id = ? AND revoked_at IS NULL', now, id);
-      this.exec('UPDATE worker_grants SET revoked_at = ? WHERE repository_id = ? AND revoked_at IS NULL', now, id);
+      this.exec('UPDATE runner_grants SET revoked_at = ? WHERE repository_id = ? AND revoked_at IS NULL', now, id);
       // R-BTN-19: each active claim on its tickets, as an administrator's force-reap reaps one.
       this.c.reapForRetire?.(id, actor);
       // B-234's store (R-BTN-160): the reaps above have ended its runs, so their open
@@ -584,8 +584,8 @@ export class Admin {
     return { ok: true };
   }
 
-  /** `POST /v1/admin/keys/{fingerprint}/revoke`: any key, at once — a worker, probe or courier
-   *  credential, a sync key, or an owner key on every repository it owns. A worker's grants go
+  /** `POST /v1/admin/keys/{fingerprint}/revoke`: any key, at once — a runner, probe or courier
+   *  credential, a sync key, or an owner key on every repository it owns. A runner's grants go
    *  with it, so its next call is refused. An administrator key is revoked by editing the secret.
    *  R-BTN-188 (B-145): refused while an approver list or a floor's `remove_by` the key alone
    *  satisfies would be left with no live credential. */
@@ -593,7 +593,7 @@ export class Admin {
     // A key's fingerprint, or a bearer-token credential's id while tokens serve (R3-1239).
     const fingerprint = KEY_FINGERPRINT.test(raw) || TOKEN_CREDENTIAL.test(raw) ? raw : bad('fingerprint', 'must be a key fingerprint, SHA256:…, or a token credential’s id');
     // The pool's reserved credential has no key to revoke (R-BTN-103).
-    if (fingerprint === 'pool') bad('fingerprint', 'pool is reserved for worker couriers’ pool copies, not a key');
+    if (fingerprint === 'pool') bad('fingerprint', 'pool is reserved for runner couriers’ pool copies, not a key');
     // Judged over the live repositories the key owns only (R-BTN-47): a retired repository's
     // policy blocks no revocation — its rows stay, read-only, and no route can change it again.
     for (const { repository_id } of this.rows<{ repository_id: string }>(
@@ -611,7 +611,7 @@ export class Admin {
       // ended — becomes the administrator's revoke too, so no owner can bring it back (R-BTN-80).
       this.exec(`UPDATE credentials SET revoked_by = ? WHERE id = ? AND revoked_at IS NOT NULL AND (revoked_by IS NULL OR revoked_by NOT LIKE 'admin:%')`, actor, fingerprint);
       changed += this.changed();
-      this.exec('UPDATE worker_grants SET revoked_at = ? WHERE credential_id = ? AND revoked_at IS NULL', now, fingerprint);
+      this.exec('UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ? AND revoked_at IS NULL', now, fingerprint);
       this.exec('UPDATE sync_keys SET revoked_at = ? WHERE fingerprint = ? AND revoked_at IS NULL', now, fingerprint);
       changed += this.changed();
       this.exec('UPDATE repository_owners SET removed_at = coalesce(removed_at, ?), revoked_at = ? WHERE fingerprint = ? AND revoked_at IS NULL', now, now, fingerprint);
@@ -672,7 +672,7 @@ export class Admin {
 
   // ── grants (R-BTN-58) ───────────────────────────────────────────────────────────────────
 
-  /** `POST /v1/owner/{repository}/grants` and `POST /v1/admin/grants`: grant a worker key access to
+  /** `POST /v1/owner/{repository}/grants` and `POST /v1/admin/grants`: grant a runner key access to
    *  one repository, with the capabilities it may use there and its `max_tier`. The first grant of
    *  an unknown key names its hostname, unique among keys in force; a later one naming another is
    *  `conflict` — only an administrator changes it. `human-operator` is granted like any capability
@@ -683,7 +683,7 @@ export class Admin {
     only(b, by === 'admin' ? ['repository', 'public_key', 'hostname', 'label', 'capabilities', 'max_tier', 'max_claims'] : ['public_key', 'hostname', 'label', 'capabilities', 'max_tier', 'max_claims'], 'body');
     const repo = this.c.registry.get(repository);
     if (!repo || repo.retired_at != null) throw new BatonError('not-found', `${repository} is not registered`);
-    const key = await this.parsePersonOrWorkerKey(b.public_key, 'public_key');
+    const key = await this.parsePersonOrRunnerKey(b.public_key, 'public_key');
     const hostname = b.hostname === undefined ? null : typeof b.hostname === 'string' && HOSTNAME.test(b.hostname) ? b.hostname : bad('hostname', 'must be a hostname');
     const label = b.label === undefined ? null : typeof b.label === 'string' && LABEL.test(b.label) ? b.label : bad('label', 'must be a short label');
     // B-104 (R-BTN-121/174): a grant names capabilities and may name a typed holding —
@@ -705,15 +705,15 @@ export class Admin {
     this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), by, await this.breakGlassSet());
     return this.c.store.transaction(() => {
       const role = this.roleOf(key.fingerprint, admins);
-      if (role && role !== 'worker') throw new BatonError('conflict', `this key is already a ${role} key (R-BTN-57: one role per key)`);
+      if (role && role !== 'runner') throw new BatonError('conflict', `this key is already a ${role} key (R-BTN-57: one role per key)`);
       const cred = this.rows<{ hostname: string; revoked_at: number | null }>('SELECT hostname, revoked_at FROM credentials WHERE id = ?', key.fingerprint)[0];
       if (cred?.revoked_at != null) throw new BatonError('conflict', 'this key was revoked; the machine needs a new key');
       if (!cred) {
         if (!hostname) bad('hostname', 'the first grant of a key names its hostname');
-        if (this.rows(`SELECT 1 FROM credentials WHERE hostname = ? AND revoked_at IS NULL AND kind IN ('worker','token')`, hostname).length) {
+        if (this.rows(`SELECT 1 FROM credentials WHERE hostname = ? AND revoked_at IS NULL AND kind IN ('runner','token')`, hostname).length) {
           throw new BatonError('conflict', `${hostname} already has a key in force`);
         }
-        this.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by, label) VALUES (?, ?, '[]', 'worker', ?, ?, ?)`,
+        this.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by, label) VALUES (?, ?, '[]', 'runner', ?, ?, ?)`,
           key.fingerprint, hostname, key.line, actor, label);
       } else if (this.rows(`SELECT 1 FROM credentials WHERE id = ? AND created_by = 'seed'`, key.fingerprint).length) {
         // A BATON_KEYS key reaches every repository until grants bind it; binding it would cut it
@@ -728,9 +728,9 @@ export class Admin {
         if (this.rows(`SELECT 1 FROM credentials WHERE hostname = ? AND revoked_at IS NULL AND id != ?`, hostname, key.fingerprint).length) throw new BatonError('conflict', `${hostname} already has a key in force`);
         this.exec('UPDATE credentials SET hostname = ? WHERE id = ?', hostname, key.fingerprint);
       }
-      const prior = this.rows<{ capabilities: string; revoked_at: number | null }>('SELECT capabilities, revoked_at FROM worker_grants WHERE credential_id = ? AND repository_id = ?', key.fingerprint, repository)[0];
+      const prior = this.rows<{ capabilities: string; revoked_at: number | null }>('SELECT capabilities, revoked_at FROM runner_grants WHERE credential_id = ? AND repository_id = ?', key.fingerprint, repository)[0];
       const caps = expanded;
-      this.exec(`INSERT INTO worker_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      this.exec(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at) VALUES (?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (credential_id, repository_id) DO UPDATE SET capabilities = excluded.capabilities, max_tier = excluded.max_tier,
                    max_claims = excluded.max_claims, granted_by = excluded.granted_by, granted_at = excluded.granted_at, revoked_at = NULL`,
         key.fingerprint, repository, JSON.stringify(caps), maxTier, maxClaims, actor, this.c.now());
@@ -746,7 +746,7 @@ export class Admin {
     // B-145 item 12: revoking a runner key is an `approvers.members` action too.
     this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlassSet());
     return this.c.store.transaction(() => {
-      this.exec('UPDATE worker_grants SET revoked_at = ? WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fingerprint, repository);
+      this.exec('UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fingerprint, repository);
       if (!this.changed()) throw new BatonError('not-found', `no grant of ${fingerprint} on ${repository}`);
       this.event(actor, { act: 'grant-revoked', key: fingerprint, repository }, repository);
       this.c.fleetChanged?.();
@@ -943,7 +943,7 @@ export class Admin {
 
   /** `POST /v1/owner/{repository}/bars`: an owner bar `{course, tag, legs?, applies, starts_at?,
    *  ends_at?, release_holders?, reason}`; named legs need a named course. */
-  // @model setOwnerBar sha256:0bbda5ac791b
+  // @model setOwnerBar sha256:82527aa95b44
   setBar(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
@@ -981,7 +981,7 @@ export class Admin {
   }
 
   /** `POST /v1/owner/{repository}/bars/{id}/lift`. */
-  // @model liftOwnerBars sha256:74ee4c9563d3
+  // @model liftOwnerBars sha256:67a7770a9c79
   liftBar(actor: string, repository: string, id: number) {
     return this.c.store.transaction(() => {
       this.exec('UPDATE owner_bars SET lifted_at = ? WHERE id = ? AND repository_id = ? AND lifted_at IS NULL', this.c.now(), id, repository);
@@ -994,7 +994,7 @@ export class Admin {
 
   /** `PUT /v1/owner/{repository}/settings`: `required_bars`, `retry`, `transcript_repos`,
    *  `unblocked_trigger`, `remind_after` (seconds, R-BTN-80), `scope_policy` and
-   *  `worker_pushers` (B-134), `code_repos` (R-BTN-140, B-182), `pushers` (R-BTN-139, B-182) and
+   *  `runner_pushers` (B-134), `code_repos` (R-BTN-140, B-182), `pushers` (R-BTN-139, B-182) and
    *  `require_signed_control` (B-127) — each given replaces that setting whole.
    *  `required_independence` is gone (B-168): `no_chain_from` in the course file is the one
    *  statement of it (R-BTN-106). R-BTN-188's knob table: every LOOSENING of an R-BTN-66 setting
@@ -1007,7 +1007,7 @@ export class Admin {
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'scope_policy', 'worker_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'scope_policy', 'runner_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     // R-BTN-114: a check's conclusion decides what branch protection sees, so the map is the
     // owners', not an agent's — refused here, before the approver question, whichever it changes.
@@ -1069,13 +1069,13 @@ export class Admin {
       if (b.scope_policy !== 'report' && b.scope_policy !== 'hold') bad('scope_policy', "must be 'report' or 'hold'");
       sets.push(['scope_policy', b.scope_policy as string]);
     }
-    if (b.worker_pushers !== undefined) {
+    if (b.runner_pushers !== undefined) {
       // A forge login, or an app bot's `<app>[bot]` — the very identity per-claim push tokens
       // (B-131) push as and the webhook side bounds the same way (its `MAX_PUSHER`).
-      const w = b.worker_pushers === null ? [] : Array.isArray(b.worker_pushers) && b.worker_pushers.length <= 50
-        && b.worker_pushers.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 100 && /^[A-Za-z0-9-]+(\[bot\])?$/.test(x))
-          ? [...new Set(b.worker_pushers as string[])] : bad('worker_pushers', 'must be null or a list of at most 50 forge logins');
-      sets.push(['worker_pushers', JSON.stringify(w)]);
+      const w = b.runner_pushers === null ? [] : Array.isArray(b.runner_pushers) && b.runner_pushers.length <= 50
+        && b.runner_pushers.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 100 && /^[A-Za-z0-9-]+(\[bot\])?$/.test(x))
+          ? [...new Set(b.runner_pushers as string[])] : bad('runner_pushers', 'must be null or a list of at most 50 forge logins');
+      sets.push(['runner_pushers', JSON.stringify(w)]);
     }
     if (b.checks !== undefined) sets.push(['checks', JSON.stringify(this.checkConclusions(repository, b.checks))]);
     // R-BTN-114: a `checks` change that TIGHTENS — a course added, a station moved away from
@@ -1151,9 +1151,9 @@ export class Admin {
     // cross-check that names fewer pushers. Naming more, or holding, tightens.
     const policy = sets.find(([k]) => k === 'scope_policy');
     if (policy && policy[1] === 'report' && this.rows<{ v: string }>('SELECT scope_policy AS v FROM repositories WHERE id = ?', repository)[0]?.v === 'hold') return true;
-    const pushers = sets.find(([k]) => k === 'worker_pushers');
+    const pushers = sets.find(([k]) => k === 'runner_pushers');
     if (pushers) {
-      const was = JSON.parse(this.rows<{ v: string | null }>('SELECT worker_pushers AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? '[]') as string[];
+      const was = JSON.parse(this.rows<{ v: string | null }>('SELECT runner_pushers AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? '[]') as string[];
       const next = JSON.parse(pushers[1]!) as string[];
       // The cross-check matches logins case-blind, so a case-only rewrite names the same
       // pushers and loosens nothing; only a login leaving the list does.
@@ -1313,7 +1313,7 @@ export class Admin {
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
-      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, scope_policy, worker_pushers, pushers, require_signed_control FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
+      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, scope_policy, runner_pushers, pushers, require_signed_control FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
         ...s,
         // B-182: the home's code repositories beside the column settings — its own table's rows,
         // as the observation hands them to the sync, so the CLI and the dashboard read one shape.
@@ -1329,7 +1329,7 @@ export class Admin {
   grants() {
     // max_tier as its name in the repository's ladder (stored as a position, R-BTN-66).
     return this.rows<{ credential_id: string; hostname: string | null; label: string | null; repository_id: string; capabilities: string; max_tier: number | null; max_claims: number; granted_by: string; granted_at: number }>(`SELECT g.credential_id, c.hostname, c.label, g.repository_id, g.capabilities, g.max_tier, g.max_claims, g.granted_by, g.granted_at
-                       FROM worker_grants g JOIN credentials c ON c.id = g.credential_id WHERE g.revoked_at IS NULL ORDER BY g.repository_id, c.hostname`)
+                       FROM runner_grants g JOIN credentials c ON c.id = g.credential_id WHERE g.revoked_at IS NULL ORDER BY g.repository_id, c.hostname`)
       .map((g) => ({ ...g, max_tier: g.max_tier == null ? null : this.c.registry.get(g.repository_id)?.tiers[g.max_tier] ?? null }));
   }
 
@@ -1341,16 +1341,16 @@ export class Admin {
     return { fingerprint: key.fingerprint, line: lineOf(key, v as string) };
   }
 
-  /** An owner's or a worker's key: an OpenSSH public key, or an API key's public line (R-BTN-159).
+  /** An owner's or a runner's key: an OpenSSH public key, or an API key's public line (R-BTN-159).
    *  Probe, courier and sync keys stay SSH keys (parseKey). */
-  private async parsePersonOrWorkerKey(v: unknown, field: string): Promise<{ fingerprint: string; line: string }> {
+  private async parsePersonOrRunnerKey(v: unknown, field: string): Promise<{ fingerprint: string; line: string }> {
     const api = typeof v === 'string' ? parseApiKeyLine(v) : null;
     return api ? { fingerprint: api.fingerprint, line: api.line } : this.parseKey(v, field);
   }
 
   private async ownerKeys(v: unknown, field: string): Promise<{ fingerprint: string; line: string }[]> {
     if (!Array.isArray(v) || v.length > OWNERS_MAX) bad(field, `must be a list of at most ${OWNERS_MAX} public keys`);
-    const keys = await Promise.all((v as unknown[]).map((k, i) => this.parsePersonOrWorkerKey(k, `${field}[${i}]`)));
+    const keys = await Promise.all((v as unknown[]).map((k, i) => this.parsePersonOrRunnerKey(k, `${field}[${i}]`)));
     if (new Set(keys.map((k) => k.fingerprint)).size !== keys.length) bad(field, 'names a key twice');
     return keys;
   }
