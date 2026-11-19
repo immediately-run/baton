@@ -2,37 +2,23 @@
 title: "7. Conditions"
 description: "A leg that cannot go on alone (it needs a person, it hit an error or it has something to report) raises a condition."
 ---
-## 7. Conditions *(proposal)*
+## 7. Conditions *(partly built)*
 
 A leg that cannot go on alone (it needs a person, it hit an error or it has something to report)
-**raises a condition**. A **binding** chooses the course that handles it, and the handler is an
-ordinary child ticket. A `suspend` condition's leg resumes with the **restart** the handler
-chooses. A condition nothing handles reaches the **debugger** (**Needs you**). Baton raises
-conditions of its own the same way. The same section defines the edges that start or stop other
-work (**calls**, **retries**, **deadlines** and **cancellation**), the **outbox**, through
-which runners make the git writes Baton intends, and **leg events**, which go the other way:
-what Baton tells a running leg.
+**raises a condition**. Baton records it and lists the open ones under **Needs you**, and raises
+conditions of its own the same way. This section also defines **retries** and the **deadline** on
+a run.
 
-Limits that hold throughout:
-
-- Core reads no course meaning (R-BTN-50) and runs no repository code (R-BTN-98).
-- Baton writes no git, sends no mail and calls no service but a forge's workflow dispatch
-  (R-BTN-94). Every git write and every check run Baton intends goes through the outbox, which
-  runners deliver (R-BTN-171).
-- Baton queues nothing for people. A course waits on a person one way, by a person's leg
-  (R-BTN-116): a `hitl` condition's handler course asks through one (R-BTN-169), and Baton's own
-  conditions are answered on their resolve page, which a delivery runner reads from Baton's own
-  list (R-BTN-163). A leg asks a person into its session by `interact`, which nothing waits on
-  (R-BTN-195). No ticket file, outbox entry or deliverer stands between Baton and a person.
-- A ticket stays sequential (R-BTN-86). Everything below that runs in parallel is a child ticket.
+Not built, and specified in the [conditions proposal](../proposals/conditions.md): bindings and
+handler tickets, the suspend wait and its restart, calls, cancellation, the outbox, the standard
+handler courses and the `ticket.changed` leg event.
 
 ### 7.1 Raising a condition
 
 - **R-BTN-160 (conditions: typed, declared, raised by any leg).**
   - **Type.** A condition is a typed event that a running leg raises. Its type matches
     `^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$` and is at most 64 characters long. The dots form a
-    hierarchy: `hitl.spec-contradiction` is a `hitl`, so a declaration or binding for `hitl`
-    covers it.
+    hierarchy: `hitl.spec-contradiction` is a `hitl`, so a declaration for `hitl` covers it.
   - **Standard types**:
 
     | Type | Disposition | Raised by |
@@ -40,78 +26,67 @@ Limits that hold throughout:
     | `hitl` | `suspend` | any leg |
     | `warning` | `notify` | any leg |
     | `interact` | `notify` | a leg (R-BTN-195) |
-    | `error` | `interrupt` | any leg; core's classes are `error.transient`, `error.capability`, `error.spec`, `error.contract-output`, `error.contract-input` |
+    | `error` | `interrupt` | any leg; core's classes are `error.transient`, `error.capability`, `error.spec`, `error.contract-output`, `error.contract-input` and `error.needs-person` (R-BTN-195) |
     | `baton` | per sub (R-BTN-163) | core only |
 
-    Any leg may raise a standard type, or a subtype of one, without declaring it — except
-    `baton` and `baton.*`, which are core's alone: the validator refuses a course declaring them
-    and Baton refuses a leg's raise of them (`invalid-params`). A leg may also narrow what it may
-    raise: `"conditions": []` allows none and `"conditions": ["warning"]` allows only warnings.
+    Any leg may raise a standard type, or a subtype of one, without declaring it. `baton` and
+    `baton.*` are core's alone: the validator refuses a course declaring them and Baton refuses a
+    leg's raise of them (`invalid-params`). A leg may narrow what it may raise: `"conditions": []`
+    allows none and `"conditions": ["warning"]` allows only warnings.
   - **Declaring.** A course declares its own types in the course file (R-BTN-69):
     `"conditions": {<type>: {"disposition": "interrupt" | "suspend" | "notify",
     "restarts": {<id>: <description>}, "default": <id>, "wait_s": <n>, "retryable": <bool>, "description":
-    …}}`. Only `disposition` is required. A restart id matches §12.3's decision-id pattern. A
-    declared subtype of a standard type inherits that type's disposition unless it states its
-    own.
-  - **Error types are `interrupt` conditions.** The course file has no `error_types`; the
-    validator refuses it, along with `max_duration`, `max_attempts_s` and `max_ready_s`
-    (R-BTN-69).
+    …}}`. Only `disposition` is required. A restart id matches §12.3's decision-id pattern, and
+    `wait_s` is 0 to 900. A subtype inherits the disposition of its nearest declared or standard
+    ancestor unless it states its own.
+  - **Error types are `interrupt` conditions.**
     - `retryable` decides whether the retry policy retries the type, for every leg; no policy
       overrides it (R-BTN-122).
-    - A course type's class is `transient` when retryable and `spec` otherwise.
+    - A course type's class is `transient` when retryable and `spec` otherwise. A core class is
+      its own. `error.needs-person` is `spec`.
     - An exception the script does not type is `error.transient`.
-    - `LegError(type, message)` raises an `interrupt` type. The exception is a `LegError` naming a
-      `prerequisite`, which ends the claim `released:blocked` (R-BTN-126).
-    - The standard courses declare `error.no-answer` (`interrupt`, `retryable: false`).
-    - `error.needs-person` (`interrupt`, `retryable: false`) is standard: an autonomous leg raises
-      it when it cannot go on without a person (R-BTN-195).
   - **Signature.** A course's signature (R-BTN-111) lists the conditions its legs may raise: its
     own types and, unless a leg narrows them, the standard ones. `baton course test` prints the
     signature.
-  - **Raising.**
-    - A leg script calls `ctx.raise(type, {subject, body?, restarts?, default?, wait_s?,
-      severity?})` from `@immediately-run/baton/leg` (R-BTN-133).
-    - A session in a leg calls `baton leg raise <type> --subject … [--body <file>] [--restarts
-      <json>] [--default <id>] [--wait <s>] [--severity …]` on the local channel (R-BTN-106).
-    - The runner checks a raise as it checks a move:
-      - the type is standard or declared, and allowed to the leg;
-      - `restarts` are the declared ones or a subset of them (a standard type with none declared
-        takes the raise's own);
-      - `default` is one of them;
-      - `severity` is valid (R-BTN-125).
-    - A raise that fails the check is answered on the channel with the reason.
-  - **Dispositions.** Condition, handler ticket, restart and binding are defined above and in
-    R-BTN-161:
+  - **Raising.** A session in a leg calls `baton leg raise <type> --subject … [--body <file>]
+    [--restarts <json>] [--default <id>] [--severity …]` on the local channel (R-BTN-106). The
+    runner checks a raise as it checks a move, and answers one that fails on the channel with the
+    reason:
+    - the type is well formed, standard or declared, and allowed to the leg;
+    - the leg's `autonomous` and the `interact` checks pass (R-BTN-195);
+    - `restarts` map ids to descriptions, and `default` is one of them;
+    - `severity` is valid (R-BTN-125).
+  - **Dispositions.**
 
-    | Disposition | Bound | Unbound |
-    |---|---|---|
-    | `interrupt` | The leg ends `released:cannot-finish:<class>` with `error: {type, message}`, `message` free text under §12.3. The retry policy routes the ticket (R-BTN-122). A handler ticket is filed as well, and nothing waits for it. | Same, with no handler ticket |
-    | `suspend` | The leg waits for the handler's restart (R-BTN-162) | The debugger is the handler (R-BTN-163) |
-    | `notify` | A handler ticket is filed, the raise returns at once and the leg goes on | The raise is only recorded |
+    | Disposition | What follows the raise |
+    |---|---|
+    | `interrupt` | The leg ends `released:cannot-finish:<class>` with `error: {type, message}`, `message` free text under §12.3. The retry policy routes the ticket (R-BTN-122). |
+    | `suspend` | The raise is recorded and returns; the condition stays open under Needs you (R-BTN-163), and nothing waits on it |
+    | `notify` | The raise is recorded and returns at once, and the leg goes on |
 
   - **Reported before it takes effect.** The runner reports each raise with `POST
-    /v1/runner/claims/{id}/conditions` and the body `{type, disposition, handler?, restarts,
-    default?, severity?, url?}`.
-    - The body holds filter fields only (R-BTN-33), never the subject or the body. `url` is sent
-      only for an unbound `suspend` and points to where git holds the question (the leg's
-      evidence or its hand-off), under R-BTN-92's link rule. An `interact` condition's `url` is
-      Baton's own (R-BTN-195).
-    - Baton answers with a `condition_id` and, when `handler` names a course, the handler's id
-      `handler_id` (below), and stores the `conditions` row; the runner then writes the handler
-      ticket under that id. It records an activity of kind `condition` on the leg run and a
-      `condition` event in the ticket's history (R-BTN-81).
+    /v1/runner/claims/{id}/conditions` and the body `{type, disposition, restarts, default?,
+    severity?, url?}`.
+    - The body holds filter fields only (R-BTN-33), never the subject or the body, which stay
+      with the runner.
+    - Baton takes the disposition from the standard table and the course's declarations, never
+      from the report. It refuses a raise from a claim running no leg (`invalid-params`).
+    - A `suspend` condition's `url` points to where git holds the question and is kept only under
+      R-BTN-92's link rule. An `interact` condition's `url` is Baton's own (R-BTN-195). No other
+      condition carries one.
+    - Baton answers with a `condition_id`, stores the `conditions` row and records a `condition`
+      event in the ticket's history (R-BTN-81).
     - A claim may hold at most 20 open conditions, and a ticket may raise at most 200 a day.
       Past either limit the request is refused with `quota`.
-    - A raise costs two writes and a settlement one (§2's write budget).
-  - **Closing.** A condition is open until its outcome is settled:
+    - A raise costs two writes (§2's write budget).
+  - **Closing.** A condition is open until it closes:
 
     | Condition | Closes when |
     |---|---|
-    | `interrupt` | it is raised, or, if bound, when its handler ticket closes |
-    | unbound leg-raised `notify` | it is raised (outcome `recorded`) |
+    | `interrupt` | it is raised |
+    | leg-raised `notify` | it is raised (outcome `recorded`) |
     | `interact` | its run ends, or the run raises `interact` again (R-BTN-195) |
-    | bound `notify` | its handler ticket closes |
-    | `suspend` | its handler ticket closes `done` or `withdrawn`, or an owner resolves it (R-BTN-163) |
+    | `suspend` | its repository is retired (R-BTN-47) |
     | core `baton.<sub>` | the cause the owning rule names ends |
     | core `baton.retries`, `baton.contract` or `baton.stalled` | per R-BTN-163 |
 
@@ -122,265 +97,104 @@ Limits that hold throughout:
     - A leg sets it on the raise.
     - A person leg's question may carry `severity` (R-BTN-116), which its Needs-you entry takes.
     - Core conditions are `normal`, except `baton.contract`, which is `high`.
-  - **What it does.** Severity is data for the handler course and the order of the debugger's
-    list (R-BTN-163). It routes nothing and gates nothing.
+  - **What it does.** Severity is data for the order of the Needs-you list (R-BTN-163). It routes
+    nothing and gates nothing.
 - **R-BTN-195 (an interaction request asks a person into the leg's session).** A leg that wants
   a person raises `interact`; the person joins the leg's agent session in its harness's own UI,
   and everything they and the agent say passes there, never through Baton.
   - **Autonomous legs.** A leg declared `"autonomous": true` (R-BTN-69) never asks for a person:
-    it may raise no `interact` and no `suspend` type, `hitl` and its subtypes included, and an
-    `error` it raises is routed by its retry policy, never by a `"replaces": "retry"` binding
-    (R-BTN-122). The validator refuses `autonomous` beside a `conditions` list naming any of
-    them. When it cannot go on without a person, it raises `error.needs-person` (R-BTN-160), its
-    trace in the leg log (R-BTN-128). The executor's brief carries the flag as a hint
+    it may raise no `interact` and no `suspend` type, `hitl` and its subtypes included. The
+    validator refuses `autonomous` beside a `conditions` list naming any of them, and on a person
+    leg. When the leg cannot go on without a person, it raises `error.needs-person` (R-BTN-160),
+    its trace in the leg log (R-BTN-128). The executor's brief carries the flag as a hint
     (R-BTN-107).
-  - **The raise.** `interact` is checked as every raise is (R-BTN-160), and is refused on the
-    channel with the reason when the leg is autonomous, has no `deadline_s` (R-BTN-167), or its run
-    has no session link Baton holds (R-BTN-113). Baton sets the condition's `url` to that link,
-    `claim_legs.session_url`, and ignores any the runner sends. A run holds one open `interact`
-    at a time: a new raise closes the open one (outcome `superseded`). The subject and body the leg supplies stay
-    with the runner (R-BTN-33).
-  - **Delivery.** No binding applies (R-BTN-161) and no handler ticket is filed. The condition
-    is open until it closes (R-BTN-160), listed on Needs you with its link (R-BTN-163), and a delivery
-    runner sends it from Baton's list (R-BTN-163).
+  - **The raise.** `interact` is refused on the channel with the reason when the leg is
+    autonomous, has no `deadline_s` (R-BTN-167), or its run has no session link Baton holds
+    (R-BTN-113). Baton sets the condition's `url` to that link, `claim_legs.session_url`, and
+    ignores any the runner sends. A run holds one open `interact` at a time: a new raise closes
+    the open one (outcome `superseded`).
+  - **Delivery.** No handler ticket is filed. The condition is listed under Needs you with its
+    link until it closes, and a delivery runner sends it from Baton's list (R-BTN-163).
   - **Baton tracks nothing of the interaction itself.** The raise returns at once and the leg
     goes on. Baton does not learn when the person joins, answers or leaves. The person may close
     the harness's UI at any time; the leg runs on, and may raise `interact` again later in the
-    same run, which a delivery runner sends as a new request. A refresh (R-BTN-123) starts a new session, whose link
-    the next heartbeat reports, and ends the person's conversation in the old one.
+    same run. A refresh (R-BTN-123) starts a new session, whose link the next heartbeat reports,
+    and ends the person's conversation in the old one.
   - **The leg ends by its result.** A joinable session does not exit when its agent is done:
     the leg ends when the result is posted on its channel (R-BTN-106), and the runner then stops
-    the session (R-BTN-107), a person in it or not. At the run's `deadline_s` it ends as a failed
+    the session (R-BTN-107), a person in it or not. At the run's deadline it ends as a failed
     attempt (R-BTN-90).
+
 ### 7.2 Handlers
 
-- **R-BTN-161 (bindings choose a handler course; the handler is a ticket).**
-  - **Binding.** A binding maps a type prefix to a course id, for example
-    `"conditions": {"hitl": "ask", "warning": "announce"}`; for an `error` type the value may be `{"course":
-    <id>, "replaces": "retry"}` (R-BTN-122). It is written in one of two scopes:
-    - the repository's scope, in `.baton/baton.json`;
-    - a ticket's scope, in its file (`conditions:`, posted by the ticket source as
-      `tickets[].conditions`). A ticket's binding applies to that ticket and to every ticket
-      below it.
-  - **Resolution.**
-    - The runner resolves a raise from the verified home tree at the claim's commit (R-BTN-133).
-    - It walks scope by scope from the innermost: the raising ticket, its parent and on to the
-      root, then the repository.
-    - Within a scope the longest matching prefix wins, and the first scope with a match wins.
-    - No match leaves the condition **unhandled** (R-BTN-163).
-    - The resolved course and its scope are written into the handler ticket and the activity.
-      `baton leg why` and `baton course test --bindings` print, for each type a course may
-      raise, the course it resolves to and the scope that supplied it.
-  - **Who may bind.** Anyone who can push may bind (R-BTN-66). Only default-branch code runs
-    (R-BTN-143), so a binding on an unmerged branch binds nothing. No owner setting gates a
-    binding. A binding of `interact` is ignored, as `interact` is delivered from Baton's list
-    (R-BTN-195), and so is a binding of `baton` or `baton.*`: Baton's own conditions are delivered
-    from Baton's list, never through a ticket (R-BTN-163).
-  - **The handler ticket.**
-    - The runner writes the handler ticket to the ticket source first, through its `file(ticket)`
-      export (R-BTN-74; the markdown source writes and pushes `<items>/<local id>.md`), its id one
-      Baton itself names — the raising ticket's id and its own count of conditions raised, never a
-      scan (R-BTN-131). It is written before the raise returns or the leg ends; on a source with
-      no `file`, the raise fails, naming the export. Under the policy's `tickets.created: proposed`
-      (R-BTN-188) the handler ticket is proposed, not filed: the runner writes it on
-      `baton/proposed/<ticket>`, and it is not claimable until it lands with a `std:approval@1`
-      (R-BTN-180).
-    - Its id is the raising ticket's local id, then `.c`, then Baton's count of conditions raised on
-      that ticket so far (`R3-1205.c3`), returned as `handler_id` by the raise's report. When that
-      would break the ticket-id rule's 64 characters, the id is `c<condition_id>`. Ids ending
-      `.c<n>` or of the form `c<n>` are reserved: the markdown source skips a file carrying one
-      without a `handles` block, with a sync warning.
-    - Its frontmatter names `course` (the resolved course), `parent` (the raising ticket),
-      `handles: {type, disposition, restarts, default?, severity?, wait_s?, condition_id}` and
-      `raised_by: {leg, run}`. Its body is the subject and body the leg supplied.
-    - It is a child (R-BTN-86), so R-BTN-149's four-generation bound applies. From then on it is
-      an ordinary ticket.
-  - **A handler course's contract.**
-    - Its input (R-BTN-111) is a **`std:condition@1`**: `{type, disposition, restarts, default?,
-      severity?, raised_by: {ticket, leg?, run?}, question: <std:git.file@1>}`, `question` the
-      handler file.
-    - A course bound to a `suspend` type, or to an `interrupt` type with `"replaces": "retry"`
-      (R-BTN-122), **asks through a person's leg** (R-BTN-116): every path of its graph from
-      `start` to an end passes a person leg, or that leg's expiry reaching an end station (the
-      `ask` shape), the course's `cancel` leg not counted (R-BTN-69); `baton course test` refuses the binding otherwise. The
-      person leg's options are the condition's `restarts` (R-BTN-116), and the restart the raiser
-      resumes with is the applied answer's `option` (R-BTN-162). The standard `ask` course is the
-      model (R-BTN-169).
-    - What a handler of a `notify` type, or of an `interrupt` type not bound with `"replaces":
-      "retry"` (R-BTN-122), produces is not read.
-  - **Delivery runners.** Reaching a person is a runner with a capability, not a key role. A
-    handler course declares the capability types its delivery legs need (R-BTN-121), such as
-    `channel:push`, or `channel:email` with `credential:SMTP_URL`. Core names none of them. A
-    runner that only delivers has a key granted, with its tags barred, for delivery courses alone
-    (R-BTN-60, R-BTN-66).
+- **R-BTN-161 (bindings choose a handler course; the handler is a ticket).** Not built. No binding
+  applies and no handler ticket is filed, so every leg-raised condition is unhandled (R-BTN-163).
+  The design is in the [conditions proposal](../proposals/conditions.md).
+- **R-BTN-162 (a suspended leg waits, then resumes with a restart).** Not built. A `suspend` raise
+  is recorded and returns (R-BTN-160); nothing waits on it and no claim resumes from it. The
+  design is in the [conditions proposal](../proposals/conditions.md).
 
-- **R-BTN-162 (a suspended leg waits in its claim, then blocks; it resumes with a restart).**
-  - **In the claim.**
-    - After the handler ticket is pushed, the runner keeps the claim and heartbeats as usual. It
-      records an activity `condition-wait` naming the handler, shown on **Running** and by
-      `baton leg why`.
-    - It waits up to `wait_s`: the raise's value, else the type's declaration, else 120 s for
-      `hitl` and 0 for every other type; never more than 900 s.
-    - The wait counts toward the leg's deadline (R-BTN-167).
-  - **The restart.** A `suspend` condition settles once, in one transaction, with a
-    **`std:restart@1`** `{restart, reason, answered_by?}` Baton forms; whatever happens to the
-    handler after that settles nothing more:
-    - the handler ticket's person leg is answered (R-BTN-116): `restart` the answer's `option`,
-      which must be one of the condition's `restarts` — Baton holds them, and refuses any other
-      `option` `invalid-params` (the sync's answer is dropped `answer-invalid`) — `reason:
-      "chosen"`, `answered_by` the answer's;
-    - the handler ticket's person leg expires (R-BTN-116), its expiry reaching an end (R-BTN-161):
-      `restart: null`, `reason: "unanswered"`;
-    - a snapshot posts the handler withdrawn or closed, or Baton supersedes it (R-BTN-168), before
-      an answer: the raise's `default` (null when it named none), `reason: "withdrawn"`, in the
-      transaction that accepts the post or decides the supersession, before any `cancel` leg runs;
-    - an owner resolves the condition (R-BTN-163): the chosen restart, `reason: "resolved"`,
-      `answered_by` the owner's credential.
-  - **Settling within the wait.** The in-claim path needs a runner to run the handler's first leg
-    (`ask`'s `open`) within `wait_s`, so that its person leg is queued; a repository that wants it
-    runs a runner with the handler courses' capabilities. In the settling transaction Baton queues
-    a `handled` message for the raiser's holder and rings it (R-BTN-91). The heartbeat answers `handled: [{condition_id,
-    handler, restart, reason, answered_by?}]`, inline; `ctx.raise` returns `{restart, reason,
-    answered_by?}` and the leg goes on in the same session. In a session, `baton leg raise
-    --wait` blocks for the wait and prints the restart or `suspend`. A harness that bounds a
-    single tool call calls `baton leg await <handler> --timeout <s>` again until the wait is
-    spent.
-  - **Past the wait, the leg blocks.**
-    - `ctx.raise` returns `{suspended: true}` and the script returns.
-    - The runner pushes the work done so far, calls `handoff` (R-BTN-44) and ends the claim
-      `released:blocked` with the prerequisite `{kind: "condition", ref: <condition_id>}`
-      (R-BTN-120, R-BTN-126).
-    - The prerequisite is met when the condition settles (above).
-    - Its row is provisional on the commit that wrote the handler. A condition already settled
-      when the end arrives writes no row, so the next claim resumes at once.
-    - A blocked end is not a failed attempt. It counts toward `max_blocked` (R-BTN-126).
-  - **Any other way the wait ends, the leg blocks too.** Any end of a claim waiting on an open
-    `suspend` condition other than the one that consumes its restart — a release for any reason
-    (`requested`, `owner-cancel`, an owner bar, `leg-timeout`), a `cannot-finish` end — and any
-    reap of it, `leg-timeout` included, writes the `condition` block on the leg in that
-    transaction, as the blocked end would. It is not provisional: the handler commit was pushed
-    before the wait, or there is none (unbound). So no claim of the leg runs, and asks again,
-    while its question is open; the condition and its handler stay as they were.
-  - **Resuming.**
-    - On `unblocked` (R-BTN-77) any runner eligible for the leg may claim it.
-    - The claim response carries `resume: [{condition_id, type, handler?, restart, reason,
-      answered_by?, handoff?}]`, every settled `suspend` condition of the leg that no end of a
-      claim has consumed, in raise order, `handoff` as a pointer. The script reads `ctx.resume`
-      before anything else. An end of the leg's claim marks them consumed.
-    - A condition that settles after its holder died, or whose consuming claim is reaped before
-      its end, is carried to the next claim the same way until an end consumes it.
-  - **No answer.**
-    - The leg decides what `restart: null` means. Typically it raises `error.no-answer`, and the
-      retry policy holds the ticket.
-    - A retry runs the leg from its hand-off. If the leg raises again, a fresh handler ticket
-      asks the question again.
-  - **One at a time.** A leg awaits one `suspend` condition at a time. The `notify` conditions it
-    raises in the meantime are not waits.
 ### 7.3 The debugger and Baton's own conditions
 
 - **R-BTN-163 (the debugger: unhandled conditions, waiting people, and core's own).**
   - **Needs you is the debugger.** **Needs you**, which the dashboard's Conditions screen draws
-    (§11.4), lists the following until each closes:
-    - every open condition with no handler ticket;
-    - every queued person's leg, with its question (R-BTN-116);
-    - the floor (below).
+    (§11.4), lists, until each closes:
+    - every open condition, with its type, restarts, default, detail and `url`;
+    - every queued person's leg, with its question (R-BTN-116).
 
-    Entries are ordered by severity, then by age. A condition's entry shows its type, restarts,
-    default, detail and `url`, and links its resolve page; a person leg's entry shows the leg,
-    `asks`, the options and the question's `url` where one is posted, links the ticket's view, and
-    takes the answer, unconfirmed (§11.4), where the policy admits an `owner` writer for
-    `std:decision@1`, else names `baton decision answer` (R-BTN-116). No rule outside §7 has its own Needs-you listing: a rule raises a
-    condition `baton.<sub>`.
-  - **An unhandled `suspend` condition** waits in the claim and then blocks as R-BTN-162 says,
-    with the debugger in the handler's place; its `condition` row is not provisional, since no
-    handler commit exists.
-  - **Resolving.** An owner answers a `suspend` condition with `baton ticket resolve <ticket>
-    <restart>` (R-BTN-127), or the dashboard's equivalent, which is the registry action
-    `ticket.resolve`; never a delegated key (R-BTN-130).
-    - The command closes the condition with a restart the condition offers and no other.
-    - A leg-raised condition resumes with `{restart, reason: "resolved", answered_by: <the
-      owner's credential>}` (R-BTN-162). A resolve supersedes the condition's handler ticket, if
-      any (R-BTN-168).
-  - **Unhandled `notify`** conditions are only recorded. **Unhandled `interrupt`** conditions
-    follow the retry policy.
+    Entries are ordered by severity, then by age. No rule outside §7 has its own Needs-you
+    listing: a rule raises a condition `baton.<sub>`.
   - **Core's own conditions** (`baton.*`) are raised by Baton, with no leg, in the transaction
-    that finds the cause. They sit on the ticket, repository or runner concerned, or on the tenant when none applies
-    (`baton.sign-in-burst`, `baton.bearer-over-http`).
+    that finds the cause. They sit on the ticket, repository or runner concerned, or on the tenant
+    when none applies.
     - **`baton.retries`, `baton.contract` and `baton.stalled`** have disposition `suspend` on the
-      whole ticket, the standard restarts below and no default, so they never resolve
-      themselves:
+      whole ticket and no default, so they never resolve themselves. An owner resolves one with
+      `retry` or `park`:
 
-      | Condition | Raised when | `retry` | `route:<leg>` | `park` |
-      |---|---|---|---|---|
-      | `baton.retries` | the retry policy holds the ticket: attempts spent, a non-retryable class other than `contract-input`, or `blocked-exhausted` (R-BTN-122) | clears the hold and the backoff | re-routes to a leg leaving the station (R-BTN-83) and clears the hold | closes the condition and keeps the hold; nothing is raised again while it stands |
-      | `baton.contract` | a leg's input fails its schema, holding the ticket `non-retryable:contract-input` (R-BTN-82); its producer is re-run in git, then `retry` | as above | as above | as above |
-      | `baton.stalled` | a leg has been posted `waiting` for its `stalled_s` (R-BTN-167); it closes by itself when the leg is posted `ready` | closes it and restarts the clock | re-routes | sets an owner hold `hold_reason: parked` and closes it |
+      | Condition | Raised when | `retry` | `park` |
+      |---|---|---|---|
+      | `baton.retries` | the retry policy holds the ticket (R-BTN-122), or a leg's blocked ends are exhausted (R-BTN-126) | clears the hold and the backoff | closes the condition and keeps the hold; nothing is raised again while it stands |
+      | `baton.contract` | a leg's input fails its schema, holding the ticket `non-retryable:contract-input` (R-BTN-82); its producer is re-run in git, then `retry` | as above | as above |
+      | `baton.stalled` | a leg has been posted `waiting` for the stalled time (R-BTN-167); it closes by itself when the leg is posted `ready` | closes it and restarts the clock | sets an owner hold `hold_reason: parked` and closes it |
 
       Any owner act that clears the hold under a `baton.retries` or `baton.contract` condition
-      closes the condition, including §6's clear-hold.
+      closes the condition, R-BTN-12's unhold included.
     - **Every other core condition** is a `notify` condition `baton.<sub>`, where `<sub>` is the
-      reason the rule that raises it names (for example `output-invalid`, `check-mismatch`,
-      `course-changed`, `queue-over`, `head-unfounded`, `outbox-late`). Every rule that raises one
-      names it; nothing else lists them.
+      reason the rule that raises it names. Every rule that raises one names it; nothing else
+      lists them.
       - It carries a `detail` of identifiers and numbers only (§12.3).
       - It closes when its cause ends. One raised within an hour of an earlier one of the same
         `(type, ticket, ref)` closing is the same entry, its `detail` counting the raises
         (`reraised`).
-  - **Baton's own conditions need no ticket.** A `baton.*` condition is answered only through
-    Baton's own authenticated surfaces — `baton ticket resolve`, an owner's or administrator's
-    dashboard session; never a delegated key (R-BTN-130) — on its resolve page,
-    `/repositories/{repository}/conditions/{condition}` (§11.4), where a signed-in owner of the
-    repository or an administrator chooses one of its restarts (R-BTN-155). The `resolve_url` of
-    `GET …/conditions` is that path, and `GET /conditions/{condition}` — the page's address
-    before the tree — is answered by the front with `302` to it when the core finds the id among
-    the session's repositories; otherwise it serves the shell, which shows sign-in to the
-    signed-out and `not-found` for no such id and for another repository's alike. Nothing in git
-    is read for it, and Baton files no handler ticket,
-    queues no outbox entry and withdraws nothing for it. How the owner
-    learns of it is a **delivery runner's**: any runner, or a process with a key granted on the
-    repository, that polls `GET /v1/repositories/{repository}/conditions?open=1` — with `person=1` for
-    what waits on a person (the list `baton decision list --watch` reads, below) and with
-    `type=baton` for Baton's notices, the `notify` conditions above, and `type=interact` for
-    interaction requests (R-BTN-195) — and sends each entry it has not yet sent: for a `suspend` condition its type, severity, detail and resolve link; for a
-    person leg its ticket, `asks`, options and question link; for a `notify` condition its type,
-    severity and detail; for an `interact` condition its ticket, leg and `url`, and nothing the
-    leg wrote — by whatever channel it has, a webhook or mail, outside Baton. Core names no channel and records no delivery; a runner that delivers twice
-    does no harm, since the page answers once. A repository with no such runner has the dashboard
-    and the CLI.
-  - **The floor, which no binding removes.**
-    - **Needs you** and `baton decision list --all` list, until each closes and whatever its
-      handler does:
-      - every open `hitl` and `hitl.*` condition;
-      - every open `baton.retries`, `baton.contract` and `baton.stalled` condition;
-      - every queued person's leg with its question (R-BTN-116).
-    - **Needs you** also lists any `suspend` condition whose handler ticket has had no leg run
-      for 24 hours.
-    - A handler course can only add channels above the floor.
-  - **Reading the list.**
-    - `baton decision list` reads `GET /v1/repositories/{repository}/conditions?open=1&person=1`:
-      the open `hitl`, `hitl.*`, `baton.retries`, `baton.contract` and `baton.stalled`
-      conditions and the queued person legs, with their links and resolve pages. It marks
-      nothing, and `--watch` asks once a minute.
-    - Without `person=1` the route lists every condition, filtered by `open`, `type` prefix and
-      `ticket`, 100 per page with a cursor.
-    - Any key granted on the repository, an owner of it or an administrator may read it. The
-      registry action is `condition.list`.
+  - **Resolving.** A `baton.*` condition is answered only through Baton's own authenticated
+    surfaces: `baton ticket resolve <ticket> <restart>` (R-BTN-127), or an owner's or
+    administrator's dashboard session on the condition's resolve page,
+    `/repositories/{repository}/conditions/{condition}` (§11.4), the registry action
+    `ticket.resolve` (R-BTN-155); never a delegated key (R-BTN-130). `GET
+    /conditions/{condition}` is answered by the front with `302` to the resolve page when the core
+    finds the id among the session's repositories; otherwise it serves the shell, which shows
+    sign-in to the signed-out and `not-found` for no such id and for another repository's alike.
+    Nothing in git is read for a `baton.*` condition, and Baton files no ticket for it.
+  - **Delivery runners.** How a person learns of an entry is a delivery runner's: any runner, or
+    a process with a key granted on the repository, that polls the list and sends each entry it
+    has not yet sent by whatever channel it has, outside Baton. An `interact` entry is sent as its
+    ticket, leg and `url`, and nothing the leg wrote. Core names no channel and records no
+    delivery. A repository with no such runner has the dashboard and the CLI.
+  - **Reading the list.** `GET /v1/repositories/{repository}/conditions` lists the repository's
+    conditions, filtered by `open=1`, a `type` prefix and `ticket`, 100 per page with a cursor.
+    Any key granted on the repository, an owner of it or an administrator may read it. The
+    registry action is `condition.list`. `baton decision list` (R-BTN-127) prints what waits on a
+    person; it marks nothing, and `--watch` asks once a minute.
+
 ### 7.4 Retries
 
 - **R-BTN-122 / R-BTN-23 (retries: the default handler of `error`).** The retry policy handles
-  every `interrupt` condition. A binding of an `error` type adds a handler ticket beside the
-  retry policy and does not replace it, unless the binding says `"replaces": "retry"`: then the binding
-  is a `suspend` binding for R-BTN-161 and R-BTN-162 — the handler asks through a person leg whose
-  options are `retry`, `route:<leg>` and `park`, Baton forms the restart as R-BTN-162 says, and
-  the restart decides in the policy's place, checked against the owners' bounds below — and the
-  leg ends blocked on the condition as a `suspend` would. Only the runner knows the binding, so it reports the raise with `replaces:
-  "retry"` and ends the claim `released:blocked` on the condition, never `cannot-finish`.
+  every `interrupt` condition.
   - **State.** Attempts are counted **per ticket and leg**, with §9's rules for what counts as a
     failed attempt, in `leg_attempts`: repository, ticket, leg, `attempts`, `retry_after` and
-    `last_error_type`. A failing `review` spends none of `implement`'s attempts. The row resets —
-    `attempts` to 0, `retry_after` cleared — when a run of the leg reaches one of its outcomes
-    (an `advance` or end reporting it, or a fact arrival of it) and when a hold is lifted, so
-    each pass of a loop starts with the full policy.
+    `last_error_type`. The row resets — `attempts` to 0, `retry_after` cleared — when a run of the
+    leg reaches one of its outcomes (an `advance` or end reporting it, or a fact arrival of it)
+    and when a hold is lifted.
   - **Policy.** A leg may carry a retry policy:
 
     ```json
@@ -391,34 +205,28 @@ Limits that hold throughout:
     long after a failed attempt the leg is offered again; `exhausted`, optional, a leg leaving
     the same station that Baton queues instead of holding the ticket. A leg with no policy takes
     the repository's default policy. Whether a type is retried is its declaration's `retryable`
-    and the owners' floor (R-BTN-160); a leg that must not retry a type raises a non-retryable
-    type of its own, or sets `max_attempts` 1. A leg that wants to try again inside its own run
-    loops in its script; Baton counts nothing for it.
-  - **Backoff.**
-    - After a failed attempt, the leg's `retry_after` is now plus `backoff_s`, multiplied by a
-      uniform factor in [0.9, 1.1].
-    - While `now < retry_after`, the leg's prerequisite `retry` is unmet (R-BTN-120): a
-      `ticket_blocks` row of kind `retry` on that leg, with `until` set to `retry_after`.
-    - A claim or `advance` into the leg is refused **`backing-off`** (with `until`), not
-      `blocked`. The leg is left out of recommendations, and `baton leg why` shows it with
-      `attempt: <n> of <max>`.
-    - The alarm clears the row at `retry_after`, and `unblocked` follows (R-BTN-77). A backoff
-      on one leg does not stop the ticket's other legs.
-    - A provider at capacity is a blocked prerequisite (R-BTN-126), never a retry.
+    (R-BTN-160) and the owners' floor; a leg that must not retry a type raises a non-retryable
+    type of its own, or sets `max_attempts` 1. A leg that tries again inside its own run loops in
+    its script; Baton counts nothing for it.
+  - **Backoff.** After a failed attempt, the leg's `retry_after` is now plus `backoff_s`,
+    multiplied by a uniform factor in [0.9, 1.1]. Until then the leg's `retry` prerequisite is
+    unmet (R-BTN-120): a claim or `advance` into the leg is refused `backing-off` (§6.6), and
+    `baton leg why` shows `attempt: <n> of <max>`. The alarm clears the block at `retry_after`,
+    and `unblocked` follows (R-BTN-77). A backoff on one leg does not stop the ticket's other
+    legs. A provider at capacity is a blocked prerequisite (R-BTN-126), never a retry.
   - **Exhaustion.** When the failed attempts reach `max_attempts`, or when the type is
     non-retryable:
     - Baton holds the ticket (`hold_reason` `attempts-exhausted` or `non-retryable:<class>`),
       logs the reason and raises `baton.retries` (R-BTN-163).
-    - When the policy names `exhausted`, a leg leaving the same station, Baton instead queues
-      that leg (`next_source: baton`), held until the station changes (R-BTN-83), and raises
-      nothing. A non-retryable type always holds.
+    - When the policy names `exhausted`, Baton instead queues that leg (`next_source: baton`),
+      held until the station changes (R-BTN-83), and raises nothing. A non-retryable type always
+      holds.
     - `contract-input` holds at once, is not an attempt and raises `baton.contract`.
     - `lease-lost` counts once per distinct runner.
-    - Lifting a hold resets the leg's counts, as does the leg reaching an outcome (above).
-  - **Owners' bounds.** The course file is in git, so the owners' `retry` setting, a Baton
-    setting (R-BTN-66), bounds every policy: `{max_attempts, backoff_s}`, a ceiling on the first
-    and a floor under the second, applied field by field as the stricter of the course's policy
-    and the owners' bound. The defaults, which a repository with no setting has:
+  - **Owners' bounds.** The owners' `retry` setting, a Baton setting (R-BTN-66), bounds every
+    policy: `{max_attempts, backoff_s}`, a ceiling on the first and a floor under the second,
+    applied field by field as the stricter of the course's policy and the owners' bound. The
+    defaults, which a repository with no setting has:
 
     | Bound | Default |
     |---|---|
@@ -427,40 +235,29 @@ Limits that hold throughout:
     | floor `backoff_s` | 60 |
     | floor types, never retried | core's `capability`, `spec`, `contract-input` |
 
-    Two limits are constants of this specification, not settings: `max_blocked`, the blocked ends
-    a leg may make per ticket and leg in 24 hours, is **5** (R-BTN-126), and a `suspend` wait in a
-    claim lasts at most **900 s** (R-BTN-162).
     - `baton course test` warns where the bounds cut a course's policy back, and the course's
       view shows the policy in force.
-    - The floor binds hard on core's built-in types. On a course's own types it binds only as git
-      does, so `baton course test` warns when a floor type is not declared. An owner who
-      needs a hard bound sets `max_attempts` 1.
+    - The floor binds hard on core's built-in types. A course's own type is retried as its
+      declaration says, so `baton course test` warns when a floor type is not declared. An owner
+      who needs a hard bound sets `max_attempts` 1.
 
 ### 7.5 Deadlines
 
 - **R-BTN-167 (two clocks on a leg: a deadline on its run, and the stalled notice).**
-  - **`deadline_s`**, optional on a leg (60 s to 604,800 s, 7 days): how long one run may take.
-    The clock starts at the `advance` that starts the run, by Baton's clock (R-BTN-90), and the
-    instant is the claim's `deadline_at`. At it Baton takes the claim back as R-BTN-90 says, and
-    the end is a failed attempt (`leg-timeout`, R-BTN-122). A leg with no `deadline_s` has no
-    deadline: Baton relies on the lease (R-BTN-9) and the owner's Stop (R-BTN-119).
-  - **`stalled_s`**, on every leg (default 259,200 s, 72 hours; 60 s to 30 days): how long the leg
-    may be posted `waiting` (R-BTN-70) before Baton raises `baton.stalled` on the ticket, a
-    `suspend` core condition (R-BTN-163). The clock counts from the ticket's arrival at the leg's
-    `from` station, only while the sync's readiness attests the leg `waiting` — not while Baton
-    itself holds the leg waiting, a `time` wait holds it or a claim runs it — and restarts when
-    the ticket's station changes. The condition closes by itself when the leg is posted `ready`.
-    A course that wants a longer or shorter watch sets `stalled_s` on the leg; nothing removes
-    the notice.
+  - **`deadline_s`**, optional on a leg (60 s to 604,800 s): how long one run may take. The clock
+    starts at the `advance` that starts the run, by Baton's clock, and the instant is the claim's
+    `deadline_at` (R-BTN-90). A leg with no `deadline_s` has no deadline: Baton relies on the
+    lease (R-BTN-9) and the owner's Stop (R-BTN-119). A person leg carries none.
+  - **The stalled time** is 72 hours, a constant: how long a leg may be posted `waiting`
+    (R-BTN-70) before Baton raises `baton.stalled` on the ticket (R-BTN-163). The clock counts
+    from the ticket's arrival at the leg's `from` station, only while the sync's readiness attests
+    the leg `waiting` — not while Baton itself holds the leg waiting, a `time` wait holds it or a
+    claim runs it — and restarts when the ticket's station changes.
   - **A person leg's `expires`** (R-BTN-116) is the one other instant Baton holds per leg; a
-    person leg has no `stalled_s`.
-  - Baton holds the `stalled` and `expires` instants in `ticket_timers` (repository, ticket, leg,
-    `kind`, `from_at`, `due_at`, `fired_at`) and fires them from the alarm, once per `from_at`. The
-    rows are owner state (R-BTN-88): an instant restarts only when the ticket's station changes,
-    never when a Baton moves. A deadline lives in its claim alone (`claims.deadline_at`, R-BTN-90)
-    and dies with it.
-  - The course validator (R-BTN-69) and `baton course test` refuse `timers`, `after_s` and any
-    value outside the ranges above, naming the leg and the field.
+    person leg has no stalled time.
+  - Baton fires the `stalled` and `expires` instants from the alarm, once each. They are owner
+    state (R-BTN-88): an instant restarts only when the ticket's station changes, never when a
+    Baton moves. A deadline lives in its claim alone and dies with it.
 
 - **R-BTN-90 (the deadline in a claim).** Baton cannot stop a runner. It takes the claim away and
   tells the runner to stop, and fencing makes a runner that ignores it harmless (R-BTN-19,
@@ -469,406 +266,50 @@ Limits that hold throughout:
     to now plus `deadline_s`. The next `advance` and the claim's end clear it.
   - **Finishing is not the end.** When the script's `run` returns, the runner sends an immediate
     heartbeat out of its cadence with `legs_finished: [{claim_id, seq}]`, the run's claim and its
-    `claim_legs.seq`. That heartbeat comes before
-    validation, `close`, and any wait under the claim on a `short_waits` label or a near `time`.
-    When the claim has a `deadline_at`, it re-arms it to now plus 40 minutes, once per leg run (R-BTN-149), so a slow push
-    or review of the result is never cut off. The heartbeat processes `leg_finished` before it
-    delivers messages: a `leg-timeout` release still pending for that leg is withdrawn (the
-    message set `expired` with `withdrawn: 'leg-finished'`, a `leg-timeout` event logged with
-    `{withdrawn: true}`); a release already delivered stands.
+    `claim_legs.seq`, before validation, `close` and any wait under the claim. The heartbeat
+    processes it before it delivers messages:
+    - a `leg-timeout` release still pending for that leg is withdrawn (the message set `expired`
+      with `withdrawn: 'leg-finished'`, a `leg-timeout` event logged with `{withdrawn: true}`); a
+      release already delivered stands;
+    - a `deadline_at` still armed is re-armed to now plus 40 minutes, once per leg run
+      (R-BTN-149).
   - **At the deadline.**
     - The alarm queues the holder a `release` with reason `leg-timeout` and logs `leg-timeout`.
     - The runner aborts the leg at its next safe point, writes its hand-off and ends
       `released:leg-timeout`, a failed attempt (R-BTN-122).
     - A delivered `leg-timeout` release left unacknowledged for 15 minutes is reaped by the
-      alarm with a fence, actor `alarm:leg-timeout` (R-BTN-19). The ticket is not re-issued
-      until the runner's sidecar confirms that it killed the tool processes, the fence's
-      deadline passes, or an administrator clears the fence (R-BTN-19). This reap counts as the `leg-timeout` end would.
-  - **The owner's controls** on a running claim are Stop (`release` with reason `requested`,
-    R-BTN-119) and Cancel (a hold and a `release` with reason `owner-cancel`, §6.8), each at once.
-    The heartbeat response (§14) and the dashboard's claim row carry `deadline_at`.
+      alarm with a fence, actor `alarm:leg-timeout` (R-BTN-19), and counts as the `leg-timeout`
+      end would.
+  - The heartbeat response (§14) and the dashboard's claim row carry `deadline_at`.
+
 ### 7.6 Calls
 
-- **R-BTN-165 (a call leg runs a course and waits for it).**
-  - **The leg.** A call leg is `"kind": "call"` with a `spawns` declaration (R-BTN-111), whose
-    `course` names the course or courses it calls. The leg's `"to"` is a **completion table**
-    `{<station>: <completion>, …}`, checked in order. A question to a person is not a call: a
-    planned one is a person's leg (R-BTN-116), one from inside a leg a `suspend` raise
-    (R-BTN-162).
-  - **What the script does.**
-    - The script runs as any leg's does and writes the children to the ticket source first,
-      through its `file` export, each child's id taken as R-BTN-131's allocator says. Each child names a course its `spawns` allows and `called_by: {leg, run}`.
-      Under the policy's `tickets.created: proposed` (R-BTN-188) the children are proposed, not
-      filed, and not claimable until they land with a `std:approval@1` (R-BTN-180).
-    - The script then returns `spawned` (R-BTN-86).
-    - The runner then ends the claim `released:blocked` on `{kind: "call", ref: <claim_legs
-      seq>}`, carrying `spawned` (R-BTN-86). A call never waits in its claim: Baton learns the
-      children only from that end. The block is not a failed attempt and does not count toward
-      `max_blocked` (R-BTN-126).
-  - **Completion.** A `<completion>` is `{"of": "all" | "any" | <n>, "at": [<station>…],
-    "skip_withdrawn"?: <bool>, "next": <leg>}`.
-    - `at` may be replaced by `"done": true` (closed at any end station), `"withdrawn": true`
-      (closed withdrawn) or `"closed": true` (closed either way). `at` names stations every
-      course the call may spawn has; a call over `"*"` uses the other three.
-    - `next` is the leg queued at the entry's station. It is required unless that station is an
-      end (R-BTN-83).
-    - An entry may be `null`: its station is an outcome the script may report instead of
-      `spawned`, and no completion settles there. A call leg's outcomes are its table's
-      stations.
-    - A completion ranges over the children this run spawned (R-BTN-86), and only a completion
-      does: no `requires.tickets` entry selects them (R-BTN-120).
-    - Examples: `{"of": 2, "at": ["approved"]}` is "2 of 3 reviewers approve".
-      `{"of": "all", "at": ["merged"]}` followed by `{"of": "any", "at": ["failed"]}` is a
-      fail-fast join. `{"of": "all", "closed": true}` waits for every child however it ends, as
-      `Promise.allSettled` does.
-    - A completion over a call whose script filed no child never holds; a script that files none
-      returns one of the leg's outcomes instead of `spawned`.
-    - The table's last non-null entry is `{"of": "all", "closed": true, …}`, which holds once
-      every child has closed, so a call always settles; the validator (R-BTN-69) and `baton
-      course test` refuse a table without it.
-  - **Settling.**
-    - Baton evaluates the table, in table order, in each transaction that changes the station of
-      one of the run's children. The first entry that holds settles the call.
-    - A `spawned` end that names no children is refused; a completion never holds over none.
-    - Baton records the position (the entry's station and `next`), with `next_source: baton`,
-      and logs `call-settled {station, children}` — only while the ticket is still at the call
-      leg's station, which R-BTN-39's hold on a blocked ticket guarantees.
-    - The position stands (R-BTN-39). The CLI's station-function library exports
-      `settleCall(course, leg, children)`, which applies the same table, for a course's implied
-      station.
-    - The children still open when the call settles are superseded (R-BTN-168).
-  - **What the next leg reads.** The settled children's end outputs are the next leg's input
-    `called`, resolved as pointers (R-BTN-82). The call's `spawns` declaration (R-BTN-111) is its
-    contract. `baton course test` checks what the declaration provides against each called
-    course's input, and what each completion station requires against each called course's end
-    outputs.
-  - **A `suspend` raise is a call from inside a leg.** It has one child, it settles when that
-    child closes, and its `raised_by` takes the place of `called_by`. It keeps its own block kind
-    `condition`, which counts toward `max_blocked` (R-BTN-126).
+- **R-BTN-165 (a call leg runs a course and waits for it).** Not built: the validator refuses
+  `"kind": "call"`. A leg that files children declares `spawns` (R-BTN-111) and reports them
+  (R-BTN-86); a ticket that waits for other tickets does so by a `ticket` prerequisite
+  (R-BTN-120). The design is in the [conditions proposal](../proposals/conditions.md).
 
 ### 7.7 Cancellation
 
-- **R-BTN-168 (supersession, lifetime and the cancel leg).**
-  - **The cancel leg.** A course may name `"cancel": <leg>` (R-BTN-69): an ordinary leg that
-    undoes the course's work outside git — closes a PR, deletes a branch, retracts a message —
-    leaving every station a ticket may be cancelled at and reaching one end station. Baton alone
-    queues it (`next_source: baton`, held until the station changes, R-BTN-83), when a ticket is
-    cancelled; a runner holding its capabilities runs it like any leg, and it may be run again
-    after a release, so it is written to succeed when its work is already done. A course with no
-    `cancel` leg has nothing to undo: a cancelled ticket closes at once.
-  - **Lifetime.** A spawning leg's `spawns` (R-BTN-111) may give its children `"lifetime":
-    "parent"`, ending them when their parent closes or is cancelled, or `"lifetime": "station"`,
-    ending them when the parent leaves the station they were filed at. Without `lifetime`,
-    children live on (R-BTN-86).
-  - **Cancelled.** A ticket is cancelled when its file says withdrawn (R-BTN-74) or when Baton
-    **supersedes** it because:
-    - a call settled without it (R-BTN-165);
-    - the condition it handles closed by other means: an owner resolved it, the cause ended, or
-      the raising ticket was cancelled;
-    - its `lifetime` ended;
-    - its source stopped posting a ticket that has no file (the `changes` source, R-BTN-114).
-  - **Superseding.** In the transaction that decides it, Baton:
-    - sends any running claim on the ticket a `release` with reason **`superseded`**. The runner
-      stops as R-BTN-119 does, without a hand-off. The claim ends `released:superseded`, which is
-      not a failed attempt.
-    - marks a completed claim on the ticket still unconfirmed `superseded_at`: it is never
-      confirmed, concludes nothing (no `baton.check-unattested`), counts no attempt, and no
-      longer holds rule 3 or raises `baton.unconfirmed`;
-    - logs `superseded {by}`;
-    - marks the ticket **`cancelling`** (`ticket_overrides.cancelling_at`, §6.8), a flag beside any
-      hold it carries, which no owner lifts and which is cleared when the ticket closes, never kept
-      past it (so a returning id gets its hold back, not the cancellation, R-BTN-12): the ticket
-      shows `cancelling` until it closes, and the flag refuses every leg but the ticket's queued
-      `cancel` leg (§6.6, rule 3); an unlanded `withdraw` entry raises `baton.outbox-late` without
-      changing it (R-BTN-171).
-  - **Then the cancel leg, then the close.** For a cancelled ticket whose course names a `cancel`
-    leg leaving its station, Baton queues that leg, `ready` at once (R-BTN-69), and a runner
-    holding its capabilities claims it like any leg. In the transaction that records the run's
-    `done` end at the leg's end station (confirmed by acceptance alone, R-BTN-10), or at once for a
-    course with no `cancel` leg leaving the station, Baton closes the ticket:
-    - a ticket still live in its source waits for its withdrawal: where the post's
-      `source.writes` names `withdraw`, Baton queues the `withdraw` outbox entry (R-BTN-171);
-      where it does not, the ticket waits for its store's own closure, shown on its view. It
-      closes `withdrawn` when a snapshot posts it withdrawn or closed;
-    - a ticket withdrawn in its source already, or one its source no longer posts, closes
-      `withdrawn` at once.
-  - **Withdrawn in the source first.** A ticket a snapshot posts withdrawn whose course names a `cancel`
-    leg leaving its station, and whose path ran a leg that leg undoes (any leg whose `to` the
-    cancel leg leaves), is kept live and `cancelling`: its board rows stay (§13), the `closed`
-    entry is kept and applied when the cancel leg's run ends, and no snapshot stales the leg's
-    claim (R-BTN-35). One whose path ran none closes at once.
-  - **Cascade.** Cancelling a ticket supersedes its open children whose `lifetime` is `parent`.
+- **R-BTN-168 (supersession, lifetime and the cancel leg).** Not built. A ticket its source posts
+  withdrawn closes `withdrawn` (R-BTN-74); Baton supersedes no ticket and queues no `cancel` leg.
+  The validator accepts a `spawns` declaration's `"lifetime": "parent" | "station"` and nothing
+  reads it. The design is in the [conditions proposal](../proposals/conditions.md).
+
 ### 7.8 The outbox
 
-- **R-BTN-171 (every git write, check run and ticket-store write Baton intends goes through one outbox, which runners deliver).**
-  Baton holds no credential that writes git, posts a check run or writes a ticket store; starting
-  a workflow is its own call (R-BTN-94). Each git write, check run or ticket-store write Baton
-  intends is an **outbox entry**. A
-  **deliverer** — a runner (R-BTN-3) whose host holds the credential the effect needs, on a grant
-  whose role the repository policy's `outbox` admits (R-BTN-188) — claims the entry under a lease,
-  delivers it and reports it with a `std:effect@1` attestation (R-BTN-191); Baton then confirms it
-  by reading the effect back, in a snapshot, wherever the ticket source's reader posts it.
-  - **Entries.** Each entry is an `outbox` row: `id` (an integer per repository, increasing),
-    repository, ticket, `kind`, `fields`, `state` (`queued`; `claimed` while a deliverer's lease
-    holds it; `delivered`, `confirmed` or `dropped`), `queued_at`, `delivered_ref` (the
-    commit or the check run) and `confirmed_at`. `fields` holds identifiers only (§12.3), and for
-    `forge-check` its `summary` rendered `plain` (R-BTN-112). An entry is Baton's record, handed
-    out over its authenticated routes and signed by nothing (§12.8).
+- **R-BTN-171 (the outbox).** Not built: Baton queues no outbox entry and no runner delivers one.
+  The repository policy's `outbox` section is checked and stored (R-BTN-188). The design is in
+  the [conditions proposal](../proposals/conditions.md).
 
-    | `kind` | Delivers | Order | Confirmed when | Late |
-    |---|---|---|---|---|
-    | `withdraw` | the withdrawal of a cancelled ticket (R-BTN-168), through the source's `withdraw(ticket, reason)` export (the markdown source sets `status: withdrawn` and `withdrawn_reason`) | a log, per ticket | a snapshot shows the ticket withdrawn or closed | not confirmed 24 hours after it was queued |
-    | `forge-check` | a check run on a change's head (R-BTN-114, R-BTN-115) | the latest, per `(repository, sha, name)` | the sync reads the run back (R-BTN-115) | not delivered 15 minutes after it was queued |
-    | `withdraw` on a custom source | as above, through the source's own `withdraw` export, to its store (git for an ejected markdown source) | a log, per ticket | as above | as above |
-    | `source-show` | a station's `display_status` to a ticket store (R-BTN-200), through the source's `show(ticket, value)` | the latest, per ticket | as R-BTN-200 says | not delivered 15 minutes after it was queued |
-    | `source-note` | a note for people on the ticket (R-BTN-200), through the source's `note(ticket, {entry, reason, station})` | a log, per ticket | at its delivery: no snapshot carries a note | not delivered 24 hours after it was queued |
-
-    `withdraw` on the markdown source is the one **git kind**: Baton files no ticket of its own
-    (R-BTN-163). The **source kinds** — `withdraw` on a custom source (`source.kind: custom`,
-    §4.4) and the two `source-` kinds — are written through the source's own code to whatever
-    store it reads. The kinds make three **delivery classes**: `git`, `forge-check` and `source`.
-    Queuing a `withdraw` drops the ticket's `queued` `source-show` and `source-note` entries.
-  - **Deliverers are runners.** No key role exists for delivery: a runner that holds the credential declares the classes it delivers in its
-    heartbeat (`delivers: [git | forge-check | source]`, nothing by default; kept in `runners.delivers`,
-    §13), and Baton offers it the entries of those classes on the repositories its grant covers.
-    A deliverer is a signed machine key: an API-key runner never delivers, as it never syncs
-    (R-BTN-159).
-    - **Who may deliver** is the repository policy's `outbox` section (R-BTN-188), one entry per
-      class, `{deliverers}` naming the grant roles admitted: `runner` (any accepted grant) or
-      `trusted-runner` (R-BTN-182; never a grant marked `checker`, R-BTN-180). Baton applies it at
-      each claim, so a change binds the next
-      claim and never a lease already held, and refuses a claim from a grant the policy does not
-      admit, `forbidden` with the unmet knob.
-    - The credential the effect needs lives only on the deliverer's host, never in Baton: push
-      access to the repository for `git`, the check App's private key for `forge-check`
-      (R-BTN-115), and for `source` the credential the source's store needs — push access for an
-      ejected markdown source, a tracker's write token for a tracker.
-    - Admitting `runner` for `source` lets a runner holding that credential withhold a show or a
-      note, or mark a note delivered unwritten. A show it fakes is caught as unconfirmed
-      (R-BTN-200).
-    - **Woken, not polling.** A deliverer's doorbell socket (R-BTN-91) is rung `outbox` when an
-      entry of a class it delivers is queued on a repository it serves; it then claims at once.
-    - Admitting `runner` for `forge-check` lets any granted runner withhold a check. It still
-      cannot post one Baton did not issue unseen (R-BTN-115).
-    - **A trusted-runner deliverer runs no repository code.** It never loads the source's code:
-      it writes from the CLI's own markdown-source templates, so it delivers no source entry,
-      which only the source's own code can write. Every outbox write of a custom source
-      (`.baton/tickets.mjs`, an ejected markdown source included) is a source entry, waiting for
-      a `runner` deliverer; a policy admitting none there is refused (R-BTN-188).
-  - **Claiming and marking.**
-    - `POST /v1/runner/outbox/claim {limit?}` claims up to 50 queued entries, each leased for 10
-      minutes, of the classes the caller declared and the `outbox` policy of each repository its
-      grant covers admits it to.
-    - A ticket's entries of one class are claimed together, in `id` order, and none while an
-      earlier entry of that ticket and class is `claimed` or `delivered`. Entries of different
-      tickets or classes are unordered.
-    - `POST /v1/runner/outbox/{repository}/{id}` marks one: `delivered` with its `ref`, or
-      `failed` with `transient` or `refused`. `failed` is a mark, not a state: the entry returns to
-      `queued`, after a backoff for `transient` and, for a git or forge-check entry, with its
-      ticket held for `refused`, as for a source `withdraw`; a `source-show` or `source-note` marked
-      `refused` is R-BTN-200's.
-    - A lapsed lease re-queues the entry. A mark arriving after its lease lapsed is accepted. A mark
-      from any credential but the claimer is `forbidden`. An entry the claimer leaves unmarked goes
-      back to `queued` when its lease lapses.
-    - `transient` re-queues the entry after 1, 5 and 30 minutes, then hourly.
-    - `refused` on a `withdraw` or `forge-check` entry (the forge or store refused the deliverer's credential, a misconfiguration) holds the entry's
-      ticket (`hold_reason: outbox-refused`) and raises `baton.outbox-late` naming the deliverer,
-      until the deliverer is fixed and the hold lifted by an approver on `approvers.policy`
-      (R-BTN-186, R-BTN-188), which queues the entry again.
-  - **Idempotence.** Every delivery carries its entry's id, so delivery is at least once and its
-    effect at most once.
-    - `withdraw`: the withdrawal writes `baton_write: <id>` beside `status: withdrawn`. Before
-      writing, the deliverer reads the file at
-      the freshly fetched head it writes to: the default branch, or under `tickets.created:
-      proposed` the proposal branch (R-BTN-180). A file that already carries the id, or for
-      `withdraw` already says withdrawn or is absent, is not written again, and the deliverer reports
-      the head's commit. On a rejected push it fetches, checks and writes again, at most 3 times,
-      then marks the entry `failed` with `transient`.
-    - `forge-check`: the check run's `external_id` carries the id, and R-BTN-115's `seq` keeps an
-      older entry from overwriting a newer one.
-    - `source-show` sets a value, so a repeat writes the same status again; `source-note` hands
-      `note` its entry id, which `note` writes once (R-BTN-74).
-  - **What Baton holds until a git entry is confirmed.**
-    - **Withdraw entry.** The cancelled ticket stays `cancelling` (R-BTN-168) until a snapshot
-      posts it withdrawn or closed, which closes it `withdrawn`.
-    - **Delivered, not confirmed.** A `delivered` entry is never claimed again. A `withdraw` entry still not
-      `confirmed` after 3 accepted snapshots at or after its delivery raises `baton.outbox-late`; a
-      `withdraw` entry's ticket, already `cancelling` (R-BTN-168), stays so, and the condition's
-      `retry` queues the entry again.
-  - **Dropping.** A `withdraw` entry for a ticket whose course names a `cancel` leg is queued in
-    the transaction that records that leg's end (R-BTN-168). A `withdraw` entry whose ticket a snapshot shows
-    withdrawn or closed before any deliverer claimed it is `dropped`, and so is a source entry
-    whose ticket closed before its delivery. Retiring a repository drops
-    every `queued`, `claimed` or `delivered` entry of it, and a later mark is ignored (R-BTN-47).
-  - **Records.**
-    - Queuing, delivering and confirming each log an `outbox {id, kind, state}` event in the
-      ticket's history.
-    - An entry late by its kind's column above raises `baton.outbox-late` (R-BTN-163) with its
-      `kind`, a late `source-show` or `source-note` being R-BTN-200's; for `forge-check` the change stays pending.
-  - **Not in the outbox.** Positions that start in Baton are Baton's (R-BTN-39), held until the
-    station changes: a call's settlement (R-BTN-165), a person leg's expiry (R-BTN-116), an
-    `exhausted` leg (R-BTN-122) and the `cancel` leg (R-BTN-168). Messages to runners ride the
-    heartbeat (§6.9). A workflow dispatch is Baton's own call, made with the credential Baton
-    holds for it (R-BTN-94, §12.7).
 ### 7.9 Standard handler courses
 
-- **R-BTN-169 (standard handler courses: `ask`, `deliver` and `announce`).** These are three
-  course directories in the baton repository under `src/defaults/courses/` (R-BTN-134). A
-  repository binds them, overrides their legs (R-BTN-131) or writes its own.
-  - **`ask`**, for `hitl`, takes a `std:condition@1` as input and asks through one person's leg
-    (R-BTN-116, R-BTN-161).
-
-    ```json
-    { "start": "asked", "start_leg": "open", "end": ["answered", "unanswered"],
-      "stations": { "asked": {}, "waiting": {}, "answered": {}, "unanswered": {} },
-      "legs": {
-        "open":   { "from": ["asked"],   "to": "waiting",
-                    "spawns": { "course": "deliver", "lifetime": "parent" } },
-        "answer": { "from": ["waiting"], "to": ["answered", "unanswered"],
-                    "kind": "person", "asks": "owner",
-                    "expires": { "after_s": 172800, "reached": "unanswered" } } } }
-    ```
-
-    - `open` files a `deliver` child for the question. The `answer` leg's options are the
-      condition's `restarts` from the moment the handler is posted (R-BTN-116); the markdown
-      source posts its question from the handler file's `handles.restarts`, each option reaching
-      `answered`.
-    - A person answers with a `std:decision@1` naming a restart as its `option` — from the
-      dashboard's Needs-you entry or `baton decision answer` (R-BTN-116) — or, where the policy admits `sync`
-      for `std:decision@1`, in the ask's own file (`answer: b`, the markdown source's `answer`
-      field, R-BTN-74), which the sync attests. The raiser resumes with that restart, `reason:
-      "chosen"` (R-BTN-162).
-    - Unanswered for two days, `answer` expires to `unanswered`, and the raiser resumes with
-      `restart: null`, `reason: "unanswered"`.
-    - When the ask closes — answered, expired, withdrawn or superseded — its `deliver` child is
-      superseded and runs its `cancel` leg, `retract`; the ask itself has nothing to undo and
-      names no `cancel` leg.
-    - The raise's `wait_s` is in the input, so `deliver` can use the fastest channel when a leg
-      is waiting in its claim.
-  - **`deliver`**:
-    - It has stations `queued` and `pushed`, and ends `lapsed` and `emailed`; its `cancel` leg
-      is `retract`, idempotent, which retracts the message.
-    - `push` (`queued` → `pushed`) needs the capability `channel:push`. Its policy is
-      `"retry": {"max_attempts": 3, "backoff_s": 60, "exhausted": "email"}`.
-    - `lapse` (`pushed` → `lapsed`) is queued by `push`'s `close` with `not_before` an hour after
-      the push. It retracts the message.
-    - `email` (`queued` → `emailed`) needs the capabilities `channel:email` and
-      `credential:SMTP_URL`.
-    - An email that cannot be sent holds the ticket under the retry policy, and the question
-      stays on the floor.
-    - The shipped scripts send a generic signed webhook and SMTP mail. A repository overrides
-      `push` and `retract` for its own channel.
-  - **`announce`**, for `warning` and `error`, has one leg, `send`, which needs the
-    capability `channel:push`. Its ends are `sent` and `undeliverable`. It never handles
-    `baton.*`, which no ticket carries (R-BTN-163).
-  - **Binding them.** `baton repo init --bind-conditions` writes `{"hitl": "ask", "warning":
-    "announce"}` into `.baton/baton.json`. Without that option a repository binds nothing, and
-    every leg-raised condition reaches the debugger.
+No handler course ships. The design of `ask`, `deliver` and `announce` is in the
+[conditions proposal](../proposals/conditions.md).
 
 ### 7.10 Leg events
 
-- **R-BTN-198 (leg events: what Baton tells a running leg).**
-  - **A leg event** is a typed event the runner hands to a running leg, from what Baton tells the
-    runner. Its type follows R-BTN-160's grammar. It runs the other way from a condition, and the
-    leg is its only handler: no binding, handler ticket, `conditions` row, Needs-you entry or
-    quota applies (R-BTN-160 to R-BTN-163). The types are core's, `ticket.changed` and
-    `release`. Leg event types and condition types are separate namespaces: nothing raises a leg
-    event, and no condition is handed to a leg.
-  - **Delivery.** The runner keeps one queue per leg run, readable until the run's `close` and
-    `handoff` have returned; events still unread then are dropped. A leg running as a script
-    under `builtin` (R-BTN-107) has each event handed to every listener it registered with
-    `ctx.on(<type or prefix>, listener)` (R-BTN-72), and reads the queue by the async iterator
-    `ctx.events`; any leg reads it by `baton leg events [--wait <s>]` on its channel (R-BTN-106,
-    JSON lines, `--wait` at most 900). The two readers share one cursor, each event once. An
-    event carries identifiers and the release reason only, never ticket text (R-BTN-33). When
-    one heartbeat brings a claim both a `release` and a new version, only `release` is handed. A
-    context refresh (R-BTN-123) hands the fresh session the run's newest `ticket.changed` again,
-    when the run has one.
-  - **Sessions poll.** The executor interface (R-BTN-107) pushes nothing into a session: a
-    session learns of its events only by `baton leg events`, which its brief tells it to call. A
-    leg script that runs an agent may pass its events on to it as text naming the event's type,
-    its versions and the verbs below, never ticket text.
-  - **`ticket.changed {from_version, to_version, snapshot_sha}`: the ticket moved under the
-    claim.**
-    - **Which claims.** Every claim with a ticket, except the two R-BTN-5 re-verifies against
-      Baton's record (a `changes` check ticket and a claim of the `cancel` leg): for those Baton
-      logs and rings nothing below, the runner hands no `ticket.changed`, and their legs'
-      `on_ticket_changed` is ignored.
-    - **Baton's half.** In the transaction that accepts a snapshot (R-BTN-62), whatever its
-      observation, for each ticket an active claim holds whose posted `version` (§4.2) differs
-      from the one Baton held, and which the snapshot leaves held (R-BTN-35), Baton logs
-      `ticket-changed {from_version, to_version}` with the claim (R-BTN-81), and rings the holder
-      `ticket` after the commit (R-BTN-91). A snapshot that ends the claim is told as that claim's
-      `release`, and logs and rings nothing here. The heartbeat carries each claim's ticket as
-      the latest accepted snapshot holds it (§8.1). Versions are compared for equality only.
-    - **The runner's half.** Per claim the runner keeps the version **last seen** and the version
-      **last verified**, each with its snapshot's sha. Both start as the claim's version once
-      R-BTN-5 passes. While a leg runs, a heartbeat `version` that differs from the last seen is
-      handed as `ticket.changed`, its `from_version` the last seen, and becomes the last seen.
-      Several changes between two heartbeats are one event, to the newest version, and none when
-      the newest is the last seen. A change is the leg's own, and becomes the last seen without
-      being handed, only on the markdown source and only when every commit that changed the
-      ticket's file between the last seen version's sha and `snapshot_sha` is one this claim's
-      legs pushed, as the leg-end scope audit reads pushes (R-BTN-106). Like that audit, the test
-      is cooperative. Every other change, on every source and under every executor whose pushes
-      the runner cannot read, is handed, a forge merge of the leg's own branch included; a course
-      whose legs change their own ticket keeps `continue`. A heartbeat whose `git` view says
-      `closed: 'done'` hands nothing: the claim ends `done` after its leg, as R-BTN-72 says.
-    - **Verifying a version.** The runner verifies a version as R-BTN-5's re-verification by
-      version reads it, at that version and `snapshot_sha`: the sha checked on the default branch
-      first (R-BTN-143), the source's code loaded from the claim's commit (R-BTN-133), the ticket
-      read where R-BTN-5 reads it (the branch's head for a course that keeps its record there),
-      and, on the markdown source, the version required to be the blob at the ticket's path at
-      `snapshot_sha`. It refuses, with these reasons:
-      - `off-branch`: `snapshot_sha` is not on the default branch (R-BTN-143);
-      - `closed`: the version is closed or archived, or its tier is above the runner's ceiling;
-      - `bounds-changed`: its `repos`, `course` or `requires` differ from the claim's, since they
-        bound the claim's scope, course and runner (§12.9, R-BTN-121);
-      - `moved`: a current source holds a newer version, or a markdown version is not the blob at
-        `snapshot_sha`;
-      - `unreadable`: the source exports no `read` (§4.2), or it or the executor could not
-        answer, which is never taken as a moved ticket.
-
-      Readiness is not checked: the leg's own progress moves it, and the holder judges it
-      (R-BTN-63). The runner keeps each result for the claim.
-    - **Before a leg starts.** R-BTN-5's check comes first, at the claim's version. After it,
-      when the latest heartbeat's `version` differs from the last verified (a change while no leg
-      ran, or during preparation after R-BTN-5's read), the runner verifies that version before
-      the leg starts. A version that passes becomes the last seen and the last verified, and the
-      leg reads it. `off-branch` ends the claim `released:off-branch`; a version closed `done`
-      ends it `done` (R-BTN-72); the other `closed` cases, `bounds-changed` and `moved` release
-      `stale-board`; `unreadable` ends it `released:cannot-finish:transient` (R-BTN-122). The
-      `advance` that starts a leg names the version the leg starts on (`ticket_version`, §14).
-    - **What the leg does** is its course's choice, the leg field `on_ticket_changed`
-      (R-BTN-69):
-      - **`continue`** (the default): the leg goes on. It may read a version handed to it by
-        `ctx.readTicket({version?})` or `baton leg ticket [--version <v>]` (default the newest
-        handed, refused `unknown-version` when none was, or when this claim never handed the
-        version named). The runner verifies the version, then returns its
-        `last_written_by` (R-BTN-194), printed first as at the claim, and the ticket as
-        R-BTN-5's read returns it, a pathless ticket's `file` included (R-BTN-74). A refusal is
-        answered on the channel with its reason, and the leg goes on with the text it has. The
-        claim's scope and `ctx.ticket` stay as they were. The verbs read only the claim's own
-        ticket. A leg handed a `ticket.changed` in this run may end itself with the release
-        reason `ticket-changed`, on the channel or in its result; the runner refuses that reason
-        from a run it handed none.
-      - **`restart`**: when `to_version` differs from the version the leg started on, the runner
-        stops the leg at once, as R-BTN-119 stops a `requested` release (`close` and `handoff`
-        included), and ends the claim `released:ticket-changed`. The validator refuses `restart` on a leg with
-        no `max_runs` (R-BTN-69). A leg waiting on an open `suspend` condition ends as R-BTN-162
-        says of any release, blocked on that condition.
-    - **The end.** A `released:ticket-changed` end names the `to_version` the runner handed in
-      its `ticket_version` (§9.4). Baton accepts it only when a `ticket-changed` row of the claim
-      carries that version and it differs from the `ticket_version` the running leg's `advance`
-      named; it refuses the end otherwise `invalid-params`. A claim ending for a `release` Baton
-      sent with the reason `ticket-changed` (an owner bar set before that reason was closed,
-      R-BTN-67) ends as that release, and this check does not apply. It is not a failed attempt.
-      The run counts toward the leg's `max_runs` as every run does (R-BTN-63). The next claim
-      reads the ticket under R-BTN-5.
-  - **`release {reason}`: why the leg is stopped.** When a `release` message reaches the runner
-    (§6.9), whatever its reason, R-BTN-35's staleness and R-BTN-90's deadline included, the
-    runner hands `release` with that reason to the claim's running leg, then acts on the message
-    as §6.9 and R-BTN-119 say, without waiting for the leg to read the event. The event changes
-    neither the stop's timing nor its escalation, and the leg cannot defer or refuse the stop by
-    it. A stop the runner makes with no message (`restart`, R-BTN-5's re-verification, a lease
-    lost, R-BTN-143, R-BTN-64) hands no `release`. The leg's `ctx.signal` aborts by R-BTN-72.
+- **R-BTN-198 (leg events: what Baton tells a running leg).** Not built: the runner
+  stops a leg as R-BTN-119 says and hands it no event. The design of the
+  `ticket.changed` and `release` events is in the
+  [conditions proposal](../proposals/conditions.md).

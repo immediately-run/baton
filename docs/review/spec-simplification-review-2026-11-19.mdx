@@ -1,0 +1,298 @@
+---
+title: "Review — where the spec can be smaller and simpler, 2026-11-19"
+description: A read of every section file of BATON_SPEC and its OAuth companion for size, not correctness — unnecessary special cases, legacy still specified, duplication, welding text, the boundary with Fieldhouse, and unbuilt designs written as rules. The owner's five rulings on it, what was applied on the same branch, and what is left for tickets.
+tags: [review]
+order: 56
+---
+
+<Lede>Commissioned by the owner on 2026-11-19: "Baton's specs are very complex. I'd like you to go
+through the existing specs … and identify areas where the spec could be simplified". Ten review
+agents each read an assigned span of `spec/BATON_SPEC/` whole, at `main` (`088026b9`), and one
+read the boundary with Fieldhouse's spec. The findings are their claims; the ones this page leans
+on were checked against the files, and the ones that were not are marked. This review is about
+size and complexity. Correctness findings are the adversarial review's
+([2026-11-18](../../spec/review/2026-11-18-adversarial-review.md)).</Lede>
+
+Scope: the twenty section files (952 KB), and `spec/BATON_MCP_OAUTH_SPEC.md` (53 KB). The
+generated index and `spec/BATON_SPEC_HISTORY.md` were not reviewed. Line numbers below are in the
+named section file as it stood at that commit.
+
+What was checked by hand: each section's status header, the "not built here" header of
+`src/core/conditions.ts`, the shipped course list in `src/defaults/courses/`, the status of the
+tickets named, §16's own wording, the Fieldhouse quotations, the size of §15's scenario table, and
+whether the four mechanisms in *The owner's rulings* exist in `src/`. What was not: most line
+counts, the schema difference in *Data model and API*, and the count of scenarios with no test
+(the reviewer counted 92 of 195; the adversarial review, independently, 87 of 190).
+
+## Summary
+
+The spec can lose about a third of its size with no change to what Baton does, and more with the
+scope rulings below. Eight places hold most of it.
+
+| # | What | Where | Size |
+|---|---|---|---|
+| 1 | Scenario rows are whole test scripts, and gates restate them | §15 | 154 KB, about 100 KB of it restatement |
+| 2 | Unbuilt designs written as rules | §7, §10, §12.8, the OAuth companion | about 100 KB |
+| 3 | Standard-course behaviour specified as core | §5 (R-BTN-131, R-BTN-124), §7 (R-BTN-169) | about 35 KB |
+| 4 | A CLI and runner manual inside protocol rules | §4 (R-BTN-74), §8, §11 | about 40 KB |
+| 5 | Data-model and API cells that restate rule text | §13, §14 | about 30 of 69 KB |
+| 6 | Decisions entries carrying rationale and rule content | Decisions | about 28 of 53 KB |
+| 7 | Deployment duties described, then disclaimed | §12.8 | about 130 lines |
+| 8 | Adoption and git-lock text threaded through the body | §16 and about 90 lines outside it | about 20 KB |
+
+Four patterns produce the rest: every rule ends with per-forge cases; a rule's last paragraph says
+what it is not; a number is restated wherever it is used; and ticket ids stand in for rationale
+(55 in §4 alone).
+
+## The owner's rulings
+
+Asked the five questions the findings turned on, the owner ruled on 2026-11-19:
+
+1. **Unbuilt designs leave the normative spec** for proposal pages until they are built.
+2. **A shipped course's contract lives in `docs/standard-courses.mdx` and the course's directory**,
+   not in the spec.
+3. **The reference runner and the CLI stay in BATON_SPEC**, "since the runner and baton server
+   interact heavily". Finding 4 in the table shrinks to its editorial part.
+4. **docs has cut over.** §16's adoption text can go.
+5. **Cut** the forge-check deliverer, per-run domains, the `resource` prerequisite and
+   `executor.builtin: refused`.
+
+Two of the four in ruling 5 exist only in the spec (per-run domains, `executor.builtin`). The
+other two are built: the check-runner and its deliverer are in `src/core/policy.ts`, `admin.ts`,
+`screens.ts` and the CLI with eleven test files, and the `resource` prerequisite is in
+`blocks.ts`, `claims.ts`, `validate.ts` and migration 0016 with five. The mirror is in
+`src/core/mirror.ts` and about ten other core files, and the git lock's `position-disagrees` path
+is in `src/core/baton.ts`. Those need the code removed with the rule (*Left for tickets*).
+
+## 1. Unnecessary special cases
+
+- **Block and prerequisite kinds** are listed in five places in §6, two of them called "the one
+  list"; five of seven "Binds" rows say the same thing.
+- **The `cancel` leg** is "an ordinary leg" that five passages in §5 then except from
+  reachability, routing, advance, readiness and holds. The misalignment is in *Welding text*.
+- **Per-forge triplets.** Nearly every §3 rule ends "GitHub …; GitLab …; Gitea …", mixing the rule
+  with its adapter mapping (40 to 60 lines). One adapter table would carry them.
+- **Retirement aftermath.** §3 (lines 29–65) lists what a retired repository no longer does, and
+  three other rules add riders, where "rules read live repositories only" would do.
+- **Delegated keys.** R-BTN-186 states "tighten, and undo its own" and then argues twelve cases.
+- **Observation numbers** (§4): six timeouts and a lapse bar, a voiding matrix of 2, 5, 10, 15 and
+  30 minutes.
+- **`next_source`** has eleven kinds, several of which cannot arise once no snapshot replaces a
+  queued leg.
+- **Retired field names** (§5, lines 168–176) are listed one by one where "an unknown field is
+  refused" already covers them.
+- **R-BTN-57 and R-BTN-58** enumerate each power of an administrator and an owner; R-BTN-129's
+  registry is meant to be that list.
+- **Thirteen principals, fifteen grant rows, seven roles** (§11): check-runner could be a runner
+  role, the mirror key a sync key, and `human` a mark on a key.
+
+## 2. Deprecated or legacy functionality
+
+- **Git locks.** R-BTN-193 says the git-based lock and counter are "never extended or copied into
+  a new mechanism", and §4 (lines 235–244, 282–334) specifies `claim`, `set` and `done`'s
+  push-retry in more detail than anything else in the section: takeover, six retries,
+  `--rules-reread`, the drop-PR refusal. The `position-disagrees` discrepancy (line 789) and its
+  weld ("the git-lock `status:` field is the one exception") exist only for it.
+- **The next-free scan** for ticket ids is stated five times with circular citations
+  (R-BTN-86 → 131 → 199 → 131).
+- **Adoption.** §16 says "the baton repository uses none of it and no new repository needs it".
+  Mirror, cutover and shadow text remains in §3 (27 lines), §11, §12, §13, §14 and §15, and §16.2
+  is the reference deployment's own rollout plan.
+- **Legacy runners and credentials**: `IR_BATON_*` variables, runs from before run ids, R-BTN-7's
+  git status writers, `mirror_pusher` (§1–§3, §8).
+- **Scenarios that test absence**: S-BTN-203, -236, -204, -134, -86 and G-BTN-152 assert that a
+  retired thing is gone; S-BTN-14, -16 and G-BTN-8, -9, -19, -22, -35, -41 are adoption's.
+- **"As before", "today", "an older CLI"** clauses throughout, against the spec's current-state
+  rule.
+
+## 3. Duplication
+
+- **Four copies of each behaviour.** The rule, a scenario's *Expects*, a gate's *Must hold* and the
+  test. §15's scenario table is 116,868 bytes; 68 rows are over 600 characters and hold 77.6 KB;
+  the longest, S-BTN-233, is 4,018. Only 14 of 196 scenario rows and 14 of 150 gate rows cite a
+  rule id, so the rows restate rules instead of pointing at them. 85 gates are proved by exactly
+  one scenario and repeat its expectation.
+- **Numbers.** About 70% of sampled rows in §13 and §14 restate a bound a rule owns. §2's alarm
+  table (lines 38–51) and §13's "alarm instants" (lines 218–227) are two clock tables beside the
+  rules that own the clocks; `spec-writing.mdx` uses exactly this as its counter-example. The
+  adversarial review lists 27 quantities stated in two to six places.
+- **Hand-kept lists of what R-BTN-129 says is generated**: administrator powers, owner powers, the
+  CLI tree (§11, lines 303–363, about 14 KB), the screens (three times), the confirmed-action
+  list, the delegated list, and §14 again. The registry and `check:actions` do not exist (B-25 is
+  `available`), so the lists cannot be generated yet.
+- **§1 restates later sections.** R-BTN-39 (lines 102–185) carries adopt, station functions and
+  fact arrival, owned by §4, §5, §9, §11 and §12; R-BTN-66 (lines 246–270) is a hand-kept index of
+  every owner setting. About 135 of §1's 300 lines are procedure owned elsewhere.
+- **Wire shapes twice.** The heartbeat body and the observation response are in §8 and §4, and
+  again in §14, and the copies already differ.
+- **Course graphs.** Each standard course's edges are stated two to four times inside R-BTN-131;
+  the adversarial review's CRS-1 (`create-pr` contradicting itself) is a consequence.
+- **Parent waits on children** exists four times in §6 and §7 (ticket prerequisite, call,
+  condition, lifetime), and "blocked on something external" four times (resource rows, capability
+  rows, seats, attestation requirements).
+- **The OAuth companion** restates itself (§1, §11, §13 and §14 repeat §2–§10), §11's R-BTN-130,
+  R-BTN-186 and R-BTN-155, and the RFCs it implements.
+- **Decisions.** 114 of 192 entries run over two lines, 81 carry rationale and 9 hold several
+  decisions. The history file's *Decisions in full* stopped being fed about 2026-10-19, so newer
+  rationale exists only in the one-line list that is meant to cite it.
+- **Smaller repeats**: dispatch-after-commit (four times), the admission and write-budget numbers
+  (three or four), the session-role sentence (five), "Baton's server is trusted" (five),
+  protected-versus-cooperative admission (four), the leg's environment (three), the stop ladder and
+  the fence formula, qualified `depends_on` (five), the lagging-fetch rule (three).
+
+## 4. Welding text
+
+Each is two positions joined by riders. Resolving the position removes the riders.
+
+| Weld | The two sides | Resolution |
+|---|---|---|
+| "Under `builtin` …; under any other executor …", in eight rules of §8 | R-BTN-107 says isolation is opaque to core; core still branches on the executor's `source` | write each rule against the executor interface |
+| "Is the deployment's (§12.8)", on 13 lines of §12 | Baton disclaims a duty and then describes it | one list of what Baton does not observe |
+| "A coordination record under `cooperative`, a boundary under `protected`", three times in §1 | §1's headline claims for every policy what only `protected` gives | state it once, relative to the policy |
+| "Git keeps every durable record", then three rules walking it back | the original design, and Baton owning history and policy | open §1 with the architecture page's wording |
+| Policy knobs that move together, fenced by "could never land" refusals | "tune knob by knob", and two coherent columns | one who-lands knob the others follow from (the owner's decision; not applied) |
+| Three confirmation mechanisms with crossing exception lists (§11) | destructive actions, authority-changing actions, one-click Stop | the dashboard reads and tightens only (the owner's decision; not applied) |
+| The cancellation flag excepted in six rules (R-BTN-168) | "withdrawn means closed", and "run an undo leg first" | clean-up is its own ticket; moves out with ruling 1 |
+| `tickets.created: proposed` riders in §5 and §7 | who writes a proposed ticket; the riders already disagree with §12.8 | §12.8 owns it; the others say "through the source" |
+| R-BTN-146's "span" | a grant's reach, and whether it may sync | an explicit per-grant flag |
+| The protection checker is a `trusted-runner` exempted from everything a trusted runner does | one role, two jobs | its own mark on the grant |
+| `read_sha` and refresh (§4, lines 408–423) | two ways to say which commit a board was read at | one |
+
+"Trusted" has six senses in §12 (runners an owner trusts, the `trusted-runner` role, `trusted:
+true` legs, "trusted writer", "Baton's server is trusted", `--trusted-proxy`), and Fieldhouse
+adds "trusted executor" for what Baton calls a check-runner, where Baton's "executor" is
+R-BTN-107's module.
+
+## 5. The boundary with Fieldhouse
+
+Fieldhouse cites Baton by id and draws the line well. The cost is on Baton's side, in three
+shapes.
+
+- **Double ownership.** Both specs specify forge secrets and privileged-job hygiene, human-only
+  key custody and the two forge identities, what a review leg may run, and where the protection
+  checker runs (§12, lines 614–626, 828–839, 950–952, 971–974; Fieldhouse R-FH-3, R-FH-95). Only
+  Fieldhouse audits them (`check:homes`). R-BTN-188 already gives the test: "A rule none of the
+  three can enforce is not policy: it is the deployment's."
+- **Deployment procedure in Baton.** The per-forge protection recipes (§12, lines 548–573); the
+  trusted-runner install, which the two specs describe differently (a tarball with a shrinkwrap
+  that "does not ship yet", against a pinned checkout); R-BTN-201's launcher, "a process outside
+  Baton"; R-BTN-37's vendoring, R-BTN-55's Cloudflare API names and R-BTN-97.
+- **Named deployments in normative text.** The front page's title ("immediately.run Baton"),
+  "Fieldhouse does both", "Fieldhouse requires `hardware`", FLDH-41, Sand Pit (retired on
+  Fieldhouse's side), `baton.immediately.run`, and docs' rollout table in §16.2. The two specs
+  name different reference deployments.
+- **Provider and harness vocabulary.** `.claude/**` and `CLAUDE.md` in the computed floor,
+  `key:zai` and `llm:deepseek-v4-flash` as examples in §5 and §6, and §6.10, which rules nothing.
+- **Knobs that exist for Fieldhouse alone**: `executor.builtin: refused` ("stops a misconfigured
+  host, never a lying one"), per-run domains (no mention in Fieldhouse's spec), the forge-check
+  deliverer (Fieldhouse: "A host runs no `forge-check` deliverer"), §12.9's deferred `pr` and
+  `egress` kinds of `out-of-course`.
+
+**What stays, as the contract a deployment consumes**: the policy read with guarantees, knobs and
+floors; floors stopping the home; grants with a role, a domain label and the checker mark; the
+`std:` attestations; the trusted runner's merge (R-BTN-182, R-BTN-183); the protected-path floor
+and its glob grammar (R-BTN-184); claim scope (R-BTN-140, R-BTN-141); the executor interface
+(R-BTN-107), the masking list (R-BTN-144) and the stop bound (R-BTN-145); session links and
+`interact`; readings, capabilities and seats; the `out-of-course` finding.
+
+**A scope sentence most of this follows from.** Baton rules on a fact only when Baton, the forge
+at Baton's stated ref classes, or Baton's trusted runner enforces it. Everything else is named
+once, in §12.8, as not observed by Baton, without describing how a deployment meets it.
+
+Three smells inside the contract, none applied here: Fieldhouse copies three lists by hand
+(branch patterns, ticket paths, `paths.protected`) that the policy read could serve computed;
+provider accounting (`src/shared/sessionUsage.mjs` and the `model-providers.json` fixtures) lives
+in Baton's repository; and `allow_install_scripts` in `.baton/baton.json` is an interface key with
+no rule in Baton's spec. Fieldhouse's §3 anchors point at `spec/BATON_SPEC.md`, which is now only
+the index.
+
+## 6. Other reductions
+
+- **Unbuilt designs in normative sections.** §7 is headed *(proposal)*: R-BTN-161, 162, 165, 168,
+  169, 171 and R-BTN-198's `ticket.changed` are unbuilt, and `src/core/conditions.ts` says handler
+  tickets, bindings, the in-claim suspend wait and owner resolve are "Not built here, by design".
+  §10 is a proposal, "GitHub only". §12.8's tickets B-136, B-140, B-146 and B-147 are `available`.
+  The OAuth companion is a proposal (B-73 `available`). Multi-tenant deployment is specified
+  through about eight riders with one instance and B-45 `available`.
+- **Courses that do not ship**: `epic`, `branch`, `ask`, `deliver`, `announce` and `draft-doc` are
+  specified; `src/defaults/courses/` has `bug-report`, `build-app`, `create-pr`, `create-spec`,
+  `decision`, `draft-ticket`, `review-pr` and `spec-to-tickets`.
+- **Mechanisms with no user found**: R-BTN-200's store display (the markdown source "exports no
+  `show` and no `note`"), `max_queue`, `std:api-capacity@1`, `x-baton-view`, `stalled_s` (one
+  value), `outbox.source` (in effect a boolean), `paths.control: trusted-runner` (in no preset).
+- **History in rule bodies.** Incident measurements (§3, lines 374–413: "14 runs of a `*/15` cron
+  in 51 hours"), seat rationale (§6, lines 615–667), R-BTN-194 explaining more than it rules, and
+  the dashboard-V2 and deployment block in Decisions (lines 203–255).
+- **Files that only point elsewhere**: `90-load-bearing-assumptions.md`; Open questions holding
+  tickets and Fieldhouse matters.
+- **§13 and §14 cannot be generated today.** Routes are `if (m === 'POST' && p === …)` chains in
+  `src/core/baton.ts` and `admin.ts`, and the schema (79 tables from 64 migrations) differs from
+  §13 by about 21 tables each way (not checked by hand). Until B-25 builds the registry, the
+  reduction is to make cells cite rules.
+
+## Applied on this branch
+
+Applied to `spec/BATON_SPEC/` on the branch that carries this page, following the rulings:
+
+- **Ruling 1**: unbuilt text moved to `spec/proposals/`, one page per design; each normative rule
+  whose id the code cites stays, trimmed to what is built.
+- **Ruling 2**: the standard courses' contracts moved to `docs/standard-courses.mdx`; §5 keeps the
+  rules every course obeys.
+- **Ruling 3**: the runner and CLI rules stay, with their welds and restatements reduced.
+- **Ruling 5, spec-only half**: per-run domains and `executor.builtin: refused` removed.
+- **Editorial**: scenario rows shortened to what the scenario establishes and the rule it tests;
+  gates that restate one scenario cite it; §13 and §14 cells cite the rule that owns a number;
+  Decisions entries cut to one line, their rationale moved to the history file; §1's borrowed
+  procedure cut to citations; the "deployment's" riders collapsed into one list in §12.8;
+  per-forge cases gathered into one table; names of deployments, harnesses and providers taken out
+  of normative text; ticket ids and incident history taken out of rule bodies.
+
+| | Before | After |
+|---|---|---|
+| The twenty section files | 952 KB | 495 KB |
+| of which §15 | 154 KB | 63 KB |
+| The OAuth companion | 53 KB | 32 KB |
+| `spec/proposals/` (eleven pages, moved text) | — | 281 KB |
+
+Rules retired: R-BTN-97, R-BTN-154, R-BTN-169, R-BTN-200. Scenarios and gates retired: S-BTN-14,
+S-BTN-205, G-BTN-8, G-BTN-22. Fifty scenarios and 28 gates moved to `spec/proposals/scenarios.md`
+with their ids.
+
+**Ruling 1 reached further than the findings above.** Each editor decided "built" by reading
+`src/` and `cli/`, and much that the review took for built has no code: the trusted runner's
+merge, protected paths, the fact reader and proposed tickets (R-BTN-182, 183, 184, 192); MCP, the
+action registry, sign-in codes, owners' sessions and the dashboard's screens; the doorbell,
+registration tokens, grant acceptance, the launcher's read, leg trees and leg logs; ticket-source
+writes, the forced Resync and the founded-head check; rate limits and write budgets; `ticket
+adopt`; and many course-file fields the validator refuses, the `cancel` leg among them. Each of
+these rules keeps its id and a line in its section, with a link to the proposal page that holds
+the design.
+
+**Where the spec and the code disagree**, found on the way and left as they were: the policy
+document in `src/core/policy.ts` has an older shape than §12.8's knob table; a break-glass key
+satisfies every `human` entry in the code, whatever `human_key` asks; retries are per ticket in
+the code and per leg in R-BTN-122; `baton:retries` and `baton:stalled` are decisions in the code
+and `baton.*` conditions in §7; the validator accepts `max_duration` where the spec says
+`deadline_s`; the administrator's session lasts 12 hours in the code; the CLI still answers
+`baton board`, `baton tickets …`, `baton request` and `baton run`; about twenty tables and a dozen
+routes in the code have no row in §13 or §14; and S-BTN-225 names two scenarios.
+
+## Left for tickets
+
+Each of these removes or changes built behaviour, or changes another repository, so the rule
+leaves with the code.
+
+1. **Remove the mirror and the adoption machinery** (`src/core/mirror.ts` and its callers), and
+   with it §16 and the mirror rows of §13, §14 and §15 (ruling 4).
+2. **Remove the git lock** (`claim`, `set` and `done`'s push-retry, `position-disagrees`; B-178
+   already retires the commands) and the next-free id scan.
+3. **Remove the check-runner and the forge-check deliverer** (ruling 5), and merge what remains of
+   the role into the runner's.
+4. **Remove the `resource` prerequisite and block** (ruling 5); readings stay as advice.
+5. **Fieldhouse**: drop its one line on `executor.builtin`, repoint its §3 anchors from the index
+   to the section files, and rename "trusted executor".
+6. **Build the action registry** (B-25), then delete the hand-kept lists of §11 and generate §14.
+7. **Owner decisions not taken here**: one who-lands knob in place of five that move together; the
+   dashboard as read-and-tighten only; one audit of forge protection, Baton's hourly checker or
+   Fieldhouse's weekly one; whether multi-tenancy stays specified before B-45; who owns
+   `sessionUsage` and the provider fixtures; whether the policy read serves the computed floor.
