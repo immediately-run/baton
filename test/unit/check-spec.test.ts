@@ -81,7 +81,7 @@ describe('check-spec', () => {
       '',
       '- **R-BTN-1 (a rule).** It holds.',
     ].join('\n'));
-    expect(found.map((l) => l.line)).toEqual([1, 2]);
+    expect(found.map((l: { line: number }) => l.line)).toEqual([1, 2]);
   });
 
   it('fails a rule that opens with an italic patch note, unless allowlisted, and a stale allowlist entry', () => {
