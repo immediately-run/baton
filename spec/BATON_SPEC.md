@@ -500,8 +500,8 @@ is stale. Never edit it by hand.
 | S-BTN-234 | Baton hands out the identifiers (B-176) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-235 | the dashboard poll's ETag (B-242) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-236 | runner names (B-68) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-237 | a control path changed outside a course | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-238 | unlisted repositories and the `builtin` executor are the policy's | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-239 | a control path changed outside a course | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-240 | unlisted repositories and the `builtin` executor are the policy's | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
@@ -654,4 +654,4 @@ is stale. Never edit it by hand.
 | G-BTN-167 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-168 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-169 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-170 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-172 | [`15-verification.md`](BATON_SPEC/15-verification.md) |

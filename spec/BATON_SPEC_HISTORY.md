@@ -3318,7 +3318,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   R-BTN-184, R-BTN-183, R-BTN-182, R-BTN-198, R-BTN-47, R-BTN-92, R-BTN-96, R-BTN-139, R-BTN-141,
   R-BTN-26, R-BTN-13, R-BTN-12, R-BTN-73 / R-BTN-95 and §12.9 amended; S-BTN-218 and S-BTN-219
   retired; S-BTN-116, S-BTN-209, S-BTN-220, S-BTN-233, G-BTN-136 and G-BTN-168 amended;
-  S-BTN-237, S-BTN-238 and G-BTN-170 added: no commit signature is verified (B-263, B-264).**
+  S-BTN-239, S-BTN-240 and G-BTN-172 added: no commit signature is verified (B-263, B-264).**
   Rules changed: R-BTN-66 (the owner-signed control inputs and `require_signed_control` are
   gone), R-BTN-133 (the runner verifies no signature and loads from the claim's snapshot),
   R-BTN-194 (the brief mark is gone; `last_written_by` carries `human`, decided when it is
@@ -3396,7 +3396,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   name could put a protected, unconsenting repository in a cooperative home's scope; it now
   needs that repository's own `by-name`. The floor's grammar left nested agent and package
   configuration outside it; those entries are any-depth. Five rules still defined reach as
-  `code_repos` membership, S-BTN-116 tested the opposite of S-BTN-238, a Decisions line still
+  `code_repos` membership, S-BTN-116 tested the opposite of S-BTN-240, a Decisions line still
   said "no exception", and the seven re-read notes did not parse.
   Round 3 (one fresh reviewer, the last round the process allows; 7 findings, one high, none
   refuted). Round 2 had made the human's merge account only when it "left `human-merge` with
