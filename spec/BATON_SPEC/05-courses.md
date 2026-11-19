@@ -971,7 +971,7 @@ mean (R-BTN-50).
       `agent_concluded_idle` with the signals that were quiet, `agent_concluded_absolute` — so
       the close and the review round can see how the leg ended; Baton is told none of it (no
       condition raised, no deadline taken, nothing posted: the server learns the leg ended as it
-      learns every leg, by the claim's end — the owner, 2026-10-22). Both bounds are the stub's
+      learns every leg, by the claim's end). Both bounds are the stub's
       constants, a course's to raise or lower in its copy of the file. While a leg runs, each of
       the runner's beats logs its duration and the age of its newest activity signal
       (R-BTN-72), so an operator watches a wedge form instead of silence.
