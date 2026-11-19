@@ -39,3 +39,8 @@ BATON_REPOSITORIES = '[{"id":"docs","github":"immediately-run/docs","default_bra
 # Cloudflare alone, and every deploy rewrites the Worker's vars from this file. The dashboard's
 # principal is a session minted from BATON_ADMIN_KEYS (R-BTN-57); B-46 removes the read that
 # remains in the code.
+
+
+[observability]
+enabled = false
+
