@@ -47,7 +47,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/core/ports.ts` | The platform services core takes: `Store`, `Scheduler`, `Clock`, `AdminKeys`, `HookRunner`, `Dispatch`, `Gate`, and the instance's `Config` |
 | `src/core/front.ts` | What stands in front of the core: verifies the principal (OIDC for the sync, Access for the owner, a signed request's shape for a worker, the App's signature for a webhook), sets the R-BTN-16 headers, serves the dashboard, forwards the API |
 | `src/core/baton.ts` | The core: migrations, board sync (§7.1), routing, the alarm, the dashboard state |
-| `src/core/workerApi.ts` | The worker API (§11): heartbeat and registration, activities, messages, mode and shadow reports, the Workers view |
+| `src/core/runnerApi.ts` | The runner API (§8): heartbeat and registration, activities, messages, mode and shadow reports, the Runners view |
 | `src/core/claims.ts` | The lease (§6, R3-1212): claim and end, matching (§7.2 rules 1–9 via `isEligible`), the alarm's reaps, the fence before re-issue, confirmations, git winning over a stale claim, the Running / Timeline / Needs you data |
 | `src/core/attempts.ts` | Pure: the retry policy (§6.10 R-BTN-23) — which ends count, backoff, holds, the review-capacity run, the resume record (R-BTN-24) |
 | `src/core/admin.ts` | Administrators and owners (R-BTN-57/-58, R-BTN-66/-67): repositories, probes, grants, owners, owner bars, required bars, `retry`, `transcript_repos`, login links and dashboard sessions — the one set of validated functions the signed `/v1/admin/*` and `/v1/owner/*` routes and the `baton` CLI share |
@@ -69,7 +69,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/core/auth.ts` | JWT verification (R-BTN-15, R-BTN-16); the one verifier of signed requests, SSHSIG over RFC 9421 (R-BTN-13); worker tokens against `TOKEN_HASHES` during the transition |
 | `src/cloudflare/` | The Cloudflare host: the Worker (`worker.ts`) and the `Baton` Durable Object (`baton.ts`), wiring `ctx.storage`, the alarm and `waitUntil` into the ports |
 | `src/local/` | The local host: `node:sqlite` as the `Store` (`store.ts`), one queue for every request and alarm tick (`queue.ts`), a timer as the alarm (`host.ts`), `node:http` (`server.ts`), the command line (`main.ts`); the course test kit (`testCourse.ts`, R3-1248) |
-| `src/runner/` | `baton run`'s worker loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`), the CLI entry (`main.ts`) and `baton leg replay` (§9.8 R-BTN-84, `replay.ts`) |
+| `src/runner/` | `baton run`'s runner loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`), the CLI entry (`main.ts`) and `baton leg replay` (§9.8 R-BTN-84, `replay.ts`) |
 | `src/migrations/` | Numbered schema migrations, applied before the object serves |
 | `src/dashboard/` | The dashboard (BATON-UI-V2): React 19 and TypeScript, no other runtime dependency, built by `npm run build:ui` (esbuild) into `src/dashboard/dist/` (gitignored) — one bundle served as text by both hosts (R-BTN-55), never Workers assets |
 | `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list` (`decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
@@ -154,7 +154,8 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   repository command, not an API call: the push triggers the sync, the board places the ticket, and
   the next claim starts the course. The course's file must say `starts_from: request`.
   `docs/standard-courses.mdx` has the pattern.
-- `npm run vendor` — re-copy `baton.mjs`, `vocabulary.mjs` and `sessionUsage.mjs` from a sibling `../docs`
+- `npm run vendor` — re-copy the files `src/shared/manifest.json` lists (`baton.mjs`, `vocabulary.mjs`,
+  `sessionUsage.mjs`, `batonSync.mjs`, `ticketPr.mjs`) from a sibling `../docs`
   checkout (or `DOCS_DIR`) and rewrite `src/shared/manifest.json`. Do this in a PR here after
   docs changes any of them.
 - `npm run fixtures` — regenerate `test/fixtures/boards.json` with the real docs

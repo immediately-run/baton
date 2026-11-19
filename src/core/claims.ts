@@ -294,9 +294,6 @@ export class Claims {
   private event(kind: string, actor: string, detail: unknown, ticketId: string | null = null, claimId: number | null = null, repo?: string) {
     logEvent(this.c.store, this.c.now(), kind, actor, detail, ticketId, claimId, repo ?? (ticketId ? repositoryOf(ticketId) : null));
   }
-  private setting(key: string): string | null {
-    return this.rows<{ value: string }>('SELECT value FROM baton_settings WHERE key = ?', key)[0]?.value ?? null;
-  }
   /** Whether the ticket's repository has cut over (R-BTN-28, per repository). */
   private cutOver(ticketId: string) {
     return this.rows('SELECT 1 FROM repositories WHERE id = ? AND cutover_at IS NOT NULL', repositoryOf(ticketId)).length > 0;

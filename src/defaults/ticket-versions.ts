@@ -9,7 +9,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { GIT_NONINTERACTIVE_ENV } from './ticket-state';
-import type { TicketsResult } from './tickets-markdown';
+import type { TicketSource, TicketsResult } from './tickets-markdown';
 
 /** One git command in `root`, bounded and non-interactive; throws with git's own stderr. */
 const git = (root: string, args: string[], timeoutMs = 30_000): string =>
@@ -73,7 +73,7 @@ export const MARKDOWN_SOURCE = {
   async read(_id: string, o: { version?: string | null; checkout?: string } = {}): Promise<{ version: string; ticket: string | null }> {
     return { version: o.version ?? '', ticket: readTicketBlob(o.checkout ?? process.cwd(), o.version) };
   },
-};
+} satisfies Pick<TicketSource, 'versions' | 'read'>;
 
 /** B-190 (R-BTN-84, §4.2): the digest of what a source's `read` returned — the `ticket` of its
  *  `{version, ticket}` answer, hashed as it stands: a string's own bytes (the markdown source's

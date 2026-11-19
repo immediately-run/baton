@@ -1,0 +1,403 @@
+---
+title: "Review — architecture, the model, persistence and spec divergence, 2026-11-19"
+description: A code review of the whole repository at b704d0af with architecture as the primary angle — duplication and decomposition, the contracts a new forge, harness or host is written to, what the Quint model has earned, whether SQLite can be replaced, and whether the spec and the code can evolve without diverging. Two bugs fixed in place, sixteen tickets ready to file.
+tags: [review]
+order: 55
+---
+
+<Lede>Commissioned 2026-11-19: a detailed review of Baton's code, architecture first. Eight
+reviewers read `main` at `b704d0af` in parallel, one per question, and measured with scripts
+rather than impressions; the findings that drive a recommendation were then checked against the
+code by hand, and two of them were reproduced as bugs and fixed in the review's own branch
+(`review/architecture-2026-11-19`). What is small, mechanical and behaviour-preserving was fixed
+in place; everything else is a ticket, written below so it can be filed as it stands.</Lede>
+
+## Verdict, one line per question
+
+| Question | Answer |
+|---|---|
+| Is code duplicated? Would an inheritance tree help? | Duplication is real but local: helper-sized copies, not parallel class families. No inheritance tree is warranted — the core is already 26 services over explicit context objects, which is the right shape. The fixes are one shared helper per cluster, and moving three concerns out of `src/core/baton.ts`. |
+| Are units doing too much? | Three are: `src/core/baton.ts` (composition root, router, auth, board post and dashboard read model in 2,227 lines), the `Runner` class (2,440 lines, 103 members, per-claim state reached through `AsyncLocalStorage` proxies) and `src/defaults/cli.ts` (four modules in one file, 515 lines of JavaScript held in template strings). `claims.ts` is large but well factored. |
+| Do core pieces implement contracts that guide a new forge, harness or host? | Uneven. The host platform (`Ports`) and the leg executor (`Executor`) are real, enforced contracts. The git forge is not: there is no forge interface, five separate forge lists, and the standard PR courses write through `gh`. The harness list is a closed enum in core and in the schema. |
+| Is the Quint model earning its cost? | It earned it in its first six days and has found nothing since. Nothing is proved (the bounded check reaches depth 4 on one ticket), no Quint runs in CI or `npm test`, and one invariant now contradicts the spec. Recommendation: **shrink** to a design-time core that runs in about a minute; retire the proof, the trace check, the stamps and the report gate. |
+| Is formatting, commenting and naming consistent? | Formatting is uniform by habit with no tool enforcing it (two exceptions: code line length, trailing commas). Comments are heavy (0.38–0.51 comment lines per code line) but 82% of a sample explain why. Naming is consistent in identifiers and inconsistent in file names; `notice`, `courier` and `item` are still live words in code the spec retired. |
+| Can SQLite be replaced with PostgreSQL? | One instance on Postgres: feasible, large. The obstacle is the synchronous `Store` port, not the dialect. Several instances on a shared Postgres: not without redesign — correctness rests on a single writer. |
+| Can spec and code evolve without diverging? | The spec's own consistency is well guarded. Almost nothing ties it to the code: no artifact says which rules are built, 90 of 192 scenarios have no test, and the route table, schema and command tree in the spec each differ from the code by dozens of entries with no check. |
+
+## What this review changed
+
+All in the worktree `../baton-arch-review`, uncommitted, on `review/architecture-2026-11-19`.
+`npm run typecheck` and `npm test` were run on the result (see [Verification](#verification)).
+
+| Change | Files | Kind |
+|---|---|---|
+| **Bug: the published CLI crashed on `baton home …`, on `owner verify-config`, and on any API command run with `--home`, `BATON_HOME` or a `homes.json`.** The package's prebuilt export list lacked `homeMain`, `resolveHomes` and `verifyConfigMain`, which `cli/baton.mjs` imports; a checkout's bundler exports them, so only an installed release failed (`baton: homeMain is not a function`). Reproduced on a built `dist/baton.mjs`, fixed, and `check:package` now runs `baton home list`, runs a command under `BATON_HOME`, and compares the entry's imports with the prebuilt list so the next missing name fails the build. | `scripts/build-cli.mjs`, `scripts/check-package.mjs` | fix + check |
+| **Bug: a retired repository still handed out sequence numbers.** `sequenceRoute` asked `registry.get`, which includes retired rows, where every sibling route asks `registry.live` (R-BTN-47). One line, with a case added to S-BTN-234 that fails without it. | `src/core/baton.ts`, `test/integration/S-BTN-234.sequences.test.ts` | fix + scenario |
+| `check:package` could not run under npm 12, whose `npm pack --json` prints an object where npm 10 and 11 print an array. It now reads both. | `scripts/check-package.mjs` | fix |
+| Six copies of the path-segment decode (three closures, three inline) are one `pathSegment`. | `src/core/baton.ts` | dedupe |
+| Dead code: `Claims.setting` (never called); a `?.` on a field that is never absent; `baton-run.mjs` built `leg.ts` and exported `raiseMain` on every `baton run`, which nothing imported (`baton-leg.mjs` is the one the CLI uses). | `src/core/claims.ts`, `src/core/baton.ts`, `scripts/baton-run.mjs` | removal |
+| A test file that no longer exists (`test/unit/dashboard-poll.test.ts`) was still listed in two tsconfigs and in `NODE_ONLY`. | `tsconfig.json`, `tsconfig.local.json`, `vitest.config.ts` | removal |
+| The ticket-source contract has a name: `TicketSource` (`tickets`, `versions`, `read`), documented as what a new source is written to, and the markdown default now `satisfies` it. Types only. | `src/defaults/tickets-markdown.ts`, `src/defaults/ticket-versions.ts` | contract |
+| README: the layout row for `src/core/workerApi.ts` (the file is `runnerApi.ts`, the section §8), the runner loop's row, and the vendored-file list (five files, per `src/shared/manifest.json`, where it said three). One comment naming a function that no longer exists. | `README.md`, `src/defaults/tickets-rules.ts` | docs |
+| `.editorconfig` stating the style the code already has. It reformats nothing. | `.editorconfig` | tooling |
+
+Deliberately **not** changed here, though each is a one-line or mechanical fix: anything under
+`spec/`, `CLAUDE.md` and `scripts/check-spec.mjs` (an open branch is amending them), and
+`.github/workflows/` (the owner's to change). They are listed under
+[Owner one-liners](#owner-one-liners).
+
+## 1. Duplication and decomposition
+
+### The core is composed well; one file is not
+
+`BatonCore` is a composition root over 26 service classes, each constructed with a context object
+(`constructor(private readonly c: Ctx)`). There are no mixins, no prototype augmentation and no
+value-import cycles; hosts are wiring only (55 lines for Cloudflare, about 320 for local); no
+platform import reaches core, and `Date.now()` appears once, as the clock's default. An
+inheritance tree would add nothing: the services share no behaviour beyond a private `rows`
+wrapper, which 21 of them define identically — a helper in `db.ts`, not a base class.
+
+The exception is `src/core/baton.ts`. Beside the composition root it holds:
+
+- **the HTTP router and all per-route authentication** — about 800 lines and 72 dispatch sites
+  across `route`, `runnerRoute` (266 lines), `adminRoute`, `courierRoute`, `blocksRoute` and
+  `sequenceRoute`, with `front.ts` keeping a second hand-written path list that must mirror it;
+- **the board post**, the most intricate transaction in the system (`boardPost`, 179 lines, and
+  its helpers) — every other domain has a service, this one has none;
+- **the dashboard read model** (`uiState` and its helpers).
+
+`docs/context/architecture.mdx` says "one registry, one check … generated from it behind one
+`authorize`" in the present tense. That is the target (B-25, `available`), not the code:
+`src/shared/actions.mjs` does not exist and `authorize` appears nowhere in `src/` or `cli/`. The
+retired-repository bug fixed above is what hand-dispatch costs — a new route copied five of the
+six checks its siblings make.
+
+### Duplication clusters worth removing
+
+| Cluster | Where | Disposition |
+|---|---|---|
+| Path-segment decode ×6 | `baton.ts` | fixed here |
+| Grant check (`SELECT 1 FROM runner_grants WHERE … revoked_at IS NULL`) ×8 | `baton.ts` ×5, `policy.ts` ×2, `runnerApi.ts` | ticket 2 |
+| "Ticket of this repository" ×5; stats and conditions preambles line for line; runner-secret reconciliation ×2 | `baton.ts` | ticket 2 |
+| **Runner liveness predicate ×7**, differing on whether `legacy` is excluded | `blocks.ts`, `runnerApi.ts`, `claims.ts` | ticket 13 — this is the lock's own predicate |
+| Private `rows`/`exec` wrapper ×23; `baton_settings` upsert ×7 | most services | ticket 8 |
+| `git` shell-out ×8, six of them with no timeout and no `GIT_TERMINAL_PROMPT=0` though they `fetch`, `push` and `ls-remote` | `src/defaults/*` | ticket 10 — `baton tickets claim` can hang on a prompt |
+| Argument parser with the same `value()` closure ×7 | `cli/`, `src/runner/`, `src/defaults/` | B-157 |
+| `forgeApi` ×2; `PR_URL` regex ×2 (and it accepts only GitHub's `/pull/`) | `forge.ts`, `cli/baton.mjs`, `pr-close.ts`, `answer.ts` | ticket 3 |
+| `class Repo` ×11, `class Home` ×7, spawn-the-CLI `run` ×26 in tests | `test/` | ticket 9 |
+
+What looks like duplication and is not: the five large leg scripts under
+`.baton/courses/create-pr/legs/` share 89–97% of their lines because they are esbuild bundles
+that `repo init` wrote, one standalone file per leg by design.
+
+### The runner
+
+`Runner` (`src/runner/runner.ts:365–2806`) moved per-claim *state* to a `Slot` but left the
+*behaviour* on the class, which reaches the state through 17 getter and setter pairs over
+`AsyncLocalStorage`. Which claim a line touches depends on the ambient async context, not on a
+receiver; `runClaim` is 370 lines threading about 15 mutable locals. The smaller runner modules
+(`mask`, `audit`, `channel`, `executor`, `state`, `protocol`) are each one job in 85–310 lines,
+and the runner re-implements no server rule — it imports `core/graph` and `core/conditionTypes`.
+
+## 2. Contracts for what varies
+
+| Variation point | A named contract? | Implementations | Files a new one touches | Conformance run |
+|---|---|---|---|---|
+| Host platform | yes — `Ports` (`src/core/ports.ts`) | Cloudflare, local | 2–3 | the whole integration suite, through `#host`; `boundary-host.test.ts` |
+| Leg executor | yes — `Executor`, versioned (`executor_api: 1`), digest-pinned | builtin, pinned bundles | 0 | load-time shape check only |
+| Ticket source | yes — `TicketSource` (named in this review) | markdown, a repository's own | 1 for reads | `baton tickets check` |
+| Condition types, step kinds, gates | yes — data: a table and course declarations | — | 0 | `condition-types.test.ts`, the course test kit |
+| **Git forge** | **no** | GitHub whole; GitLab and Gitea in part; plain git | **about 20** | none (`githubFake.ts` is GitHub only) |
+| **Agent harness** | a string contract (`agent_command`); the name is a closed enum | opencode, claude-code | 0 to run, 6 to be first-class | none |
+| Sync identity | tagged unions; SSHSIG sync keys are the forge-neutral floor | GitHub OIDC, GitLab CI, sync key | 4 | none |
+| Delivery to people | by design none in core: a delivery runner polls `GET …/conditions` | none in the repository | 0 | none |
+
+`Ports` is the seam the others should copy: small interfaces, two implementations, a test that
+fails on a platform import, and one suite run against every implementation.
+
+The forge is where value 8 ("Baton runs without GitHub") is not yet true of the code:
+
+- five separate forge lists (`links.ts`, `codeRepos.ts`, `forge.ts` twice, `course-pr.ts`) and two
+  SQL `CHECK`s, with a ternary chain per operation — nothing fails to compile when one is missed,
+  because most chains end in a default `else`;
+- the read side is GitHub only (`githubFacts` throws "no adapter … yet" for anything else),
+  though its output type `PrFact` is already forge-neutral and `--facts` already injects it;
+- the write side of the standard PR courses is `gh pr create`, `gh pr list` and `gh pr comment`;
+- core's dispatch port is `DispatchTarget.github`, sent to `api.github.com`, and the forge-path
+  column is named `github` for every forge.
+
+## 3. The Quint model
+
+**What it found.** Two spec defects and two core defects, all between 2026-10-15 and 2026-10-20:
+overlapping sync runs flagged as a regression (R-BTN-62, amended to `sync-busy`); an end that
+blocked a ticket silently; a regression judged by a reading older than the latest advance
+(S-BTN-36); `done` not confirmed at an end station (S-BTN-40). Both code defects came from the
+model-drawn *replay*, not from the checker. Of the 75 runs in `model/regressions.qnt`, about four
+trace to a defect the tooling surfaced; the rest are back-ported review findings and scripted
+examples.
+
+**What it proves.** Nothing unbounded. The Apalache run is depth 4 on a one-ticket instance and
+takes 48–127 minutes; at that depth it reaches no judged snapshot, no reap and no second ticket.
+Liveness formulas "have not been run" (`model/README.md`). Everything else is random sampling,
+which already missed one real trace at 1,000 samples.
+
+**What it costs and where it stands.**
+
+- No Quint runs in CI or in `npm test` (removed in five steps between 2026-10-14 and 2026-11-10).
+  The last full report on a PR is 2026-10-20; of 53 PRs since 2026-11-06 that changed checked
+  paths, two carry a report.
+- `model/` took 55 commits in October and 8 in November while `src/core` took 135 and 106. B-188
+  changed the claim cardinality with no model change: `oneClaimPerRunner`
+  (`model/properties.qnt:81`) asserts what R-BTN-4 no longer says, and `model:links` stayed green
+  because its hashes cover model edits only, never code edits.
+- `model/lightQuestion.qnt` (586 lines) models a rule retired on 2026-11-01 and no script runs it.
+- The report gate caused two operational incidents recorded in `docs/lessons.mdx`.
+- About 5,300 lines of model, scripts and tests against 19,580 in `src/core`.
+
+**Recommendation: shrink, do not retire outright.** Keep `baton.qnt`, `properties.qnt`,
+`regressions.qnt`, `witnesses.qnt` and the `sim` instance as a design instrument for the lease,
+fence and observation core: `npm run model:quick` (typecheck plus the 75 runs, about a minute) in
+CI when `model/` changes, and `npm run model` on demand when a ticket amends the lease rules.
+Retire the bounded proof, liveness, `lightQuestion`, the scenario trace check, the report gate and
+the `@model` stamps. Replace the one part that found code bugs — the replay — with a property test
+that drives the real core with random action sequences under `setClock` and asserts the nine
+non-trivial invariants. This amends values 10 and R-BTN-68, so it is the owner's decision
+(ticket 1).
+
+## 4. Replacing SQLite
+
+**The contract.** `Store` is `exec(query, ...params)`, `script(sql)` and `transaction(fn)`, all
+synchronous, with positional `?` and raw SQL strings. That is true of both hosts today and of no
+Postgres driver.
+
+| Obstacle | Size |
+|---|---|
+| The synchronous port: about 512 functions reach the store without `await`, through chains up to 14 frames deep; about 2,000 call sites and every `transaction` body would change | large |
+| No data-access layer: 894 SQL literals in 29 of 50 core files (claims 213, blocks 103, admin 98, runnerApi 87) | large to confine, medium to translate in place |
+| Tests assert on the schema: 1,451 SQL literals in 126 test files | medium to large |
+| Dialect semantics: bytewise `ORDER BY` on text (161 uses), `rowid` as an insertion-order tiebreak (5), a unique violation caught inside a transaction that then continues (2), booleans as integers, `int8` returned as strings | medium |
+| Migration history: 59 files with table rebuilds and JSON rewrites; a second dialect needs a squashed baseline and then two trees | medium |
+| Single-writer assumption: sequences, observations, capacity seats and claim eligibility are read-then-write with no lock; only "one active claim per ticket" has a database constraint behind it | small for one instance (keep the request queue), large for several |
+
+The dialect itself is mostly mechanical: no `datetime()`, `strftime()`, `AUTOINCREMENT`, `STRICT`,
+`GLOB` or `INSERT OR REPLACE` anywhere; every `ON CONFLICT` names its target; time is always bound
+from `this.now`.
+
+So: one instance on Postgres is a large but bounded port, and the cheap steps that keep it open
+are worth taking now (ticket 8). Several instances on one database is a different system — the
+spec states the single writer as a rule (§2) — and should be recorded as a non-goal rather than
+left implied.
+
+## 5. Spec and code
+
+What works: one home per statement, a generated index, `check:spec` failing on unknown rule ids,
+stale indexes and patch notes, and a history file the stale-rule guard reads.
+
+What is missing is any link from a rule to the fact of its being built.
+
+- **No per-rule status.** The only markers are 17 free-text section headings, several already
+  wrong (§6.11 is marked a proposal for B-106, which is done and cited in 11 source files).
+  Citation is not implementation: R-BTN-129 is cited in two source files and the registry does
+  not exist.
+- **Scenarios.** R-BTN-30 says every scenario passes; 90 of 192 have no test anywhere, and
+  `check:spec` checks only test file → spec, never spec → test.
+- **Retired ids** are a warning, not an error: 94 citations in `src/`, 30 in `model/`. Of 275
+  section-qualified citations (`§x R-BTN-n`) in code, 96 name a section that no longer holds the
+  rule.
+- **Three second sources of truth, unchecked.** §14 lists 113 paths, the code serves about 73
+  (51 spec-only, 11 code-only). §13 calls itself "the current schema"; 19 tables in the
+  migrations are not in it and about 20 in it have no migration. R-BTN-127's command tree has 59
+  rows; nine of its nouns are not built and three built commands are not in it.
+- **The spec names checks that do not exist**: `npm run check:actions` (§14, §11) and
+  `npm run test:load` (§2, §15) are not in `package.json`.
+- **`spec:impact`** lists tickets and context pages, not code or tests, so "an amendment reaches
+  every citation" stops at the documentation.
+
+## 6. Consistency
+
+- **Formatting.** No formatter, linter or lint step exists. The code is uniform anyway: two-space
+  indent, no tabs, single quotes about 99%, semicolons always, no loose equality, no `var`, zero
+  `as any` and zero `@ts-ignore` in `src/`. Two real inconsistencies: comments wrap at 100 with
+  discipline while code does not wrap at all (12% of code lines exceed 120 characters, 333 exceed
+  200), and trailing commas are mixed. A formatter at width 100 would rewrite about 14,000 lines;
+  that is a decision, not a cleanup.
+- **Type coverage.** About 7,400 hand-written lines of `.mjs` are unchecked (`cli/`, `scripts/`,
+  `src/shared/`), eleven modules are declared bare so every import from them is `any`, and twelve
+  test files are in no tsconfig because coverage is two hand-kept lists of about 75 paths.
+- **Comments.** 66% of comment blocks carry an id. Rule ids (the rule that holds) age well;
+  ticket ids (who changed it) duplicate `git blame`, and about 9% of blocks are change narrative
+  ("moved", "round 1", "renumbered at the merge"). A dozen name files or functions that no longer
+  exist.
+- **Names.** Identifiers follow one unwritten rule consistently — snake_case is data (wire,
+  database, file), camelCase is code — and error codes, routes and table names are uniform. File
+  names are not: `src/core` is camelCase, `src/defaults` and `scripts` kebab-case, and near-twins
+  confuse (`core/course.ts` and `core/courses.ts`; `baton.ts` twice; `defaults/cli.ts` and
+  `cli/`). `src/shared` is called vendored and is 5 vendored files among 12.
+- **The dashboard** is an 18-line shell; the previous one was deleted on 2026-11-13 and its
+  replacements (B-206–208, B-194, B-195) are `available`. The README still describes screens that
+  do not exist.
+
+## Tickets to file
+
+In priority order. Each is written to be filed as it stands (`baton tickets new`); none has been
+filed.
+
+1. **Decide the model: shrink it to a design-time core.** *Owner decision — amends values 10 and
+   R-BTN-68.* Keep `baton.qnt`, `properties.qnt`, `regressions.qnt`, `witnesses.qnt`, `check.mjs`
+   and the `sim` instance; run `model:quick` in CI on changes under `model/`. Fix or drop
+   `oneClaimPerRunner` for B-188 first. Retire `verify.mjs`, `full.mjs`, `liveness.qnt`,
+   `lightQuestion.qnt`, the `small` instance, `check-traces.mjs` and `trace-scope.json`,
+   `model-report.mjs` and its workflow, `check-model-links.mjs` and the 25 `@model` stamps, and
+   the npm scripts that run them. Add a property test over the real core on the local host
+   asserting the nine interleaving invariants, then retire `replay.qnt`. Amend R-BTN-68, §16's
+   cutover precondition, the decision in §91, values 10 and the architecture page's "the formal
+   model names the code". Close B-37 and B-50; narrow R3-1254. *Done when* `npm test` needs no
+   JVM and names no Quint, CI checks the model in about a minute, and no document claims a proof.
+2. **`src/core/baton.ts` is wiring only.** Three move-only changes: `sync.ts` (the board post and
+   its helpers, signed control), `views.ts` (the dashboard read model), `routes/` (one file per
+   principal family, each `(core, req, url, principal) => Response | null`), with the shared
+   preambles as helpers — `liveRepoParam`, `ticketOf`, `requireGrant`, `runnerSecret`. A stepping
+   stone to B-25, not a replacement. *Done when* `baton.ts` is under about 500 lines, no test
+   changes beyond imports, and each "one check for every route naming a repository" is one
+   function.
+3. **A forge is one table entry on each side.** `src/core/forges.ts`:
+   `FORGE_SHAPES: Record<Forge, ForgeShape>` (path depth, PR-URL shape, blob URL, default web
+   base, CI identity), read by `links.ts`, `registry.ts` and `codeRepos.ts`.
+   `src/defaults/forges/`: a `ForgeClient` per forge (`openPr`, `listOpenPrs`, `comment`, `facts`
+   returning `PrFact[]`, `protectedRefusal`), chosen from the repository's registered forge. Route
+   `pr-close`, `pr-verify` and `tickets new` through it; one `PR_URL`; rename the dispatch port's
+   `github` field. *Done when* no forge literal exists in `src/` outside the two tables and the
+   migrations, `create-pr` runs against a Gitea fake with no `gh` on `PATH`, and one contract test
+   runs every client. Coordinate with R3-1263 (dispatch adapters).
+4. **Per-claim behaviour lives on a per-claim object.** Move `runClaim`, `runLeg`, the close and
+   handoff calls and the verify methods into a `ClaimRun` that owns its slot; extract the
+   heartbeat and spool as `Sidecar`; split `runClaim` into prepare, leg loop and settle. *Done
+   when* the runner uses no `AsyncLocalStorage`, no function exceeds about 120 lines, and the
+   runner scenarios are unchanged.
+5. **A refused dispatch is logged.** `dispatchWorkflow` swallows every error and returns
+   `res.ok`, so the `dispatch-refused` discrepancy `baton.ts` logs in its `catch` (R-BTN-94) can
+   never fire: a forge's 404 or 422 is a silent `false`. Throw on a non-2xx answer with the status
+   and a capped reason; keep `false` for a missing token. *Done when* a scenario drives the real
+   adapter against a stubbed 422 and reads the event.
+6. **A rule's status is data.** One token per rule — built, partly, specified, retiring — with
+   the tickets that build it, replacing the section-heading marks; `spec:index` emits a ledger of
+   rule → status → citing modules → scenario tests. For scenarios, a shrink-only pending list.
+   *Done when* `check:spec` fails on a rule without status, a `built` rule no source cites, a
+   `specified` rule whose tickets are all archived, and a scenario with neither a test nor a
+   pending entry; and R-BTN-30 says what is true.
+7. **Check the spec's second copies.** `check:api`: diff §14 against the routes the core serves
+   and §13 against the tables the migrations produce, each with two explicit shrink-only lists
+   (specified, not built; built, not specified). Make a retired id cited in code an error behind
+   a shrinking allowlist, check `§n R-BTN-m` pairs against the index, and extend `check:wiki` so
+   every backticked repository path and `npm run` name in the README, `AGENTS.md`, the context
+   pages and the spec exists. Add code and test citations to `spec:impact`. *Done when* CI runs
+   all of it and `check:actions` and `test:load` either exist or are not named.
+8. **Keep Postgres possible.** (a) A dialect lint in `npm test` that fails on new
+   `last_insert_rowid`, `changes()`, `rowid`, `INSERT OR`, scalar `MAX(a, b)`, `IS ?`,
+   `COLLATE NOCASE` and `PRAGMA` beyond a shrink-only allowlist. (b) A `Store` conformance test
+   on both hosts: nested rollback, `one()`, `rowsWritten`, integers above 2^53, unique-violation
+   detection, a write then a throw outside a transaction. (c) Replace the six
+   `last_insert_rowid()` reads with `RETURNING id`; give the five `rowid` orderings a column;
+   read `Sequences.next`'s stored number inside its transaction. (d) One `Db` helper for the 23
+   private `rows` wrappers, then repositories per aggregate for the four files that hold 501 of
+   the 894 statements. (e) Record on the architecture page whether the synchronous store and the
+   single writer are permanent decisions.
+9. **Scenarios do not write SQL.** 49 test files write raw `INSERT`, `UPDATE` or `DELETE`, and
+   the rename in `b704d0af` touched 124 test files for it. Add named seeders and readers to
+   `test/helpers.ts`, one git fixture (`test/lib/gitRepo.ts`) and one runner rig
+   (`test/lib/runnerRig.ts`) with a single `until`, and give S-BTN-229 — which timed out in three
+   of the last five failed CI runs — an injected clock. *Done when* a source-gate test finds no
+   write statement under `test/unit` or `test/integration` outside an allowlist, and no
+   `class Repo` or `class Home` remains there.
+10. **A client layer, and one git helper.** `src/client/` holds `send`, signing, `DEFAULT_URL`,
+    `homesPath` and the git environment, so `src/` no longer imports `cli/baton.mjs` (each dev
+    bundle currently inlines a second copy of the entry). One `src/defaults/git.ts`, bounded and
+    non-interactive by default. One table of `{entry, exports}` that the checkout's bundlers and
+    `build-cli.mjs` both read. Wire types (`ClaimAnswer`, `BeatAnswer`, `AdvanceAnswer`) shared
+    by `runnerApi.ts` and the runner's `BatonApi`, which returns `Record<string, any>` today.
+    *Done when* a boundary test shows `src/**` never imports `cli/`.
+11. **The leg stub is a module, not a string.** `stubSource` and `testsStubSource` emit about 515
+    lines of JavaScript from template literals — unchecked, with `gitRun` and `newestWrite`
+    redefined inside. Export `makeLeg(config)` from a real `src/defaults/stub-runtime.ts`; the
+    generated entry is imports and a config literal. *Done when* generated stubs behave
+    identically on the existing tests and the templates total under 40 lines. Split
+    `defaults/cli.ts` into sync, facts, stubs and init in the same change.
+12. **Lint in CI, and every file type-checked.** ESLint with only `eqeqeq`, `no-var`,
+    `prefer-const`, `no-explicit-any`, a restricted-syntax rule for `Date.now()` in `src/core`
+    and for `innerHTML`, and a file-name rule per directory; expect near-zero findings. Replace
+    the two hand-kept tsconfig lists with a convention (or a test that every `.ts` file is in
+    exactly one project); type the eleven bare module declarations. Decide the formatter
+    separately: either codify the existing style in the linter, or one Prettier commit at a wide
+    print width listed in `.git-blame-ignore-revs`.
+13. **One liveness predicate; required collaborators.** `isLive(runner, now)` and its SQL
+    fragment in one module, with the variants that differ on purpose (the dashboard's, the claim
+    gate's) named. Make the services `BatonCore` always supplies required in each context type —
+    `claims.ts` alone has 41 `this.c.x?.` calls, so a dependency dropped from the constructor
+    silently disables a gate instead of failing the type check.
+14. **A harness is one adapter.** `HarnessAdapter` (`name`, `agentCommand`, `activityPaths`,
+    `usage`) and a table in `src/runner/harness.ts`; core validates `harness` by grammar, with a
+    migration relaxing the `CHECK`. Today a third harness must report itself as one of two names.
+    Needs §8.1 amended.
+15. **Remove what the spec retired.** `src/core/notices.ts`, `/v1/courier/*`, `admin.couriers`
+    and the CLI's `courier` commands (R-BTN-80 and R-BTN-103, kept "until R-BTN-170's phase 4" —
+    confirm that phase has a ticket); the `reviewer_agents`, `reviewer_matrix` and
+    `reviewer_catalog` settings, which core writes and nothing reads; the `HookRunner` port.
+    Until then, a page on how a delivery channel is added, so nobody extends the retired model.
+16. **`src/shared` says what it is.** Move the five vendored files to `src/vendor/`; decide, now
+    that the spec lives here, whether Baton owns `baton.mjs` and docs vendors from it (R-BTN-37).
+
+Smaller items, to fold into the ticket that touches the file: the organisation-specific defaults
+in core (`DEFAULT_TRANSCRIPT_REPOS`, `MIRROR_EMAIL`, `claude/{ticket}-*` twice); `runner/main.ts`
+defaulting `repository` to `docs`; `randomHex` bypassing the injectable `random` port for claim
+nonces; `heartbeatTx` at 187 lines; `.local/` growing by one replay bundle per `baton run`;
+`baton repo init --check` to report stubs that differ from their pinned source; file names
+(`core/course.ts` and `courses.ts`); a comment policy (cite the rule, not the change).
+
+### Owner one-liners
+
+Each is small and outside what this review may change.
+
+- **`.github/workflows/ci.yml`**: `cancel-in-progress: true` applies to `main` too — 11 of the
+  last 30 runs on `main` were cancelled, so `main` is rarely verified end to end. Cancel only on
+  pull requests.
+- **`docs/context/architecture.mdx`**: "one registry, one check" is written in the present
+  tense; it is B-25's target.
+- **Spec headings**: drop "proposal — B-106" from §6.11 and the done tickets from §12.8 and
+  §12.9; about ten lines in §8, §13 and §15 still say "worker".
+- **`node scripts/link-spec-refs.mjs --check`** fails on `main` (three pages) and is not in CI.
+- **README**: 24 uses of "worker" in the retired sense remain, the layout table omits 18 core
+  modules, and it describes dashboard screens that do not exist.
+
+## What holds
+
+- Hosts are wiring; the boundary and the clock are enforced by tests, not convention.
+- Signing has one implementation; schema validation has one; the runner imports the server's
+  graph and condition rules rather than restating them.
+- Core imports nothing from course code.
+- Vendoring is hashed and checked by the suite.
+- Transitional code is catalogued in the history file with its stop condition.
+- The `#host` seam: one scenario file, two runtimes, in a suite that takes five to seven minutes.
+- No `.only`, one `it.todo`, no snapshot dumps; a fake clock is the only time source in core
+  tests.
+
+## Verification
+
+- **Reproduced:** the CLI export gap (`dist/baton.mjs home list` → `homeMain is not a function`
+  before, runs after; the new check fails with the build fix stashed) and the retired-repository
+  sequence (the new S-BTN-234 case fails with `registry.get`, passes with `registry.live`).
+- **Run on the changed tree:** `npm run typecheck` clean; `check:package`, `check:wiki` and
+  `model:links` pass. `npm test` on both hosts: 2,467 passed, 3 failed, none from these changes —
+  `dependency-hygiene.test.ts` fails the same way on unmodified `main` on the reviewer's machine
+  (its npm configuration refuses `npm ci`), and two tests (`S-BTN-48.replay`,
+  `request-protected`) hit their 5-second timeout under the full run and pass when run alone.
+  Hosted CI has not run this branch.
+- **Read by hand:** the unreachable `dispatch-refused` log, `oneClaimPerRunner` against R-BTN-4,
+  the missing `check:actions` and `test:load` scripts, CI's concurrency block, `Sequences.next`'s
+  read outside its transaction, the absent action registry, the README rows.
+- **Measured by the reviewers' scripts and not re-derived:** the counts in sections 4–6 (SQL
+  literals, call-graph sizes, id citations, route and table diffs, formatting ratios). The route
+  and table diffs are regex extractions; expect a few entries either way.
+- **Taken from records, not from a run:** model timings and the seven traces rejected on `main`
+  come from PR bodies; no Quint was run for this review beyond a typecheck and `model:links`.
+- **Not examined:** the uncommitted work on `spec/retire-signed-control`; the private docs
+  repository the vendored files come from.
