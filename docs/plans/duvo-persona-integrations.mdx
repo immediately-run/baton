@@ -1,0 +1,232 @@
+---
+title: "Meeting an organization in its own tools — Linear, Slack and Claude Code on the web"
+id: baton/DUVO-PERSONA-INTEGRATIONS
+status: proposal
+updated: 2026-11-18
+tags:
+  - plan
+scope: "What Baton needs so that an organization already working in Linear, Slack and Claude Code on the web can adopt it without moving its people into Baton's CLI, dashboard and markdown tickets"
+description: "Design for a ticket-system reader/writer pair with a Linear implementation, a launcher for Claude Code on the web sessions, and Slack as a notice channel, driven by the Duvo persona"
+topics:
+  - baton
+owns: {}
+reads-first: []
+kind: doc
+---
+
+**Spec:** [R-BTN-74](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (the ticket source),
+[R-BTN-33](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) and
+[R-BTN-39](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (what Baton holds; who places a ticket),
+[R-BTN-45](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (Baton advises, runners decide),
+[R-BTN-98](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (ranking and launch candidates),
+[R-BTN-107](../../spec/BATON_SPEC/08-runners.md#sec-8-3) (the executor),
+[R-BTN-116](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md) (person legs),
+[R-BTN-163](../../spec/BATON_SPEC/07-conditions.md) (Needs you and delivery),
+[R-BTN-171](../../spec/BATON_SPEC/07-conditions.md) (the outbox),
+[R-BTN-186](../../spec/BATON_SPEC/12-security.md#sec-12-8) (delegated keys),
+[R-BTN-193](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (git is never a lock or a counter),
+[R-BTN-195](../../spec/BATON_SPEC/07-conditions.md) (interaction requests).
+
+## Intent
+
+The persona is Duvo: an engineering organization that plans in **Linear**, talks in **Slack** and
+runs agents in **Claude Code on the web** sessions. Duvo is not adopting Baton; it stands for the
+organization that would. That organization does not move its people into Baton's CLI, dashboard
+and markdown tickets. Baton has to meet it in the tools it already uses, or it is not adopted.
+
+The comparison that prompted this was Jan Kuča's Duvo software factory proposal (13 Nov 2026),
+which uses Linear as the human view, Slack for `ask_human`, and hosted agent sessions started by a
+controller. This plan takes the parts of that which an adopter needs and fits them to Baton's
+architecture, not the other way round.
+
+## Goals
+
+- An organization files and reads its tickets in Linear, and sees each ticket's position there.
+- Work waiting in Baton starts Claude Code on the web sessions that claim it, without a person
+  opening them.
+- Everything waiting on a person reaches them in Slack, with a link to where they act.
+- Every integration is an implementation of a generic interface, so Jira, Teams or another
+  harness slots in the same way.
+
+## Non-goals
+
+- Steering tickets by moving Linear statuses (see *Later*).
+- Answering person legs with Slack buttons (see *Later*).
+- A post-merge release watcher and a risk-tiered merge policy. Both are useful, but any adopter
+  wants them; this persona does not drive them. They are separate plans.
+- Claude Managed Agents or Devin. The persona uses Claude Code on the web.
+
+## Anti-goals
+
+These would make the work a failure even if it ran:
+
+- **Linear, Slack or Claude vocabulary in `src/core/`.** The boundary test (R-BTN-50) must keep
+  passing with no new exceptions. Everything specific lives in `src/defaults/` or a course.
+- **A second authority on a ticket's position.** Baton stays the only writer of positions
+  (R-BTN-39). Linear shows them; it never sets them in this plan.
+- **Credentials in Baton.** Linear, Slack and routine tokens are held by runners, deliverers and
+  the launcher, never by Baton (R-BTN-53, R-BTN-171).
+- **A weaker answer rule.** No Slack bot or other delegated key answers a person leg (R-BTN-186).
+
+## Owner decisions
+
+Two decisions change existing context or Decisions entries. The owner has made both.
+
+- **Tickets may live outside git.** `docs/context/architecture.mdx` says "Git is the ledger for the
+  work… every ticket, its body and its evidence live in the repository", and
+  `docs/context/vocabulary.mdx` defines a ticket as "a unit of work, filed in git". R-BTN-74
+  already lets a ticket source be "a file, an issue, a row". Both pages are amended to read: git is
+  the ledger for the work's **evidence**, and the ticket source is the ledger for tickets — git by
+  default. This amendment lands first, with the Linear reader right after it.
+- **Baton refreshes a view that drifted.** Decision 91 says that under `cooperative` Baton carries
+  "no mechanism whose only purpose is to catch a pusher going round it". That entry is narrowed:
+  re-showing a position on a source's display is a display refresh, not catching a pusher. It
+  changes no position, raises nothing on Needs you, and attributes the move to no one.
+
+## The three parts
+
+### 1. A ticket system is a reader and a writer
+
+Today `tickets.mjs` mixes both directions in one module. This plan makes the pair explicit, and
+every ticket system — the built-in markdown source, `changes`, Linear — declares which halves it
+implements.
+
+| | Reader | Writer |
+|---|---|---|
+| Operations | `list(ctx)` (today's `tickets`), `read(id, {version})`, `versions: pinned \| current` | `file(ticket)`, `withdraw(ticket, reason)`, `show(ticket, station)`, `note(ticket, text)` |
+| Runs in | the sync | an outbox deliverer: a runner holding the write credential (R-BTN-171) |
+| Credential | read-only | write; under `protected`, a trusted runner's |
+| Required | yes | optional; each operation is declared, and a course that needs an undeclared one is refused at load |
+
+Rules the pair carries:
+
+- **Writes are confirmed through the same system's reader.** The outbox already confirms each
+  effect by reading it back; with the pair declared, a Linear write is confirmed in Linear.
+- **A writer's `show` and `note` never change the reader's `version`.** Otherwise each status
+  write-back stales the claim it reports on (R-BTN-35) and the sync loops. Closure does change it,
+  and only `withdraw` closes.
+- **`show` and `note` are new outbox kinds**, generic in name (`source-show`, `source-note`), each
+  ordered "latest per ticket" and confirmed when the reader sees the value.
+- **Implementations:**
+  - markdown: reader and writer as today; **no `show`**, because writing a status to git is the
+    pattern R-BTN-193 retires. Its position lives in Baton and the dashboard only.
+  - `changes`: reader only. Nothing writes a check ticket.
+  - Linear: below.
+
+### 2. Linear as the ticket system (option A: Baton steers, Linear shows)
+
+- **Reader.** One Linear team or project per Baton repository, set in `.baton/baton.json`. `list`
+  reads its open issues **that carry a course label**, so backlog and triage issues are never
+  claimable (*builder's call*). The ticket id is Linear's readable identifier (`FAC-123`) and the
+  ticket's `key` is the issue's UUID, so an issue moved to another team reads as a renumbering,
+  which R-BTN-147 already raises (*builder's call*). Filter fields (course, tier, requires, parent, repos, rank) come from
+  labels or custom fields; the body stays in Linear (R-BTN-33). `versions: current`. The version is
+  a digest of the body, the filter fields and closure; status and comments are excluded.
+- **Triggers.** A Linear webhook only records a sync want, as a forge notification does
+  (R-BTN-73). An hourly sync catches a missed webhook.
+- **Writer.** `file` creates an issue (handler tickets, call children); `withdraw` moves it to a
+  cancelled status with the reason; `show` sets the status the station maps to; `note` comments.
+- **The station-to-status map** lives in the course's display data, one Linear status per
+  station, inside Linear's fixed categories.
+- **Closure is Linear's** (*builder's call*, following R-BTN-35: the source is authoritative about
+  closure). An issue in the Completed or Canceled category is closed, whoever moved it there — a
+  person, or Linear's GitHub integration marking it Done when its PR merges. `show` writes only
+  Started, Unstarted and Backlog statuses for non-end stations; an end station's status may be a
+  Completed one, since a ticket at an end station holds no claim to stale.
+- **Where `file` runs.** Handler tickets and call children are written by the runner inside the
+  claim (R-BTN-161, R-BTN-165), so `file` needs the Linear write token on that runner. Legs that
+  file require a capability only runners holding that token provide; cloud runners do not
+  declare it, so those legs never run in a Claude Code on the web session (*builder's call*; an
+  outbox `file` kind is the alternative if this proves too narrow).
+- **A move Baton did not make is shown again.** This is a generic core rule, not Linear code:
+  when a source's writer has `show` and the display status the reader reports differs from the
+  status mapped from the ticket's current station, Baton queues a `source-show` back to the mapped
+  status. The first refresh after a drift also queues one `source-note` saying how to steer
+  instead (`baton ticket hold`, the dashboard). R-BTN-85's `position-disagrees` is not used: it
+  fires only for an `available` ticket past start and only on the Sync screen. The rule needs the
+  reader to report display status in core-neutral terms (a `display` field), and a bound so a
+  status a person keeps moving does not loop (*builder's call*: at most one refresh per ticket per
+  sync, and a note only on the first drift for that position).
+- **Presets.** The Linear source is allowed under `cooperative` only. `protected` relies on
+  ticket files a human merges in git (`paths.tickets`), and a Linear issue is outside that chain.
+
+### 3. Claude Code on the web sessions, started by a launcher
+
+What the product allows (verified 2026-11-18 against code.claude.com docs): the only documented
+external start is a **routine's API trigger** — `POST /v1/claude_code/routines/{id}/fire` with that
+routine's token, from a claude.ai account; repository, branch, prompt and environment are fixed in
+the routine; each call may pass an untrusted `text` of up to 64 KB; the response carries the
+session id and URL. 30 fires per routine per hour, 100 per account per hour, and an unpublished
+org cap on concurrent sessions. There is no documented stop or status API, and an idle session's
+VM pauses after a few minutes and loses background processes.
+
+Design:
+
+- **The runner side already exists.** A `SessionStart` hook starts `baton-sidecar` and `SessionEnd`
+  stops it (§8.1); `cloud` is a host kind (R-BTN-3); a run reports its `session_url` (R-BTN-113).
+  The cloud environment uses Limited network access with Baton's host allowlisted, and holds the
+  runner key in its environment variables.
+- **The launcher** is a small process outside Baton, run by the deployment. It reads
+  `GET /v1/runner/launch-candidates`, runs the course's `rank.mjs` with `runner: null` (R-BTN-98),
+  and fires one routine per repository for each launch it decides, passing the suggested ticket
+  and leg in `text`. It holds the routine tokens and respects the rate limits (Retry-After on 429).
+- **The session decides.** Its runner claims with `prefer` set to the suggested ticket
+  (R-BTN-100). If another runner took it, the session claims other work or exits. Baton never
+  reserves a ticket for a launch.
+- **Stopping is the lease's job.** With no stop API, a lost lease fences the sidecar and the
+  session ends its work; a paused VM stops heartbeating and is reaped after its lease timeout
+  (R-BTN-9).
+- **Cloud legs never wait on a person inside the session.** A leg that needs a person ends its
+  claim suspended (R-BTN-71) or raises `interact` with the session link (R-BTN-195), never a long
+  in-session wait, because the VM pauses and the lease lapses.
+- **Cloud runners get the ordinary `runner` role, never a trusted one.** The agent in the session
+  can read the runner key from the environment.
+
+Rejected: the executor starting the session (R-BTN-107's contract needs `stop` and `end`, which
+the product does not offer); Baton queuing launches as an outbox kind (it would make Baton decide
+when work runs, against R-BTN-45, and add a core concept).
+
+### 4. Slack as a notice channel (option A: notify only)
+
+- **Sending is a writer.** A Slack delivery runner (R-BTN-163) holds the bot token and posts each
+  Needs-you entry: person-leg questions with their options, unhandled conditions, and interaction
+  requests. A notice links to where the person acts: the dashboard's answer form, the Linear
+  issue, or, for `interact`, the claude.ai/code session.
+- **Routing.** A channel per repository by default; a person leg's `asks` label maps to a Slack
+  user group, in the deployment's configuration, not in Baton.
+- **Answers are not taken in Slack** in this plan; Baton's answer paths are unchanged.
+
+## Later (agreed direction, not in this plan)
+
+- **Linear steers a small set of moves (option B).** Hold, cancel and "ready" made in Linear count,
+  as attestations from a Linear writer the policy admits under `cooperative`.
+- **Slack answers through the ticket system (option C).** A Slack button writes the answer onto the
+  Linear issue, and the Linear reader attests it as a `std:decision@1`, as the markdown source does
+  with `answer:`. This reuses the reader/writer pair and needs no new writer kind.
+
+## Approaches considered
+
+| Part | Considered | Chosen and why |
+|---|---|---|
+| Linear | A. Baton steers, Linear shows. B. Linear status moves steer. C. Read-only mirror, tickets stay in git | **A**: no new authority on positions; B adds one, C fails a persona that files in Linear. B later for a few moves |
+| Cloud sessions | A. Launcher fires routines. B. Executor fires routines. C. Baton queues launches | **A**: no core change, matches R-BTN-45 and the existing launcher concept; B does not fit the API, C moves the decision into Baton |
+| Slack | A. Notify only. B. Slack buttons answer as their own writer. C. Answers via the ticket system | **A now, C later**: B weakens R-BTN-186; C reuses the reader/writer pair |
+
+## Left to the builder
+
+- Exact names and signatures of the reader and writer interfaces, and how `tickets.mjs`'s
+  existing exports map onto them without breaking current repositories.
+- How filter fields are encoded in Linear (labels or custom fields).
+- The launcher's shape (a CLI command such as `baton launcher start`, a workflow, or both) and how
+  it bounds launches against the concurrency cap it cannot read.
+- The spec amendments, scenarios and gates each part needs, run through `npm run spec:impact`.
+
+## Order of work
+
+1. Amend the two context pages and narrow decision 91 (owner decisions above).
+2. The reader/writer split for ticket sources, with the markdown source moved onto it unchanged.
+3. The Linear source, then the display-refresh rule in core.
+4. The Claude Code on the web launcher.
+5. The Slack delivery runner.
+
+Parts 4 and 5 do not depend on 1–3 and can run in parallel with them.

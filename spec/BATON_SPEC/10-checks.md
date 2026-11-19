@@ -91,7 +91,7 @@ print its way to `success`.
     - A check ticket's first claim queues an entry with conclusion `in_progress`.
 
 - **R-BTN-115 (the forge-check deliverer and `forge-check` entries).** Baton sends no mail and
-  calls no service but a workflow dispatch (R-BTN-94). `forge-check` is the outbox's one kind outside git (R-BTN-171), delivered by a
+  calls no service but a workflow dispatch (R-BTN-94). `forge-check` is the outbox's one kind written to the forge outside git (R-BTN-171), delivered by a
   runner the policy's `outbox.forge-check` admits (R-BTN-188).
   - **The forge-check deliverer** is a runner that declares `delivers: [forge-check]` (R-BTN-171).
     - It holds the dedicated **check App**'s private key on its own host; Baton holds no

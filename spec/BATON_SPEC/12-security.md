@@ -376,6 +376,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     | `merge.checks` — `optional`, or `required`: the protected default branch's check runs pass at the head, or a `std:checks@1` the owner named a writer for | `optional` | `required` | | trusted runners, the forge | R-BTN-183 |
     | `tickets.created` — how a ticket a runner's action creates (a handler ticket, a call leg's child, a supersession's replacement) and a withdrawal reach git | `filed` | `proposed` | | Baton, trusted runners | R-BTN-161, R-BTN-165, R-BTN-171, R-BTN-180 |
     | `outbox.git`, `outbox.forge-check` — `{deliverers}`: which grant roles may deliver the kind, from `runner`, `trusted-runner` | `{deliverers: [runner]}`, each | `{deliverers: [trusted-runner]}`, each | | Baton | R-BTN-171 |
+    | `outbox.source` — `{deliverers}`: which grant roles may deliver the source kinds, from `runner` alone (R-BTN-171) | `{deliverers: [runner]}` | `{deliverers: []}`: a `protected` repository never ejects its source (below), and the markdown source shows nothing | | Baton | R-BTN-171, R-BTN-200 |
     | `inputs.board` — who may post the board, from `sync-key`, `ci-identity`, `machine` | all three | `[sync-key, ci-identity]` | | Baton | R-BTN-93, R-BTN-102, R-BTN-187 |
     | `repos.unlisted` — whether a home that lists no `code_repos` reaches its tickets' `repos:` entries by name: `by-name` or `none` | `by-name` | `none` | | Baton, the sync | R-BTN-140 |
     | `executor.builtin` — whether a runner reporting the `builtin` executor, or none, is given a claim on a ticket that reaches the repository: `allowed` or `refused` | `allowed` | `refused` | | Baton | R-BTN-107 |
@@ -441,10 +442,10 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     enforced by the `pre-receive` hook `baton repo protect --print` emits (R-BTN-180). Baton
     refuses, on a `git` repository, `ci-identity` in `inputs.board` and a `forge-check`
     deliverer, and on a repository whose ticket source is ejected (`.baton/tickets.mjs`,
-    R-BTN-74) an `outbox.git` admitting only `trusted-runner`, naming the source: a trusted-runner
-    deliverer writes no ejected source's withdrawals (R-BTN-171), so such a policy could never
-    land one; and the other way, a snapshot that ejects the ticket source while `outbox.git`
-    admits only `trusted-runner` is refused `snapshot-rejected`, the previous source staying in
+    R-BTN-74) an `outbox.source` admitting no deliverer, naming the source: every outbox write of
+    an ejected source is a source entry (R-BTN-171), so such a policy could never land one; and
+    the other way, a snapshot that ejects the ticket source while `outbox.source` admits no
+    deliverer is refused `snapshot-rejected`, the previous source staying in
     force (R-BTN-74), so a `protected` repository never ejects its source. Its leg state is the
     side branch, by R-BTN-190, not by a knob.
 - **R-BTN-189 (guarantees and floors).**
@@ -457,7 +458,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     |---|---|---|
     | `no-runner-lands` | no runner updates the default branch, a tag or a branch outside its pattern; a runner's work lands only through the merge runner under `merge.*`, as reviewed as `merge.reviews` says, or by the human identity's own merge of its PR (`merged-by-hand`) | `refs.default_branch`, `refs.tags` and `refs.other` admit only `trusted-runner` and `human`; `paths.control` is not `any`; `merge.trusted`; `tickets.created` is `proposed`; `outbox.git` admits only `trusted-runner`; and the latest report from the protection checker, within 24 hours, matched (R-BTN-180) |
     | `control-paths-human` | no control path (courses, workflows, agent configuration, the ticket source) changes without a human landing it | `no-runner-lands`, and `paths.control` is `human` |
-    | `tickets-approved` | no ticket or goal changes, and no ticket a runner creates is filed, without a human approval of that file: a `std:approval@1`, or the human's merge of the ticket's PR, or the request PR, carrying it | `no-runner-lands`; `paths.tickets` is `approval`; `tickets.created` is `proposed`; and `attestations` admits only `human` for `std:approval@1` |
+    | `tickets-approved` | no ticket or goal changes, and no ticket a runner creates is filed, without a human approval of that file: a `std:approval@1`, or the human's merge of the ticket's PR, or the request PR, carrying it | `no-runner-lands`; `paths.tickets` is `approval`; `tickets.created` is `proposed`; `attestations` admits only `human` for `std:approval@1`; and the last accepted post's ticket source is the markdown source (`source.kind: markdown`, R-BTN-74), whose tickets are files a human lands |
     | `independent-review` | a runner's change the merge runner lands has two reviews from domains other than its writers' and each other's, runs compared as R-BTN-180 says — a labelled run of a credential `domains.per_run` lists counting as its own domain only as far as the deployment keeps that credential's runs apart (§12.8); what the human merges by hand, the human has reviewed | `no-runner-lands`; `merge.reviews.count` ≥ 2; and `attestations` admits only `baton` for `std:review@1`, `std:wrote@1` and `std:ran@1` |
     | `human-gates` | no owner's agent session, and no delegated key, changes membership, roles or the policy, and every human approval is made on a hardware key no session can drive | `approvers.members`, `approvers.roles` and `approvers.policy` are human-only lists, and the repository's `human_key` is `hardware` |
     | `board-from-trusted` | nothing a trusted leg acts on comes from a runner's board post or from git verdicts | `no-runner-lands`; `inputs.board` excludes `machine`; and the `attestations` entries admit no `sync` writer for `std:arrival@1` or `std:decision@1`, and only `human` for `std:decision@1` (R-BTN-191) |

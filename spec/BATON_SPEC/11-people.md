@@ -326,7 +326,7 @@ is summarized in the principal table (§12.1).
     | `repo sync [--if-wanted] [--defaults-only]`, `repo mirror [--if-wanted]` | `/v1/sync/*` (R-BTN-93) | CI identity, sync (mirror) key, or machine key (R-BTN-102) |
     | `repo spool <repository>` | local (R-BTN-105) | — |
     | `course test <root> <course> [--base <ref>] [--board <file>]` | local (R-BTN-69) | — |
-    | `runner start [--delivers git,forge-check] […]` | `/v1/runner/*` (R-BTN-72, R-BTN-171) | runner |
+    | `runner start [--delivers git,forge-check,source] […]` | `/v1/runner/*` (R-BTN-72, R-BTN-171) | runner |
     | `runner register --token <t> --name <name> [--key ssh\|api]` | `POST /v1/register` (R-BTN-117) | the token |
     | `runner accept-grant <repository> [--confirm]`, `runner decline-grant <repository>` | `runner.grant.accept`, `runner.grant.decline` (R-BTN-146) | runner, key alone |
     | `key create <file>` | local (R-BTN-159) | — |
