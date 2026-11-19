@@ -44,7 +44,7 @@ export const RESOURCES = [
   // BATON_SPEC (2026-10-13): authority on the Cloudflare account behind
   // baton.immediately.run — Workers, Durable Objects, DNS routes, Access, the plan.
   'cloudflare-admin',
-  // BATON_SPEC: a session registered with Baton — a worker token for its host and a
+  // BATON_SPEC: a session registered with Baton — a runner token for its host and a
   // running sidecar. Agent-held once the fleet is provisioned (AGENT_HOLDS).
   'baton-worker',
   'human-operator',
@@ -92,9 +92,9 @@ export function fitsTier(itemTier, ceiling, ladder = TIERS) {
 /**
  * The capabilities a set of declared names fulfils (BATON_SPEC §7.2 rule 4). A role expands
  * through `ROLES`; any other name (a capability, or a legacy resource such as `mcp-chrome`)
- * matches only itself; `none` contributes nothing, since every worker satisfies it. Used on
+ * matches only itself; `none` contributes nothing, since every runner satisfies it. Used on
  * both sides of the claim rule: `requires ⊆ capabilitiesOf(declared)` compares the item's
- * expanded clause with the worker's expanded declaration.
+ * expanded clause with the runner's expanded declaration.
  */
 export function capabilitiesOf(declared) {
   const out = new Set();

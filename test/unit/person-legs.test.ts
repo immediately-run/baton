@@ -196,7 +196,7 @@ describe('R-BTN-116, R-BTN-39: the answer', () => {
     expect(again.json).toMatchObject({ code: 'invalid-params' });
   });
 
-  it('an owner key of another repository, a worker\'s and an administrator\'s may not answer', async () => {
+  it('an owner key of another repository, a runner\'s and an administrator\'s may not answer', async () => {
     const stranger = await makeKey('ssh-ed25519', 'stranger-owner');
     const apiKey = await makeApiKey('a person');
     // An administrator's key is never an owner's (R-BTN-57); a key Baton does not know is no

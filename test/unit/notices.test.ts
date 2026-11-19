@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, keyCall, placed, rows, setAdminKeys, setClock, tick } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
-import { grantedWorker, signed } from '../lib/fleet';
+import { grantedRunner, signed } from '../lib/fleet';
 import { BACKOFF_MS, CLOSED_KEPT_MS, LEASE_MS, POOL, backoffMs } from '../../src/core/notices';
 import { checkAsks, checkCouriers, checkMark, checkNoticeClaim, CLAIM_MAX } from '../../src/core/validate';
 
@@ -186,12 +186,12 @@ describe('R-BTN-80: registration', () => {
     expect((await addCourier(cli, ['owner'])).json.code).toBe('conflict');
   });
 
-  it('one role per key: an owner, worker or probe key is refused as a courier, a courier key as a worker', async () => {
+  it('one role per key: an owner, runner or probe key is refused as a courier, a courier key as a runner', async () => {
     expect((await addCourier(owner, ['owner'])).json.code).toBe('conflict');
     const probe = await makeKey('ssh-ed25519', 'probe');
     expect((await keyCall(admin, '/v1/admin/probes', { public_key: probe.publicKey, label: 'probe' })).status).toBe(200);
     expect((await addCourier(probe, ['owner'])).json.code).toBe('conflict');
-    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue']);
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue']);
     expect((await addCourier(w.key, ['owner'])).json.code).toBe('conflict');
     expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: cli.publicKey, hostname: 'cli-host', capabilities: [] })).json.code).toBe('conflict');
     expect((await keyCall(owner, '/v1/owner/docs/owners', { public_key: cli.publicKey })).json.code).toBe('conflict');
@@ -210,31 +210,31 @@ describe('R-BTN-80: registration', () => {
 
 describe('R-BTN-103: the pool', () => {
   it('a heartbeat’s couriers are kept for granted repositories only, refreshed at most hourly', async () => {
-    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue']);
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue']);
     const hb = await w.beat({ couriers: [{ repository: 'docs', asks: ['owner'] }, { repository: 'ops', asks: ['owner'] }] });
     expect(hb.status).toBe(200);
     expect(hb.json.refused_couriers).toEqual([{ repository: 'ops', code: 'forbidden' }]);
-    expect(await rows('SELECT repository_id, asks, seen_at FROM worker_couriers')).toEqual([{ repository_id: 'docs', asks: 'owner', seen_at: T0 }]);
+    expect(await rows('SELECT repository_id, asks, seen_at FROM runner_couriers')).toEqual([{ repository_id: 'docs', asks: 'owner', seen_at: T0 }]);
     await setClock(T0 + 30 * MIN);
     await w.beat({ couriers: [{ repository: 'docs', asks: ['owner'] }] });
-    expect(await rows('SELECT seen_at FROM worker_couriers')).toEqual([{ seen_at: T0 }]);
+    expect(await rows('SELECT seen_at FROM runner_couriers')).toEqual([{ seen_at: T0 }]);
     await setClock(T0 + H);
     await w.beat({ couriers: [{ repository: 'docs', asks: ['owner'] }] });
-    expect(await rows('SELECT seen_at FROM worker_couriers')).toEqual([{ seen_at: T0 + H }]);
+    expect(await rows('SELECT seen_at FROM runner_couriers')).toEqual([{ seen_at: T0 + H }]);
     // A heartbeat that stops declaring them drops them; a malformed list refuses the heartbeat.
     await w.beat({ couriers: [] });
-    expect(await rows('SELECT 1 FROM worker_couriers')).toEqual([]);
+    expect(await rows('SELECT 1 FROM runner_couriers')).toEqual([]);
     // A malformed entry is refused and reported, never the heartbeat; an over-long list is.
     const mixed = await w.beat({ couriers: [{ repository: 'docs', asks: [] }, { repository: 'docs', asks: ['owner'] }, { repository: 'docs', asks: ['legal'] }] });
     expect(mixed.status).toBe(200);
     expect(mixed.json.refused_couriers).toEqual([{ repository: 'docs', code: 'invalid-params' }, { repository: 'docs', code: 'invalid-params' }]);
-    expect(await rows('SELECT asks FROM worker_couriers')).toEqual([{ asks: 'owner' }]);
+    expect(await rows('SELECT asks FROM runner_couriers')).toEqual([{ asks: 'owner' }]);
     expect((await w.beat({ couriers: Array.from({ length: 17 }, (_, i) => ({ repository: `r${i}`, asks: ['owner'] })) })).json.code).toBe('invalid-params');
   });
 
-  it('a pool copy goes to the first claimer; another worker’s mark is forbidden; a lapse returns it', async () => {
-    const w1 = await grantedWorker(owner, 'docs', 'w1', ['agent-venue']);
-    const w2 = await grantedWorker(owner, 'docs', 'w2', ['agent-venue']);
+  it('a pool copy goes to the first claimer; another runner’s mark is forbidden; a lapse returns it', async () => {
+    const w1 = await grantedRunner(owner, 'docs', 'w1', ['agent-venue']);
+    const w2 = await grantedRunner(owner, 'docs', 'w2', ['agent-venue']);
     for (const w of [w1, w2]) await w.beat({ couriers: [{ repository: 'docs', asks: ['owner'] }] });
     git.add('H', {}, decided('H-1'));
     expect((await git.post()).status).toBe(200);
@@ -251,7 +251,7 @@ describe('R-BTN-103: the pool', () => {
   });
 
   it('a machine key without couriers declared, or naming no repository, is refused', async () => {
-    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue']);
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue']);
     expect((await signed(w.key, '/v1/courier/notices/claim?repository=docs', { body: {} })).json.code).toBe('forbidden');
     expect((await signed(w.key, '/v1/courier/notices/claim', { body: {} })).json.code).toBe('invalid-params');
     expect((await signed(cli, '/v1/courier/notices/claim?repository=docs', { body: {} })).json.code).toBe('invalid-params');

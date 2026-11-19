@@ -146,7 +146,7 @@ export const SPEC_TO_TICKETS_COURSE = {
 
 /** The `decision` course (R-BTN-131), from the docs `prepare-decision-packet` and
  * `process-decision-packets` skills: a question only the owner can settle becomes a one-letter
- * packet in the ticket; the owner answers by setting the ticket's `answer:`; a worker carries the
+ * packet in the ticket; the owner answers by setting the ticket's `answer:`; a runner carries the
  * answer out. Until person legs (R-BTN-116) are built, the owner's answer is a wait on the
  * `owner`, not a leg. It opens no PR. */
 export const DECISION_COURSE = {

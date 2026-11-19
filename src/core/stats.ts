@@ -2,7 +2,7 @@
 // `GET /v1/repositories/{repository}/stats`; R3-1248): per station and leg how long tickets waited
 // and legs ran, claims by end and detail, suspensions by station and what they waited on, advice
 // overridden, hook failures, `off-graph` transitions and foreign writes — over a window, for one
-// repository. Aggregates and ids only: no worker, no profile, no report (G-BTN-64).
+// repository. Aggregates and ids only: no runner, no profile, no report (G-BTN-64).
 import type { Row, Store } from './ports';
 import type { Queues } from './queues';
 import { signatureOf, type EntryRequirement } from './graph';

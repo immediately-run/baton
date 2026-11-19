@@ -1,6 +1,6 @@
 // api.ts — the runner's client of Baton's runner API (BATON_SPEC §11, §6.3 R-BTN-13 as amended):
 // every call signed with the machine's SSH key (ssh-keygen -Y sign, the one verifier shape), or
-// with its API key as a bearer (R-BTN-159), or — through R3-1239's transition — a bearer token, and after the first heartbeat the worker
+// with its API key as a bearer (R-BTN-159), or — through R3-1239's transition — a bearer token, and after the first heartbeat the runner
 // secret. A call Baton refuses comes back as a `BatonRefusal` (never thrown past the loop); a
 // call that cannot reach Baton throws. R-BTN-197 (B-254): every call says which client it is
 // (`Baton-Client`), and the served versions each answer names are warned on — once at start and
@@ -26,7 +26,7 @@ export class BatonRefusal extends Error {
 export type Transport = (req: Request) => Promise<Response>;
 
 /** The headers that authenticate one request: the SSHSIG signature, or the transition's bearer
- * token, and the worker secret once the first heartbeat returned it. */
+ * token, and the runner secret once the first heartbeat returned it. */
 export type Auth = (method: string, url: string, body: string, secret: string | null) => Record<string, string>;
 
 export interface ApiOptions {
@@ -56,21 +56,21 @@ export function envAuth(env: NodeJS.ProcessEnv, keyWriter?: (material: string) =
   const keyFile = env.BATON_KEY_FILE;
   const key = env.BATON_KEY;
   // R-BTN-159: an API key, in BATON_KEY or the key file, goes as a bearer in place of a
-  // signature; the worker secret joins it as it joins a signature.
+  // signature; the runner secret joins it as it joins a signature.
   const material = keyFile ? readFileSync(keyFile, 'utf8').trim() : key?.trim();
   if (material && API_KEY.test(material)) {
-    return (_method, _url, _body, secret) => ({ Authorization: `Bearer ${material}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
+    return (_method, _url, _body, secret) => ({ Authorization: `Bearer ${material}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) });
   }
   const signing = keyFile ?? (key && keyWriter ? keyWriter(key) : null);
   if (signing) {
     return (method, url, body, secret) => {
       const signed = signHeaders({ method, url, body: body ?? '', key: signingKey(signing) });
-      return { ...signed, ...(secret ? { 'X-Worker-Secret': secret } : {}) };
+      return { ...signed, ...(secret ? { 'X-Runner-Secret': secret } : {}) };
     };
   }
   const token = env.BATON_TOKEN;
   if (token) {
-    return (_method, _url, _body, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
+    return (_method, _url, _body, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) });
   }
   throw new Error('no credential: BATON_KEY_FILE, BATON_KEY or BATON_TOKEN (§6.4, R-BTN-13)');
 }
@@ -141,7 +141,7 @@ export class BatonApi {
   heartbeat(body: Record<string, unknown>): Promise<Record<string, any>> {
     return this.call('POST', '/v1/runner/heartbeat', body);
   }
-  /** §11: the sorted legs this worker may take — what an idle runner asks for (R-BTN-45). */
+  /** §11: the sorted legs this runner may take — what an idle runner asks for (R-BTN-45). */
   recommendations(limit = 10): Promise<Record<string, any>> {
     return this.call('GET', `/v1/runner/recommendations?limit=${limit}`);
   }

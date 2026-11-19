@@ -6,7 +6,7 @@
 // reach it only through the front, which has verified the principal — all but a signed
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
 import { MIGRATIONS } from '../migrations';
-import { versionedStore, type VersionedStore } from './stateVersion';
+import { versionedStore, clockBucket, ifNoneMatch, stateEtag, type VersionedStore } from './stateVersion';
 import { BatonError, CLIENT_HEADER, errorResponse, json, servedClientVersions, withClientVersions } from './http';
 import { checkPayload, DEFAULT_COURSE, retiredBoardFields, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
@@ -16,7 +16,7 @@ import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
 import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { clientVersionOf } from '../shared/versions.mjs';
-import { WorkerApi } from './workerApi';
+import { RunnerApi } from './runnerApi';
 import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
 import { Cutover } from './cutover';
@@ -58,7 +58,7 @@ export class BatonCore {
   /** The random source (B-185: a run id's random half). Tests replace it, as the clock. */
   random: (n: number) => Uint8Array;
 
-  readonly workers: WorkerApi;
+  readonly runners: RunnerApi;
   readonly claims: Claims;
   readonly cutover: Cutover;
   readonly mirror: Mirror;
@@ -138,7 +138,7 @@ export class BatonCore {
     this.notices = new Notices({ store, now: () => this.now() });
     this.history = new History({ store, now: () => this.now() });
     this.retention = new Retention({ store, now: () => this.now() });
-    // B-4 (§13.1, R-BTN-113): the instance settings, before the worker calls and the claims that
+    // B-4 (§13.1, R-BTN-113): the instance settings, before the runner calls and the claims that
     // read the session-host allowlist.
     this.instance = new InstanceSettings({ store, now: () => this.now(), config: ports.config });
     // B-126 (R-BTN-194): ticket provenance, read from the push deliveries the webhooks record.
@@ -146,7 +146,7 @@ export class BatonCore {
     const decisionRows = (ticket: string, ids: string[], kind: 'decision-opened' | 'decision-answered') => {
       for (const id of ids) this.history.record(ticket, { kind, detail: { decision: id } });
     };
-    this.blocks = new Blocks({ store, now: () => this.now(), fits: (worker, ticket) => this.claims.fits(worker, ticket), history: this.history,
+    this.blocks = new Blocks({ store, now: () => this.now(), fits: (runner, ticket) => this.claims.fits(runner, ticket), history: this.history,
       decisions: {
         opened: (ticket, ids) => { this.notices.opened(ticket, ids); decisionRows(ticket, ids, 'decision-opened'); },
         closed: (ticket, ids) => { this.notices.closed(ticket, ids); decisionRows(ticket, ids, 'decision-answered'); },
@@ -181,12 +181,12 @@ export class BatonCore {
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
-    this.workers = new WorkerApi({ store, config: ports.config, now: () => this.now(), fenced: (w, inc, id) => this.claims.fenced(w, inc, id),
+    this.runners = new RunnerApi({ store, config: ports.config, now: () => this.now(), fenced: (w, inc, id) => this.claims.fenced(w, inc, id),
       legFinished: (w, id, seq) => this.claims.legFinished(w, id, seq),
       deprecated: this.deprecated, fleetChanged: () => this.blocks.recount(),
       // B-4 (R-BTN-113): the session-host allowlist the heartbeat's link rule reads.
       sessionHosts: () => this.instance.sessionHosts(),
-      // R-BTN-103: what it delivers as a worker courier.
+      // R-BTN-103: what it delivers as a runner courier.
       couriers: (w, granted, entries) => this.notices.declare(w, granted, entries),
       // R-BTN-75 as amended by R3-1254 (B-26): a shadow claim's start is silent, its end an event.
       held: (ticket, silent) => this.blocks.held(ticket, silent),
@@ -195,8 +195,8 @@ export class BatonCore {
       // R-BTN-189), and the policy hashes the answer carries for its repositories.
       policies: this.policies,
       // A granted key's repositories are its grants' (R-BTN-58); an ungranted one's, every one it may reach.
-      bars: (now, cred) => this.admin.bars(this.workers.credential(cred).granted
-        ? this.sql<{ repository_id: string }>('SELECT repository_id FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', cred).map((r) => r.repository_id)
+      bars: (now, cred) => this.admin.bars(this.runners.credential(cred).granted
+        ? this.sql<{ repository_id: string }>('SELECT repository_id FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', cred).map((r) => r.repository_id)
         : null, now).map(({ id: _id, release_holders: _r, ...b }) => ({ repository: b.repository_id, course: b.course, tag: b.tag, legs: b.legs, applies: b.applies, starts_at: b.starts_at, ends_at: b.ends_at, reason: b.reason })) });
   }
 
@@ -226,7 +226,7 @@ export class BatonCore {
     await this.armBy(this.claims.nextDeadline());
   }
 
-  /** The worker keys from BATON_KEYS (R3-1239). A list that cannot be seeded changes nothing
+  /** The runner keys from BATON_KEYS (R3-1239). A list that cannot be seeded changes nothing
    *  and stops nothing — the keys in force stay, and the sync, the dashboard and every other
    *  principal serve on — but goes to Needs you, as does a revoked key the list names again. */
   private async seedKeys(): Promise<void> {
@@ -234,7 +234,7 @@ export class BatonCore {
     // What the list in force last reported stands until another list seeds.
     let notice: { refused?: string; revoked_listed?: string[] } | null = before?.revoked_listed ? { revoked_listed: before.revoked_listed } : null;
     try {
-      const r = await this.workers.seedKeys();
+      const r = await this.runners.seedKeys();
       if (r.unchanged) {
         // The list that last seeded is back (a refused one never seeds): its refusal is over.
         if (!before?.refused) return;
@@ -309,12 +309,12 @@ export class BatonCore {
           // an unreadable line is no key
         }
       }
-      const { req: signed, cred } = await this.verifySigned(req, (fp) => this.registry.syncKey(fp)?.public_key ?? this.workers.publicKey(fp) ?? admins.get(fp) ?? null);
+      const { req: signed, cred } = await this.verifySigned(req, (fp) => this.registry.syncKey(fp)?.public_key ?? this.runners.publicKey(fp) ?? admins.get(fp) ?? null);
       // An administrator key is never a sync's, even one added to BATON_ADMIN_KEYS after it was
       // registered as a sync key (round 3, 3-A-2).
       if (admins.has(cred)) throw new BatonError('forbidden', 'an administrator key holds no other role (R-BTN-57)');
       const key = this.registry.syncKey(cred);
-      // A worker, probe, courier or administrator key is never a sync's (R-BTN-57, R-BTN-93).
+      // A runner, probe, courier or administrator key is never a sync's (R-BTN-57, R-BTN-93).
       if (!key) throw new BatonError('forbidden', 'only a sync key may act as a sync');
       if (key.role !== role) throw new BatonError('forbidden', `this sync key serves its repository's ${key.role}, not its ${role}`);
       return { repo: this.registry.get(key.repository)!, req: signed };
@@ -382,7 +382,7 @@ export class BatonCore {
 
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
-  // @model alarmLive sha256:e92b9b16d800
+  // @model alarmLive sha256:6f9056ae3a4b
   async alarm(): Promise<void> {
     // Re-armed first, so one failing tick never ends the cycle.
     await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
@@ -407,12 +407,12 @@ export class BatonCore {
       throw new Error(`the alarm's reaper failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
     }
     this.flushDispatch();
-    let stage = 'workers';
+    let stage = 'runners';
     try {
       this.store.transaction(() => {
-        this.workers.alarm();
+        this.runners.alarm();
         // R-BTN-76: readings lapse; R-BTN-75: liveness moves the counts; R-BTN-77: a pending
-        // `unblocked` message dies with its worker's liveness, and a window's trailing dispatch goes.
+        // `unblocked` message dies with its runner's liveness, and a window's trailing dispatch goes.
         // Time moves liveness: recount when, and only when, the live set changed (R-BTN-75); a
         // lapsed reading's recount has already taken the live set, so a tick runs one recount.
         // R-BTN-78: a queued leg posted waiting for 72 hours is put to the owner. The recount's rows
@@ -624,8 +624,19 @@ export class BatonCore {
         if (!owner && !(await this.admin.adminFingerprints()).size) owner = req.headers.get('X-Baton-Owner');
         if (!owner) throw new BatonError('unauthenticated', 'the dashboard session ended or is unknown');
         if (req.method === 'GET' && url.pathname === '/v1/ui/session') return json({ ok: true });
+        // B-242 (R-BTN-196): the poll's ETag, decided after the principal and before the read
+        // runs — the version row it hashes is an unchanged poll's whole cost, and a matching
+        // `If-None-Match` answers `304` with that ETag and no body. The state shows what the
+        // clock decides (alive, stalled, `reap_at`, the time windows), so the coarse bucket is
+        // an input; the caller is one too. The helper is B-205's for every read a session polls.
+        if (req.method === 'GET' && url.pathname === '/v1/ui/state') {
+          const etag = stateEtag(this.store, owner, '/v1/ui/state', clockBucket(this.now()));
+          if (ifNoneMatch(req, etag)) return new Response(null, { status: 304, headers: { ETag: etag } });
+          const res = json(this.uiState());
+          res.headers.set('ETag', etag);
+          return res;
+        }
       }
-      if (req.method === 'GET' && url.pathname === '/v1/ui/state') return json(this.uiState());
       // R-BTN-181's envelope (§14), B-7's slice: `POST /v1/repositories/{repository}/attestations`
       // with a `std:decision@1` — a person's answer to the ticket's queued person leg
       // (R-BTN-116), what `baton decision answer` writes (R-BTN-127). An owner key of the
@@ -678,7 +689,7 @@ export class BatonCore {
         const out = this.resources.post({ kind: 'probe', fingerprint: signed.cred }, await readJson(signed.req), null);
         return json(out);
       }
-      const routed = await this.workerRoute(req, url, owner);
+      const routed = await this.runnerRoute(req, url, owner);
       if (routed) return routed;
       throw new BatonError('not-found', `no route ${req.method} ${url.pathname}`);
     } catch (e) {
@@ -795,12 +806,12 @@ export class BatonCore {
    *  minutes of this clock — then its nonce, unseen for that key. The crypto runs outside the
    *  turn (§3); the nonce is checked and written after it. Returns the request with its body
    *  put back and the credential: the key's fingerprint. */
-  private async verifySigned(req: Request, lookup: (fp: string) => string | null = (fp) => this.workers.publicKey(fp)): Promise<{ req: Request; cred: string }> {
+  private async verifySigned(req: Request, lookup: (fp: string) => string | null = (fp) => this.runners.publicKey(fp)): Promise<{ req: Request; cred: string }> {
     const now = this.now();
     const v = await this.outside(() => verifyRequest(req, lookup, { origin: this.ports.config.BATON_ORIGIN, now }));
     // Another request ran meanwhile: the key may have been revoked since it was read.
     if (!lookup(v.keyid)) throw new BatonError('unauthenticated', 'the key is not registered or is revoked');
-    this.workers.acceptNonce(v.keyid, v.nonce, now);
+    this.runners.acceptNonce(v.keyid, v.nonce, now);
     return { req: withBody(req, v.body), cred: v.keyid };
   }
 
@@ -809,33 +820,39 @@ export class BatonCore {
   private async authenticated(req: Request, lookup?: (fp: string) => string | null): Promise<{ req: Request; cred: string }> {
     const apiKey = req.headers.get('X-Baton-Api-Key');
     if (apiKey == null) return this.verifySigned(req, lookup);
-    return { req, cred: await verifyApiKey(apiKey, lookup ?? ((fp) => this.workers.publicKey(fp))) };
+    return { req, cred: await verifyApiKey(apiKey, lookup ?? ((fp) => this.runners.publicKey(fp))) };
   }
 
-  /** The worker and owner routes of R3-1211. The front passes the principal in
+  /** The runner and owner routes of R3-1211. The front passes the principal in
    *  `X-Baton-Credential` (a bearer token's credential, verified), `X-Baton-Signed` (a signed
    *  request's keyid, pre-checked; verifySigned finishes it here) or `X-Baton-Owner` (the Access
    *  email); it strips all of them from every incoming request first. */
-  private async workerRoute(req: Request, url: URL, owner: string | null): Promise<Response | null> {
+  private async runnerRoute(req: Request, url: URL, owner: string | null): Promise<Response | null> {
     const p = url.pathname;
     const m = req.method;
     let cred = req.headers.get('X-Baton-Credential');
-    const secret = req.headers.get('X-Worker-Secret');
+    const currentSecret = req.headers.get('X-Runner-Secret');
+    const legacySecret = req.headers.get('X-Worker-Secret');
+    if (currentSecret != null && legacySecret != null && currentSecret !== legacySecret) {
+      throw new BatonError('invalid-params', 'X-Runner-Secret and X-Worker-Secret differ');
+    }
+    const secret = currentSecret ?? legacySecret;
+    const legacyName = legacySecret != null;
     if (req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key')) {
       // R-BTN-13 as amended: the front checked the request's shape, @authority and digest; the
       // key, the signature and the clock are checked here, and the nonce in this turn. An API
       // key (R-BTN-159) is checked against the public line its grant registered.
       ({ req, cred } = await this.authenticated(req));
-      // One role per key (R-BTN-57): a key in BATON_ADMIN_KEYS is never a worker's, even one
+      // One role per key (R-BTN-57): a key in BATON_ADMIN_KEYS is never a runner's, even one
       // granted before it was listed.
-      if ((await this.admin.adminFingerprints()).has(cred)) throw new BatonError('forbidden', 'an administrator key is never a worker key (R-BTN-57)');
+      if ((await this.admin.adminFingerprints()).has(cred)) throw new BatonError('forbidden', 'an administrator key is never a runner key (R-BTN-57)');
     }
     const tx = <T>(f: () => T): T => this.store.transaction(f);
     const stats = /^\/v1\/repositories\/([^/]+)\/stats$/.exec(p);
     if (m === 'GET' && stats) {
       // §2d, §11: a course's record, for any key granted on the repository (R-BTN-58).
       // Aggregates and ids only (G-BTN-64).
-      if (!cred) throw new BatonError('unauthenticated', 'no worker principal');
+      if (!cred) throw new BatonError('unauthenticated', 'no runner principal');
       let segment: string;
       try {
         segment = decodeURIComponent(stats[1]);
@@ -847,8 +864,8 @@ export class BatonCore {
       if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
       // A grant on the repository, whatever the key (round 1, 1-A-0): a bearer or seed key has no
       // grant, so it reads no repository's stats — the item's "Do not".
-      this.workers.credential(cred);
-      if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
+      this.runners.credential(cred);
+      if (!this.sql('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
         throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
       }
       const raw = url.searchParams.get('since');
@@ -862,7 +879,7 @@ export class BatonCore {
     // granted on the repository reads it, as it reads the stats.
     const conditionsList = /^\/v1\/repositories\/([^/]+)\/conditions$/.exec(p);
     if (m === 'GET' && conditionsList) {
-      if (!cred) throw new BatonError('unauthenticated', 'no worker principal');
+      if (!cred) throw new BatonError('unauthenticated', 'no runner principal');
       let segment: string;
       try {
         segment = decodeURIComponent(conditionsList[1]);
@@ -872,8 +889,8 @@ export class BatonCore {
       const repo = checkRepositoryId(segment);
       // R-BTN-47 (B-173): a retired repository is `not-found`, as one never registered.
       if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
-      this.workers.credential(cred);
-      if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
+      this.runners.credential(cred);
+      if (!this.sql('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
         throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
       }
       const open = url.searchParams.get('open');
@@ -886,22 +903,22 @@ export class BatonCore {
       }) });
     }
     if (p.startsWith('/v1/runner/')) {
-      if (!cred) throw new BatonError('unauthenticated', 'no worker principal');
+      if (!cred) throw new BatonError('unauthenticated', 'no runner principal');
       // R-BTN-197: every runner call records its Baton-Client as the runner's own statement of
       // its version (§13.3), with the heartbeat and with the secret-authenticated calls alike.
       const client = clientVersionOf(req.headers.get(CLIENT_HEADER));
       if (m === 'POST' && p === '/v1/runner/heartbeat') {
         const body = await readJson(req);
         // The hashing is async; the writes happen in one transaction after it (§3: atomic).
-        return json(await this.workers.heartbeat(cred, secret, body, client));
+        return json(await this.runners.heartbeat(cred, secret, body, client, legacyName));
       }
       if (m === 'GET' && p === '/v1/runner/mode') {
-        await this.workers.authWorker(cred, secret, client);
+        await this.runners.authRunner(cred, secret, client, legacyName);
         // §11: `?repository=` — each repository cuts over on its own (R-BTN-28). R-BTN-47
         // (B-173): a retired one is as one never registered.
         const repo = checkRepositoryId(url.searchParams.get('repository'));
         if (!this.registry.live(repo)) throw new BatonError('invalid-params', 'repository: must be a registered repository id');
-        return json(this.workers.mode(repo));
+        return json(this.runners.mode(repo));
       }
       if (m === 'GET' && p === '/v1/runner/branch-holder') {
         // §6.3: a push to an item branch asks who holds the tickets it maps to; machine key alone,
@@ -911,7 +928,7 @@ export class BatonCore {
         const branch = (url.searchParams.get('branch') ?? '').replace(/^refs\/heads\//, '');
         if (!GIT_REPO.test(gitRepo)) throw new BatonError('invalid-params', 'repo: must be owner/name');
         if (!GIT_BRANCH.test(branch)) throw new BatonError('invalid-params', 'branch: must be a branch name');
-        const caller = secret ? await this.workers.authWorker(cred, secret, client) : null;
+        const caller = secret ? await this.runners.authRunner(cred, secret, client, legacyName) : null;
         return json(this.claims.branchHolder(caller, gitRepo, branch));
       }
       const holder = /^\/v1\/runner\/tickets\/([^/]+)\/holder$/.exec(p);
@@ -919,10 +936,10 @@ export class BatonCore {
         // R-BTN-7: callable with the token alone (the witness has no sidecar); with a secret, the
         // caller's own claim is not "another".
         const item = this.ticketParam(holder[1]);
-        const caller = secret ? await this.workers.authWorker(cred, secret, client) : null;
+        const caller = secret ? await this.runners.authRunner(cred, secret, client, legacyName) : null;
         return json(this.claims.holder(caller, item));
       }
-      const workerId = await this.workers.authWorker(cred, secret, client);
+      const runnerId = await this.runners.authRunner(cred, secret, client, legacyName);
       if (m === 'POST' && p === '/v1/runner/claim') {
         const body = await readJson(req);
         // B-127 (round 2, the pairing): the claim and the standing signed-control record are
@@ -936,7 +953,7 @@ export class BatonCore {
         // `cannot-finish:spec`, a counted, non-retryable attempt, where the stale board's
         // release is unpenalised.
         const answer = tx(() => {
-          const a = this.claims.claim(workerId, body);
+          const a = this.claims.claim(runnerId, body);
           const ticket = String(a.ticket_id ?? '');
           if (ticket.includes(':')) {
             const standing = this.sql<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', repositoryOf(ticket))[0];
@@ -952,40 +969,40 @@ export class BatonCore {
         });
         return json({ ...answer, ...await this.claimControl(String(answer.ticket_id ?? ''), Number(answer.claim_id ?? 0)) });
       }
-      if (m === 'GET' && p === '/v1/runner/next') return json(this.claims.next(workerId));
+      if (m === 'GET' && p === '/v1/runner/next') return json(this.claims.next(runnerId));
       if (m === 'GET' && p === '/v1/runner/recommendations') {
         // §11: `?limit=`, default 10, applied after the merge (R-BTN-61).
         const raw = url.searchParams.get('limit');
         const limit = raw == null ? 10 : Number(raw);
         if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new BatonError('invalid-params', 'limit: must be an integer from 1 to 50');
-        return json(this.claims.recommendations(workerId, limit));
+        return json(this.claims.recommendations(runnerId, limit));
       }
       const advance = /^\/v1\/runner\/claims\/(\d+)\/advance$/.exec(p);
       if (m === 'POST' && advance) {
         const body = await readJson(req);
-        return json(tx(() => this.claims.advance(workerId, Number(advance[1]), body)));
+        return json(tx(() => this.claims.advance(runnerId, Number(advance[1]), body)));
       }
       if (m === 'POST' && p === '/v1/runner/adopt') {
         const body = await readJson(req);
-        return json(tx(() => this.cutover.adopt(workerId, body)));
+        return json(tx(() => this.cutover.adopt(runnerId, body)));
       }
       const end = /^\/v1\/runner\/claims\/(\d+)\/end$/.exec(p);
       if (m === 'POST' && end) {
         const body = await readJson(req);
         // R-BTN-126 (round 1 B9, round 2 r2-5): a blocked end's ref must be a well-formed
-        // capability the worker declares — judged before the request's transaction, so the
+        // capability the runner declares — judged before the request's transaction, so the
         // invalid end's recording (a failed attempt, ended transient) commits whether or not
         // the answer is the error.
         const prereq = (body as { prerequisite?: { kind?: string; ref?: unknown } }).prerequisite;
         if ((body as { end_reason?: string }).end_reason === 'released:blocked' && prereq?.kind === 'capability') {
           if (typeof prereq.ref !== 'string' || !CAPABILITY_NAME.test(prereq.ref)) throw new BatonError('invalid-params', 'prerequisite: must be a capability name (R-BTN-126)');
-          const declared = this.sql('SELECT 1 FROM worker_capabilities wc JOIN claims c ON c.worker_id = wc.worker_id WHERE c.id = ? AND c.worker_id = ? AND wc.capability = ?', Number(end[1]), workerId, prereq.ref);
+          const declared = this.sql('SELECT 1 FROM runner_capabilities wc JOIN claims c ON c.runner_id = wc.runner_id WHERE c.id = ? AND c.runner_id = ? AND wc.capability = ?', Number(end[1]), runnerId, prereq.ref);
           if (!declared.length) {
-            this.store.transaction(() => this.claims.invalidPrerequisiteEnd(workerId, Number(end[1]), prereq.ref as string));
-            throw new BatonError('invalid-prerequisite', `prerequisite: ${prereq.ref} is not a capability this worker declares (R-BTN-126)`);
+            this.store.transaction(() => this.claims.invalidPrerequisiteEnd(runnerId, Number(end[1]), prereq.ref as string));
+            throw new BatonError('invalid-prerequisite', `prerequisite: ${prereq.ref} is not a capability this runner declares (R-BTN-126)`);
           }
         }
-        return json(tx(() => this.claims.end(workerId, Number(end[1]), body)));
+        return json(tx(() => this.claims.end(runnerId, Number(end[1]), body)));
       }
       // B-234 (R-BTN-160, R-BTN-195): the report a runner sends for each raise its channel
       // check passed. One transaction, like the advance and the end: the condition's row, its
@@ -994,27 +1011,27 @@ export class BatonCore {
       const conditions = /^\/v1\/runner\/claims\/(\d+)\/conditions$/.exec(p);
       if (m === 'POST' && conditions) {
         const body = await readJson(req);
-        return json(tx(() => this.conditions.report(workerId, Number(conditions[1]), body)));
+        return json(tx(() => this.conditions.report(runnerId, Number(conditions[1]), body)));
       }
       if (m === 'POST' && p === '/v1/runner/readings') {
-        // R-BTN-76, R-BTN-101: what a leg met — on its own worker instances and on any account
+        // R-BTN-76, R-BTN-101: what a leg met — on its own runner instances and on any account
         // instance listing a repository its key works on.
         const body = await readJson(req);
-        return json(this.resources.post({ kind: 'worker', workerId, credential: cred }, body, this.grantedRepos(cred)));
+        return json(this.resources.post({ kind: 'runner', runnerId, credential: cred }, body, this.grantedRepos(cred)));
       }
       if (m === 'POST' && p === '/v1/runner/activities') {
         const body = await readJson(req);
-        return json(this.workers.activities(workerId, body));
+        return json(this.runners.activities(runnerId, body));
       }
       const ack = /^\/v1\/runner\/messages\/(\d+)\/ack$/.exec(p);
       if (m === 'POST' && ack) {
         // An absent body is an acknowledgement with no reply; a malformed one is refused.
         const body = req.headers.get('Content-Length') === '0' || !req.body ? null : await readJson(req);
-        return json(tx(() => this.workers.ack(workerId, Number(ack[1]), body)));
+        return json(tx(() => this.runners.ack(runnerId, Number(ack[1]), body)));
       }
       if (m === 'POST' && p === '/v1/runner/shadow-report') {
         const body = await readJson(req);
-        return json(tx(() => this.workers.shadowReport(workerId, body)));
+        return json(tx(() => this.runners.shadowReport(runnerId, body)));
       }
       return null;
     }
@@ -1022,7 +1039,7 @@ export class BatonCore {
       if (!owner) throw new BatonError('unauthenticated', 'no owner principal');
       if (p === '/v1/ui/messages') {
         const body = await readJson(req);
-        return json(tx(() => this.workers.sendMessage(owner, body)));
+        return json(tx(() => this.runners.sendMessage(owner, body)));
       }
       const reap = /^\/v1\/ui\/claims\/(\d+)\/reap$/.exec(p);
       if (reap) {
@@ -1204,7 +1221,7 @@ export class BatonCore {
   /**
    * `/v1/courier/*` (R-BTN-80, R-BTN-103, §11): signed by a personal courier's key, or by a machine
    * key naming `?repository=` — granted there, its sessions having declared `couriers` for it within
-   * the day — acting as a worker courier on that repository's pool, with no worker secret. A key in
+   * the day — acting as a runner courier on that repository's pool, with no runner secret. A key in
    * any other role is `forbidden`.
    */
   private async courierRoute(req: Request, url: URL): Promise<Response> {
@@ -1218,15 +1235,15 @@ export class BatonCore {
     if (cred?.kind === 'courier') {
       if (raw != null) throw new BatonError('invalid-params', 'repository: only a machine key names one; a courier key claims its own notices');
       who = { kind: 'personal', fingerprint: fp };
-    } else if (cred?.kind === 'worker') {
+    } else if (cred?.kind === 'runner') {
       if (raw == null) throw new BatonError('invalid-params', 'repository: a machine key delivers one repository’s pool at a time (R-BTN-103)');
       const repository = checkRepositoryId(raw);
-      if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', fp, repository).length) {
+      if (!this.sql('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', fp, repository).length) {
         throw new BatonError('forbidden', `the key is not granted on ${repository} (R-BTN-58)`);
       }
-      const asks = this.notices.workerAsks(fp, repository);
+      const asks = this.notices.runnerAsks(fp, repository);
       if (!asks.length) throw new BatonError('forbidden', `no session of this key declared couriers for ${repository} within the day (R-BTN-103)`);
-      who = { kind: 'worker', fingerprint: fp, repository, asks };
+      who = { kind: 'runner', fingerprint: fp, repository, asks };
     } else throw new BatonError('forbidden', 'only a courier key or a machine key delivers notices (R-BTN-57)');
     const p = url.pathname;
     const m = req.method;
@@ -1245,18 +1262,18 @@ export class BatonCore {
     throw new BatonError('not-found', `no route ${m} ${p}`);
   }
 
-  /** The repositories a worker key works on (R-BTN-58), or null for a key no owner or
+  /** The repositories a runner key works on (R-BTN-58), or null for a key no owner or
    *  administrator granted — a bearer token or a seed key, which reaches every one. */
   private grantedRepos(cred: string): string[] | null {
-    if (!this.workers.credential(cred).granted) return null;
-    return this.sql<{ repository_id: string }>('SELECT repository_id FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', cred).map((r) => r.repository_id);
+    if (!this.runners.credential(cred).granted) return null;
+    return this.sql<{ repository_id: string }>('SELECT repository_id FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', cred).map((r) => r.repository_id);
   }
 
   /**
-   * `GET /v1/repositories/{repository}/tickets/{ticket}/blocks[?worker=me]` and
+   * `GET /v1/repositories/{repository}/tickets/{ticket}/blocks[?runner=me]` and
    * `GET /v1/repositories/{repository}/blocked[?on=…&transitive=1 | ?cursor=…]` (R-BTN-75, §11):
-   * for any key granted on the repository, an owner of it, or an administrator. `worker=me` is a
-   * worker session's own answer, so it needs the session's secret.
+   * for any key granted on the repository, an owner of it, or an administrator. `runner=me` is a
+   * runner session's own answer, so it needs the session's secret.
    */
   private async blocksRoute(req: Request, url: URL): Promise<Response | null> {
     const blocks = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/blocks$/.exec(url.pathname);
@@ -1264,7 +1281,7 @@ export class BatonCore {
     // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
     const history = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/history$/.exec(url.pathname);
     // B-190 (R-BTN-84, §14): one leg's runs of a ticket, with the inputs replay reads — an
-    // owner's or an administrator's read (§11's command tree), never a worker's.
+    // owner's or an administrator's read (§11's command tree), never a runner's.
     const runs = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/legs\/([^/]+)\/runs$/.exec(url.pathname);
     // R-BTN-194 (B-126): the ticket itself — its filter fields, where it is, who last pushed it
     // and its brief mark — for the same principals; `baton ticket show` prints the provenance first.
@@ -1287,28 +1304,28 @@ export class BatonCore {
     // registered.
     if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
     let cred = req.headers.get('X-Baton-Credential');
-    let role: 'admin' | 'owner' | 'worker' = 'worker';
+    let role: 'admin' | 'owner' | 'runner' = 'runner';
     if (req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key')) {
       const admins = await this.admin.adminFingerprints();
-      const v = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.workers.publicKey(fp));
+      const v = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.runners.publicKey(fp));
       cred = v.cred;
-      role = admins.has(cred) ? 'admin' : this.admin.ownerKey(cred) ? 'owner' : 'worker';
+      role = admins.has(cred) ? 'admin' : this.admin.ownerKey(cred) ? 'owner' : 'runner';
       if (role === 'owner' && !this.admin.owns(cred, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
     }
     if (!cred) throw new BatonError('unauthenticated', 'no principal');
     // B-190 (§14): a leg's runs are what replay reads — an owner's or an administrator's read.
-    if (runs && role === 'worker') throw new BatonError('forbidden', `a leg's runs are an owner's or an administrator's read, not a worker's (R-BTN-84)`);
+    if (runs && role === 'runner') throw new BatonError('forbidden', `a leg's runs are an owner's or an administrator's read, not a runner's (R-BTN-84)`);
     // R-BTN-179 (B-90): a granted key's board names its grant on THIS repository — the same grant the
-    // heartbeat's answer names for it (workerApi.grantedCapabilities), 'none' left out — and
+    // heartbeat's answer names for it (runnerApi.grantedCapabilities), 'none' left out — and
     // null for a key no grant binds there (a bearer's or a seed key's reach is its own).
     let granted: string[] | null = null;
-    if (role === 'worker') {
-      if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
+    if (role === 'runner') {
+      if (!this.sql('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
         throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
       }
-      const c = this.workers.credential(cred);
+      const c = this.runners.credential(cred);
       granted = c.granted
-        ? [...new Set(this.workers.grantedCapabilities(cred, repo))].filter((x) => x !== 'none').sort()
+        ? [...new Set(this.runners.grantedCapabilities(cred, repo))].filter((x) => x !== 'none').sort()
         : null;
     }
     if (boardRead) return json(this.boardView(repo, granted));
@@ -1347,13 +1364,19 @@ export class BatonCore {
       const raw = seg(blocks[2]);
       const id = raw.includes(':') ? raw : qualify(repo, raw);
       if (!TICKET_ID.test(id) || repositoryOf(id) !== repo) throw new BatonError('invalid-params', `ticket: must be a ticket of ${repo}`);
-      let worker: number | null = null;
-      const who = url.searchParams.get('worker');
+      let runner: number | null = null;
+      const currentWho = url.searchParams.get('runner');
+      const legacyWho = url.searchParams.get('worker');
+      if (currentWho != null && legacyWho != null && currentWho !== legacyWho) throw new BatonError('invalid-params', 'runner and worker differ');
+      const who = currentWho ?? legacyWho;
       if (who != null) {
-        if (who !== 'me' || role !== 'worker') throw new BatonError('invalid-params', 'worker: only `me`, from a worker session');
-        worker = await this.workers.authWorker(cred, req.headers.get('X-Worker-Secret'), clientVersionOf(req.headers.get(CLIENT_HEADER)));
+        if (who !== 'me' || role !== 'runner') throw new BatonError('invalid-params', 'runner: only `me`, from a runner session');
+        const currentSecret = req.headers.get('X-Runner-Secret');
+        const legacySecret = req.headers.get('X-Worker-Secret');
+        if (currentSecret != null && legacySecret != null && currentSecret !== legacySecret) throw new BatonError('invalid-params', 'X-Runner-Secret and X-Worker-Secret differ');
+        runner = await this.runners.authRunner(cred, currentSecret ?? legacySecret, clientVersionOf(req.headers.get(CLIENT_HEADER)), legacyWho != null || legacySecret != null);
       }
-      return json(this.blocks.blocksOf(id, worker));
+      return json(this.blocks.blocksOf(id, runner));
     }
     const on = url.searchParams.get('on');
     if (on == null) {
@@ -1389,33 +1412,33 @@ export class BatonCore {
     const kind = seg(m[2]);
     if (!SEQUENCE_KIND.test(kind)) throw new BatonError('invalid-params', 'kind: must match ' + SEQUENCE_KIND);
     // The same principals the repository's reads take (blocksRoute), with the repository's sync
-    // key beside them: a sync credential files tickets too, and its key is never a worker's.
-    // A worker's key on EITHER path — signed, an API key, or the transition's bearer token
-    // (front.ts's verifyWorker) — takes numbers only where R-BTN-58's grant binds it, exactly as
+    // key beside them: a sync credential files tickets too, and its key is never a runner's.
+    // A runner's key on EITHER path — signed, an API key, or the transition's bearer token
+    // (front.ts's verifyRunner) — takes numbers only where R-BTN-58's grant binds it, exactly as
     // blocksRoute checks the same path (review round 1, finding 1: the bearer once skipped it).
     let cred = req.headers.get('X-Baton-Credential');
     let actor = `runner:${cred ?? ''}`;
-    let workerKey = true;
+    let runnerKey = true;
     if (req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key')) {
       const admins = await this.admin.adminFingerprints();
       // The signed request's body is put back by the verifier: read it from the returned request.
-      const v = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.registry.syncKey(fp)?.public_key ?? this.workers.publicKey(fp));
+      const v = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.registry.syncKey(fp)?.public_key ?? this.runners.publicKey(fp));
       req = v.req;
       cred = v.cred;
       const sync = this.registry.syncKey(cred);
-      if (admins.has(cred)) { actor = `admin:${cred}`; workerKey = false; }
+      if (admins.has(cred)) { actor = `admin:${cred}`; runnerKey = false; }
       else if (this.admin.ownerKey(cred)) {
         if (!this.admin.owns(cred, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
         actor = `owner:${cred}`;
-        workerKey = false;
-      } else if (sync?.role === 'sync' && sync.repository === repo) { actor = 'sync'; workerKey = false; }
+        runnerKey = false;
+      } else if (sync?.role === 'sync' && sync.repository === repo) { actor = 'sync'; runnerKey = false; }
       else if (sync?.role === 'sync') throw new BatonError('forbidden', `this sync key serves ${sync.repository}, not ${repo}`);
       else if (sync) throw new BatonError('forbidden', `this key is ${sync.repository}'s ${sync.role} key, not ${repo}'s sync key`);
       else actor = `runner:${cred}`;
     }
     if (!cred) throw new BatonError('unauthenticated', 'no principal');
-    if (workerKey) {
-      if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
+    if (runnerKey) {
+      if (!this.sql('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
         throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
       }
     }
@@ -1475,7 +1498,7 @@ export class BatonCore {
    * a rewind to a once-accepted history included — is a fresh hold with a fresh row. The 0001
    * schema's "written once" and "the first force post" describe that one hold.
    */
-  // @model syncPost sha256:e11273132f73
+  // @model syncPost sha256:231806fa206f
   async board(repo: Repository, p: BoardPayload) {
     // Course graphs are read per post: a registry applied, or a post refused after applying one,
     // must not leave another request reading a graph that is not in force.
@@ -2031,10 +2054,10 @@ export class BatonCore {
   private uiRepo(repo: Repository) {
     const sha = this.headOf(repo.id);
     const head = sha ? this.sql('SELECT sha, parent_sha, received_at, ticket_count FROM board_snapshots WHERE repository_id = ? AND sha = ?', repo.id, sha)[0] ?? null : null;
-    const courses = this.courses.all().filter((c) => c.repository_id === repo.id).map(({ id, version, min_worker_version, skill }) => ({ id, version, min_worker_version, skill,
+    const courses = this.courses.all().filter((c) => c.repository_id === repo.id).map(({ id, version, min_runner_version, skill }) => ({ id, version, min_runner_version, skill,
         // R-BTN-79: the course's intake and each of its queues, for the Courses view.
         intake: this.queues.intake(repo.id, id), queues: this.queues.legs(repo.id, id).map(({ leg, depth, max_queue }) => ({ leg, depth, max_queue })) }));
-    return { id: repo.id, github: repo.github, forge: repo.forge, web_base: repo.web_base, default_branch: repo.default_branch, weight: repo.weight, head, mode: this.workers.mode(repo.id), courses };
+    return { id: repo.id, github: repo.github, forge: repo.forge, web_base: repo.web_base, default_branch: repo.default_branch, weight: repo.weight, head, mode: this.runners.mode(repo.id), courses };
   }
 
   /** `GET /v1/admin/repositories` (B-90, R-BTN-179): the registry as the dashboard's state lists
@@ -2134,7 +2157,7 @@ export class BatonCore {
     }));
   }
 
-  /** Per tier ceiling, the order a worker under it would be offered (§13 step 1's exit). Each
+  /** Per tier ceiling, the order a runner under it would be offered (§13 step 1's exit). Each
    *  tier name of any ladder, lowest first; a ticket appears under the names of its own
    *  repository's ladder that it fits (R-BTN-66). Derived from the `ready` rows given, so the
    *  board's tier order is its own repository's and never a filtering of another's (B-90). */
@@ -2153,9 +2176,9 @@ export class BatonCore {
     const repositories = this.adminView().repositories;
     const ready = this.readyRows(repositories);
     const byTier = this.readyByTier(ready);
-    // The Workers view, read once for both the rows it serves and Needs you's stale clients
+    // The Runners view, read once for both the rows it serves and Needs you's stale clients
     // (R-BTN-197, B-254) — one read, B-240's statement budget kept.
-    const workers = this.workers.workersView(now);
+    const runners = this.runners.runnersView(now);
 
     const held = this.sql(
       `SELECT repository_id, sha, parent_sha, head_sha, ticket_count, received_at, auto_accept_at FROM held_snapshots
@@ -2164,7 +2187,7 @@ export class BatonCore {
     // gone; an unavailable provider is a reading (§6.3, R-BTN-76) and a peak preference a rule
     // in the course (§6.10), never a dashboard row.
     return {
-      server_time: now, repositories, ready, ready_by_tier: byTier, held, workers,
+      server_time: now, repositories, ready, ready_by_tier: byTier, held, runners,
       running: this.claims.running(now), timeline: this.claims.timeline(now),
       // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
       limits: this.admin.view(now),
@@ -2175,8 +2198,8 @@ export class BatonCore {
       needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), keys: this.keysNotice(),
         // R-BTN-197 (B-254): each live runner whose own version statement is below the
         // recommended client, with its version — update it at your own pace; nothing self-updates.
-        stale_clients: this.workers.staleClients(workers, this.instance.recommendedClient()),
-        // B-134: the open scope findings — a leg reported outside its ticket's scope, a worker
+        stale_clients: this.runners.staleClients(runners, this.instance.recommendedClient()),
+        // B-134: the open scope findings — a leg reported outside its ticket's scope, a runner
         // push no open claim covers — until an owner resolves each.
         scope: this.scope.needsYou(),
         // B-133: the person legs' questions with each option's computed action (R-BTN-116).

@@ -1,4 +1,4 @@
-// S-BTN-12 completion confirmation (BATON_SPEC §15, §9.6): a worker completes before its push's
+// S-BTN-12 completion confirmation (BATON_SPEC §15, §9.6): a runner completes before its push's
 // sync arrives, and a push that never lands. Must hold: unclaimable until confirmed by ancestry;
 // the never-landed one is flagged at 6 h and never re-issued. The sync is the real decision code
 // (scripts/lib/batonSync.mjs, vendored) over the fixture repository's real ancestry.
@@ -43,7 +43,7 @@ describe('S-BTN-12 completion confirmation', () => {
     const a = await register('vm-a');
     const b = await register('vm-b');
     const { json: c } = await claimItem('vm-a', a.secret, { ticket_id: 'docs:R3-9001' });
-    // The worker pushed A's history (git first, R-BTN-8) and ends before any sync has run.
+    // The runner pushed A's history (git first, R-BTN-8) and ends before any sync has run.
     await endClaim('vm-a', a.secret, c.claim_id, { end_reason: 'done', ended_at_sha: sha.A });
     expect((await claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9001' })).json.rule).toBe(3);
     // The sync for D: A is an ancestor and the item is no longer in-progress there.

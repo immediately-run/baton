@@ -1,5 +1,5 @@
 // S-BTN-30 signed requests (BATON_SPEC §15, §11.1 R-BTN-13 as amended; G-BTN-55; R3-1239): a
-// worker's request is an RFC 9421 signature whose value is an SSHSIG in the `baton-request`
+// runner's request is an RFC 9421 signature whose value is an SSHSIG in the `baton-request`
 // namespace, by a registered key of one of the four types. Must hold: a replay within 5 minutes,
 // one signed 6 minutes ago and one by a revoked key are refused `unauthenticated`; a request
 // signed for the local host and replayed to this one is refused (`@authority`); a commit
@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { HOST, ORIGIN, call, hbBody, keyCall, register, setAdminKeys, rows, setClock, sha256, signedCall, SSH_KEYS, withCore } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
-import { WorkerApi } from '../../src/core/workerApi';
+import { RunnerApi } from '../../src/core/runnerApi';
 import { call as hostCall, config } from '#host';
 import { Deprecated } from '../../src/core/deprecated';
 
@@ -39,13 +39,13 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
     expect(mode.res.status).toBe(200);
     const holder = await signedCall(name, HOLDER);
     expect(holder.res.status).toBe(200);
-    // The worker is registered under the key's fingerprint, by the one name the key holds.
-    expect(await rows('SELECT hostname, credential_id FROM workers')).toEqual([{ hostname: name, credential_id: SSH_KEYS[name].fingerprint }]);
+    // The runner is registered under the key's fingerprint, by the one name the key holds.
+    expect(await rows('SELECT hostname, credential_id FROM runners')).toEqual([{ hostname: name, credential_id: SSH_KEYS[name].fingerprint }]);
   });
 
   it('the seed stored each key by its fingerprint, the public key and nothing else', async () => {
     const got = await rows<{ id: string; kind: string; hostname: string; public_key: string }>(
-      `SELECT id, kind, hostname, public_key FROM credentials WHERE kind = 'worker' ORDER BY hostname`);
+      `SELECT id, kind, hostname, public_key FROM credentials WHERE kind = 'runner' ORDER BY hostname`);
     expect(got.map((r) => r.hostname)).toEqual([...NAMES].sort());
     for (const r of got) {
       expect(r.id).toBe(SSH_KEYS[r.hostname].fingerprint);
@@ -70,7 +70,7 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
     }
   });
 
-  it('a request by a revoked key is refused, and its worker stops at its next call', async () => {
+  it('a request by a revoked key is refused, and its runner stops at its next call', async () => {
     const secret = 'secret-revoked';
     expect((await signedCall('vm-sk-ed', '/v1/runner/heartbeat', { body: await keyBeat('vm-sk-ed', secret) })).res.status).toBe(200);
     await rows(`UPDATE credentials SET revoked_at = ? WHERE id = ?`, T0, SSH_KEYS['vm-sk-ed'].fingerprint);
@@ -80,7 +80,7 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
   });
 
   it('a request signed for the local host and replayed here is refused (@authority)', async () => {
-    // The local Baton a worker signed for, and this one: the same path, body and fresh clock.
+    // The local Baton a runner signed for, and this one: the same path, body and fresh clock.
     const { res } = await signedCall('vm-ed', HOLDER, { authority: '127.0.0.1:8787' });
     expect(res.status).toBe(401);
     expect(await code(res)).toBe('unauthenticated');
@@ -134,23 +134,23 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
     const { id, secret } = await register('vm-a');
     const key = await makeKey('ecdsa-sha2-nistp256', 'vm-a');
     await withCore(async (c) => {
-      const w = new WorkerApi({ store: c.store, deprecated: new Deprecated(c.store), config: { ...config, BATON_KEYS: JSON.stringify([{ key: key.publicKey, name: 'vm-a', allowed_capabilities: ['agent-venue'] }]) } as never, now: () => T0 });
+      const w = new RunnerApi({ store: c.store, deprecated: new Deprecated(c.store), config: { ...config, BATON_KEYS: JSON.stringify([{ key: key.publicKey, name: 'vm-a', allowed_capabilities: ['agent-venue'] }]) } as never, now: () => T0 });
       await w.seedKeys();
     });
-    const beat = (k: typeof key, body: unknown) => signedRequest(k, `${ORIGIN}/v1/runner/heartbeat`, { created: T0 / 1000, headers: { 'X-Worker-Secret': secret }, body: JSON.stringify(body) });
+    const beat = (k: typeof key, body: unknown) => signedRequest(k, `${ORIGIN}/v1/runner/heartbeat`, { created: T0 / 1000, headers: { 'X-Runner-Secret': secret }, body: JSON.stringify(body) });
     const res = await hostCall(await beat(key, hbBody('vm-a')));
     expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
-    expect(await rows('SELECT id, credential_id FROM workers')).toEqual([{ id, credential_id: key.fingerprint }]);
+    expect(await rows('SELECT id, credential_id FROM runners')).toEqual([{ id, credential_id: key.fingerprint }]);
     // Under the key now; the token's call is no longer this session's.
-    expect((await call('/v1/runner/mode?repository=docs', { headers: { Authorization: 'Bearer tok-vm-a', 'X-Worker-Secret': secret } })).status).toBe(401);
+    expect((await call('/v1/runner/mode?repository=docs', { headers: { Authorization: 'Bearer tok-vm-a', 'X-Runner-Secret': secret } })).status).toBe(401);
   });
 
   it('a session under a key the seed revoked continues under its new key; nothing moves it back, and a token never takes it (round 2, 2-A-3)', async () => {
     const seed = (k: Awaited<ReturnType<typeof makeKey>>) => withCore(async (c) => {
-      await new WorkerApi({ store: c.store, deprecated: new Deprecated(c.store), config: { ...config, BATON_KEYS: JSON.stringify([{ key: k.publicKey, name: 'vm-a', allowed_capabilities: ['agent-venue'] }]) }, now: () => T0 }).seedKeys();
+      await new RunnerApi({ store: c.store, deprecated: new Deprecated(c.store), config: { ...config, BATON_KEYS: JSON.stringify([{ key: k.publicKey, name: 'vm-a', allowed_capabilities: ['agent-venue'] }]) }, now: () => T0 }).seedKeys();
     });
     const beat = async (k: Awaited<ReturnType<typeof makeKey>>, secret: string, body: unknown) =>
-      hostCall(await signedRequest(k, `${ORIGIN}/v1/runner/heartbeat`, { created: T0 / 1000, headers: secret ? { 'X-Worker-Secret': secret } : {}, body: JSON.stringify(body) }));
+      hostCall(await signedRequest(k, `${ORIGIN}/v1/runner/heartbeat`, { created: T0 / 1000, headers: secret ? { 'X-Runner-Secret': secret } : {}, body: JSON.stringify(body) }));
     const old = await makeKey('ssh-ed25519', 'vm-a');
     await seed(old);
     const secret = 'secret-rotated';
@@ -160,21 +160,21 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
     await seed(fresh);
     const moved = await beat(fresh, secret, hbBody('vm-a'));
     expect(moved.status, JSON.stringify(await moved.clone().json())).toBe(200);
-    expect(await rows('SELECT credential_id FROM workers')).toEqual([{ credential_id: fresh.fingerprint }]);
+    expect(await rows('SELECT credential_id FROM runners')).toEqual([{ credential_id: fresh.fingerprint }]);
     // The old key is refused outright; the bearer token for that name may not take the session.
     expect((await beat(old, secret, hbBody('vm-a'))).status).toBe(401);
-    const back = await call('/v1/runner/heartbeat', { method: 'POST', headers: { Authorization: 'Bearer tok-vm-a', 'X-Worker-Secret': secret, 'Content-Type': 'application/json' }, body: JSON.stringify(hbBody('vm-a')) });
+    const back = await call('/v1/runner/heartbeat', { method: 'POST', headers: { Authorization: 'Bearer tok-vm-a', 'X-Runner-Secret': secret, 'Content-Type': 'application/json' }, body: JSON.stringify(hbBody('vm-a')) });
     expect(back.status).toBe(403);
-    expect(await rows('SELECT credential_id FROM workers')).toEqual([{ credential_id: fresh.fingerprint }]);
+    expect(await rows('SELECT credential_id FROM runners')).toEqual([{ credential_id: fresh.fingerprint }]);
   });
 
   it('a session never moves between two bearer tokens, even for one name (round 2, 2-A-3)', async () => {
     const { secret } = await register('vm-a');
     await withCore((c) => {
       c.store.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('vm-a-2', 'vm-a', '["agent-venue"]')`);
-      return expect(c.workers.heartbeat('vm-a-2', secret, hbBody('vm-a'))).rejects.toMatchObject({ code: 'forbidden' });
+      return expect(c.runners.heartbeat('vm-a-2', secret, hbBody('vm-a'))).rejects.toMatchObject({ code: 'forbidden' });
     });
-    expect(await rows('SELECT credential_id FROM workers')).toEqual([{ credential_id: 'vm-a' }]);
+    expect(await rows('SELECT credential_id FROM runners')).toEqual([{ credential_id: 'vm-a' }]);
   });
 
   it('a probe reading for an instance outside its registered list is accepted (R-BTN-101); another role’s key is forbidden', async () => {
@@ -193,7 +193,7 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
     // Unsigned, or signed by a key Baton keeps for no instrument: refused before any reading is read.
     expect(await code(await call('/v1/probe/readings', { method: 'POST', body: '{}' }))).toBe('unauthenticated');
     expect(await code(await post(admin, { readings: [{ instance: 'github-api', available: true }] }))).toBe('unauthenticated');
-    // A worker key is a key in another role (R-BTN-57).
+    // A runner key is a key in another role (R-BTN-57).
     expect(await code(await post(SSH_KEYS['vm-ed'], { readings: [{ instance: 'github-api', available: true }] }))).toBe('forbidden');
   });
   it('an admin request signed by a key not in BATON_ADMIN_KEYS is refused unauthenticated (R3-1240)', async () => {

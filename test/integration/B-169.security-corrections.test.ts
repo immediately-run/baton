@@ -51,7 +51,7 @@ beforeEach(async () => {
   await setPolicySigningKey();
   { const reg = await keyCall(admin, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', forge: 'github', remote: 'ssh://git@github.com/immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', sync_keys: [], owner_keys: [owner.publicKey] }); expect(reg.status).toBe(200); }
   // The check course's file rides a post's own registry (R-BTN-48); the owner's repository takes it.
-  const withCheck = await syncCall('/v1/sync/board', payload(board.shas.A, null, { ...board.states.A, registry: [course(), { id: 'check', version: 1, min_worker_version: 1, skill: 'next-roadmap-item', course: CHECK_COURSE, step_kinds: ['implement'], branch_pattern: 'claude/{ticket}-*' }] }), await syncToken({ repository: 'immediately-run/ops', job_workflow_ref: 'immediately-run/ops/.github/workflows/baton-sync.yml@refs/heads/main' }));
+  const withCheck = await syncCall('/v1/sync/board', payload(board.shas.A, null, { ...board.states.A, registry: [course(), { id: 'check', version: 1, min_runner_version: 1, skill: 'next-roadmap-item', course: CHECK_COURSE, step_kinds: ['implement'], branch_pattern: 'claude/{ticket}-*' }] }), await syncToken({ repository: 'immediately-run/ops', job_workflow_ref: 'immediately-run/ops/.github/workflows/baton-sync.yml@refs/heads/main' }));
   expect((await withCheck.json() as Record<string, unknown>).ok).toBe(true);
   expect(await rows<{ id: string }>('SELECT id FROM courses WHERE repository_id = ? AND id = ?', 'ops', 'check')).toEqual([{ id: 'check' }]);
 });

@@ -793,7 +793,7 @@ export class Policies {
     // (B-147 reads it so).
     if (doc.grants.one_per_domain || doc.grants.trusted_domain === 'separate') {
       const grants = this.rows<{ credential_id: string; trust_level: string | null; trust_domain: string | null }>(
-        'SELECT credential_id, trust_level, trust_domain FROM worker_grants WHERE repository_id = ? AND revoked_at IS NULL AND trust_domain IS NOT NULL', repository);
+        'SELECT credential_id, trust_level, trust_domain FROM runner_grants WHERE repository_id = ? AND revoked_at IS NULL AND trust_domain IS NOT NULL', repository);
       const couriers = [...new Map(this.rows<{ credential_id: string; trust_level: string | null; trust_domain: string | null }>(
         'SELECT credential_id, trust_level, trust_domain FROM couriers WHERE repository_id = ? AND trust_domain IS NOT NULL', repository).map((c) => [c.credential_id, c])).values()];
       const byDomain = new Map<string, { who: string; grant: boolean; trusted: boolean }[]>();
@@ -830,9 +830,9 @@ export class Policies {
       const admits = (by: string) => this.entryMatches(doc.approvers.trust, by, factsNow, doc.human_key);
       const cleared: string[] = [];
       for (const t of this.rows<{ credential_id: string; trust_set_by: string | null }>(
-        'SELECT credential_id, trust_set_by FROM worker_grants WHERE repository_id = ? AND revoked_at IS NULL AND trust_set_by IS NOT NULL', repository)) {
+        'SELECT credential_id, trust_set_by FROM runner_grants WHERE repository_id = ? AND revoked_at IS NULL AND trust_set_by IS NOT NULL', repository)) {
         if (!admits(ownerOfTrustSet(t.trust_set_by ?? ''))) {
-          this.exec('UPDATE worker_grants SET trust_level = ?, trust_domain = NULL, model_family = NULL, role = NULL WHERE credential_id = ? AND repository_id = ?', 'untrusted', t.credential_id, repository);
+          this.exec('UPDATE runner_grants SET trust_level = ?, trust_domain = NULL, model_family = NULL, role = NULL WHERE credential_id = ? AND repository_id = ?', 'untrusted', t.credential_id, repository);
           cleared.push(`grant:${t.credential_id}`);
         }
       }
@@ -874,7 +874,7 @@ export class Policies {
     const out: string[] = [];
     for (const fp of named) {
       const role = this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND removed_at IS NULL', fp).length ? 'an owner key'
-        : this.rows('SELECT 1 FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', fp).length ? 'a runner key'
+        : this.rows('SELECT 1 FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', fp).length ? 'a runner key'
           : this.rows('SELECT 1 FROM couriers WHERE credential_id = ?', fp).length ? 'a courier key' : null;
       if (role) out.push(`service:${fp.slice(0, 16)}… is ${role}, and a service: writer holds no owner, runner or courier role (R-BTN-181)`);
     }
@@ -1001,7 +1001,7 @@ export class Policies {
    *  the next report that repeats the new reading. Returns false when the caller is not the
    *  repository's protection checker (the grant's role names it, R-BTN-180). */
   recordProtection(repository: string, report: { matched: boolean; reading_hash: string; legs?: { count: number; tickets: number } }, credential: string): boolean {
-    if (!this.rows('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL AND role = ?', credential, repository, 'protection-checker').length) return false;
+    if (!this.rows('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL AND role = ?', credential, repository, 'protection-checker').length) return false;
     const prev = this.rows<{ matched: number; reading_hash: string; matched_hash: string | null }>('SELECT matched, reading_hash, matched_hash FROM protection_reports WHERE repository_id = ?', repository)[0];
     this.exec('INSERT INTO protection_reports (repository_id, matched, reading_hash, matched_hash, by, at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (repository_id) DO UPDATE SET matched = excluded.matched, reading_hash = excluded.reading_hash, matched_hash = excluded.matched_hash, by = excluded.by, at = excluded.at',
       repository, report.matched ? 1 : 0, report.reading_hash, report.matched ? report.reading_hash : prev?.matched_hash ?? null, credential, this.c.now());
@@ -1024,48 +1024,48 @@ export class Policies {
    *  repository is recorded nowhere and drives nothing (an untrusted runner shares its sandbox
    *  with the code it builds, so its pin proves nothing). Returns the repositories whose pin
    *  differed. */
-  recordPins(workerId: number, credential: string, pins: PolicyPin[], granted: ReadonlySet<string>): string[] {
+  recordPins(runnerId: number, credential: string, pins: PolicyPin[], granted: ReadonlySet<string>): string[] {
     const differed: string[] = [];
     for (const pin of pins) {
       if (!REPOSITORY_ID.test(pin.repository) || !granted.has(pin.repository)) continue;
       const cur = this.current(pin.repository);
       const trusted = this.rows<{ trust_level: string | null }>(
-        'SELECT trust_level FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', credential, pin.repository)[0];
+        'SELECT trust_level FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', credential, pin.repository)[0];
       const policy = cur?.policy;
       const isTrusted = trusted != null && (trusted.trust_level ?? policy?.grants.default_trust ?? 'untrusted') === 'trusted';
       if (!isTrusted) continue;
-      this.exec('INSERT INTO policy_pins (worker_id, repository_id, hash, floors_hash, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (worker_id, repository_id) DO UPDATE SET hash = excluded.hash, floors_hash = excluded.floors_hash, at = excluded.at',
-        workerId, pin.repository, pin.hash, pin.floors_hash ?? null, this.c.now());
+      this.exec('INSERT INTO policy_pins (runner_id, repository_id, hash, floors_hash, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (runner_id, repository_id) DO UPDATE SET hash = excluded.hash, floors_hash = excluded.floors_hash, at = excluded.at',
+        runnerId, pin.repository, pin.hash, pin.floors_hash ?? null, this.c.now());
       const floorsHash = cur ? this.floorsHashOf(this.floors(pin.repository)) : null;
       if (cur && (cur.hash !== pin.hash || (pin.floors_hash != null && pin.floors_hash !== floorsHash))) {
         differed.push(pin.repository);
-        this.openCondition(pin.repository, 'baton.policy-unpinned', `worker:${workerId}`, { pinned: pin.hash, current: cur.hash, ...(pin.floors_hash != null && pin.floors_hash !== floorsHash ? { pinned_floors: pin.floors_hash, current_floors: floorsHash } : {}) });
+        this.openCondition(pin.repository, 'baton.policy-unpinned', `runner:${runnerId}`, { pinned: pin.hash, current: cur.hash, ...(pin.floors_hash != null && pin.floors_hash !== floorsHash ? { pinned_floors: pin.floors_hash, current_floors: floorsHash } : {}) });
       } else {
-        this.closeCondition(pin.repository, 'baton.policy-unpinned', `worker:${workerId}`);
+        this.closeCondition(pin.repository, 'baton.policy-unpinned', `runner:${runnerId}`);
       }
     }
     return differed;
   }
 
-  /** Whether the worker's pins on `repository` differ from the current version — while one
+  /** Whether the runner's pins on `repository` differ from the current version — while one
    *  does, the runner acts on nothing in the repository (R-BTN-189; a trusted runner's pins
    *  alone are stored, so only a trusted grant can differ). A pin left behind by a demoted
    *  grant drives nothing: the trust that made it matter is gone (round 2, finding N1). */
-  pinDiffers(workerId: number, repository: string): boolean {
-    const pin = this.rows<{ hash: string; floors_hash: string | null }>('SELECT hash, floors_hash FROM policy_pins WHERE worker_id = ? AND repository_id = ?', workerId, repository)[0];
+  pinDiffers(runnerId: number, repository: string): boolean {
+    const pin = this.rows<{ hash: string; floors_hash: string | null }>('SELECT hash, floors_hash FROM policy_pins WHERE runner_id = ? AND repository_id = ?', runnerId, repository)[0];
     if (!pin) return false;
     const cur = this.current(repository);
     if (cur == null) return false;
     const trusted = this.rows<{ trust_level: string | null }>(
-      'SELECT trust_level FROM worker_grants WHERE credential_id = (SELECT credential_id FROM workers WHERE id = ?) AND repository_id = ? AND revoked_at IS NULL', workerId, repository)[0];
+      'SELECT trust_level FROM runner_grants WHERE credential_id = (SELECT credential_id FROM runners WHERE id = ?) AND repository_id = ? AND revoked_at IS NULL', runnerId, repository)[0];
     if (!(trusted != null && (trusted.trust_level ?? cur.policy?.grants.default_trust ?? 'untrusted') === 'trusted')) return false;
     return cur.hash !== pin.hash || (pin.floors_hash != null && pin.floors_hash !== this.floorsHashOf(this.floors(repository)));
   }
 
-  /** Whether the worker's credential is the repository's protection checker — the one claimant
+  /** Whether the runner's credential is the repository's protection checker — the one claimant
    *  exempt from a broken floor and a differing pin (R-BTN-180, R-BTN-189). */
   isProtectionChecker(credential: string, repository: string): boolean {
-    return this.rows('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL AND role = ?', credential, repository, 'protection-checker').length > 0;
+    return this.rows('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL AND role = ?', credential, repository, 'protection-checker').length > 0;
   }
 
   private openCondition(repository: string, type: string, ref: string, detail: Record<string, unknown>): void {

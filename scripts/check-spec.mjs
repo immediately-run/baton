@@ -43,7 +43,7 @@ export const EXAMPLE_TICKETS = ['R3-9'];
 export const COURSE_IDS = ['R-BTN-21', 'R-BTN-27', 'R-BTN-42', 'R-BTN-43', 'R-BTN-49'];
 
 /** The requirement ids the spec defines: each `**R-BTN-n` that opens a rule, and each bold rule
- *  title followed by its id (`- **The worker declares its own lease timeout** (R-BTN-9)`). */
+ *  title followed by its id (`- **The runner declares its own lease timeout** (R-BTN-9)`). */
 export function definedIds(spec) {
   return new Set([
     ...[...spec.matchAll(/\*\*(R-BTN-\d+)\b/g)].map((m) => m[1]),
@@ -76,8 +76,9 @@ export function retiredScenarioIds(history) {
 
 /** Test files that may stay named for a retired scenario: they still test their (retired) rows,
  *  and B-67 (S-BTN-46, S-BTN-60) deletes them — empty the list then. (B-167 deleted S-BTN-139 and
- *  S-BTN-147 with the ontology and route choices, the spec restructure's part 4.) */
-export const RETIRED_TESTS_ALLOWED = ['S-BTN-46', 'S-BTN-60'];
+ *  S-BTN-147 with the ontology and route choices, the spec restructure's part 4.) B-263 deletes
+ *  S-BTN-218 and S-BTN-219 with signed control, retired 2026-11-19. */
+export const RETIRED_TESTS_ALLOWED = ['S-BTN-46', 'S-BTN-60', 'S-BTN-218', 'S-BTN-219'];
 
 /** The scenario a test file is named for (`S-BTN-2.silent-runner.test.ts` → `S-BTN-2`), if any. */
 export function fileScenario(name) {
@@ -120,6 +121,25 @@ export function unnamedEntries(history, since = RULES_LINE_SINCE, prefix = 'R-BT
   return out;
 }
 
+/** Lines of the spec that carry its lineage instead of its current state (spec-writing rule 4:
+ *  dates, the owner's words and replaced choices live in BATON_SPEC_HISTORY.md): a calendar
+ *  date, or the owner quoted. A date that is itself a fact a rule states is allowed by the
+ *  phrase beside it (DATED_FACTS): the page's own Updated line, a measurement's span, the
+ *  cutoff a check reads, a protocol revision. Returns `{line, text}` each. */
+export const DATED_FACTS = [/\*\*Updated:\*\*/, /^updated: /, /`\*\/15` cron/, /entry dated (after|on or before)/, /amendments from \d{4}-\d{2}-\d{2} on/, /MCP_VERSIONS|MCP-Protocol-Version|an absent header means/];
+export function lineage(spec) {
+  const out = [];
+  const lines = spec.split(/\r?\n/);
+  lines.forEach((text, i) => {
+    // The phrase that makes a date a fact may sit on the wrapped line before or after it.
+    const around = [lines[i - 1] ?? '', text, lines[i + 1] ?? ''];
+    const dated = /(?<![\d-])\d{4}-\d{2}-\d{2}(?![\d-])/.test(text) && !DATED_FACTS.some((re) => around.some((l) => re.test(l)));
+    const quoted = /\bthe owner[,:]\s+"|",?\s+the owner\b/.test(text);
+    if (dated || quoted) out.push({ line: i + 1, text: text.trim().slice(0, 80) });
+  });
+  return out;
+}
+
 /** Every `R-BTN-n` in a text. */
 export function citedIds(text) {
   return new Set([...text.matchAll(/\bR-BTN-(\d+)\b/g)].map((m) => `R-BTN-${m[1]}`));
@@ -159,6 +179,9 @@ export function check(spec, code, tickets, history = '', testNames = [], allowed
   }
   for (const e of unnamedEntries(history)) {
     problems.push(`spec/BATON_SPEC_HISTORY.md: the ${e.date} entry "${e.title.length > 60 ? `${e.title.slice(0, 59)}…` : e.title}" names no rule id in its title and has no \`Rules changed: <ids>\` line under it (R-BTN-74)`);
+  }
+  for (const l of lineage(spec)) {
+    problems.push(`the spec carries lineage, not current state ("${l.text}…"): move the date or the owner's words to spec/BATON_SPEC_HISTORY.md`);
   }
   for (const term of SCRUBBED) {
     if (spec.toLowerCase().includes(term)) problems.push(`the spec contains the scrubbed term "${term}"`);

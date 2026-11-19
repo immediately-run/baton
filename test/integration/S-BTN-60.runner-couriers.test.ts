@@ -1,16 +1,16 @@
-// S-BTN-60 worker couriers (BATON_SPEC §15; R3-1256), on both hosts. The scenario is retired —
+// S-BTN-60 runner couriers (BATON_SPEC §15; R3-1256), on both hosts. The scenario is retired —
 // the history's "Retired scenarios and gates" table: a courier is a runner with a capability now,
 // and B-67 deletes this file; check-spec's RETIRED_TESTS_ALLOWED list holds it until then. W1 and W2
 // heartbeat `couriers: [{repository: docs, asks: [owner]}]`; the owner's CLI key is a personal
 // courier; a decision opens; later, `ops` has an `owner` decision and no courier of either kind.
 // Must hold: the decision queued twice — once to the pool and once to the CLI; W1 claims the pool
-// copy and fails it, W2 then claims and sends it; the CLI's copy unaffected; with both workers gone
+// copy and fails it, W2 then claims and sends it; the CLI's copy unaffected; with both runners gone
 // for a day a new decision gets no pool copy; `ops` under Needs you for having no personal `owner`
 // channel, and a pool copy unclaimed for an hour there too.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, adminSession, keyCall, placed, rows, sessionCall, setAdminKeys, setClock, syncToken, tick } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
-import { grantedWorker, signed, type FleetWorker } from '../lib/fleet';
+import { grantedRunner, signed, type FleetRunner } from '../lib/fleet';
 import { POOL } from '../../src/core/notices';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
@@ -23,13 +23,13 @@ let owner: TestKey;
 let opsOwner: TestKey;
 let cli: TestKey;
 let git: Git;
-let w1: FleetWorker;
-let w2: FleetWorker;
+let w1: FleetRunner;
+let w2: FleetRunner;
 
 const decision = (id: string) => placed('filed', [], [['implement', 'ready']], { decisions: [{ id, asks: 'owner' }] });
 const copies = (ref: string) => rows<{ credential_id: string; state: string; claimed_by: string | null }>(
   'SELECT credential_id, state, claimed_by FROM notices WHERE ref = ? ORDER BY credential_id', ref);
-const poolClaim = (w: FleetWorker) => signed(w.key, '/v1/courier/notices/claim?repository=docs', { body: {} });
+const poolClaim = (w: FleetRunner) => signed(w.key, '/v1/courier/notices/claim?repository=docs', { body: {} });
 const needsYou = async () => {
   const res = await sessionCall(await adminSession(admin), '/v1/ui/state');
   return ((await res.json()) as { needs_you: { pool_unclaimed: unknown[]; no_owner_channel: unknown[] } }).needs_you;
@@ -46,15 +46,15 @@ beforeEach(async () => {
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', default_branch: 'main',
     sync_workflow: '.github/workflows/baton-sync.yml', owner_keys: [opsOwner.publicKey] })).status).toBe(200);
   expect((await keyCall(owner, '/v1/owner/docs/couriers', { public_key: cli.publicKey, asks: ['owner'] })).status).toBe(200);
-  w1 = await grantedWorker(owner, 'docs', 'w1', ['agent-venue']);
-  w2 = await grantedWorker(owner, 'docs', 'w2', ['agent-venue']);
+  w1 = await grantedRunner(owner, 'docs', 'w1', ['agent-venue']);
+  w2 = await grantedRunner(owner, 'docs', 'w2', ['agent-venue']);
   for (const w of [w1, w2]) expect((await w.beat({ couriers: COURIERS })).status).toBe(200);
   git = new Git().add('D', {}, decision('D-1'));
   expect((await git.post()).status).toBe(200);
 });
 
-describe('S-BTN-60 worker couriers', () => {
-  it('one pool copy beside the personal one; a failed claim returns it to the pool for the next worker', async () => {
+describe('S-BTN-60 runner couriers', () => {
+  it('one pool copy beside the personal one; a failed claim returns it to the pool for the next runner', async () => {
     expect(await copies('D-1')).toEqual([cli.fingerprint, POOL].sort().map((c) => ({ credential_id: c, state: 'queued', claimed_by: null })));
 
     // W1 claims the pool copy, and W2 is offered nothing while W1 holds it.
@@ -76,7 +76,7 @@ describe('S-BTN-60 worker couriers', () => {
     expect((await copies('D-1')).find((n) => n.credential_id === cli.fingerprint)).toEqual({ credential_id: cli.fingerprint, state: 'queued', claimed_by: null });
   });
 
-  it('with both workers gone for a day a new decision gets no pool copy; Needs you names the gaps', async () => {
+  it('with both runners gone for a day a new decision gets no pool copy; Needs you names the gaps', async () => {
     // A pool copy unclaimed for an hour is listed.
     await setClock(T0 + H);
     await tick();
@@ -89,7 +89,7 @@ describe('S-BTN-60 worker couriers', () => {
     expect(await copies('O-1')).toEqual([]);
     expect((await needsYou()).no_owner_channel).toEqual([{ repository_id: 'ops', decisions: 1 }]);
 
-    // Both workers go silent; a day after their last heartbeat, a new decision gets no pool copy.
+    // Both runners go silent; a day after their last heartbeat, a new decision gets no pool copy.
     await setClock(T0 + 24 * H + MIN);
     git.add('N', {}, decision('N-1'));
     expect((await git.post()).status).toBe(200);

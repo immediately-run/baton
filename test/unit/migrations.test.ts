@@ -587,3 +587,46 @@ describe('migration 0050: the retirement tombstone (B-173)', () => {
     });
   });
 });
+
+// B-68 — migration 0061 changes only the live schema's vocabulary. Historical migrations keep
+// their original SQL; a database at 0059 keeps every row while its runner-facing names move.
+describe('migration 0061: workers become runners (B-68, S-BTN-236)', () => {
+  it('renames the schema and credential kind in place without losing rows', async () => {
+    const id = env.BATON.idFromName('migrations-0061');
+    await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      const objects = sql.exec("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table','index')").toArray() as { type: string; name: string }[];
+      for (const o of objects.filter((x) => x.type === 'table')) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id <= 59)) sql.exec(m.sql);
+
+      sql.exec(`INSERT INTO repositories (id, github, default_branch, sync_workflow, worker_pushers) VALUES ('docs', 'immediately-run/docs', 'main', '.github/workflows/baton-sync.yml', '["bot"]')`);
+      sql.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('vm-a', 'vm-a', '["agent-venue"]', 'worker')`);
+      sql.exec(`INSERT INTO workers (id, hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+                VALUES (7, 'vm-a', 's', 'hash', 'vm-a', 'opencode', 'vm', 'critical', 900000, '', 1, 2)`);
+      sql.exec(`INSERT INTO worker_grants (credential_id, repository_id, capabilities, granted_by, granted_at) VALUES ('vm-a', 'docs', '["agent-venue"]', 'owner:x', 1)`);
+      sql.exec(`INSERT INTO worker_capabilities (worker_id, capability, declared) VALUES (7, 'agent-venue', 'agent-venue')`);
+      sql.exec(`INSERT INTO worker_tags (worker_id, tag) VALUES (7, 'family:test')`);
+      sql.exec(`INSERT INTO worker_courses (worker_id, repository_id, course_id, version) VALUES (7, 'docs', 'roadmap-pr', 3)`);
+      sql.exec(`INSERT INTO courses (repository_id, id, version, skill, course_json, step_kinds, min_worker_version) VALUES ('docs', 'roadmap-pr', 3, 'run', '{}', '[]', 2)`);
+      sql.exec(`INSERT INTO claims (id, ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status) VALUES (9, 'docs:T-1', 7, 'r', 'abc123', 'sha', 3, 'active')`);
+      sql.exec(`INSERT INTO messages (kind, from_worker_id, to_worker_id, sent_at, status) VALUES ('status_report', 7, 7, 4, 'pending')`);
+      sql.exec(`INSERT INTO events (at, kind, actor) VALUES (5, 'claimed', 'worker:7')`);
+
+      sql.exec('PRAGMA foreign_keys = ON');
+      sql.exec(MIGRATIONS.find((x) => x.id === 61)!.sql);
+
+      const all = (q: string) => sql.exec(q).toArray() as Record<string, unknown>[];
+      expect(all(`SELECT id, legacy_names_at FROM runners`)).toEqual([{ id: 7, legacy_names_at: null }]);
+      expect(all(`SELECT runner_id, capability FROM runner_capabilities`)).toEqual([{ runner_id: 7, capability: 'agent-venue' }]);
+      expect(all(`SELECT runner_id, ticket_id FROM claims`)).toEqual([{ runner_id: 7, ticket_id: 'docs:T-1' }]);
+      expect(all(`SELECT from_runner_id, to_runner_id FROM messages`)).toEqual([{ from_runner_id: 7, to_runner_id: 7 }]);
+      expect(all(`SELECT min_runner_version FROM courses`)).toEqual([{ min_runner_version: 2 }]);
+      expect(all(`SELECT runner_pushers FROM repositories`)).toEqual([{ runner_pushers: '["bot"]' }]);
+      expect(all(`SELECT kind FROM credentials WHERE id = 'vm-a'`)).toEqual([{ kind: 'runner' }]);
+      expect(all(`SELECT actor FROM events`)).toEqual([{ actor: 'runner:7' }]);
+      expect(all(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'worker%'`)).toEqual([]);
+      expect(all('PRAGMA foreign_key_check')).toEqual([]);
+    });
+  });
+});

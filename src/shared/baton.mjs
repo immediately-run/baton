@@ -2,7 +2,7 @@
 //
 // The Worker (R3-1206) and the Node tooling (`baton-seats.mjs`, the review gate, claim.sh)
 // must make the same decisions — who may review, which account a model bills, whether a
-// worker can take an item — so they share this module. It imports only `vocabulary.mjs`:
+// runner can take an item — so they share this module. It imports only `vocabulary.mjs`:
 // no `node:` module, no `process.env`, no direct `Date.now()`. Every input (the matrix, the
 // providers, the suspensions, the clock) is an argument, so the Worker bundles it as is.
 
@@ -85,7 +85,7 @@ export function seatedOn(day, matrix) {
 
 /** Whether `providerId` (or `modelId` on it) is suspended at `now` (R-BTN-21): a suspension
  *  in force (`starts_at ≤ now < ends_at`, not lifted) on the whole account or on that model.
- *  A missing `providerId` is a prefix the worker could not resolve to an account, which
+ *  A missing `providerId` is a prefix the runner could not resolve to an account, which
  *  counts as suspended — fail closed (§7.4). */
 export function suspended(suspensions, providerId, modelId, now) {
   if (!providerId) return true;
@@ -107,12 +107,12 @@ function checkSuspensionTimes(s) {
   }
 }
 
-/** Whether `agent` may run for a worker with `billing` (`{prefix: accountId}`): every prefix
+/** Whether `agent` may run for a runner with `billing` (`{prefix: accountId}`): every prefix
  *  it bills resolves to an account, and none of them is suspended for it. */
-function billable(agent, workerBilling, suspensions, now) {
+function billable(agent, runnerBilling, suspensions, now) {
   // The model each prefix bills: `models[prefix]` where the agent spends a second line (review-pr-claude's
   // orchestrator runs on Z.AI while its review runs on Claude), else the model it reviews on.
-  return agent.bills.every((prefix) => !suspended(suspensions, workerBilling?.[prefix], agent.models?.[prefix] ?? agent.reviews_on, now));
+  return agent.bills.every((prefix) => !suspended(suspensions, runnerBilling?.[prefix], agent.models?.[prefix] ?? agent.reviews_on, now));
 }
 
 /**
@@ -122,7 +122,7 @@ function billable(agent, workerBilling, suspensions, now) {
  * `authorFamilies` is every family that wrote code on the item's PRs — the first is the
  * original author, whose row is read (a family with no row, or `null`, reads `default`). A
  * seat qualifies when its agent's family is in none of them, differs from the other seat's,
- * and nothing it bills is suspended for `workerBilling`. A seat that does not qualify takes
+ * and nothing it bills is suspended for `runnerBilling`. A seat that does not qualify takes
  * the cheapest agent (`cost`, then name) that some row seats on `date` and that would
  * qualify in it — so an agent in no row (Kimi), or one whose dated seat has ended, never
  * comes back through a suspension. `catalog` is the agents table (`matrix.agents` unless the
@@ -131,7 +131,7 @@ function billable(agent, workerBilling, suspensions, now) {
  * Returns `{a, b, substituted}` — `substituted` names each replaced seat as
  * `{seat, for, agent}` — or `null` when either seat has no qualifying agent.
  */
-export function qualifyingPair(authorFamilies, workerBilling, suspensions, date, catalog, matrix) {
+export function qualifyingPair(authorFamilies, runnerBilling, suspensions, date, catalog, matrix) {
   const { day, ms } = dayAndMs(date);
   const authors = new Set((authorFamilies ?? []).filter(Boolean));
   const row = rowFor((authorFamilies ?? [])[0] ?? null, matrix);
@@ -140,7 +140,7 @@ export function qualifyingPair(authorFamilies, workerBilling, suspensions, date,
     !!catalog[name] &&
     !authors.has(fam(name)) &&
     (otherName == null || (name !== otherName && fam(name) !== fam(otherName))) &&
-    billable(catalog[name], workerBilling, suspensions, ms);
+    billable(catalog[name], runnerBilling, suspensions, ms);
 
   const pool = [...seatedOn(day, matrix)]
     .filter((n) => catalog[n])
@@ -185,7 +185,7 @@ export const RULE_CODES = {
 const refuse = (rule) => ({ ok: false, rule, code: RULE_CODES[rule] });
 
 /** Whether a claim row still blocks its item (rule 3): active, completed but unconfirmed
- *  (§6.7), or reaped while its worker was alive and not yet fenced (§6.6). */
+ *  (§6.7), or reaped while its runner was alive and not yet fenced (§6.6). */
 export function claimBlocks(claim) {
   return claim.status === 'active' ||
     (claim.status === 'completed' && claim.confirmed_at == null) ||
@@ -193,26 +193,26 @@ export function claimBlocks(claim) {
 }
 
 /**
- * Whether `worker` may take `item` now (§7.2 rules 2–10), as `{ok: true}` or
+ * Whether `runner` may take `item` now (§7.2 rules 2–10), as `{ok: true}` or
  * `{ok: false, rule, code}` naming the first rule that refuses. The reference for every
  * rule: the server's candidate query is tested against it (G-BTN-40).
  *
- * - `worker`: `{tier_ceiling, declared, model_id, model_provider_id, billing, courses, derived?}`
+ * - `runner`: `{tier_ceiling, declared, model_id, model_provider_id, billing, courses, derived?}`
  *   — `declared` the capability/role names as the heartbeat sent them, `billing`
  *   `{prefix: accountId}`, `courses` the `{repository, course, version}` its checkouts run,
  *   `derived` (B-104, R-BTN-174) what the item's repository's ontology derives from the
- *   worker's granted holdings — D(H), from a current set.
+ *   runner's granted holdings — D(H), from a current set.
  * - `item`: `{id, repository, course, tier, tags, requires, expedite}` — `requires` the
  *   clause's names, `null` when it has none; `expedite` true for the expedite lane or an
  *   expedite override.
- * - `ctx`: `{now, claims, override, suspensions, minWorkerVersion, expediteActive,
+ * - `ctx`: `{now, claims, override, suspensions, minRunnerVersion, expediteActive,
  *   expediteBound, lastEndReason, authorFamilies, catalog, matrix, tiers}` — `tiers` the item's
- *   repository's ladder (R-BTN-66), `minWorkerVersion` the
+ *   repository's ladder (R-BTN-66), `minRunnerVersion` the
  *   item's course's (R-BTN-65), `claims` the item's
  *   claim rows, `override` its `ticket_overrides` row or `null`, `expediteActive` the active
  *   Baton claims on expedited items, `lastEndReason` its most recent claim's end.
  */
-export function isEligible(worker, item, ctx) {
+export function isEligible(runner, item, ctx) {
   const now = ctx.now ?? batonNow();
   const override = ctx.override ?? null;
 
@@ -221,47 +221,47 @@ export function isEligible(worker, item, ctx) {
   if ((ctx.claims ?? []).some(claimBlocks) || override?.hold) return refuse(3);
 
   // Rule 4 (R-BTN-174, B-104): H ∪ D(H) — the holdings (declared ∩ grant, a granted key's) and
-  // what the repository's ontology derives from them; `worker.derived` is D(H) for the item's
+  // what the repository's ontology derives from them; `runner.derived` is D(H) for the item's
   // repository, handed in by the caller that read a current set. A derivation satisfies a need
   // the grant never names; a grant bounds holdings only.
-  const held = capabilitiesOf(worker.declared);
-  const derived = new Set(worker.derived ?? []);
+  const held = capabilitiesOf(runner.declared);
+  const derived = new Set(runner.derived ?? []);
   for (const need of capabilitiesOf(item.requires)) if (!held.has(need) && !derived.has(need)) return refuse(4);
 
-  // Rule 5 in the item's repository's ladder (R-BTN-66); the caller resolves the worker's
+  // Rule 5 in the item's repository's ladder (R-BTN-66); the caller resolves the runner's
   // ceiling for that repository. No ladder given: docs' three tiers.
   const ladder = ctx.tiers ?? TIERS;
-  if (!fitsTier(item.tier ?? null, worker.tier_ceiling ?? ladder.at(-1), ladder)) return refuse(5);
+  if (!fitsTier(item.tier ?? null, runner.tier_ceiling ?? ladder.at(-1), ladder)) return refuse(5);
 
   // Rule 6 is retired (B-104, R-BTN-121 as amended): `human-operator` is a runner's own
   // statement, checked by rule 4 like any capability — declared by that name and granted by
   // that name.
 
-  if (suspended(ctx.suspensions, worker.model_provider_id, worker.model_id, now)) return refuse(7);
+  if (suspended(ctx.suspensions, runner.model_provider_id, runner.model_id, now)) return refuse(7);
 
   if (ctx.lastEndReason === 'released:awaiting-review-capacity') {
-    const families = [...(ctx.authorFamilies ?? []), familyOf(worker.model_id, ctx.matrix)];
+    const families = [...(ctx.authorFamilies ?? []), familyOf(runner.model_id, ctx.matrix)];
     const catalog = ctx.catalog ?? ctx.matrix.agents;
-    if (!qualifyingPair(families, worker.billing, ctx.suspensions, now, catalog, ctx.matrix)) return refuse(8);
+    if (!qualifyingPair(families, runner.billing, ctx.suspensions, now, catalog, ctx.matrix)) return refuse(8);
   }
 
-  // Rule 9 (R-BTN-22, R-BTN-48, R-BTN-65): the worker declares the item's course at its
-  // `min_worker_version` or later; a worker that declares the course not at all is stale too.
-  const declared = (worker.courses ?? []).find((c) => c.repository === item.repository && c.course === item.course);
-  if (!declared || declared.version < (ctx.minWorkerVersion ?? 0)) return refuse(9);
+  // Rule 9 (R-BTN-22, R-BTN-48, R-BTN-65): the runner declares the item's course at its
+  // `min_runner_version` or later; a runner that declares the course not at all is stale too.
+  const declared = (runner.courses ?? []).find((c) => c.repository === item.repository && c.course === item.course);
+  if (!declared || declared.version < (ctx.minRunnerVersion ?? 0)) return refuse(9);
 
   if (override?.retry_after != null && override.retry_after > now) return refuse(10);
 
   return { ok: true };
 }
 
-/** The first item of a ranked list `worker` may take, with the refusals before it:
+/** The first item of a ranked list `runner` may take, with the refusals before it:
  *  `{item, refusals: [{id, rule, code}]}`; `item` is `null` when none qualifies.
  *  `ctxFor(item)` supplies each item's `isEligible` context. */
-export function firstEligible(worker, ranked, ctxFor) {
+export function firstEligible(runner, ranked, ctxFor) {
   const refusals = [];
   for (const item of ranked) {
-    const verdict = isEligible(worker, item, ctxFor(item));
+    const verdict = isEligible(runner, item, ctxFor(item));
     if (verdict.ok) return { item, refusals };
     refusals.push({ id: item.id, rule: verdict.rule, code: verdict.code });
   }

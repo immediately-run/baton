@@ -1,7 +1,7 @@
 // S-BTN-45 the edges of blocks (BATON_SPEC §15, §6.2–§6.4 R-BTN-75–78, §6.3 R-BTN-101; R3-1251), on both
 // hosts — every case but the leg queues', which are in S-BTN-45.leg-queues.test.ts (R3-1255). In `docs`: `opencode-go:go_plus`
 // serves `llm:deepseek-v4-flash` and `llm:glm-5`, for `docs` only. Must hold: a `$ref` schema is
-// refused at registration; another repository's worker is refused `forbidden` for go_plus; one
+// refused at registration; another repository's runner is refused `forbidden` for go_plus; one
 // reading blocks both resources' legs; a reading whose detail fails the schema is `invalid-params`;
 // an unavailable reading lapses at its `until`; an administrator's reading wins and an instrument's
 // takes over after it (`overridden` meanwhile); overnight the rows clear silently, none is written,
@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, cutover, keyCall, placed, rows, setAdminKeys, setClock, syncCall, syncToken, tick } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
-import { grantedWorker, signed, SCHEMA } from '../lib/fleet';
+import { grantedRunner, signed, SCHEMA } from '../lib/fleet';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const MIN = 60_000;
@@ -63,18 +63,18 @@ describe('S-BTN-45 the edges of blocks', () => {
   });
 
   it('isolates repositories, blocks two resources with one reading, refuses bad detail, lapses at until, and orders the readings', async () => {
-    // A worker granted only on ops reports on go_plus, which lists docs alone: refused. Its
+    // A runner granted only on ops reports on go_plus, which lists docs alone: refused. Its
     // heartbeat sends the retired `uses` (B-168): read as absent, logged `deprecated-field`, and
     // never a refused name — the heartbeat succeeds.
-    const opsWorker = await grantedWorker(opsOwner, 'ops', 'opsw', CAPS, [GO]);
-    const hb = await opsWorker.beat({ uses: ['Not A Name', GO] });
+    const opsRunner = await grantedRunner(opsOwner, 'ops', 'opsw', CAPS, [GO]);
+    const hb = await opsRunner.beat({ uses: ['Not A Name', GO] });
     expect(hb.status).toBe(200);
     expect(hb.json.refused_uses).toBeUndefined();
     expect(await rows<{ field: string }>(`SELECT json_extract(detail_json, '$.field') AS field FROM events WHERE kind = 'deprecated-field'`)).toEqual([{ field: 'heartbeat.uses' }]);
-    expect((await opsWorker.call('/v1/runner/readings', { readings: [{ instance: GO, available: false }] })).json.refused).toEqual([{ instance: GO, code: 'forbidden' }]);
+    expect((await opsRunner.call('/v1/runner/readings', { readings: [{ instance: GO, available: false }] })).json.refused).toEqual([{ instance: GO, code: 'forbidden' }]);
 
     // W1 uses go_plus: one reading — unavailable until +20 min, valid_for 24 h — blocks F and D together.
-    const w1 = await grantedWorker(owner, 'docs', 'w1', CAPS, [GO]);
+    const w1 = await grantedRunner(owner, 'docs', 'w1', CAPS, [GO]);
     const posted = await w1.call('/v1/runner/readings', { readings: [
       { instance: GO, available: false, until: T0 + 20 * MIN, valid_for: 24 * 3600 },
       { instance: GO, kind: 'measure', detail: { used: -1 } },
@@ -82,7 +82,7 @@ describe('S-BTN-45 the edges of blocks', () => {
     expect(posted.json.refused).toEqual([{ instance: GO, code: 'invalid-params', message: expect.stringMatching(/at least 0/) }]);
     expect(await blocksOf('D')).toMatchObject({ blocked: true, blocks: [{ kind: 'resource', ref: DS, leg: 'review', until: T0 + 20 * MIN }] });
     expect(await blocksOf('F')).toMatchObject({ blocked: true, blocks: [{ kind: 'resource', ref: GLM, leg: 'review' }] });
-    // The second reading a minute is refused for the same worker and instance (the measure the
+    // The second reading a minute is refused for the same runner and instance (the measure the
     // first post carried was stored beside the state — one a minute per kind — and rides its 31
     // days through the block below, R-BTN-101).
     expect((await w1.call('/v1/runner/readings', { readings: [{ instance: GO, available: true }] })).json.refused).toEqual([{ instance: GO, code: 'rate-limited' }]);
@@ -116,7 +116,7 @@ describe('S-BTN-45 the edges of blocks', () => {
     // At +97 min every reading is over — the probe's half-hour, and both of the administrator's
     // hours (the one posted with the retired signature had no `until`: in force for its hour, then
     // gone): go_plus is unknown, and F's block went with the probe's reading. Each beat is a
-    // minute of the worker's lease — the reading fixed since 12:23, past the one-a-minute rule —
+    // minute of the runner's lease — the reading fixed since 12:23, past the one-a-minute rule —
     // so it stays live until the first tick that drops the last reading adsorbs its lapse.
     for (let t = T0 + 24 * MIN; t <= T0 + 97 * MIN; t += MIN) {
       await setClock(t);
@@ -127,7 +127,7 @@ describe('S-BTN-45 the edges of blocks', () => {
     expect(await rows(`SELECT DISTINCT instance FROM instance_readings`)).toEqual([]);
     expect((await blocksOf('F')).blocked).toBe(false);
 
-    // Overnight every worker stops (its lease runs out): with no live runner granted, no row is
+    // Overnight every runner stops (its lease runs out): with no live runner granted, no row is
     // written, so `no-instance`, and D's answer is lost. It is not a claim unblocking here: the
     // ticket's `blocked` stands, so its record goes with no `unblocked` (R-BTN-77).
     const unblockedD = async () => (await rows(`SELECT seq FROM events WHERE kind = 'unblocked' AND ticket_id = 'docs:D'`)).length;
@@ -148,7 +148,7 @@ describe('S-BTN-45 the edges of blocks', () => {
 
   it('K, needing a capability only W1 declares and an unavailable resource, stays blocked through the night and logs nothing when the fleet comes back (B-49)', async () => {
     expect((await git.add('K', { requires: ['mcp-chrome'] }, reviewNeeds([DS])).post()).status).toBe(200);
-    const w1 = await grantedWorker(owner, 'docs', 'w1', ['mcp-chrome'], [GO]);
+    const w1 = await grantedRunner(owner, 'docs', 'w1', ['mcp-chrome'], [GO]);
     expect((await w1.call('/v1/runner/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }] })).status).toBe(200);
     const evening = await blocksOf('K');
     expect(evening).toMatchObject({ blocked: true, blocks: [{ kind: 'resource', ref: DS, leg: 'review' }] });
@@ -161,7 +161,7 @@ describe('S-BTN-45 the edges of blocks', () => {
     expect(await blocksOf('K')).toMatchObject({ blocked: true, blocks: [{ kind: 'capability', ref: 'mcp-chrome' }] });
     // In the morning W1 heartbeats: one recount clears the capability row and writes the resource
     // row again, and K is evaluated once, after both — blocked throughout, so nothing is logged and
-    // no worker is messaged (R-BTN-75: one evaluation per transaction).
+    // no runner is messaged (R-BTN-75: one evaluation per transaction).
     await w1.beat();
     expect(await blocksOf('K')).toMatchObject({ blocked: true, blocks: [{ kind: 'resource', ref: DS, leg: 'review' }] });
     expect(await rows(`SELECT kind FROM events WHERE seq > ? AND ticket_id = 'docs:K' AND kind IN ('blocked', 'unblocked')`, seq)).toEqual([]);
@@ -180,7 +180,7 @@ describe('S-BTN-45 the edges of blocks', () => {
     expect((await blocksOf('H')).blocks[0].leg).toBeUndefined();
     expect(await rows('SELECT url FROM ticket_decisions WHERE ticket_id = ?', 'docs:H')).toEqual([{ url: null }]);
 
-    const w = await grantedWorker(owner, 'docs', 'wg', CAPS);
+    const w = await grantedRunner(owner, 'docs', 'wg', CAPS);
     const claim = await w.call('/v1/runner/claim', { request_id: 'req-claim-g', ticket_id: 'docs:G' });
     expect(claim.json).toMatchObject({ ticket_id: 'docs:G', legs: ['fix'] });
     const id = claim.json.claim_id as number;
@@ -193,8 +193,8 @@ describe('S-BTN-45 the edges of blocks', () => {
     const ops = await syncToken({ repository: 'immediately-run/ops', job_workflow_ref: 'immediately-run/ops/.github/workflows/baton-sync.yml@refs/heads/main' });
     expect((await syncCall('/v1/sync/board', new Git(ops).add('X', { blocked_by: ['D'] }).body('a'.repeat(40), null), ops)).status).toBe(200);
     expect(await rows(`SELECT ticket_id, ref FROM ticket_blocks WHERE kind = 'ticket'`)).toEqual([{ ticket_id: 'ops:X', ref: 'ops:D' }]);
-    const opsWorker = await grantedWorker(opsOwner, 'ops', 'opsq', CAPS);
-    expect((await opsWorker.call('/v1/repositories/docs/tickets/D/blocks', undefined, 'GET')).json).toMatchObject({ code: 'forbidden' });
-    expect((await opsWorker.call('/v1/repositories/ops/tickets/X/blocks', undefined, 'GET')).json).toMatchObject({ blocked: true });
+    const opsRunner = await grantedRunner(opsOwner, 'ops', 'opsq', CAPS);
+    expect((await opsRunner.call('/v1/repositories/docs/tickets/D/blocks', undefined, 'GET')).json).toMatchObject({ code: 'forbidden' });
+    expect((await opsRunner.call('/v1/repositories/ops/tickets/X/blocks', undefined, 'GET')).json).toMatchObject({ blocked: true });
   });
 });

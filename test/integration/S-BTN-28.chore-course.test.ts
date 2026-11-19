@@ -38,7 +38,7 @@ describe('S-BTN-28 the chore course (stations and legs)', () => {
     expect(await git.post()).toMatchObject({ confirmed: 1 });
   });
 
-  it('S-BTN-24’s gate case: verify barred by a tag — a worker carrying it is neither offered nor given C-2; core’s default order puts resume before start', async () => {
+  it('S-BTN-24’s gate case: verify barred by a tag — a runner carrying it is neither offered nor given C-2; core’s default order puts resume before start', async () => {
     const glm = await register('vm-a', { courses: CHORE, tags: ['family:glm'] });
     const qwen = await register('vm-b', { courses: CHORE, tags: ['family:qwen'] });
     // Resume before start: C-2 (one leg to an end) before C-1 (two).

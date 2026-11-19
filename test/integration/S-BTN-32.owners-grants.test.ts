@@ -1,10 +1,10 @@
 // S-BTN-32 owners and grants (BATON_SPEC §15, §11.1 R-BTN-57, §8.2 R-BTN-58, §12.4 R-BTN-16; R3-1240): an
 // administrator registers `ops` with one owner and gives `docs` (seeded before owners existed) its
-// owner; docs' owner grants worker key K. Must hold: K is recommended and claims docs tickets,
+// owner; docs' owner grants runner key K. Must hold: K is recommended and claims docs tickets,
 // never ops tickets; ops' owner revoking K's docs grant is forbidden; removing the last owner is
 // refused; ops' owner granting K under another hostname is conflict, and granting human-operator
 // forbidden; capabilities ops grants K never satisfy a docs ticket's requires; an administrator
-// key is never a worker key; a login link works once, within 5 minutes, and its session ends when
+// key is never a runner key; a login link works once, within 5 minutes, and its session ends when
 // its key leaves BATON_ADMIN_KEYS; an administrator's revoke of K stops it at its next call.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
@@ -20,10 +20,10 @@ let docsOwner: TestKey;
 let opsOwner: TestKey;
 let k: TestKey;
 
-/** A worker call signed by `key`, with its secret after the first heartbeat. */
-async function workerAs(key: TestKey, path: string, body?: unknown, secret?: string) {
+/** A runner call signed by `key`, with its secret after the first heartbeat. */
+async function runnerAs(key: TestKey, path: string, body?: unknown, secret?: string) {
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
-  const req = await signedRequest(key, ORIGIN + path, { created, body: body === undefined ? undefined : JSON.stringify(body), headers: secret ? { 'X-Worker-Secret': secret } : {} });
+  const req = await signedRequest(key, ORIGIN + path, { created, body: body === undefined ? undefined : JSON.stringify(body), headers: secret ? { 'X-Runner-Secret': secret } : {} });
   const res = await hostCall(req);
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
@@ -50,17 +50,17 @@ describe('S-BTN-32 owners and grants', () => {
     expect((await keyCall(docsOwner, '/v1/owner/docs/grants', { public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue'] })).status).toBe(200);
     const secret = 'secret-k';
     // A course of a repository no grant covers is refused (§10.1).
-    expect((await workerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret),
+    expect((await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret),
       courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }, { repository: 'ops', course: 'roadmap-pr', version: 3 }] }))).status).toBe(403);
-    const hb = await workerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret),
+    const hb = await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret),
       courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }] }));
     expect(hb.status).toBe(200);
     // Recommended docs' tickets, never ops' (rule 7: no ops grant).
-    const offered = await recommended(hb.json.worker_id as number);
+    const offered = await recommended(hb.json.runner_id as number);
     expect(offered.length).toBeGreaterThan(0);
     expect(offered.every((t) => t.startsWith('docs:'))).toBe(true);
-    expect((await workerAs(k, '/v1/runner/claim', { request_id: 'req-k-ops-1', ticket_id: 'ops:R3-9001' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 7, rule_code: 'not-granted' });
-    expect((await workerAs(k, '/v1/runner/claim', { request_id: 'req-k-docs-1' }, secret)).json).toMatchObject({ ticket_id: 'docs:R3-9001' });
+    expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-ops-1', ticket_id: 'ops:R3-9001' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 7, rule_code: 'not-granted' });
+    expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-docs-1' }, secret)).json).toMatchObject({ ticket_id: 'docs:R3-9001' });
 
     // ops' owner cannot touch docs' grant, nor take K's hostname. B-104 (R-BTN-121 as
     // amended, rule 6 retired): human-operator is granted like any capability — by an owner
@@ -73,7 +73,7 @@ describe('S-BTN-32 owners and grants', () => {
     expect((await keyCall(admin, '/v1/admin/grants', { repository: 'ops', public_key: other.publicKey, hostname: 'op-host', capabilities: ['human-operator'] })).status).toBe(200);
     // Removing docs' last owner is refused.
     expect((await keyCall(docsOwner, '/v1/owner/docs/owners', { fingerprint: docsOwner.fingerprint, remove: true })).json.code).toBe('conflict');
-    // An administrator's key is never a worker's.
+    // An administrator's key is never a runner's.
     expect((await keyCall(docsOwner, '/v1/owner/docs/grants', { public_key: admin.publicKey, hostname: 'admin-host', capabilities: [] })).json.code).toBe('conflict');
   });
 
@@ -81,21 +81,21 @@ describe('S-BTN-32 owners and grants', () => {
     await keyCall(docsOwner, '/v1/owner/docs/grants', { public_key: k.publicKey, hostname: 'k-host', capabilities: ['llm-call'] });
     await keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: k.publicKey, capabilities: ['agent-venue'] });
     const secret = 'secret-k';
-    const hb = await workerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret), capabilities: ['agent-venue'],
+    const hb = await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret), capabilities: ['agent-venue'],
       courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }, { repository: 'ops', course: 'roadmap-pr', version: 3 }] }));
     expect(hb.status).toBe(200);
     // R3-9002 requires agent-venue: granted on ops, not on docs.
-    expect((await workerAs(k, '/v1/runner/claim', { request_id: 'req-k-docs-2', ticket_id: 'docs:R3-9002' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 4 });
-    expect((await workerAs(k, '/v1/runner/claim', { request_id: 'req-k-ops-2', ticket_id: 'ops:R3-9002' }, secret)).json).toMatchObject({ ticket_id: 'ops:R3-9002' });
+    expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-docs-2', ticket_id: 'docs:R3-9002' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 4 });
+    expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-ops-2', ticket_id: 'ops:R3-9002' }, secret)).json).toMatchObject({ ticket_id: 'ops:R3-9002' });
   });
 
   it('a grant’s max_tier caps the key in that repository', async () => {
     await keyCall(docsOwner, '/v1/owner/docs/grants', { public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue'], max_tier: 'routine' });
     const secret = 'secret-k';
-    const hb = await workerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret), tier_ceiling: 'critical' }));
+    const hb = await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret), tier_ceiling: 'critical' }));
     // R3-9002 is judgement: above the grant's routine.
-    expect((await workerAs(k, '/v1/runner/claim', { request_id: 'req-k-docs-3', ticket_id: 'docs:R3-9002' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 5 });
-    expect(await recommended(hb.json.worker_id as number)).toEqual(['docs:R3-9001']);
+    expect((await runnerAs(k, '/v1/runner/claim', { request_id: 'req-k-docs-3', ticket_id: 'docs:R3-9002' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 5 });
+    expect(await recommended(hb.json.runner_id as number)).toEqual(['docs:R3-9001']);
   });
 
   it('a login link works once, within 5 minutes; its session ends when its key leaves BATON_ADMIN_KEYS', async () => {
@@ -126,9 +126,9 @@ describe('S-BTN-32 owners and grants', () => {
   it('an administrator’s revoke of K stops it at its next call', async () => {
     await keyCall(docsOwner, '/v1/owner/docs/grants', { public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue'] });
     const secret = 'secret-k';
-    expect((await workerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret) }))).status).toBe(200);
+    expect((await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k', secret_hash: await sha256(secret) }))).status).toBe(200);
     expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(k.fingerprint)}/revoke`, {})).status).toBe(200);
-    expect((await workerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k' }), secret)).status).toBe(401);
+    expect((await runnerAs(k, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'k-host', session_name: 'k' }), secret)).status).toBe(401);
     expect(await rows(`SELECT count(*) AS n FROM events WHERE kind = 'admin'`)).toEqual([{ n: 4 }]);
   });
 });

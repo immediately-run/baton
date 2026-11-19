@@ -37,6 +37,11 @@ function world(overrides: { claude?: string; gh?: string; node?: string; originN
   stub('claude', overrides.claude ?? 'echo ready');
   stub('gh', overrides.gh ?? 'exit 0');
   if (overrides.node != null) stub('node', overrides.node);
+  // `setsid` is supplied by util-linux in the Linux cloud container, but macOS has no native
+  // command. Keep Linux exercising the real detach operation; on other development hosts a
+  // transparent test shim preserves argv/process lifetime so the rest of the launch contract is
+  // still tested without weakening cloud-runner.sh's production preflight.
+  if (spawnSync('sh', ['-c', 'command -v setsid >/dev/null 2>&1']).status !== 0) stub('setsid', 'exec "$@"');
   // The origin every GitHub-shaped check reads: a bare `docs.git`, seeded with one commit, and
   // a clean clone of it as the runner's home checkout.
   const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
@@ -108,7 +113,7 @@ describe('the cloud runner script (B-115)', () => {
 
   it('every failing check exits non-zero naming itself', () => {
     const cases: { name: string; make: () => ReturnType<typeof world>; env: Record<string, string | undefined>; args?: string[]; names: RegExp }[] = [      { name: 'no credential', make: () => world(), env: { BATON_KEY: undefined }, names: /no credential: set BATON_KEY/ },
-      { name: 'BATON_KEY_FILE names no file', make: () => world(), env: { BATON_KEY: undefined, BATON_KEY_FILE: '/nonexistent/baton_worker' }, names: /BATON_KEY_FILE \(\/nonexistent\/baton_worker\) does not exist/ },
+      { name: 'BATON_KEY_FILE names no file', make: () => world(), env: { BATON_KEY: undefined, BATON_KEY_FILE: '/nonexistent/baton_runner' }, names: /BATON_KEY_FILE \(\/nonexistent\/baton_runner\) does not exist/ },
       { name: 'no BATON_HOSTNAME', make: () => world(), env: { BATON_HOSTNAME: undefined }, names: /BATON_HOSTNAME is not set/ },
       { name: 'no CLAUDE_CODE_SESSION_ID', make: () => world(), env: { CLAUDE_CODE_SESSION_ID: undefined }, names: /CLAUDE_CODE_SESSION_ID is not set/ },
       { name: 'a session id a session_name may not be', make: () => world(), env: { CLAUDE_CODE_SESSION_ID: 'bad id!' }, names: /CLAUDE_CODE_SESSION_ID is not a session_name/ },

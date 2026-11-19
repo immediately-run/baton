@@ -3,7 +3,7 @@
 //
 // The sync is the REAL one, in two halves. Its decisions: `syncOnce` from docs
 // scripts/lib/batonSync.mjs (vendored, R-BTN-37), the code baton-sync.mjs runs in the
-// workflow, posting to the real Worker. Its payloads: docs baton-sync.mjs's own `buildPayload`
+// workflow, posting to the real Runner. Its payloads: docs baton-sync.mjs's own `buildPayload`
 // run over the fixture repository (test/fixtures/boards.json, recomputed and compared wherever
 // docs is a sibling — Baton's CI cannot read docs). Ancestry is real git: global-setup.ts asks
 // `git merge-base --is-ancestor` of the fixture repository.

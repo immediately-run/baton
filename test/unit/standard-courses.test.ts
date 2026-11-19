@@ -232,7 +232,7 @@ describe('the standard courses (R-BTN-131)', () => {
   describe('create-spec’s kit (B-96)', () => {
     const KIT: KitInput = {
       course: 'create-spec', proposed: CREATE_SPEC_COURSE, base: null,
-      proposedVersions: { version: 1, min_worker_version: 1 }, baseVersions: null,
+      proposedVersions: { version: 1, min_runner_version: 1 }, baseVersions: null,
       legScripts: null, live: null,
     };
     /** Where the course's own station function puts a ticket, from the facts and the closes its
@@ -303,7 +303,7 @@ describe('the standard courses (R-BTN-131)', () => {
   describe('spec-to-tickets’ kit (B-99)', () => {
     const KIT: KitInput = {
       course: 'spec-to-tickets', proposed: SPEC_TO_TICKETS_COURSE, base: null,
-      proposedVersions: { version: 1, min_worker_version: 1 }, baseVersions: null,
+      proposedVersions: { version: 1, min_runner_version: 1 }, baseVersions: null,
       legScripts: null, live: null,
     };
 

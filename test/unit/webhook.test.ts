@@ -120,7 +120,7 @@ describe('the one parser (R-BTN-73)', () => {
   const A = 'f'.repeat(40);
   const pushPayload = (over: Record<string, unknown> = {}) => ({
     ref: 'refs/heads/main', before: B, after: A,
-    repository: { full_name: 'immediately-run/docs' }, pusher: { name: 'worker' },
+    repository: { full_name: 'immediately-run/docs' }, pusher: { name: 'runner' },
     sender: { id: 424242, login: 'immediately-run-worker' },
     head_commit: { id: A, author: { email: 'w@x' } },
     commits: [{ id: A, message: 'm', author: { name: 'Anyone' }, added: ['.baton/baton.json'], removed: [], modified: ['docs/readme.md'] }],
@@ -130,7 +130,7 @@ describe('the one parser (R-BTN-73)', () => {
   it('records a push\u2019s pusher and its commits\u2019 paths; reads nothing else of them', () => {
     const reads = new Set<string>();
     expect(pickDelivery('push', 'p-1', recording(pushPayload(), reads))).toEqual({
-      event: 'push', id: 'p-1', repository: 'immediately-run/docs', pusher: 'worker', author_email: 'w@x',
+      event: 'push', id: 'p-1', repository: 'immediately-run/docs', pusher: 'runner', author_email: 'w@x',
       push: { sender_id: 424242, sender_login: 'immediately-run-worker', ref: 'refs/heads/main', before: B, after: A,
         commits: [{ sha: A, paths: ['.baton/baton.json', 'docs/readme.md'] }] },
     });
@@ -145,7 +145,7 @@ describe('the one parser (R-BTN-73)', () => {
     ['a commits list that is not an array', pushPayload({ commits: 'many' })],
   ])('a push whose recorded half does not parse (%s) triggers without a record', (_what, payload) => {
     const d = pickDelivery('push', 'p-2', payload)!;
-    expect(d.pusher).toBe('worker');
+    expect(d.pusher).toBe('runner');
     expect('push' in d).toBe(false);
   });
 
@@ -163,7 +163,7 @@ describe('the one parser (R-BTN-73)', () => {
     ['a payload with none of the fields', pushPayload({ ref: undefined, before: undefined, after: undefined, sender: undefined, commits: undefined }), null],
   ])('a push Baton does not record (%s) triggers all the same', (_what, payload, _want) => {
     const d = pickDelivery('push', 'p-3', payload)!;
-    expect(d.pusher).toBe('worker');
+    expect(d.pusher).toBe('runner');
     expect('push' in d).toBe(false);
   });
 

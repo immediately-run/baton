@@ -1,8 +1,8 @@
 // S-BTN-159 quiet start (B-93, BATON_SPEC §15's scenario table): two noises from the runs of
-// 2026-10-21 — every runner start printed `no recommendation (no worker holds this secret)`, and
+// 2026-10-21 — every runner start printed `no recommendation (no runner holds this secret)`, and
 // `remoteSlug` let git's own `error: No such remote 'origin'` into a sync's log while the sync
 // succeeded. Must hold: the registration attempt's refusal is not logged (a registered
-// worker's still is), and an origin-less checkout is null with empty stderr — in this process
+// runner's still is), and an origin-less checkout is null with empty stderr — in this process
 // and, as an operator's console reads it, through the CLI's own esbuild bundle (what
 // scripts/baton-cli.mjs loads for `baton repo sync`). Node only: it writes a real git checkout
 // and builds that bundle.
@@ -29,10 +29,10 @@ process.stdout.write(JSON.stringify(remoteSlug(${JSON.stringify(root)})));\n`);
   return { slug: out.status === 0 ? (JSON.parse(out.stdout || 'null') as string | null) : 'error', stderr: out.stderr ?? '' };
 };
 
-/** A fresh session's start: no state file and no worker, the first attempt's beat registering one.
+/** A fresh session's start: no state file and no runner, the first attempt's beat registering one.
  *  Its state lives in this process's memory — the handful of fields one heartbeat registers — and
  *  its home, state file and spool are its own, under a fresh temp directory. */
-const start = (api: BatonApi, log: (l: string) => void, state: Record<string, unknown> = { worker_id: null, claim: null }): Runner => {
+const start = (api: BatonApi, log: (l: string) => void, state: Record<string, unknown> = { runner_id: null, claim: null }): Runner => {
   const home = mkdtempSync(join(tmpdir(), 'baton-fb-'));
   const r = new Runner({ api, home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'fresh',
     courses: [{ course: 'create-pr', version: 1 }], stateFile: join(home, 's.json'), beatEvery: 60_000, log });
@@ -63,7 +63,7 @@ afterAll(() => {
   if (bundleDir) rmSync(bundleDir, { recursive: true, force: true });
 });
 
-// The Workers project's filesystem is a memfs with no child processes; this scenario is Node's,
+// The Runners project's filesystem is a memfs with no child processes; this scenario is Node's,
 // as `baton repo sync`'s bundle is.
 const nodeOnly = !(globalThis as { navigator?: { userAgent?: string } }).navigator?.userAgent?.includes('Cloudflare');
 describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
@@ -77,11 +77,11 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
     const api = {
       setSecret: () => {},
       // `sent`: the list this beat carried, as B-86's `rewriteSettings` records it server-side.
-      heartbeat: async (body: Record<string, unknown>) => { calls.heartbeats++; registered = true; return { worker_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], ...GRANT }; },
-      // `authWorker`'s refusal (src/core/workerApi.ts) — a secret no registered worker holds.
+      heartbeat: async (body: Record<string, unknown>) => { calls.heartbeats++; registered = true; return { runner_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], ...GRANT }; },
+      // `authRunner`'s refusal (src/core/runnerApi.ts) — a secret no registered runner holds.
       recommendations: async () => {
         calls.recommendations++;
-        if (!registered) throw new BatonRefusal('unauthenticated', undefined, 'no worker holds this secret', 401);
+        if (!registered) throw new BatonRefusal('unauthenticated', undefined, 'no runner holds this secret', 401);
         return { recommendations: [{ ticket_id: 'B-9' }] };
       },
       claim: async () => { calls.claims++; throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409); },
@@ -92,21 +92,21 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
     // and is answered the grant, the second carries the settled list before the claim. Then the
     // recommendation is the stray the ticket names, then the claim.
     expect(calls).toEqual({ heartbeats: 2, recommendations: 1, claims: 1 });
-    // The only line is the declaration the grant settles — not `no recommendation (no worker
+    // The only line is the declaration the grant settles — not `no recommendation (no runner
     // holds this secret)` on every start.
     expect(lines).toEqual(["baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given"]);
     r.stop();
   });
 
-  it('a worker the state already named still logs the refusal, and still asks for its pick', async () => {
+  it('a runner the state already named still logs the refusal, and still asks for its pick', async () => {
     const lines: string[] = [];
     const asked: (string | null)[] = [];
     let refuseGates = false;
     const api = {
       setSecret: () => {},
-      heartbeat: async (body: Record<string, unknown>) => ({ worker_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], grant: { capabilities: ['create-pr'] } }),
+      heartbeat: async (body: Record<string, unknown>) => ({ runner_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], grant: { capabilities: ['create-pr'] } }),
       recommendations: async () => {
-        if (refuseGates) throw new BatonRefusal('not-eligible', undefined, 'every gate refused this worker', 403);
+        if (refuseGates) throw new BatonRefusal('not-eligible', undefined, 'every gate refused this runner', 403);
         return { recommendations: [{ ticket_id: 'B-9' }] };
       },
       claim: async (body: { ticket_id?: string }) => {
@@ -114,16 +114,16 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
         throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409);
       },
     } as unknown as BatonApi;
-    const r = start(api, (l) => lines.push(l), { worker_id: 7, claim: null });
+    const r = start(api, (l) => lines.push(l), { runner_id: 7, claim: null });
     await r.runOnce();
     expect(asked).toEqual(['B-9']); // registered: recommended for, and its claim asked for the pick
-    // B-86's once-per-declaration line, and nothing else: the state names the worker, so its
+    // B-86's once-per-declaration line, and nothing else: the state names the runner, so its
     // refusal would have been logged had it come — and none was due.
     expect(lines).toEqual(["baton: declaring create-pr — the grant's capabilities, no --capabilities given"]);
     refuseGates = true;
     lines.length = 0;
     await r.runOnce();
-    expect(lines).toEqual(['baton: no recommendation (every gate refused this worker)']);
+    expect(lines).toEqual(['baton: no recommendation (every gate refused this runner)']);
     r.stop();
   });
 

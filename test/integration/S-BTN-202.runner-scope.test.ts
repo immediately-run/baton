@@ -283,7 +283,7 @@ function makeRunner(): Runner {
   const api = new BatonApi({
     url: 'https://baton.test',
     transport: (req) => hostCall(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });
   runner = new Runner({
     api, home: home.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',

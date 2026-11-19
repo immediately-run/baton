@@ -21,7 +21,7 @@ export interface Leg {
   maxQueue: number | null;
   /** R-BTN-106: the legs a key that ran any of them on the ticket may not take this one. */
   noChainFrom: string[];
-  /** R-BTN-107: the isolation a worker must declare to take it, or null for any. */
+  /** R-BTN-107: the isolation a runner must declare to take it, or null for any. */
   isolation: 'session' | null;
   /** R-BTN-120, R-BTN-121: the capabilities the leg requires of whoever takes it — rule 4's own
    *  input beside the ticket's clause (B-86); empty when it requires none. Read as
@@ -81,7 +81,7 @@ const names = (v: unknown): string[] => (typeof v === 'string' ? [v] : Array.isA
  * makes it a built-in bare capability "compared as a string", and the ticket side keeps it so —
  * `board.ts` sets `operator_only` for a clause naming it and rule 6 compares the literal. The
  * vocabulary happens to give it the agent venue's four, so expanding it here let any autonomous
- * `agent-venue` worker take a leg the course reserved for a person. It stands literal, and rule 4
+ * `agent-venue` runner take a leg the course reserved for a person. It stands literal, and rule 4
  * and the candidate query check that literal the way rule 6 does.
  */
 export function legCapabilities(requires: unknown, capabilityRoles: unknown): string[] {

@@ -86,7 +86,7 @@ export async function handoff(ctx) { note(ctx, 'handoff'); return 'https://examp
       const api = new BatonApi({
         url: 'https://baton.test',
         transport: (req) => hostCall(req),
-        auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+        auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
       });
       const { executor, log } = recording();
       const runner = new Runner({

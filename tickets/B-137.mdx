@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1160
 tier: critical
-description: "Adversarial review findings 4 and 18 (2026-10-27): any runner key can post the board and any leg can read that key, so B-126's detection and B-127's signature check, computed client-side, are computed by the attacker. the policy's `inputs.board` excludes machine keys on homes with runners below the human level; Baton reads control-path changes from push deliveries and verifies signatures over raw commits, and runners verify again; observation and post rate limits per key. Requires: none."
+description: "Adversarial review findings 4 and 18 (2026-10-27): any runner key can post the board and any leg can read that key, so B-126's detection and B-127's signature check, computed client-side, are computed by the attacker. the policy's `inputs.board` excludes machine keys on homes with runners below the human level; Baton reads control-path changes from push deliveries (the signature half retired 2026-11-19, see Status); observation and post rate limits per key. Requires: none."
 topics:
   - baton
 owns: {}
@@ -38,8 +38,8 @@ R-BTN-97; B-126, B-127; `docs/security-model.mdx` (reach 7, reach 8).
    their owners now (`machine_sync: false` until B-145 lands).
 2. **What Baton must trust, Baton computes.** Control-path changes (B-126) come from the push
    deliveries' `commits[].added/modified/removed` and `sender.id`, server-side; a missing delivery
-   is `pusher-unknown`, fail closed. Signatures (B-127) are verified by Baton over the raw commit
-   objects the sync posts, and again by each runner before it loads configuration.
+   is `pusher-unknown`, fail closed. ~~Signatures (B-127) are verified by Baton over the raw commit
+   objects the sync posts, and again by each runner before it loads configuration.~~
 3. **Rate limits per key**: observation numbers and board posts per key per hour, and an owner
    alert when a key holds observations repeatedly. Revoking the key releases its observation.
 4. **The security model** names board posts as a reach and the denial of service a key can cause.
@@ -62,3 +62,5 @@ R-BTN-97; B-126, B-127; `docs/security-model.mdx` (reach 7, reach 8).
 _(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may post the board is the repository policy's `inputs.board` (`machine`), R-BTN-188, built by B-145. Read it through `src/core/policy.ts` once B-145 lands.)_
 
 _(2026-11-01: `inputs.answers` is retired (immediately-run/baton#150, R-BTN-191): what it decided is now the policy's `attestations` entries — `sync` not admitted for `std:decision@1` or `std:arrival@1` is the old `inputs.answers: attestation`. Read the references above that way.)_
+
+_(2026-11-19: rules re-read: R-BTN-66, R-BTN-133, R-BTN-194. Signed control is retired — BATON_SPEC verifies no commit signature (`spec/BATON_SPEC_HISTORY.md`, that date). Item 2's signature sentence is struck; nothing replaces it. Its first sentence stands: control-path changes computed server-side from the push deliveries are what §12.9's `out-of-course` finding reads (B-264).)_

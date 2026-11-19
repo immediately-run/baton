@@ -2,10 +2,10 @@
 // tickets wait for review, none with room. No core rule bounds the queue — that rule retired with
 // the rewrite; the bound is `roadmap-pr`'s ranking code in docs, and core counts `max_queue`
 // (R-BTN-79). Core's half: the default order applies — expedite, then resume before start
-// (`to_end`), rank, age, id — nothing is flagged, and a worker that claims against the order is
+// (`to_end`), rank, age, id — nothing is flagged, and a runner that claims against the order is
 // accepted and records the override. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { claimItem, cutover, Git, placed, register, rows, setClock, workerCall } from '../helpers';
+import { claimItem, cutover, Git, placed, register, rows, setClock, runnerCall } from '../helpers';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 let git: Git;
@@ -26,7 +26,7 @@ beforeEach(async () => {
 describe('S-BTN-22 review queue bound', () => {
   it('core’s default order, nothing flagged; a claim against it is accepted and recorded', async () => {
     const w = await register('vm-a');
-    const res = await workerCall('/v1/runner/recommendations?limit=50', { secret: w.secret });
+    const res = await runnerCall('/v1/runner/recommendations?limit=50', { secret: w.secret });
     const recs = ((await res.json()) as { recommendations: { ticket_id: string; station: string; legs: string[]; flags: string[]; score: unknown }[] }).recommendations;
     // Resume before start: one leg to an end (M-1 at reviewed), then two (X-1 at fixed), then the
     // filed tickets by rank; the waiting reviews are not offered at all.
@@ -35,10 +35,10 @@ describe('S-BTN-22 review queue bound', () => {
       ['docs:F-1', 'filed', ['implement']], ['docs:F-2', 'filed', ['implement']], ['docs:F-3', 'filed', ['implement']]]);
     expect(recs.every((r) => r.flags.length === 0 && r.score === null)).toBe(true);
     // ?limit= applies after the merge.
-    const two = (await (await workerCall('/v1/runner/recommendations?limit=2', { secret: w.secret })).json()) as { recommendations: unknown[] };
+    const two = (await (await runnerCall('/v1/runner/recommendations?limit=2', { secret: w.secret })).json()) as { recommendations: unknown[] };
     expect(two.recommendations).toHaveLength(2);
-    expect((await workerCall('/v1/runner/recommendations?limit=0', { secret: w.secret })).status).toBe(400);
-    // A worker that starts a new ticket anyway is accepted, the order it went against recorded.
+    expect((await runnerCall('/v1/runner/recommendations?limit=0', { secret: w.secret })).status).toBe(400);
+    // A runner that starts a new ticket anyway is accepted, the order it went against recorded.
     const c = await claimItem('vm-a', w.secret, { ticket_id: 'docs:F-3' });
     expect(c.status).toBe(200);
     expect(await rows(`SELECT json_extract(detail_json, '$.overridden[0].place') AS place FROM events WHERE kind = 'advice-overridden' AND claim_id = ?`, c.json.claim_id))
@@ -53,7 +53,7 @@ describe('S-BTN-22 review queue bound', () => {
     git.add('A-0', { rank: 50 });
     await git.post();
     const w = await register('vm-a');
-    const recs = ((await (await workerCall('/v1/runner/recommendations?limit=50', { secret: w.secret })).json()) as { recommendations: { ticket_id: string }[] }).recommendations;
+    const recs = ((await (await runnerCall('/v1/runner/recommendations?limit=50', { secret: w.secret })).json()) as { recommendations: { ticket_id: string }[] }).recommendations;
     expect(recs.map((r) => r.ticket_id).slice(-3)).toEqual(['docs:A-1', 'docs:A-2', 'docs:A-0']);
   });
 });

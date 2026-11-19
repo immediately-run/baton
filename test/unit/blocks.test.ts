@@ -4,9 +4,9 @@
 // reading's `until` passing on the fake clock; `transitive=1` over a chain; and the query plans
 // G-BTN-70's cost claim rests on.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, armedAt, cutover, keyCall, placed, register, beat, claimItem, endClaim, rows, seedClaim, setAdminKeys, setClock, tick, withCore, workerCall, adminSession, sessionCall } from '../helpers';
+import { Git, armedAt, cutover, keyCall, placed, register, beat, claimItem, endClaim, rows, seedClaim, setAdminKeys, setClock, tick, withCore, runnerCall, adminSession, sessionCall } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
-import { grantedWorker, signed, SCHEMA } from '../lib/fleet';
+import { grantedRunner, signed, SCHEMA } from '../lib/fleet';
 import type { Workflow } from '../../src/core/ports';
 import { BLOCK_SQL, decisionOptionActions, STALLED_AFTER_MS } from '../../src/core/blocks';
 
@@ -188,7 +188,7 @@ describe('R-BTN-75 as amended by R3-1254, B-26: held versus blocked', () => {
     const w = await register('vm-a');
     git.tickets.get('A')!.blocked_by = [];
     await git.post();
-    const report = (body: unknown) => workerCall('/v1/runner/shadow-report', { cred: 'vm-a', secret: w.secret, body });
+    const report = (body: unknown) => runnerCall('/v1/runner/shadow-report', { cred: 'vm-a', secret: w.secret, body });
     // A shadow claim is a claim’s start: silent (R-BTN-77).
     expect((await report({ transition: 'claim', ticket_id: 'docs:A', status: 'in-progress', nonce: 'aaaaaa', at: T0 })).status).toBe(200);
     // The dependency returns while A is shadow-held: the row is written, nothing logged.
@@ -212,16 +212,16 @@ describe('R-BTN-75 as amended by R3-1254, B-26: held versus blocked', () => {
 });
 
 describe('R-BTN-75, R-BTN-76: the counts crossing zero', () => {
-  it('a capability block follows the live workers declaring it, both ways', async () => {
+  it('a capability block follows the live runners declaring it, both ways', async () => {
     git.add('C', { requires: ['mcp-chrome'] });
     await git.post();
     expect(await blockRows('C')).toEqual([{ kind: 'capability', ref: 'mcp-chrome', leg: '', since: T0 }]);
     const w = await register('vm-a', { capabilities: ['mcp-chrome'] });
     expect(await blockRows('C')).toEqual([]);
-    expect(await rows('SELECT workers FROM fleet_capabilities WHERE repository_id = ? AND capability = ?', 'docs', 'mcp-chrome')).toEqual([{ workers: 1 }]);
-    // A second worker moves the count, not the rows.
+    expect(await rows('SELECT runners FROM fleet_capabilities WHERE repository_id = ? AND capability = ?', 'docs', 'mcp-chrome')).toEqual([{ runners: 1 }]);
+    // A second runner moves the count, not the rows.
     await register('vm-b', { capabilities: ['mcp-chrome'] });
-    expect(await rows('SELECT workers FROM fleet_capabilities WHERE capability = ?', 'mcp-chrome')).toEqual([{ workers: 2 }]);
+    expect(await rows('SELECT runners FROM fleet_capabilities WHERE capability = ?', 'mcp-chrome')).toEqual([{ runners: 2 }]);
     // Both stop declaring it: the count crosses zero and the row returns.
     await beat('vm-a', w.secret, { capabilities: ['agent-venue'] });
     expect(await blockRows('C')).toEqual([]);
@@ -239,12 +239,12 @@ describe('R-BTN-75, R-BTN-76: the counts crossing zero', () => {
     expect(await rows('SELECT resource FROM leg_needs WHERE ticket_id = ?', 'docs:D')).toEqual([{ resource: R }]);
     const g = await keyCall(owner, '/v1/owner/docs/grants', { public_key: (await makeKey('ssh-ed25519', 'k')).publicKey, hostname: 'k-host', capabilities: ['agent-venue'] });
     expect(g.status).toBe(200);
-    // No live worker granted on the repository: no row, though the instance is usable — the
+    // No live runner granted on the repository: no row, though the instance is usable — the
     // repository's instances are its own, not a runner's (R-BTN-76, B-168).
     expect(await rows('SELECT * FROM resource_fleet')).toEqual([{ repository_id: 'docs', resource: R, usable_instances: 1, open_instances: 1, live_runner: 0 }]);
     const w = await register('vm-a');
     expect(await rows('SELECT usable_instances, open_instances, live_runner FROM resource_fleet')).toEqual([{ usable_instances: 1, open_instances: 1, live_runner: 1 }]);
-    const r = await (await import('../helpers')).workerCall('/v1/runner/readings', { cred: 'vm-a', secret: w.secret, body: { readings: [{ instance: GO, available: false, until: T0 + 5 * MIN }] } });
+    const r = await (await import('../helpers')).runnerCall('/v1/runner/readings', { cred: 'vm-a', secret: w.secret, body: { readings: [{ instance: GO, available: false, until: T0 + 5 * MIN }] } });
     expect(r.status).toBe(200);
     expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 }]);
     expect((await rows<{ until: number }>('SELECT until FROM ticket_blocks WHERE ticket_id = ?', 'docs:D'))[0].until).toBe(T0 + 5 * MIN);
@@ -252,7 +252,7 @@ describe('R-BTN-75, R-BTN-76: the counts crossing zero', () => {
     // unblocking — the answer is lost — is silent.
     await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: [] });
     expect(await blockRows('D')).toEqual([]);
-    // It lists docs again: a worker is live, so D is blocked again — and logged, as it was not
+    // It lists docs again: a runner is live, so D is blocked again — and logged, as it was not
     // blocked meanwhile (a lost answer ends with the next block logged).
     await beat('vm-a', w.secret);
     await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
@@ -273,11 +273,11 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
     git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R] }] });
     await git.post();
     await cutover(T0);
-    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue'], [GO]);
     await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }] });
     expect(await since('D')).toBe(T0);
     expect(await kinds('blocked')).toEqual(['docs:D']);
-    // The worker's lease lapses: no one can answer, so the row goes silently and the loss is kept.
+    // The runner's lease lapses: no one can answer, so the row goes silently and the loss is kept.
     await setClock(T0 + 16 * MIN);
     await tick();
     expect(await blockRows('D')).toEqual([]);
@@ -300,7 +300,7 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
     git.add('D', { requires: ['mcp-chrome'] }, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R] }] });
     await git.post();
     await cutover(T0);
-    const w = await grantedWorker(owner, 'docs', 'w1', ['mcp-chrome'], [GO]);
+    const w = await grantedRunner(owner, 'docs', 'w1', ['mcp-chrome'], [GO]);
     await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }] });
     expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 }]);
     const [blocked, unblocked] = [await kinds('blocked'), await kinds('unblocked')];
@@ -314,7 +314,7 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
     expect(await since('D')).toBe(T0);
     // In the morning it heartbeats with the capability declared and go_plus listing docs again:
     // the capability row goes and the resource's comes back in one recount. D was never claimable,
-    // so no `unblocked`, no second `blocked`, and the same blocked_since; no worker is messaged.
+    // so no `unblocked`, no second `blocked`, and the same blocked_since; no runner is messaged.
     await listings([{ name: GO, repositories: ['docs'] }]);
     await w.beat({ capabilities: ['agent-venue', 'mcp-chrome'] });
     expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 + 16 * MIN }]);
@@ -330,7 +330,7 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
     git.add('D', { requires: ['mcp-chrome'] }, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R] }] });
     await git.post();
     await cutover(T0);
-    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue', 'mcp-chrome'], [GO]);
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue', 'mcp-chrome'], [GO]);
     await w.beat({ capabilities: ['agent-venue'] });
     await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }] });
     expect(await blockRows('D')).toEqual([{ kind: 'capability', ref: 'mcp-chrome', leg: '', since: T0 }, { kind: 'resource', ref: R, leg: 'review', since: T0 }]);
@@ -368,8 +368,8 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
     git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R, R2] }] });
     await git.post();
     await cutover(T0);
-    const w1 = await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
-    const w2 = await grantedWorker(owner, 'docs', 'w2', ['agent-venue'], [GO2]);
+    const w1 = await grantedRunner(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    const w2 = await grantedRunner(owner, 'docs', 'w2', ['agent-venue'], [GO2]);
     await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }, { instance: GO2, available: false, valid_for: 15 * 60 }] });
     expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 }, { kind: 'resource', ref: R2, leg: 'review', since: T0 }]);
     const unblocked = await kinds('unblocked');
@@ -396,7 +396,7 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
       next: [{ leg: 'fix', state: 'ready' }, { leg: 'merge', state: 'waiting', waiting_on: 'ci', needs: [R] }] });
     await git.post();
     await cutover(T0);
-    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue', 'mcp-chrome'], [GO]);
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue', 'mcp-chrome'], [GO]);
     await w.beat({ capabilities: ['agent-venue'] });
     await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }] });
     expect((await blockRows('D')).map((r) => `${r.kind}:${r.leg}`)).toEqual(['capability:', 'resource:merge']);
@@ -432,8 +432,8 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
       next: [{ leg: 'fix', state: 'ready', needs: [R2] }, { leg: 'merge', state: 'waiting', waiting_on: 'ci', needs: [R] }] });
     await git.post();
     await cutover(T0);
-    await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
-    const w2 = await grantedWorker(owner, 'docs', 'w2', ['agent-venue'], [GO2]);
+    await grantedRunner(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    const w2 = await grantedRunner(owner, 'docs', 'w2', ['agent-venue'], [GO2]);
     await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }, { instance: GO2, available: false, valid_for: 15 * 60 }] });
     expect(await since('D')).toBe(T0);
     const unblocked = (await kinds('unblocked')).length;
@@ -457,11 +457,11 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
     git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'waiting', 'ci']]), next: [{ leg: 'review', state: 'waiting', waiting_on: 'ci', needs: [R] }] });
     await git.post();
     await cutover(T0);
-    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue'], [GO]);
     await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 6 * 3600 }] });
     expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 }]);
     const [blocked, unblocked] = [await kinds('blocked'), await kinds('unblocked')];
-    // The worker's second heartbeat declares the longest lease a heartbeat may (24 hours, R-BTN-9),
+    // The runner's second heartbeat declares the longest lease a heartbeat may (24 hours, R-BTN-9),
     // and it beats every few minutes through the day — a running session, its ceiling within its
     // lease — so its lease never runs out, which would be a lost answer instead. The tick at 72
     // hours takes the lapse and raises baton:stalled at once.
@@ -505,7 +505,7 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
     git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R] }] });
     await git.post();
     await cutover(T0);
-    await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    await grantedRunner(owner, 'docs', 'w1', ['agent-venue'], [GO]);
     await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }] });
     expect(await since('D')).toBe(T0);
     // The sync places D past review: its need goes, and with it the fleet's count for R.
@@ -526,8 +526,8 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
     git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R, R2] }] });
     await git.post();
     await cutover(T0);
-    const w1 = await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
-    const w2 = await grantedWorker(owner, 'docs', 'w2', ['agent-venue'], [GO2]);
+    const w1 = await grantedRunner(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    const w2 = await grantedRunner(owner, 'docs', 'w2', ['agent-venue'], [GO2]);
     await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }, { instance: GO2, available: false, valid_for: 24 * 3600 }] });
     expect(await kinds('blocked')).toEqual(['docs:D']);
     // Both instances stop listing docs (no runner can answer for either): both rows are lost,
@@ -537,7 +537,7 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
     await tick();
     expect(await since('D')).toBeNull();
     expect(JSON.parse((await rows<{ a: string }>('SELECT answer_lost AS a FROM tickets WHERE id = ?', 'docs:D'))[0].a).rows).toHaveLength(2);
-    // R lists docs again, still down, while a worker is live: D is blocked again silently, since
+    // R lists docs again, still down, while a runner is live: D is blocked again silently, since
     // the evening, and R2's loss still stands.
     await w1.beat();
     await listings([{ name: GO, repositories: ['docs'] }]);
@@ -550,7 +550,7 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
     await w1.beat();
     expect(await since('D')).toBeNull();
     expect(await kinds('unblocked')).toEqual(['docs:D']);
-    // R2 lists docs again, still down, while a worker is live: D is left with two lost rows, so
+    // R2 lists docs again, still down, while a runner is live: D is left with two lost rows, so
     // the answer it comes back to is lost again — re-blocked silently, since the evening.
     await setClock(T0 + 30 * MIN);
     await w1.beat();
@@ -570,8 +570,8 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
     git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R] }] });
     await git.post();
     await cutover(T0);
-    await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
-    const w2 = await grantedWorker(owner, 'docs', 'w2', ['agent-venue'], [GO2]);
+    await grantedRunner(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    const w2 = await grantedRunner(owner, 'docs', 'w2', ['agent-venue'], [GO2]);
     await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }, { instance: GO2, available: false, valid_for: 24 * 3600 }] });
     expect(await kinds('blocked')).toEqual(['docs:D']);
     // R's instance stops listing docs, W2 is live: the answer for R is lost silently.
@@ -602,11 +602,11 @@ describe('R-BTN-76, R-BTN-77: an answer lost', () => {
     expect(await rows(`SELECT json_extract(detail_json, '$.dropped') AS d FROM events WHERE kind = 'snapshot-accepted' ORDER BY seq DESC LIMIT 1`)).toEqual([{ d: JSON.stringify(['docs:U:needs:llm:not-yet:unregistered']) }]);
     expect(await rows('SELECT leg, resource FROM leg_needs WHERE ticket_id = ?', 'docs:U')).toEqual([{ leg: 'review', resource: 'llm:not-yet' }]);
     expect(await blockRows('U')).toEqual([]);
-    // Registered later, with an instance a live worker uses that is down: the kept need now blocks.
+    // Registered later, with an instance a live runner uses that is down: the kept need now blocks.
     await keyCall(admin, '/v1/admin/resources', { name: 'llm:not-yet', scope: 'account', detail_schema: SCHEMA });
     await keyCall(admin, '/v1/admin/instances', { name: 'acct:later', serves: ['llm:not-yet'], repositories: ['docs'] });
     await cutover(T0);
-    await grantedWorker(owner, 'docs', 'wu', ['agent-venue'], ['acct:later']);
+    await grantedRunner(owner, 'docs', 'wu', ['agent-venue'], ['acct:later']);
     await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'acct:later', available: false, valid_for: 3600 }] });
     expect(await blockRows('U')).toEqual([{ kind: 'resource', ref: 'llm:not-yet', leg: 'review', since: T0 }]);
   });
@@ -622,7 +622,7 @@ describe('R-BTN-77: unblocking wakes work, bounded', () => {
       };
     });
     expect((await keyCall(owner, '/v1/owner/docs/settings', { unblocked_trigger: { kind: 'github-app', workflow: '.github/workflows/baton-unblocked.yml' } }, 'PUT')).status).toBe(200);
-    const idle = await grantedWorker(owner, 'docs', 'idle', ['agent-venue']);
+    const idle = await grantedRunner(owner, 'docs', 'idle', ['agent-venue']);
     git.add('Z');
     const many = Array.from({ length: 150 }, (_, i) => `M-${String(i).padStart(3, '0')}`);
     for (const id of many) git.add(id, { blocked_by: ['Z'] });
@@ -636,7 +636,7 @@ describe('R-BTN-77: unblocking wakes work, bounded', () => {
     expect(tickets).toHaveLength(101);
     expect(tickets.at(-1)).toEqual({ truncated: 50 });
     expect(tickets[0]).toEqual({ ticket: 'docs:M-000', cleared: [{ kind: 'ticket', ref: 'docs:Z' }] });
-    // The idle worker's one message names the 20 latest (R-BTN-77), and a newer message supersedes
+    // The idle runner's one message names the 20 latest (R-BTN-77), and a newer message supersedes
     // a delivered one it never acknowledged, so nothing piles up.
     const first = (await idle.beat()).json.messages.filter((m: { kind: string }) => m.kind === 'unblocked');
     expect(first).toHaveLength(1);
@@ -709,22 +709,22 @@ describe('R-BTN-75: asking', () => {
     await git.post();
     await cutover(T0);
     const other = async () => (await withCore((c) => c.blocks.blocksOf('docs:O', null))).other;
-    // No live worker: the resource need has no instance, and no bar is reported (nobody to bar).
+    // No live runner: the resource need has no instance, and no bar is reported (nobody to bar).
     expect(await other()).toEqual([{ kind: 'waiting_on', detail: { leg: 'merge', on: 'ci' } }, { kind: 'no-instance', detail: { leg: 'fix', resource: R } }]);
 
     const w = await register('vm-a');
-    await rows(`INSERT INTO worker_tags (worker_id, tag) VALUES (?, 'night')`, w.id);
+    await rows(`INSERT INTO runner_tags (runner_id, tag) VALUES (?, 'night')`, w.id);
     const bar = (course: string, tag: string, legs: string[]) => rows(`INSERT INTO owner_bars (repository_id, course, tag, legs, applies, starts_at, reason, set_by)
       VALUES ('docs', ?, ?, ?, 'claim', 0, 'test', 'owner:test') RETURNING id`, course, tag, JSON.stringify(legs)).then((r) => (r[0] as { id: number }).id);
     const every = await bar('*', 'night', []);
     const onFix = await bar('roadmap-pr', 'night', ['fix']);
     await bar('another-course', 'night', []); // another course: not this ticket's
     await bar('roadmap-pr', 'night', ['merge']); // a leg that is not queued
-    await bar('*', 'day', []); // a tag the live worker lacks
+    await bar('*', 'day', []); // a tag the live runner lacks
     await rows(`INSERT INTO ticket_overrides (ticket_id, hold, hold_reason, retry_after, set_by, set_at) VALUES ('docs:O', 1, 'owner', ?, 'owner:test', 0)`, T0 + MIN);
     const active = await seedClaim(w.id, 'docs:O', T0);
-    await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, ended_at_sha) VALUES ('docs:O', ?, 'seed:done', 'abc124', '', ?, 'completed', ?, 'abc')`, w.id, T0, T0);
-    await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, fence_pending, ended_at) VALUES ('docs:O', ?, 'seed:reaped', 'abc125', '', ?, 'reaped', 1, ?)`, w.id, T0, T0);
+    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, ended_at_sha) VALUES ('docs:O', ?, 'seed:done', 'abc124', '', ?, 'completed', ?, 'abc')`, w.id, T0, T0);
+    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, fence_pending, ended_at) VALUES ('docs:O', ?, 'seed:reaped', 'abc125', '', ?, 'reaped', 1, ?)`, w.id, T0, T0);
     const [done, reaped] = (await rows<{ id: number }>(`SELECT id FROM claims WHERE ticket_id = 'docs:O' AND status != 'active' ORDER BY id`)).map((r) => r.id);
     expect(await other()).toEqual([
       { kind: 'claimed', detail: { claim_id: active } },

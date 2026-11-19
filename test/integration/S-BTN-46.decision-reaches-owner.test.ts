@@ -9,7 +9,7 @@
 // lapsed lease claimed again, the CLI printing E's title, question and link as text and marking
 // its notice sent, `--all` listing R3-E-1 whatever the notices' state, the reminder after 24 h,
 // both notices closed by the answering snapshot that fires `unblocked`, the late mark answered
-// `closed`, a third courier queued its notice at once, and the CLI's key refused as a worker key.
+// `closed`, a third courier queued its notice at once, and the CLI's key refused as a runner key.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, keyCall, placed, rows, setAdminKeys, setClock, tick } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
@@ -102,7 +102,7 @@ describe('S-BTN-46 a decision reaches its owner', () => {
     expect(late.json.code).toBe('closed');
   });
 
-  it('a third courier added while another decision is open is queued its notice at once; the CLI’s key is no worker key', async () => {
+  it('a third courier added while another decision is open is queued its notice at once; the CLI’s key is no runner key', async () => {
     git.add('F', {}, placed('filed', [], [['implement', 'ready']], { decisions: [{ id: 'F-1', asks: 'owner' }] }));
     expect((await git.post()).status).toBe(200);
     const third = await makeKey('ssh-ed25519', 'chat-relay');

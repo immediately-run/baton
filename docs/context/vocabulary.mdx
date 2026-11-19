@@ -14,11 +14,20 @@ courses; its sync tells Baton where every ticket is.
 
 **Home, code repository.** Every ticket lives in one repository, its **home**, which holds its
 board, its courses and its owners. The repositories a ticket's work changes are its **code
-repositories**: the home's owners list them in `code_repos`, and they hold no tickets of their
-own. What a home covers is its owners' choice; Baton has no word for it.
+repositories**: the home's owners list them in `code_repos`
+(a home that lists none reaches them by name where its policy's `repos.unlisted` allows,
+R-BTN-140), and they hold no tickets of their own. What a home covers is its owners' choice; Baton has no word for it.
 
-**Ticket.** A unit of work, filed in git. Baton knows its id, course, tier and requirements,
-never its body.
+**Ticket.** A unit of work, filed in its repository's ticket source. Baton knows its id, course,
+tier and requirements, never its body.
+
+**Ticket source, reader, writer.** The repository's code that reads its tickets from their store
+and posts them in each sync — the **reader** — and may write to that store: a new ticket, a
+withdrawal, the status a station shows people, a note — the **writer**. The default is the
+markdown source, the store a git folder (R-BTN-74).
+
+**Launcher.** A process outside Baton that starts runner sessions for the work Baton lists as
+waiting, handing each a ticket it may prefer; Baton reserves nothing for it (R-BTN-201).
 
 **Course.** The state machine a ticket follows: **stations** it rests at and **legs** it runs
 between them. Defined in `course.json`; changed by a commit.
@@ -32,12 +41,12 @@ station** finishes the ticket.
 **Path.** The legs a ticket has run and the stations they reached, as Baton recorded them: its
 **course history**, which git never writes.
 
-**Worker.** An agent session on a machine, identified by its key. It declares capabilities,
+**Runner.** An agent session on a machine, identified by its key. It declares capabilities,
 a tier ceiling, tags and the courses it can run.
 
-**Capability.** A name a worker declares (`key:anthropic`, `capability:code-generation-llm`) and
+**Capability.** A name a runner declares (`key:anthropic`, `capability:code-generation-llm`) and
 a leg requires; Baton matches the two by name and derives nothing. What the keys and tools a
-worker holds amount to is the worker's own statement, and which model and key a leg uses is the
+runner holds amount to is the runner's own statement, and which model and key a leg uses is the
 course's choice, in its ranking code and instructions (R-BTN-174, §6.10).
 
 **Executor, provides.** The module a CLI runner starts every leg and runs every call into
@@ -54,21 +63,21 @@ its leg starts, for each such capability rule 4 matched for that leg (the ticket
 the leg's), and a claim past capacity is refused (R-BTN-178). Not the tenant's capacity envelope
 (R-BTN-87), which no claim is refused by.
 
-**Claim.** A worker's lease on one ticket. It runs one or more legs and ends **done**,
+**Claim.** A runner's lease on one ticket. It runs one or more legs and ends **done**,
 **suspended** at a station, or **released**.
 
-**Lease, heartbeat, reap, fence.** A claim lives while its worker heartbeats. A silent worker
-is **reaped** at its lease; a **fence** stops a revived worker from writing.
+**Lease, heartbeat, reap, fence.** A claim lives while its runner heartbeats. A silent runner
+is **reaped** at its lease; a **fence** stops a revived runner from writing.
 
 **Gate.** A rule Baton enforces for safety: one holder, capabilities and their capacity, tier, grants, barred
 tags. Everything else is **advice**.
 
-**Tag, barred tag.** Short strings a course gives workers (`family:glm`). A leg can bar tags,
-so some workers may not run it.
+**Tag, barred tag.** Short strings a course gives runners (`family:glm`). A leg can bar tags,
+so some runners may not run it.
 
 **Owner bar, required bar.** Limits a repository's owners set in Baton, which no push changes:
 tags barred across courses, and bars every leg must carry. Under `cooperative` they, like every
-position and count Baton owns, are a **coordination record** for workers that cooperate — a
+position and count Baton owns, are a **coordination record** for runners that cooperate — a
 pusher can re-file a ticket or edit its course and Baton does not try to notice; under
 `protected` the forge and the trusted runners make the same state a boundary (R-BTN-66).
 
@@ -113,7 +122,7 @@ course that handles a leg's condition (R-BTN-160, R-BTN-161). A **leg event** go
 cancelled; Baton alone queues it, and the ticket is withdrawn when it ends (R-BTN-168).
 
 **Administrator, owner, grant.** Administrators run the instance; each repository's owners
-grant worker keys access to it.
+grant runner keys access to it.
 
 **Action, registry.** Everything a credential can ask Baton to do is one action in one registry,
 named `<noun>.<verb>`, with the principals that may call it; the API, the CLI, the dashboard and
@@ -171,10 +180,10 @@ or only steers advice; the repository's policy says whose count.
 owner's or administrator's action. Baton accepts or refuses it by its gates; it is not evidence. A
 command may carry an attestation: an advance moves the lease and reports where the leg reached.
 
-**Outbox, deliverer.** Every git write and check run Baton intends — a ticket's withdrawal, a
-merge check — is an outbox entry; a deliverer, a runner whose host holds the credential the effect
+**Outbox, deliverer.** Every git write, check run and ticket-store write Baton intends — a
+ticket's withdrawal, a merge check, the status a ticket store shows — is an outbox entry; a deliverer, a runner whose host holds the credential the effect
 needs and whose grant role the policy admits, delivers it, and Baton confirms it by reading it
-back. Baton itself holds no credential that writes git or posts a check; a workflow dispatch is
+back. Baton itself holds no credential that writes git, posts a check or writes a ticket store; a workflow dispatch is
 its own call, made with the App key it holds (R-BTN-94, R-BTN-171).
 
 **Reply.** Baton's answer to a command or a read: a claim response, a recommendation, a policy

@@ -1,5 +1,5 @@
 // detailSchema.ts — the JSON Schema subset an external resource's readings' `detail` must satisfy
-// (BATON_SPEC §2g R-BTN-76; R3-1251). Interpreted here, never compiled: a Worker may not `eval`,
+// (BATON_SPEC §2g R-BTN-76; R3-1251). Interpreted here, never compiled: a Runner may not `eval`,
 // so no code generation. Exactly the keywords `type`, `properties`, `required`,
 // `additionalProperties` (a boolean), `items`, `enum`, `const`, `minimum`, `maximum`, `minLength`,
 // `maxLength`, `minItems`, `maxItems` and `x-baton-base` (the root alone, naming a `std:` schema);

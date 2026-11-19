@@ -3,7 +3,7 @@
 // <file>` (one OpenSSH public key per line), `--github-webhook-secret <file>` (R-BTN-73),
 // `--signing-key <file>` (R-BTN-114's SigningKey, the tenant's Ed25519 JWK; R-BTN-171, R-BTN-189)
 // and `--config <file>`, a JSON object of the
-// Worker's other variables and secrets (OIDC_ISSUER, OIDC_JWKS_URL, BATON_REPOSITORIES — the
+// Runner's other variables and secrets (OIDC_ISSUER, OIDC_JWKS_URL, BATON_REPOSITORIES — the
 // repositories to register, as a JSON string —, ACCESS_*, OWNER_EMAILS, TOKEN_HASHES,
 // CREDENTIALS, BATON_KEYS, BATON_GITHUB_WEBHOOK_SECRET, BATON_FORGE_SECRETS, BATON_SIGNING_KEY,
 // BATON_SESSION_HOSTS — the hosts whose session links the instance accepts, R-BTN-113 —,

@@ -1,4 +1,4 @@
-// runner.ts — `baton run`'s generic worker loop (BATON_SPEC §6.13 R-BTN-72): it heartbeats (it
+// runner.ts — `baton run`'s generic runner loop (BATON_SPEC §6.13 R-BTN-72): it heartbeats (it
 // hosts the sidecar of §6.3–6.4), claims, loads the claim's course file and leg scripts from the
 // home checkout at the claim's `snapshot_sha` (R-BTN-34), and runs each leg as a child process
 // that gets `BATON_PARENT` and `BATON_STATE` and an AbortSignal. It knows no course: the
@@ -49,7 +49,7 @@ type NextLegs = { leg: string; state: string; waiting_on?: string }[];
 
 export interface RunnerOptions {
   api: BatonApi;
-  /** B-229: a separate API for another session's worker, by its secret — how a runner that
+  /** B-229: a separate API for another session's runner, by its secret — how a runner that
    *  starts ends the claims its host's earlier sessions left (their state files, beside this
    *  one). Separate, so this runner's own beats never carry the other's secret. Absent: none. */
   apiFor?: (secret: string) => BatonApi;
@@ -57,7 +57,7 @@ export interface RunnerOptions {
   home: string;
   /** The Baton repository id that checkout is (the heartbeat's courses are declared for it). */
   repository: string;
-  /** The worker's hostname — the credential's registered name (§6.4). */
+  /** The runner's hostname — the credential's registered name (§6.4). */
   hostname: string;
   harness: 'opencode' | 'claude-code';
   session: string;
@@ -258,7 +258,7 @@ export interface ClaimOutcome {
  *  name in it is one the server answered: a grant is stored as the roles the owner named and the
  *  capabilities they stay as (admin.ts:423), and the heartbeat admits each name by the same
  *  logic that answered it — a role by its own name in a bearer or seed key's allow-list, a
- *  capability when its expansion is all granted (`credentialAllowed`, workerApi.ts). So a role
+ *  capability when its expansion is all granted (`credentialAllowed`, runnerApi.ts). So a role
  *  the answer carries is declared as the role: rule 4 and the grant check both expand it
  *  gates-side (`capabilitiesOf`), which is why folding it into (or dropping it for) its
  *  capabilities could only lose names the server would have accepted (review round 4, finding 1).
@@ -397,7 +397,7 @@ export class Runner {
   /** One beat at a time — the sidecar's answers stay ordered against the loop. The in-flight
    *  beat's promise while one is out, so a caller that needs a beat waits for it (`tick`). */
   private ticking: Promise<void> | null = null;
-  /** R-BTN-14: a reaped worker re-keys on its next beat; the fresh secret until it lands. */
+  /** R-BTN-14: a reaped runner re-keys on its next beat; the fresh secret until it lands. */
   private rekeySecret: string | null = null;
   /** The ends Baton never answered (the network went with the lease), by claim: retried on
    *  every beat. */
@@ -601,7 +601,7 @@ export class Runner {
    * another beat, so an answer always post-dates the claim state it is judged against. A caller
    * that arrives while a beat is out waits for it and returns — review round 5, finding 2:
    * `work()` starts the sidecar and then claims at once, and the boot beat must have landed
-   * (registering the worker, settling the declaration) before `runOnce` reads `sent`; returning
+   * (registering the runner, settling the declaration) before `runOnce` reads `sent`; returning
    * on the guard let the first claims go out on `null` and `[]`. */
   async tick(): Promise<void> {
     if (this.ticking) return this.ticking;
@@ -611,14 +611,14 @@ export class Runner {
     return this.ticking;
   }
 
-  /** B-93: the beat a `start()` issued, and that registers the worker (review round 2, finding
+  /** B-93: the beat a `start()` issued, and that registers the runner (review round 2, finding
    * 3). A session's first attempt finds a beat already out — the sidecar's boot beat — and read
-   * its worker id before the answer, so `!registered` sent a second, redundant heartbeat and
+   * its runner id before the answer, so `!registered` sent a second, redundant heartbeat and
    * `stray` never applied. This is the promise `waitForBeat` waits on. */
   private booting: Promise<void> | null = null;
 
   /** B-93: whatever beat was in flight has answered — so the calls after it are a registered
-   * worker's, carrying the secret Baton now holds. A beat still out after a minute has lost its
+   * runner's, carrying the secret Baton now holds. A beat still out after a minute has lost its
    * claim to the timer and the next attempt; the wait is bounded so an attempt can never hang. */
   private async waitForBeat(): Promise<void> {
     // A beat's own `finally` may clear the flag before this loop first reads it, so the boot beat is
@@ -725,7 +725,7 @@ export class Runner {
       // §7.5 R-BTN-90 (B-234, B-188): the runs whose scripts returned — the finishing half's word.
       ...(finished.length ? { legs_finished: finished.map((f) => ({ claim_id: f.claim_id, seq: f.seq })) } : {}),
       ...(one && finished.length ? { leg_finished: finished[0].seq } : {}),
-      ...((s.worker_id == null || this.rekeySecret) ? { secret_hash: await sha256Hex(this.rekeySecret ?? s.secret), ...(this.rekeySecret ? { rekey: true } : {}) } : {}),
+      ...((s.runner_id == null || this.rekeySecret) ? { secret_hash: await sha256Hex(this.rekeySecret ?? s.secret), ...(this.rekeySecret ? { rekey: true } : {}) } : {}),
       // R-BTN-19 (B-188): one entry per fenced claim.
       ...(fences.length ? { fenced: one && fences.length === 1 ? { claim_id: fences[0], terminated: true } : fences.map((id) => ({ claim_id: id, terminated: true })) } : {}),
       transcripts: spool.transcripts,
@@ -751,10 +751,10 @@ export class Runner {
       appendFileSync(this.state.spool, `${[...spool.transcripts, ...leftover].map((t) => JSON.stringify(t)).join('\n')}\n`);
       void carry;
       rmSync(spool.taken, { force: true }); // back in the spool; the taken copy is spent
-      if (e instanceof BatonRefusal && ['session-taken', 'worker-reaped', 'forbidden'].includes(e.code)) {
+      if (e instanceof BatonRefusal && ['session-taken', 'runner-reaped', 'worker-reaped', 'forbidden'].includes(e.code)) {
         // §6.3: a refused heartbeat marks the lease lost exactly as a missed timeout does; a
-        // reaped worker re-keys on the beat after (R-BTN-14).
-        if (e.code === 'worker-reaped') this.rekeySecret = freshSecret();
+        // reaped runner re-keys on the beat after (R-BTN-14).
+        if (e.code === 'runner-reaped' || e.code === 'worker-reaped') this.rekeySecret = freshSecret();
         // B-86 (review round 4, finding 3): `forbidden` is a name the server no longer admits —
         // the owner narrowed the grant under this runner (`admin.ts` replaces the list). A
         // refused beat carries no grant, so settling here would replay the stale declaration on
@@ -836,7 +836,7 @@ export class Runner {
       this.lostLease = false;
     }
     this.state.set({
-      worker_id: answer.worker_id, incarnation: answer.incarnation, last_ok: this.now(),
+      runner_id: answer.runner_id, incarnation: answer.incarnation, last_ok: this.now(),
       lease_timeout_s: answer.lease_timeout_s ?? s.lease_timeout_s,
     });
     // R-BTN-19: the fences this beat carried cleared with it.
@@ -942,11 +942,11 @@ export class Runner {
 
   /** B-229 (R-BTN-26): every other state file beside this session's that still names a claim
    *  whose lease is lost by the file's own clock — a session that can no longer act on it, the
-   *  same reading its own fence makes — has that claim ended with its own worker's secret, as
+   *  same reading its own fence makes — has that claim ended with its own runner's secret, as
    *  `released:lease-lost`, and the file's claim cleared. A sibling session whose lease still
    *  holds is a live runner on this host, and is left alone; a file never answered (no
    *  `last_ok`) holds no lease to read, and is left too. A refusal clears the file (the claim is
-   *  ended or not that worker's any more); a failure to reach Baton leaves it for the next start. */
+   *  ended or not that runner's any more); a failure to reach Baton leaves it for the next start. */
   private async endEarlierSessions(): Promise<void> {
     if (!this.o.apiFor) return;
     const dir = dirname(this.o.stateFile);
@@ -1042,8 +1042,8 @@ export class Runner {
   private loseLease(because: string): void {
     this.lostLease = true;
     this.state.set({ lease_lost: true, lease_lost_because: because });
-    // R-BTN-19: the claims were taken away from this worker; the next heartbeat reports the
-    // fences it cleared, so each ticket is re-issued instead of waiting for the worker to go
+    // R-BTN-19: the claims were taken away from this runner; the next heartbeat reports the
+    // fences it cleared, so each ticket is re-issued instead of waiting for the runner to go
     // silent. B-188: the runner's lease is every claim's — each leg stops at once.
     const live = this.liveSlots().filter((x) => x.claimId != null || x.inflight);
     const ids = live.map((x) => x.inflight?.claimId ?? x.claimId).filter((id): id is number => id != null);
@@ -1123,7 +1123,7 @@ export class Runner {
 
   /** The environment every session starts from: the runner's, with the parent markers (R-BTN-144). */
   private baseEnv(): Record<string, string> {
-    const env: Record<string, string | undefined> = { ...process.env, BATON_PARENT: String(this.state.get().worker_id ?? ''), BATON_STATE: this.o.stateFile };
+    const env: Record<string, string | undefined> = { ...process.env, BATON_PARENT: String(this.state.get().runner_id ?? ''), BATON_STATE: this.o.stateFile };
     return Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => typeof e[1] === 'string'));
   }
 
@@ -1394,27 +1394,27 @@ export class Runner {
    *  null when nothing was claimable — or when the runner holds its bound (B-188). */
   private async claimNext(): Promise<{ claim: Record<string, any>; slot: Slot } | null> {
     this.roomMade = false;
-    // The worker must exist before it can claim (§5): one heartbeat registers it. Whether this
+    // The runner must exist before it can claim (§5): one heartbeat registers it. Whether this
     // attempt is the registration (B-93) is read before this attempt's own beat: an attempt that
-    // finds no worker is the one whose heartbeat creates it, so nothing it asks before that beat
+    // finds no runner is the one whose heartbeat creates it, so nothing it asks before that beat
     // is authenticated.
-    const registered = this.state.get().worker_id != null;
+    const registered = this.state.get().runner_id != null;
     // B-93 (review round 1): the beat must be *finished* here, not merely started. During it
-    // Baton already holds the new worker's secret — `beatOnce` sends `secret_hash` for one the
-    // state does not name yet — but the state names neither the worker nor the re-key until the
+    // Baton already holds the new runner's secret — `beatOnce` sends `secret_hash` for one the
+    // state does not name yet — but the state names neither the runner nor the re-key until the
     // answer, so a recommendation that overlapped a slow beat was refused `unauthenticated` and
     // logged: the first-beat noise again. `tick()` refuses to run beside a beat (it returns at
     // once while the timer's is out), so a beat in flight is waited for, never skipped.
     await this.waitForBeat();
-    // The wait may have been the boot beat that registered this worker (review round 2, finding
-    // 3): its answer names the worker in the state, so the id is read again here — never before
+    // The wait may have been the boot beat that registered this runner (review round 2, finding
+    // 3): its answer names the runner in the state, so the id is read again here — never before
     // the wait, or every `start()` → `work()` start beat a second time for nothing — and by
-    // `stray` too, so a registration attempt is the one that began with no worker at all.
-    const worker = this.state.get().worker_id;
-    // A beat of the attempt's own, when no worker is named yet; the recommendation after it is the
+    // `stray` too, so a registration attempt is the one that began with no runner at all.
+    const runner = this.state.get().runner_id;
+    // A beat of the attempt's own, when no runner is named yet; the recommendation after it is the
     // first ask of one Baton may hold no secret for, so it is a registration attempt too.
     let beating = false;
-    if (worker == null) { await this.tick(); beating = true; }
+    if (runner == null) { await this.tick(); beating = true; }
     // R-BTN-72 (B-188): the claims the state file named when this process started — reattached
     // within the lease when the executor can, else ended — before any claim of this process.
     await this.settlePersisted();
@@ -1432,7 +1432,7 @@ export class Runner {
     // `[]` and rule 4 refuses each leg. A grant-less answer leaves the declaration unsettled, so
     // each attempt asks again until a grant arrives (finding 6).
     // Review round 4 (finding 4): one beat may not be enough — a restart from a pre-B-86 state
-    // file (`worker_id` set, no `declared`) beats at that moment declaring `[]` and settles the
+    // file (`runner_id` set, no `declared`) beats at that moment declaring `[]` and settles the
     // grant, which leaves `sent` ≠ the list this claim carries. So beat again while they differ,
     // at most MAX_STALE_BEATS times a claim attempt; a grant-less answer (`grantAsked`) ends the
     // loop after its one beat, as it always did — the declaration is unsettled and the claim goes
@@ -1442,9 +1442,9 @@ export class Runner {
       const stale = this.grantAsked || this.sent == null || JSON.stringify(this.sent) !== JSON.stringify(claimOn);
       if (!stale) break;
       await this.tick();
-      // B-93: this may have been the first beat Baton has an answer of a just-registered worker
+      // B-93: this may have been the first beat Baton has an answer of a just-registered runner
       // for (the boot beat carried no grant, so `grantAsked` sent this one). Only an attempt that
-      // BEGAN unregistered is a registration's (round 3, 3-r0-2): a settled worker's own forced
+      // BEGAN unregistered is a registration's (round 3, 3-r0-2): a settled runner's own forced
       // beat is not one, and its refusal is news like any other.
       beating = !registered;
       if (this.grantAsked) break;
@@ -1464,16 +1464,16 @@ export class Runner {
       wanted = (recs.recommendations ?? [])[0]?.ticket_id;
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
-      // A worker the gates refuse entirely still claims below: Baton's refusal is the answer.
+      // A runner the gates refuse entirely still claims below: Baton's refusal is the answer.
       // B-93: the registration beat's own refusal — the recommendation right after the beat that
-      // registered this session, refused `no worker holds this secret` before a worker exists —
+      // registered this session, refused `no runner holds this secret` before a runner exists —
       // is not news, and is not logged (2026-10-21's runs: every start printed it). Only that
-      // refusal goes quiet: `authWorker` answers `unauthenticated` for a missing
-      // `X-Worker-Secret` and a replayed nonce too, and a registered worker's refusal (a
-      // replaced secret) still names itself. The registration is either a state with no worker
+      // refusal goes quiet: `authRunner` answers `unauthenticated` for a missing
+      // `X-Runner-Secret` and a replayed nonce too, and a registered runner's refusal (a
+      // replaced secret) still names itself. The registration is either a state with no runner
       // before this attempt or a beat of this attempt's own, whose answer Baton may have no
-      // secret for — never a resumed worker's ordinary attempt.
-      const stray = (beating || !registered) && e.code === 'unauthenticated' && /no worker holds this secret/.test(e.message);
+      // secret for — never a resumed runner's ordinary attempt.
+      const stray = (beating || !registered) && e.code === 'unauthenticated' && /no runner holds this secret/.test(e.message);
       if (!stray) this.log(`baton: no recommendation (${e.message})`);
     }
     let claim: Record<string, any>;
@@ -1486,12 +1486,12 @@ export class Runner {
       // singleton is not held by an idle runner (B-188: nor taken from a claim's running leg).
       if (this.locks && e instanceof BatonRefusal) this.locks.releaseAll((c) => this.lockHeldByLive(c, null));
       if (e instanceof BatonRefusal && e.code === 'no-eligible-ticket') return null;
-      if (e instanceof BatonRefusal && e.code === 'not-eligible' && /already held|worker-holds/.test(e.message)) {
-        // The worker still holds a claim Baton knows and this runner does not (its state was
+      if (e instanceof BatonRefusal && e.code === 'not-eligible' && /already held|runner-holds/.test(e.message)) {
+        // The runner still holds a claim Baton knows and this runner does not (its state was
         // lost with the container): the heartbeat's claim view named it, so end it loudly
         // rather than idling on the refusal forever.
         const held = this.slots.size === 0 ? this.state.get().claim : null;
-        this.log(`baton: the claim was refused — this worker still holds ${held ? `claim ${held.id}` : 'a claim'} (${e.message})`);
+        this.log(`baton: the claim was refused — this runner still holds ${held ? `claim ${held.id}` : 'a claim'} (${e.message})`);
         if (held) {
           this.state.set({ claim: null });
           await this.endQuietly(held.id, { end_reason: 'released:lease-lost', next: null });
@@ -2145,7 +2145,7 @@ export class Runner {
           ...(typeof claim.default_branch === 'string' && claim.default_branch !== '' ? { default_branch: claim.default_branch } : {}),
           handoff: handoffUrl, resume, advice,
           checkout: this.checkout, session,
-          state: this.o.stateFile, worker: this.state.get().worker_id,
+          state: this.o.stateFile, runner: this.state.get().runner_id,
         };
         const outcome = resuming ? await this.reattachedLeg(course, legName, resuming.handle) : await this.runLeg(course, legName, ctx, scratch);
         resuming = undefined;
@@ -2389,7 +2389,7 @@ export class Runner {
     // (§6.13) without touching the runner. The env names the parent every leg session checks
     // (BATON_PARENT — such a session never claims; BATON_STATE — the fence and the spool). B-97
     // dropped the transition's IR_BATON_* spellings: these two names are the only ones set.
-    const parent = String(this.state.get().worker_id ?? '');
+    const parent = String(this.state.get().runner_id ?? '');
     const childEnv: Record<string, string | undefined> = {
       ...process.env, BATON_PARENT: parent, BATON_STATE: this.o.stateFile,
       // R-BTN-144 (B-185): the run's id, and its session — `<run_id>.r0`, the first session;

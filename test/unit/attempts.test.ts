@@ -5,7 +5,7 @@
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord } from '../../src/core/attempts';
 import {
-  beat, claimItem, claimRow, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, workerCall,
+  beat, claimItem, claimRow, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall,
   refresh,
 } from '../helpers';
 
@@ -19,7 +19,7 @@ const override = async (item: string) => (await rows<{ hold: number; hold_reason
 const failed = async (item: string) => (await rows<{ n: number }>('SELECT count(*) AS n FROM claims WHERE ticket_id = ? AND failed_attempt = 1', item))[0].n;
 
 describe('the policy, pure', () => {
-  it('counts only a reap for silence, cannot-finish, and lease-lost once per worker', () => {
+  it('counts only a reap for silence, cannot-finish, and lease-lost once per runner', () => {
     for (const r of ['reaped:silent', 'released:cannot-finish:transient', 'released:cannot-finish:capability', 'released:cannot-finish:spec', 'released:lease-lost']) {
       expect([r, countsAsFailed(r)]).toEqual([r, true]);
     }
@@ -75,7 +75,7 @@ describe('G-BTN-31 through the server', () => {
     await beat('vm-a', a.secret, { lease_timeout_s: 43_200, fenced: { claim_id: one.json.claim_id, terminated: true } });
     await refresh(); // §6.7: claimable again only after a reading since the end
     const two = await claimItem('vm-a', a.secret, { ticket_id: 'docs:R3-9001' });
-    await owner('/v1/ui/messages', { to_worker_id: a.id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } });
+    await owner('/v1/ui/messages', { to_runner_id: a.id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } });
     await beat('vm-a', a.secret, { lease_timeout_s: 43_200 });
     await setClock(T0 + 2 * H);
     await tick();
@@ -90,7 +90,7 @@ describe('G-BTN-31 through the server', () => {
     expect(await rows(`SELECT count(*) AS n FROM claims WHERE resume_json IS NOT NULL`)).toEqual([{ n: 3 }]);
   });
 
-  it('lease-lost counts once per worker; a second worker’s counts', async () => {
+  it('lease-lost counts once per runner; a second runner’s counts', async () => {
     const a = await register('vm-a');
     const b = await register('vm-b');
     let t = T0;
@@ -177,7 +177,7 @@ describe('G-BTN-31 through the server', () => {
     expect(await rows(`SELECT kind FROM events WHERE ticket_id = 'docs:R3-9002' AND kind NOT IN ('blocked', 'unblocked') ORDER BY seq`)).toEqual([{ kind: 'override' }, { kind: 'override' }, { kind: 'held' }]);
     expect(await rows(`SELECT expedite, hold, hold_reason FROM ticket_overrides WHERE ticket_id = 'docs:R3-9002'`)).toEqual([{ expedite: 1, hold: 1, hold_reason: 'owner' }]);
     const { secret } = await register('vm-a');
-    expect((await workerCall('/v1/runner/next', { secret })).status).toBe(200);
+    expect((await runnerCall('/v1/runner/next', { secret })).status).toBe(200);
   });
 
   it('no override grants runs: the answer carries the grant (B-110 round 1, finding 6)', async () => {

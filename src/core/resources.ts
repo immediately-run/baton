@@ -20,7 +20,7 @@ import type { Deprecated } from './deprecated';
 import type { Store } from './ports';
 
 /** R-BTN-76: at most one reading per runner, instance and kind a minute. */
-export const WORKER_READING_EVERY_MS = 60_000;
+export const RUNNER_READING_EVERY_MS = 60_000;
 
 export interface Ctx {
   store: Store;
@@ -32,7 +32,7 @@ export interface Ctx {
 
 /** Who posts a reading: a runner session, a probe key, or an administrator — one more instrument. */
 export type Instrument =
-  | { kind: 'worker'; workerId: number; credential: string }
+  | { kind: 'runner'; runnerId: number; credential: string }
   | { kind: 'probe'; fingerprint: string }
   | { kind: 'admin'; fingerprint: string };
 
@@ -197,7 +197,7 @@ export class Resources {
    *  registered instance; a runner on any account instance that lists a repository its key works
    *  on (`repos` null: a key with no grants, which reaches all). */
   private mayReport(who: Instrument, instance: string, served: { scope: string }[], repos: string[] | null): 'ok' | 'forbidden' {
-    if (who.kind !== 'worker') return 'ok';
+    if (who.kind !== 'runner') return 'ok';
     if (!served.every((s) => s.scope === 'account')) return 'forbidden';
     const listed = JSON.parse(this.rows<{ repositories: string }>('SELECT repositories FROM resource_instances WHERE name = ?', instance)[0]?.repositories ?? '[]') as string[];
     return repos === null || listed.some((r) => repos.includes(r)) ? 'ok' : 'forbidden';
@@ -212,7 +212,7 @@ export class Resources {
    * writer class `admin` — no precedence. A reading's `nonce` and `signature` are its retired
    * signature (R-BTN-181), read and ignored while the history's Migrations entry lasts.
    */
-  // @model reading sha256:7c747d85a0b4
+  // @model reading sha256:e0d1aece2ff1
   post(who: Instrument, body: unknown, repos: string[] | null) {
     const readings = checkReadings(body, VALID_FOR.state_s);
     return this.c.store.transaction(() => {
@@ -220,7 +220,7 @@ export class Resources {
       const refused: { instance: string; code: string; message?: string }[] = [];
       const touched = new Set<string>();
       // An administrator's instrument is its key; a probe's, its key; a runner's, its session.
-      const source = who.kind === 'admin' ? `admin:${who.fingerprint}` : who.kind === 'probe' ? `probe:${who.fingerprint}` : `worker:${who.workerId}`;
+      const source = who.kind === 'admin' ? `admin:${who.fingerprint}` : who.kind === 'probe' ? `probe:${who.fingerprint}` : `runner:${who.runnerId}`;
       const writer = who.kind === 'admin' ? 'admin' : who.kind === 'probe' ? 'instrument' : 'runner';
       for (const field of new Set(readings.flatMap((r) => r.retired))) this.c.deprecated?.note(now, source, `reading.${field}`, 'readings');
       for (const r of readings) {
@@ -240,8 +240,8 @@ export class Resources {
             continue;
           }
         }
-        if (who.kind === 'worker' && this.rows(`SELECT 1 FROM instance_readings WHERE instance = ? AND source = ? AND kind = ? AND observed_at > ?`,
-          r.instance, source, r.kind, now - WORKER_READING_EVERY_MS).length) {
+        if (who.kind === 'runner' && this.rows(`SELECT 1 FROM instance_readings WHERE instance = ? AND source = ? AND kind = ? AND observed_at > ?`,
+          r.instance, source, r.kind, now - RUNNER_READING_EVERY_MS).length) {
           refused.push({ instance: r.instance, code: 'rate-limited' });
           continue;
         }
@@ -271,7 +271,7 @@ export class Resources {
 
   /** `POST /v1/admin/readings {instance, clear: {source?}}` (R-BTN-76, R-BTN-151): every reading
    *  in force on the instance from one instrument (the `source` a reading carries: `admin:<fp>`,
-   *  `probe:<fp>`, `worker:<id>`), or from all when none is named; logged, and the state follows. */
+   *  `probe:<fp>`, `runner:<id>`), or from all when none is named; logged, and the state follows. */
   clear(actor: string, body: unknown) {
     if (!isObj(body) || typeof body.instance !== 'string' || !isObj(body.clear)) throw new BatonError('invalid-params', 'body: must be {instance, clear}');
     const instance = body.instance as string;
@@ -320,7 +320,7 @@ export class Resources {
 
   /** The alarm's share: lapsed readings are dropped (every reading in force is kept, R-BTN-101),
    *  and the states they held change. Returns when the next one lapses. */
-  // @model readingLapses sha256:5a1fa56a409d
+  // @model readingLapses sha256:aec1a39a8e0e
   alarm(): number | null {
     const now = this.c.now();
     const lapsed = this.rows<{ instance: string }>('SELECT DISTINCT instance FROM instance_readings WHERE lapses_at <= ?', now).map((r) => r.instance);

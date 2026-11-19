@@ -35,7 +35,7 @@ FLDH-16 (the fence's registries); `docs/security-model.mdx` (OWASP mapping, hole
 
 1. **Scripts off by default in legs.** The standard courses' instructions and the Sand Pit image's
    npm configuration set `ignore-scripts=true`; a repository that needs a package's install script
-   lists it in `.baton/` (`allow_install_scripts: [<package>]`, a control input under B-127).
+   lists it in `.baton/` (`allow_install_scripts: [<package>]`, ~~a control input under B-127~~ a control path, R-BTN-184).
 2. **A new dependency is a flagged change.** The review leg's instructions require naming every
    added or upgraded dependency, its publisher and its age; B-126 raises a notice on a lockfile
    change by a non-owner pusher.
@@ -54,3 +54,7 @@ FLDH-16 (the fence's registries); `docs/security-model.mdx` (OWASP mapping, hole
 ### Exit criteria
 
 - [ ] the standard courses and the Sand Pit image install with scripts off; the test passes
+
+## Status
+
+_(2026-11-19: rules re-read: R-BTN-66, R-BTN-133. Signed control is retired — BATON_SPEC verifies no commit signature (`spec/BATON_SPEC_HISTORY.md`, that date). Item 1's "a control input under B-127" is struck: `.baton/` is a control path, landed as the policy's `paths.control` says (R-BTN-184).)_

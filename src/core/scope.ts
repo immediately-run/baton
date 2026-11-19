@@ -6,7 +6,7 @@
 //     one can hide it, since the audit runs as the runner's OS user inside the trust domain it
 //     audits (docs/security-model.mdx, review finding 16) — and reports the actions outside the
 //     scope with the claim (`scope-exceeded`).
-//   * Baton's half is the control: the forge's push deliveries for the worker identities the
+//   * Baton's half is the control: the forge's push deliveries for the runner identities the
 //     owners named are cross-checked against the claims open at the time (rule 3's reading of
 //     a claim still holding, as `openScopes` reads it). A push by one of them to a repository
 //     no open claim's scope covers is `unclaimed-write`.
@@ -142,8 +142,8 @@ export class Scope {
   }
 
   /** B-134's control: a push delivery for a repository whose owners named the pusher among their
-   *  `worker_pushers` is cross-checked against the claims open at the time (rule 3's reading of a
-   *  claim still holding, as `openScopes` reads it) — a push by the worker to a repository no
+   *  `runner_pushers` is cross-checked against the claims open at the time (rule 3's reading of a
+   *  claim still holding, as `openScopes` reads it) — a push by the runner to a repository no
    *  open claim's scope covers is `unclaimed-write`. In the caller's transaction; a push an open
    *  claim covers records nothing, and so does one by a login the owners did not name (a human's
    *  push is not the fleet's). */
@@ -152,13 +152,13 @@ export class Scope {
     const full = d.repository.toLowerCase();
     // The App serves github.com repositories alone (R-BTN-92): the same live repositories the
     // delivery's want is mapped to, matched the same way.
-    const repo = this.rows<{ id: string; worker_pushers: string | null }>(
-      `SELECT id, worker_pushers FROM repositories
+    const repo = this.rows<{ id: string; runner_pushers: string | null }>(
+      `SELECT id, runner_pushers FROM repositories
        WHERE retired_at IS NULL AND forge = 'github' AND lower(web_base) = 'https://github.com/' || lower(github) AND lower(github) = ?`, full)[0];
-    if (!repo?.worker_pushers) return;
+    if (!repo?.runner_pushers) return;
     let pushers: string[] = [];
     try {
-      pushers = JSON.parse(repo.worker_pushers) as string[];
+      pushers = JSON.parse(repo.runner_pushers) as string[];
     } catch {
       return; // stored by a checked setting: never malformed
     }
