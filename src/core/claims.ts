@@ -5,7 +5,7 @@
 // SQLite refuse a second holder, never check-then-insert without them (R-BTN-4).
 import { BatonError } from './http';
 import { SESSION_HOSTS, sessionLinkWhy, transcriptUrl } from './links';
-import { isUniqueViolation, logEvent, mintRunId, randomHex, type Random } from './db';
+import { groupBy, isUniqueViolation, logEvent, mintRunId, randomHex, type Random } from './db';
 import type { Deprecated } from './deprecated';
 import { fitsTier, capabilitiesOf, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
@@ -224,18 +224,6 @@ export function branchMatches(pattern: string, branch: string, local: string, re
 
 /** B-110: the most rows of each kind `syncRecord` hands the sync. */
 const SYNC_RECORD_MAX = 2000;
-
-/** B-240: rows read for many parents at once, grouped by their parent's `key` and each without
- *  it, in the order the query gave them. */
-function groupBy<T extends Row>(rows: T[], key = 'claim_id'): Map<SqlValue, Row[]> {
-  const out = new Map<SqlValue, Row[]>();
-  for (const { [key]: k, ...rest } of rows) {
-    const list = out.get(k);
-    if (list) list.push(rest);
-    else out.set(k, [rest]);
-  }
-  return out;
-}
 
 export class Claims {
   constructor(private readonly c: Ctx) {}
@@ -2606,8 +2594,11 @@ export class Claims {
    *  per claim and per activity; every list keeps the order the per-row reads served. */
   timeline(now: number) {
     const from = now - 24 * 3_600_000;
+    // The live set through `runners_live` (0052), the few rows sorted by name — never the
+    // name-ordered `runners_by_hostname` (0063), whose walk the planner would otherwise take
+    // to escape the sort and read every runner ever registered (B-250 kept that bound).
     const lanes = this.rows<{ id: number; hostname: string; session_name: string }>(
-      `SELECT id, hostname, session_name FROM runners WHERE reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? ORDER BY hostname, id`, now);
+      `SELECT id, hostname, session_name FROM runners INDEXED BY runners_live WHERE reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? ORDER BY hostname, id`, now);
     // The window's claims (`claims_by_ended`, B-240: the active ones and those ended since
     // `from`), by `claimed_at`, ties by id.
     const laneIds = JSON.stringify(lanes.map((l) => l.id));

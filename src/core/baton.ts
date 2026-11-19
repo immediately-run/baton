@@ -21,11 +21,12 @@ import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, typ
 import { Claims } from './claims';
 import { Cutover } from './cutover';
 import { Mirror } from './mirror';
-import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkRepositoryId, checkSequenceTake, COURSE_ID, GIT_BRANCH, GIT_REPO, SEQUENCE_KIND } from './validate';
+import { CAPABILITY_NAME, checkAttestation, checkConfirmations, checkDependenciesRead, checkRepositoryId, checkSequenceTake, COURSE_ID, GIT_BRANCH, GIT_REPO, SEQUENCE_KIND } from './validate';
 import { Courses } from './courses';
 import { Observations } from './observations';
 import { Sequences } from './sequences';
 import { Webhooks, type Delivery } from './webhook';
+import { checkCrossBoardCycle, checkCrossRepository, consentRoute, resolveDependencies } from './dependencies';
 import { fileUrl } from './links';
 import { Stats, STATS_WINDOW_MS } from './stats';
 import { Blocks } from './blocks';
@@ -634,7 +635,9 @@ export class BatonCore {
           const retired = retiredBoardFields(body);
           let p: BoardPayload;
           try {
-            p = checkPayload(body);
+            // The posting repository's id reads a self-qualified `depends_on` entry as the local
+            // id alone in the one-board cycle graph (§3.1, B-113 round 1).
+            p = checkPayload(body, repo.id);
           } catch (e) {
             // A refused post uses its number too (R-BTN-62), malformed or not, so the sync's
             // next run is not held off as busy for ten minutes.
@@ -646,6 +649,17 @@ export class BatonCore {
           // (the history's Migrations entry).
           if (retired.length) this.store.transaction(() => { for (const f of retired) this.deprecated.note(this.now(), `sync:${repo.id}`, f, 'board', repo.id); });
           return json(await this.board(repo, p));
+        }
+        // B-113 (§4.3): the sync's dependencies read — each qualified `depends_on` entry of
+        // another repository the posting repository's tickets name, resolved against its
+        // target's board (done, closed, its station, its link from the registration). The same
+        // refusals the post would make come here first, so a sync that could not post fails
+        // before it reads the forge; read after the number, as everything this run posts is.
+        if (req.method === 'POST' && url.pathname === '/v1/sync/dependencies') {
+          const { repo, req: signed } = await this.verifySync(req, 'sync');
+          const ids = checkDependenciesRead(await readJson(signed));
+          const sql = <T>(q: string, ...a: unknown[]): T[] => this.sql<T>(q, ...a);
+          return json({ dependencies: resolveDependencies(sql, repo.id, ids) });
         }
         if (req.method === 'GET' && url.pathname === '/v1/sync/events') {
           const { repo } = await this.verifySync(req, 'mirror');
@@ -1270,6 +1284,10 @@ export class BatonCore {
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
     if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1])));
     if (m === 'POST' && rest === 'owners') return json(await this.admin.owners(actor, repo, await body()));
+    // B-113 (R-BTN-140's precedent): the repository's owners' consent to another repository's
+    // tickets depending on theirs — the consent a dependency on a less visible repository needs
+    // (§3.1). Given here, never by the dependent's own settings; `{withdraw: true}` takes it back.
+    if (m === 'POST' && rest === 'dependency-consents') return json(consentRoute(this.store, () => this.now(), repo, actor, await body()));
     if (m === 'POST' && rest === 'bars') return json(this.admin.setBar(actor, repo, await body()));
     const lift = /^bars\/(\d+)\/lift$/.exec(rest);
     if (m === 'POST' && lift) return json(this.admin.liftBar(actor, repo, Number(lift[1])));
@@ -1640,6 +1658,12 @@ export class BatonCore {
     const at = this.now();
     const normative = p.tickets !== undefined;
     const ticketCount = normative ? p.tickets!.length : p.state!.items.length;
+    // B-113 (§4.4): the post's live tickets' cross-repository `depends_on`, as the checks below
+    // take them — the normative post's live ones (closed by the post is not live), the interim
+    // post's items, all live. Judged inside each path's transaction, before anything is written.
+    const liveDeps = normative
+      ? (() => { const live = new Set(p.tickets!.map((t) => t.id)); for (const c of p.closed ?? []) live.delete(c.id); return p.tickets!.filter((t) => live.has(t.id)).map((t) => ({ id: t.id, depends_on: t.depends_on })); })()
+      : p.state!.items.map((it) => ({ id: it.id, depends_on: it.dependsOn ?? [] }));
     // The interim post's confirmations (docs until R3-1233; R-BTN-10 derives them from stations
     // and closures for the normative post), only for its own repository's completions (R-BTN-47).
     const confirmations = normative ? [] : this.claims.ownConfirmations(r, checkConfirmations(p.confirmations));
@@ -1706,6 +1730,10 @@ export class BatonCore {
         this.applyControl(r, p, at, head);
         let wrote: { upserted: string[]; deleted: number; renumbered: { from: string; to: string; key: string }[]; closingParents: Map<string, string | null> } | null = null;
         if (refreshed) {
+          // B-113: a refresh that writes rows may change `depends_on` too (a source whose store
+          // moves with no commit, B-183), so its cross-repository edges are judged as a new
+          // head's are — resolved, consented, no cycle across boards — before anything is written.
+          this.checkQualifiedDependencies(r, liveDeps);
           // Every ticket a refresh writes must name a course in force (R-BTN-48, R-BTN-69, round
           // 1 finding 3) — the same per-ticket check the new-head path runs, without applying the
           // registry the body carries (an older one would roll a course back, above).
@@ -1739,6 +1767,11 @@ export class BatonCore {
       // meanwhile: this reading must still be the newest, over the head it was judged against.
       if (!this.observations.newest(r, n)) throw new BatonError('stale-observation', `a newer reading than ${n} was accepted while this post was judged; take a new number and retry (R-BTN-62)`);
       if (this.headOf(r) !== head) throw new BatonError('head-moved', `the head moved to ${this.headOf(r) ?? 'unset'} while this post was judged; re-read it and retry`);
+      // B-113 (§4.4): every cross-repository `depends_on` resolves — a live-registered target,
+      // a ticket live or closed there, a target at least as visible as this repository or its
+      // owners' consent — and no cycle runs through two boards. Before anything is written, so
+      // a refused post leaves the head and every row as they were.
+      this.checkQualifiedDependencies(r, liveDeps);
       // The course registry first (R-BTN-48, R-BTN-69): every ticket must name a course in
       // force, and a refused file with none to keep refuses the whole post.
       const refused = this.applyRegistry(r, p, rows.map(({ row }) => row.course_id), at);
@@ -2191,6 +2224,17 @@ export class BatonCore {
     for (const c of new Set(ticketCourses)) {
       if (!this.courses.get(r, c)) throw new BatonError('invalid-params', `a ticket's course ${c} is not in ${r}'s registry`);
     }
+  }
+
+  /** B-113 (§4.4): a post's cross-repository `depends_on`, judged inside its transaction — every
+   *  qualified id resolves against its target's board (a live-registered repository, a ticket
+   *  live or closed there), the target is at least as visible as the posting repository or its
+   *  owners consented, and no dependency cycle runs through two boards (dependencies.ts holds
+   *  both checks, pure over the store this transaction holds). */
+  private checkQualifiedDependencies(r: string, live: readonly { id: string; depends_on: readonly string[] }[]): void {
+    const sql = <T>(q: string, ...a: unknown[]): T[] => this.sql<T>(q, ...a);
+    checkCrossRepository(sql, r, live);
+    checkCrossBoardCycle(sql, r, live);
   }
 
   /** The registry of a post (R-BTN-48, R-BTN-69), inside its transaction: applied whole, then

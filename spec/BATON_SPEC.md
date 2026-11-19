@@ -506,6 +506,7 @@ is stale. Never edit it by hand.
 | S-BTN-238 | a launcher | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-239 | a control path changed outside a course | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-240 | unlisted repositories and the `builtin` executor are the policy's | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-241 | dependencies on another repository's tickets (B-113) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
