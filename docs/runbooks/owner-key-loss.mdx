@@ -117,7 +117,8 @@ set. The PR is ready when they are.
 
 ## 6. Everything else the old key signed with
 
-- **Commit signing.** If the owner signed commits with the old key (owner briefs, B-127), point
+- **Commit signing.** Baton reads no commit signature since 2026-11-19 (B-263 removes the code);
+  until then, on a home with `require_signed_control` still on: if the owner signed commits with the old key (owner briefs, B-127), point
   `git config user.signingkey` at the new one, and wherever an allowed-signers list names owner
   keys, add the new line.
 - **Scripts and environment.** `-i` paths in shell history, `BATON_KEY_FILE`, a courier's

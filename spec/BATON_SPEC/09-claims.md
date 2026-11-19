@@ -102,7 +102,7 @@ is `active` until it ends
   by the key alone, Baton counts every active claim as another's, a claim of a runner of the
   same key included, since several runners may share one credential (§8.1).
   Baton maps a branch to tickets through every course's current or previous `branch_pattern`,
-  among tickets whose home repository or `code_repos` reach that repository (R-BTN-140), naming
+  among tickets whose home repository or `repos:` entries reach that repository (R-BTN-140), naming
   only tickets of repositories granted to the key and following former paths (R-BTN-141). A
   branch that maps to tickets of two repositories sharing a local id is refused if either is
   held; a course whose ids may collide puts `{repository}` in its pattern.

@@ -30,9 +30,9 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   derived and says so. A claim status a mirror writes to git (§16) says a claim exists; Baton
   says who holds it.
 
-  | Git: the home repository, and the repositories and PRs its course reads | Baton |
+  | Git: the home repository, and the repositories and PRs its course reads; and the ticket source's store (R-BTN-74), git by default | Baton |
   |---|---|
-  | ticket files, bodies, Status notes, ids, statuses, closure; tags such as `EXPEDITE` | each live ticket's filter fields (R-BTN-33), as a cache; each ticket's course history and position (R-BTN-39), which git never writes |
+  | tickets — ticket files in the default store — bodies, Status notes, ids, statuses, closure; tags such as `EXPEDITE` | each live ticket's filter fields (R-BTN-33), as a cache; each ticket's course history and position (R-BTN-39), which git never writes |
   | leg evidence: commits, branches, PRs, checks, reviews, closing markers, hand-off documents, a person's answer in git | claims, leases, activities, history, events; attestations (R-BTN-181) |
   | `.baton/`: courses, ticket source, station functions, ranking code, condition bindings; course data | the course registry and each course's opaque data, as posted |
   | transcripts | pointers to them |
@@ -65,8 +65,9 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   matching (§6) and the dashboard's lists read: id, title, path, course, tier, `requires`,
   expedite, `depends_at`, `parent`, `repos`, rank, the position Baton holds (R-BTN-39), and an
   opaque `display` object core never reads, except its `project` for the ticket's row and its
-  `status` for R-BTN-85's `position-disagrees`. It never stores a body, Status notes, exit
-  criteria, a PR list or other prose; the dashboard links each ticket to its file on the forge.
+  `status` for R-BTN-85's `position-disagrees` and R-BTN-200's comparison with the station's
+  `display_status`, by equality alone. It never stores a body, Status notes, exit
+  criteria, a PR list or other prose; the dashboard links each ticket that has a `path` to its file on the forge.
   - It may hold **pointers and digests, never content**: a leg's evidence pointer and position,
     input and output URIs and digests (R-BTN-82, R-BTN-83), a leg run's log directory (R-BTN-128),
     `session_url`, transcript pointers, `closed_tickets`' final station and path, and the
@@ -97,7 +98,7 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
     not caught up with, or a station or leg the course file lacks (R-BTN-64) leave the claim
     alone. A new version of a held ticket leaves the claim alone too: R-BTN-198 says what the
     runner does with it, after R-BTN-5's check at the claim's version.
-  - A ticket gone from git loses its `tickets` row; its claims, events and course history stay.
+  - A ticket gone from its source loses its `tickets` row; its claims, events and course history stay.
 - **R-BTN-39 (where a ticket is: Baton's course history).** Baton is the one authority on a
   ticket's course history (R-BTN-81) and on its position: its station, its path (the legs run,
   each with the station it reached) and its queued leg (R-BTN-83). Git never writes them: no
@@ -251,8 +252,6 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
     R-BTN-128), `artifact_buckets` (R-BTN-82), `api_keys` (default `true`, R-BTN-117),
     `checks` and `check_runners` (R-BTN-114), `pushers` (R-BTN-139), `code_repos`
     (with the named repository's consent, R-BTN-140) and each grant's `sync` flag (R-BTN-146);
-    `require_signed_control` (default off, B-127 — turning it on tightens, turning it off is a
-    loosening R-BTN-186 governs);
     each grant's role and domain (R-BTN-180), set by the policy's `approvers.roles` alone; and
     the repository policy (R-BTN-188), which holds every rule about
     authority and trust;
@@ -269,30 +268,6 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   (R-BTN-161), `branch_pattern`, `min_runner_version`, station functions,
   ranking code. They are protected paths (R-BTN-184), landed only as the policy's
   `paths.control` says.
-
-  **Owner-signed control inputs** (B-127, the owner 2026-10-27; security model mitigation C).
-  A repository may require, by the owners' setting `require_signed_control` (default off), that
-  its **control inputs** — `.baton/**`, goal files, the `EXPEDITE` tag and agent configuration
-  (`.claude/**`, every `CLAUDE.md` and `AGENTS.md`, MCP and plugin manifests) — count only at a
-  commit carrying a valid SSHSIG in the namespace `git` (R-BTN-13's format) by an owner key of
-  the repository that no agent session holds: the human-only register's (R-BTN-185), which is
-  what an owner-signed commit accepts and nothing else — an API-key owner cannot sign, and a
-  key an agent session holds would let an injected session sign. "The commit that last changed
-  it" is read along the default branch's first parents, so a merge whose result differs from
-  its first parent on a control path is that merge's change, never a rollback to an older
-  signed version. An unsigned change keeps the last owner-signed version in force and raises an
-  `unsigned-control` notice under Needs you naming the paths and commits; with no signed
-  version, nothing counts and no claim is handed out (fail closed) until an owner signs the
-  current state once. Runners load `agent_command`, overrides, `rank.mjs` and the courses' leg
-  scripts only from the commits the board post names (§7.1, R-BTN-133), verifying each
-  signature themselves; a group is read atomically, so a signed change to one input never
-  carries a sibling input's unsigned bytes into force. A
-  ticket's `tier` is not one (the owner, 2026-10-27: a tier routes by quality, not privilege).
-  Whether or not the setting is on, the sync marks each ticket's brief `signed` or `unsigned`
-  with its provenance (§7.1), and the standing harness rule (each repository's `CLAUDE.md`)
-  reads an unsigned owner quote as a claim, not the owner. The sync computes the marks and the
-  record where the git objects are; B-137 moves the verification over the raw commits
-  server-side — until then the runners' own verification is what a lying post cannot pass.
 
   **What Baton's state protects.** Under `cooperative`, whoever can push can also re-file a held
   ticket under a new id (R-BTN-12), change a ticket's `course:`, rename a leg a bar names

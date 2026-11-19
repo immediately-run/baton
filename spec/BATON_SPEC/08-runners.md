@@ -46,7 +46,7 @@ the runner's credentials under any other executor is that executor's, never Bato
   - The response carries the runner's active claims, a list, empty when it holds none — each
     with its id, ticket, station, leg, nonce,
     `deadline_at`, Baton's position (`station`, `path`, `next_leg`), the ticket as the latest
-    accepted snapshot holds it (`version`, `snapshot_sha`, `brief`, `last_written_by`,
+    accepted snapshot holds it (`version`, `snapshot_sha`, `last_written_by`,
     R-BTN-198) and that snapshot's `git` view (`next` legs with state, `waiting_on` and `not_before`; or `closed:
     done | withdrawn`; or `unknown`; for a ticket marked `cancelling`, its queued `cancel` leg
     `ready`, R-BTN-168). A claim the runner's state does not hold is ended by the runner
@@ -364,8 +364,8 @@ the runner's credentials under any other executor is that executor's, never Bato
   every leg, and runs every call into repository code, through its **executor**: a module with a
   versioned interface whose code the runner's host chooses. Baton is agnostic about isolation: it
   names no sandbox, VM, container or cgroup, defines no key an executor reads, keeps no ranking of
-  executors, and no rule reads whether or how a leg was kept apart; that is the deployment's
-  (§12.8). The runner keeps everything Baton knows of — heartbeat, claim, lease, fence, its key,
+  executors, and no rule reads how a leg was kept apart; that is the deployment's (§12.8). The
+  one thing a policy may refuse is `builtin`, which keeps nothing apart (below). The runner keeps everything Baton knows of — heartbeat, claim, lease, fence, its key,
   checking every move (R-BTN-106), the leg log written from what the executor streams (R-BTN-128)
   and masking applied to those streams (R-BTN-144).
   - **The interface**, `executor_api: 1`:
@@ -401,14 +401,16 @@ the runner's credentials under any other executor is that executor's, never Bato
       its OS user, each call a detached child in its own process group (R-BTN-133), stopped by
       signals (R-BTN-119, R-BTN-145); the channel is a Unix socket (R-BTN-106). A leg can read
       the runner's state file and use its ssh-agent (R-BTN-14, R-BTN-144): `builtin` binds only
-      cooperating legs. It ignores executor data.
+      cooperating legs. It ignores executor data. Where a repository's policy sets
+      `executor.builtin` to `refused` (R-BTN-188), Baton gives a runner whose last heartbeat
+      reported `builtin`, or no `executor` at all — a sidecar reports none, so an interactive
+      session is refused with it — no claim on a ticket that reaches the repository (rule
+      `executor`, §6.6). A claim already held keeps advancing. The source is the runner's own
+      statement, so the rule stops a misconfigured host, never a lying one.
     - **`home`**: the home's `.baton/executor.mjs` at the claim's `snapshot_sha` (R-BTN-143); for
       a session with no claim (`rank`, `source`, `sync`), at the head of the default branch the
       runner verified, as `rank.mjs` is read (R-BTN-98). It runs at the runner's level, so a host
       chooses it only where the repository and the host are one trust domain.
-    - **`home-signed`**: the same file, loaded only at a commit an owner key signed (B-127's walk,
-      the file among its control inputs); while B-127 is unbuilt the runner refuses to start with
-      it, naming B-127.
     - **`pinned:<path>@sha256:<digest>`**: a bundle on the host, a directory whose entry point is
       its `executor.mjs`. Its digest is the SHA-256 of its canonical listing: for each regular
       file, ordered by its path relative to the bundle (`/`-separated, compared bytewise), the
@@ -449,15 +451,15 @@ the runner's credentials under any other executor is that executor's, never Bato
     name again only once its executor reports it can honour it. Otherwise the leg ends
     `released:cannot-finish:transient`, as any leg that could not start.
   - **The runner declares; Baton records and matches.** The heartbeat's `executor` is `{source,
-    digest, api, provides: [<name>…]}`: `source` one of `builtin`, `home`, `home-signed`,
+    digest, api, provides: [<name>…]}`: `source` one of `builtin`, `home`,
     `pinned`; `digest` the SHA-256 of the code loaded (absent for `builtin`); `api` the
     interface version; `provides` the capability names the executor states. `provides` are
     matched like declared capabilities (R-BTN-174) and are, like them, the runner's word: a name
     beginning `runner:` is refused `invalid-params` (those come only from the runner's own code,
-    R-BTN-133), no name is derived from `source`, and no policy knob reads `source` or
-    `provides` — a course may require a name, which only steers matching. Core reads `source` only
-    to tell `builtin`, whose legs are the runner's children, from any other executor when it fences
-    a silence reap (R-BTN-19). A capability of a type
+    R-BTN-133), no name is derived from `source`, and no policy knob reads `provides` — a course may
+    require a name, which only steers matching. Core reads `source` only to tell `builtin`,
+    whose legs are the runner's children, from any other executor: when it fences a silence
+    reap (R-BTN-19), and for the policy's `executor.builtin` (above). A capability of a type
     its course declares `"from": "executor"` counts only from `provides` (R-BTN-121).
   - **The run's record.** The `advance` that starts a run carries `executor_digest`,
     `environment` (what the leg ran on, such as an image digest; it may repeat across runs) and
@@ -497,6 +499,33 @@ the runner's credentials under any other executor is that executor's, never Bato
   under an executor whose handle names its session's link (R-BTN-107), it is that link, or a
   page the runner serves that leads a person to the session.
 
+- **R-BTN-201 (a launcher starts sessions; Baton reserves nothing for them).** A **launcher** is
+  a process outside Baton, run by the deployment, that starts runner sessions when there is work
+  for them. It reads `GET /v1/runner/launch-candidates` (R-BTN-99) with a machine key, orders them
+  by the course's `rank.mjs` with `runner: null` (R-BTN-98), and starts each session it decides
+  on by whatever its host offers — a provider's session trigger, a VM, a process — handing the
+  session, as a hint, the ticket and leg it ranked first. Baton records no launch.
+  - **The launcher bounds itself.** It keeps its own record of the starts it made whose session
+    has not yet claimed, and launches again for a candidate only after that record expires; it
+    bounds its concurrent starts by its host's limits, which Baton does not know. It runs
+    `rank.mjs` as R-BTN-98 says, through an executor, never in the process that holds its start
+    credentials.
+  - **The session decides.** The started session's runner reads the hint as a ticket id and a
+    leg alone, and never hands it to the agent; it claims with `prefer` naming that ticket
+    (R-BTN-100) and, refused, claims what else it is offered, or ends. Nothing is reserved for a
+    launch, and a hint is never a grant.
+  - **The lease stops it.** A launcher needs no way to stop a session: a session whose lease
+    lapses — ended, paused by its host or lost — is fenced (R-BTN-6) and reaped (§9.5).
+  - **Credentials stay with the launcher.** The launcher holds what its starts need, Baton none
+    (R-BTN-53). Where the agent in a session can read the session's runner key, as in a hosted
+    agent session, that key is an API key (R-BTN-159), so the session never syncs or delivers,
+    and its grant is `runner`, never `trusted-runner` (R-BTN-182), on the repositories the
+    deployment scopes it to.
+  - **A session its host may pause.** Its runner declares the lowest lease timeout (R-BTN-9). A
+    leg there that needs a person raises `suspend` with `wait_s: 0` (R-BTN-162), so its claim
+    ends suspended at once (R-BTN-71), and never `interact`, whose session stays running for the
+    person (R-BTN-195).
+
 ### 8.4 Where and how a leg runs
 
 - **R-BTN-143 (a runner runs only code the default branch holds).** Before reading any file at a
@@ -517,39 +546,6 @@ the runner's credentials under any other executor is that executor's, never Bato
     `--against <sha>`.
 - **R-BTN-133 (a leg runs in a read-only checkout of its commit).** R-BTN-143 runs first; an
   off-branch sha is never checked out or installed.
-  - **Owner-signed control** (B-127, R-BTN-66 as amended): where the repository requires signed
-    control, the claim answer's `control` names, per group, the commit a runner loads
-    `agent_command` (with `agent_wrapper`, both in `.baton/baton.json`), the overrides
-    (`legs/<leg>.run.mjs`), `rank.mjs` (R-BTN-98) and the course's leg scripts with their
-    instruction files (`legs/*.mjs` and `legs/*.md`, overrides excluded) from. The runner
-    verifies each named commit's `git`-namespace SSHSIG (R-BTN-13) against the owner keys the
-    answer carries — Baton's own, never the post's choice — that the commit is an ancestor of
-    the claim's snapshot, and that it is the commit the walk itself names: the runner
-    recomputes the group walk at the claim's snapshot (round 2) and refuses a `read` that
-    disagrees, so an old on-branch signed commit — the rollback the first-parent rule exists
-    to prevent — never loads on a record's word. All of this happens before loading anything,
-    and each failure refuses the claim (`released:cannot-finish:spec`, fail closed): a named
-    commit that does not verify, is no ancestor of the snapshot, or names no signing key
-    without being the pre-adoption baseline — the one keyless shape that is honest: the
-    snapshot itself, and only while the walk there finds no change to the group (a group with
-    changes is either signed or names no signed version, so a keyless record over one is a lie
-    the runner refuses); a post that lied about a signature — or about which ancestor counts,
-    or whether a group is gated at all — changes what a runner refuses, not what it runs. While
-    the owner key register has moved since the record was computed (Baton compares the record's
-    keys with its own), a refusal releases the claim as a stale board, unpenalised, until the
-    next post recomputes under the register as it stands; nothing loads either way. While a
-    group names no signed version, no claim is handed out at all. An unsigned
-    change to a group keeps the last owner-signed version in force: the legs read that group
-    at the named commit, never the snapshot's newer bytes — and the course group's commit is
-    where the runner loads the course's graph, its leg scripts and their instruction files as
-    one coherent tree, so the code that enforces the gate is never a push's own bytes. A
-    group's read is atomic (§7.1): a signed change to one of its paths carries no sibling's
-    unsigned bytes. The course group's walk covers the leg scripts and their instruction
-    files only: a sourced course's `course.json` is pinned byte-equal by the sync (B-33) and
-    could never be signed after its scaffold, so the graph travels with the scripts —
-    byte-identical for a sourced course, an owned course's graph change taking effect with the
-    next signed change to its leg scripts — and a leg a pushed graph adds that the signed
-    `legs/` does not carry refuses the claim as a missing script.
   - **Leg trees** are sparse, detached, non-cone git worktrees: the home repository at
     `snapshot_sha` with only `/.baton/` (`ctx.snapshot.tree`), and, for a sourced course, the
     source repository at its commit with only the course directory (R-BTN-134). The course

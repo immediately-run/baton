@@ -20,7 +20,7 @@ depends_on: []
 **What (code only):** recommendations and claim re-check far more tickets than they return.
 
 - `recommend()` (claims.ts ~629-647) runs the full gate check on 50 candidates per group even for `limit=10`, ~18 point queries each: sort first, gate lazily until `limit` pass.
-- Cache per request what is constant for it: the tier ladder (`tiers` read ×102), owner bars, `capability_capacity`, `board_head`, the unsigned-control set.
+- Cache per request what is constant for it: the tier ladder (`tiers` read ×102), owner bars, `capability_capacity`, `board_head`~~, the unsigned-control set~~.
 - A refused claim runs `candidates()` a second time for its explanation (claims.ts ~770): reuse the first result.
 
 **Target:** recommendations and claim ≈ 1k rows.
@@ -50,3 +50,5 @@ No new input: indexes, tables and queries over data Baton already stores; no fie
 _filed 2026-11-15._
 
 2026-11-15: in review — lazy gating, per-request caching, one candidate reading per refusal, the claim indexes, and R-BTN-196's state version (B-242's counter) with the idle memo. On a production-sized gated state an idle beat's recommendations and refused claim read 9 and 8 rows on a repeat (from ~3.8k and ~7.5k); a reading that computes reads ~2.2k each.
+
+_(2026-11-19: rules re-read: R-BTN-66. The unsigned-control set is struck from the cache list: signed control is retired (`spec/BATON_SPEC_HISTORY.md`, that date) and B-263 removes the read.)_

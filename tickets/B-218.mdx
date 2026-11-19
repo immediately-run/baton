@@ -49,8 +49,8 @@ read** — the same route and action, every field it serves today kept with its 
 reads them) — and amends its §14 row; it does not add a second handler.
 
 1. **`GET /v1/repositories/{repository}/tickets/{ticket}`** (`ticket.show`, read; the repository
-   reads' principals and, new here, a session): today's answer, including `last_written_by` and
-   the brief's `signed`/`unsigned` mark (R-BTN-194), plus the ticket's `repo.tickets` row and
+   reads' principals and, new here, a session): today's answer, including `last_written_by` ~~and
+   the brief's `signed`/`unsigned` mark~~ (R-BTN-194), plus the ticket's `repo.tickets` row and
    - `claim`: null, or `{claim_id, runner_id, hostname, session_name, leg, run_id, claimed_at,
      lease_ends_at, deadline_at, attempt, max_runs, next_backoff_until, session_url, log_dir}`
      (`session_url` only where R-BTN-113 passed it; `log_dir` text, R-BTN-128);
@@ -104,3 +104,5 @@ _filed 2026-11-09, split from B-194 after the second review._
 _2026-11-16 — the route already exists (B-126, R-BTN-194, built after this ticket was written):
 the work is an extension of it that keeps `last_written_by` and `brief`, which B-210's ticket page
 should draw next to the head, as the CLI does._
+
+_(2026-11-19: rules re-read: R-BTN-194. The brief mark is retired with signed control (`spec/BATON_SPEC_HISTORY.md`, that date). The read keeps `last_written_by`, now served with `human` (R-BTN-194), and no `brief`: the mark is struck above, and the 2026-11-16 note's "and `brief`" no longer holds.)_

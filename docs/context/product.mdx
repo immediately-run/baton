@@ -15,8 +15,8 @@ guarantees.</Lede>
 each ticket and keeps that claim alive with a lease. It moves each ticket along its course, and
 shows the whole team live. It also owns the state that someone pushing to the repository must not
 be able to write: each ticket's course history, the attestations that count as evidence, the
-repository's policy, the grants and the owners' bars. Git holds the work itself: every ticket,
-its body and its evidence. Baton does not do, verify or confine the work. Its permissions cover
+repository's policy, the grants and the owners' bars. The ticket source — git by default —
+holds every ticket and its body, and git the work's evidence. Baton does not do, verify or confine the work. Its permissions cover
 its own state, its gates protect the lock, and it advises on everything else. A repository can opt
 into one exception through its policy: Baton's trusted runners decide what lands, and the forge
 lets only them and a human land it ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
@@ -99,10 +99,10 @@ to see at a glance what the team is doing and what it needs from a person.
 
 ## What it is not
 
-- **Not the record of the work.** Git holds every ticket and its evidence, and Baton's board is a
-  cache of it, rebuilt by each sync. Baton holds the live leases, the course history,
+- **Not the record of the work.** The ticket source holds every ticket and git its evidence, and
+  Baton's board is a cache of them, rebuilt by each sync. Baton holds the live leases, the course history,
   attestations and the limits agents cannot change. When Baton and git disagree about what Baton
-  owns, Baton wins; about anything else, git wins.
+  owns, Baton wins; about anything else, the ticket source and git win.
 - **Not a gatekeeper of the work.** Baton never verifies or confines what a runner does. A
   capability, `human-operator` included, is the runner's own statement, which Baton records and
   matches but never grants or checks. A threat that needs a runner stopped belongs to the
