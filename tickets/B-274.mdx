@@ -1,0 +1,53 @@
+---
+title: "B-274 — A client layer and one git helper: src never imports cli/, one export table for both bundlers, shared wire types"
+id: B-274
+project: baton
+status: available
+updated: 2026-11-19
+tags:
+  - roadmap-item
+description: "src/client holds send, signing and the default URL; one bounded src/defaults/git.ts; one table of entry and exports read by the checkout's bundlers and build-cli; ClaimAnswer, BeatAnswer and AdvanceAnswer shared with the runner"
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**What:** `src/` imports `cli/baton.mjs` for `send`, signing and the default URL, so each
+development bundle inlines a second copy of the CLI entry. Eight places shell out to `git`, six
+with no timeout. The list of what each bundle exports is kept twice, which shipped a package
+whose `baton home` crashed with `homeMain is not a function`.
+
+From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
+
+### What to build
+
+1. `src/client/`: `send`, signing, `DEFAULT_URL`, `homesPath` and the git environment. The CLI
+   entry and `src/` both import it; `src/` never imports `cli/`.
+2. One `src/defaults/git.ts`: every `git` call bounded by a timeout and non-interactive by
+   default.
+3. One table of `{ entry, exports }` that the checkout's bundlers (`scripts/baton-*.mjs`) and
+   `scripts/build-cli.mjs` both read, replacing the comparison `check-package.mjs` makes today.
+4. Wire types `ClaimAnswer`, `BeatAnswer` and `AdvanceAnswer`, shared by
+   `src/core/runnerApi.ts` and the runner's `BatonApi`, which returns `Record<string, any>` today.
+
+**Done when:** a boundary test shows `src/**` never imports `cli/`, and `check:package` passes.
+
+### Trust
+
+Signing moves; it does not change. The key file is read where it is read today and the client
+never logs it. The git helper runs `git` without a shell and with prompts disabled, so a remote
+that asks for a credential fails instead of hanging.
+
+### Invariants
+
+- One implementation of request signing, used by every caller.
+- The published package runs with dependencies only: no esbuild at run time
+  (`scripts/check-package.mjs`).
+- A runner's answer from Baton is checked at the boundary: the shared types describe the wire;
+  they do not replace the checks.
+
+## Status
+
+_filed 2026-11-19._

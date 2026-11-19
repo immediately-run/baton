@@ -1,0 +1,52 @@
+---
+title: "B-273 — Scenarios do not write SQL: named seeders, one git fixture, one runner rig, and S-BTN-229 on an injected clock"
+id: B-273
+project: baton
+status: available
+updated: 2026-11-19
+tags:
+  - roadmap-item
+description: "49 test files write raw SQL and a rename touched 124 of them; add seeders and readers to test/helpers.ts, test/lib/gitRepo.ts and test/lib/runnerRig.ts, and deflake S-BTN-229"
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**What:** 49 test files write raw `INSERT`, `UPDATE` or `DELETE` against the core's tables, so
+a schema rename touches the suite by hand: the rename in `b704d0af` edited 124 test files.
+S-BTN-229 timed out in three of the last five failed CI runs.
+
+From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
+
+### What to build
+
+1. Named seeders and readers in `test/helpers.ts`; scenarios call them and write no SQL.
+2. One git fixture, `test/lib/gitRepo.ts`, replacing the per-file `class Repo` and `class Home`.
+3. One runner rig, `test/lib/runnerRig.ts`, with a single `until`.
+4. S-BTN-229 gets an injected clock instead of waiting on wall time. `S-BTN-48.replay` and
+   `request-protected` hit their 5-second timeout under the full run on 2026-11-19 and pass
+   alone: give them the same treatment or a stated budget.
+
+**Done when:** a source-gate test finds no write statement under `test/unit` or
+`test/integration` outside an allowlist that may only shrink, and no `class Repo` or
+`class Home` remains there.
+
+### Trust
+
+No new input: test code only. The seeders write through the same tables the core reads, so a
+seeder that skips a column the core validates would hide a bug; each seeder writes what the
+corresponding request would have written.
+
+### Invariants
+
+- [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) ([R-BTN-32](../spec/BATON_SPEC/02-deployments.md#sec-2-1)): one clock. Tests set time with `setClock`; no test sleeps on wall
+  time to make a lease lapse.
+- Every scenario test keeps its `S-BTN-n` name, and runs on both hosts unless it is in
+  `NODE_ONLY`.
+- Never add `BATON_TEST_BINDINGS` or a `TEST_*` binding to `wrangler.toml`.
+
+## Status
+
+_filed 2026-11-19._
