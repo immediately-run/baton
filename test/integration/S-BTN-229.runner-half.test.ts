@@ -53,6 +53,10 @@ const clock = { now: T0 };
 const runners: Runner[] = [];
 /** Baton out of reach: every runner call fails, as a dropped network does. */
 let down = false;
+/** A beat held after Baton answered it and before the runner reads the answer: `caught` counts
+ *  the beats waiting on `held`. */
+let held: Promise<void> | null = null;
+let caught = 0;
 
 function writeHome(): string {
   homeDir = join(dir, 'home');
@@ -87,8 +91,14 @@ function makeRunner(over: Record<string, unknown> = {}, beats?: Record<string, a
     url: 'https://baton.test',
     transport: async (req) => {
       if (down) throw new Error('the network is down');
-      if (beats && new URL(req.url).pathname === '/v1/runner/heartbeat') beats.push(await req.clone().json() as Record<string, any>);
-      return hostCall(req);
+      const beat = new URL(req.url).pathname === '/v1/runner/heartbeat';
+      if (beats && beat) beats.push(await req.clone().json() as Record<string, any>);
+      const res = await hostCall(req);
+      if (beat && held) {
+        caught++;
+        await held;
+      }
+      return res;
     },
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });
@@ -138,6 +148,8 @@ const gate = (id: string) => writeFileSync(join(gates, id), '');
 beforeEach(async () => {
   clock.now = T0;
   down = false;
+  held = null;
+  caught = 0;
   await setClock(T0);
   dir = mkdtempSync(join(tmpdir(), 'baton-229-'));
   log = join(dir, 'legs.jsonl');
@@ -238,9 +250,16 @@ describe('S-BTN-229 (the runner half): a runner holds several claims (R-BTN-4, R
 
     // Baton goes out of reach and the runner's own lease lapses by its wall clock (R-BTN-26):
     // every claim it holds stops at once, no hand-off.
+    // A beat Baton answered before the outage, read by the runner only after its clock moved,
+    // renews the lease from when it left — never from when it was read, which would hold the
+    // lease (and this leg) for as long as the outage lasts.
     r.drain('test'); // no new claim after it
+    let read!: () => void;
+    held = new Promise<void>((res) => { read = res; });
+    await until(() => caught, (v) => v > 0, 'a beat answered and not yet read');
     down = true;
     clock.now = T0 + 20 * 60_000;
+    read();
     await working;
     expect(said().some((x) => x.ev === 'handoff' && x.ticket === other.ticket_id)).toBe(false);
     expect(said().some((x) => x.ev === 'end' && x.ticket === other.ticket_id)).toBe(false); // killed, never returned
