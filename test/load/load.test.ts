@@ -6,7 +6,7 @@
 // envelope never refuses anything. Local only (vitest.config.ts's LOAD_TEST list): CI's job
 // wiring is the owner's; the Cloudflare budgets are read on production (B-224).
 import { describe, it, expect } from 'vitest';
-import { adminSession, call, keyCall, rows, setAdminKeys, setClock, syncCall, syncToken, tick, withCore, workerCall, hbBody, sha256, placed, course } from '../helpers';
+import { adminSession, call, keyCall, rows, setAdminKeys, setClock, syncCall, syncToken, tick, withCore, runnerCall, hbBody, sha256, placed, course } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { adjustCounts } from '../../src/core/capacity';
 
@@ -118,7 +118,7 @@ describe('npm run test:load — the envelope mix on the local host (G-BTN-77)', 
     // 1,000,000 seeded history rows: the envelope's history figure, in one statement. The
     // maintained count (R-BTN-87) is moved by the write sites; a raw seed answers for itself.
     await rows(`WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ${HISTORY_ROWS})
-                 INSERT INTO ticket_history (repository_id, ticket_id, at, kind, worker_id, leg, reached, detail_json)
+                 INSERT INTO ticket_history (repository_id, ticket_id, at, kind, runner_id, leg, reached, detail_json)
                  SELECT 'load-0', 'load-0:L' || (i % ${TICKETS_PER_REPO}), ${T0} + i, 'leg-finished', 1, 'implement', 'filed', NULL FROM seq`);
     await withCore((c) => adjustCounts(c.store, { history: HISTORY_ROWS }));
 
@@ -127,9 +127,9 @@ describe('npm run test:load — the envelope mix on the local host (G-BTN-77)', 
     for (let i = 0; i < RUNNERS; i++) {
       const secret = `load-secret-${i}`;
       const session = `load-${i}`;
-      const res = await heartbeat.run(async () => workerCall('/v1/runner/heartbeat', { body: hbBody('vm-a', { session_name: session, secret_hash: await sha256(secret), courses: [{ repository: 'load-0', course: 'roadmap-pr', version: 3 }] }) }));
+      const res = await heartbeat.run(async () => runnerCall('/v1/runner/heartbeat', { body: hbBody('vm-a', { session_name: session, secret_hash: await sha256(secret), courses: [{ repository: 'load-0', course: 'roadmap-pr', version: 3 }] }) }));
       expect(res.status, `runner ${i} register`).toBe(200);
-      runners.push({ secret, id: ((await res.json()) as { worker_id: number }).worker_id, session });
+      runners.push({ secret, id: ((await res.json()) as { runner_id: number }).runner_id, session });
     }
 
     // The mix: every runner heartbeats, claims, advances and ends; a dashboard read and an
@@ -141,7 +141,7 @@ describe('npm run test:load — the envelope mix on the local host (G-BTN-77)', 
       // A refresh of load-0's head, so its tickets stay claimable between rounds (R-BTN-62).
       await refreshBoard('load-0', 'immediately-run/load-0');
       for (const r of runners) {
-        const beat = await heartbeat.run(async () => workerCall('/v1/runner/heartbeat', { secret: r.secret, body: hbBody('vm-a', { session_name: r.session, courses: [{ repository: 'load-0', course: 'roadmap-pr', version: 3 }] }) }));
+        const beat = await heartbeat.run(async () => runnerCall('/v1/runner/heartbeat', { secret: r.secret, body: hbBody('vm-a', { session_name: r.session, courses: [{ repository: 'load-0', course: 'roadmap-pr', version: 3 }] }) }));
         expect(beat.status, `runner ${r.id} heartbeat`).toBe(200);
       }
       const takes: { r: { secret: string; id: number; session: string }; res: Response }[] = [];
@@ -150,7 +150,7 @@ describe('npm run test:load — the envelope mix on the local host (G-BTN-77)', 
       for (let wave = 0; wave < RUNNERS / 5; wave++) {
         const part = await Promise.all(runners.slice(wave * 5, wave * 5 + 5).map(async (r) => ({
           r,
-          res: await claim.run(async () => workerCall('/v1/runner/claim', { secret: r.secret, body: { request_id: `load-${r.id}-${round}` } })),
+          res: await claim.run(async () => runnerCall('/v1/runner/claim', { secret: r.secret, body: { request_id: `load-${r.id}-${round}` } })),
         })));
         takes.push(...part);
         await new Promise((done) => setTimeout(done, 50));
@@ -158,9 +158,9 @@ describe('npm run test:load — the envelope mix on the local host (G-BTN-77)', 
       for (const { r, res } of takes) {
         expect(res.status, `runner ${r.id} claim`).toBe(200);
         const c = (await res.json()) as { claim_id: number };
-        const moved = await advanceLane.run(async () => workerCall(`/v1/runner/claims/${c.claim_id}/advance`, { secret: r.secret, body: { leg: 'implement' } }));
+        const moved = await advanceLane.run(async () => runnerCall(`/v1/runner/claims/${c.claim_id}/advance`, { secret: r.secret, body: { leg: 'implement' } }));
         expect(moved.status, `runner ${r.id} advance of ${c.claim_id} (${r.session}): ${await moved.clone().text()}`).toBe(200);
-        const done = await end.run(async () => workerCall(`/v1/runner/claims/${c.claim_id}/end`, { secret: r.secret, body: { end_reason: 'released:requested' } }));
+        const done = await end.run(async () => runnerCall(`/v1/runner/claims/${c.claim_id}/end`, { secret: r.secret, body: { end_reason: 'released:requested' } }));
         expect(done.status, `runner ${r.id} end`).toBe(200);
         ended++;
       }

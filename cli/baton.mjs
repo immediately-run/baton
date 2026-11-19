@@ -3,7 +3,7 @@
 // the one management path. Each command builds one request — `plan`, pure, so it is tested on its
 // own — and signs it with the key `-i` names; Baton validates it with the functions of
 // src/core/admin.ts on either host. Nothing here holds a rule of its own: a refusal is Baton's,
-// printed as it came. `baton run` (§6.13 R-BTN-72) is the worker loop: it lives in src/runner
+// printed as it came. `baton run` (§6.13 R-BTN-72) is the runner loop: it lives in src/runner
 // (TypeScript, node-only), so scripts/baton-run.mjs bundles it first, the way start-local does.
 //
 //   baton key create FILE [--comment TEXT]     an API key (R-BTN-159), beside SSH keys: FILE for -i, FILE.pub its public line
@@ -82,7 +82,7 @@
 //   baton owner -i KEY grants REPO                    (B-90: the repository's owners, grants and settings, and the bars in force)
 //   baton board -i KEY REPO                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
 //   baton run [--home <checkout|home name>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
-//             [--harness opencode|claude-code] [--verbose]   (R-BTN-72: the worker loop; a home
+//             [--harness opencode|claude-code] [--verbose]   (R-BTN-72: the runner loop; a home
 //             name resolves to its checkout, B-121)
 //   baton leg raise <type> --subject TEXT [--body <file>] [--restarts <json>] [--default <id>]
 //                [--severity critical|high|normal]   (R-BTN-160, R-BTN-195; B-234)
@@ -434,7 +434,9 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       // repository's, never one it declares.
       const { flags, positional } = parseArgs(rest.slice(1), [], ['scope', 'schema'], 1);
       if (!flags.scope) throw new Error('baton admin resource add NAME names its --scope (account or service, R-BTN-76)');
-      if (flags.scope === 'worker' || flags.scope === 'host') throw new Error(`--scope ${flags.scope} is retired: a resource is account or service, and a runner uses its repository's instances (R-BTN-76, B-168)`);
+      // B-68's window: `worker` stays a retired scope beside `runner` until B-69 takes the old
+      // spelling away, so the window's callers still meet the "is retired" message.
+      if (flags.scope === 'runner' || flags.scope === 'worker' || flags.scope === 'host') throw new Error(`--scope ${flags.scope} is retired: a resource is account or service, and a runner uses its repository's instances (R-BTN-76, B-168)`);
       if (flags.scope !== 'account' && flags.scope !== 'service') throw new Error('--scope must be account or service (R-BTN-76)');
       return { method: 'POST', path: '/v1/admin/resources', body: { name: need(positional[0], 'the resource name'), scope: flags.scope, detail_schema: jsonArg(need(flags.schema, '--schema'), readJson) } };
     }
@@ -1287,7 +1289,7 @@ export async function main(argv) {
   const home = homes.inForce ? { repository: homes.inForce.home.repository, names: homes.names } : (homes.names.length ? { repository: null, names: homes.names } : null);
   const p = plan(role, args, undefined, undefined, home);
   const url = flags.url ?? process.env.BATON_URL ?? homes.inForce?.home.origin ?? DEFAULT_URL;
-  const keyFile = need(flags.identity, '-i KEY (an administrator, owner or worker key file)');
+  const keyFile = need(flags.identity, '-i KEY (an administrator, owner or runner key file)');
   // B-182 (R-BTN-140): `--code-repos` entries whose ids the operator did not supply offline are
   // read from their forge here, before the settings PUT goes out — Baton never fetches.
   if (p.resolveCodeRepos) {
@@ -1347,7 +1349,7 @@ export async function main(argv) {
 
 // A pipe's write is asynchronous and `process.exit()` flushes nothing, so the command's final
 // line could be dropped with its exit already decided — under a loaded consumer (vitest's
-// parallel workers) `baton tickets check`'s count line, an answer protocol's last line (B-84's
+// parallel runners) `baton tickets check`'s count line, an answer protocol's last line (B-84's
 // class). Wait for stdout and stderr to accept everything, then exit: an empty-string write's
 // callback fires once the writes before it are through; the bound keeps a consumer that stopped
 // reading from hanging the exit, and stdout's own EPIPE handling keeps a vanished one quiet.

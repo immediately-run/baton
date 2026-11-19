@@ -112,7 +112,7 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     expect((await adminPost('/v1/admin/import', first)).status).toBe(200);
     expect((await adminPost('/v1/admin/import', first)).json.code).toBe('conflict');
     // The state stands: the grant with its expanded capabilities, the bar, the reading, the repository.
-    expect((await rows<{ capabilities: string }>('SELECT capabilities FROM worker_grants')).map((r) => JSON.parse(r.capabilities) as string[])).toContainEqual(expect.arrayContaining(['create-pr', 'llm-call']));
+    expect((await rows<{ capabilities: string }>('SELECT capabilities FROM runner_grants')).map((r) => JSON.parse(r.capabilities) as string[])).toContainEqual(expect.arrayContaining(['create-pr', 'llm-call']));
     expect((await rows<{ reason: string }>('SELECT reason FROM owner_bars')).map((r) => r.reason)).toContainEqual('glm-down');
     expect((await rows<{ instance: string; available: number }>('SELECT instance, available FROM instance_readings')).map((r) => [r.instance, r.available])).toContainEqual(['vpn-1', 1]);
     expect((await rows<{ id: string }>('SELECT id FROM repositories')).map((r) => r.id).sort()).toEqual(['baton', 'docs']);
@@ -124,10 +124,10 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     // The event sequence continues from the export's floor.
     expect((await rows<{ n: number }>('SELECT MAX(seq) AS n FROM events'))[0].n).toBeGreaterThanOrEqual(first.events_seq);
     // The runner resumes unkeyed and re-heartbeats with its secret.
-    expect((await rows<{ last_seen_at: number }>('SELECT last_seen_at FROM workers')).every((r) => r.last_seen_at === 0)).toBe(true);
+    expect((await rows<{ last_seen_at: number }>('SELECT last_seen_at FROM runners')).every((r) => r.last_seen_at === 0)).toBe(true);
     const beat = await import('../helpers').then((h) => h.beat('vm-a', w.secret));
     expect(beat.status).toBe(200);
-    expect(beat.json.worker_id).toBe(w.id);
+    expect(beat.json.runner_id).toBe(w.id);
     // The day's usage is the target's own (R-BTN-2): the counters were never imported.
     expect((await withCore((c) => c.capacity.usage())).requests).toBeLessThan(10);
   });

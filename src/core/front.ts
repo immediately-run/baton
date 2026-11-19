@@ -2,7 +2,7 @@
 // principal for the path, applies the R-BTN-16 rules, serves the dashboard's static files, and
 // forwards the API to the core — through the Durable Object on Cloudflare, through the request
 // queue locally (R-BTN-55). Every response leaves with the security headers.
-import { API_KEY, readCapped, verifyOwner, verifyRequest, verifySyncCredential, verifyWorker, checkStateChanging, withBody } from './auth';
+import { API_KEY, readCapped, verifyOwner, verifyRequest, verifySyncCredential, verifyRunner, checkStateChanging, withBody } from './auth';
 import { BatonError, CLIENT_HEADER, NO_STORE, SESSION_COOKIE, VERSIONS_HEADER, clientTooOld, errorResponse, noStore, servedClientVersions, withClientVersions, withSecurityHeaders } from './http';
 import { MAX_DELIVERY, pickDelivery, verifyDelivery } from './webhook';
 import { clientVersionOf, compareVersions, maxVersion, parseClientVersions } from '../shared/versions.mjs';
@@ -201,18 +201,18 @@ async function route(req: Request, env: Config, to: Forward): Promise<Answer> {
   // slice): the attestation write signs the same way — the core checks the writer it names.
   // B-126 (R-BTN-194): a ticket itself, `GET …/tickets/{ticket}`, read like its blocks.
   // B-190 (R-BTN-84): one leg's runs, `GET …/legs/{leg}/runs`, read the same three ways — the
-  // core refuses a worker's (§14: an owner's or an administrator's read).
+  // core refuses a runner's (§14: an owner's or an administrator's read).
   // B-176 (R-BTN-199): the sequence route, a write for the same principals — the core checks
   // each, and the repository's sync key beside them.
   // R-BTN-86 (§4.6, R3-1258): a ticket's children, open and closed, read like its blocks.
   if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|board|policy|attestations|conditions|sequences\/[^/]+\/next|tickets\/[^/]+(\/(blocks|history|children|legs\/[^/]+\/runs))?)$/.test(pathname)) {
     return under('private', async () => {
       if (isSigned(req)) return forwardSigned(req, env, to);
-      // R-BTN-159: a worker's (or, on the reads, an owner's or administrator's) API key.
+      // R-BTN-159: a runner's (or, on the reads, an owner's or administrator's) API key.
       const apiKey = apiKeyOf(req);
       if (apiKey) return forward(req, to, { 'X-Baton-Api-Key': apiKey });
-      // The transition (R3-1239): a bearer token still serves until every worker signs.
-      const credential = await verifyWorker(req, env);
+      // The transition (R3-1239): a bearer token still serves until every runner signs.
+      const credential = await verifyRunner(req, env);
       return forward(req, to, { 'X-Baton-Credential': credential });
     });
   }

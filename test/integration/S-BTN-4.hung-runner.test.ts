@@ -12,7 +12,7 @@
 // (R-BTN-155's owner sessions and R-BTN-186's keys, B-124/B-73) — every dashboard session today
 // is an administrator's, the only key a session is minted from (R-BTN-57). Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, course, cutover, Git, keyCall, ORIGIN, placed, requestId, rows, sessionCall, setAdminKeys, setClock, sha256, withCore, workerCall } from '../helpers';
+import { adminSession, course, cutover, Git, keyCall, ORIGIN, placed, requestId, rows, sessionCall, setAdminKeys, setClock, sha256, withCore, runnerCall } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -45,32 +45,32 @@ function docsGit() {
   return g;
 }
 
-/** A worker call signed by `key`, with its secret after the first heartbeat. */
-async function workerAs(key: TestKey, path: string, body?: unknown, secret?: string) {
+/** A runner call signed by `key`, with its secret after the first heartbeat. */
+async function runnerAs(key: TestKey, path: string, body?: unknown, secret?: string) {
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
-  const req = await signedRequest(key, ORIGIN + path, { created, body: body === undefined ? undefined : JSON.stringify(body), headers: secret ? { 'X-Worker-Secret': secret } : {} });
+  const req = await signedRequest(key, ORIGIN + path, { created, body: body === undefined ? undefined : JSON.stringify(body), headers: secret ? { 'X-Runner-Secret': secret } : {} });
   const res = await hostCall(req);
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 
-/** Register a granted key as a worker declaring the lab; returns its id and secret. */
+/** Register a granted key as a runner declaring the lab; returns its id and secret. */
 async function up(key: TestKey, hostname: string, name: string, over: Record<string, unknown> = {}) {
   const secret = `secret-${name}`;
-  const hb = await workerAs(key, '/v1/runner/heartbeat', {
+  const hb = await runnerAs(key, '/v1/runner/heartbeat', {
     hostname, session_name: name, harness: 'opencode', kind: 'vm', billing: {}, capabilities: [CAP],
     tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'hung-course', version: 1 }],
     secret_hash: await sha256(secret), ...over,
   });
   expect(hb.status).toBe(200);
-  return { id: hb.json.worker_id as number, secret };
+  return { id: hb.json.runner_id as number, secret };
 }
 
-const claimAs = (key: TestKey, secret: string, body: Record<string, unknown>) => workerAs(key, '/v1/runner/claim', { request_id: requestId(), ...body }, secret);
-const advanceAs = (key: TestKey, secret: string, claimId: number, body: Record<string, unknown>) => workerAs(key, `/v1/runner/claims/${claimId}/advance`, body, secret);
+const claimAs = (key: TestKey, secret: string, body: Record<string, unknown>) => runnerAs(key, '/v1/runner/claim', { request_id: requestId(), ...body }, secret);
+const advanceAs = (key: TestKey, secret: string, claimId: number, body: Record<string, unknown>) => runnerAs(key, `/v1/runner/claims/${claimId}/advance`, body, secret);
 const sessionPost = (cookie: string, path: string, body: unknown) =>
   sessionCall(cookie, path, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify(body) });
 const seatsOf = async (claimId: number) => (await rows<{ capability: string }>('SELECT capability FROM claim_seats WHERE claim_id = ? ORDER BY capability', claimId)).map((r) => r.capability);
-const holder = (ticket: string) => (workerCall(`/v1/runner/tickets/${encodeURIComponent(ticket)}/holder`)).then((r) => r.json() as Promise<{ held_by_other: boolean; fence_pending: boolean }>);
+const holder = (ticket: string) => (runnerCall(`/v1/runner/tickets/${encodeURIComponent(ticket)}/holder`)).then((r) => r.json() as Promise<{ held_by_other: boolean; fence_pending: boolean }>);
 
 let docs: Git;
 beforeEach(async () => {
@@ -105,7 +105,7 @@ describe('S-BTN-4 hung runner force-reaped (R-BTN-19)', () => {
     const reap = await sessionPost(session, `/v1/ui/claims/${c1.json.claim_id}/reap`, { confirm: true });
     expect(reap.status).toBe(200);
     expect(await reap.json()).toMatchObject({ fence_pending: true });
-    expect((await rows<{ reaped_at: number | null }>('SELECT reaped_at FROM workers WHERE id = ?', W1.id))[0].reaped_at).toBeNull();
+    expect((await rows<{ reaped_at: number | null }>('SELECT reaped_at FROM runners WHERE id = ?', W1.id))[0].reaped_at).toBeNull();
     expect((await claimAs(w2, W2.secret, { ticket_id: 'docs:HUNG1' })).status).toBe(409);
     expect((await claimAs(w2, W2.secret, { ticket_id: 'docs:HUNG2' })).status).toBe(409); // rule 11: the seat
     expect(await holder('docs:HUNG1')).toEqual({ held_by_other: false, fence_pending: true });
@@ -156,7 +156,7 @@ describe('S-BTN-4 hung runner force-reaped (R-BTN-19)', () => {
     expect(await (await sessionPost(session, '/v1/ui/claims/999/fence-clear', { confirm: true })).json()).toMatchObject({ code: 'not-found' });
     // A claim whose fence already cleared — by its sidecar's report — is conflict too.
     await sessionPost(session, `/v1/ui/claims/${c1.json.claim_id}/reap`, { confirm: true });
-    const report = await workerAs(w1, '/v1/runner/heartbeat', {
+    const report = await runnerAs(w1, '/v1/runner/heartbeat', {
       hostname: 'vm-12', session_name: 'w1', harness: 'opencode', kind: 'vm', billing: {}, capabilities: [CAP],
       tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'hung-course', version: 1 }],
       fenced: { claim_id: c1.json.claim_id, terminated: true },

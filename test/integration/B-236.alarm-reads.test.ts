@@ -1,7 +1,7 @@
 // B-236 — the alarm reads tens of rows, not tables (BATON_SPEC §3's one alarm, §13's indexes).
 // Production passed Cloudflare's 5,000,000 rows_read/day on 2026-11-14: a tick read 0.8–1.3k
 // rows, scanning `claims` for pending fences, `ticket_next_legs` for the 72-hour stall and
-// `workers` for the live set — tables that only grow. On a production-sized state (180 tickets,
+// `runners` for the live set — tables that only grow. On a production-sized state (180 tickets,
 // ~700 ended claims, 300 reaped runner sessions, 3,000 events, 600 snapshots, 300 purged
 // tickets) every statement a tick runs is captured from the store and explained: none scans a
 // growing table, and the named lookups search their index. On the Cloudflare host the tick's
@@ -46,26 +46,26 @@ const plan = async (sql: string, params: unknown[]) =>
   (await rows<{ detail: string }>(`EXPLAIN QUERY PLAN ${sql}`, ...params)).map((r) => r.detail);
 
 /** The tables that grow with time; a full scan of one is what this ticket removes. */
-const GROWING = ['claims', 'workers', 'events', 'ticket_next_legs', 'ticket_stations', 'messages', 'board_snapshots', 'closed_tickets',
-  'claim_legs', 'activities', 'ticket_decisions', 'worker_capabilities', 'transcripts'];
+const GROWING = ['claims', 'runners', 'events', 'ticket_next_legs', 'ticket_stations', 'messages', 'board_snapshots', 'closed_tickets',
+  'claim_legs', 'activities', 'ticket_decisions', 'runner_capabilities', 'transcripts'];
 
 /** The claims, runner sessions, events, snapshots and closures of a few months' work. */
-async function productionSized(workerId: number) {
+async function productionSized(runnerId: number) {
   const seq = (n: number) => `WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < ${n})`;
   // 600 released and 100 confirmed claims, spread over the tickets; 3 reaped whose fences cleared.
-  await rows(`${seq(600)} INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason)
+  await rows(`${seq(600)} INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason)
               SELECT 'docs:T-' || (i % ${TICKETS} + 1), ?, 'seed-r-' || i, 'abc123', '', ? + i, 'released', ? + i + 1000, 'released:abandoned' FROM k`,
-  workerId, T0 - 30 * DAY, T0 - 30 * DAY);
-  await rows(`${seq(100)} INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason, ended_at_sha, confirmed_at)
+  runnerId, T0 - 30 * DAY, T0 - 30 * DAY);
+  await rows(`${seq(100)} INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason, ended_at_sha, confirmed_at)
               SELECT 'docs:T-' || (i % ${TICKETS} + 1), ?, 'seed-c-' || i, 'abc123', '', ? + i, 'completed', ? + i + 1000, 'completed:merged', 'aa', ? + i + 2000 FROM k`,
-  workerId, T0 - 20 * DAY, T0 - 20 * DAY, T0 - 20 * DAY);
-  await rows(`${seq(3)} INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason, fence_pending)
-              SELECT 'docs:T-' || i, ?, 'seed-f-' || i, 'abc123', '', ? + i, 'reaped', ? + i + 1000, 'reaped:silent', 0 FROM k`, workerId, T0 - 10 * DAY, T0 - 10 * DAY);
+  runnerId, T0 - 20 * DAY, T0 - 20 * DAY, T0 - 20 * DAY);
+  await rows(`${seq(3)} INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, end_reason, fence_pending)
+              SELECT 'docs:T-' || i, ?, 'seed-f-' || i, 'abc123', '', ? + i, 'reaped', ? + i + 1000, 'reaped:silent', 0 FROM k`, runnerId, T0 - 10 * DAY, T0 - 10 * DAY);
   // 300 earlier sessions of the runner, reaped (R-BTN-3 keeps their rows).
-  const cols = (await rows<{ name: string; pk: number }>(`PRAGMA table_info(workers)`)).filter((c) => !c.pk).map((c) => c.name);
+  const cols = (await rows<{ name: string; pk: number }>(`PRAGMA table_info(runners)`)).filter((c) => !c.pk).map((c) => c.name);
   const sel = cols.map((c) => (c === 'session_name' ? `session_name || '-' || i` : c === 'secret_hash' ? `secret_hash || i` : c === 'reaped_at' ? `${T0 - 2 * DAY}`
     : c === 'last_seen_at' ? `${T0 - 3 * DAY} + i` : c)).join(', ');
-  await rows(`${seq(300)} INSERT INTO workers (${cols.join(', ')}) SELECT ${sel} FROM workers, k WHERE workers.id = ?`, workerId);
+  await rows(`${seq(300)} INSERT INTO runners (${cols.join(', ')}) SELECT ${sel} FROM runners, k WHERE runners.id = ?`, runnerId);
   // 3,000 events of the last weeks; 600 snapshots; 300 tickets closed and purged long ago.
   await rows(`${seq(3000)} INSERT INTO events (at, kind, actor, detail_json, ticket_id, repository_id) SELECT ? + i * 1000, 'claimed', 'test', '{}', 'docs:T-1', 'docs' FROM k`, T0 - 20 * DAY);
   await rows(`${seq(600)} INSERT INTO board_snapshots (repository_id, sha, parent_sha, received_at, ticket_count) SELECT 'docs', printf('%040x', 100000 + i), NULL, ? + i, ${TICKETS} FROM k`, T0 - 20 * DAY);
@@ -76,7 +76,7 @@ async function productionSized(workerId: number) {
   await rows(`UPDATE ticket_next_legs SET waiting_since = ? WHERE ticket_id IN ('docs:T-2', 'docs:T-4', 'docs:T-6', 'docs:T-8', 'docs:T-10')`, T0 - 4 * DAY);
 }
 
-let worker: { id: number; secret: string };
+let runner: { id: number; secret: string };
 
 type Scheduler = { get(): Promise<number | null>; set(at: number): Promise<void> };
 let scheduler: Scheduler | null = null;
@@ -107,8 +107,8 @@ beforeEach(async () => {
   for (let i = 1; i <= TICKETS; i++) git.add(`T-${i}`, { rank: i });
   expect((await git.post()).status).toBe(200);
   await cutover();
-  worker = await register('vm-a');
-  await productionSized(worker.id);
+  runner = await register('vm-a');
+  await productionSized(runner.id);
   // The first ticks do their one-off work: the stalled five are raised, the live set recounted.
   await setClock(T0 + 60_000);
   await tick();
@@ -135,8 +135,8 @@ describe('B-236 the alarm reads through indexes', () => {
       });
       expect(scans, `${sql}\n${detail.join('\n')}`).toEqual([]);
     }
-    for (const index of ['claims_fence_pending', 'claims_deadline', 'workers_live', 'next_legs_waiting_since', 'messages_by_status',
-      'events_retention', 'board_snapshots_received', 'workers_last_seen', 'closed_claims_due']) {
+    for (const index of ['claims_fence_pending', 'claims_deadline', 'runners_live', 'next_legs_waiting_since', 'messages_by_status',
+      'events_retention', 'board_snapshots_received', 'runners_last_seen', 'closed_claims_due']) {
       expect([...used], index).toContain(index);
     }
   });
@@ -150,23 +150,23 @@ describe('B-236 the alarm reads through indexes', () => {
   });
 
   it('the live set is the lease to the millisecond (R-BTN-9): live while last_seen_at + lease > now', async () => {
-    const lease = (await rows<{ seen: number; lease: number }>('SELECT last_seen_at AS seen, lease_timeout_ms AS lease FROM workers WHERE id = ?', worker.id))[0];
+    const lease = (await rows<{ seen: number; lease: number }>('SELECT last_seen_at AS seen, lease_timeout_ms AS lease FROM runners WHERE id = ?', runner.id))[0];
     const live = async (at: number) => (await rows<{ id: number }>(
-      `SELECT id FROM workers WHERE reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? ORDER BY id`, at)).map((r) => r.id);
-    expect(await live(lease.seen + lease.lease - 1)).toEqual([worker.id]);
+      `SELECT id FROM runners WHERE reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? ORDER BY id`, at)).map((r) => r.id);
+    expect(await live(lease.seen + lease.lease - 1)).toEqual([runner.id]);
     expect(await live(lease.seen + lease.lease)).toEqual([]);
-    expect(await plan(`SELECT id FROM workers WHERE reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ?`, [0]))
-      .toEqual([expect.stringMatching(/^SEARCH workers USING INDEX workers_live \(<expr>>\?\)$/)]);
+    expect(await plan(`SELECT id FROM runners WHERE reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ?`, [0]))
+      .toEqual([expect.stringMatching(/^SEARCH runners USING INDEX runners_live \(<expr>>\?\)$/)]);
   });
 
-  it("the dashboard's and the runner calls' claim and worker lookups search their index", async () => {
-    // As src/core/claims.ts (needsYou, timeline) and src/core/workerApi.ts write them.
+  it("the dashboard's and the runner calls' claim and runner lookups search their index", async () => {
+    // As src/core/claims.ts (needsYou, timeline) and src/core/runnerApi.ts write them.
     const cases: [string, unknown[], string, boolean?][] = [
-      [`SELECT id, ticket_id, worker_id, ended_at FROM claims WHERE status = 'reaped' AND fence_pending = 1 ORDER BY ended_at`, [], 'claims_fence_pending'],
-      [`SELECT id, ticket_id, worker_id, ended_at, end_reason, ended_at_sha FROM claims
+      [`SELECT id, ticket_id, runner_id, ended_at FROM claims WHERE status = 'reaped' AND fence_pending = 1 ORDER BY ended_at`, [], 'claims_fence_pending'],
+      [`SELECT id, ticket_id, runner_id, ended_at, end_reason, ended_at_sha FROM claims
         WHERE status = 'completed' AND confirmed_at IS NULL AND ended_at <= ? ORDER BY ended_at`, [T0], 'claims_unconfirmed_by_end'],
-      [`SELECT id, reaped_at FROM workers WHERE credential_id = ? AND secret_hash = ?`, ['x', 'y'], 'workers_by_secret'],
-      [`SELECT id, hostname, session_name FROM workers WHERE reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? ORDER BY hostname, id`, [T0], 'workers_live', true],
+      [`SELECT id, reaped_at FROM runners WHERE credential_id = ? AND secret_hash = ?`, ['x', 'y'], 'runners_by_secret'],
+      [`SELECT id, hostname, session_name FROM runners WHERE reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? ORDER BY hostname, id`, [T0], 'runners_live', true],
     ];
     for (const [sql, params, index, sorts] of cases) {
       const detail = await plan(sql, params);

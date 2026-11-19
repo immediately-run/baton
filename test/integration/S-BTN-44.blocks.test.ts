@@ -1,15 +1,15 @@
 // S-BTN-44 blocks, resources and decisions (BATON_SPEC §15, §6.2–§6.4 R-BTN-75–78, §6.3 R-BTN-101;
 // R3-1251), on both hosts. In `docs`: A's posted `blocked_by` is B; C requires `real-iphone`, which
-// no live worker declares; D's `review` leg needs `llm:deepseek-v4-flash`, served by the account
+// no live runner declares; D's `review` leg needs `llm:deepseek-v4-flash`, served by the account
 // instances `opencode-go:go_plus` and `opencode-go:go_plus_2`; W1 uses `go_plus`, W2 both; E posts
 // an open decision; the owner sets an unblocked trigger; W3 sits idle. Must hold: each block named
-// from the stored rows, the fleet's and a worker's own answers, the lapse to `unknown`, the refusals
+// from the stored rows, the fleet's and a runner's own answers, the lapse to `unknown`, the refusals
 // and the override, `unblocked` logged with what cleared, W3's message and fresh recommendation, one
 // coalesced dispatch, liveness, and Needs you after a day.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, cutover, keyCall, placed, recommended, rows, setAdminKeys, setClock, tick, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
-import { grantedWorker, signed, SCHEMA, type FleetWorker } from '../lib/fleet';
+import { grantedRunner, signed, SCHEMA, type FleetRunner } from '../lib/fleet';
 import type { Workflow } from '../../src/core/ports';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
@@ -27,13 +27,13 @@ let git: Git;
 let sent: Workflow[];
 
 const blocksOf = async (local: string, as: { key: TestKey; secret?: string } = { key: owner }, me = false) =>
-  (await signed(as.key, `/v1/repositories/docs/tickets/${local}/blocks${me ? '?worker=me' : ''}`, { secret: as.secret })).json;
+  (await signed(as.key, `/v1/repositories/docs/tickets/${local}/blocks${me ? '?runner=me' : ''}`, { secret: as.secret })).json;
 const blockedOn = async (on: string) => (await signed(owner, `/v1/repositories/docs/blocked?on=${encodeURIComponent(on)}`)).json;
 const events = async (kind: string) => (await rows<{ ticket_id: string; detail_json: string }>('SELECT ticket_id, detail_json FROM events WHERE kind = ? ORDER BY seq', kind))
   .map((e) => ({ ticket: e.ticket_id, ...JSON.parse(e.detail_json) }));
-/** Move the clock to `to` the way time passes for live workers: they heartbeat every few minutes
+/** Move the clock to `to` the way time passes for live runners: they heartbeat every few minutes
  *  (§6.3), so none lapses on the way; each step's alarm runs. */
-async function advance(from: number, to: number, alive: FleetWorker[]) {
+async function advance(from: number, to: number, alive: FleetRunner[]) {
   for (let t = Math.min(from + 5 * MIN, to); ; t = Math.min(t + 5 * MIN, to)) {
     await setClock(t);
     for (const w of alive) await w.beat();
@@ -72,11 +72,11 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-44 blocks, resources and decisions', { timeout: 30_000 }, () => {
-  it('names every source of a block, answers per worker, refuses and overrides, unblocks with what cleared', async () => {
-    const w1 = await grantedWorker(owner, 'docs', 'w1', CAPS, [GO]);
-    const w2 = await grantedWorker(owner, 'docs', 'w2', CAPS, [GO, GO2]);
-    const w3 = await grantedWorker(owner, 'docs', 'w3', CAPS);
-    const w4 = await grantedWorker(owner, 'docs', 'w4', CAPS);
+  it('names every source of a block, answers per runner, refuses and overrides, unblocks with what cleared', async () => {
+    const w1 = await grantedRunner(owner, 'docs', 'w1', CAPS, [GO]);
+    const w2 = await grantedRunner(owner, 'docs', 'w2', CAPS, [GO, GO2]);
+    const w3 = await grantedRunner(owner, 'docs', 'w3', CAPS);
+    const w4 = await grantedRunner(owner, 'docs', 'w4', CAPS);
 
     // The rows, as the owner reads them.
     expect(await blocksOf('A')).toMatchObject({ blocked: true, blocks: [{ kind: 'ticket', ref: 'docs:B' }] });
@@ -105,7 +105,7 @@ describe('S-BTN-44 blocks, resources and decisions', { timeout: 30_000 }, () => 
     expect((await blockedOn('decision:*')).tickets.map((t: { ticket_id: string }) => t.ticket_id)).toEqual(['docs:E']);
     expect((await blockedOn('ticket:docs:B')).tickets).toMatchObject([{ ticket_id: 'docs:A', blocked: true }]);
 
-    // A worker reporting on an instance it does not use, which lists its repository: accepted (R-BTN-101).
+    // A runner reporting on an instance it does not use, which lists its repository: accepted (R-BTN-101).
     expect((await w3.call('/v1/runner/readings', { readings: [{ instance: GO2, kind: 'measure', detail: { used: 4 } }] })).json).toMatchObject({ ok: true, refused: [] });
 
     // A and E are refused `blocked`; no claim of D without its id (advice) — W4 asks for any.
@@ -141,13 +141,13 @@ describe('S-BTN-44 blocks, resources and decisions', { timeout: 30_000 }, () => 
     // its recommendation is fresh.
     const hb = await w3.beat();
     expect((hb.json.messages as { kind: string }[]).filter((m) => m.kind === 'unblocked').length).toBeGreaterThan(0);
-    const toW3 = await rows<{ payload_json: string; status: string }>(`SELECT payload_json, status FROM messages WHERE to_worker_id = ? AND kind = 'unblocked' ORDER BY id`, w3.id);
+    const toW3 = await rows<{ payload_json: string; status: string }>(`SELECT payload_json, status FROM messages WHERE to_runner_id = ? AND kind = 'unblocked' ORDER BY id`, w3.id);
     expect(toW3.filter((m) => m.status === 'pending')).toEqual([]);
     expect(toW3.flatMap((m) => (JSON.parse(m.payload_json) as { tickets: { ticket_id: string }[] }).tickets.map((t) => t.ticket_id))).toEqual(['docs:D', 'docs:A', 'docs:E']);
     expect(await recommended(w3.id)).toEqual(expect.arrayContaining(['docs:A', 'docs:D', 'docs:E']));
 
-    // A worker declaring real-iphone registers: C unblocks; it stops heartbeating: C is blocked again.
-    const phone = await grantedWorker(owner, 'docs', 'phone', [...CAPS, 'real-iphone']);
+    // A runner declaring real-iphone registers: C unblocks; it stops heartbeating: C is blocked again.
+    const phone = await grantedRunner(owner, 'docs', 'phone', [...CAPS, 'real-iphone']);
     expect(await blocksOf('C')).toMatchObject({ blocked: false, blocks: [] });
     expect((await events('unblocked')).at(-1)).toMatchObject({ ticket: 'docs:C', cleared: [{ kind: 'capability', ref: 'real-iphone' }] });
     await advance(T0 + 10 * MIN + 30_000, T0 + 10 * MIN + 30_000 + 20 * MIN, [w1, w2, w3, w4]);
@@ -169,7 +169,7 @@ describe('S-BTN-44 blocks, resources and decisions', { timeout: 30_000 }, () => 
     await advance(T0 + 30 * MIN + 30_000, T0 + H + MIN, [w1, w2, w3, w4]);
     expect(await rows('SELECT state FROM instance_states WHERE instance = ?', GO)).toEqual([{ state: 'unknown' }]);
 
-    // After a day blocked on a capability no live worker has, C is under Needs you.
+    // After a day blocked on a capability no live runner has, C is under Needs you.
     await setClock(T0 + 26 * H);
     await tick();
     const state = await withCore((c) => c.uiState());

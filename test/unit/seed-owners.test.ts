@@ -40,7 +40,7 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
 
   it('an empty or repeated owner_keys is invalid-params; an administrator’s key or one of another role is a conflict', async () => {
     const admin = await makeKey('ssh-ed25519', 'seed-admin');
-    const worker = await makeKey('ssh-ed25519', 'seed-worker');
+    const runner = await makeKey('ssh-ed25519', 'seed-runner');
     await setAdminKeys(admin);
     await withCore(async (c) => {
       // Read as the administrator's route reads `owner_keys` (`Admin.ownerKeys`), one parse for both.
@@ -48,9 +48,9 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
       await expect(c.admin.readSeedOwners(seeded([{ ...OPS, owner_keys: [owner.publicKey, owner.publicKey] }]))).rejects.toThrow(/twice/);
       await expect(c.admin.readSeedOwners(seeded([{ ...OPS, owner_keys: ['not a key'] }]))).rejects.toMatchObject({ code: 'invalid-params' });
       await expect(seedOwners(c, seeded([{ ...OPS, owner_keys: [admin.publicKey] }]))).rejects.toMatchObject({ code: 'conflict' });
-      // A key of another role (R-BTN-57): a worker's.
-      await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, 'h', '[]', 'worker', ?, 'seed')`, worker.fingerprint, worker.publicKey);
-      await expect(seedOwners(c, seeded([{ ...OPS, owner_keys: [worker.publicKey] }]))).rejects.toMatchObject({ code: 'conflict' });
+      // A key of another role (R-BTN-57): a runner's.
+      await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, 'h', '[]', 'runner', ?, 'seed')`, runner.fingerprint, runner.publicKey);
+      await expect(seedOwners(c, seeded([{ ...OPS, owner_keys: [runner.publicKey] }]))).rejects.toMatchObject({ code: 'conflict' });
       // A right-shaped line whose base64 is no key stops the start as a malformed seed does.
       await expect(seedOwners(c, seeded([{ ...OPS, owner_keys: ['ssh-ed25519 AAAA'] }]))).rejects.toMatchObject({ code: 'invalid-params' });
       expect(await rows('SELECT COUNT(*) AS n FROM repository_owners')).toEqual([{ n: 0 }]);
@@ -66,8 +66,8 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
       await seedOwners(c, config);
       expect(await live()).toEqual([owner.publicKey, second.publicKey, third.publicKey].map((k) => k.split(' ').slice(0, 2).join(' ')).sort());
       // Each owns the repository: any of them grants.
-      const worker = await makeKey('ssh-ed25519', 'seed-multi-worker');
-      expect((await keyCall(third, '/v1/owner/ops/owners', { public_key: worker.publicKey })).status).toBe(200);
+      const runner = await makeKey('ssh-ed25519', 'seed-multi-runner');
+      expect((await keyCall(third, '/v1/owner/ops/owners', { public_key: runner.publicKey })).status).toBe(200);
       // A second start writes nothing new: the repository has its owners.
       await seedOwners(c, config);
       expect(await rows(`SELECT COUNT(*) AS n FROM repository_owners WHERE repository_id = 'ops' AND added_by = 'admin:seed'`)).toEqual([{ n: 3 }]);
@@ -76,7 +76,7 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
 
   it('an owned repository’s keys are checked too: a seed that would stop a rebuild stops this start, and writes nothing', async () => {
     const admin = await makeKey('ssh-ed25519', 'owned-admin');
-    const worker = await makeKey('ssh-ed25519', 'owned-worker');
+    const runner = await makeKey('ssh-ed25519', 'owned-runner');
     const another = await makeKey('ssh-ed25519', 'owned-already');
     await setAdminKeys(admin);
     await withCore(async (c) => {
@@ -85,10 +85,10 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
       // another (round two, 1).
       c.registry.register(OPS);
       await rows(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES ('ops', ?, ?, 'admin:test', 1)`, another.publicKey, another.fingerprint);
-      await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, 'h', '[]', 'worker', ?, 'seed')`, worker.fingerprint, worker.publicKey);
+      await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, 'h', '[]', 'runner', ?, 'seed')`, runner.fingerprint, runner.publicKey);
       for (const keys of [
         [admin.publicKey], // an administrator's key (R-BTN-57)
-        [worker.publicKey], // a worker's
+        [runner.publicKey], // a runner's
         ['ssh-ed25519 AAAA'], // right-shaped, no key at all
       ]) {
         await expect(seedOwners(c, seeded([{ ...OPS, owner_keys: [...keys] }]))).rejects.toBeDefined();

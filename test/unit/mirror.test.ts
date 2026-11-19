@@ -2,7 +2,7 @@
 // principal, the event feed, the foreign-claim report, and the dispatches after a transition.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import {
-  beat, captureDispatches, claimItem, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, workerCall, mirrorCall,
+  beat, captureDispatches, claimItem, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, tick, runnerCall, mirrorCall,
 } from '../helpers';
 
 const board = inject('board');
@@ -33,7 +33,7 @@ describe('§12: the event feed', () => {
     await cutover(T0);
     const { secret } = await register('vm-a');
     const { json: c } = await claimItem('vm-a', secret);
-    await workerCall('/v1/runner/activities', { secret, body: { activities: [
+    await runnerCall('/v1/runner/activities', { secret, body: { activities: [
       { id: 'p', claim_id: c.claim_id, kind: 'push', source: 'hook', started_at: T0, ended_at: T0 + 1, outcome: 'succeeded', detail: { branch: 'claude/r3-9001-x', sha: 'abc' } }] } });
     await beat('vm-a', secret, { transcripts: [{ repo: 'immediately-run/claude-sessions', path: 'cc/s.jsonl' }] });
     await endClaim('vm-a', secret, c.claim_id, { end_reason: 'released:cannot-finish:transient' });
@@ -44,7 +44,7 @@ describe('§12: the event feed', () => {
     expect(all.cutover_at).toBe(T0);
     expect(all.next).toBe(all.events.at(-1).seq);
     const claimed = all.events[1];
-    expect(claimed).toMatchObject({ kind: 'claimed', ticket_id: 'docs:R3-9001', claim_id: c.claim_id, actor: 'worker', detail: {} });
+    expect(claimed).toMatchObject({ kind: 'claimed', ticket_id: 'docs:R3-9001', claim_id: c.claim_id, actor: 'runner', detail: {} });
     expect(claimed.claim).toMatchObject({ nonce: c.nonce, status: 'released', started: true, legacy: false });
     expect(claimed.claim.request_id).toBeUndefined();
     const released = all.events[2];
@@ -57,14 +57,14 @@ describe('§12: the event feed', () => {
     expect((await feed(all.next)).events).toEqual([]);
   });
 
-  it('G-BTN-41 (server half): no session, hostname, worker id or email leaves through the feed', async () => {
+  it('G-BTN-41 (server half): no session, hostname, runner id or email leaves through the feed', async () => {
     await cutover(T0);
     const a = await register('vm-a', { session_name: 'sess-secret-name' });
     const { json: c } = await claimItem('vm-a', a.secret);
     await owner('/v1/ui/overrides/docs:R3-9002', { hold: true });
     await owner(`/v1/ui/claims/${c.claim_id}/reap`, { confirm: true });
     const text = JSON.stringify(await feed());
-    for (const leak of ['sess-secret-name', 'vm-a', 'owner@example.com', 'request_id', `worker:${a.id}`, 'worker_id']) {
+    for (const leak of ['sess-secret-name', 'vm-a', 'owner@example.com', 'request_id', `runner:${a.id}`, 'runner_id']) {
       expect([leak, text.includes(leak)]).toEqual([leak, false]);
     }
   });
@@ -94,7 +94,7 @@ describe('§12: foreign claims', () => {
     await cutover(T0);
     expect(await (await report({})).json()).toEqual({ imported: true, claim_id: expect.any(Number), nonce: 'f0f0f0' });
     expect(await (await report({})).json()).toEqual({ imported: true, claim_id: expect.any(Number), nonce: 'f0f0f0' });
-    expect(await rows(`SELECT c.nonce, c.reap_after, w.kind FROM claims c JOIN workers w ON w.id = c.worker_id`)).toEqual([
+    expect(await rows(`SELECT c.nonce, c.reap_after, w.kind FROM claims c JOIN runners w ON w.id = c.runner_id`)).toEqual([
       { nonce: 'f0f0f0', reap_after: T0 + 7 * 24 * 3_600_000, kind: 'legacy' }]);
     // The cutover import's shape, its claimed (legacy) event included: the export's claim record.
     const feedKinds = (await feed()).events.filter((e) => e.ticket_id === 'docs:R3-9001').map((e) => [e.kind, e.detail]);
@@ -122,9 +122,9 @@ describe('§10.3: Baton dispatches the workflows after a transition', () => {
   it('nothing before cutover; after it, a claim and an end dispatch the mirror and the sync (R-BTN-73)', async () => {
     const sent = await captureDispatches();
     const { secret } = await register('vm-a');
-    await workerCall('/v1/runner/shadow-report', { secret, body: { transition: 'claim', ticket_id: 'docs:R3-9001', status: 'in-progress', nonce: 'aaaaaa', at: T0 } });
+    await runnerCall('/v1/runner/shadow-report', { secret, body: { transition: 'claim', ticket_id: 'docs:R3-9001', status: 'in-progress', nonce: 'aaaaaa', at: T0 } });
     expect(sent).toEqual([]);
-    await workerCall('/v1/runner/shadow-report', { secret, body: { transition: 'set', ticket_id: 'docs:R3-9001', status: 'available', at: T0 } });
+    await runnerCall('/v1/runner/shadow-report', { secret, body: { transition: 'set', ticket_id: 'docs:R3-9001', status: 'available', at: T0 } });
     expect(sent).toEqual([]);
     await cutover(T0);
     const { json: c } = await claimItem('vm-a', secret);

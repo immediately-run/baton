@@ -1,19 +1,19 @@
 // S-BTN-37 a course changes under a claim — the rename half (BATON_SPEC §15, R-BTN-64, R-BTN-22;
 // R3-1232): while W1 runs fix, roadmap-pr merges a course file renaming fix to address
-// (`renamed_from: fix`) and adding a station, raising `version` but not `min_worker_version`.
+// (`renamed_from: fix`) and adding a station, raising `version` but not `min_runner_version`.
 // Must hold: W1's claim carries over — Baton rewrites its leg to address, its next advance into
 // review is accepted with its earlier fix runs counted as address's, and a W2 advance still naming
 // fix resolves to address; W2, still on the old version, keeps claiming. A later file that drops
 // the claim's station shows `station: unknown` on the heartbeat. The removal half (R3-1248): a
 // second change removes the `adjudicate` leg and the `adjudicated` station and raises
-// `min_worker_version`; a third adds a loop with no `max_runs`; a fourth adds a leg leaving the
+// `min_runner_version`; a third adds a loop with no `max_runs`; a fourth adds a leg leaving the
 // end station. Must hold: docs' required bar (`*`
 // with an `except` list) still covers the renamed leg and the second file is accepted although
 // the bar's `except` names `adjudicate`; a claim at `adjudicated` gets `station: unknown` and ends
 // `released:course-changed`, no failed attempt; W2, on the old version, is refused `stale-skills`
 // only after the second change; the third and fourth files are refused (R-BTN-69) and listed
 // under Needs you, the second staying in force. (`baton test-course` failing the second change without its
-// `min_worker_version` raise is test/unit/test-course.test.ts.) Runs on both hosts.
+// `min_runner_version` raise is test/unit/test-course.test.ts.) Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { adminSession, advance, beat, claimItem, course, cutover, endClaim, Git, keyCall, placed, register, rows, sessionCall, setAdminKeys, setClock } from '../helpers';
@@ -50,7 +50,7 @@ describe('S-BTN-37 a course changes under a claim (renames)', () => {
     const c2 = (await claimItem('vm-b', w2.secret, { ticket_id: 'docs:T-2' })).json;
     expect((await advance('vm-a', w1.secret, c1.claim_id, { leg: 'fix' })).status).toBe(200);
 
-    // The course change merges: version 4, workers still needed at 3. The sync's stations name
+    // The course change merges: version 4, runners still needed at 3. The sync's stations name
     // the new leg.
     git.registry = [course(4, 3, { course: RENAMED })];
     git.place('T-1', placed('reviewed', REVIEWED, [['address', 'ready']]));
@@ -68,7 +68,7 @@ describe('S-BTN-37 a course changes under a claim (renames)', () => {
     await advance('vm-b', w2.secret, c2.claim_id, { reached: 'fixed', leg: 'review' });
     expect((await advance('vm-b', w2.secret, c2.claim_id, { reached: 'reviewed', leg: 'address' })).json).toMatchObject({ code: 'not-eligible', rule_code: 'max-runs' });
 
-    // Workers on the old version keep claiming: min_worker_version did not move.
+    // Runners on the old version keep claiming: min_runner_version did not move.
     git.add('T-3', { rank: 3 });
     await git.post();
     const w3 = await register('test');
@@ -96,7 +96,7 @@ describe('S-BTN-37 a course changes under a claim (renames)', () => {
     expect((await endClaim('vm-a', w1.secret, c1.claim_id, { end_reason: 'released:course-changed', reached: 'reviewed' })).status).toBe(200);
   });
 
-  it('a removal raises min_worker_version: the claim there ends course-changed, old workers stop; a loop with no max_runs is refused', async () => {
+  it('a removal raises min_runner_version: the claim there ends course-changed, old runners stop; a loop with no max_runs is refused', async () => {
     const admin = await makeKey('ssh-ed25519', 'admin');
     const owner = await makeKey('ssh-ed25519', 'docs-owner');
     await setAdminKeys(admin);
@@ -111,7 +111,7 @@ describe('S-BTN-37 a course changes under a claim (renames)', () => {
     const w1 = await register('vm-a');
     const w2 = await register('vm-b'); // declares roadmap-pr at version 3
 
-    // The first change renames fix (version 4, workers still needed at 3): W2 keeps claiming, and
+    // The first change renames fix (version 4, runners still needed at 3): W2 keeps claiming, and
     // the bar covers the renamed leg.
     git.registry = [course(4, 3, { course: RENAMED })];
     git.place('T-1', placed('reviewed', REVIEWED, [['address', 'ready']]));
@@ -127,7 +127,7 @@ describe('S-BTN-37 a course changes under a claim (renames)', () => {
     const c1 = (await claimItem('vm-a', w1.secret, { ticket_id: 'docs:T-3' })).json;
     expect(c1).toMatchObject({ station: 'adjudicated' });
 
-    // The second change removes adjudicate and adjudicated, and raises min_worker_version to 5.
+    // The second change removes adjudicate and adjudicated, and raises min_runner_version to 5.
     const { adjudicate: _a, ...renamedLegs } = RENAMED.legs;
     const { adjudicated: _s, ...renamedStations } = RENAMED.stations;
     const REMOVED = { ...RENAMED, stations: renamedStations, legs: { ...renamedLegs, merge: { ...renamedLegs.merge, from: ['reviewed'] } } };
@@ -135,7 +135,7 @@ describe('S-BTN-37 a course changes under a claim (renames)', () => {
     git.place('T-3', placed('reviewed', REVIEWED, [['merge', 'ready']], { bars: { merge: ['family:glm'] } }));
     expect(await git.post()).toMatchObject({ status: 200 });
     // accepted although the bar's except names adjudicate (the entry is dropped)
-    expect(await rows(`SELECT version, min_worker_version FROM courses WHERE repository_id = 'docs' AND id = 'roadmap-pr'`)).toEqual([{ version: 5, min_worker_version: 5 }]);
+    expect(await rows(`SELECT version, min_runner_version FROM courses WHERE repository_id = 'docs' AND id = 'roadmap-pr'`)).toEqual([{ version: 5, min_runner_version: 5 }]);
     expect(await rows(`SELECT course_id FROM course_refusals`)).toEqual([]);
     // W1's claim at adjudicated: its station is gone. It keeps its lease, the heartbeat says
     // unknown, and it ends course-changed — no failed attempt, nothing to confirm.

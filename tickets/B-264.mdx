@@ -1,0 +1,116 @@
+---
+title: "B-264 — Build the 2026-11-19 amendment: the out-of-course finding and the policy knobs repos.unlisted and executor.builtin"
+id: B-264
+project: baton
+status: available
+updated: 2026-11-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1264
+tier: judgement
+description: "Build what the 2026-11-19 amendment adds: section 12.9's out-of-course finding (a default-branch push changing a control path whose head neither a trusted leg's end nor a ticket's merge by hand names, listed under Needs you after 15 minutes as 'Emergency interactive session'), last_written_by.human (R-BTN-194), and R-BTN-188's knobs repos.unlisted (by-name or none: whether a home listing no code_repos reaches repos: by name, R-BTN-140) and executor.builtin (allowed or refused: rule executor, R-BTN-107). Scenarios S-BTN-239 and S-BTN-240."
+topics:
+  - baton
+  - security
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** see the description. The owner's decisions are quoted in
+`spec/BATON_SPEC_HISTORY.md`'s 2026-11-19 entry.
+
+**Spec:** [BATON_SPEC §12.9](../spec/BATON_SPEC/12-security.md#sec-12-9),
+[§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-184](../spec/BATON_SPEC/12-security.md#sec-12-8)),
+[§3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) ([R-BTN-73](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3)), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)),
+[§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (rule `executor`),
+[§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3)),
+[§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`scope_findings`).
+
+### What to build
+
+The spec is the authority; where this list and a rule differ, the rule wins.
+
+1. **The knobs (R-BTN-188).** `repos.unlisted` (`by-name` | `none`) and `executor.builtin`
+   (`allowed` | `refused`) in the policy document, its validation, `policy show | diff`, and
+   the presets: `cooperative` and `plain-git` write `by-name` and `allowed`, `protected` and
+   `protected-hardware` write `none` and `refused`. A stored version naming neither reads
+   `by-name` and `allowed`; no guarantee reads either knob. The dry run names, in
+   `stops.runners`, the granted runners a change to `executor.builtin` would stop, and in
+   `stops.unreached` the live tickets whose `repos:` entries a change to `repos.unlisted`
+   leaves without reach.
+2. **`repos.unlisted` (R-BTN-140).** `by-name` is the code's present reading for a home that
+   lists no `code_repos` (`src/core/codeRepos.ts`, `src/defaults/cli.ts`), with two things the
+   rule adds: Baton judges it from the posted path (host and owner equal to the home's), and a
+   registered repository is reached by name only while its own policy says `by-name`. Under
+   `none` the reading ends: the entry has no reach and its ticket raises
+   `baton.repo-not-listed`. The observation hands the sync the knob as `repos_unlisted` (§4.3,
+   §14). R-BTN-92, R-BTN-96, R-BTN-139, R-BTN-141 and R-BTN-26 read "with reach".
+3. **`executor.builtin` (R-BTN-107, §6.6).** Rule `executor` at the claim only, refusal
+   `executor-refused`, for a runner whose last heartbeat reported `builtin` or no `executor` (a
+   sidecar), on every repository the ticket reaches whose policy says `refused`.
+4. **`last_written_by.human` (R-BTN-194).** Decided in the transaction that records
+   `last_written_by`, against the policy then in force, stored in its JSON and never recomputed;
+   rows recorded before this ticket read `false`. Served wherever `last_written_by` is; printed
+   at the claim and by `baton ticket show`.
+5. **The `out-of-course` finding (§12.9, R-BTN-73).** Everything its bullet says: the paths
+   judged by the floor's outright globs with R-BTN-184's match grammar; accounting only by a
+   record naming the delivery's head, for a ticket whose scope covers the repository, in
+   either order — a trusted leg's `ended_at_sha` from a runner granted `trusted-runner` on the
+   pushed repository, or a `pr-merged` arrival from the fact reader that repository's policy
+   names; one finding per head, open or closed; the truncated delivery; what the row stores
+   (sixteen paths and a count, the commit ids); `resolved_by` `baton`; an owner's resolve
+   refused `not-found` until listed; the 15 minutes from `raised_at` by `this.now` at the
+   read; the line and its `unrecorded paths`. The merge leg's end names the merge result as
+   `ended_at_sha` (R-BTN-183): check the shipped `merge` leg does.
+6. **The schema.** A new numbered migration (its number from `baton tickets next migration`)
+   widens `scope_findings.kind`, whose CHECK (`0034_scope_audit.sql`) names two kinds today,
+   and `events.kind` if its CHECK enumerates kinds.
+7. **R-BTN-184's floor** as amended: `.github/**`, `CODEOWNERS` and `docs/CODEOWNERS`,
+   `.codex/**`, wherever the floor is computed (the merge runner's refusal, the protection
+   print).
+
+### Exit criteria
+
+- S-BTN-239 and S-BTN-240 pass as their rows read; S-BTN-220 passes with `human`.
+- A `protected` policy stored before the knobs holds every guarantee it held (R-BTN-189).
+
+### Trust
+
+- **The policy knobs**: written only by an `approvers.policy` approver (R-BTN-188), validated
+  on write, never read from git.
+- **A runner's `executor.source`**: the runner's own statement on its heartbeat (a machine key).
+  Rule `executor` trusts it only to stop a misconfigured host; a lying runner passes, and the
+  spec says so (R-BTN-107).
+- **Push records**: Baton's own record of the forge's deliveries, verified in the Worker
+  (`X-Hub-Signature-256`, R-BTN-73). The finding reads `sender`, `after` and the commits' paths
+  from them and nothing a board post or a runner says (reach 7). A pusher controls the paths
+  its own push names only by changing them, which is what the finding reports.
+- **`pr-merged` arrivals and a trusted leg's reported end**: written by the fact reader's
+  `service:` key the owner named (R-BTN-192) and by a trusted runner's claim (R-BTN-182); a
+  `sync`-written arrival accounts for nothing. Only a runner granted `trusted-runner` on the pushed repository, and the fact reader its
+  own policy names, account for its pushes: another home's trusted runner does not. A
+  compromised fact reader or merge runner of the repository can account a finding away; that
+  is inside §12.8's
+  "a compromised host of trusted runners".
+- The finding is information: it grants nothing, so a forged delivery could at worst list a
+  false line under Needs you.
+
+### Invariants
+
+- R-BTN-73: a notification never computes or carries state beyond its named products; the
+  finding is one of them, from the delivery's own fields, with no repository content read.
+- R-BTN-32: the 15 minutes are compared against `this.now` at the read; no alarm, no
+  `Date.now()`.
+- Migrations are append-only: one new file widens the CHECK; 0034 is not edited.
+- R-BTN-33: the row stores identifiers only (pusher, commit, paths), no file content.
+- R-BTN-189: neither knob is a guarantee's condition; adding them breaks no stored floor
+  (test: a `protected` policy stored before the knobs keeps every guarantee it held).
+- R-BTN-66: under `paths.control: any` nothing is checked and nothing is raised.
+- R-BTN-31: S-BTN-239, S-BTN-240.
+
+## Status
+
+_filed 2026-11-19._

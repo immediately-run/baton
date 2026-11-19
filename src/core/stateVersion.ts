@@ -4,9 +4,9 @@
 // the counter in its own commit (a write outside any transaction bumps it at once), so a
 // reader that saw version n and sees n again knows no stored fact changed between.
 //
-// Liveness is the one exception, by design: a worker's `last_seen_at`/`last_activity_at`
-// beat (the heartbeat's and the worker call's) and the request nonces change on every call,
-// and what they decide is clock-dependent — whether a worker is live or stalled is
+// Liveness is the one exception, by design: a runner's `last_seen_at`/`last_activity_at`
+// beat (the heartbeat's and the runner call's) and the request nonces change on every call,
+// and what they decide is clock-dependent — whether a runner is live or stalled is
 // `now - last_seen_at` against its lease — so a reader that depends on them folds the clock
 // in (the recommendation memo's deadline, B-242's time bucket) instead of a bump on every beat.
 // Those writes run inside `liveness()`; nothing else does.

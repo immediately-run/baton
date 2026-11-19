@@ -67,11 +67,11 @@ export async function syncCall(path: string, body?: unknown, token?: string) {
   return send(path, body);
 }
 
-/** The ticket ids a worker is recommended, in order (R-BTN-45, R-BTN-61): what a claim without
+/** The ticket ids a runner is recommended, in order (R-BTN-45, R-BTN-61): what a claim without
  *  an id would take first. */
-export function recommended(workerId: number, limit = 100): Promise<string[]> {
+export function recommended(runnerId: number, limit = 100): Promise<string[]> {
   return withCore((o) => (o.claims as unknown as { recommendations: (id: number, limit: number) => { recommendations: { ticket_id: string }[] } })
-    .recommendations(workerId, limit).recommendations.map((r) => r.ticket_id));
+    .recommendations(runnerId, limit).recommendations.map((r) => r.ticket_id));
 }
 
 /** A refresh (§7.1 step 4): docs' head re-posted with a fresh observation, so a reading follows
@@ -120,13 +120,13 @@ export function payload(
 }
 
 /** A registry entry (R-BTN-48) as the sync posts it: docs' `roadmap-pr`, its course file the
- *  vendored fixture, at `version` with workers needed at `min` (rule 9). */
+ *  vendored fixture, at `version` with runners needed at `min` (rule 9). */
 export function course(version = 3, min = version, over: Record<string, unknown> = {}) {
-  return { id: 'roadmap-pr', version, min_worker_version: min, skill: 'next-roadmap-item', course: roadmapPr,
+  return { id: 'roadmap-pr', version, min_runner_version: min, skill: 'next-roadmap-item', course: roadmapPr,
     step_kinds: [...ACTIVITY_KINDS], branch_pattern: 'claude/{ticket}-*', ...over };
 }
 
-// ── workers (R3-1211) ─────────────────────────────────────────────────────────────────────
+// ── runners (R3-1211) ─────────────────────────────────────────────────────────────────────
 
 export const TOKENS = { 'vm-a': 'tok-vm-a', 'vm-b': 'tok-vm-b', mac: 'tok-mac', test: 'tok-test' } as const;
 const HOSTS = { 'vm-a': 'vm-a', 'vm-b': 'vm-b', mac: 'owner-mac', test: 'harness' } as const;
@@ -136,11 +136,11 @@ export async function sha256(text: string) {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** A worker call with a credential's token and, after the first heartbeat, the secret. `client`
+/** A runner call with a credential's token and, after the first heartbeat, the secret. `client`
  *  is the `Baton-Client` the call names — absent, the harness's own (the host's `call`). */
-export function workerCall(path: string, { cred = 'vm-a', secret, body, method, client }: { cred?: keyof typeof TOKENS; secret?: string; body?: unknown; method?: string; client?: string } = {}) {
+export function runnerCall(path: string, { cred = 'vm-a', secret, body, method, client }: { cred?: keyof typeof TOKENS; secret?: string; body?: unknown; method?: string; client?: string } = {}) {
   const headers: Record<string, string> = { Authorization: `Bearer ${TOKENS[cred]}`, 'Content-Type': 'application/json' };
-  if (secret) headers['X-Worker-Secret'] = secret;
+  if (secret) headers['X-Runner-Secret'] = secret;
   if (client) headers['Baton-Client'] = client;
   return call(path, { method: method ?? (body === undefined ? 'GET' : 'POST'), headers, body: body === undefined ? undefined : JSON.stringify(body) });
 }
@@ -149,12 +149,12 @@ export function workerCall(path: string, { cred = 'vm-a', secret, body, method, 
  *  `vm-p256`, `vm-sk-ed`, `vm-sk-p256` (R-BTN-13 as amended, R3-1239). */
 export const SSH_KEYS: Record<string, TestKey> = Object.fromEntries((JSON.parse(env.TEST_SSH_KEYS ?? '[]') as TestKey[]).map((k) => [k.name, k]));
 
-/** A worker call signed with test key `name` (R-BTN-13): `created` is the core's clock unless
+/** A runner call signed with test key `name` (R-BTN-13): `created` is the core's clock unless
  *  given; a body is JSON. `headers` ride beside the signature (B-254: a `Baton-Client` of the
  *  test's choosing). Returns the request too, to replay it. */
 export async function signedCall(name: string, path: string, o: Omit<SignOptions, 'body'> & { body?: unknown; secret?: string; url?: string; headers?: Record<string, string> } = {}) {
   const created = o.created ?? Math.floor((await withCore((c) => c.now())) / 1000);
-  const headers: Record<string, string> = { ...(o.headers ?? {}), ...(o.secret ? { 'X-Worker-Secret': o.secret } : {}) };
+  const headers: Record<string, string> = { ...(o.headers ?? {}), ...(o.secret ? { 'X-Runner-Secret': o.secret } : {}) };
   const req = await signedRequest(SSH_KEYS[name], o.url ?? ORIGIN + path, { ...o, created, headers, body: o.body === undefined ? undefined : JSON.stringify(o.body) });
   const replay = req.clone();
   const res = await hostCall(req);
@@ -171,25 +171,25 @@ export function hbBody(cred: keyof typeof TOKENS, over: Record<string, unknown> 
   };
 }
 
-/** Register a worker with a fresh secret; returns its id and secret. */
+/** Register a runner with a fresh secret; returns its id and secret. */
 export async function register(cred: keyof typeof TOKENS = 'vm-a', over: Record<string, unknown> = {}) {
   const secret = `secret-${cred}-${Math.random().toString(16).slice(2)}`;
-  const res = await workerCall('/v1/runner/heartbeat', { cred, body: hbBody(cred, { secret_hash: await sha256(secret), ...over }) });
+  const res = await runnerCall('/v1/runner/heartbeat', { cred, body: hbBody(cred, { secret_hash: await sha256(secret), ...over }) });
   const json = (await res.json()) as Record<string, unknown>;
   if (res.status !== 200) throw new Error(`register ${cred}: ${res.status} ${JSON.stringify(json)}`);
-  return { id: json.worker_id as number, secret, first: json };
+  return { id: json.runner_id as number, secret, first: json };
 }
 
 /** A later heartbeat, authenticated by the secret. */
 export async function beat(cred: keyof typeof TOKENS, secret: string, over: Record<string, unknown> = {}) {
-  const res = await workerCall('/v1/runner/heartbeat', { cred, secret, body: hbBody(cred, over) });
+  const res = await runnerCall('/v1/runner/heartbeat', { cred, secret, body: hbBody(cred, over) });
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 
 /** An active claim row, seeded directly: claims are R3-1212's; R3-1211 only reads them. */
-export async function seedClaim(workerId: number, item: string, at = 0) {
-  await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status)
-              VALUES (?, ?, ?, 'abc123', '', ?, 'active')`, item, workerId, `seed:${workerId}:${item}`, at);
+export async function seedClaim(runnerId: number, item: string, at = 0) {
+  await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status)
+              VALUES (?, ?, ?, 'abc123', '', ?, 'active')`, item, runnerId, `seed:${runnerId}:${item}`, at);
   return (await rows<{ id: number }>(`SELECT id FROM claims WHERE ticket_id = ? AND status = 'active'`, item))[0].id;
 }
 
@@ -207,13 +207,13 @@ export const requestId = () => `req-${++requests}-${Math.random().toString(16).s
 
 /** `POST /v1/runner/claim`; returns the status and the body. */
 export async function claimItem(cred: keyof typeof TOKENS, secret: string, body: Record<string, unknown> = {}, client?: string) {
-  const res = await workerCall('/v1/runner/claim', { cred, secret, body: { request_id: requestId(), ...body }, ...(client ? { client } : {}) });
+  const res = await runnerCall('/v1/runner/claim', { cred, secret, body: { request_id: requestId(), ...body }, ...(client ? { client } : {}) });
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 
 /** `POST /v1/runner/claims/{id}/end`. */
 export async function endClaim(cred: keyof typeof TOKENS, secret: string, claimId: number, body: Record<string, unknown>) {
-  const res = await workerCall(`/v1/runner/claims/${claimId}/end`, { cred, secret, body });
+  const res = await runnerCall(`/v1/runner/claims/${claimId}/end`, { cred, secret, body });
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 
@@ -340,7 +340,7 @@ export class Git {
 
 /** `POST /v1/runner/claims/{id}/advance`. */
 export async function advance(cred: keyof typeof TOKENS, secret: string, claimId: number, body: Record<string, unknown>) {
-  const res = await workerCall(`/v1/runner/claims/${claimId}/advance`, { cred, secret, body });
+  const res = await runnerCall(`/v1/runner/claims/${claimId}/advance`, { cred, secret, body });
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 

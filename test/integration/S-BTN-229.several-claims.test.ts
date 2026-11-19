@@ -17,13 +17,13 @@ beforeEach(async () => {
   await cutover();
 });
 
-/** Bind the worker's credential by an owner's grant on docs with `max_claims` (as `owner grant
+/** Bind the runner's credential by an owner's grant on docs with `max_claims` (as `owner grant
  *  add --max-claims` stores it), the grant covering what it declares. */
-async function grant(workerId: number, maxClaims: number) {
-  const [{ credential_id }] = await rows<{ credential_id: string }>('SELECT credential_id FROM workers WHERE id = ?', workerId);
-  const caps = (await rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ?', workerId)).map((r) => r.capability);
+async function grant(runnerId: number, maxClaims: number) {
+  const [{ credential_id }] = await rows<{ credential_id: string }>('SELECT credential_id FROM runners WHERE id = ?', runnerId);
+  const caps = (await rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ?', runnerId)).map((r) => r.capability);
   await rows(`UPDATE credentials SET created_by = 'owner:owner@example.com' WHERE id = ?`, credential_id);
-  await rows(`INSERT INTO worker_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at)
+  await rows(`INSERT INTO runner_grants (credential_id, repository_id, capabilities, max_tier, max_claims, granted_by, granted_at)
               VALUES (?, 'docs', ?, NULL, ?, 'owner:owner@example.com', 0)
               ON CONFLICT (credential_id, repository_id) DO UPDATE SET max_claims = excluded.max_claims`, credential_id, JSON.stringify(caps), maxClaims);
 }
@@ -31,7 +31,7 @@ async function grant(workerId: number, maxClaims: number) {
 describe('S-BTN-229: a runner holds several claims, up to R-BTN-4\'s bound', () => {
   it('the lower of concurrency and the grant\'s max_claims; the heartbeat answers every claim; raising the grant admits one more', async () => {
     const a = await register('vm-a', { concurrency: 3, capabilities: CAPS });
-    expect(await rows('SELECT concurrency FROM workers WHERE id = ?', a.id)).toEqual([{ concurrency: 3 }]);
+    expect(await rows('SELECT concurrency FROM runners WHERE id = ?', a.id)).toEqual([{ concurrency: 3 }]);
     await grant(a.id, 2);
     const first = await claimItem('vm-a', a.secret);
     const second = await claimItem('vm-a', a.secret);
@@ -54,12 +54,12 @@ describe('S-BTN-229: a runner holds several claims, up to R-BTN-4\'s bound', () 
 
   it('a runner declaring 1 — the default — holds one claim as before; concurrency is clamped, never refused', async () => {
     const a = await register('vm-a', { concurrency: 99 });
-    expect(await rows('SELECT concurrency FROM workers WHERE id = ?', a.id)).toEqual([{ concurrency: 32 }]);
+    expect(await rows('SELECT concurrency FROM runners WHERE id = ?', a.id)).toEqual([{ concurrency: 32 }]);
     // An ungranted key's bound is 1 whatever it declares.
     expect((await claimItem('vm-a', a.secret)).status).toBe(200);
     expect((await claimItem('vm-a', a.secret)).json.rule).toBe('max-claims');
     const b = await register('vm-b', { concurrency: 0 });
-    expect(await rows('SELECT concurrency FROM workers WHERE id = ?', b.id)).toEqual([{ concurrency: 1 }]);
+    expect(await rows('SELECT concurrency FROM runners WHERE id = ?', b.id)).toEqual([{ concurrency: 1 }]);
   });
 
   it('one claim\'s force-reap fences that claim alone; the fenced list clears it; silence reaps every claim', async () => {

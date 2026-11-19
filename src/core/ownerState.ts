@@ -37,8 +37,8 @@ export const SECTIONS: readonly Section[] = [
   { table: 'repository_owners', order: 'repository_id, fingerprint' },
   { table: 'credentials', order: 'id' },
   { table: 'sync_keys', order: 'fingerprint' },
-  { table: 'worker_grants', order: 'credential_id, repository_id' },
-  { table: 'workers', order: 'id' },
+  { table: 'runner_grants', order: 'credential_id, repository_id' },
+  { table: 'runners', order: 'id' },
   { table: 'owner_bars', order: 'id' },
   { table: 'ticket_overrides', order: 'ticket_id', ticketScoped: { kind: 'override' } },
   { table: 'closed_tickets', order: 'ticket_id' },
@@ -261,18 +261,18 @@ export class OwnerState {
       roles.set(fp, here);
     }
     const creds = new Set((sections.credentials ?? []).map((r) => String(r.id)));
-    for (const r of sections.worker_grants ?? []) {
-      if (!str(r.credential_id) || !creds.has(r.credential_id)) bad('worker_grants row', `${JSON.stringify(r.credential_id)} is not an imported credential`);
-      if (!str(r.repository_id) || !repoIds.has(r.repository_id)) bad('worker_grants row', `${JSON.stringify(r.repository_id)} is not an imported repository`);
-      if (r.role != null && !['runner', 'trusted-runner'].includes(String(r.role))) bad('worker_grants row', `${r.credential_id}: role is unknown`);
+    for (const r of sections.runner_grants ?? []) {
+      if (!str(r.credential_id) || !creds.has(r.credential_id)) bad('runner_grants row', `${JSON.stringify(r.credential_id)} is not an imported credential`);
+      if (!str(r.repository_id) || !repoIds.has(r.repository_id)) bad('runner_grants row', `${JSON.stringify(r.repository_id)} is not an imported repository`);
+      if (r.role != null && !['runner', 'trusted-runner'].includes(String(r.role))) bad('runner_grants row', `${r.credential_id}: role is unknown`);
     }
     for (const r of sections.couriers ?? []) {
       if (!str(r.credential_id) || !creds.has(r.credential_id)) bad('couriers row', `${JSON.stringify(r.credential_id)} is not an imported credential`);
       if (!str(r.repository_id) || !repoIds.has(r.repository_id)) bad('couriers row', `${JSON.stringify(r.repository_id)} is not an imported repository`);
     }
-    for (const r of sections.workers ?? []) {
-      if (!Number.isSafeInteger(r.id)) bad('workers row', 'an integer id is required');
-      if (!str(r.hostname) || !str(r.session_name)) bad('workers row', `${JSON.stringify(r.id)}: hostname and session_name are required`);
+    for (const r of sections.runners ?? []) {
+      if (!Number.isSafeInteger(r.id)) bad('runners row', 'an integer id is required');
+      if (!str(r.hostname) || !str(r.session_name)) bad('runners row', `${JSON.stringify(r.id)}: hostname and session_name are required`);
     }
     for (const table of ['closed_tickets', 'ticket_overrides']) {
       for (const r of sections[table] ?? []) {
@@ -327,7 +327,7 @@ export class OwnerState {
     if (Object.keys(awaiting).length) this.setSetting('pending_first_snapshot', JSON.stringify(Object.keys(awaiting).sort()));
     for (const s of SECTIONS) {
       if (s.ticketScoped) continue;
-      const rows = (b.sections?.[s.table] ?? []).map((r) => (s.table === 'workers' ? { ...r, last_seen_at: 0, last_activity_at: 0 } : r));
+      const rows = (b.sections?.[s.table] ?? []).map((r) => (s.table === 'runners' ? { ...r, last_seen_at: 0, last_activity_at: 0 } : r));
       importOne(s.table, rows);
     }
     for (const s of HISTORY_SECTIONS) importOne(s.table, b.sections?.[s.table] ?? []);

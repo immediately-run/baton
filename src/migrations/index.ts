@@ -58,7 +58,8 @@ import workerProfile from './0056_worker_profile.sql';
 import severalClaims from './0057_several_claims.sql';
 import clientVersions from './0058_client_versions.sql';
 import sequences from './0059_sequences.sql';
-import childrenOwnerState from './0060_children_owner_state.sql';
+import runners from './0061_runners.sql';
+import childrenOwnerState from './0064_children_owner_state.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -188,8 +189,10 @@ export const MIGRATIONS: Migration[] = [
   // 0059 is B-176's (the per-repository, per-kind sequences, and the `sequence` event kind),
   // renumbered at the merge behind main's 0048–0058, its events CHECK the union with B-234's.
   { id: 59, sql: sequences },
-  // 0060 is R3-1258's (§4.6 children, §4.8 owner state: `tickets.parent`, `pending_owner_state`,
+  // 0061 is B-68's implementation-wide worker → runner migration; 0060 belongs to B-259.
+  { id: 61, sql: runners },
+  // 0064 is R3-1258's (§4.6 children, §4.8 owner state: `tickets.parent`, `pending_owner_state`,
   // the `spawned_children` a `spawned` end reports, and the `capacity`, `parent-invalid`,
   // `frozen`, `unfrozen`, `sealed`, `imported` event kinds).
-  { id: 60, sql: childrenOwnerState },
+  { id: 64, sql: childrenOwnerState },
 ];

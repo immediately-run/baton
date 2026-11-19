@@ -56,7 +56,7 @@ process for development and CI. Nothing crosses a tenant.
   `main`. immediately.run's own instance is `https://baton.immediately.run` (provisioned by
   R3-1208), and it is the only deployed instance: a home repository binds to one Baton
   (R-BTN-56), every registered repository binds to production, and a staging instance would hold
-  nothing and test nothing (B-224; the owner, 2026-11-09).
+  nothing and test nothing.
 - **R-BTN-37 (shared modules are vendored by hash).** The Worker imports byte-identical copies
   of the pure modules it shares with docs — `baton.mjs`, `vocabulary.mjs`, `sessionUsage.mjs`
   and `batonSync.mjs` — from `src/shared/`, listed in `src/shared/manifest.json` with the docs

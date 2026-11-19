@@ -175,7 +175,7 @@ describe('R-BTN-88: the import', () => {
     const seq = (await rows<{ n: number }>('SELECT MAX(seq) AS n FROM events'))[0].n;
     expect(seq).toBeGreaterThanOrEqual(ex.events_seq);
     // The runners resume unkeyed.
-    expect((await rows<{ last_seen_at: number }>('SELECT last_seen_at FROM workers')).every((r) => r.last_seen_at === 0)).toBe(true);
+    expect((await rows<{ last_seen_at: number }>('SELECT last_seen_at FROM runners')).every((r) => r.last_seen_at === 0)).toBe(true);
     // A request signed at the source's sealed_at is a captured one replayed: refused (§4.8).
     expect((await call('/v1/admin/import', ex)).json.code).toBe('unauthenticated');
     // A second import into the now-non-empty Baton is refused — signed after the floor.

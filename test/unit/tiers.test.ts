@@ -1,9 +1,9 @@
 // R3-1231 part 4 — tiers are a repository setting (BATON_SPEC R-BTN-66, §7.2 rule 5): a ticket's
-// tier arrives by name and is matched as its position in its repository's ladder; a worker's
+// tier arrives by name and is matched as its position in its repository's ladder; a runner's
 // ceiling may differ per repository. S-BTN-26.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { ceilingIn, tierPosition } from '../../src/core/registry';
-import { claimItem, course, cutover, payload, register, rows, setClock, syncCall, syncToken, withCore, workerCall, hbBody, sha256, recommended } from '../helpers';
+import { claimItem, course, cutover, payload, register, rows, setClock, syncCall, syncToken, withCore, runnerCall, hbBody, sha256, recommended } from '../helpers';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-13T12:00:00Z');
@@ -15,7 +15,7 @@ const DECLARES = { courses: [{ repository: 'docs', course: 'roadmap-pr', version
 
 beforeEach(async () => {
   await setClock(T0);
-  // docs' board carries the fleet data a worker's provider is resolved from (rule 7).
+  // docs' board carries the fleet data a runner's provider is resolved from (rule 7).
   await syncCall('/v1/sync/board', payload(board.shas.A, null, board.states.A));
   await withCore((c) => {
     c.registry.register({ id: 'ops', github: 'immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', tiers: LADDER });
@@ -42,7 +42,7 @@ describe('tiers per repository (R-BTN-66)', () => {
       { local_id: 'T-small', tier: 'small', tier_position: 0 }]);
   });
 
-  it('rule 5 compares in the repository’s ladder at the ceiling the worker declared for it', async () => {
+  it('rule 5 compares in the repository’s ladder at the ceiling the runner declared for it', async () => {
     const low = await register('vm-a', { ...DECLARES, tier_ceilings: { ops: 'small' } });
     expect(await offered(low.id)).toEqual(['ops:T-small']);
     const high = await register('vm-b', { ...DECLARES, tier_ceilings: { ops: 'large' } });
@@ -66,16 +66,16 @@ describe('tiers per repository (R-BTN-66)', () => {
 
   it('a heartbeat’s per-repository ceiling must name a tier of that registered repository’s ladder', async () => {
     for (const tier_ceilings of [{ ops: 'critical' }, { ops: 'Small' }]) {
-      const res = await workerCall('/v1/runner/heartbeat', { body: hbBody('vm-a', { secret_hash: await sha256('s'), tier_ceilings }) });
+      const res = await runnerCall('/v1/runner/heartbeat', { body: hbBody('vm-a', { secret_hash: await sha256('s'), tier_ceilings }) });
       expect([res.status, ((await res.json()) as { code: string }).code]).toEqual([400, 'invalid-params']);
     }
     // One for a repository Baton does not serve is reported, never refusing the heartbeat
-    // (round 1, 1-A-5): a refused heartbeat would cost the worker its leases everywhere.
-    const res = await workerCall('/v1/runner/heartbeat', { body: hbBody('vm-a', { secret_hash: await sha256('s'), tier_ceilings: { nope: 'small', ops: 'small' } }) });
+    // (round 1, 1-A-5): a refused heartbeat would cost the runner its leases everywhere.
+    const res = await runnerCall('/v1/runner/heartbeat', { body: hbBody('vm-a', { secret_hash: await sha256('s'), tier_ceilings: { nope: 'small', ops: 'small' } }) });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ tier_ceilings_unregistered: ['nope'] });
-    // Kept (round 2, 2-A-1): once nope registers, the worker is not widened to its top.
-    expect(await rows(`SELECT tier_ceilings FROM workers WHERE hostname = 'vm-a'`)).toEqual([{ tier_ceilings: '{"nope":"small","ops":"small"}' }]);
+    // Kept (round 2, 2-A-1): once nope registers, the runner is not widened to its top.
+    expect(await rows(`SELECT tier_ceilings FROM runners WHERE hostname = 'vm-a'`)).toEqual([{ tier_ceilings: '{"nope":"small","ops":"small"}' }]);
   });
 
   it('a ticket re-tiered above its holder’s ceiling in that ladder ends stale-board', async () => {
@@ -88,19 +88,19 @@ describe('tiers per repository (R-BTN-66)', () => {
   });
 
   it('G-BTN-40 for rule 5: the query and gatesFor agree for every ceiling, in docs’ ladder and ops’', async () => {
-    const workers = [
+    const runners = [
       { cred: 'vm-a' as const, over: { tier_ceilings: { ops: 'small' } } },
       { cred: 'vm-b' as const, over: { tier_ceilings: { ops: 'large', docs: 'routine' } } },
       { cred: 'mac' as const, over: { tier_ceiling: 'judgement' } }, // ops' ladder lacks it: its bottom
       { cred: 'test' as const, over: {} },
     ];
     await cutover(1, 'docs');
-    for (const w of workers) {
+    for (const w of runners) {
       const { id } = await register(w.cred, { ...DECLARES, ...w.over });
       const agree = await withCore((o) => {
-        const c = o.claims as unknown as { candidates: (w: unknown, page: number) => { id: string }[]; worker: (id: number) => unknown;
+        const c = o.claims as unknown as { candidates: (w: unknown, page: number) => { id: string }[]; runner: (id: number) => unknown;
           item: (id: string) => { station: { next_leg: string } }; gate: (w: unknown, item: unknown, leg: string, phase: string) => { ok: boolean } };
-        const facts = c.worker(id);
+        const facts = c.runner(id);
         const query = new Set(c.candidates(facts, 0).map((r) => r.id));
         const all = (o.store.exec<{ id: string }>(`SELECT t.id FROM tickets t JOIN ticket_next_legs a ON a.ticket_id = t.id AND a.state = 'ready'`).toArray()).map((r) => r.id);
         return all.map((t) => { const item = c.item(t); return [t, query.has(t), c.gate(facts, item, item.station.next_leg, 'claim').ok]; });

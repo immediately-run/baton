@@ -157,18 +157,18 @@ export function checkStateChanging(req: Request, env: Config): void {
   }
 }
 
-/** The worker principal (§10.1, R-BTN-13): a bearer token whose SHA-256 is one of the
+/** The runner principal (§10.1, R-BTN-13): a bearer token whose SHA-256 is one of the
  *  `TOKEN_HASHES` Worker secret's values (`{credential id: hex}`). Returns that credential id.
  *  Revoking a token is deleting its hash; the credential's policy (hostname, allowed
  *  capabilities) is the `CREDENTIALS` secret, which the object mirrors into `credentials`. */
-export async function verifyWorker(req: Request, env: Config): Promise<string> {
+export async function verifyRunner(req: Request, env: Config): Promise<string> {
   const token = bearer(req);
-  if (!token) throw new BatonError('unauthenticated', 'a worker token is required');
+  if (!token) throw new BatonError('unauthenticated', 'a runner token is required');
   let hashes: Record<string, string>;
   try {
     hashes = JSON.parse(env.TOKEN_HASHES ?? '{}');
   } catch {
-    throw new BatonError('unavailable', 'the worker token table is unreadable');
+    throw new BatonError('unavailable', 'the runner token table is unreadable');
   }
   const presented = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)));
   let match: string | null = null;
@@ -178,7 +178,7 @@ export async function verifyWorker(req: Request, env: Config): Promise<string> {
     // Compare every entry in constant time, so the scan's timing says nothing.
     if (equalBytes(presented, want)) match = id;
   }
-  if (!match) throw new BatonError('unauthenticated', 'unknown worker token');
+  if (!match) throw new BatonError('unauthenticated', 'unknown runner token');
   return match;
 }
 
@@ -226,7 +226,7 @@ const NONCE = /^[A-Za-z0-9+/_=-]{22,64}$/;
 export const KEY_FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
 
 /** An API key (R-BTN-159): `bak_<id>_<secret>`, 64 random bits of id and 256 of secret, hex —
- *  an administrator's, an owner's or a worker's, beside SSH keys at the holder's choice. Its
+ *  an administrator's, an owner's or a runner's, beside SSH keys at the holder's choice. Its
  *  public half — the line BATON_ADMIN_KEYS lists, or an owner key or a grant registers — is
  *  `bak_<id> sha256:<SHA-256 of the whole key>`, with an optional comment; its fingerprint is
  *  `bak_<id>`. A sync, probe or courier key stays an SSH key: no API key is accepted there. */

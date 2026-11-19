@@ -122,6 +122,7 @@ mean (R-BTN-50).
   | `capability_types`, `capability_roles` | course | the capability types its legs may require, and named lists of capabilities | R-BTN-121 |
   | `rank_advice`, `rank_launch` | course | schema ids (R-BTN-108) that `rank.mjs`'s `advice` and `launch` must meet; absent, they are dropped | R-BTN-152 |
   | `label` | station, leg | display text | — |
+  | `display_status` | station | the status a ticket source's writer shows people for a ticket at this station (`show`, R-BTN-74): a string of 1–64 characters naming a status the source's reader posts as live | R-BTN-74, R-BTN-200 |
   | `renamed_from` | station, leg | the earlier name this one carries over | R-BTN-64, R-BTN-142 |
   | `entry` | station | outputs any leg arriving here must have produced | R-BTN-109 |
   | `from` | leg | the stations it leaves | R-BTN-69 |
@@ -970,7 +971,7 @@ mean (R-BTN-50).
       `agent_concluded_idle` with the signals that were quiet, `agent_concluded_absolute` — so
       the close and the review round can see how the leg ended; Baton is told none of it (no
       condition raised, no deadline taken, nothing posted: the server learns the leg ended as it
-      learns every leg, by the claim's end — the owner, 2026-10-22). Both bounds are the stub's
+      learns every leg, by the claim's end). Both bounds are the stub's
       constants, a course's to raise or lower in its copy of the file. While a leg runs, each of
       the runner's beats logs its duration and the age of its newest activity signal
       (R-BTN-72), so an operator watches a wedge form instead of silence.

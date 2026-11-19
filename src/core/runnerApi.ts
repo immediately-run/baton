@@ -1,5 +1,5 @@
-// workerApi.ts — the server side of workers (BATON_SPEC §5, §6.8, §6.9, §9, §10.1–10.2, §11;
-// R3-1211): registration and heartbeats with credential binding and per-worker secrets,
+// runnerApi.ts — the server side of runners (BATON_SPEC §5, §6.8, §6.9, §9, §10.1–10.2, §11;
+// R3-1211): registration and heartbeats with credential binding and per-runner secrets,
 // activities, transcript pointers, messages, the alarm's share of them, and shadow reports. No
 // claim logic lives here (R3-1212): claims are read, and written only by the shadow report,
 // whose rows the unique indexes guard. The model tables are gone (B-142): a heartbeat may still
@@ -46,21 +46,21 @@ export interface Ctx {
   config: Config;
   now: () => number;
   /** R-BTN-19: a heartbeat's `fenced` report, handed to the claims (R3-1212). */
-  fenced?: (workerId: number, incarnation: number, claimId: number) => boolean;
+  fenced?: (runnerId: number, incarnation: number, claimId: number) => boolean;
   /** §7.5 R-BTN-90 (B-234): a heartbeat's `leg_finished` for its claim's running run, handed to
    *  the claims — the re-arm and the withdrawal, before this beat delivers its messages. */
-  legFinished?: (workerId: number, claimId: number, seq: number) => void;
+  legFinished?: (runnerId: number, claimId: number, seq: number) => void;
   /** §11: where the claim is and what git shows of its ticket (R3-1232), from the claims. */
   claimView?: (claimId: number) => Record<string, unknown>;
   /** R-BTN-67: the owner bars in force on the credential's repositories, for the heartbeat's `bars`. */
   bars?: (now: number, credentialId: string) => unknown[];
   /** R-BTN-103: store the repositories and `asks` a heartbeat delivers notices for (`granted`: the
    *  repositories a machine key works on, null for any other key), returning what was refused. */
-  couriers?: (workerId: number, granted: string[] | null, entries: { repository: string; asks: string[] }[]) => { repository: string; code: string }[];
+  couriers?: (runnerId: number, granted: string[] | null, entries: { repository: string; asks: string[] }[]) => { repository: string; code: string }[];
   /** §12.8 (B-145): the policy store — the protection reports and pins a heartbeat carries
    *  (R-BTN-180, R-BTN-189) and the hashes the answer carries for its repositories. */
   policies?: Policies;
-  /** R-BTN-75: a worker became live or changed what it declares. */
+  /** R-BTN-75: a runner became live or changed what it declares. */
   fleetChanged?: () => void;
   /** R-BTN-75: a shadow report's claim holds its ticket, or no longer does — the claim's start
    *  is silent (R-BTN-77), its end an event that wakes no one (R-BTN-75 as amended by R3-1254,
@@ -69,11 +69,11 @@ export interface Ctx {
   /** The retired-fields window's one writer (B-168): a heartbeat's `uses`. */
   deprecated?: Deprecated;
   /** B-4 (R-BTN-113): the instance's session-host allowlist, `instance_settings` first, else the
-   *  deploy's BATON_SESSION_HOSTS. Absent, the config's alone (a unit test's WorkerApi). */
+   *  deploy's BATON_SESSION_HOSTS. Absent, the config's alone (a unit test's RunnerApi). */
   sessionHosts?: () => string[];
 }
 
-export class WorkerApi {
+export class RunnerApi {
   constructor(private readonly c: Ctx) {}
 
   private rows<T = Row>(q: string, ...p: unknown[]): T[] {
@@ -113,14 +113,14 @@ export class WorkerApi {
     // R-BTN-58: a key an owner or administrator granted may declare what its grants together give
     // it — expanded capabilities, `human-operator` only from an administrator's grant.
     if (isGrantedKey(row.created_by)) {
-      const caps = new Set(this.rows<{ capabilities: string }>('SELECT capabilities FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', id)
+      const caps = new Set(this.rows<{ capabilities: string }>('SELECT capabilities FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', id)
         .flatMap((g) => JSON.parse(g.capabilities) as string[]));
       return { id: row.id, hostname: row.hostname, allowed: [...caps, 'none'].sort(), kind: row.kind, granted: true };
     }
     return { id: row.id, hostname: row.hostname, allowed: JSON.parse(row.allowed_capabilities), kind: row.kind, granted: false };
   }
 
-  /** The `credentials` table is the secrets' mirror (§4), for the dashboard and the worker rows'
+  /** The `credentials` table is the secrets' mirror (§4), for the dashboard and the runner rows'
    *  foreign key; a credential whose token hash is gone is marked revoked. */
   private mirrorCredentials(policy: Record<string, { hostname: string; allowed_capabilities: string[] }>, hashes: Record<string, string>, marker: string, now: number) {
     for (const [cid, p] of Object.entries(policy)) {
@@ -142,7 +142,7 @@ export class WorkerApi {
 
   // ── SSH keys (R-BTN-13 as amended; R3-1239) ──────────────────────────────────────────────
 
-  /** Seed the worker keys from `BATON_KEYS` — a JSON array of `{key, name,
+  /** Seed the runner keys from `BATON_KEYS` — a JSON array of `{key, name,
    *  allowed_capabilities}`, the key an OpenSSH public key line — until R3-1240's owner grants
    *  replace it. Each key's credential is its fingerprint. Seeding never brings a revoked key
    *  back (a key is revoked for good; a machine gets a new one) — such a key is returned in
@@ -177,7 +177,7 @@ export class WorkerApi {
         throw new Error(`${at}.allowed_capabilities must be capability or holding names`);
       }
       if (keys.some((k) => k.id === parsed.fingerprint)) throw new Error(`${at}: the key is listed twice`);
-      // R-BTN-57: a key holds one role — a sync key (R-BTN-93) is never a worker's.
+      // R-BTN-57: a key holds one role — a sync key (R-BTN-93) is never a runner's.
       if (this.rows('SELECT 1 FROM sync_keys WHERE fingerprint = ?', parsed.fingerprint).length) throw new Error(`${at}: the key is a sync key (one role per key)`);
       if (this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND removed_at IS NULL', parsed.fingerprint).length) throw new Error(`${at}: the key is an owner key (one role per key)`);
       if (keys.some((k) => k.name === name)) throw new Error(`${at}: ${name} already has a key (one key per name)`);
@@ -188,13 +188,13 @@ export class WorkerApi {
     const revoked: string[] = [];
     this.c.store.transaction(() => {
       // Revoke first, so a name whose key changed is free for its new key.
-      this.exec(`UPDATE credentials SET revoked_at = ? WHERE kind = 'worker' AND created_by = 'seed' AND revoked_at IS NULL AND id NOT IN (SELECT value FROM json_each(?))`, now, JSON.stringify(keys.map((k) => k.id)));
+      this.exec(`UPDATE credentials SET revoked_at = ? WHERE kind = 'runner' AND created_by = 'seed' AND revoked_at IS NULL AND id NOT IN (SELECT value FROM json_each(?))`, now, JSON.stringify(keys.map((k) => k.id)));
       for (const k of keys) {
-        const held = this.rows<{ id: string }>(`SELECT id FROM credentials WHERE kind = 'worker' AND revoked_at IS NULL AND hostname = ? AND id != ?`, k.name, k.id)[0];
+        const held = this.rows<{ id: string }>(`SELECT id FROM credentials WHERE kind = 'runner' AND revoked_at IS NULL AND hostname = ? AND id != ?`, k.name, k.id)[0];
         if (held) throw new Error(`BATON_KEYS: ${k.name} already has a key in force (one key per name)`);
-        this.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, ?, ?, 'worker', ?, 'seed')
+        this.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, ?, ?, 'runner', ?, 'seed')
                    ON CONFLICT (id) DO UPDATE SET hostname = excluded.hostname, allowed_capabilities = excluded.allowed_capabilities
-                   WHERE credentials.kind = 'worker' AND credentials.created_by = 'seed' AND credentials.revoked_at IS NULL`, k.id, k.name, k.allowed, k.public_key);
+                   WHERE credentials.kind = 'runner' AND credentials.created_by = 'seed' AND credentials.revoked_at IS NULL`, k.id, k.name, k.allowed, k.public_key);
       }
       revoked.push(...this.rows<{ id: string }>(`SELECT id FROM credentials WHERE revoked_at IS NOT NULL AND id IN (SELECT value FROM json_each(?))`, JSON.stringify(keys.map((k) => k.id))).map((r) => r.id));
       this.exec(`INSERT INTO baton_settings (key, value) VALUES ('keys_marker', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, marker);
@@ -222,27 +222,29 @@ export class WorkerApi {
     });
   }
 
-  // ── workers (§5, §10.2) ─────────────────────────────────────────────────────────────────
+  // ── runners (§5, §10.2) ─────────────────────────────────────────────────────────────────
 
-  /** The worker a later call comes from: this credential's worker whose secret hashes to the
-   *  presented `X-Worker-Secret` (R-BTN-14). A reaped worker is refused until it re-keys.
+  /** The runner a later call comes from: this credential's runner whose secret hashes to the
+   *  presented `X-Runner-Secret` (R-BTN-14). A reaped runner is refused until it re-keys.
    *  R-BTN-197: the call's `Baton-Client` is recorded as the runner's `client_version` beside
    *  its `last_seen_at` — the runner's own statement, NULL when the call named no version. */
-  async authWorker(credentialId: string, secret: string | null, clientVersion: string | null = null) {
-    if (!secret) throw new BatonError('unauthenticated', 'X-Worker-Secret is required after the first heartbeat');
+  async authRunner(credentialId: string, secret: string | null, clientVersion: string | null = null, legacyName = false) {
+    if (!secret) throw new BatonError('unauthenticated', 'X-Runner-Secret is required after the first heartbeat');
     const hash = await sha256Hex(secret);
-    return this.c.store.transaction(() => this.authWorkerTx(credentialId, hash, clientVersion));
+    return this.c.store.transaction(() => this.authRunnerTx(credentialId, hash, clientVersion, legacyName));
   }
 
-  private authWorkerTx(credentialId: string, hash: string, clientVersion: string | null = null) {
+  private authRunnerTx(credentialId: string, hash: string, clientVersion: string | null = null, legacyName = false) {
     this.credential(credentialId);
-    const w = this.rows<{ id: number; reaped_at: number | null; secret_seen: number }>('SELECT id, reaped_at, secret_seen FROM workers WHERE credential_id = ? AND secret_hash = ?', credentialId, hash)[0];
-    if (!w) throw new BatonError('unauthenticated', 'no worker holds this secret');
-    if (w.reaped_at != null) throw new BatonError('worker-reaped', 'this worker was reaped; re-key with a heartbeat');
+    const w = this.rows<{ id: number; reaped_at: number | null; secret_seen: number }>('SELECT id, reaped_at, secret_seen FROM runners WHERE credential_id = ? AND secret_hash = ?', credentialId, hash)[0];
+    if (!w) throw new BatonError('unauthenticated', 'no runner holds this secret');
+    if (w.reaped_at != null) throw new BatonError('runner-reaped', 'this runner was reaped; re-key with a heartbeat');
     // B-237 (R-BTN-196): a call's `last_seen_at` is liveness — it does not move the state version;
     // the first presentation of the secret does.
-    const seen = () => this.exec('UPDATE workers SET last_seen_at = ?, secret_seen = 1, client_version = ? WHERE id = ?', this.c.now(), clientVersion, w.id);
-    if (w.secret_seen) liveness(this.c.store, seen);
+    const now = this.c.now();
+    const seen = () => this.exec(`UPDATE runners SET last_seen_at = ?, secret_seen = 1, client_version = ?,
+      legacy_names_at = CASE WHEN ? THEN ? ELSE legacy_names_at END WHERE id = ?`, now, clientVersion, legacyName ? 1 : 0, now, w.id);
+    if (w.secret_seen && !legacyName) liveness(this.c.store, seen);
     else seen();
     return w.id;
   }
@@ -259,23 +261,23 @@ export class WorkerApi {
     return [...new Set(repos.flatMap((r) => transcriptReposOf(this.c.store, r.id)))].sort();
   }
 
-  /** R-BTN-4 (B-188): the worker's active claims, oldest first — several, up to its bound. */
-  private activeClaims(workerId: number) {
+  /** R-BTN-4 (B-188): the runner's active claims, oldest first — several, up to its bound. */
+  private activeClaims(runnerId: number) {
     return this.rows<{ id: number; ticket_id: string; nonce: string; claimed_at: number }>(
-      `SELECT id, ticket_id, nonce, claimed_at FROM claims WHERE worker_id = ? AND status = 'active' ORDER BY claimed_at, id`, workerId);
+      `SELECT id, ticket_id, nonce, claimed_at FROM claims WHERE runner_id = ? AND status = 'active' ORDER BY claimed_at, id`, runnerId);
   }
 
-  /** The worker's oldest active claim — what a caller that knows one claim per worker reads
+  /** The runner's oldest active claim — what a caller that knows one claim per runner reads
    *  (the shadow report, and the heartbeat's `claim` kept for runners before B-188). */
-  private activeClaim(workerId: number) {
-    return this.activeClaims(workerId)[0] ?? null;
+  private activeClaim(runnerId: number) {
+    return this.activeClaims(runnerId)[0] ?? null;
   }
 
-  /** §9.9: the newest open activity — the worker's, or with `claimId` that claim's (B-188). */
-  private currentActivity(workerId: number, claimId?: number) {
+  /** §9.9: the newest open activity — the runner's, or with `claimId` that claim's (B-188). */
+  private currentActivity(runnerId: number, claimId?: number) {
     return this.rows<{ id: string; kind: string; label: string | null; started_at: number; claim_id: number | null }>(
-      `SELECT id, kind, label, started_at, claim_id FROM activities WHERE worker_id = ? AND ended_at IS NULL${claimId != null ? ' AND claim_id = ?' : ''}
-       ORDER BY started_at DESC, received_at DESC LIMIT 1`, ...(claimId != null ? [workerId, claimId] : [workerId]))[0] ?? null;
+      `SELECT id, kind, label, started_at, claim_id FROM activities WHERE runner_id = ? AND ended_at IS NULL${claimId != null ? ' AND claim_id = ?' : ''}
+       ORDER BY started_at DESC, received_at DESC LIMIT 1`, ...(claimId != null ? [runnerId, claimId] : [runnerId]))[0] ?? null;
   }
 
   /** `POST /v1/runner/heartbeat` (§11): registration on first contact, the secret and re-key
@@ -284,9 +286,9 @@ export class WorkerApi {
    *  claim, the messages, the stale courses and the mode. A `uses` a runner still sends is its
    *  retired declaration that it uses account instances (B-168): the heartbeat reads it as
    *  absent, logging `deprecated-field`. */
-  // @model heartbeat sha256:e9da1acd5895
-  // @model declare sha256:d898c5bf9f5f
-  async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null) {
+  // @model heartbeat sha256:b4745be87ea5
+  // @model declare sha256:6bcad587d342
+  async heartbeat(credentialId: string, secretHeader: string | null, body: unknown, clientVersion: string | null = null, legacyName = false) {
     // B-168 (R-BTN-76): `uses` is retired — a runner uses the repository's instances, never a set
     // it declares — and read as absent while the history's Migrations entry lasts.
     if (body && typeof body === 'object' && !Array.isArray(body) && (body as { uses?: unknown }).uses !== undefined) {
@@ -295,7 +297,7 @@ export class WorkerApi {
     const hb = checkHeartbeat(body, this.transcriptRepos());
     // R-BTN-66: a per-repository ceiling names a tier of that registered repository's ladder.
     // One for a repository Baton does not serve (unknown or retired) is kept and reported, never
-    // refusing the heartbeat — which would cost the worker its leases everywhere — and, once that
+    // refusing the heartbeat — which would cost the runner its leases everywhere — and, once that
     // repository registers, holds if its ladder has the name and is its bottom if not (ceilingIn).
     const ignoredCeilings: string[] = [];
     for (const [repo, tier] of Object.entries(hb.tier_ceilings)) {
@@ -332,7 +334,7 @@ export class WorkerApi {
       tags: [...hb.tags].sort(),
       profile: hb.profile ?? null,
     }));
-    const answer = this.c.store.transaction(() => this.heartbeatTx(credentialId, presented, settingsHash, hb, clientVersion));
+    const answer = this.c.store.transaction(() => this.heartbeatTx(credentialId, presented, settingsHash, hb, clientVersion, legacyName));
     return {
       ...answer,
       ...(ignoredCeilings.length ? { tier_ceilings_unregistered: ignoredCeilings } : {}),
@@ -340,7 +342,7 @@ export class WorkerApi {
     };
   }
 
-  private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat, clientVersion: string | null) {
+  private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat, clientVersion: string | null, legacyName: boolean) {
     // B-253: the profile, serialized once — the same bytes compared, stored and hashed.
     const profileJson = hb.profile ? JSON.stringify(hb.profile) : null;
     const cred = this.credential(credentialId);
@@ -351,7 +353,7 @@ export class WorkerApi {
     // The shape of a capability name is checked where the heartbeat was parsed (§12.3).
     // §10.1: a granted key declares only courses of repositories its grants cover (round 2, 2-A-6).
     if (cred.granted) {
-      const granted = new Set(this.rows<{ repository_id: string }>('SELECT repository_id FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', cred.id).map((r) => r.repository_id));
+      const granted = new Set(this.rows<{ repository_id: string }>('SELECT repository_id FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', cred.id).map((r) => r.repository_id));
       const foreign = [...new Set(hb.courses.map((c) => c.repository).filter((r) => !granted.has(r)))];
       if (foreign.length) throw new BatonError('forbidden', `this credential is granted no access to ${foreign.join(', ')}; it may not declare their courses`);
     }
@@ -360,19 +362,19 @@ export class WorkerApi {
 
     const now = this.c.now();
     let w = this.rows<{ id: number; secret_hash: string; credential_id: string; reaped_at: number | null; incarnation: number; settings_hash: string; secret_seen: number }>(
-      'SELECT id, secret_hash, credential_id, reaped_at, incarnation, settings_hash, secret_seen FROM workers WHERE hostname = ? AND session_name = ?', hb.hostname, hb.session_name)[0];
+      'SELECT id, secret_hash, credential_id, reaped_at, incarnation, settings_hash, secret_seen FROM runners WHERE hostname = ? AND session_name = ?', hb.hostname, hb.session_name)[0];
 
     let rekeyed = false;
-    // R-BTN-75: a worker that was not live before this heartbeat joins the fleet's counts.
-    const was = w ? this.rows<{ live: number }>(`SELECT reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? AS live FROM workers WHERE id = ?`, now, w.id)[0] : null;
+    // R-BTN-75: a runner that was not live before this heartbeat joins the fleet's counts.
+    const was = w ? this.rows<{ live: number }>(`SELECT reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? AS live FROM runners WHERE id = ?`, now, w.id)[0] : null;
     if (!w) {
       if (!hb.secret_hash) bad('secret_hash', 'the first heartbeat of a session carries its SHA-256');
-      this.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, model_id,
+      this.exec(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, model_id,
                    tier_ceiling, tier_ceilings, lease_timeout_ms, profile_json, settings_hash, client_version, first_seen_at, last_seen_at, last_activity_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,
         hb.hostname, hb.session_name, hb.secret_hash, cred.id, hb.harness, hb.kind, hb.model_id ?? null,
         hb.tier_ceiling, JSON.stringify(hb.tier_ceilings), hb.lease_timeout_s * 1000, profileJson, clientVersion, now, now, hb.last_activity_at ?? null);
-      w = this.rows<typeof w>('SELECT id, secret_hash, credential_id, reaped_at, incarnation, settings_hash, secret_seen FROM workers WHERE hostname = ? AND session_name = ?', hb.hostname, hb.session_name)[0];
+      w = this.rows<typeof w>('SELECT id, secret_hash, credential_id, reaped_at, incarnation, settings_hash, secret_seen FROM runners WHERE hostname = ? AND session_name = ?', hb.hostname, hb.session_name)[0];
     } else {
       // R3-1239's handover: a session registered under a bearer token, or under a key since
       // revoked, may continue under its machine's key — the same name, and the session proved
@@ -380,69 +382,70 @@ export class WorkerApi {
       const moving = w.credential_id !== cred.id;
       if (moving) {
         const from = this.rows<{ kind: string; revoked_at: number | null }>('SELECT kind, revoked_at FROM credentials WHERE id = ?', w.credential_id)[0];
-        if (cred.kind !== 'worker' || !from || (from.kind !== 'token' && from.revoked_at == null)) {
+        if (cred.kind !== 'runner' || !from || (from.kind !== 'token' && from.revoked_at == null)) {
           throw new BatonError('forbidden', 'this session is registered under another credential');
         }
       }
       if (hb.rekey) {
-        // R-BTN-14: a re-key replaces the secret when the worker holds no claim or was reaped;
+        // R-BTN-14: a re-key replaces the secret when the runner holds no claim or was reaped;
         // it clears reaped_at, bumps the incarnation, and never clears a fence.
         if (!hb.secret_hash) bad('secret_hash', 'a re-key carries the new secret’s SHA-256');
-        if (w.reaped_at == null && this.activeClaim(w.id)) throw new BatonError('session-taken', 'a worker holding a claim cannot re-key');
+        if (w.reaped_at == null && this.activeClaim(w.id)) throw new BatonError('session-taken', 'a runner holding a claim cannot re-key');
         if (hb.secret_hash === w.secret_hash) {
           // A retried re-key is idempotent — only until the secret is presented, as for a retried
-          // first heartbeat; the same hash cannot bring a reaped worker back.
+          // first heartbeat; the same hash cannot bring a reaped runner back.
           if (w.reaped_at != null) bad('secret_hash', 'a re-key carries a new secret');
           if (w.secret_seen && presented !== w.secret_hash) throw new BatonError('session-taken', 'a re-key carries a new secret');
         } else {
-          this.exec('UPDATE workers SET secret_hash = ?, secret_seen = 0, incarnation = incarnation + 1, reaped_at = NULL WHERE id = ?', hb.secret_hash, w.id);
-          this.event('rekeyed', `worker:${w.id}`, { incarnation: w.incarnation + 1 });
+          this.exec('UPDATE runners SET secret_hash = ?, secret_seen = 0, incarnation = incarnation + 1, reaped_at = NULL WHERE id = ?', hb.secret_hash, w.id);
+          this.event('rekeyed', `runner:${w.id}`, { incarnation: w.incarnation + 1 });
           rekeyed = true;
         }
       } else {
-        // R-BTN-14: X-Worker-Secret, or — only until the worker has once presented it — the body
+        // R-BTN-14: X-Runner-Secret, or — only until the runner has once presented it — the body
         // hash of a retried first heartbeat (idempotent registration).
         const ok = presented ? presented === w.secret_hash : !w.secret_seen && hb.secret_hash === w.secret_hash;
         if (!ok) throw new BatonError('session-taken', 'this session is registered with another secret');
-        if (w.reaped_at != null) throw new BatonError('worker-reaped', 'this worker was reaped; re-key to start a new incarnation');
+        if (w.reaped_at != null) throw new BatonError('runner-reaped', 'this runner was reaped; re-key to start a new incarnation');
       }
-      if (moving) this.exec('UPDATE workers SET credential_id = ? WHERE id = ?', cred.id, w.id);
+      if (moving) this.exec('UPDATE runners SET credential_id = ? WHERE id = ?', cred.id, w.id);
     }
 
     const current = rekeyed ? hb.secret_hash : w.secret_hash; // the hash stored now
     const secretSeen = presented != null && presented === current ? 1 : 0;
-    // B-237 (R-BTN-196): a beat of a live worker that changes nothing but `last_seen_at` and
+    // B-237 (R-BTN-196): a beat of a live runner that changes nothing but `last_seen_at` and
     // `last_activity_at` is liveness, and does not move the state version — what those decide
     // (live, stalled) is the clock's; any other field it sets that differs is a change. The
     // caller's own `client_version` (R-BTN-197, B-254) is liveness in every path that records
-    // it — this beat and `authWorkerTx`'s `seen` — like `last_seen_at` beside it: the runner's
+    // it — this beat and `authRunnerTx`'s `seen` — like `last_seen_at` beside it: the runner's
     // statement of itself, never a state change.
     const stored = this.rows<{ harness: string; kind: string; model_id: string | null; tier_ceiling: string; tier_ceilings: string; lease_timeout_ms: number; isolation: string | null; profile_json: string | null; secret_seen: number; concurrency: number }>(
-      'SELECT harness, kind, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms, isolation, profile_json, secret_seen, concurrency FROM workers WHERE id = ?', w.id)[0];
-    const beatOnly = !!was?.live && !rekeyed && stored != null && stored.harness === hb.harness && stored.kind === hb.kind
+      'SELECT harness, kind, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms, isolation, profile_json, secret_seen, concurrency FROM runners WHERE id = ?', w.id)[0];
+    const beatOnly = !legacyName && !!was?.live && !rekeyed && stored != null && stored.harness === hb.harness && stored.kind === hb.kind
       && stored.model_id === (hb.model_id ?? null) && stored.tier_ceiling === hb.tier_ceiling && stored.tier_ceilings === JSON.stringify(hb.tier_ceilings)
       && stored.lease_timeout_ms === hb.lease_timeout_s * 1000 && stored.isolation === hb.isolation && stored.profile_json === profileJson && stored.secret_seen >= secretSeen
       && stored.concurrency === hb.concurrency;
-    const beat = () => this.exec(`UPDATE workers SET last_seen_at = ?, secret_seen = MAX(secret_seen, ?), last_activity_at = COALESCE(?, last_activity_at), harness = ?, kind = ?,
-                 model_id = ?, tier_ceiling = ?, tier_ceilings = ?, lease_timeout_ms = ?, isolation = ?, profile_json = ?, concurrency = ?, client_version = ? WHERE id = ?`,
+    const beat = () => this.exec(`UPDATE runners SET last_seen_at = ?, secret_seen = MAX(secret_seen, ?), last_activity_at = COALESCE(?, last_activity_at), harness = ?, kind = ?,
+                 model_id = ?, tier_ceiling = ?, tier_ceilings = ?, lease_timeout_ms = ?, isolation = ?, profile_json = ?, concurrency = ?, client_version = ?,
+                 legacy_names_at = CASE WHEN ? THEN ? ELSE legacy_names_at END WHERE id = ?`,
       now, secretSeen, hb.last_activity_at ?? null, hb.harness, hb.kind, hb.model_id ?? null, hb.tier_ceiling, JSON.stringify(hb.tier_ceilings),
-      hb.lease_timeout_s * 1000, hb.isolation, profileJson, hb.concurrency, clientVersion, w.id);
+      hb.lease_timeout_s * 1000, hb.isolation, profileJson, hb.concurrency, clientVersion, legacyName ? 1 : 0, now, w.id);
     if (beatOnly) liveness(this.c.store, beat);
     else beat();
     const rewrote = settingsHash !== w.settings_hash || rekeyed;
     if (rewrote) this.rewriteSettings(w.id, hb, settingsHash);
     const granted = this.grantedRepos(cred);
-    // R-BTN-103: the notices it delivers as a worker courier — a machine key's, on repositories it
+    // R-BTN-103: the notices it delivers as a runner courier — a machine key's, on repositories it
     // is granted on; a refused entry never refuses the heartbeat either.
-    const refusedCouriers = [...hb.couriers.refused, ...(this.c.couriers?.(w.id, cred.kind === 'worker' ? granted : null, hb.couriers.entries) ?? [])];
+    const refusedCouriers = [...hb.couriers.refused, ...(this.c.couriers?.(w.id, cred.kind === 'runner' ? granted : null, hb.couriers.entries) ?? [])];
     // §12.8 (B-145, R-BTN-180): only the protection checker's reports feed `no-runner-lands` —
     // a report from anyone else is refused per entry; the sync's and other trusted runners'
     // readings only log a discrepancy, so a granted key's report is logged as one.
     const protectionRefused: { repository: string; code: string }[] = [];
     for (const report of hb.protection) {
       if (this.c.policies?.recordProtection(report.repository, report, cred.id)) continue;
-      if (this.rows('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred.id, report.repository).length) {
-        this.event('discrepancy', `worker:${w.id}`, { kind: 'protection-report', repository: report.repository, matched: report.matched, by: cred.id }, null, null);
+      if (this.rows('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred.id, report.repository).length) {
+        this.event('discrepancy', `runner:${w.id}`, { kind: 'protection-report', repository: report.repository, matched: report.matched, by: cred.id }, null, null);
         protectionRefused.push({ repository: report.repository, code: 'not-checker' });
       } else {
         protectionRefused.push({ repository: report.repository, code: 'not-granted' });
@@ -456,7 +459,7 @@ export class WorkerApi {
     const refused = hb.transcript_refusals;
     const unlinked = this.recordTranscripts(w.id, hb, now);
 
-    const fresh = this.rows<{ incarnation: number; lease_timeout_ms: number }>('SELECT incarnation, lease_timeout_ms FROM workers WHERE id = ?', w.id)[0];
+    const fresh = this.rows<{ incarnation: number; lease_timeout_ms: number }>('SELECT incarnation, lease_timeout_ms FROM runners WHERE id = ?', w.id)[0];
     // R-BTN-19: only a heartbeat with the secret (never the hash path) clears a fence.
     if (secretSeen) for (const f of hb.fenced) this.c.fenced?.(w.id, fresh.incarnation, f.claim_id);
     const claims = this.activeClaims(w.id);
@@ -474,11 +477,11 @@ export class WorkerApi {
     else if (hb.session_url !== undefined && claims.length > 1) sessionUrlDropped = 'session_url names no claim while this runner holds several; send session_urls';
     for (const link of links) {
       const claim = mine.get(link.claim_id);
-      if (!claim) continue; // a claim this worker no longer holds: its link has nothing to land on
+      if (!claim) continue; // a claim this runner no longer holds: its link has nothing to land on
       const why = sessionLinkWhy(link.url, this.c.sessionHosts?.() ?? SESSION_HOSTS.of(this.c.config));
       if (why != null) {
         sessionUrlDropped = why;
-        this.event('discrepancy', `worker:${w.id}`, { sub: 'session-url', why, url: link.url.slice(0, 120) }, claim.ticket_id, claim.id);
+        this.event('discrepancy', `runner:${w.id}`, { sub: 'session-url', why, url: link.url.slice(0, 120) }, claim.ticket_id, claim.id);
       } else {
         // The same link again changes no row (B-237: so a working runner's beat moves no version).
         this.exec(`UPDATE claim_legs SET session_url = ? WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL AND session_url IS NOT ?`,
@@ -495,6 +498,9 @@ export class WorkerApi {
     // B-86: the capabilities a runner with no `--capabilities` declares (see `grantCapabilities`).
     const grantCapabilities = this.grantCapabilities(cred, w.id);
     return {
+      runner_id: w.id,
+      // B-68's dual-read window: old runners can finish upgrading from the same answer. B-69
+      // removes this alias once `legacy_names_at` shows none remain.
       worker_id: w.id,
       incarnation: fresh.incarnation,
       lease_timeout_s: fresh.lease_timeout_ms / 1000,
@@ -507,14 +513,14 @@ export class WorkerApi {
       messages: this.deliver(w.id, now),
       // R-BTN-67: the owner bars in force on its repositories, so harness hooks can act on them offline.
       bars: this.c.bars?.(now, credentialId) ?? [],
-      // R-BTN-22: the declared courses below their min_worker_version — no new claim on them.
+      // R-BTN-22: the declared courses below their min_runner_version — no new claim on them.
       stale_courses: this.staleCourses(w.id),
       // §11: each repository's mode (R-BTN-28, per repository).
       mode: Object.fromEntries(this.rows<{ id: string; cutover_at: number | null }>('SELECT id, cutover_at FROM repositories WHERE retired_at IS NULL ORDER BY id')
         .map((r) => [r.id, r.cutover_at == null ? 'shadow' : 'cut-over'])),
       server_time: now,
-      // §12.8 (B-145, R-BTN-189): the policy facts of every repository the worker serves — a
-      // map, for a worker's grants and courses reach several.
+      // §12.8 (B-145, R-BTN-189): the policy facts of every repository the runner serves — a
+      // map, for a runner's grants and courses reach several.
       ...(this.c.policies ? { policies: this.policyFacts(granted, hb) } : {}),
       ...(protectionRefused.length ? { protection_refused: protectionRefused } : {}),
       ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}),
@@ -524,7 +530,7 @@ export class WorkerApi {
     };
   }
 
-  /** §12.8 (B-145, R-BTN-189): the policy facts of the repositories this heartbeat's worker
+  /** §12.8 (B-145, R-BTN-189): the policy facts of the repositories this heartbeat's runner
    *  serves — its grants', and a bearer's or seed key's the courses it declares. */
   private policyFacts(granted: string[] | null, hb: Heartbeat): Record<string, { version: number; policy_hash: string; guarantees_hash: string; floors_hash: string }> {
     const policies = this.c.policies!;
@@ -542,9 +548,9 @@ export class WorkerApi {
    * a bearer or seed key, which no grant binds: the allow-list it has always declared within.
    * `none` (every runner satisfies it) is left out.
    */
-  private grantCapabilities(cred: { id: string; granted: boolean }, workerId: number): string[] {
+  private grantCapabilities(cred: { id: string; granted: boolean }, runnerId: number): string[] {
     const repos = this.rows<{ repository_id: string }>(
-      'SELECT repository_id FROM worker_courses WHERE worker_id = ?', workerId).map((r) => r.repository_id);
+      'SELECT repository_id FROM runner_courses WHERE runner_id = ?', runnerId).map((r) => r.repository_id);
     const mine = cred.granted
       ? repos.flatMap((repository) => this.grantedCapabilities(cred.id, repository))
       : this.credentialAllowed(cred.id);
@@ -556,7 +562,7 @@ export class WorkerApi {
    *  route names the same grant the heartbeat names (src/core/baton.ts). */
   grantedCapabilities(credential: string, repository: string): string[] {
     const row = this.rows<{ capabilities: string }>(
-      'SELECT capabilities FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', credential, repository)[0];
+      'SELECT capabilities FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', credential, repository)[0];
     return row ? (JSON.parse(row.capabilities) as string[]) : [];
   }
 
@@ -564,7 +570,7 @@ export class WorkerApi {
    *  whose reach is its own. */
   private grantedRepos(cred: { id: string; granted: boolean }): string[] | null {
     return cred.granted
-      ? this.rows<{ repository_id: string }>('SELECT repository_id FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', cred.id).map((r) => r.repository_id)
+      ? this.rows<{ repository_id: string }>('SELECT repository_id FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', cred.id).map((r) => r.repository_id)
       : null;
   }
 
@@ -577,8 +583,8 @@ export class WorkerApi {
   }
 
   /** §3's write budget: capability rows change only with the settings hash. */
-  private rewriteSettings(workerId: number, hb: Heartbeat, hash: string) {
-    this.exec('DELETE FROM worker_capabilities WHERE worker_id = ?', workerId);
+  private rewriteSettings(runnerId: number, hb: Heartbeat, hash: string) {
+    this.exec('DELETE FROM runner_capabilities WHERE runner_id = ?', runnerId);
     const seen = new Set<string>();
     for (const declared of hb.capabilities) {
       // A role is stored as its capabilities (§7.2 rule 4), each row naming what was declared;
@@ -586,42 +592,42 @@ export class WorkerApi {
       for (const cap of capabilitiesOf([declared])) {
         if (seen.has(cap)) continue;
         seen.add(cap);
-        this.exec('INSERT INTO worker_capabilities (worker_id, capability, declared) VALUES (?, ?, ?)', workerId, cap, declared);
+        this.exec('INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (?, ?, ?)', runnerId, cap, declared);
       }
       if (declared === 'human-operator' && !seen.has('human-operator')) {
         // Rule 6 reads the declared role itself (§7.2), so it gets a row of its own.
         seen.add('human-operator');
-        this.exec('INSERT INTO worker_capabilities (worker_id, capability, declared) VALUES (?, ?, ?)', workerId, 'human-operator', declared);
+        this.exec('INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (?, ?, ?)', runnerId, 'human-operator', declared);
       }
     }
     // R-BTN-60: the tags rule 8 matches, as declared.
-    this.exec('DELETE FROM worker_tags WHERE worker_id = ?', workerId);
-    for (const tag of hb.tags) this.exec('INSERT INTO worker_tags (worker_id, tag) VALUES (?, ?)', workerId, tag);
+    this.exec('DELETE FROM runner_tags WHERE runner_id = ?', runnerId);
+    for (const tag of hb.tags) this.exec('INSERT INTO runner_tags (runner_id, tag) VALUES (?, ?)', runnerId, tag);
     // R-BTN-48: the courses its checkouts run, at their versions — rule 9 reads them.
-    this.exec('DELETE FROM worker_courses WHERE worker_id = ?', workerId);
+    this.exec('DELETE FROM runner_courses WHERE runner_id = ?', runnerId);
     for (const c of hb.courses) {
-      this.exec('INSERT INTO worker_courses (worker_id, repository_id, course_id, version) VALUES (?, ?, ?, ?)', workerId, c.repository, c.course, c.version);
+      this.exec('INSERT INTO runner_courses (runner_id, repository_id, course_id, version) VALUES (?, ?, ?, ?)', runnerId, c.repository, c.course, c.version);
     }
-    this.exec('UPDATE workers SET settings_hash = ? WHERE id = ?', hash, workerId);
+    this.exec('UPDATE runners SET settings_hash = ? WHERE id = ?', hash, runnerId);
   }
 
   /** §6.8: a path reported under a claim is linked to it; one reported with none waits for the
    *  next claim (`Claims.claim` links it). A repeat report moves `last_pushed_at` and fills a
    *  missing `activity_id` once that activity has arrived. */
-  private recordTranscripts(workerId: number, hb: Heartbeat, now: number) {
+  private recordTranscripts(runnerId: number, hb: Heartbeat, now: number) {
     const unlinked: number[] = [];
     if (!hb.transcripts.length) return unlinked;
-    const claims = this.activeClaims(workerId);
+    const claims = this.activeClaims(runnerId);
     for (const t of hb.transcripts) {
       // An activity not received yet only defers the link: the pointer is stored, and a later
       // report of it, once the activity has arrived, fills the link in.
-      if (t.activity_id && !this.rows('SELECT 1 FROM activities WHERE worker_id = ? AND id = ?', workerId, t.activity_id).length) {
+      if (t.activity_id && !this.rows('SELECT 1 FROM activities WHERE runner_id = ? AND id = ?', runnerId, t.activity_id).length) {
         unlinked.push(t.index ?? -1);
         t.activity_id = undefined;
       }
       // B-188: the claim a pointer belongs to — the one it names, else its activity's, else the
       // lone claim; with several held and none named, it waits for a claim as one with none does.
-      const named = t.claim_id ?? (t.activity_id ? this.rows<{ claim_id: number | null }>('SELECT claim_id FROM activities WHERE worker_id = ? AND id = ?', workerId, t.activity_id)[0]?.claim_id ?? undefined : undefined);
+      const named = t.claim_id ?? (t.activity_id ? this.rows<{ claim_id: number | null }>('SELECT claim_id FROM activities WHERE runner_id = ? AND id = ?', runnerId, t.activity_id)[0]?.claim_id ?? undefined : undefined);
       const claim = named != null ? claims.find((c) => c.id === named) ?? null : claims.length === 1 ? claims[0] : null;
       if (claim) {
         // A pointer under a claim names one of that claim's repository's transcript repositories
@@ -630,17 +636,17 @@ export class WorkerApi {
           hb.transcript_refusals.push({ index: t.index ?? -1, code: 'invalid-params', message: `transcripts[${t.index}].repo: ${t.repo} is not one of ${repositoryOf(claim.ticket_id)}'s transcript repositories` });
           continue;
         }
-        this.exec(`INSERT INTO transcripts (worker_id, claim_id, repo, path, role, activity_id, first_seen_at, last_pushed_at)
+        this.exec(`INSERT INTO transcripts (runner_id, claim_id, repo, path, role, activity_id, first_seen_at, last_pushed_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT (worker_id, repo, path, claim_id) DO UPDATE SET last_pushed_at = COALESCE(excluded.last_pushed_at, transcripts.last_pushed_at),
+                   ON CONFLICT (runner_id, repo, path, claim_id) DO UPDATE SET last_pushed_at = COALESCE(excluded.last_pushed_at, transcripts.last_pushed_at),
                      activity_id = COALESCE(transcripts.activity_id, excluded.activity_id)`,
-          workerId, claim.id, t.repo, t.path, t.role, t.activity_id ?? null, now, t.pushed_at ?? null);
+          runnerId, claim.id, t.repo, t.path, t.role, t.activity_id ?? null, now, t.pushed_at ?? null);
       } else {
-        this.exec(`INSERT INTO pending_transcripts (worker_id, repo, path, role, activity_id, first_seen_at, last_pushed_at)
+        this.exec(`INSERT INTO pending_transcripts (runner_id, repo, path, role, activity_id, first_seen_at, last_pushed_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT (worker_id, repo, path) DO UPDATE SET last_pushed_at = COALESCE(excluded.last_pushed_at, pending_transcripts.last_pushed_at),
+                   ON CONFLICT (runner_id, repo, path) DO UPDATE SET last_pushed_at = COALESCE(excluded.last_pushed_at, pending_transcripts.last_pushed_at),
                      activity_id = COALESCE(pending_transcripts.activity_id, excluded.activity_id)`,
-          workerId, t.repo, t.path, t.role, t.activity_id ?? null, now, t.pushed_at ?? null);
+          runnerId, t.repo, t.path, t.role, t.activity_id ?? null, now, t.pushed_at ?? null);
       }
     }
     return unlinked;
@@ -650,56 +656,56 @@ export class WorkerApi {
 
   /** Delivery is the heartbeat (§9): pending messages become delivered; delivered ones not yet
    *  acknowledged are sent again, so a lost response loses nothing. */
-  private deliver(workerId: number, now: number) {
+  private deliver(runnerId: number, now: number) {
     const out = this.rows<{ id: number; kind: string; payload_json: string | null; sent_at: number }>(
-      `SELECT id, kind, payload_json, sent_at FROM messages WHERE to_worker_id = ? AND status IN ('pending','delivered')
-       AND kind IN ('release','status_request','wind-down','unblocked') ORDER BY id`, workerId);
-    this.exec(`UPDATE messages SET status = 'delivered', delivered_at = ? WHERE to_worker_id = ? AND status = 'pending'`, now, workerId);
+      `SELECT id, kind, payload_json, sent_at FROM messages WHERE to_runner_id = ? AND status IN ('pending','delivered')
+       AND kind IN ('release','status_request','wind-down','unblocked') ORDER BY id`, runnerId);
+    this.exec(`UPDATE messages SET status = 'delivered', delivered_at = ? WHERE to_runner_id = ? AND status = 'pending'`, now, runnerId);
     return out.map((m) => ({ id: m.id, kind: m.kind, payload: m.payload_json ? JSON.parse(m.payload_json) : null, sent_at: m.sent_at }));
   }
 
   /** `POST /v1/ui/messages`: a release (`requested`, `owner-cancel`, `provider-suspended`), a
    *  status request, or a wind-down (B-109: the runner drains — its current leg completes, then
-   *  it exits without claiming again), from the owner to one worker. */
+   *  it exits without claiming again), from the owner to one runner. */
   sendMessage(owner: string, body: unknown) {
     const m = checkMessage(body);
-    if (!this.rows('SELECT 1 FROM workers WHERE id = ?', m.to_worker_id).length) throw new BatonError('not-found', 'no such worker');
-    this.exec(`INSERT INTO messages (kind, payload_json, from_principal, to_worker_id, sent_at, status) VALUES (?, ?, ?, ?, ?, 'pending')`,
-      m.kind, m.payload ? JSON.stringify(m.payload) : null, `owner:${owner}`, m.to_worker_id, this.c.now());
+    if (!this.rows('SELECT 1 FROM runners WHERE id = ?', m.to_runner_id).length) throw new BatonError('not-found', 'no such runner');
+    this.exec(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status) VALUES (?, ?, ?, ?, ?, 'pending')`,
+      m.kind, m.payload ? JSON.stringify(m.payload) : null, `owner:${owner}`, m.to_runner_id, this.c.now());
     return { id: this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id };
   }
 
-  /** `POST /v1/runner/messages/{id}/ack`: the worker acknowledges; a status request's reply is
+  /** `POST /v1/runner/messages/{id}/ack`: the runner acknowledges; a status request's reply is
    *  stored as a `status_report` carrying the current activity (the server attaches it). */
-  ack(workerId: number, messageId: number, body: unknown) {
+  ack(runnerId: number, messageId: number, body: unknown) {
     const reply = checkAck(body); // §10.4: before any write
-    const m = this.rows<{ id: number; kind: string; status: string }>('SELECT id, kind, status FROM messages WHERE id = ? AND to_worker_id = ?', messageId, workerId)[0];
-    if (!m) throw new BatonError('not-found', 'no such message for this worker');
+    const m = this.rows<{ id: number; kind: string; status: string }>('SELECT id, kind, status FROM messages WHERE id = ? AND to_runner_id = ?', messageId, runnerId)[0];
+    if (!m) throw new BatonError('not-found', 'no such message for this runner');
     if (m.status === 'expired') bad('message', 'has expired');
     if (m.status === 'acknowledged') return { ok: true };
     const now = this.c.now();
     this.exec(`UPDATE messages SET status = 'acknowledged', acknowledged_at = ?, delivered_at = COALESCE(delivered_at, ?) WHERE id = ?`, now, now, m.id);
     if (m.kind === 'status_request' && reply) {
       // The table needs a recipient; a report is addressed back to its sender and read by the dashboard.
-      this.exec(`INSERT INTO messages (kind, payload_json, from_worker_id, to_worker_id, in_reply_to, sent_at, delivered_at, acknowledged_at, status)
+      this.exec(`INSERT INTO messages (kind, payload_json, from_runner_id, to_runner_id, in_reply_to, sent_at, delivered_at, acknowledged_at, status)
                  VALUES ('status_report', ?, ?, ?, ?, ?, ?, ?, 'acknowledged')`,
-        JSON.stringify({ activity: this.currentActivity(workerId), text: reply.text }), workerId, workerId, m.id, now, now, now);
+        JSON.stringify({ activity: this.currentActivity(runnerId), text: reply.text }), runnerId, runnerId, m.id, now, now, now);
     }
     return { ok: true };
   }
 
   // ── activities (§6.9) ───────────────────────────────────────────────────────────────────
 
-  /** `POST /v1/runner/activities`: each one upserted under `(worker_id, id)`, so a retry is
-   *  idempotent and one worker never touches another's rows. Refusals are per activity. */
-  activities(workerId: number, body: unknown) {
+  /** `POST /v1/runner/activities`: each one upserted under `(runner_id, id)`, so a retry is
+   *  idempotent and one runner never touches another's rows. Refusals are per activity. */
+  activities(runnerId: number, body: unknown) {
     const list = (body as { activities?: unknown })?.activities;
     if (!Array.isArray(list) || list.length > 200) bad('activities', 'must be a list of at most 200');
     const refused: { id: string | null; code: string; message: string }[] = [];
     const now = this.c.now();
     for (const [i, raw] of (list as unknown[]).entries()) {
       try {
-        this.c.store.transaction(() => this.upsertActivity(workerId, checkActivity(raw, `activities[${i}]`), now));
+        this.c.store.transaction(() => this.upsertActivity(runnerId, checkActivity(raw, `activities[${i}]`), now));
       } catch (e) {
         if (!(e instanceof BatonError)) throw e;
         refused.push({ id: (raw as { id?: string })?.id ?? null, code: e.code, message: e.message });
@@ -727,17 +733,17 @@ export class WorkerApi {
     bad(field, 'must be a pull request of the ticket’s repositories, under its forge');
   }
 
-  private upsertActivity(workerId: number, a: ActivityReport, now: number) {
+  private upsertActivity(runnerId: number, a: ActivityReport, now: number) {
     const existing = this.rows<{ kind: string; claim_id: number | null; ended_at: number | null; parent_id: string | null }>(
-      'SELECT kind, claim_id, ended_at, parent_id FROM activities WHERE worker_id = ? AND id = ?', workerId, a.id)[0];
+      'SELECT kind, claim_id, ended_at, parent_id FROM activities WHERE runner_id = ? AND id = ?', runnerId, a.id)[0];
     if (existing && (existing.kind !== a.kind || (existing.claim_id ?? null) !== (a.claim_id ?? null))) {
       bad(`activity ${a.id}`, 'kind and claim_id cannot change');
     }
     if (typeof a.detail?.pr === 'string') this.checkPullRequest(a.detail.pr, a.claim_id, `activity ${a.id}.detail.pr`);
     if (a.claim_id !== null) {
-      const claim = this.rows<{ worker_id: number; status: string; ended_at: number | null }>(
-        'SELECT worker_id, status, ended_at FROM claims WHERE id = ?', a.claim_id)[0];
-      if (!claim || claim.worker_id !== workerId) throw new BatonError('not-holder', `claim ${a.claim_id} is not this worker's`);
+      const claim = this.rows<{ runner_id: number; status: string; ended_at: number | null }>(
+        'SELECT runner_id, status, ended_at FROM claims WHERE id = ?', a.claim_id)[0];
+      if (!claim || claim.runner_id !== runnerId) throw new BatonError('not-holder', `claim ${a.claim_id} is not this runner's`);
       if (claim.status !== 'active') {
         // §6.9: for 10 minutes after the end, an update that only closes an open activity is
         // accepted; anything else, and every later update, is claim-ended.
@@ -747,43 +753,43 @@ export class WorkerApi {
     }
     let parent = a.parent_id ?? existing?.parent_id ?? null;
     if (a.parent_id) {
-      const p = this.rows<{ claim_id: number | null }>('SELECT claim_id FROM activities WHERE worker_id = ? AND id = ?', workerId, a.parent_id)[0];
-      if (!p || (p.claim_id ?? null) !== a.claim_id) bad(`activity ${a.id}.parent_id`, 'must name this worker’s activity under the same claim');
+      const p = this.rows<{ claim_id: number | null }>('SELECT claim_id FROM activities WHERE runner_id = ? AND id = ?', runnerId, a.parent_id)[0];
+      if (!p || (p.claim_id ?? null) !== a.claim_id) bad(`activity ${a.id}.parent_id`, 'must name this runner’s activity under the same claim');
     } else if (!existing && a.kind === 'reviewer' && a.claim_id !== null) {
       // §6.9: a reviewer is parented to the newest open review-round on its claim.
-      parent = this.rows<{ id: string }>(`SELECT id FROM activities WHERE worker_id = ? AND claim_id = ? AND kind = 'review-round' AND ended_at IS NULL
-                                           ORDER BY started_at DESC LIMIT 1`, workerId, a.claim_id)[0]?.id ?? null;
+      parent = this.rows<{ id: string }>(`SELECT id FROM activities WHERE runner_id = ? AND claim_id = ? AND kind = 'review-round' AND ended_at IS NULL
+                                           ORDER BY started_at DESC LIMIT 1`, runnerId, a.claim_id)[0]?.id ?? null;
     }
     if (a.call_id) {
-      const other = this.rows<{ id: string }>('SELECT id FROM activities WHERE worker_id = ? AND call_id = ?', workerId, a.call_id)[0];
+      const other = this.rows<{ id: string }>('SELECT id FROM activities WHERE runner_id = ? AND call_id = ?', runnerId, a.call_id)[0];
       if (other && other.id !== a.id) bad(`activity ${a.id}.call_id`, `is already activity ${other.id}'s`);
     }
     if (existing) {
       this.exec(`UPDATE activities SET label = COALESCE(?, label), detail_json = COALESCE(?, detail_json), ended_at = COALESCE(?, ended_at),
-                   outcome = COALESCE(?, outcome), seq = COALESCE(?, seq), received_at = ? WHERE worker_id = ? AND id = ?`,
-        a.label ?? null, a.detail ? JSON.stringify(a.detail) : null, a.ended_at ?? null, a.outcome ?? null, a.seq ?? null, now, workerId, a.id);
+                   outcome = COALESCE(?, outcome), seq = COALESCE(?, seq), received_at = ? WHERE runner_id = ? AND id = ?`,
+        a.label ?? null, a.detail ? JSON.stringify(a.detail) : null, a.ended_at ?? null, a.outcome ?? null, a.seq ?? null, now, runnerId, a.id);
       return;
     }
-    this.exec(`INSERT INTO activities (worker_id, id, claim_id, parent_id, call_id, kind, seq, label, source, started_at, ended_at, outcome, received_at, detail_json)
+    this.exec(`INSERT INTO activities (runner_id, id, claim_id, parent_id, call_id, kind, seq, label, source, started_at, ended_at, outcome, received_at, detail_json)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      workerId, a.id, a.claim_id, parent, a.call_id ?? null, a.kind, a.seq ?? null, a.label ?? null, a.source, a.started_at,
+      runnerId, a.id, a.claim_id, parent, a.call_id ?? null, a.kind, a.seq ?? null, a.label ?? null, a.source, a.started_at,
       a.ended_at ?? null, a.outcome ?? null, now, a.detail ? JSON.stringify(a.detail) : null);
     if (a.kind === 'reviewer' && typeof a.detail?.substituted_for === 'string') {
       // §6.9: a substitution is derived from the reviewer activity, not reported separately.
       const item = a.claim_id ? this.rows<{ ticket_id: string }>('SELECT ticket_id FROM claims WHERE id = ?', a.claim_id)[0]?.ticket_id ?? null : null;
-      this.event('reviewer-substituted', `worker:${workerId}`, { activity: a.id, agent: a.detail.agent ?? a.label ?? null, substituted_for: a.detail.substituted_for }, item, a.claim_id);
+      this.event('reviewer-substituted', `runner:${runnerId}`, { activity: a.id, agent: a.detail.agent ?? a.label ?? null, substituted_for: a.detail.substituted_for }, item, a.claim_id);
     }
   }
 
   // ── the alarm's share (§3) ──────────────────────────────────────────────────────────────
 
-  /** The expiry of a reaped worker's open messages (§9). R3-1212 adds reaping. */
+  /** The expiry of a reaped runner's open messages (§9). R3-1212 adds reaping. */
   alarm() {
     const now = this.c.now();
-    // B-236: driven from the open messages (`messages_by_status`), each worker read by its key —
-    // never from the reaped workers, whose rows are kept forever (R-BTN-3).
+    // B-236: driven from the open messages (`messages_by_status`), each runner read by its key —
+    // never from the reaped runners, whose rows are kept forever (R-BTN-3).
     this.exec(`UPDATE messages SET status = 'expired' WHERE status IN ('pending','delivered')
-               AND EXISTS (SELECT 1 FROM workers w WHERE w.id = messages.to_worker_id AND w.reaped_at IS NOT NULL)`);
+               AND EXISTS (SELECT 1 FROM runners w WHERE w.id = messages.to_runner_id AND w.reaped_at IS NOT NULL)`);
   }
 
   // ── mode and shadow reports (R-BTN-28, §13 step 2) ──────────────────────────────────────
@@ -796,34 +802,34 @@ export class WorkerApi {
 
   /** `POST /v1/runner/shadow-report`: in shadow, `claim.sh` reports each git transition and
    *  Baton records it as a claim row, deciding nothing; a report the claim constraints refuse —
-   *  a second active claim on the item or for the worker — is a `shadow-conflict` event. */
-  shadowReport(workerId: number, body: unknown) {
+   *  a second active claim on the item or for the runner — is a `shadow-conflict` event. */
+  shadowReport(runnerId: number, body: unknown) {
     const r = checkShadowReport(body);
     const repo = repositoryOf(r.ticket_id);
     if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NULL', repo).length) throw new BatonError('invalid-params', 'ticket_id: not a registered repository’s ticket');
     if (this.mode(repo).mode !== 'shadow') throw new BatonError('forbidden', `${repo}'s shadow reports ended at its cutover`);
-    const actor = `worker:${workerId}`;
+    const actor = `runner:${runnerId}`;
     const conflict = (reason: string) => {
       this.event('shadow-conflict', actor, { ...r, reason }, r.ticket_id);
       return { ok: true, conflict: reason };
     };
-    const holder = this.rows<{ id: number; worker_id: number }>(`SELECT id, worker_id FROM claims WHERE ticket_id = ? AND status = 'active'`, r.ticket_id)[0];
+    const holder = this.rows<{ id: number; runner_id: number }>(`SELECT id, runner_id FROM claims WHERE ticket_id = ? AND status = 'active'`, r.ticket_id)[0];
     if (r.transition === 'claim') {
-      if (holder && holder.worker_id === workerId) {
+      if (holder && holder.runner_id === runnerId) {
         // A retried report (same nonce) is the same claim; another nonce is a second git claim.
         const same = this.rows('SELECT 1 FROM claims WHERE id = ? AND nonce = ?', holder.id, r.nonce).length;
         return same ? { ok: true, claim_id: holder.id } : conflict('already-held');
       }
-      if (holder) return conflict(`held-by-worker:${holder.worker_id}`);
-      const mine = this.activeClaim(workerId);
-      if (mine) return conflict(`worker-holds:${mine.ticket_id}`);
+      if (holder) return conflict(`held-by-runner:${holder.runner_id}`);
+      const mine = this.activeClaim(runnerId);
+      if (mine) return conflict(`runner-holds:${mine.ticket_id}`);
       const head = this.rows<{ sha: string | null }>('SELECT sha FROM board_head WHERE repository_id = ?', repo)[0]?.sha ?? '';
       // R-BTN-62: as any claim, judged only by a reading numbered after it.
-      this.exec(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation, station, start_path, course_id)
+      this.exec(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation, station, start_path, course_id)
                  VALUES (?, ?, ?, ?, ?, ?, 'active', COALESCE((SELECT last_handed_out FROM board_head WHERE repository_id = ?), 0),
                          COALESCE((SELECT station FROM ticket_stations WHERE ticket_id = ?), ''), COALESCE((SELECT path FROM ticket_stations WHERE ticket_id = ?), '[]'),
                          (SELECT course_id FROM tickets WHERE id = ?))`,
-        r.ticket_id, workerId, `shadow:${workerId}:${r.ticket_id}:${r.nonce}`, r.nonce!, head, r.at, repo, r.ticket_id, r.ticket_id, r.ticket_id);
+        r.ticket_id, runnerId, `shadow:${runnerId}:${r.ticket_id}:${r.nonce}`, r.nonce!, head, r.at, repo, r.ticket_id, r.ticket_id, r.ticket_id);
       const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
       this.event('claimed', actor, { shadow: true, nonce: r.nonce }, r.ticket_id, id);
       this.c.held?.(r.ticket_id, true); // a claim's start is silent (R-BTN-77)
@@ -833,7 +839,7 @@ export class WorkerApi {
     // claim, which lasts through the gate and the merge (§6.5); any other status ends it.
     const keeps = r.status === 'in-progress' || r.status === 'in-review';
     if (!holder) return keeps ? conflict('no-claim') : { ok: true };
-    if (holder.worker_id !== workerId) return conflict(`held-by-worker:${holder.worker_id}`);
+    if (holder.runner_id !== runnerId) return conflict(`held-by-runner:${holder.runner_id}`);
     if (keeps) return { ok: true, claim_id: holder.id };
     // R-BTN-62: the counter when it ended, as every end records.
     this.exec(`UPDATE claims SET status = 'released', ended_at = ?, end_reason = ?,
@@ -846,34 +852,34 @@ export class WorkerApi {
     return { ok: true, claim_id: holder.id };
   }
 
-  /** A worker's declared courses (R-BTN-48) with each one's `min_worker_version` — only those
-   *  below it (rule 9), or all of them for the Workers view. A course no repository registered
-   *  has no minimum and is never stale. A worker that declares no course at all (a sidecar from
+  /** A runner's declared courses (R-BTN-48) with each one's `min_runner_version` — only those
+   *  below it (rule 9), or all of them for the Runners view. A course no repository registered
+   *  has no minimum and is never stale. A runner that declares no course at all (a sidecar from
    *  before R-BTN-22's change) is stale on every registered course, its version `null`. */
-  staleCourses(workerId: number, all = false) {
-    type Stale = { repository: string; course: string; version: number | null; min_worker_version: number | null };
+  staleCourses(runnerId: number, all = false) {
+    type Stale = { repository: string; course: string; version: number | null; min_runner_version: number | null };
     const declared = this.rows<Stale>(
-      `SELECT f.repository_id AS repository, f.course_id AS course, f.version, c.min_worker_version
-       FROM worker_courses f LEFT JOIN courses c ON c.repository_id = f.repository_id AND c.id = f.course_id
-       WHERE f.worker_id = ? ORDER BY f.repository_id, f.course_id`, workerId);
+      `SELECT f.repository_id AS repository, f.course_id AS course, f.version, c.min_runner_version
+       FROM runner_courses f LEFT JOIN courses c ON c.repository_id = f.repository_id AND c.id = f.course_id
+       WHERE f.runner_id = ? ORDER BY f.repository_id, f.course_id`, runnerId);
     if (all) return declared;
     if (!declared.length) {
-      return this.rows<Stale>('SELECT repository_id AS repository, id AS course, NULL AS version, min_worker_version FROM courses ORDER BY repository_id, id');
+      return this.rows<Stale>('SELECT repository_id AS repository, id AS course, NULL AS version, min_runner_version FROM courses ORDER BY repository_id, id');
     }
-    return declared.filter((d) => d.min_worker_version != null && (d.version as number) < d.min_worker_version);
+    return declared.filter((d) => d.min_runner_version != null && (d.version as number) < d.min_runner_version);
   }
 
-  // ── the dashboard's Workers view (§14) ──────────────────────────────────────────────────
+  // ── the dashboard's Runners view (§14) ──────────────────────────────────────────────────
 
-  workersView(now: number) {
-    const workers = this.rows<Row>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
-                                       first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version FROM workers ORDER BY hostname, id`);
-    return workers.map((w) => {
+  runnersView(now: number) {
+    const runners = this.rows<Row>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
+                                        first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version, legacy_names_at FROM runners ORDER BY hostname, id`);
+    return runners.map((w) => {
       const id = w.id as number;
       const alive = w.reaped_at == null && now - (w.last_seen_at as number) < (w.lease_timeout_ms as number);
       const transcript = this.rows<{ repo: string; path: string }>(
-        `SELECT repo, path FROM (SELECT repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts WHERE worker_id = ?
-         UNION ALL SELECT repo, path, COALESCE(last_pushed_at, first_seen_at) FROM pending_transcripts WHERE worker_id = ?) ORDER BY t DESC LIMIT 1`, id, id)[0];
+        `SELECT repo, path FROM (SELECT repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts WHERE runner_id = ?
+         UNION ALL SELECT repo, path, COALESCE(last_pushed_at, first_seen_at) FROM pending_transcripts WHERE runner_id = ?) ORDER BY t DESC LIMIT 1`, id, id)[0];
       return {
         ...w,
         tier_ceilings: JSON.parse(w.tier_ceilings as string) as Record<string, string>,
@@ -881,7 +887,7 @@ export class WorkerApi {
         // key names the CLI's pinning. NULL until a heartbeat carried one.
         profile: w.profile_json == null ? null : JSON.parse(w.profile_json as string) as Record<string, unknown>,
         alive,
-        capabilities: this.rows<{ capability: string; declared: string }>('SELECT capability, declared FROM worker_capabilities WHERE worker_id = ? ORDER BY capability', id),
+        capabilities: this.rows<{ capability: string; declared: string }>('SELECT capability, declared FROM runner_capabilities WHERE runner_id = ? ORDER BY capability', id),
         courses: this.staleCourses(id, true),
         // R-BTN-4 (B-188): every claim the runner holds; `claim`, the oldest, for readers before it.
         claims: this.activeClaims(id),
@@ -889,21 +895,20 @@ export class WorkerApi {
         activity: this.currentActivity(id),
         // §6.8: built only as a blob link from validated parts, never a reported URL.
         transcript_url: transcript ? transcriptUrl(transcript.repo, transcript.path) : null,
-        last_report: this.rows(`SELECT payload_json, sent_at FROM messages WHERE from_worker_id = ? AND kind = 'status_report' ORDER BY id DESC LIMIT 1`, id)[0] ?? null,
+        last_report: this.rows(`SELECT payload_json, sent_at FROM messages WHERE from_runner_id = ? AND kind = 'status_report' ORDER BY id DESC LIMIT 1`, id)[0] ?? null,
       };
     });
   }
 
   /** R-BTN-197 (B-254): Needs you's runners below the recommended client — each live runner
    *  whose own statement (`client_version`, its last call's `Baton-Client`) is below
-   *  `recommended`, with its version, folded out of the Workers view's own read so the state
+   *  `recommended`, with its version, folded out of the Runners view's own read so the state
    *  read costs no statement of its own for it (B-240's budget). A runner that named no version
-   *  said nothing to compare and is not listed; liveness is the Workers view's own rule
+   *  said nothing to compare and is not listed; liveness is the Runners view's own rule
    *  (`reaped_at` clear and the lease un-lapsed). */
-  staleClients(workers: ({ alive: boolean } & Record<string, unknown>)[], recommended: string) {
-    return workers
+  staleClients(runners: ({ alive: boolean } & Record<string, unknown>)[], recommended: string) {
+    return runners
       .filter((w) => w.client_version != null && w.kind !== 'legacy' && w.alive && compareVersions(w.client_version as string, recommended) < 0)
       .map((w) => ({ hostname: w.hostname, session_name: w.session_name, client_version: w.client_version, recommended }));
   }
 }
-

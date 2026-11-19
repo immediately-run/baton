@@ -193,7 +193,7 @@ export class Capacity {
     const one = (q: string) => this.c.store.exec<{ n: number }>(q).toArray()[0]?.n ?? 0;
     const kept = maintainedCounts(this.c.store);
     return {
-      live_runners: one(`SELECT COUNT(*) AS n FROM workers WHERE reaped_at IS NULL AND kind != 'legacy'`),
+      live_runners: one(`SELECT COUNT(*) AS n FROM runners WHERE reaped_at IS NULL AND kind != 'legacy'`),
       repositories: one('SELECT COUNT(*) AS n FROM repositories WHERE retired_at IS NULL'),
       live_tickets: kept.tickets,
       history_rows: kept.history,

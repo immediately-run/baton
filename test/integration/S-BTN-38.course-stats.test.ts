@@ -1,10 +1,10 @@
 // S-BTN-38 a course measures itself (BATON_SPEC §15, §5.7, §14; R3-1248): after a claim runs legs,
-// suspends and another resumes and gives the ticket back, a worker key granted on docs reads
+// suspends and another resumes and gives the ticket back, a runner key granted on docs reads
 // `GET /v1/repositories/docs/stats`; an `ops`-only key tries the same. Must hold: docs' key gets
 // leg wait and run times, ends by reason and detail, suspensions by station and overridden advice,
-// with no worker, profile or report in it; the `ops` key is refused `forbidden`. Runs on both hosts.
+// with no runner, profile or report in it; the `ops` key is refused `forbidden`. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { advance, claimItem, cutover, endClaim, Git, keyCall, ORIGIN, placed, register, setAdminKeys, setClock, withCore, workerCall, course } from '../helpers';
+import { advance, claimItem, cutover, endClaim, Git, keyCall, ORIGIN, placed, register, setAdminKeys, setClock, withCore, runnerCall, course } from '../helpers';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import chore from '../fixtures/courses/chore/course.json';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
@@ -42,7 +42,7 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-38 a course measures itself', () => {
-  it('a key granted on docs reads its course record — aggregates and ids, no worker; an ops-only key is forbidden', async () => {
+  it('a key granted on docs reads its course record — aggregates and ids, no runner; an ops-only key is forbidden', async () => {
     // One claim runs implement for 20 minutes and suspends at pr-open, waiting on CI.
     const w1 = await register('vm-a');
     const { json: c1 } = await claimItem('vm-a', w1.secret, { ticket_id: 'docs:T-1' });
@@ -55,7 +55,7 @@ describe('S-BTN-38 a course measures itself', () => {
     await setClock(T0 + 25 * MIN);
     git.place('T-1', placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]));
     expect(await git.post()).toMatchObject({ status: 200 });
-    // At +30 another worker takes it up, reviews for 30 minutes and gives it back.
+    // At +30 another runner takes it up, reviews for 30 minutes and gives it back.
     await setClock(T0 + 30 * MIN);
     const w2 = await register('vm-b');
     const { json: c2 } = await claimItem('vm-b', w2.secret, { ticket_id: 'docs:T-1' });
@@ -85,9 +85,9 @@ describe('S-BTN-38 a course measures itself', () => {
       { end_reason: 'suspended:pr-open', detail: 'waiting on ci', claims: 1 },
       { end_reason: 'released:requested', detail: null, claims: 1 },
     ]));
-    // Aggregates and ids only: no worker, hostname, key or session in it.
+    // Aggregates and ids only: no runner, hostname, key or session in it.
     const text = JSON.stringify(r.json);
-    for (const s of ['worker', 'vm-a', 'vm-b', 'host', docsKey.fingerprint, 'session']) expect(text).not.toContain(s);
+    for (const s of ['runner', 'vm-a', 'vm-b', 'host', docsKey.fingerprint, 'session']) expect(text).not.toContain(s);
     // A window that starts after the work holds none of it.
     await setClock(T0 + 90 * MIN);
     expect((await readAs(docsKey, `/v1/repositories/docs/stats?since=${new Date(T0 + 61 * MIN).toISOString()}`)).json).toMatchObject({ ends: [], suspensions: [], courses: {} });
@@ -106,12 +106,12 @@ describe('S-BTN-38 a course measures itself', () => {
       // since it turned ready at +20 (2-r2-1); T-2, held by W3, is no longer counted
       courses: { 'roadmap-pr': { legs: { review: { ready_now: { tickets: 1, oldest_s: 1800 } } } } } });
 
-    // Refused: the ops-only key; a bearer (seed) worker key, which has no grant (round 1, 1-A-0);
+    // Refused: the ops-only key; a bearer (seed) runner key, which has no grant (round 1, 1-A-0);
     // an unsigned call; a malformed window and a malformed segment. An unknown repository is not-found.
     expect(await readAs(opsKey, '/v1/repositories/docs/stats')).toMatchObject({ status: 403, json: { code: 'forbidden' } });
-    expect((await workerCall('/v1/repositories/docs/stats', { cred: 'vm-a' })).status).toBe(403);
+    expect((await runnerCall('/v1/repositories/docs/stats', { cred: 'vm-a' })).status).toBe(403);
     expect((await hostCall(new Request(`${ORIGIN}/v1/repositories/docs/stats`))).status).toBe(401);
-    expect((await workerCall('/v1/repositories/nope/stats', { cred: 'vm-a' })).status).toBe(404);
+    expect((await runnerCall('/v1/repositories/nope/stats', { cred: 'vm-a' })).status).toBe(404);
     expect((await readAs(docsKey, '/v1/repositories/docs/stats?since=yesterday')).json).toMatchObject({ code: 'invalid-params' });
     expect(await readAs(docsKey, '/v1/repositories/%zz/stats')).toMatchObject({ status: 400, json: { code: 'invalid-params' } });
   });

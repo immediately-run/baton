@@ -1,7 +1,7 @@
 // notices.ts — requests for people (BATON_SPEC §2g R-BTN-80, §2l R-BTN-103; R3-1256). The one
-// writer of `notices` and `worker_couriers`. Baton sends nothing: for each open decision it queues
+// writer of `notices` and `runner_couriers`. Baton sends nothing: for each open decision it queues
 // one notice per personal courier registered for the decision's `asks`, and one pool copy while a
-// worker courier has said within a day that it delivers them; couriers claim notices, deliver them
+// runner courier has said within a day that it delivers them; couriers claim notices, deliver them
 // however they do, and mark them `sent` or `failed`. A notice holds references only — the title,
 // question and link are read from the ticket and its decision when a courier claims it, so nothing
 // of a packet is stored here (R-BTN-33). A notice closes only when its decision closes or its
@@ -23,22 +23,22 @@ export const BACKOFF_MS = [60_000, 5 * 60_000, 30 * 60_000, 3_600_000] as const;
 export const CLOSED_KEPT_MS = 7 * 86_400_000;
 /** R-BTN-80: `remind_after`, an owner setting in seconds — default a day, from an hour to 7 days. */
 export const REMIND_AFTER_S = { min: 3600, max: 604_800, default: 86_400 } as const;
-/** R-BTN-103: a worker courier seen within a day gets its `(repository, asks)` a pool copy; a pool
+/** R-BTN-103: a runner courier seen within a day gets its `(repository, asks)` a pool copy; a pool
  *  copy unclaimed for an hour is listed under Needs you. */
 export const POOL_WINDOW_MS = 24 * 3_600_000;
 export const POOL_UNCLAIMED_MS = 3_600_000;
-/** §3's write budget (spec-silent, recorded on R3-1256): a heartbeat refreshes a worker courier's
+/** §3's write budget (spec-silent, recorded on R3-1256): a heartbeat refreshes a runner courier's
  *  `seen_at` only once it is an hour old, so the 24-hour window is kept to within an hour. */
 export const SEEN_REFRESH_MS = 3_600_000;
 /** A notice id: 16 random bytes, hex. */
 const NOTICE_ID = /^[0-9a-f]{32}$/;
 
 /** Who is asking on `/v1/courier/*`: a personal channel — a courier key its owners registered —
- *  or a worker courier, a machine key acting for one repository with the `asks` its sessions'
+ *  or a runner courier, a machine key acting for one repository with the `asks` its sessions'
  *  heartbeats declared there within the day. */
 export type Courier =
   | { kind: 'personal'; fingerprint: string }
-  | { kind: 'worker'; fingerprint: string; repository: string; asks: string[] };
+  | { kind: 'runner'; fingerprint: string; repository: string; asks: string[] };
 
 /** A notice as a courier receives it (R-BTN-80): a decision, or a leg over its bound (R-BTN-79).
  *  A decision's options each carry their computed action (B-133). */
@@ -86,7 +86,7 @@ export class Notices {
 
   /** Decisions `ids` of `ticket` were first stored, in the caller's transaction: one notice per
    *  personal courier of the ticket's repository registered for each one's `asks`, and one pool
-   *  copy while a worker courier of that `(repository, asks)` was seen within the day. */
+   *  copy while a runner courier of that `(repository, asks)` was seen within the day. */
   opened(ticket: string, ids: string[]) {
     const now = this.c.now();
     for (const d of this.decisionsOf(ticket, ids)) {
@@ -189,12 +189,12 @@ export class Notices {
                VALUES (?, ?, ?, ?, 'decision', ?, 'queued', 0, ?, ?, ?)`, randomHex(16), credential, repository, ticket, decision, now, now, now);
   }
 
-  /** Whether a worker courier still granted on `repository` declared `asks` there within the day. */
+  /** Whether a runner courier still granted on `repository` declared `asks` there within the day. */
   private poolServed(repository: string, asks: string, now: number): boolean {
     return this.rows(
-      `SELECT 1 FROM worker_couriers wc JOIN workers w ON w.id = wc.worker_id JOIN credentials k ON k.id = w.credential_id
+      `SELECT 1 FROM runner_couriers wc JOIN runners w ON w.id = wc.runner_id JOIN credentials k ON k.id = w.credential_id
        WHERE wc.repository_id = ? AND wc.asks = ? AND wc.seen_at > ? AND k.revoked_at IS NULL
-         AND EXISTS (SELECT 1 FROM worker_grants g WHERE g.credential_id = k.id AND g.repository_id = wc.repository_id AND g.revoked_at IS NULL)
+         AND EXISTS (SELECT 1 FROM runner_grants g WHERE g.credential_id = k.id AND g.repository_id = wc.repository_id AND g.revoked_at IS NULL)
        LIMIT 1`, repository, asks, now - POOL_WINDOW_MS).length > 0;
   }
 
@@ -207,7 +207,7 @@ export class Notices {
   // ── couriers' calls (`/v1/courier/*`) ─────────────────────────────────────────────────────
 
   /** `POST /v1/courier/notices/claim`: up to `limit` of the courier's queued notices — a personal
-   *  channel's own copies, or a worker courier's repository's pool copies for its `asks` — each
+   *  channel's own copies, or a runner courier's repository's pool copies for its `asks` — each
    *  leased 10 minutes. */
   claim(who: Courier, limit: number): { notices: NoticeView[] } {
     const now = this.c.now();
@@ -304,35 +304,35 @@ export class Notices {
     };
   }
 
-  // ── worker couriers (R-BTN-103) ───────────────────────────────────────────────────────────
+  // ── runner couriers (R-BTN-103) ───────────────────────────────────────────────────────────
 
   /**
-   * A heartbeat's `couriers`, inside its transaction: the worker's rows rewritten to what it
+   * A heartbeat's `couriers`, inside its transaction: the runner's rows rewritten to what it
    * declares on repositories its key is granted on (`granted`; null for a key that is no machine
    * key granted anywhere, which delivers nothing). Returns the entries refused.
    */
-  declare(workerId: number, granted: string[] | null, entries: { repository: string; asks: string[] }[]): { repository: string; code: string }[] {
+  declare(runnerId: number, granted: string[] | null, entries: { repository: string; asks: string[] }[]): { repository: string; code: string }[] {
     const now = this.c.now();
     const refused = entries.filter((e) => !granted?.includes(e.repository)).map((e) => ({ repository: e.repository, code: 'forbidden' }));
     const want = new Set(entries.filter((e) => granted?.includes(e.repository)).flatMap((e) => e.asks.map((a) => `${e.repository}\u0000${a}`)));
-    const have = this.rows<{ repository_id: string; asks: string; seen_at: number }>('SELECT repository_id, asks, seen_at FROM worker_couriers WHERE worker_id = ?', workerId);
+    const have = this.rows<{ repository_id: string; asks: string; seen_at: number }>('SELECT repository_id, asks, seen_at FROM runner_couriers WHERE runner_id = ?', runnerId);
     for (const h of have) {
       const key = `${h.repository_id}\u0000${h.asks}`;
-      if (!want.has(key)) this.exec('DELETE FROM worker_couriers WHERE worker_id = ? AND repository_id = ? AND asks = ?', workerId, h.repository_id, h.asks);
-      else if (now - h.seen_at >= SEEN_REFRESH_MS) this.exec('UPDATE worker_couriers SET seen_at = ? WHERE worker_id = ? AND repository_id = ? AND asks = ?', now, workerId, h.repository_id, h.asks);
+      if (!want.has(key)) this.exec('DELETE FROM runner_couriers WHERE runner_id = ? AND repository_id = ? AND asks = ?', runnerId, h.repository_id, h.asks);
+      else if (now - h.seen_at >= SEEN_REFRESH_MS) this.exec('UPDATE runner_couriers SET seen_at = ? WHERE runner_id = ? AND repository_id = ? AND asks = ?', now, runnerId, h.repository_id, h.asks);
       want.delete(key);
     }
     for (const key of want) {
       const [repository, asks] = key.split('\u0000');
-      this.exec('INSERT INTO worker_couriers (worker_id, repository_id, asks, seen_at) VALUES (?, ?, ?, ?)', workerId, repository, asks, now);
+      this.exec('INSERT INTO runner_couriers (runner_id, repository_id, asks, seen_at) VALUES (?, ?, ?, ?)', runnerId, repository, asks, now);
     }
     return refused;
   }
 
   /** The `asks` a machine key's sessions declared on `repository` within the day. */
-  workerAsks(credential: string, repository: string): string[] {
+  runnerAsks(credential: string, repository: string): string[] {
     return this.rows<{ asks: string }>(
-      `SELECT DISTINCT wc.asks FROM worker_couriers wc JOIN workers w ON w.id = wc.worker_id
+      `SELECT DISTINCT wc.asks FROM runner_couriers wc JOIN runners w ON w.id = wc.runner_id
        WHERE w.credential_id = ? AND wc.repository_id = ? AND wc.seen_at > ? ORDER BY wc.asks`, credential, repository, this.c.now() - POOL_WINDOW_MS).map((r) => r.asks);
   }
 

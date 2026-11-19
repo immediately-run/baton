@@ -55,7 +55,7 @@ export function maxVersion(a, b) {
  *  `client_version` is a filter field, a short validated string, bounded like `session_name`'s
  *  1–128 — this one 64, the whole version including its `-prerelease` and `+build`). A longer
  *  claim is not a statement Baton reads: it compares as no header, is stored as NULL and echoes
- *  back as nothing, so no unbounded string reaches `workers.client_version`, a refusal's body or
+ *  back as nothing, so no unbounded string reaches `runners.client_version`, a refusal's body or
  *  the Needs-you row. */
 export const CLIENT_VERSION_MAX = 64;
 

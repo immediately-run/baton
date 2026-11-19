@@ -161,7 +161,7 @@ describe('the local host', () => {
         expect(await big.json()).toMatchObject({ ok: false, code: 'invalid-params' });
         for (const [k, v] of Object.entries(SECURITY_HEADERS)) expect(big.headers.get(k)).toBe(v);
       }
-      expect(await ok.json()).toMatchObject({ worker_id: 1, mode: { docs: 'cut-over' } });
+      expect(await ok.json()).toMatchObject({ runner_id: 1, mode: { docs: 'cut-over' } });
     } finally {
       await new Promise((r) => server.close(r));
     }

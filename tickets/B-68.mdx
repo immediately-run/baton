@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1090
 tier: critical
-description: "Rename the code's `worker` identifiers to the spec's `runner` (history, Migrations: \"Worker\" is \"runner\"): a new migration renames the `workers` and `worker_*` tables, the index `worker_instances_by_instance`, the columns `worker_id`, `from_worker_id`, `to_worker_id` and `min_worker_version`, and the credential kind; Baton accepts `X-Runner-Secret`, `Min-Runner-Version`, `?runner=me` and `min_runner_version` beside the old names and records which runners still send them; clients send and read only the new names (`runner-reaped`); TypeScript identifiers, UI text and the model's names follow, with `@impl` links re-stamped. S-BTN-30. Requires: none."
+description: "Rename the code's `worker` identifiers to the spec's `runner` (history, Migrations: \"Worker\" is \"runner\"): migration 0061 renames the live `workers` and `worker_*` schema, the columns `worker_id`, `from_worker_id`, `to_worker_id` and `min_worker_version`, and the credential kind; Baton accepts `X-Runner-Secret`, `Min-Runner-Version`, `?runner=me` and `min_runner_version` beside the old names and records which runners still send them; clients send and read only the new names (`runner-reaped`); TypeScript identifiers, UI text and the model's names follow, with `@impl` links re-stamped. S-BTN-236. Requires: none."
 topics:
   - baton
 owns: {}
@@ -29,7 +29,7 @@ term" (history, Integration). The spec now names every process that runs a leg a
 "\"Worker\" is \"runner\" (2026-10-20, owner)". In BATON_SPEC: [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) [R-BTN-3](../spec/BATON_SPEC/08-runners.md#sec-8-1), [R-BTN-14](../spec/BATON_SPEC/08-runners.md#sec-8-1)
 (`X-Runner-Secret`, `runner-reaped`); [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) and [§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) (`?runner=me`); [§5.7](../spec/BATON_SPEC/05-courses.md#sec-5-7) [R-BTN-22](../spec/BATON_SPEC/05-courses.md#sec-5-7) / [R-BTN-65](../spec/BATON_SPEC/05-courses.md#sec-5-7) and [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6)
 rule 9 (`min_runner_version`, `Min-Runner-Version`); [§13.2](../spec/BATON_SPEC/13-data-model.md#sec-13-2) `credentials.kind` `runner`; [§13.3](../spec/BATON_SPEC/13-data-model.md#sec-13-3)
-`runners` and the `runner_*` tables; [§13.8](../spec/BATON_SPEC/13-data-model.md#sec-13-8) `runner_instances_by_instance`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-30](../spec/BATON_SPEC/15-verification.md#scenarios).
+`runners` and the `runner_*` tables; [§13.8](../spec/BATON_SPEC/13-data-model.md#sec-13-8) `runner_instances_by_instance`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-236](../spec/BATON_SPEC/15-verification.md#scenarios).
 **Depends on:** nothing. Schedule it right after B-49 merges (its PR #67 touches
 `src/core/blocks.ts`) and before the [§7](../spec/BATON_SPEC/07-conditions.md#sec-7) wave (B-55 onward) adds new `worker` code.
 
@@ -82,7 +82,7 @@ early, with a window so no running runner breaks.
 
 ### Tests
 
-- S-BTN-30 gains a case: a heartbeat with `X-Runner-Secret` and one with `X-Worker-Secret` both
+- S-BTN-236 covers a heartbeat with `X-Runner-Secret` and one with `X-Worker-Secret`; both
   pass, and only the second sets `legacy_names_at`.
 - Unit: the migration on a database at the previous schema keeps every row; `?worker=me` and
   `?runner=me` answer alike; differing `min_runner_version` and `min_worker_version` refused.
@@ -101,3 +101,9 @@ early, with a window so no running runner breaks.
 _(filed 2026-10-20 with the current-state spec, PR #71)_
 
 _(2026-11-18: rules re-read at claim: R-BTN-3 (amended 2026-11-09))_
+
+_(2026-11-18, review round 1: the Tests item's "S-BTN-30 gains a case" is carried by the new
+S-BTN-236 instead — the coverage grew past S-BTN-30's signed requests into the dual-read
+window's refusals and migration 0061's row preservation, and §15 keeps one row per subject, so
+the window got a scenario of its own; the asked-for heartbeat pair — `X-Runner-Secret` and
+`X-Worker-Secret`, only the old one setting `legacy_names_at` — is S-BTN-236's first case.)_

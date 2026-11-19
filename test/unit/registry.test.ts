@@ -170,13 +170,13 @@ describe('a branch pattern cannot stall the object (round 1, 1-B-0)', () => {
   });
 
   it('the registry refuses a pattern with more than four stars', () => {
-    expect(() => checkRegistry([{ id: 'c', version: 1, min_worker_version: 1, skill: 's', course: {}, step_kinds: [], branch_pattern: 'claude/{ticket}*-*-*-*-*' }]))
+    expect(() => checkRegistry([{ id: 'c', version: 1, min_runner_version: 1, skill: 's', course: {}, step_kinds: [], branch_pattern: 'claude/{ticket}*-*-*-*-*' }]))
       .toThrow(/at most 4 \*/);
   });
 });
 
 describe('the reserved branch namespaces (R-BTN-190, B-174)', () => {
-  const entry = (branch_pattern: string) => ({ id: 'c', version: 1, min_worker_version: 1, skill: 's', course: {}, step_kinds: [], branch_pattern });
+  const entry = (branch_pattern: string) => ({ id: 'c', version: 1, min_runner_version: 1, skill: 's', course: {}, step_kinds: [], branch_pattern });
 
   it.each([
     ['baton-request/{ticket}', 'the namespace itself'],

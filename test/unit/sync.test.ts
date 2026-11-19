@@ -66,7 +66,7 @@ describe('POST /v1/sync/board', () => {
     ['force as a string', { ...payload(A, null, board.states.A), force: 'false' }],
     ['a registry that is not a list', { ...payload(A, null, board.states.A), registry: {} }],
     ['a course named twice', { ...payload(A, null, board.states.A), registry: [course(), course()] }],
-    ['a min_worker_version above its version', { ...payload(A, null, board.states.A), registry: [course(3, 4)] }],
+    ['a min_runner_version above its version', { ...payload(A, null, board.states.A), registry: [course(3, 4)] }],
     ['a branch pattern without {ticket}', { ...payload(A, null, board.states.A), registry: [course(3, 3, { branch_pattern: 'claude/*' })] }],
     ['a registry of 65 courses', { ...payload(A, null, board.states.A), registry: Array.from({ length: 65 }, (_, i) => course(3, 3, { id: `c${i}` })) }],
     ['a course file over 64 KiB with none in force', { ...payload(A, null, board.states.A), registry: [course(3, 3, { course: { pad: 'x'.repeat(65 * 1024) } })] }],
@@ -102,7 +102,7 @@ describe('POST /v1/sync/board', () => {
     const retired = { ontology: { builtin: 'baton@1', program: { not: 'a program' } }, registry: [course(3, 3, { route_choices: { go: ['codegen'] } })] };
     expect((await syncCall('/v1/sync/board', payload(A, null, board.states.A, retired))).status).toBe(200);
     expect(await head()).toBe(A);
-    expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('ontologies', 'worker_derived', 'worker_derived_inputs', 'ontology_refusals', 'route_last')`)).toEqual([]);
+    expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('ontologies', 'runner_derived', 'runner_derived_inputs', 'ontology_refusals', 'route_last')`)).toEqual([]);
     expect(await rows(`SELECT name FROM pragma_table_info('courses') WHERE name IN ('route_choices_json', 'report_horizon_h')`)).toEqual([]);
   });
 

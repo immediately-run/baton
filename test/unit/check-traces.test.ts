@@ -15,9 +15,9 @@ const dir = mkdtempSync(join(tmpdir(), 'baton-check-traces-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 const T = 'docs:T-1';
-const base = (): Projection => ({ counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], workers: { 1: [] }, required: [], courseFile: null, liveness: { 1: { lastSeen: 0, lease: 900_000 } } });
+const base = (): Projection => ({ counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: { 1: [] }, required: [], courseFile: null, liveness: { 1: { lastSeen: 0, lease: 900_000 } } });
 const claim = (over: Partial<ClaimView> = {}): ClaimView => ({
-  ticket: T, worker: 1, status: 'active', endReason: null, station: 'filed', leg: '', finished: [], legBars: [], startPath: [], claimObs: 1, endObs: -1,
+  ticket: T, runner: 1, status: 'active', endReason: null, station: 'filed', leg: '', finished: [], legBars: [], startPath: [], claimObs: 1, endObs: -1,
   regressed: false, endedRegressed: false, confirmed: false, fencePending: false, ...over,
 });
 
@@ -112,7 +112,7 @@ describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1
       [req('POST', '/v1/sync/observation'), (p) => ({ ...p, counter: 3, outstanding: true })]], 'sync-busy');
   });
   it('an alarm reap before the lease ran out by the recorded clock', async () => {
-    await rejected('early-reap', [[claimReq, claimed()], [{ kind: 'alarm' }, claimed({ status: 'reaped', endReason: 'reaped:silent' })]], 'before worker 1\'s lease ran out');
+    await rejected('early-reap', [[claimReq, claimed()], [{ kind: 'alarm' }, claimed({ status: 'reaped', endReason: 'reaped:silent' })]], 'before runner 1\'s lease ran out');
   });
   it('a claim\'s legs moved by anything but its advance', async () => {
     await rejected('legs-by-heartbeat', [[claimReq, claimed()], [req('POST', '/v1/runner/heartbeat'), claimed({ leg: 'implement' })]], 'legs changed by /v1/runner/heartbeat');

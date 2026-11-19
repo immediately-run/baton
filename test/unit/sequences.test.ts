@@ -363,7 +363,7 @@ describe('baton tickets new: the PR-first landing and --direct (B-176)', () => {
 
 describe('R-BTN-190: no branch_pattern matches the reserved namespaces (B-176)', () => {
   const entry = (branch_pattern: string): unknown => ({
-    id: 'c', version: 1, min_worker_version: 1, skill: 'next-ticket', step_kinds: ['implement'], course: {}, branch_pattern,
+    id: 'c', version: 1, min_runner_version: 1, skill: 'next-ticket', step_kinds: ['implement'], course: {}, branch_pattern,
   });
   it('a pattern matching baton-ticket/*, baton-request/* or baton-legs/* is refused — the exact shape too', () => {
     expect(() => checkRegistry([entry('baton-ticket/{ticket}-*')])).toThrow(/branch_pattern: must not match baton-ticket\/\*/);

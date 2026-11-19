@@ -16,7 +16,7 @@
 // consents, ticket timers, the outbox) extend this file with their own cases.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, captureDispatches, claimItem, claimRow, course, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, setHumanKeys, setPolicySigningKey, sha256, syncCall, tick, ticket, withCore, webhookCall, workerCall } from '../helpers';
+import { adminSession, captureDispatches, claimItem, claimRow, course, ORIGIN, placed, register, rows, sessionCall, setAdminKeys, setClock, setHumanKeys, setPolicySigningKey, sha256, syncCall, tick, ticket, withCore, webhookCall, runnerCall } from '../helpers';
 import { makeKey, signedRequest, sshsig, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -50,7 +50,7 @@ const beatBody = (over: Record<string, unknown> = {}) => ({
   hostname: 'ops-vm', session_name: 's-ops', harness: 'opencode', kind: 'vm', capabilities: ['agent-venue'],
   tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'ops', course: 'roadmap-pr', version: 3 }], ...over,
 });
-const beat = (over: Record<string, unknown> = {}) => signed(runner, '/v1/runner/heartbeat', beatBody(over), { 'X-Worker-Secret': secret });
+const beat = (over: Record<string, unknown> = {}) => signed(runner, '/v1/runner/heartbeat', beatBody(over), { 'X-Runner-Secret': secret });
 
 /** Register ops, post its board as its sync key, and let a granted runner hold its one ticket. */
 async function aLiveRepository(): Promise<void> {
@@ -73,7 +73,7 @@ async function aLiveRepository(): Promise<void> {
   secret = `secret-${Math.random().toString(16).slice(2)}`;
   const first = await beat({ secret_hash: await sha256(secret) });
   expect(first.status, JSON.stringify(await first.clone().json())).toBe(200);
-  const claim = await signed(runner, '/v1/runner/claim', { request_id: 'retire-1', ticket_id: 'ops:T-1' }, { 'X-Worker-Secret': secret });
+  const claim = await signed(runner, '/v1/runner/claim', { request_id: 'retire-1', ticket_id: 'ops:T-1' }, { 'X-Runner-Secret': secret });
   expect(claim.status, JSON.stringify(await claim.clone().json())).toBe(200);
   claimId = ((await claim.json()) as { claim_id: number }).claim_id;
   // The rows retirement deletes: a stale webhook stamp, a pending trailing dispatch, a pending
@@ -115,11 +115,11 @@ describe('S-BTN-198 retirement', () => {
       .toEqual([{ retired_at: T0, github: '~retired/ops', former_paths: '["immediately-run/ops"]', web_base: null, dispatch: null, unblocked_trigger: null }]);
     // R-BTN-93, R-BTN-58: the sync key and the runner grant are revoked.
     expect(await rows(`SELECT revoked_at FROM sync_keys WHERE repository_id = 'ops'`)).toEqual([{ revoked_at: T0 }]);
-    expect(await rows(`SELECT revoked_at FROM worker_grants WHERE repository_id = 'ops'`)).toEqual([{ revoked_at: T0 }]);
+    expect(await rows(`SELECT revoked_at FROM runner_grants WHERE repository_id = 'ops'`)).toEqual([{ revoked_at: T0 }]);
     // R-BTN-19: the claim is reaped as an administrator's force-reap — the runner is alive, so
-    // the claim is fence-pending and the worker is not reaped.
+    // the claim is fence-pending and the runner is not reaped.
     expect(await claimRow(claimId)).toMatchObject({ status: 'reaped', end_reason: 'reaped:owner', fence_pending: 1 });
-    expect(await rows(`SELECT reaped_at FROM workers WHERE hostname = 'ops-vm'`)).toEqual([{ reaped_at: null }]);
+    expect(await rows(`SELECT reaped_at FROM runners WHERE hostname = 'ops-vm'`)).toEqual([{ reaped_at: null }]);
     expect(await rows(`SELECT actor FROM events WHERE kind = 'reaped' AND ticket_id = 'ops:T-1'`)).toEqual([{ actor: `admin:${admin.fingerprint}` }]);
     expect(await rows(`SELECT detail_json FROM events WHERE kind = 'admin' AND json_extract(detail_json, '$.act') = 'repository-retired'`))
       .toEqual([{ detail_json: JSON.stringify({ act: 'repository-retired', repository: 'ops', github: 'immediately-run/ops' }) }]);
@@ -142,7 +142,7 @@ describe('S-BTN-198 retirement', () => {
     expect(await code(await keyCall(admin, '/v1/owner/ops/grants'))).toBe('not-found');
     expect(await code(await keyCall(admin, '/v1/repositories/ops/board'))).toBe('not-found');
     expect(await code(await keyCall(opsOwner, '/v1/repositories/ops/attestations', {}))).toBe('not-found');
-    expect((await workerCall('/v1/repositories/ops/stats')).status).toBe(404);
+    expect((await runnerCall('/v1/repositories/ops/stats')).status).toBe(404);
     const w = await register('vm-a');
     const claimed = await claimItem('vm-a', w.secret, { ticket_id: 'ops:T-1' });
     expect(claimed.status === 200 ? 200 : claimed.json.code).toBe('not-found');
@@ -158,14 +158,14 @@ describe('S-BTN-198 retirement', () => {
     const json = (await hb.json()) as { courses_retired?: string[]; mode: Record<string, unknown> };
     expect(json.courses_retired).toEqual(['ops']);
     expect(json.mode).not.toHaveProperty('ops');
-    expect(await rows(`SELECT 1 FROM worker_courses c JOIN workers w ON w.id = c.worker_id WHERE w.hostname = 'ops-vm' AND c.repository_id = 'ops'`)).toEqual([]);
+    expect(await rows(`SELECT 1 FROM runner_courses c JOIN runners w ON w.id = c.runner_id WHERE w.hostname = 'ops-vm' AND c.repository_id = 'ops'`)).toEqual([]);
     // The sync key's next post is refused (R-BTN-93: a revoked key is unauthenticated, as
     // S-BTN-55 finds).
     expect(await code(await signed(opsSync, '/v1/sync/head'))).toBe('unauthenticated');
     // R-BTN-7: the holder queries keep answering — by ticket id, and for the former path
     // (R-BTN-138) while the fence is pending and no live repository holds the path.
-    expect(await (await workerCall('/v1/runner/tickets/ops:T-1/holder')).json()).toEqual({ held_by_other: false, fence_pending: true });
-    expect(await (await workerCall('/v1/runner/branch-holder?repo=immediately-run/ops.git&branch=claude/T-1-implement')).json())
+    expect(await (await runnerCall('/v1/runner/tickets/ops:T-1/holder')).json()).toEqual({ held_by_other: false, fence_pending: true });
+    expect(await (await runnerCall('/v1/runner/branch-holder?repo=immediately-run/ops.git&branch=claude/T-1-implement')).json())
       .toEqual({ tickets: ['ops:T-1'], held_by_other: false, fence_pending: true });
     // A key whose only repositories are retired owns none (R-BTN-155): opsOwner authenticates
     // no more, while the key that reached two repositories keeps the other.
@@ -180,7 +180,7 @@ describe('S-BTN-198 retirement', () => {
     // reaching the fence the moment a live repository holds it.
     const ops2Sync = await makeKey('ssh-ed25519', 'ops2-sync');
     expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops2', github: 'immediately-run/ops', default_branch: 'main', ci_identity: null, sync_keys: [{ public_key: ops2Sync.publicKey, role: 'sync' }], owner_keys: [opsOwner.publicKey] })).status).toBe(200);
-    expect(await (await workerCall('/v1/runner/branch-holder?repo=immediately-run/ops.git&branch=claude/T-1-implement')).json())
+    expect(await (await runnerCall('/v1/runner/branch-holder?repo=immediately-run/ops.git&branch=claude/T-1-implement')).json())
       .toEqual({ tickets: [], held_by_other: false, fence_pending: false });
   });
 
@@ -193,9 +193,9 @@ describe('S-BTN-198 retirement', () => {
     expect(await claimRow(claimId)).toMatchObject({ status: 'reaped', fence_pending: 0 });
     expect(await rows(`SELECT kind FROM events WHERE kind = 'fence-cleared' AND ticket_id = 'ops:T-1'`)).toEqual([{ kind: 'fence-cleared' }]);
     // Nothing reaches the retired repository's former path once no fence is pending.
-    expect(await (await workerCall('/v1/runner/branch-holder?repo=immediately-run/ops.git&branch=claude/T-1-implement')).json())
+    expect(await (await runnerCall('/v1/runner/branch-holder?repo=immediately-run/ops.git&branch=claude/T-1-implement')).json())
       .toEqual({ tickets: [], held_by_other: false, fence_pending: false });
-    expect(await (await workerCall('/v1/runner/tickets/ops:T-1/holder')).json()).toEqual({ held_by_other: false, fence_pending: false });
+    expect(await (await runnerCall('/v1/runner/tickets/ops:T-1/holder')).json()).toEqual({ held_by_other: false, fence_pending: false });
   });
 
   it('the alarm clears a retired repository\'s fence when its runner goes silent (R-BTN-19)', async () => {
@@ -205,7 +205,7 @@ describe('S-BTN-198 retirement', () => {
     await tick();
     expect(await claimRow(claimId)).toMatchObject({ fence_pending: 0 });
     expect(await rows(`SELECT kind FROM events WHERE kind = 'fence-cleared' AND ticket_id = 'ops:T-1'`)).toEqual([{ kind: 'fence-cleared' }]);
-    expect((await rows<{ reaped_at: number | null }>(`SELECT reaped_at FROM workers WHERE hostname = 'ops-vm'`))[0].reaped_at).not.toBeNull();
+    expect((await rows<{ reaped_at: number | null }>(`SELECT reaped_at FROM runners WHERE hostname = 'ops-vm'`))[0].reaped_at).not.toBeNull();
   });
 
   it('a retired repository\'s CI identity and forge notifications are refused', async () => {
@@ -271,7 +271,7 @@ describe('S-BTN-198 retirement', () => {
     expect(after.courses_retired).toEqual(['ops']);
     // `?repository=` of /v1/runner/mode reads the live predicate: a retired id is as one never
     // registered.
-    expect(await code(await signed(runner, '/v1/runner/mode?repository=ops', undefined, { 'X-Worker-Secret': secret }))).toBe('invalid-params');
+    expect(await code(await signed(runner, '/v1/runner/mode?repository=ops', undefined, { 'X-Runner-Secret': secret }))).toBe('invalid-params');
   });
 
   it('a retired repository\'s policy blocks no revocation (R-BTN-57, R-BTN-47)', async () => {
@@ -332,12 +332,12 @@ describe('S-BTN-198 retirement', () => {
     // The run holds two open conditions: an `interact` on its stored session link (R-BTN-195)
     // and a `hitl` suspend of the standard table (R-BTN-160) — both on Needs you (R-BTN-163)
     // and read by the granted key before the retire.
-    expect((await signed(runner, `/v1/runner/claims/${claimId}/advance`, { leg: 'implement' }, { 'X-Worker-Secret': secret })).status).toBe(200);
+    expect((await signed(runner, `/v1/runner/claims/${claimId}/advance`, { leg: 'implement' }, { 'X-Runner-Secret': secret })).status).toBe(200);
     const link = 'https://claude.ai/s/r_0000000000000000000000000';
     expect((await beat({ session_url: link })).status).toBe(200);
-    const interact = await signed(runner, `/v1/runner/claims/${claimId}/conditions`, { type: 'interact' }, { 'X-Worker-Secret': secret });
+    const interact = await signed(runner, `/v1/runner/claims/${claimId}/conditions`, { type: 'interact' }, { 'X-Runner-Secret': secret });
     expect(interact.status, JSON.stringify(await interact.clone().json())).toBe(200);
-    const hitl = await signed(runner, `/v1/runner/claims/${claimId}/conditions`, { type: 'hitl' }, { 'X-Worker-Secret': secret });
+    const hitl = await signed(runner, `/v1/runner/claims/${claimId}/conditions`, { type: 'hitl' }, { 'X-Runner-Secret': secret });
     expect(hitl.status, JSON.stringify(await hitl.clone().json())).toBe(200);
     const hitlId = ((await hitl.json()) as { condition_id: number }).condition_id;
     // Before: the granted key reads the repository's open conditions (R-BTN-163).

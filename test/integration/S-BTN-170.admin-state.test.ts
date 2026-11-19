@@ -1,5 +1,5 @@
 // S-BTN-170 the dashboard's state read with an administrator's key (BATON_SPEC §15, §11, §12.1
-// R-BTN-57; B-118): an administrator registers `ops` with one owner, who grants worker key K;
+// R-BTN-57; B-118): an administrator registers `ops` with one owner, who grants runner key K;
 // K heartbeats. Must hold: the administrator's signed `GET /v1/admin/state` — and the same read
 // with its API key (R-BTN-159) — answers exactly what an administrator's session reads from
 // `GET /v1/ui/state` at the same instant, K's runner included; an owner's key is `forbidden`, an

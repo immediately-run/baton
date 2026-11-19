@@ -1,4 +1,4 @@
--- 0060_children_owner_state.sql — R3-1258 (BATON_SPEC §4.6 R-BTN-86, §4.8 R-BTN-88, §13): child
+-- 0064_children_owner_state.sql — R3-1258 (BATON_SPEC §4.6 R-BTN-86, §4.8 R-BTN-88, §13): child
 -- tickets and owner state. `tickets.parent` holds the qualified id of a ticket's same-repository
 -- parent (`<repository>:<local id>`, R-BTN-47), stored by the snapshot that materializes the
 -- ticket — a malformed or cycling parent is stored as NULL and logged `parent-invalid`
@@ -12,7 +12,7 @@
 --
 -- The events table is rebuilt with `capacity` (R-BTN-87's envelope crossings), `parent-invalid`
 -- (R-BTN-86), `frozen`, `unfrozen`, `sealed` and `imported` (R-BTN-88) beside every kind the
--- 0059 CHECK holds. `baton_settings` is a key-value table: `frozen_at` and `sealed_at` are rows
+-- 0062 CHECK holds. `baton_settings` is a key-value table: `frozen_at` and `sealed_at` are rows
 -- in it, written by the freeze, seal and import paths. `repositories.mirror_acked_seq` (0006)
 -- is the cursor the seal reads. The `spawned_children` table holds what a `spawned` end
 -- reported as the run's children until the first accepted snapshot observed after the end
@@ -44,10 +44,10 @@ CREATE TABLE pending_owner_state (
   PRIMARY KEY (repository_id, ticket_id, kind, key)
 );
 
--- The events table rebuilt with R3-1258's kinds beside every one 0059 held, its indexes
+-- The events table rebuilt with R3-1258's kinds beside every one 0062 held (B-113's `dependency-consent` among them), its indexes
 -- restored, as 0035, 0037, 0040, 0042, 0043, 0048 and 0059 did: nothing references the table
 -- beyond its indexes.
-CREATE TABLE events_0060 (
+CREATE TABLE events_0064 (
   seq           INTEGER PRIMARY KEY,
   at            INTEGER NOT NULL,
   kind          TEXT NOT NULL CHECK (kind IN ('claimed','completed','confirmed',
@@ -61,7 +61,7 @@ CREATE TABLE events_0060 (
                   'answer-invalid','arrival-unapplied','scope-exceeded','unclaimed-write',
                   'scope-invalid','scope-resolved','renumbered','unsigned-control','deprecated-field',
                   'condition','leg-timeout',
-                  'sequence',
+                  'sequence','dependency-consent',
                   'capacity','parent-invalid','frozen','unfrozen','sealed','imported')),
   ticket_id     TEXT,
   claim_id      INTEGER REFERENCES claims(id),
@@ -69,7 +69,7 @@ CREATE TABLE events_0060 (
   detail_json   TEXT,
   repository_id TEXT
 );
-INSERT INTO events_0060 (seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id)
+INSERT INTO events_0064 (seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id)
   SELECT seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id FROM events;
 DROP INDEX IF EXISTS events_by_ticket;
 DROP INDEX IF EXISTS events_by_claim;
@@ -79,7 +79,7 @@ DROP INDEX IF EXISTS events_by_kind_at;
 DROP INDEX IF EXISTS events_unsigned_control;
 DROP INDEX IF EXISTS events_retention;
 DROP TABLE events;
-ALTER TABLE events_0060 RENAME TO events;
+ALTER TABLE events_0064 RENAME TO events;
 CREATE INDEX events_by_ticket ON events(ticket_id, kind, seq);
 CREATE INDEX events_by_claim ON events(claim_id, kind, seq);
 CREATE INDEX events_by_repository ON events(repository_id, seq);
