@@ -1,0 +1,49 @@
+---
+title: "B-268 — Where the done ticket's archive change is made: a commit of its own after the merge"
+id: B-268
+project: baton
+status: available
+updated: 2026-11-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "R-BTN-184 says the merge runner makes the done ticket's archive change and not where. Fieldhouse's landing gate needs it as a separate single-parent commit changing ticket paths only. Amend R-BTN-184 and section 12.9's accounting, and have the CLI follow. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** R-BTN-184 says "A done ticket's move to the archive, setting `status: done`, is a templated change the merge runner makes", and does not say where: inside the merge commit, or as a commit of its own. immediately-run/fieldhouse `spec/FIELDHOUSE_SPEC.md` §6 (the forge gate, fieldhouse#37)'s landing gate requires a merge commit's tree to be the clean merge and nothing more, and accepts a separate single-parent commit that changes ticket paths only — so it must be the second. The owner, 2026-11-19: "file these and push to main".
+
+**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-184](../spec/BATON_SPEC/12-security.md#sec-12-8); [R-BTN-183](../spec/BATON_SPEC/12-security.md#sec-12-8) *How* and its `ended_at_sha`), [§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9) (the `out-of-course` finding accounts for a push by the leg's `ended_at_sha`).
+**Depends on:** none.
+**Used by:** fieldhouse FLDH-61.
+
+### What to build
+
+1. **Amend R-BTN-184 first, by PR**: the archive change is a commit of its own, whose only parent is the merge result, changing only the ticket's file (its move and its `status:` line), pushed as a compare-and-swap; or, if the owner prefers it inside the merge commit, say that and tell Fieldhouse its tree check must allow it.
+2. **§12.9's accounting**: with two pushes, say which commit the leg's `ended_at_sha` names (the merge result, as R-BTN-183 says) and that the archive commit's push, changing no control path, raises no finding.
+3. **The CLI** follows the rule; a failed archive push after a landed merge is retried by the same leg, never left for a person.
+
+### Exit criteria
+
+- [ ] R-BTN-184 amended with a history entry; a scenario asserting the two commits' parents and changed paths, and that the archive push raises no `out-of-course` finding
+- [ ] `npm test` green
+
+### Trust
+
+No new input: the change is the CLI's own template, written by the trusted runner from Baton's record of the ticket. What changes is where it is written. The ticket file's other content is never rewritten by it.
+
+### Invariants
+
+- R-BTN-184: a ticket path merges only with its approval, the templated archive change excepted — the exception stays exactly the move and the `status:` line.
+- R-BTN-183: the merge result is `ended_at_sha`.
+- R-BTN-194: `last_written_by` for the archived ticket names the trusted runner's push, `human` false — unchanged.
+
+## Status
+
+_filed 2026-11-19._
