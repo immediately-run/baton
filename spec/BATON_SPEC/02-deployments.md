@@ -230,17 +230,21 @@ process for development and CI. Nothing crosses a tenant.
     caps at twice it do. `npm run test:load` proves it (§15).
   - Beyond the envelope the answer is another Baton: repositories partition across Batons
     (R-BTN-56).
-- **R-BTN-196 (an idle runner's beat reads about nothing).** Every write to a tenant's state
-  moves one counter, `state_version`, in the write's own commit. Liveness does not: a runner's
-  `last_seen_at` and `last_activity_at`, which its calls and heartbeats set, and request nonces
-  (R-BTN-13) — what they decide (live, stalled) is the clock's, so a reader that shows it adds
-  the clock. A runner's recommendations or claim that find nothing eligible for it are
-  remembered, per runner and in memory only, while `state_version` stands and until the earliest
-  instant the clock alone could change the answer — a backoff's `retry_after` (rule 10), an owner
-  bar's `starts_at` or `ends_at` (R-BTN-67), an instance's `until` (R-BTN-76) — and at most
-  10 minutes; an idle beat then reads a handful of rows. The answer remembered is always the one
-  computing it gives (R-BTN-61, R-BTN-72): a heartbeat that changes what the runner declares is a
-  write.
+- **R-BTN-196 (an idle runner's beat reads about nothing).** State versions move in the
+  write's own commit. The aggregate version covers stored state; the scheduling version covers
+  inputs to eligibility and advice, including runner declarations, permissions, positions,
+  claims, blocks and resource availability. Activity, event, message and transcript writes do
+  not move the scheduling version. Allocating or consuming an observation number does not
+  move it; accepting an observation does when it crosses a claim end's freshness boundary.
+  Other scheduling-relevant effects of a sync move it normally. Unknown writes invalidate
+  conservatively. Liveness (`last_seen_at`, `last_activity_at`) and request nonces are
+  unversioned; a reader that shows clock-dependent facts includes the clock.
+  A runner's recommendations or claim that find nothing eligible are remembered per runner,
+  in memory only, while the scheduling version stands and until the earliest instant the clock
+  alone could change the answer — a backoff's `retry_after` (rule 10), an owner bar's
+  `starts_at` or `ends_at` (R-BTN-67), an instance's `until` (R-BTN-76) — and at most
+  10 minutes. The remembered answer equals computing it (R-BTN-61, R-BTN-72), including when
+  another runner posts activity between beats. A rollback rolls back its invalidation too.
 - **R-BTN-149 (hard caps per repository).** Safety limits at twice the envelope; none refuses
   lease upkeep.
 

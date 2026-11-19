@@ -19,7 +19,7 @@ import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
 import { legStateOf } from './policy';
 import { briefMark, writtenBy, type LastWrittenBy } from './provenance';
 import type { Row, SqlValue, Store } from './ports';
-import { stateVersion } from './stateVersion';
+import { schedulingVersion } from './stateVersion';
 import type { Blocks } from './blocks';
 import type { Conditions } from './conditions';
 import type { History } from './history';
@@ -145,6 +145,7 @@ interface RequestCache {
   unsigned: Set<string> | null;
   intake: Map<string, string | undefined>;
   item: Map<string, ItemFacts | null>;
+  candidatePages: Map<string, { cursor: [number, number, number, number, number, string]; count: number }>;
   override: Map<string, { expedite: number; hold: number; retry_after: number | null } | null>;
 }
 
@@ -245,7 +246,7 @@ export class Claims {
 
   private cached<T>(fn: () => T): T {
     if (this.cache || this.reference) return fn();
-    this.cache = { ladder: new Map(), bars: new Map(), capacity: null, head: new Map(), minVersion: new Map(), unsigned: null, intake: new Map(), item: new Map(), override: new Map() };
+    this.cache = { ladder: new Map(), bars: new Map(), capacity: null, head: new Map(), minVersion: new Map(), unsigned: null, intake: new Map(), item: new Map(), override: new Map(), candidatePages: new Map() };
     try {
       return fn();
     } finally {
@@ -337,8 +338,8 @@ export class Claims {
   releaseForFloor(repository: string): void {
     const holders = this.rows<{ id: number; ticket_id: string; runner_id: number; credential_id: string }>(
       `SELECT c.id, c.ticket_id, c.runner_id, w.credential_id FROM claims c JOIN runners w ON w.id = c.runner_id
-       WHERE c.status = 'active' AND (c.ticket_id LIKE ? || ':%' OR c.ticket_id IN (SELECT t.id FROM tickets t WHERE t.repos LIKE ?))`,
-      repository, `%${this.forgePathOf(repository)}%`).filter((h) => {
+       WHERE c.status = 'active' AND (c.ticket_id LIKE ? || ':%' OR c.ticket_id IN (SELECT t.ticket_id FROM ticket_repositories t WHERE t.repository_key = lower(?)))`,
+      repository, this.forgePathOf(repository)).filter((h) => {
         // R-BTN-180: the protection checker keeps checking.
         if (this.c.policies?.isProtectionChecker(h.credential_id, repository)) return false;
         return this.reachedRepositories(h.ticket_id).includes(repository);
@@ -391,16 +392,20 @@ export class Claims {
       const listed = allowed ? (JSON.parse(allowed.allowed_capabilities) as string[]) : [];
       const set = new Set(listed);
       if (listed.some((c) => c.endsWith(':*'))) {
-        const declared = this.rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE credential_id IS NOT NULL AND runner_id IN (SELECT id FROM runners WHERE credential_id = ?)', credential).map((r) => r.capability);
+        const declared = this.rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id IN (SELECT id FROM runners WHERE credential_id = ?)', credential).map((r) => r.capability);
         for (const c of declared) if (listed.includes(`${c.split(':')[0]}:*`)) set.add(c);
       }
       const capabilities = [...set];
       return Object.fromEntries(this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL')
         .map((r) => [r.id, { capabilities, max_tier: null, max_claims: 1 }]));
     }
-    return Object.fromEntries(this.rows<{ repository_id: string; capabilities: string; max_tier: number | null; max_claims: number }>(
-      'SELECT repository_id, capabilities, max_tier, max_claims FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', credential)
-      .map((g) => [g.repository_id, { capabilities: JSON.parse(g.capabilities) as string[], max_tier: g.max_tier, max_claims: g.max_claims }]));
+    const patterns = groupBy(this.rows<{ repository_id: string; capability_pattern: string }>(
+      `SELECT c.repository_id, c.capability_pattern FROM grant_capabilities c JOIN runner_grants g
+       ON g.credential_id = c.credential_id AND g.repository_id = c.repository_id
+       WHERE c.credential_id = ? AND g.revoked_at IS NULL`, credential), 'repository_id');
+    return Object.fromEntries(this.rows<{ repository_id: string; max_tier: number | null; max_claims: number }>(
+      'SELECT repository_id, max_tier, max_claims FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', credential)
+      .map((g) => [g.repository_id, { capabilities: (patterns.get(g.repository_id) ?? []).map((c) => c.capability_pattern as string), max_tier: g.max_tier, max_claims: g.max_claims }]));
   }
 
   /** R-BTN-4 (B-188): the most claims the runner may hold while claiming in `repository` — the
@@ -548,7 +553,7 @@ export class Claims {
     const ticket: GateTicket = { repository: item.repository, course: item.course, tier: item.tier, requires: item.requires, operator_only: item.operator_only, tiers: this.ladder(item.repository) };
     const facts: GateContext = {
       now: this.c.now(),
-      claims: this.rows('SELECT status, confirmed_at, fence_pending FROM claims WHERE ticket_id = ? AND id IS NOT ?', item.id, opts.except ?? null),
+      claims: this.rows(`SELECT status, confirmed_at, fence_pending FROM claims WHERE ticket_id = ? AND id IS NOT ? AND (status = 'active' OR (status = 'completed' AND confirmed_at IS NULL) OR (status = 'reaped' AND fence_pending = 1))`, item.id, opts.except ?? null),
       override: this.override(item.id),
       // Rule 9 (R-BTN-65): a ticket whose course is not registered fits no runner.
       minRunnerVersion: this.memo(this.cache?.minVersion, `${item.repository}\u0000${item.course}`, () =>
@@ -646,7 +651,7 @@ export class Claims {
    * refuses, and one reading serves the recommendation and a refusal's `stale-skills` check
    * alike (B-237).
    */
-  candidates(w: RunnerFacts, page = 0, rule9 = true): Candidate[] {
+  private referenceCandidates(w: RunnerFacts, page = 0, rule9 = true): Candidate[] {
     const rows = this.named<Candidate>(
       `SELECT id, repository_id, course_id, weight, expedite, to_end, ready_since, n FROM (
          SELECT w.id, w.repository_id, w.course_id, p.weight, s.to_end, a.ready_since,
@@ -731,6 +736,63 @@ export class Claims {
       r.r9 = v != null && w.courses.some((k) => k.repository === r.repository_id && k.course === r.course_id && k.version >= v) ? 1 : 0;
     }
     return rule9 ? rows.filter((r) => r.r9) : rows;
+  }
+
+  /** B-287 / S-BTN-243: one ordered index walk per group, no board-wide window sort.
+   * The projection contains runner-independent facts; all runner gates remain authoritative.
+   * JSON parameters below are small request-local sets, expanded once, never stored documents
+   * expanded for every candidate. Page cursors live only for this synchronous decision. */
+  candidates(w: RunnerFacts, page = 0, rule9 = true): Candidate[] {
+    if (this.reference) return this.referenceCandidates(w, page, rule9);
+    const groups = this.rows<{ repository_id: string; course_id: string; weight: number; min_runner_version: number; observation: number; tiers: string }>(
+      `SELECT k.repository_id, k.id AS course_id, p.weight, k.min_runner_version, h.observation, p.tiers
+       FROM courses k JOIN repositories p ON p.id = k.repository_id JOIN board_head h ON h.repository_id = p.id
+       WHERE p.cutover_at IS NOT NULL AND p.retired_at IS NULL ORDER BY k.repository_id, k.id`);
+    const out: Candidate[] = [];
+    const holdings = capabilitiesOf(w.declared);
+    for (const g of groups) {
+      const grant = w.grants?.[g.repository_id];
+      if (w.grants && !grant) continue;
+      const admitted = new Set(grant?.capabilities ?? []);
+      const caps = JSON.stringify([...holdings].filter((c) => !grant || c.startsWith('runner:') || admitted.has(c) || admitted.has(`${c.split(':')[0]}:*`)));
+      const tiers = JSON.parse(g.tiers) as string[];
+      const ceiling = tiers.indexOf(this.ceiling(w, g.repository_id));
+      const r9 = w.courses.some((k) => k.repository === g.repository_id && k.course === g.course_id && k.version >= g.min_runner_version) ? 1 : 0;
+      if (rule9 && !r9) continue;
+      const legs = this.rows<{ leg: string }>(`SELECT l.leg FROM course_legs l
+        WHERE l.repository_id = ? AND l.course_id = ? AND l.person = 0
+        AND NOT EXISTS (SELECT 1 FROM course_leg_capabilities c
+          WHERE c.repository_id = l.repository_id AND c.course_id = l.course_id AND c.leg = l.leg
+          AND c.capability NOT IN (SELECT value FROM json_each(?)))`, g.repository_id, g.course_id, caps).map((l) => l.leg);
+      if (!legs.length) continue;
+      const key = `${g.repository_id}\u0000${g.course_id}`;
+      const prior = page > 0 ? this.cache?.candidatePages.get(key) : undefined;
+      if (prior && prior.count < page * 50) continue;
+      const after = prior ? `AND (-q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id) > (?, ?, ?, ?, ?, ?)` : '';
+      const found = this.rows<Omit<Candidate, 'n' | 'r9' | 'weight'> & { rank: number | null }>(
+        `SELECT q.ticket_id AS id, q.repository_id, q.course_id, q.expedite, q.to_end, q.rank, q.ready_since
+         FROM ready_tickets q INDEXED BY ready_tickets_order
+         WHERE q.repository_id = ? AND q.course_id = ?
+           AND q.last_end_observation < ? AND (q.retry_after IS NULL OR q.retry_after <= ?)
+           AND COALESCE(q.tier_position, ?) <= ?
+           AND q.leg IN (SELECT value FROM json_each(?))
+           AND NOT EXISTS (SELECT 1 FROM ticket_bars b JOIN runner_tags t ON t.tag = b.tag
+             WHERE b.ticket_id = q.ticket_id AND b.leg = q.leg AND t.runner_id = ?)
+           AND NOT EXISTS (SELECT 1 FROM ticket_requires r WHERE r.ticket_id = q.ticket_id
+             AND r.name NOT IN (SELECT value FROM json_each(?)))
+           ${after}
+         ORDER BY -q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id
+         LIMIT 50${page > 0 && !prior ? ' OFFSET ?' : ''}`,
+        g.repository_id, g.course_id, g.observation, this.c.now(), tiers.length - 1, ceiling,
+        JSON.stringify(legs), w.id, caps, ...(prior?.cursor ?? []), ...(page > 0 && !prior ? [page * 50] : []));
+      const last = found.at(-1);
+      if (last) this.cache?.candidatePages.set(key, {
+        cursor: [-last.expedite, last.to_end, Number(last.rank == null), last.rank ?? 0, last.ready_since ?? -1, last.id],
+        count: page * 50 + found.length,
+      });
+      out.push(...found.map((r, i) => ({ ...r, weight: g.weight, r9, n: page * 50 + i + 1 })));
+    }
+    return out;
   }
 
   /** The runner's ceiling's position in every repository's ladder: the query's rule 5. */
@@ -976,7 +1038,7 @@ export class Claims {
    *  claiming; `?limit=` applies after the merge (R-BTN-61). */
   recommendations(runnerId: number, limit = 10) {
     if (limit >= 1 && this.idleHit(runnerId)) return { recommendations: [] };
-    const version = stateVersion(this.c.store);
+    const version = schedulingVersion(this.c.store);
     const recommendations = this.cached(() => this.recommend(this.runner(runnerId), limit));
     if (limit >= 1 && !recommendations.length) this.idleNote(runnerId, version, null);
     return { recommendations };
@@ -984,14 +1046,14 @@ export class Claims {
 
   // ── the idle memo (B-237, R-BTN-196) ───────────────────────────────────────────────────
 
-  /** The runner's memoised "nothing eligible", while it still holds: the state version is the
-   *  one it was read at — no write since, the runner's own heartbeat settings included — and no
+  /** The runner's memoised "nothing eligible", while it still holds: the scheduling version is the
+   *  one it was read at — no scheduling input changed, the runner's own heartbeat settings included — and no
    *  clock deadline it noted has come. */
   private idleHit(runnerId: number): IdleMemo | null {
     if (this.reference) return null;
     const m = this.idle.get(runnerId);
     if (!m) return null;
-    if (m.until > this.c.now() && m.version === stateVersion(this.c.store)) return m;
+    if (m.until > this.c.now() && m.version === schedulingVersion(this.c.store)) return m;
     this.idle.delete(runnerId);
     return null;
   }
@@ -1012,7 +1074,7 @@ export class Claims {
   /** The clock-dependent inputs of the candidate query and `gatesFor` (B-237): the earliest
    *  future instant one of them flips — a backoff's `retry_after` lapsing (rule 10), an owner bar
    *  starting or ending (R-BTN-67), an instance's `until` (R-BTN-76). Everything else they read
-   *  is stored state, and a stored change moves the state version: a lease lapsing, a claim's
+   *  is stored state, and a stored scheduling change moves its version: a lease lapsing, a claim's
    *  deadline, a reap, a stalled wait and a lapsed protection report all change a row by the
    *  alarm first (the gates read a claim's status, never its runner's liveness). */
   private nextEligibleChange(now: number): number | null {
@@ -1039,7 +1101,7 @@ export class Claims {
   next(runnerId: number) {
     const idle = this.idleHit(runnerId);
     if (idle?.refusal) throw idle.refusal;
-    const version = stateVersion(this.c.store);
+    const version = schedulingVersion(this.c.store);
     const { item, advice } = this.decideNoting(this.runner(runnerId), null, version);
     const r = (advice?.recommendation ?? null) as Recommendation | null;
     return { ...(r ?? { ticket_id: item.id }), rank_reason: r?.reasons.join(' · ') ?? '' };
@@ -1071,7 +1133,7 @@ export class Claims {
     // B-237 (R-BTN-196): an idle runner asking again with nothing changed gets the same refusal.
     const idle = b.ticket_id ? null : this.idleHit(runnerId);
     if (idle?.refusal) throw idle.refusal;
-    const version = stateVersion(this.c.store);
+    const version = schedulingVersion(this.c.store);
     const w = this.runner(runnerId);
     const { item, advice } = this.decideNoting(w, b.ticket_id, version);
     const st = item.station!;
@@ -1829,7 +1891,7 @@ export class Claims {
     const local = (id: string) => id.slice(id.indexOf(':') + 1);
     const live = `t.repository_id = ? AND NOT EXISTS (SELECT 1 FROM closed_tickets x WHERE x.ticket_id = t.id)`;
     const answers = this.rows<{ ticket_id: string; decision_id: string; answer: string; answered_at: number }>(
-      `SELECT a.ticket_id, a.decision_id, a.answer, a.answered_at FROM decision_answers a JOIN tickets t ON t.id = a.ticket_id
+      `SELECT a.ticket_id, a.decision_id, a.answer, a.answered_at FROM decision_answers a CROSS JOIN tickets t ON t.id = a.ticket_id
        WHERE ${live} ORDER BY a.answered_at DESC LIMIT ${SYNC_RECORD_MAX}`, repo);
     // B-257: each with the station it reached, so a station function tells an implement run that
     // opened a PR from one that answered `delivered` by Baton's record, not by git.

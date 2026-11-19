@@ -78,7 +78,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/core/provenance.ts` | Who last wrote each ticket (§4.4 R-BTN-194): `last_written_by`, read from the App's push deliveries (R-BTN-73), `pusher-unknown` when none accounts for a change; information only |
 | `src/core/scope.ts` | A leg's scope audit (B-134): a runner's `scope-exceeded` report judged against the claim's scope, and `unclaimed-write` for a push no open claim's scope covers |
 | `src/core/sequences.ts` | The per-repository, per-kind sequences (§4.3 R-BTN-199): the next ticket, rule, scenario, gate or migration number, `max(stored, floor) + 1` in one transaction |
-| `src/core/stateVersion.ts` | `state_version` (§3 R-BTN-196): the `Store` wrapper that moves one counter with every write to Baton's state, liveness beats and request nonces aside |
+| `src/core/stateVersion.ts` | `state_version` (§3 R-BTN-196): the `Store` wrapper for aggregate, scheduling and screen versions (R-BTN-196) |
 | `src/core/retention.ts` | Retention (R-BTN-149): the alarm's batched prunes of old events and board snapshots, unseen runners' rows and purged tickets' claims |
 | `src/core/instanceSettings.ts` | The administrators' instance settings (§13.1, R-BTN-57): `link_hosts`, `session_hosts` and `check_app_id` behind `PUT /v1/admin/settings`; `session_hosts` is what R-BTN-113's link rule reads |
 | `src/core/mirror.ts` | What the git mirror reads and reports (§12, R-BTN-36): the event feed `GET /v1/sync/events`, the foreign-claim report, the workflows dispatched after a transition |

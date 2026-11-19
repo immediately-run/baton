@@ -6,7 +6,7 @@
 // reach it only through the front, which has verified the principal — all but a signed
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
 import { MIGRATIONS } from '../migrations';
-import { versionedStore, clockBucket, ifNoneMatch, stateEtag, type VersionedStore } from './stateVersion';
+import { versionedStore, clockBucket, ifNoneMatch, stateEtag, nonScheduling, schedulingVersion, type VersionedStore } from './stateVersion';
 import { BatonError, CLIENT_HEADER, errorResponse, json, servedClientVersions, withClientVersions } from './http';
 import { checkPayload, DEFAULT_COURSE, resolveParents, retiredBoardFields, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
@@ -716,6 +716,30 @@ export class BatonCore {
         // `If-None-Match` answers `304` with that ETag and no body. The state shows what the
         // clock decides (alive, stalled, `reap_at`, the time windows), so the coarse bucket is
         // an input; the caller is one too. The helper is B-205's for every read a session polls.
+        // B-287 / S-BTN-243: the existing authenticated dashboard principal can read one
+        // repository screen without constructing the aggregate state. Authorization precedes
+        // ETags, including a 304. The legacy aggregate endpoint remains compatible.
+        const list = /^\/v1\/ui\/repositories\/([^/]+)\/(tickets|runners)$/.exec(url.pathname);
+        if (req.method === 'GET' && list) {
+          const repository = checkRepositoryId(pathSegment(list[1]));
+          if (!this.registry.live(repository)) throw new BatonError('not-found', `no repository ${repository}`);
+          const limit = Number(url.searchParams.get('limit') ?? 50);
+          if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new BatonError('invalid-params', 'limit must be an integer from 1 to 100');
+          const after = url.searchParams.get('after') ?? '';
+          if (after.length > 256) throw new BatonError('invalid-params', 'after is too long');
+          const activity = list[2] === 'runners';
+          const runnerAfter = after === '' ? 0 : Number(after);
+          if (activity && (!Number.isSafeInteger(runnerAfter) || runnerAfter < 0)) throw new BatonError('invalid-params', 'after must be a runner id');
+          const etag = `"${sha256HexSync(JSON.stringify([owner, url.pathname, after, limit, this.store.readVersion(activity), activity ? clockBucket(this.now()) : null]))}"`;
+          if (ifNoneMatch(req, etag)) return new Response(null, { status: 304, headers: { ETag: etag } });
+          const rows = activity ? this.runners.runnersView(this.now(), { repository, after: runnerAfter, limit: limit + 1 })
+            : this.ticketList(repository, after, limit + 1);
+          const more = rows.length > limit;
+          const items = rows.slice(0, limit);
+          const res = json({ [list[2]]: items, cursor: more ? String((items.at(-1) as unknown as { id: string | number }).id) : null });
+          res.headers.set('ETag', etag);
+          return res;
+        }
         if (req.method === 'GET' && url.pathname === '/v1/ui/state') {
           const etag = stateEtag(this.store, owner, '/v1/ui/state', clockBucket(this.now()));
           if (ifNoneMatch(req, etag)) return new Response(null, { status: 304, headers: { ETag: etag } });
@@ -1673,6 +1697,45 @@ export class BatonCore {
       }
       throw new BatonError('snapshot-rejected', `a rewritten history is held for the owner until ${new Date(deadline).toISOString()}; claims continue on the current head`);
     }
+    // B-287: hash the validated reading, not its observation number. A tracker can change at
+    // the same Git head. The scheduling version also invalidates this shortcut after any
+    // server-side matching/position change. No incoming digest is trusted.
+    const { observation: _observation, ...snapshotInputs } = p;
+    const fingerprint = sha256HexSync(JSON.stringify(snapshotInputs));
+    const remember = () => this.store.exec(`INSERT INTO sync_fingerprints (repository_id, digest, scheduling_v)
+      VALUES (?, ?, ?) ON CONFLICT(repository_id) DO UPDATE SET digest = excluded.digest, scheduling_v = excluded.scheduling_v
+      WHERE sync_fingerprints.digest IS NOT excluded.digest OR sync_fingerprints.scheduling_v IS NOT excluded.scheduling_v`,
+      r, fingerprint, schedulingVersion(this.store));
+    if (p.sha === head && normative && !p.force) {
+      const prior = this.sql<{ digest: string; scheduling_v: number }>('SELECT digest, scheduling_v FROM sync_fingerprints WHERE repository_id = ?', r)[0];
+      if (prior?.digest === fingerprint && prior.scheduling_v === schedulingVersion(this.store)) {
+        return this.store.transaction(() => {
+          this.observations.accept(r, n);
+          // The snapshot is identical but a later observation may now confirm a completion
+          // or judge a run whose observation equalled the previous snapshot's. Read only those
+          // claims' placements, preserving a Baton-owned position instead of replaying git.
+          const relevant = this.sql<{ ticket_id: string }>(`SELECT ticket_id FROM claims INDEXED BY claims_holding
+            WHERE (status = 'active' OR (status = 'completed' AND confirmed_at IS NULL) OR (status = 'reaped' AND fence_pending = 1))
+              AND ticket_id >= ? || ':' AND ticket_id < ? || ';'
+            UNION SELECT c.ticket_id FROM claim_legs l INDEXED BY claim_legs_unjudged CROSS JOIN claims c ON c.id = l.claim_id
+              WHERE l.bars != '[]' AND l.bars_judged = 0 AND c.ticket_id >= ? || ':' AND c.ticket_id < ? || ';'`, r, r, r, r);
+          const ids = JSON.stringify(relevant.map((x) => x.ticket_id));
+          const seen = new Map<string, Seen>();
+          if (relevant.length) for (const st of this.sql<{ ticket_id: string; station: string; path: string }>(
+            'SELECT ticket_id, station, path FROM ticket_stations WHERE ticket_id IN (SELECT value FROM json_each(?))', ids)) {
+            const posted = p.stations?.[st.ticket_id.slice(r.length + 1)];
+            if (posted) seen.set(st.ticket_id, { station: st.station, path: JSON.parse(st.path), prev: JSON.parse(st.path), bars: posted.bars });
+          }
+          nonScheduling(this.store, () => this.store.exec('UPDATE board_head SET stations_observation = ? WHERE repository_id = ?', n, r));
+          this.settleSpawned(r, p, n, at);
+          const confirmed = this.claims.confirm(confirmations, n);
+          const judged = this.claims.judge(r, n, seen);
+          remember();
+          return { ok: true, unchanged: true, ...(p.read_sha === p.sha ? { tickets_upserted: 0, tickets_deleted: 0 } : {}),
+            confirmed: confirmed + judged.confirmed, stale_released: judged.stale_released };
+        });
+      }
+    }
     if (p.sha === head) {
       // §4.3 step 4 (R-BTN-11): a refresh — the head's own reading again under a newer number,
       // its stations, paths, next legs and closures replaced; its registry is not applied: the
@@ -1727,6 +1790,7 @@ export class BatonCore {
         const seen = normative ? this.refreshStations(r, p, n, at, wrote) : new Map<string, Seen>();
         const confirmed = this.claims.confirm(confirmations, n);
         const judged = this.claims.judge(r, n, seen);
+        remember();
         return {
           ok: true, unchanged: true,
           ...(wrote ? { tickets_upserted: wrote.upserted.length, tickets_deleted: wrote.deleted, ...(wrote.renumbered.length ? { renumbered: wrote.renumbered } : {}) } : {}),
@@ -1819,6 +1883,7 @@ export class BatonCore {
       const judged = this.claims.judge(r, n, seen);
       changed.confirmed = confirmed + judged.confirmed;
       changed.stale_released = judged.stale_released;
+      remember();
     });
     return { ok: true, ...changed };
   }
@@ -2348,7 +2413,7 @@ export class BatonCore {
        WHERE p.retired_at IS NULL${repository_id ? ' AND t.repository_id = ?' : ''} ORDER BY p.weight DESC, t.expedite DESC, s.to_end, t.rank IS NULL, t.rank, t.repository_id, t.id`,
       ...(repository_id ? [repository_id] : []));
     const requires = new Map<string, string[]>();
-    for (const r of this.sql<{ ticket_id: string; name: string }>('SELECT ticket_id, name FROM ticket_requires ORDER BY name')) {
+    for (const r of this.sql<{ ticket_id: string; name: string }>('SELECT ticket_id, name FROM ticket_requires WHERE ticket_id IN (SELECT value FROM json_each(?)) ORDER BY name', JSON.stringify(items.map((t) => t.id)))) {
       requires.set(r.ticket_id, [...(requires.get(r.ticket_id) ?? []), r.name]);
     }
     return items.map((r) => ({
@@ -2390,6 +2455,23 @@ export class BatonCore {
       const ladder = ladders.get(r.repository_id as string) ?? [...TIERS];
       return ladder.includes(t) && fitsTier((r.tier as string | null) ?? null, t, ladder);
     }).map((r) => r.id)]));
+  }
+
+  /** A ticket page reads only current list fields, with bounded child-row enrichment. */
+  private ticketList(repository: string, after: string, limit: number) {
+    const tickets = this.sql<{ id: string; title: string; local_id: string; course_id: string; tier: string | null; station: string | null; next_leg: string | null }>(
+      `SELECT t.id, t.local_id, t.title, t.course_id, t.tier, t.path, t.display, s.station, s.next_leg
+       FROM tickets t LEFT JOIN ticket_stations s ON s.ticket_id = t.id
+       WHERE t.repository_id = ? AND t.id > ? ORDER BY t.id LIMIT ?`, repository, after, limit);
+    if (!tickets.length) return [];
+    const ids = JSON.stringify(tickets.map((t) => t.id));
+    const requirements = new Map<string, string[]>();
+    for (const r of this.sql<{ ticket_id: string; name: string }>(
+      'SELECT ticket_id, name FROM ticket_requires WHERE ticket_id IN (SELECT value FROM json_each(?)) ORDER BY ticket_id, name', ids)) {
+      const list = requirements.get(r.ticket_id) ?? [];
+      list.push(r.name); requirements.set(r.ticket_id, list);
+    }
+    return tickets.map((t) => ({ ...t, requires: requirements.get(t.id) ?? [] }));
   }
 
   uiState() {

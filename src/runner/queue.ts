@@ -2,10 +2,8 @@
 // home checkout under the runner's cache directory, mode 0600, shared by every runner session on
 // that home and by `baton queue`, the host user's command. It holds:
 //   - `orders`: what the host's user asked for (`baton queue add`), oldest first — tried before
-//     any recommendation while Baton answers (an ordinary claim, every gate), and started without
+//     Baton's own choice while Baton answers (an ordinary claim, every gate), and started without
 //     a claim only while Baton is unreachable;
-//   - `recommendations`: the last list Baton recommended, kept as a queue rather than dropped
-//     after one claim attempt, so an idle runner holding entries does not ask every beat;
 //   - `control_required`: whether the last claim answer said the repository requires
 //     owner-signed control (B-127) — an offline order runs only where it said not;
 //   - `worked`: legs run under an order while Baton was unreachable, whose results wait to be
@@ -28,13 +26,6 @@ export interface LocalOrder {
   added_at: string;
 }
 
-/** One recommendation as Baton served it (§11): the station the ticket rests at and its legs. */
-export interface QueuedRecommendation {
-  ticket_id: string;
-  station: string;
-  legs: string[];
-}
-
 /** A leg run under an order while Baton was unreachable, its result kept for the report. */
 export interface WorkedLeg {
   ticket_id: string;
@@ -51,16 +42,11 @@ export interface WorkedLeg {
 
 export interface QueueData {
   orders: LocalOrder[];
-  recommendations: QueuedRecommendation[];
-  recommended_at: number | null;
-  /** The last list in full, never shifted — where an offline order finds its ticket's station
-   *  and leg when it names none (R-BTN-202). */
-  seen: QueuedRecommendation[];
   control_required: boolean | null;
   worked: WorkedLeg[];
 }
 
-const empty = (): QueueData => ({ orders: [], recommendations: [], recommended_at: null, seen: [], control_required: null, worked: [] });
+const empty = (): QueueData => ({ orders: [], control_required: null, worked: [] });
 
 /** `<repository>:<id>` — the qualified ticket id Baton's claims name. */
 export const QUALIFIED_ID = /^[a-z0-9][a-z0-9-]{0,63}:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -86,9 +72,6 @@ export class LocalQueue {
       const raw = JSON.parse(readFileSync(this.path, 'utf8')) as Partial<QueueData>;
       return {
         orders: Array.isArray(raw.orders) ? raw.orders : [],
-        recommendations: Array.isArray(raw.recommendations) ? raw.recommendations : [],
-        recommended_at: typeof raw.recommended_at === 'number' ? raw.recommended_at : null,
-        seen: Array.isArray(raw.seen) ? raw.seen : [],
         control_required: typeof raw.control_required === 'boolean' ? raw.control_required : null,
         worked: Array.isArray(raw.worked) ? raw.worked : [],
       };
@@ -134,16 +117,6 @@ export class LocalQueue {
     this.update((q) => { q.orders = q.orders.filter((o) => o.ticket_id !== ticketId); });
   }
 
-  /** The recommendations Baton served, kept in its order (R-BTN-202). */
-  setRecommendations(recs: QueuedRecommendation[], now: number): void {
-    this.update((q) => { q.recommendations = [...recs]; q.seen = [...recs]; q.recommended_at = now; });
-  }
-
-  /** The head recommendation, taken off the queue: a claim attempt spends it either way. */
-  shiftRecommendation(): QueuedRecommendation | null {
-    return this.update((q) => q.recommendations.shift() ?? null);
-  }
-
   setControlRequired(required: boolean): void {
     if (this.read().control_required === required) return;
     this.update((q) => { q.control_required = required; });
@@ -171,8 +144,7 @@ baton queue list [--home DIR]
 baton queue remove <repository>:<id> [--home DIR]
   — this host's local work queue for the runners on one home checkout (R-BTN-202, B-248). An
   order goes first while Baton answers, through the ordinary claim and every gate; while Baton is
-  unreachable the runner starts its leg (@leg, else the leg Baton last recommended for it)
-  without a claim and reports the result when Baton answers again. --home defaults to
+  unreachable the runner starts its @leg without a claim and reports the result when Baton answers again. --home defaults to
   BATON_HOME, else the current directory.`;
 
 /** \`baton queue …\` — the host user's command; it never reaches Baton. */
@@ -200,10 +172,9 @@ export function queueMain(argv: string[], cacheDir: string, resolveHome: (h: str
     }
     if (cmd === 'list' && rest.length === 1) {
       const d = q.read();
-      if (!d.orders.length && !d.worked.length && !d.recommendations.length) out('the queue is empty');
+      if (!d.orders.length && !d.worked.length) out('the queue is empty');
       for (const o of d.orders) out(`order        ${o.ticket_id}${o.leg ? `@${o.leg}` : ''}  by ${o.by} at ${o.added_at}`);
       for (const w of d.worked) out(`unreported   ${w.ticket_id}@${w.leg} from ${w.at}  ran ${w.ran_at} (order by ${w.by})`);
-      for (const r of d.recommendations) out(`recommended  ${r.ticket_id} at ${r.station}, ${r.legs.join(', ') || 'no leg'}`);
       return 0;
     }
   } catch (e) {

@@ -18,6 +18,16 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-19 — SQLite polling reads (B-287, S-BTN-243, R-BTN-196, R-BTN-72).** R-BTN-196 now separates scheduling
+  invalidation from telemetry after a busy runner's activity repeatedly cleared every idle
+  runner's memo. R-BTN-72's automatic loop makes one unnamed claim request. Matching uses
+  indexed normalized inputs and one transactionally maintained candidate projection, preserving
+  gate checks and group ordering. Same-head snapshots use a server digest plus scheduling
+  version to skip unchanged materialization while retaining observation reconciliation.
+  Repository-scoped dashboard lists paginate and use indexed latest pointers; the aggregate
+  endpoint remains compatible. Rejected a runner/ticket eligibility matrix and stored dashboard
+  copies because their invalidation and write costs would outweigh this small projection.
+
 - **2026-10-13 — approval.** The specification was approved after a claims-truth review and five
   adversarial and final review rounds (Review record), owned by project `baton`, items
   R3-1205–R3-1221. It moved the factory's live claim state off git into a Cloudflare Durable
@@ -3596,7 +3606,10 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   than a new route. The ticket's other safeguards — refusing an order the last snapshot showed
   held, on hold or outside the grant — need a snapshot the runner does not keep; Baton's claim on
   return judges each instead. The provenance rides the `advanced` event (or the end's) rather
-  than an event kind of its own: a new kind rebuilds `events`, a write of every row.
+  than an event kind of its own: a new kind rebuilds `events`, a write of every row. The branch
+  first also kept Baton's recommendations as a queue, so an idle runner asked less often; B-287
+  (#297), merged the same day, made the runner's claim one unnamed request with no
+  recommendations read, so the queue holds only orders and an offline order names its leg.
 
 ## Retired requirements
 

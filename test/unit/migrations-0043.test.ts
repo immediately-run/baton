@@ -7,6 +7,7 @@
 // account's and loses the rest with a line each.
 import { describe, it, expect } from 'vitest';
 import { env, runInDurableObject } from 'cloudflare:test';
+import { dropDerivedSchema } from '../lib/migrationRewind';
 import { MIGRATIONS } from '../../src/migrations';
 
 const COLUMNS = (sql: SqlStorage, table: string) => (sql.exec(`SELECT name FROM pragma_table_info('${table}')`).toArray() as { name: string }[]).map((r) => r.name);
@@ -17,6 +18,7 @@ describe('migration 0043 (B-168): resources lose their worker scope, the fleet i
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { type: string; name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 42)) sql.exec(m.sql);

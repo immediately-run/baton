@@ -4,6 +4,7 @@
 // once — posted or refused — and at most one is outstanding per repository at a time, so two
 // overlapping sync runs can never post an older reading under a higher number.
 import { BatonError } from './http';
+import { nonScheduling } from './stateVersion';
 import type { Store } from './ports';
 
 /** An outstanding number older than this is void (R-BTN-62). */
@@ -33,7 +34,7 @@ export class Observations {
         throw new BatonError('sync-busy', `observation ${h.last_handed_out} is still outstanding; one reading at a time per repository (R-BTN-62)`);
       }
       const n = h.last_handed_out + 1;
-      this.c.store.exec('UPDATE board_head SET last_handed_out = ?, handed_out_at = ? WHERE repository_id = ?', n, now, repo);
+      nonScheduling(this.c.store, () => this.c.store.exec('UPDATE board_head SET last_handed_out = ?, handed_out_at = ? WHERE repository_id = ?', n, now, repo));
       return { sha: h.sha, observation: n, bars: [] };
     });
   }
@@ -49,7 +50,7 @@ export class Observations {
       const now = this.c.now();
       const h = this.row(repo);
       const outstanding = h.handed_out_at != null && n === h.last_handed_out;
-      if (outstanding) this.c.store.exec('UPDATE board_head SET handed_out_at = NULL WHERE repository_id = ?', repo);
+      if (outstanding) nonScheduling(this.c.store, () => this.c.store.exec('UPDATE board_head SET handed_out_at = NULL WHERE repository_id = ?', repo));
       if (n <= h.observation) return `observation ${n} is not above the last accepted reading's (${h.observation})`;
       if (!outstanding) return `observation ${n} is not the outstanding number (the last handed out is ${h.last_handed_out}${h.handed_out_at == null ? ', already used' : ''})`;
       if (now - (h.handed_out_at as number) >= OBSERVATION_TTL_MS) return `observation ${n} was handed out over 10 minutes ago and is void`;
@@ -60,7 +61,7 @@ export class Observations {
 
   /** A refused post's number, used without judging it: it is no longer outstanding. */
   release(repo: string, n: number): void {
-    this.c.store.exec('UPDATE board_head SET handed_out_at = NULL WHERE repository_id = ? AND last_handed_out = ?', repo, n);
+    nonScheduling(this.c.store, () => this.c.store.exec('UPDATE board_head SET handed_out_at = NULL WHERE repository_id = ? AND last_handed_out = ?', repo, n));
   }
 
   /** Whether `n` is still above the last accepted reading's: re-checked in a post's writing
@@ -71,6 +72,12 @@ export class Observations {
 
   /** Record an accepted reading's number (the post's own transaction). */
   accept(repo: string, n: number): void {
-    this.c.store.exec('UPDATE board_head SET observation = ? WHERE repository_id = ? AND observation < ?', n, repo, n);
+    const prior = this.row(repo).observation;
+    // Only a crossing of an ended claim's observation can change the freshness gate. Check
+    // all ends, including tickets currently held/blocked: those may be reoffered in this sync.
+    const changed = this.c.store.exec(`SELECT 1 FROM claims INDEXED BY claims_end_observation WHERE end_observation >= ? AND end_observation < ?
+      AND ticket_id >= ? || ':' AND ticket_id < ? || ';' LIMIT 1`, prior, n, repo, repo).toArray().length > 0;
+    const write = () => this.c.store.exec('UPDATE board_head SET observation = ? WHERE repository_id = ? AND observation < ?', n, repo, n);
+    if (changed) write(); else nonScheduling(this.c.store, write);
   }
 }

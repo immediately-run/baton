@@ -90,40 +90,38 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
     expect(await r.runOnce()).toBeNull(); // nothing claimable, on a session whose first beat registered it
     // Two beats, as B-86's grant-driven declaration spends them (#104): the first declares nothing
     // and is answered the grant, the second carries the settled list before the claim. Then the
-    // recommendation is the stray the ticket names, then the claim.
-    expect(calls).toEqual({ heartbeats: 2, recommendations: 1, claims: 1 });
+    // single unnamed claim follows the settled heartbeat.
+    expect(calls).toEqual({ heartbeats: 2, recommendations: 0, claims: 1 });
     // The only line is the declaration the grant settles — not `no recommendation (no runner
     // holds this secret)` on every start.
     expect(lines).toEqual(["baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given"]);
     r.stop();
   });
 
-  it('a runner the state already named still logs the refusal, and still asks for its pick', async () => {
+  it('a registered runner makes one unnamed claim and logs a gate refusal', async () => {
     const lines: string[] = [];
     const asked: (string | null)[] = [];
     let refuseGates = false;
     const api = {
       setSecret: () => {},
       heartbeat: async (body: Record<string, unknown>) => ({ runner_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], grant: { capabilities: ['create-pr'] } }),
-      recommendations: async () => {
-        if (refuseGates) throw new BatonRefusal('not-eligible', undefined, 'every gate refused this runner', 403);
-        return { recommendations: [{ ticket_id: 'B-9' }] };
-      },
+      recommendations: async () => { throw new Error('unexpected recommendation read'); },
       claim: async (body: { ticket_id?: string }) => {
         asked.push(body.ticket_id ?? null);
+        if (refuseGates) throw new BatonRefusal('not-eligible', undefined, 'every gate refused this runner', 403);
         throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409);
       },
     } as unknown as BatonApi;
     const r = start(api, (l) => lines.push(l), { runner_id: 7, claim: null });
     await r.runOnce();
-    expect(asked).toEqual(['B-9']); // registered: recommended for, and its claim asked for the pick
+    expect(asked).toEqual([null]); // the server chooses and claims in one transaction
     // B-86's once-per-declaration line, and nothing else: the state names the runner, so its
     // refusal would have been logged had it come — and none was due.
     expect(lines).toEqual(["baton: declaring create-pr — the grant's capabilities, no --capabilities given"]);
     refuseGates = true;
     lines.length = 0;
     await r.runOnce();
-    expect(lines).toEqual(['baton: no recommendation (every gate refused this runner)']);
+    expect(lines).toEqual(['baton: no claim (every gate refused this runner)']);
     r.stop();
   });
 

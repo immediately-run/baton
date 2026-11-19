@@ -45,17 +45,12 @@ export const SIGNAL_GRACE_MS = 30_000;
  *  match the list the claim will carry — one for a fresh or legacy runner, one for the change it
  *  settles (review round 4, finding 4). */
 const MAX_STALE_BEATS = 2;
-/** R-BTN-202 (B-248): how long recommendations are kept as the runner's queue before it asks
- *  again — a stale entry costs one refused claim (R-BTN-72), so the bound is freshness of
- *  choice, not safety. */
-export const RECOMMENDATIONS_KEPT_MS = 10 * 60_000;
 /** What one leg's snapshot shows of the legs leaving the claim's station (R-BTN-70). */
 type NextLegs = { leg: string; state: string; waiting_on?: string }[];
 
 export interface RunnerOptions {
-  /** R-BTN-202 (B-248): this home checkout's local work queue — the host user's orders, the
-   *  recommendations kept between attempts, and the legs run offline awaiting their report.
-   *  Absent, the runner asks for a recommendation on every attempt and never runs offline. */
+  /** R-BTN-202 (B-248): this home checkout's local work queue — the host user's orders and the
+   *  legs run offline awaiting their report. Absent, the runner never runs offline. */
   queue?: LocalQueue;
   api: BatonApi;
   /** B-229: a separate API for another session's runner, by its secret — how a runner that
@@ -1435,7 +1430,7 @@ export class Runner {
     // B-93 (review round 1): the beat must be *finished* here, not merely started. During it
     // Baton already holds the new runner's secret — `beatOnce` sends `secret_hash` for one the
     // state does not name yet — but the state names neither the runner nor the re-key until the
-    // answer, so a recommendation that overlapped a slow beat was refused `unauthenticated` and
+    // answer, so a claim that overlapped a slow beat was refused `unauthenticated` and
     // logged: the first-beat noise again. `tick()` refuses to run beside a beat (it returns at
     // once while the timer's is out), so a beat in flight is waited for, never skipped.
     await this.waitForBeat();
@@ -1444,7 +1439,7 @@ export class Runner {
     // the wait, or every `start()` → `work()` start beat a second time for nothing — and by
     // `stray` too, so a registration attempt is the one that began with no runner at all.
     const runner = this.state.get().runner_id;
-    // A beat of the attempt's own, when no runner is named yet; the recommendation after it is the
+    // A beat of the attempt's own, when no runner is named yet; the claim after it is the
     // first ask of one Baton may hold no secret for, so it is a registration attempt too.
     let beating = false;
     if (runner == null) { await this.tick(); beating = true; }
@@ -1490,39 +1485,13 @@ export class Runner {
       this.log(`baton: this runner declared nothing — its key's grant allows no capability on the repositories its courses are in, so every leg requiring one refuses it rule 4 (missing-capability); have the owner grant it (baton owner grant <repository> --key …, R-BTN-58)`);
     }
     // R-BTN-202 (B-248): the local queue first — a leg run offline whose result waits for Baton,
-    // then the host user's oldest order, then the recommendations kept from the last ask. Each
-    // is only a claim attempt: Baton's claim decides, every gate in force.
+    // then the host user's oldest order, each claimed by name: Baton's claim decides, every gate
+    // in force. Otherwise R-BTN-72 / B-287: an unnamed claim selects and claims atomically.
     const q = this.o.queue;
     const queued = q?.read() ?? null;
     const preworked = queued?.worked[0] ?? null;
     const order = preworked == null ? (queued?.orders[0] ?? null) : null;
-    let wanted: string | undefined = preworked?.ticket_id ?? order?.ticket_id;
-    if (wanted == null && q && queued!.recommendations.length && queued!.recommended_at != null && this.now() - queued!.recommended_at < RECOMMENDATIONS_KEPT_MS) {
-      wanted = q.shiftRecommendation()?.ticket_id;
-    }
-    // R-BTN-72: it recommends, then claims — the first recommendation is what a claim without
-    // an id would take anyway, asked for here so the runner knows what it is going for.
-    if (wanted == null) try {
-      const recs = await this.o.api.recommendations();
-      const list = (recs.recommendations ?? []) as { ticket_id: string; station: string; legs?: string[] }[];
-      wanted = list[0]?.ticket_id;
-      // R-BTN-202: the rest are kept, in Baton's order, for the attempts after this one.
-      q?.setRecommendations(list.map((r) => ({ ticket_id: r.ticket_id, station: r.station, legs: Array.isArray(r.legs) ? r.legs : [] })), this.now());
-      q?.shiftRecommendation();
-    } catch (e) {
-      if (!(e instanceof BatonRefusal)) throw e;
-      // A runner the gates refuse entirely still claims below: Baton's refusal is the answer.
-      // B-93: the registration beat's own refusal — the recommendation right after the beat that
-      // registered this session, refused `no runner holds this secret` before a runner exists —
-      // is not news, and is not logged (2026-10-21's runs: every start printed it). Only that
-      // refusal goes quiet: `authRunner` answers `unauthenticated` for a missing
-      // `X-Runner-Secret` and a replayed nonce too, and a registered runner's refusal (a
-      // replaced secret) still names itself. The registration is either a state with no runner
-      // before this attempt or a beat of this attempt's own, whose answer Baton may have no
-      // secret for — never a resumed runner's ordinary attempt.
-      const stray = (beating || !registered) && e.code === 'unauthenticated' && /no runner holds this secret/.test(e.message);
-      if (!stray) this.log(`baton: no recommendation (${e.message})`);
-    }
+    const wanted: string | undefined = preworked?.ticket_id ?? order?.ticket_id;
     let claim: Record<string, any>;
     const requestId = `run-${randomBytes(8).toString('hex')}`;
     this.claimsOut++;
@@ -1546,6 +1515,13 @@ export class Runner {
         return null;
       }
       if (e instanceof BatonRefusal && e.code === 'no-eligible-ticket') return null;
+      if (e instanceof BatonRefusal && e.code === 'unauthenticated') {
+        // B-93: only the registration's own missing-secret refusal is quiet. A replaced
+        // secret or replayed nonce still names itself, now on the single claim request.
+        const stray = (beating || !registered) && /no runner holds this secret/.test(e.message);
+        if (!stray) this.log(`baton: no claim (${e.message})`);
+        return null;
+      }
       if (e instanceof BatonRefusal && e.code === 'not-eligible' && /already held|runner-holds/.test(e.message)) {
         // The runner still holds a claim Baton knows and this runner does not (its state was
         // lost with the container): the heartbeat's claim view named it, so end it loudly
@@ -1559,7 +1535,10 @@ export class Runner {
         return null;
       }
       // R-BTN-4 (B-188): `max-claims` among them — the runner is at its bound for now.
-      if (e instanceof BatonRefusal && e.code === 'not-eligible') return null;
+      if (e instanceof BatonRefusal && e.code === 'not-eligible') {
+        this.log(`baton: no claim (${e.message})`);
+        return null;
+      }
       throw e;
     } finally {
       this.claimsOut--;
@@ -1604,7 +1583,7 @@ export class Runner {
    *  offline only at one claim (`--concurrency 1`, the home checkout), on a one-course runner,
    *  where the last claim answer said the repository requires no owner-signed control (B-127:
    *  only Baton's record names the signed commits), and when its leg is known — the order's
-   *  `@leg`, else the leg Baton last recommended for the ticket — with the station it leaves.
+   *  `@leg` — and leaves exactly one station.
    *  Nothing tells this runner whether another runner works the same leg meanwhile; it says so
    *  and runs. A finished leg is closed (its evidence in git) and its result kept in the queue,
    *  reported through an ordinary claim when Baton answers again; nothing else is decided here. */
@@ -1624,9 +1603,8 @@ export class Runner {
         continue;
       }
       if (this.o.courses.length !== 1) { wait(order.ticket_id, `this runner serves ${this.o.courses.length} courses, and without Baton it cannot tell which one the ticket is on`); continue; }
-      const seen = d.seen.find((r) => r.ticket_id === order.ticket_id) ?? null;
-      const leg = order.leg ?? seen?.legs[0] ?? null;
-      if (leg == null) { wait(order.ticket_id, `it names no leg and Baton's last recommendations did not list the ticket — queue it as ${order.ticket_id}@<leg>`); continue; }
+      const leg = order.leg;
+      if (leg == null) { wait(order.ticket_id, `it names no leg — queue it as ${order.ticket_id}@<leg> to run it without Baton`); continue; }
       let sha: string;
       let course: CourseLoad;
       try {
@@ -1637,10 +1615,10 @@ export class Runner {
         continue;
       }
       const def = course.graph.legs.get(leg);
-      const at = seen && seen.legs.includes(leg) ? seen.station : def?.from.length === 1 ? def.from[0] : null;
+      const at = def?.from.length === 1 ? def.from[0] : null;
       if (def == null || at == null) {
         dropCourse(course.scratch);
-        wait(order.ticket_id, def == null ? `${leg} is not a leg of course ${course.course}` : `${leg} leaves ${def.from.join(' or ')}, and Baton's last recommendations did not say where the ticket rests`);
+        wait(order.ticket_id, def == null ? `${leg} is not a leg of course ${course.course}` : `${leg} leaves ${def.from.join(' or ')}, and without Baton the runner cannot tell where the ticket rests`);
         continue;
       }
       this.saidOffline.delete(order.ticket_id);

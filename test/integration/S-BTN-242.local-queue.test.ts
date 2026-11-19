@@ -223,7 +223,7 @@ describe('S-BTN-242 a runner\'s local queue', () => {
     expect(lines.some((l) => l.includes('Baton refused the claim on ordered docs:T-9') && l.includes('dropped'))).toBe(true);
     expect(queue.read().orders).toEqual([]);
     expect(home.evidence()).toEqual([]);
-    // An order for T-2: claimed ahead of whatever Baton would recommend first.
+    // An order for T-2: claimed by name, ahead of whatever Baton would choose first.
     queue.add('docs:T-2', null, 'tester@host', T0);
     expect(await makeRunner().runOnce()).toMatchObject({ ticket: 'docs:T-2', end_reason: 'done' });
     expect(lines.some((l) => l.includes('claimed docs:T-2 under tester@host\'s order'))).toBe(true);
@@ -249,27 +249,21 @@ describe('S-BTN-242 a runner\'s local queue', () => {
     expect(queue.read().orders).toHaveLength(1);
   }, 60_000);
 
-  it('the recommendations are kept as a queue: an idle runner holding entries does not ask every attempt', async () => {
+  it('offline, an order naming no leg waits, said once; without Baton nothing says which leg', async () => {
     legs();
-    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]), 'T-2': placed('filed', [], [['build', 'ready']]) },
-      [ticket('T-1', { course_id: 'relay' }), ticket('T-2', { course_id: 'relay' })]);
-    const asked: string[] = [];
-    const api = new BatonApi({
-      url: 'https://baton.test',
-      transport: (req) => { if (new URL(req.url).pathname === '/v1/runner/recommendations') asked.push(req.url); return hostCall(req); },
-      auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
-    });
-    const runner = new Runner({
-      api, home: home.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
-      session: `runner-242-${++n}`, courses: [{ course: 'relay', version: 3 }],
-      stateFile: join(scratch, `state-${n}.json`), beatEvery: 40, now: () => Date.now(), log: (l) => lines.push(l), queue,
-    });
-    runners.push(runner);
-    const first = await runner.runOnce();
-    const second = await runner.runOnce();
-    expect(new Set([first?.ticket, second?.ticket])).toEqual(new Set(['docs:T-1', 'docs:T-2']));
-    // One ask served both claims: the second went for the entry kept from the first answer.
-    expect(asked).toHaveLength(1);
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    queue.setControlRequired(false);
+    down = true;
+    queue.add('docs:T-1', null, 'tester@host', T0);
+    const runner = makeRunner();
+    const working = runner.work();
+    await until(() => lines.some((l) => l.includes('the order for docs:T-1 waits for Baton') && l.includes('queue it as docs:T-1@<leg>')));
+    await until(() => lines.filter((l) => l.includes('the loop failed')).length >= 3);
+    runner.stop();
+    await working;
+    expect(lines.filter((l) => l.includes('the order for docs:T-1 waits for Baton'))).toHaveLength(1);
+    expect(home.evidence()).toEqual([]);
+    expect(queue.read().orders).toHaveLength(1);
   }, 60_000);
 });
 

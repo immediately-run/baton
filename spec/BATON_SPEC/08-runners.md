@@ -176,7 +176,7 @@ the runner's credentials under any other executor is that executor's, never Bato
 ### 8.3 The runner
 
 - **R-BTN-72 (the runner).** `baton runner start` is a generic runner loop. It hosts the
-  sidecar, heartbeats, asks for recommendations, claims up to R-BTN-4's bound, and
+  sidecar, heartbeats, claims up to R-BTN-4's bound, and
   runs each claim's legs one at a time, claims side by side, each leg by **the script for that leg**, then advances, suspends or ends as the script's
   result and the course file allow. It knows no course: it serves every course its home
   checkout declares, loading each claim's course from the claim answer's `course_id` at the
@@ -193,8 +193,9 @@ the runner's credentials under any other executor is that executor's, never Bato
   and the wrapper's own return alike — so a process a leg started (a held lock, a background
   check an agent spawned) never outlives its leg (S-BTN-200); any other executor keeps the same
   guarantee by its own means. With room for another claim — fewer held than R-BTN-4's bound, and
-  the host's own judgement that it can start one — it asks for recommendations when
-  a heartbeat carries `unblocked`, else at its own interval (R-BTN-77). A claim that waits — a
+  the host's own judgement that it can start one — it attempts an unnamed claim when
+  a heartbeat carries `unblocked`, else at its own interval (R-BTN-77). Each automatic attempt
+  makes one claim request; recommendations remain an explicit read for callers choosing work. A claim that waits — a
   leg in a `short_waits` wait (R-BTN-40), a condition's wait (R-BTN-162), a person's
   `interact` (R-BTN-195) — holds only its own place, never the runner's other claims.
   - **Course directory** (R-BTN-69, R-BTN-134):
@@ -527,18 +528,14 @@ the runner's credentials under any other executor is that executor's, never Bato
 
 - **R-BTN-202 (a runner's local queue; local orders while Baton is unreachable).** A runner keeps a
   local work queue for its home checkout, on its host and outside every leg session, so no leg can
-  write it. It holds the recommendations Baton last served, in Baton's order, and the **orders**
-  the host's user gives with `baton queue add <repository>:<id>[@leg]` (`baton queue list`,
+  write it. It holds the **orders** the host's user gives with `baton queue add <repository>:<id>[@leg]` (`baton queue list`,
   `baton queue remove`). Baton is **unreachable** when a call does not reach it or it answers 5xx.
-  - **Recommendations are a queue.** An idle runner holding kept recommendations claims the next
-    one rather than asking again, for at most ten minutes after the answer; a stale entry costs
-    one refused claim (R-BTN-72).
-  - **While Baton answers, an order is a claim attempt.** The runner tries its oldest order
-    before any recommendation, through the ordinary claim and every gate; a refused claim drops
+  - **While Baton answers, an order is a claim attempt.** The runner claims its oldest order
+    by name before an unnamed claim (R-BTN-72), through every gate; a refused claim drops
     the order.
   - **While Baton is unreachable, an order's leg starts without a claim.** The leg is the
-    order's, else the leg Baton last recommended for the ticket; the station is the one that
-    recommendation named, else the leg's only `from`. Such a leg runs only at one claim (R-BTN-4's
+    order's `@leg` and the station the leg's only `from`; an order naming no leg, or a leg leaving
+    several stations, waits for Baton. Such a leg runs only at one claim (R-BTN-4's
     bound 1), on a runner serving one course, at the home checkout's head. Its `ctx.claim` names
     only the station it leaves. The runner logs that nothing guarantees another runner is not
     running the same leg, and keeps asking Baton. No git write stands in for the lease

@@ -4,6 +4,7 @@
 // also notices a path that is neither an extension of the previous one by edges of the course
 // file nor shorter (`off-graph`), and hands the claims what changed, so they judge confirmation,
 // staleness and regression from it (claims.ts).
+import { nonScheduling } from './stateVersion';
 import { logEvent } from './db';
 import { extendsPath, graphOf, leaves, onGraph, resolveLeg, type Graph, type Step } from './graph';
 import type { PostedStation } from './board';
@@ -99,7 +100,7 @@ export class Stations {
     // The reading that placed every station row before this one (R-BTN-62): a row this post
     // leaves unchanged keeps its own, older `observation`, so the repository's stands for it.
     const placedBefore = this.rows<{ n: number | null }>('SELECT stations_observation AS n FROM board_head WHERE repository_id = ?', repo)[0]?.n ?? 0;
-    this.exec('UPDATE board_head SET stations_observation = ? WHERE repository_id = ?', observation, repo);
+    nonScheduling(this.c.store, () => this.exec('UPDATE board_head SET stations_observation = ? WHERE repository_id = ?', observation, repo));
     // B-241: the repository's stored stations, next legs and bars, and its required bars, read
     // once for the post; each ticket's writes touch only its own rows, so what was read for the
     // others stays true while the loop runs.

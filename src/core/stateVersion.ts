@@ -1,21 +1,13 @@
-// stateVersion.ts — B-237, B-242 (BATON_SPEC §3 R-BTN-196): `state_version`, one counter that
-// moves with every write to Baton's state. The core's Store is this wrapper over the host's:
-// a statement that writes a row marks the request dirty, and the outermost transaction bumps
-// the counter in its own commit (a write outside any transaction bumps it at once), so a
-// reader that saw version n and sees n again knows no stored fact changed between.
-//
-// Liveness is the one exception, by design: a runner's `last_seen_at`/`last_activity_at`
-// beat (the heartbeat's and the runner call's) and the request nonces change on every call,
-// and what they decide is clock-dependent — whether a runner is live or stalled is
-// `now - last_seen_at` against its lease — so a reader that depends on them folds the clock
-// in (the recommendation memo's deadline, B-242's time bucket) instead of a bump on every beat.
-// Those writes run inside `liveness()`; nothing else does.
+// stateVersion.ts — R-BTN-196 / B-287: aggregate, scheduling and screen versions move in
+// the source write's transaction. Telemetry moves the aggregate/activity versions without
+// expiring idle decisions. Unknown writes invalidate conservatively. Liveness and nonces
+// remain unversioned; time-dependent reads add a deadline or clock bucket.
 import { sha256HexSync } from './policy';
 import type { Cursor, Row, Store } from './ports';
 
 /** The tables whose writes are bookkeeping, never state a reader keys on: the request nonces
  *  (R-BTN-13, a replay guard) and the migration ledger. */
-const UNVERSIONED = new Set(['request_nonces', '_baton_migrations', 'state_version']);
+const UNVERSIONED = new Set(['request_nonces', '_baton_migrations', 'state_version', 'sync_fingerprints']);
 
 const kinds = new Map<string, { write: boolean; table: string | null }>();
 /** Whether `query` may write, and the table it names first — read once per statement text. */
@@ -34,6 +26,10 @@ export function statementKind(query: string): { write: boolean; table: string | 
 export interface VersionedStore extends Store {
   /** The counter now: one row read. 0 before the migration that creates it has run. */
   version(): number;
+  schedulingVersion(): number;
+  readVersion(activity: boolean): string;
+  /** Observation bookkeeping still changes dashboard state, but not scheduling. */
+  nonScheduling<T>(fn: () => T): T;
   /** Run `fn` with its writes not moving the counter — liveness writes only (see the header). */
   liveness<T>(fn: () => T): T;
   /** Start counting (after the migrations: the table exists from 0054 on). */
@@ -62,18 +58,29 @@ export function versionedStore(inner: Store): VersionedStore {
   let tracking = false;
   let depth = 0;
   let dirty = false;
+  let schedulingDirty = false;
+  let boardDirty = false;
+  let activityDirty = false;
+  let schedulingQuiet = 0;
   let quiet = 0;
   // R-BTN-2: the rows written since the last `takeWritten()` — the day's usage counter's source.
   let written = 0;
-  // Through `self`, so whoever measures the store's statements sees these two as well.
+  // Through `self`, so read/write measurements include the version update.
   const bump = () => {
-    self.exec('UPDATE state_version SET v = v + 1 WHERE id = 1');
+    self.exec('UPDATE state_version SET v = v + 1, scheduling_v = scheduling_v + ?, board_v = board_v + ?, activity_v = activity_v + ? WHERE id = 1', Number(schedulingDirty), Number(boardDirty), Number(activityDirty));
   };
-  const wrote = (rows: number) => {
+  const activityTables = new Set(['activities', 'transcripts', 'pending_transcripts', 'messages', 'events', 'ticket_history']);
+  const nonSchedulingTables = new Set([...activityTables, 'board_snapshots', 'push_deliveries', 'webhook_deliveries', 'webhook_dispatch', 'webhook_syncs', 'sequences', 'deprecated_fields']);
+  const reset = () => { dirty = schedulingDirty = boardDirty = activityDirty = false; };
+  const wrote = (rows: number, table: string | null = null) => {
     if (!tracking || quiet || rows <= 0) return;
     written += rows;
-    if (depth > 0) dirty = true;
-    else bump();
+    const activity = table != null && activityTables.has(table);
+    activityDirty ||= activity;
+    boardDirty ||= !activity;
+    schedulingDirty ||= !schedulingQuiet && !(table && nonSchedulingTables.has(table));
+    dirty = true;
+    if (depth === 0) { bump(); reset(); }
   };
   const self: VersionedStore = {
     exec<T = Row>(query: string, ...params: unknown[]): Cursor<T> {
@@ -84,7 +91,7 @@ export function versionedStore(inner: Store): VersionedStore {
       const rows = cur.toArray();
       const counts = cur as { rowsRead?: number; rowsWritten?: number };
       // B-237: a host that cannot say counts as a change; one that says zero changed nothing.
-      wrote(counts.rowsWritten == null ? 1 : counts.rowsWritten > 0 ? counts.rowsWritten : 0);
+      wrote(counts.rowsWritten == null ? 1 : counts.rowsWritten > 0 ? counts.rowsWritten : 0, kind.table);
       return cursorOf(rows, counts);
     },
     script(sql: string): void {
@@ -92,18 +99,34 @@ export function versionedStore(inner: Store): VersionedStore {
       wrote(1);
     },
     transaction<T>(fn: () => T): T {
-      return inner.transaction(() => {
-        const outer = depth === 0;
-        depth++;
-        try {
-          const out = fn();
-          if (outer && dirty) bump();
-          return out;
-        } finally {
-          depth--;
-          if (outer) dirty = false;
-        }
-      });
+      const before = { dirty, schedulingDirty, boardDirty, activityDirty, written };
+      try {
+        return inner.transaction(() => {
+          const outer = depth++ === 0;
+          try {
+            const out = fn();
+            if (outer && dirty) bump();
+            if (outer) reset();
+            return out;
+          } finally { depth--; }
+        });
+      } catch (e) {
+        // A rolled-back savepoint must not dirty its parent or leave a cache at a future version.
+        ({ dirty, schedulingDirty, boardDirty, activityDirty, written } = before);
+        throw e;
+      }
+    },
+    schedulingVersion(): number {
+      if (!tracking) return 0;
+      return (self.exec<{ v: number }>('SELECT scheduling_v AS v FROM state_version WHERE id = 1').toArray()[0]?.v ?? 0) + Number(schedulingDirty);
+    },
+    readVersion(activity: boolean): string {
+      const v = self.exec<{ board_v: number; activity_v: number }>('SELECT board_v, activity_v FROM state_version WHERE id = 1').one();
+      return activity ? `${v.board_v}:${v.activity_v}` : String(v.board_v);
+    },
+    nonScheduling<T>(fn: () => T): T {
+      schedulingQuiet++;
+      try { return fn(); } finally { schedulingQuiet--; }
     },
     version(): number {
       if (!tracking) return 0;
@@ -176,4 +199,14 @@ export function ifNoneMatch(req: Request, etag: string): boolean {
   const sent = req.headers.get('If-None-Match');
   if (sent == null) return false;
   return sent.split(',').some((one) => one.trim().replace(/^W\//, '') === etag);
+}
+
+/** Scheduling changes include advice, permissions and runner declarations, never telemetry. */
+export function schedulingVersion(store: Store): number {
+  const s = store as Partial<VersionedStore>;
+  return typeof s.schedulingVersion === 'function' ? s.schedulingVersion() : 0;
+}
+export function nonScheduling<T>(store: Store, fn: () => T): T {
+  const s = store as Partial<VersionedStore>;
+  return typeof s.nonScheduling === 'function' ? s.nonScheduling(fn) : fn();
 }
