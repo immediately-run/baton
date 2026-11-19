@@ -1,0 +1,85 @@
+---
+title: "B-287 — Bound SQLite reads for polling, syncs and dashboard lists"
+id: B-287
+project: baton
+status: in-progress
+updated: 2026-11-19
+repos: [baton]
+tags: [roadmap-item]
+description: Separate scheduling invalidation, normalize matching inputs and index a small candidate projection without duplicating dashboard state.
+topics: [baton]
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** Implement the owner's requested SQLite efficiency review in one isolated worktree
+and pull request. The 2026-11-18 rows-read investigation found roughly 4,200 rows per idle
+recommendation/claim pair when a busy peer invalidates its memo, and roughly 2,900 rows for
+an unchanged sync. Preserve Baton's relational model and authoritative gates.
+
+**Spec:** [R-BTN-196](../spec/BATON_SPEC/02-deployments.md#sec-2-3),
+[R-BTN-61](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1),
+[R-BTN-62](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3),
+[matching](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6),
+[R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3).
+
+## Plan
+
+1. Separate scheduling invalidation from activity and dashboard changes. Keep deadline-aware
+   idle memoization, including backoffs, owner bars and resource availability. Activity,
+   transcript and observation-allocation bookkeeping must not invalidate an idle answer.
+   Accepted observations still affect freshness and confirmations.
+2. Normalize the hot matching inputs: course legs and their expanded capabilities, grant
+   capability patterns, and ticket repository membership. Keep opaque documents in JSON.
+   Compute effective runner capabilities once per request; do not maintain a runner/ticket
+   eligibility matrix. This incorporates the relevant work proposed in B-239.
+3. Maintain one narrow, rebuildable candidate table, indexed in the existing per-course
+   order. Update affected tickets transactionally, retain authoritative gate checks, preserve
+   group fairness, expedited-lane behavior and the four-page bound. Time and observation
+   predicates must remain fresh even without an alarm. This incorporates B-243's approach.
+4. Claim automatically with one request, leaving recommendations available for explicit reads.
+5. Short-circuit unchanged snapshot sections using server-computed fingerprints, while still
+   validating observation order and reconciling claims, closures, questions and mutable ticket
+   sources. Identical Git heads alone are never proof of an unchanged reading.
+6. Bound dashboard reads by the requested repository and page. Read latest transcripts and
+   reports through indexes, scope requirement enrichment to returned tickets, and expose
+   independently cacheable list reads. Keep the aggregate endpoint compatible. Avoid a second
+   stored copy of dashboard cards or counters with different readiness semantics.
+7. Add append-only migrations, update the owning spec rules, and validate on both hosts.
+
+## Acceptance
+
+- S-BTN-242 exercises a busy runner beside an idle runner with activity and unchanged syncs
+  between polls; idle reads stay in tens of rows rather than thousands.
+- Candidate membership and ordering match the reference query through changes, rollback,
+  restart, claim/fence/confirmation transitions, course changes and clock deadlines.
+- Cold selection is measured with 180 tickets, 600 ended claims and 3,000 events, including
+  mostly incompatible work. Hundreds of reads is the target; record actual measurements.
+- An unchanged board post avoids per-ticket materialization reads when its inputs and relevant
+  server state are unchanged. The separate observation response still returns all ticket versions. New observations and tracker changes still reconcile correctly.
+- Dashboard list cost grows with the page and its related rows, not historical reports or
+  transcripts. Query plans demonstrate the intended indexes.
+- Measure both rows read and written, including projection/index maintenance. No schema claim
+  substitutes for workerd cursor measurements. Run npm test, typecheck and check:wiki.
+
+### Trust
+
+The owner requested these code and schema changes in this session. No deployed credentials,
+grants, owner settings, CI workflows or deployment configuration are changed. New tables
+derive only from previously validated inputs; projections never authorize a claim. The PR
+changes Baton only and requires no access to another repository.
+
+### Invariants
+
+One active claim per ticket, fencing, observation ordering, grant wildcard semantics, person
+legs, authoritative gate rechecks, advice versus refusal, and the existing group order remain
+intact. No ticket bodies or other prohibited content are stored. Derived rows commit or roll
+back with their source. Migration files already merged remain unchanged.
+
+## Status
+
+_filed 2026-11-19._
+
+The CLI selected B-287 using its documented remote-branch fallback because this session has
+no Baton key configured. Recheck identifiers against the remote before publication.
