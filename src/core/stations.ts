@@ -94,7 +94,7 @@ export class Stations {
    * path that neither extends the previous one by edges nor is shorter is stored (git wins) and
    * logs `off-graph`. Returns what each placed ticket showed, by qualified id.
    */
-  apply(repo: string, sha: string, observation: number, stations: Map<string, PostedStation>, closed: { id: string; as: 'done' | 'withdrawn' }[], at: number): Map<string, Seen> {
+  apply(repo: string, sha: string, observation: number, stations: Map<string, PostedStation>, closed: { id: string; as: 'done' | 'withdrawn' }[], at: number, closingParents?: ReadonlyMap<string, string | null>): Map<string, Seen> {
     const seen = new Map<string, Seen>();
     // The reading that placed every station row before this one (R-BTN-62): a row this post
     // leaves unchanged keeps its own, older `observation`, so the repository's stands for it.
@@ -157,8 +157,14 @@ export class Stations {
     }
     for (const c of closed) {
       // The first snapshot to report a closure stands (R-BTN-10 compares its observation).
-      this.exec('INSERT INTO closed_tickets (ticket_id, closed_as, observation, closed_at) VALUES (?, ?, ?, ?) ON CONFLICT (ticket_id) DO NOTHING',
-        qualify(repo, c.id), c.as, observation, at);
+      // R-BTN-86: the relation outlives the close — the parent the closing ticket's row held,
+      // passed by the materialization that just dropped it (or read from the row a held
+      // history's refresh still leaves standing).
+      const parent = closingParents?.get(c.id)
+        ?? this.rows<{ parent: string | null }>('SELECT parent FROM tickets WHERE id = ?', qualify(repo, c.id))[0]?.parent
+        ?? null;
+      this.exec('INSERT INTO closed_tickets (ticket_id, closed_as, observation, closed_at, parent) VALUES (?, ?, ?, ?, ?) ON CONFLICT (ticket_id) DO NOTHING',
+        qualify(repo, c.id), c.as, observation, at, parent);
     }
     return seen;
   }

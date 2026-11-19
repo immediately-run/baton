@@ -76,7 +76,9 @@ describe('the tickets cache', () => {
       // B-127: the brief's mark (0040).
       'brief',
       // B-126: who last pushed the ticket's body (R-BTN-194).
-      'last_written_by']);
+      'last_written_by',
+      // R-BTN-86 (R3-1258): the parent's qualified id — an id, never body text.
+      'parent']);
   });
 });
 

@@ -41,7 +41,12 @@ describe('S-BTN-170 the dashboard state, read with an administrator’s key', ()
     expect(viaSession.status).toBe(200);
     const viaKey = await keyCall(admin, '/v1/admin/state');
     expect(viaKey.status).toBe(200);
-    expect(viaKey.json).toEqual(await viaSession.json());
+    // R3-1258: the Capacity view is the one section a read itself moves — the day's usage and
+    // the rates count the request reading them — so the two answers are compared without it;
+    // everything else is the same state, as B-118 built.
+    const { capacity: _volatile, ...key } = viaKey.json as Record<string, unknown>;
+    const { capacity: _too, ...seen } = (await viaSession.clone().json()) as Record<string, unknown>;
+    expect(key).toEqual(seen);
     // Not an empty answer that happens to match: the registered repository and K's runner are in it.
     expect(JSON.stringify(viaKey.json)).toContain('immediately-run/ops');
     expect(JSON.stringify(viaKey.json)).toContain('k-host');

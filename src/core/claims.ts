@@ -448,12 +448,23 @@ export class Claims {
   ticketView(id: string): Record<string, unknown> | null {
     const item = this.item(id);
     if (!item) return null;
-    const r = this.rows<{ title: string; project: string | null; expedite: number; snapshot_sha: string; course_id: string }>(
-      'SELECT title, project, expedite, snapshot_sha, course_id FROM tickets WHERE id = ?', id)[0];
+    const r = this.rows<{ title: string; project: string | null; expedite: number; snapshot_sha: string; course_id: string; parent: string | null }>(
+      'SELECT title, project, expedite, snapshot_sha, course_id, parent FROM tickets WHERE id = ?', id)[0];
+    // R-BTN-86 (§4.6, R3-1258): the ticket's tree — its parent, and its children open and
+    // closed — the data the Courses ticket view draws its tree from.
+    const children = this.rows<{ id: string; station: string | null }>(
+      `SELECT t.id, s.station FROM tickets t LEFT JOIN ticket_stations s ON s.ticket_id = t.id WHERE t.parent = ? ORDER BY t.id`, id);
+    const closed = this.rows<{ ticket_id: string; closed_as: string }>(
+      'SELECT ticket_id, closed_as FROM closed_tickets WHERE parent = ? ORDER BY ticket_id', id);
     return {
       ticket_id: item.id, repository: item.repository, course_id: r?.course_id ?? item.course, title: r?.title ?? null,
       path: item.path, tier: item.tier, requires: item.requires ?? [], operator_only: item.operator_only, expedite: item.expedite,
       rank: item.rank, snapshot_sha: r?.snapshot_sha ?? null,
+      parent: r?.parent ?? null,
+      children: [
+        ...children.map((c) => ({ ticket_id: c.id, station: c.station })),
+        ...closed.map((c) => ({ ticket_id: c.ticket_id, closed: c.closed_as })),
+      ],
       station: item.station ? { station: item.station.station, path: item.station.path, next_leg: item.station.next_leg, to_end: item.station.to_end,
         ...(item.station.handoff_url ? { handoff_url: item.station.handoff_url } : {}) } : null,
       ...(item.last_written_by ? { last_written_by: item.last_written_by } : {}),
@@ -487,6 +498,14 @@ export class Claims {
    *  advance and an end, so only a reading numbered above it can judge them. */
   handedOut(repo: string): number {
     return this.rows<{ n: number }>('SELECT last_handed_out AS n FROM board_head WHERE repository_id = ?', repo)[0]?.n ?? 0;
+  }
+
+  /** R-BTN-88 (§4.8): the freeze in force, or null — a frozen Baton refuses new claims (the
+   *  gate in `claim`), never lease upkeep. */
+  frozenAt(): number | null {
+    const raw = this.rows<{ value: string }>(`SELECT value FROM baton_settings WHERE key = 'frozen_at'`)[0]?.value;
+    const n = raw == null ? NaN : Number(raw);
+    return Number.isSafeInteger(n) && n >= 0 ? n : null;
   }
 
   /** The leg as the head snapshot posted it for the ticket, its barred tags (R-BTN-70), and what
@@ -1035,6 +1054,9 @@ export class Claims {
     // there — is not-found before the cutover gate, which reads the live repositories alone.
     if (b.ticket_id) this.refuseUnregisteredTicket(b.ticket_id);
     for (const field of b.retired) this.c.deprecated.note(this.c.now(), `runner:${runnerId}`, `claim.${field}`, 'claim');
+    // R-BTN-88 (§4.8): a frozen Baton refuses new claims — lease upkeep (heartbeats, advances,
+    // ends) runs on, so held work drains before the seal.
+    if (this.frozenAt() != null) throw new BatonError('frozen', 'this Baton is frozen for a move: new claims are refused until it is unfrozen or sealed (R-BTN-88)');
     if (!this.anyCutOver()) throw new BatonError('not-cut-over', 'claims go through git until cutover (R-BTN-28)');
     const prior = this.rows<{ id: number; runner_id: number }>('SELECT id, runner_id FROM claims WHERE request_id = ?', b.request_id)[0];
     if (prior) {
@@ -1415,6 +1437,11 @@ export class Claims {
     if (e.owner_bar && !this.rows('SELECT 1 FROM owner_bars WHERE repository_id = ? AND reason = ?', repositoryOf(c.ticket_id), e.end_reason.slice(9)).length) {
       throw new BatonError('invalid-params', `end_reason: ${e.end_reason} names no owner bar's reason on ${repositoryOf(c.ticket_id)}`);
     }
+    // R-BTN-86 (§4.6, R3-1258): a reported child is never the parent's own — validated before
+    // any write, with the ticket the claim holds. The rest of the report's shape is checkEnd's.
+    if (e.spawned && e.spawned.includes(c.ticket_id.slice(c.ticket_id.indexOf(':') + 1))) {
+      throw new BatonError('invalid-params', `spawned: a child is never the parent's own ticket (R-BTN-86)`);
+    }
     if (c.status !== 'active') {
       if (c.end_reason === e.end_reason) return { ok: true };
       // R-BTN-8 pushes git first, so a sync can see the ticket closed and release the claim
@@ -1476,6 +1503,17 @@ export class Claims {
     // valid blocked end is not a failed attempt, not a run for max_runs, and starts no backoff
     // (the blocked-end work's rules). The transaction is the end's own; the delete is its shape.
     if (e.prerequisite?.kind === 'capability') this.exec('DELETE FROM runner_capabilities WHERE runner_id = ? AND capability = ?', runnerId, e.prerequisite.ref);
+    // R-BTN-86 (§4.6, R3-1258): the children the ending leg reported — recorded as the run's
+    // (the range a call settles over is B-62's to read) until the first accepted snapshot
+    // observed after this end, which posts them or drops each unposted one with discrepancy
+    // `spawned-unposted` (R-BTN-85). The end's observation is the counter's now, as finish
+    // writes it below; the snapshot that judges it carries a strictly greater number.
+    if (e.spawned?.length) {
+      const repo = repositoryOf(c.ticket_id);
+      this.exec(`INSERT INTO spawned_children (repository_id, ticket_id, claim_id, children_json, observation, ended_at) VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (repository_id, ticket_id, claim_id) DO UPDATE SET children_json = excluded.children_json, observation = excluded.observation, ended_at = excluded.ended_at`,
+        repo, c.ticket_id, c.id, JSON.stringify(e.spawned), this.handedOut(repo), this.c.now());
+    }
     this.finish(c.id, c.ticket_id, e.status, e.end_reason, `runner:${runnerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next });
     return { ok: true, ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
   }

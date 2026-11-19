@@ -20,11 +20,11 @@ export interface MarkdownFile {
 }
 
 /** A ticket as a ticket source posts it (§7.1): the generic fields core reads, plus the
- * fields core stores unread — the opaque `course` fields, `parent` (R-BTN-86) and `not_before`
- * (R-BTN-89). Typed here, in course code, so `src/core/` gains no line (S-BTN-43). */
+ * fields core stores unread — the opaque `course` fields and `not_before` (R-BTN-89). `parent`
+ * (R-BTN-86) is PostedTicket's own since R3-1258, read and stored by the snapshot; typed there,
+ * so `src/core/` gains no line (S-BTN-43). */
 export interface SourceTicket extends PostedTicket {
   course?: Record<string, unknown>;
-  parent?: string;
   not_before?: unknown;
 }
 

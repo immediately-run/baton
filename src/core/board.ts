@@ -41,7 +41,7 @@ export interface StateItem {
 export const DEFAULT_COURSE = 'roadmap-pr';
 
 /** A ticket of §7.1's normative post. Only the generic fields are read; `course` (opaque, for the
- *  course's hook, R3-1236), `parent` (R3-1258) and `not_before` (R3-1259) are accepted unread. */
+ *  course's hook, R3-1236) and `not_before` (R3-1259) are accepted unread. */
 export interface PostedTicket {
   id: string;
   course_id: string;
@@ -64,6 +64,13 @@ export interface PostedTicket {
   blocked_by: string[];
   repos: string[];
   rank?: number | null;
+  /** R-BTN-86 (§4.6): the ticket's parent, a LOCAL id of the same repository as the sync reads
+   *  it from the ticket file's `parent:`. Shape-bounded here; whether it is stored — qualified —
+   *  is the snapshot's to decide (`resolveParents`): a parent that is not a local id, names the
+   *  ticket itself, closes a cycle or lies more than 4 generations below a root (R-BTN-149) is
+   *  stored as none and logged `parent-invalid`; one naming no known ticket is stored and drawn
+   *  orphaned. No snapshot is refused for a parent. */
+  parent?: string | null;
   /** Shown, never read (§2b). */
   display?: { status?: string; group?: string; project?: string };
   /** R-BTN-116: the queued person leg's question (§4.4) — stored only while the ticket's queued
@@ -226,6 +233,10 @@ export interface TicketRow {
   course_id: string;
   /** The tier's position in the repository's ladder (R-BTN-66), set by the core, which knows it. */
   tier_position?: number | null;
+  /** R-BTN-86: the parent AS POSTED (a local id, or null) — an input of `row_hash`, so a parent
+   *  that changes rewrites the row. The column the snapshot stores is the resolved qualified id
+   *  (`resolveParents`), which this raw value decides but never is. */
+  parent?: string | null;
   requires: string[];
   since: string | null;
   holder: string | null;
@@ -491,6 +502,12 @@ function checkNormative(p: BoardPayload, repo?: string) {
     if (!isObjArr(t.repos, 64)) fail(`${t.id}.repos`, 'must be a list of at most 64');
     list(t.repos, REPO, `${t.id}: repos`);
     if (t.rank != null && !(Number.isSafeInteger(t.rank) && t.rank >= 0)) fail(`${t.id}.rank`, 'must be a non-negative integer');
+    // R-BTN-86 (§4.6): the parent is bounded here alone — whether it is a local id at all, and
+    // what the snapshot then does with it (cycles, depth, orphans), is `resolveParents`'s, which
+    // never refuses the post.
+    if (t.parent !== undefined && t.parent !== null && (typeof t.parent !== 'string' || t.parent.length > 128 || !TEXT.test(t.parent))) {
+      fail(`${t.id}.parent`, 'must be a local ticket id (short plain text), or null');
+    }
     // R-BTN-116 (§4.4): the queued person leg's question. Its shape here; whether the ticket's
     // queued leg is a person's — and each option's `reached` one of the leg's own outcomes — is
     // judged where the course in force is known, when the question is stored.
@@ -791,6 +808,7 @@ export function rowFor(it: StateItem, rankOf: Map<string, number>): TicketRow {
     ord: it.order == null ? null : String(it.order),
     rank: rankOf.get(it.id) ?? null,
     course_id: it.course ?? DEFAULT_COURSE,
+    parent: null,
     requires: [...capabilitiesOf(names)].sort(),
     since: calendarDate(it.since),
     holder: typeof it.holder === 'string' && SESSION_NAME.test(it.holder) ? it.holder : null,
@@ -826,6 +844,7 @@ export function rowForTicket(t: PostedTicket): TicketRow {
     ord: null,
     rank: t.rank ?? null,
     course_id: t.course_id,
+    parent: t.parent ?? null,
     requires: [...capabilitiesOf(names)].sort(),
     since: null,
     holder: null,
@@ -849,5 +868,123 @@ export async function rowHash(row: TicketRow): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(row));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ── §4.6 children (R-BTN-86, R3-1258) ────────────────────────────────────────────────────
+
+/** R-BTN-149: the generation cap — a ticket more than this many parent-edges below a root is
+ *  `parent-invalid`, twice the envelope's parallelism depth being one Baton's whole shape. */
+export const PARENT_GENERATIONS_MAX = 4;
+
+/** Why a posted parent is stored as none (§4.6): the reason `parent-invalid` carries. */
+export type ParentInvalidReason = 'foreign' | 'self' | 'cycle' | 'depth';
+
+/** One dropped parent: the ticket, the value it posted, and why. */
+export interface ParentInvalid {
+  ticket: string;
+  parent: string;
+  reason: ParentInvalidReason;
+}
+
+export interface ResolvedParents {
+  /** Each posted ticket's stored parent — its QUALIFIED id, or null — and whether it names a
+   *  ticket the board knows (an orphan is stored and drawn orphaned, never dropped). */
+  parentOf: Map<string, { qualified: string | null; known: boolean }>;
+  invalid: ParentInvalid[];
+}
+
+/**
+ * R-BTN-86 (§4.6): what each posted ticket's `parent` becomes in `tickets.parent`. Pure — the
+ * snapshot calls it inside its own transaction with the board it holds, so the graph it walks
+ * (this post's parents beside the stored ones) is the one the transaction writes. A parent that
+ * is not a local id (`foreign` — a qualified id among them), names the ticket itself (`self`),
+ * closes a cycle (`cycle`, a parent chain that returns, or runs into one) or lies more than
+ * {@link PARENT_GENERATIONS_MAX} generations below a root (`depth`, R-BTN-149) is stored as
+ * none and returned for the snapshot to log `parent-invalid`; one naming no ticket the post or
+ * the board holds is stored, `known: false` — drawn orphaned. Nothing is refused.
+ *
+ * The walk is iterative, as `dependsCycles`' is: a legal board holds a chain 10 000 long.
+ */
+export function resolveParents(
+  repository: string,
+  posted: readonly { id: string; parent: string | null }[],
+  existing: ReadonlyMap<string, string | null>,
+  closedKnown: ReadonlySet<string> = new Set(),
+): ResolvedParents {
+  // The graph over local ids: this post's raw parents beside the board's stored ones (already
+  // qualified, this repository's by construction), each edge to a LOCAL id or none.
+  const parentLocal = (fromPost: boolean, raw: string | null): string | null => {
+    if (raw == null) return null;
+    if (fromPost) return LOCAL_ID.test(raw) ? raw : null;
+    const cut = raw.indexOf(':');
+    return cut >= 0 ? raw.slice(cut + 1) : null;
+  };
+  const edges = new Map<string, string>();
+  const postedIds = new Set(posted.map((t) => t.id));
+  for (const t of posted) {
+    const up = parentLocal(true, t.parent);
+    if (up != null) edges.set(t.id, up);
+  }
+  for (const [id, up] of existing) {
+    if (postedIds.has(id)) continue; // the post's own value wins for its tickets
+    const local = parentLocal(false, up);
+    if (local != null) edges.set(id, local);
+  }
+  const known = new Set<string>([...postedIds, ...existing.keys(), ...closedKnown]);
+  // Depth below a root, memoized over the known nodes: an unknown parent is a root boundary (an
+  // orphan's chain above it is nobody's to walk), a known parent adds one generation.
+  const depth = new Map<string, number>();
+  const depthOf = (start: string): number | 'cycle' => {
+    const path: string[] = [];
+    const onPath = new Set<string>();
+    let at: string | null = start;
+    let below = 0; // the depth of the path's topmost node: one under a memoized parent, else a root's 0
+    while (at != null && known.has(at)) {
+      const memo = depth.get(at);
+      if (memo != null) {
+        below = memo + 1;
+        break;
+      }
+      if (onPath.has(at)) return 'cycle'; // a parent chain that returns — to the start or into one
+      onPath.add(at);
+      path.push(at);
+      at = edges.get(at) ?? null;
+      if (at != null && !known.has(at)) at = null; // an orphan parent: a root boundary, stored as posted
+    }
+    for (let i = 0; i < path.length; i++) depth.set(path[i], path.length - 1 - i + below);
+    return depth.get(start) ?? below;
+  };
+  const parentOf = new Map<string, { qualified: string | null; known: boolean }>();
+  const invalid: ParentInvalid[] = [];
+  for (const t of posted) {
+    const raw = t.parent;
+    if (raw == null) {
+      parentOf.set(t.id, { qualified: null, known: false });
+      continue;
+    }
+    if (!LOCAL_ID.test(raw)) {
+      parentOf.set(t.id, { qualified: null, known: false });
+      invalid.push({ ticket: t.id, parent: raw, reason: 'foreign' });
+      continue;
+    }
+    if (raw === t.id) {
+      parentOf.set(t.id, { qualified: null, known: false });
+      invalid.push({ ticket: t.id, parent: raw, reason: 'self' });
+      continue;
+    }
+    const d = depthOf(t.id);
+    if (d === 'cycle') {
+      parentOf.set(t.id, { qualified: null, known: false });
+      invalid.push({ ticket: t.id, parent: raw, reason: 'cycle' });
+      continue;
+    }
+    if (d > PARENT_GENERATIONS_MAX) {
+      parentOf.set(t.id, { qualified: null, known: false });
+      invalid.push({ ticket: t.id, parent: raw, reason: 'depth' });
+      continue;
+    }
+    parentOf.set(t.id, { qualified: `${repository}:${raw}`, known: known.has(raw) });
+  }
+  return { parentOf, invalid };
 }
 

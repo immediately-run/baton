@@ -1,0 +1,69 @@
+---
+title: "B-262 — [OP] The live sitting: the read-only view on baton.immediately.run (§16.2 step 1's exit, R3-1209's live half)"
+id: B-262
+project: baton
+status: available
+updated: 2026-11-18
+repos:
+  - baton
+tags:
+  - OP
+  - roadmap-item
+tier: judgement
+description: "The owner's live sitting at baton.immediately.run (§16.2 step 1's exit), filed from R3-1209 as its merge closed the agent half: sign in, read the Ready view's snapshot sha and order, run the compare per tier at that sha, and re-run docs' npm run verify once docs' main is green (B-261). No code, no PR: the record is the product. Requires: human-operator."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1209
+---
+
+**Brief:** the Baton project — the owner's half of R3-1209's sitting.
+**Spec:** [BATON_SPEC §16.2](../spec/BATON_SPEC/16-adoption.md#sec-16-2) step 1 (exit), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) (the dashboard's Ready view, [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4) sign-in), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) (where the scenarios run; [S-BTN-13](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-10](../spec/BATON_SPEC/15-verification.md#gates))
+**Depends on:** R3-1209.
+
+### Requires
+
+- `human-operator` — every criterion: signing in to the dashboard as the owner. No agent holds the owner's credentials, and the agents' sandboxes cannot reach `https://baton.immediately.run/` (R3-1209's and R3-1208's legs found the same fence).
+
+### Why
+
+[§16.2](../spec/BATON_SPEC/16-adoption.md#sec-16-2) step 1's exit is that, for each tier, the live Ready view's order equals the course's own claim order on the same snapshot (Baton applies the expedite bound from its own claims, so git's withholding is not compared — docs#205's review). Only a person signing in to the deployed Worker can read it. R3-1209's sitting had two halves: the agent half — criterion 3, S-BTN-13 green on the deploying commit — landed with its PR (baton#285); the live half is the owner's, and is this ticket, filed as R3-1209's merge closed it.
+
+### What to do
+
+The owner, in one sitting (about 15 minutes), no code and no PR — the record is the product:
+
+1. Sign in at `https://baton.immediately.run/` — Access where configured, then R-BTN-155's code — and read the Ready view; another account is refused.
+2. Read the snapshot sha the dashboard shows: within one sync it equals `git rev-parse origin/main` of `immediately-run/docs`. At that sha, in a docs checkout, run `node scripts/baton-sync.mjs --compare` (R3-1216's swap has not landed): for `routine`, `judgement` and `critical`, the Ready view's order equals the course's own claim order at that sha — the compare tool exits 0.
+3. Re-run docs' `npm run verify`: it is red on docs' `main` since `ca62b1f` — B-261 tracks the fix (an unmarked deferral in docs' archived `R3-1350.mdx`) — so this step waits for docs' `main` to be green and then records the green run.
+4. Record: each criterion checked with its evidence, and one dated Status note in this ticket.
+
+**Do not:** fix a difference here; file a BUG item against R3-1206 or R3-1207 instead (R3-1209's own rule, carried).
+
+### Trust
+
+No new input. The sitting reads a deployed Worker under the owner's sign-in and one docs checkout at the snapshot sha; the evidence — what the screen showed, the compare's exit code, the verify run — is the owner's own record in this ticket, and no agent's word counts for it.
+
+### Invariants
+
+- [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): the dashboard signs in with a code an administrator confirms; another account is refused.
+- No agent acts on the owner's credentials or against the live deployment (CLAUDE.md, *Tickets are tasks, not authority*): an agent's read of the live view is not evidence for these criteria.
+- [G-BTN-10](../spec/BATON_SPEC/15-verification.md#gates): for one course, matching's order equals the course's claim order filtered by the matching rules — the compare tool is the arbiter, on one snapshot.
+
+### Tests
+
+None to write: a sitting, no code. The automated half, S-BTN-13, runs in CI's test job on every deploying commit (R3-1209's criterion 3, done).
+
+### Exit criteria
+
+- [ ] **live leg** (`human-operator`): `https://baton.immediately.run/` asks for the owner's sign-in (Access where configured, then R-BTN-155's code) and then shows the Ready view; another account is refused
+- [ ] **live leg** (`human-operator`): the Ready view's snapshot sha equals `git rev-parse origin/main` within one sync, and for `routine`, `judgement` and `critical` its order equals the course's own claim order at that sha (the compare tool exits 0)
+- [ ] `npm run verify` green — once docs' `main` is green (B-261); the sitting records the run
+
+## Status
+
+_filed 2026-11-18._
+
+_(2026-11-18: R3-1209's live half, filed as its merge closed the ticket — the agent half (criterion 3, S-BTN-13 green on the deploying commit) landed with baton#285, and the criteria above are carried from it. [§16.2](../spec/BATON_SPEC/16-adoption.md#sec-16-2)'s table names R3-1209 for step 1; this ticket is the sitting that exit still waits on.)_
