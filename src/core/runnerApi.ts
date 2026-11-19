@@ -887,18 +887,21 @@ export class RunnerApi {
    *  transcripts, the union read's own arrival order at their fold below. `runners` itself is
    *  read in its served order through 0063's `runners_by_hostname`: a sort reads every row
    *  twice on the Cloudflare host. */
-  runnersView(now: number) {
+  runnersView(now: number, page?: { repository: string; after: number; limit: number }) {
     const runners = this.rows<Row>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
-                                       first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version, legacy_names_at FROM runners ORDER BY hostname, id`);
-    const capabilities = groupBy(this.rows('SELECT runner_id, capability, declared FROM runner_capabilities ORDER BY capability'), 'runner_id');
+                                       first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation, profile_json, client_version, legacy_names_at FROM runners ${page ? `w WHERE w.id IN (SELECT DISTINCT runner_id FROM runner_courses WHERE repository_id = ? AND runner_id > ? ORDER BY runner_id LIMIT ?)
+                                       ORDER BY w.id` : 'ORDER BY hostname, id'}`, ...(page ? [page.repository, page.after, page.limit] : []));
+    const ids = JSON.stringify(runners.map((r) => r.id));
+    if (!runners.length) return [];
+    const capabilities = groupBy(this.rows(`SELECT runner_id, capability, declared FROM runner_capabilities${page ? ' WHERE runner_id IN (SELECT value FROM json_each(?))' : ''} ORDER BY capability`, ...(page ? [ids] : [])), 'runner_id');
     const courses = groupBy(this.rows(`SELECT f.runner_id, f.repository_id AS repository, f.course_id AS course, f.version, c.min_runner_version
                                        FROM runner_courses f LEFT JOIN courses c ON c.repository_id = f.repository_id AND c.id = f.course_id
-                                       ORDER BY f.repository_id, f.course_id`), 'runner_id');
-    const claims = groupBy(this.rows(`SELECT runner_id, id, ticket_id, nonce, claimed_at FROM claims WHERE status = 'active' ORDER BY claimed_at, id`), 'runner_id');
+                                       ${page ? 'WHERE f.runner_id IN (SELECT value FROM json_each(?))' : ''} ORDER BY f.repository_id, f.course_id`, ...(page ? [ids] : [])), 'runner_id');
+    const claims = groupBy(this.rows(`SELECT runner_id, id, ticket_id, nonce, claimed_at FROM claims WHERE status = 'active'${page ? ' AND runner_id IN (SELECT value FROM json_each(?))' : ''} ORDER BY claimed_at, id`, ...(page ? [ids] : [])), 'runner_id');
     // §9.9: the newest open activity per runner — `received_at` breaks ties and is never served.
     const activity = new Map<number, { id: string; kind: string; label: string | null; started_at: number; claim_id: number | null; received_at: number }>();
     for (const a of this.rows<{ runner_id: number; id: string; kind: string; label: string | null; started_at: number; claim_id: number | null; received_at: number }>(
-      'SELECT runner_id, id, kind, label, started_at, claim_id, received_at FROM activities WHERE ended_at IS NULL')) {
+      `SELECT runner_id, id, kind, label, started_at, claim_id, received_at FROM activities WHERE ended_at IS NULL${page ? ' AND runner_id IN (SELECT value FROM json_each(?))' : ''}`, ...(page ? [ids] : []))) {
       const best = activity.get(a.runner_id);
       if (!best || a.started_at > best.started_at
         || (a.started_at === best.started_at && a.received_at > best.received_at)) activity.set(a.runner_id, a);
@@ -924,13 +927,13 @@ export class RunnerApi {
             || (r.path === best.path && r.claim_id < best.claim_id)))))) transcript.set(r.runner_id, r);
     };
     for (const t of this.rows<{ runner_id: number; repo: string; path: string; claim_id: number; t: number }>(
-      'SELECT runner_id, repo, path, claim_id, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts')) latest({ ...t, linked: true });
+      `SELECT runner_id, repo, path, claim_id, COALESCE(last_pushed_at, first_seen_at) AS t FROM transcripts${page ? " WHERE id IN (SELECT (SELECT t.id FROM transcripts t WHERE t.runner_id = j.value ORDER BY COALESCE(t.last_pushed_at, t.first_seen_at) DESC, t.repo, t.path, t.claim_id LIMIT 1) FROM json_each(?) j)" : ""}`, ...(page ? [ids] : []))) latest({ ...t, linked: true });
     for (const t of this.rows<{ runner_id: number; repo: string; path: string; t: number }>(
-      'SELECT runner_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM pending_transcripts')) latest({ ...t, claim_id: 0, linked: false });
+      `SELECT runner_id, repo, path, COALESCE(last_pushed_at, first_seen_at) AS t FROM pending_transcripts${page ? " WHERE rowid IN (SELECT (SELECT t.rowid FROM pending_transcripts t WHERE t.runner_id = j.value ORDER BY COALESCE(t.last_pushed_at, t.first_seen_at) DESC, t.repo, t.path LIMIT 1) FROM json_each(?) j)" : ""}`, ...(page ? [ids] : []))) latest({ ...t, claim_id: 0, linked: false });
     // §9: the latest status report per runner — `id` decides, never the scan's order.
     const reports = new Map<number, { payload_json: string | null; sent_at: number; id: number }>();
     for (const m of this.rows<{ runner_id: number; id: number; payload_json: string | null; sent_at: number }>(
-      `SELECT from_runner_id AS runner_id, id, payload_json, sent_at FROM messages WHERE kind = 'status_report'`)) {
+      `SELECT from_runner_id AS runner_id, id, payload_json, sent_at FROM messages WHERE ${page ? "id IN (SELECT (SELECT m.id FROM messages m WHERE m.kind = 'status_report' AND m.from_runner_id = j.value ORDER BY m.id DESC LIMIT 1) FROM json_each(?) j)" : "kind = 'status_report'"}`, ...(page ? [ids] : []))) {
       const best = reports.get(m.runner_id);
       if (!best || m.id > best.id) reports.set(m.runner_id, m);
     }

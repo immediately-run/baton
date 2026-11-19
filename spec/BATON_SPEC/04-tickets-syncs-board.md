@@ -464,6 +464,12 @@ live solely in Baton, and both are exportable (R-BTN-88).
       (`sync-busy` with `retry_after_s`) and raises `baton.sync-barred`. The bar never applies to
       the sync key or CI identity.
 
+An identical validated same-head snapshot may reuse its materialization only while its
+server-computed fingerprint and scheduling version match. The observation number is excluded
+from the fingerprint; mutable ticket versions and submitted placements are included. R-BTN-62's
+number validation, relevant claim reconciliation and spawned-child settlement still run.
+The fingerprint stores no ticket content and is an optimization, never authority to accept a post.
+
 - **R-BTN-11 (snapshots advance by compare-and-set on ancestry).** Per repository, Baton accepts
   a snapshot only when `parent_sha` equals its head (a refresh: both equal the head) and its
   observation is newer, then moves the head. A first snapshot is accepted with `parent_sha:

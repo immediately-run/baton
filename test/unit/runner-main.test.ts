@@ -681,8 +681,8 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
   const DECLARED = "baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given";
 
   /** A Baton that answers every call as the first beat's ordering makes it: the heartbeat
-   *  registers the runner, and from then on the recommendation and the claim answer. `refuseWith`
-   *  sets what the recommendation throws — counting each throw, so a case can tell the refusal
+   *  registers the runner before the single claim attempt. `refuseWith`
+   *  sets what the claim attempt throws — counting each throw, so a case can tell the refusal
    *  was reached — or null for none. The heartbeat answers after a turn of the event loop, as a
    *  round trip does: what the quiet start guards is that nothing is asked of Baton while it is
    *  still out. */
@@ -705,14 +705,14 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
         order.push('heartbeat:answer');
         return { runner_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], ...grant };
       },
-      recommendations: async () => {
-        order.push(`recommendations(registered:${registered})`);
-        calls.recommendations++;
-        if (refuse) throw refuse(); // the case's own record of the refusal Baton gave
+      recommendations: async () => { calls.recommendations++; throw new Error('automatic polling must not read recommendations'); },
+      claim: async () => {
+        order.push(`claim(registered:${registered})`);
+        calls.claims++;
+        if (refuse) throw refuse();
         if (!registered) throw new BatonRefusal('unauthenticated', undefined, 'no runner holds this secret', 401);
-        return { recommendations: [] };
+        throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409);
       },
-      claim: async () => { order.push('claim'); calls.claims++; throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409); },
     } as unknown as BatonApi;
     return { api, calls, refuseWith: (f: (() => Error) | null) => { refuse = f; } };
   };
@@ -720,8 +720,8 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
   it('the registration beat’s refusal is not logged: a quiet start says nothing', async () => {
     const lines: string[] = [];
     const { api, calls, refuseWith } = registeringApi();
-    // The recommendation about to be refused — so an empty `lines` is the refusal swallowed, not
-    // the recommendation skipped: a change that never asks it leaves `refused` 0 and fails here.
+    // The claim attempt about to be refused — so an empty `lines` is the refusal swallowed, not
+    // the claim attempt skipped: a change that never asks it leaves `refused` 0 and fails here.
     let refused = 0;
     refuseWith(() => { refused++; return new BatonRefusal('unauthenticated', undefined, 'no runner holds this secret', 401); });
     const r = runFresh(api, (l) => lines.push(l));
@@ -729,12 +729,11 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     // Two beats, as B-86's grant-driven declaration spends them (#104): the first declares nothing
     // — the registration has no list to widen — and is answered the grant; the declaration then
     // differs from what the server holds (`sent: []`), so one more beat carries it before the
-    // claim, which is what `rewriteSettings` records. Then the recommendation is the stray this
-    // ticket names, and the claim.
-    expect(calls).toEqual({ heartbeats: 2, recommendations: 1, claims: 1 });
+    // claim, which is what `rewriteSettings` records. The claim is the single attempt whose refusal is handled here.
+    expect(calls).toEqual({ heartbeats: 2, recommendations: 0, claims: 1 });
     expect(refused).toBe(1);
     // The one line such a start says: what it declares, from the grant. Nothing else — not
-    // `no recommendation (no runner holds this secret)` on every start.
+    // `no claim (no runner holds this secret)` on every start.
     expect(lines).toEqual(["baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given"]);
     r.stop();
   });
@@ -752,7 +751,7 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     live.state = { get: () => ({ runner_id: 7, claim: null, declared: ['agent-venue'], sent: null }), set: () => {}, spool: live.state.spool };
     expect(await r.runOnce()).toBeNull();
     expect(calls.heartbeats).toBeGreaterThanOrEqual(1);
-    expect(lines.some((l) => l.includes('no recommendation (no runner holds this secret)'))).toBe(true);
+    expect(lines.some((l) => l.includes('no claim (no runner holds this secret)'))).toBe(true);
     r.stop();
   });
 
@@ -767,18 +766,18 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     expect(await r.runOnce()).toBeNull();
     // The boot beat declares nothing and is answered no grant; it is itself the beat that
     // registers the runner in `registeringApi`; the settle beat it forces is answered no grant
-    // again — then the recommendation is the stray, then the claim.
-    expect(calls).toEqual({ heartbeats: 2, recommendations: 1, claims: 1 });
+    // again — then the single claim is refused.
+    expect(calls).toEqual({ heartbeats: 2, recommendations: 0, claims: 1 });
     expect(lines).toEqual(['baton: the heartbeat answered no grant — the declaration stays unsettled and the next beat asks again (a seed key is granted nothing; a machine key is granted by its owner)']);
     r.stop();
   });
 
   it('a slow boot beat is waited for: nothing is asked before it answers, so nothing is logged', async () => {
     const lines: string[] = [];
-    // What Baton saw, call by call, and whether a runner existed when the recommendation left. A
+    // What Baton saw, call by call, and whether a runner existed when the claim attempt left. A
     // grant-less Baton is the state a fresh credential starts in, and it is also B-86's "no grant
     // yet" answer, which forces no extra beat — but its register beat is still a round trip, and
-    // this one is slow (a further 40 ms), so a recommendation sent beside it would reach Baton
+    // this one is slow (a further 40 ms), so a claim attempt sent beside it would reach Baton
     // first if nothing waited for the answer.
     const order: string[] = [];
     const { api, calls, refuseWith } = registeringApi({}, order);
@@ -793,28 +792,28 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const r = runFresh(api, (l) => lines.push(l));
     r.start(); // the sidecar's boot beat, not awaited — as `work()` starts it
     expect(await r.runOnce()).toBeNull();
-    // The recommendation went out to a runner whose secret Baton already held, never beside a beat
+    // The claim attempt went out to a runner whose secret Baton already held, never beside a beat
     // still out — the race whose refusal (`no runner holds this secret`, the line this ticket
     // removes) `stray` would otherwise swallow into a quiet log. `refused` proves the
-    // recommendation really was asked, so the quiet below is the refusal handled and not skipped.
-    expect(order.filter((e) => e.startsWith('recommendations')), order.join(' → ')).toEqual(['recommendations(registered:true)']);
-    expect(order.indexOf('recommendations(registered:true)'), order.join(' → ')).toBeGreaterThan(order.indexOf('heartbeat:answer'));
+    // claim attempt really was asked, so the quiet below is the refusal handled and not skipped.
+    expect(order.filter((e) => e.startsWith('claim(')), order.join(' → ')).toEqual(['claim(registered:true)']);
+    expect(order.indexOf('claim(registered:true)'), order.join(' → ')).toBeGreaterThan(order.indexOf('heartbeat:answer'));
     expect(refused).toBe(1);
     // The one line such a start says: the grant is unsettled, said once.
     expect(lines).toEqual(['baton: the heartbeat answered no grant — the declaration stays unsettled and the next beat asks again (a seed key is granted nothing; a machine key is granted by its owner)']);
     // Two beats is what this attempt spends (B-86's settle beat included); the case is the order,
     // not the count.
-    expect(calls.recommendations).toBe(1);
+    expect(calls.recommendations).toBe(0);
     expect(calls.claims).toBe(1);
     r.stop();
   });
 
-  it('a beat in flight before an attempt is finished first: the recommendation follows its answer', async () => {
+  it('a beat in flight before an attempt is finished first: the claim attempt follows its answer', async () => {
     // B-86 settles the declaration before the first claim, so on a fresh session a forced beat
-    // always stands between an in-flight boot beat and the recommendation — which is why the boot
+    // always stands between an in-flight boot beat and the claim attempt — which is why the boot
     // case above cannot lose the race below. This is the shape that can: a registered runner whose
     // declaration is already settled (`sent` current), and a beat still out when the attempt
-    // begins. Without `await this.waitForBeat()` the recommendation leaves beside that beat and
+    // begins. Without `await this.waitForBeat()` the claim attempt leaves beside that beat and
     // Baton's `no runner holds this secret` — the line this ticket removes — is swallowed by
     // `stray`, so nothing in the log would show the race had come back.
     const lines: string[] = [];
@@ -839,16 +838,16 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const beat = (r as unknown as { tick(): Promise<void> }).tick(); // in flight, not awaited
     expect(await r.runOnce()).toBeNull();
     await beat;
-    // The recommendation went to Baton only after that beat answered.
-    expect(order.filter((e) => e.startsWith('recommendations')), order.join(' → ')).toEqual(['recommendations(registered:true)']);
-    expect(order.indexOf('recommendations(registered:true)'), order.join(' → ')).toBeGreaterThan(order.indexOf('heartbeat:answer'));
-    expect(calls.recommendations).toBe(1);
+    // The claim attempt went to Baton only after that beat answered.
+    expect(order.filter((e) => e.startsWith('claim(')), order.join(' → ')).toEqual(['claim(registered:true)']);
+    expect(order.indexOf('claim(registered:true)'), order.join(' → ')).toBeGreaterThan(order.indexOf('heartbeat:answer'));
+    expect(calls.recommendations).toBe(0);
     r.stop();
   });
 
   it('only that refusal goes quiet: the other unauthenticated answers still name themselves', async () => {
     const lines: string[] = [];
-    // The recommendation's answer, set per case below.
+    // The claim attempt's answer, set per case below.
     let answer: Error | null = null;
     const rejecting = (message: string) => new BatonRefusal('unauthenticated', undefined, message, 401);
     // `authRunner`'s same code for a replayed nonce (core/runnerApi.ts), the message to tell apart.
@@ -856,11 +855,11 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const api = {
       setSecret: () => {},
       heartbeat: async (body: Record<string, unknown>) => ({ runner_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], ...GRANT }),
-      recommendations: async () => {
+      recommendations: async () => { throw new Error('unexpected recommendations'); },
+      claim: async () => {
         if (answer) throw answer;
-        return { recommendations: [{ ticket_id: 'B-9' }] };
+        throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409);
       },
-      claim: async () => { throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409); },
     } as unknown as BatonApi;
     // A runner the state names already: the registration's own exemption does not reach it.
     const r = runFresh(api, (l) => lines.push(l));
@@ -875,12 +874,12 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     await r.runOnce();
     // B-86's once-per-declaration line first (an unsettled runner's first answered beat), then
     // the refusal, which names itself.
-    expect(lines).toEqual([DECLARED, `baton: no recommendation (${replayed})`]);
+    expect(lines).toEqual([DECLARED, `baton: no claim (${replayed})`]);
     // On a registration attempt too: only the ticket's own refusal is the stray, never the code.
     lines.length = 0;
     const fresh = runFresh(api, (l) => lines.push(l));
     await fresh.runOnce();
-    expect(lines).toEqual([DECLARED, `baton: no recommendation (${replayed})`]);
+    expect(lines).toEqual([DECLARED, `baton: no claim (${replayed})`]);
     // And the ticket's refusal, on that same registration attempt, is the one that goes quiet.
     lines.length = 0;
     answer = rejecting('no runner holds this secret');
@@ -900,12 +899,10 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     const api = {
       setSecret: () => {},
       heartbeat: async (body: Record<string, unknown>) => ({ runner_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], ...GRANT }),
-      recommendations: async () => {
-        if (refuseGates) throw new BatonRefusal('not-eligible', undefined, 'every gate refused this runner', 403);
-        return { recommendations: [{ ticket_id: 'B-9' }] };
-      },
+      recommendations: async () => { throw new Error('unexpected recommendations'); },
       claim: async (body: { ticket_id?: string }) => {
-        asked.push(body.ticket_id ?? null); // the recommendation is what the claim asks for
+        asked.push(body.ticket_id ?? null);
+        if (refuseGates) throw new BatonRefusal('not-eligible', undefined, 'every gate refused this runner', 403);
         throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409);
       },
     } as unknown as BatonApi;
@@ -919,13 +916,13 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
       spool: live.state.spool,
     };
     await r.runOnce();
-    expect(asked).toEqual(['B-9']); // a registered runner is recommended for, and its claim asks for the pick
+    expect(asked).toEqual([null]); // the server chooses in the claim transaction
     // B-86's own once-per-declaration line, and nothing else: no refusal was due, and none was logged.
     expect(lines).toEqual([DECLARED]);
     refuseGates = true;
     lines.length = 0;
     await r.runOnce();
-    expect(lines).toEqual(['baton: no recommendation (every gate refused this runner)']);
+    expect(lines).toEqual(['baton: no claim (every gate refused this runner)']);
     r.stop();
   });
 });

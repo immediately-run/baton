@@ -176,7 +176,7 @@ the runner's credentials under any other executor is that executor's, never Bato
 ### 8.3 The runner
 
 - **R-BTN-72 (the runner).** `baton runner start` is a generic runner loop. It hosts the
-  sidecar, heartbeats, asks for recommendations, claims up to R-BTN-4's bound, and
+  sidecar, heartbeats, claims up to R-BTN-4's bound, and
   runs each claim's legs one at a time, claims side by side, each leg by **the script for that leg**, then advances, suspends or ends as the script's
   result and the course file allow. It knows no course: it serves every course its home
   checkout declares, loading each claim's course from the claim answer's `course_id` at the
@@ -193,8 +193,9 @@ the runner's credentials under any other executor is that executor's, never Bato
   and the wrapper's own return alike — so a process a leg started (a held lock, a background
   check an agent spawned) never outlives its leg (S-BTN-200); any other executor keeps the same
   guarantee by its own means. With room for another claim — fewer held than R-BTN-4's bound, and
-  the host's own judgement that it can start one — it asks for recommendations when
-  a heartbeat carries `unblocked`, else at its own interval (R-BTN-77). A claim that waits — a
+  the host's own judgement that it can start one — it attempts an unnamed claim when
+  a heartbeat carries `unblocked`, else at its own interval (R-BTN-77). Each automatic attempt
+  makes one claim request; recommendations remain an explicit read for callers choosing work. A claim that waits — a
   leg in a `short_waits` wait (R-BTN-40), a condition's wait (R-BTN-162), a person's
   `interact` (R-BTN-195) — holds only its own place, never the runner's other claims.
   - **Course directory** (R-BTN-69, R-BTN-134):

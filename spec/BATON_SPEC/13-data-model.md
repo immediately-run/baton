@@ -212,8 +212,31 @@ where active, completed and unconfirmed, or reaped with its fence pending), so t
 query's two claim lookups (§7.2 rule 3, §6.7's sync since the last end) read one entry a ticket,
 not its every claim (B-237).
 
-**`state_version`** — one row, `v`: R-BTN-196's counter, moved in the commit of every write
-but liveness and request nonces.
+**`state_version`** — one row: aggregate `v`, `scheduling_v`, `board_v` and `activity_v`.
+R-BTN-196 owns scheduling invalidation. Screen versions separate board state from activity,
+transcripts, messages and history; the runner screen reads both and includes a clock bucket.
+
+**Matching inputs and candidate projection.** `course_legs` (repository, course, leg, person),
+`course_leg_capabilities` (repository, course, leg, capability), `grant_capabilities`
+(credential, repository, capability pattern) and `ticket_repositories` (ticket, lowercase
+repository key) expose matching sets as indexed rows. Their composite primary keys use
+`WITHOUT ROWID`; repository membership has a reverse index. Validated source documents stay
+in their existing columns. Triggers update derived sets in the source write's transaction.
+
+`ready_tickets` has at most one row per ticket: repository, course, queued leg, expedite,
+`to_end`, rank, `ready_since`, tier position, `retry_after` and `last_end_observation`.
+`ready_ticket_source` defines membership once; triggers refresh affected tickets when a ticket,
+station, next leg, override, claim or block changes. Backfill and rebuild use that same view.
+The per-group order has an expression index; clock and current-observation comparisons happen
+at read time. This table is a candidate filter; authoritative claim gates still run (§6.6).
+No runner/ticket eligibility matrix or dashboard card copy is stored.
+
+`sync_fingerprints` holds one digest and scheduling version per repository for §4.3's identical
+snapshot reuse. It is derived and unversioned. Latest transcript expression indexes order by
+runner and effective timestamp, with the existing tie order; latest reports use `messages_reports`.
+`claims_end_observation` indexes freshness crossings. Ticket lists use `(repository_id, id)`;
+runner lists use repository/course membership and runner id. Timeline indexes use
+`(ticket_id, seq)` and `(claim_id, seq)`.
 
 **Where the alarm's instants live** (§2 owns what each does): `ticket_timers.due_at`;
 `ticket_next_legs.not_before`; `ticket_blocks.until` of `retry` rows; `claims.deadline_at`;

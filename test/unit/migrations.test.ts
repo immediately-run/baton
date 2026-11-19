@@ -7,6 +7,8 @@ import { MIGRATIONS } from '../../src/migrations';
 import { mintRunId } from '../../src/core/db';
 import type { Store } from '../../src/core/ports';
 
+import { dropDerivedSchema } from '../lib/migrationRewind';
+
 describe('migration 0005: work items become tickets (R3-1230)', () => {
   it('keeps every row under the new names', async () => {
     const id = env.BATON.idFromName('migrations-0005');
@@ -14,6 +16,7 @@ describe('migration 0005: work items become tickets (R3-1230)', () => {
       const sql = state.storage.sql;
       // Rewind this object to an empty schema, then build it to 0004 as a deployed Baton was.
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table','index')").toArray() as { type: string; name: string }[];
       for (const o of objects.filter((x) => x.type === 'table')) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 4)) sql.exec(m.sql);
@@ -61,6 +64,7 @@ describe('migration 0005: work items become tickets (R3-1230)', () => {
 describe('migration 0006: one Baton, many repositories (R3-1231)', () => {
   const rewind = (sql: SqlStorage, upTo: number) => {
     sql.exec('PRAGMA foreign_keys = OFF');
+    dropDerivedSchema(sql);
     const objects = sql.exec("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
     for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
     for (const m of MIGRATIONS.filter((x) => x.id <= upTo)) sql.exec(m.sql);
@@ -137,6 +141,7 @@ describe('migration 0007: courses (R3-1231)', () => {
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 6)) sql.exec(m.sql);
@@ -167,6 +172,7 @@ describe('migration 0008: observations (R3-1231)', () => {
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 7)) sql.exec(m.sql);
@@ -186,6 +192,7 @@ describe('migration 0008: observations (R3-1231)', () => {
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 5)) sql.exec(m.sql);
@@ -206,6 +213,7 @@ describe('migration 0009: tiers per repository (R3-1231)', () => {
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 8)) sql.exec(m.sql);
@@ -230,6 +238,7 @@ describe('migration 0010: credentials by SSH key (R3-1239, round 1, 1-B-3)', () 
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 9)) sql.exec(m.sql);
@@ -262,6 +271,7 @@ describe('migration 0013: stations and legs (R3-1232, round 1, 1-B-2)', () => {
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 12)) sql.exec(m.sql);
@@ -296,6 +306,7 @@ describe('migration 0022: the leg needs derived beside the course file (B-86, re
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 21)) sql.exec(m.sql);
@@ -320,6 +331,7 @@ describe('migration 0021: leg queues (R3-1255)', () => {
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 20)) sql.exec(m.sql);
@@ -362,6 +374,7 @@ describe('migration 0029: the repository policy tables (B-145)', () => {
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table','index')").toArray() as { type: string; name: string }[];
       for (const o of objects.filter((x) => x.type === 'table')) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 27)) sql.exec(m.sql);
@@ -413,6 +426,7 @@ describe('migration 0036: the model tables retire (B-142)', () => {
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 35)) sql.exec(m.sql);
@@ -452,6 +466,7 @@ describe('migration 0038: run ids (B-185, S-BTN-204)', () => {
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 37)) sql.exec(m.sql);
@@ -496,6 +511,7 @@ describe('migration 0042: the ontology and route choices retire (B-167)', () => 
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
       for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 41)) sql.exec(m.sql);
@@ -559,6 +575,7 @@ describe('migration 0050: the retirement tombstone (B-173)', () => {
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table','index')").toArray() as { type: string; name: string }[];
       for (const o of objects.filter((x) => x.type === 'table')) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 49)) sql.exec(m.sql);
@@ -596,6 +613,7 @@ describe('migration 0061: workers become runners (B-68, S-BTN-236)', () => {
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
       const objects = sql.exec("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table','index')").toArray() as { type: string; name: string }[];
       for (const o of objects.filter((x) => x.type === 'table')) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 59)) sql.exec(m.sql);
@@ -626,6 +644,60 @@ describe('migration 0061: workers become runners (B-68, S-BTN-236)', () => {
       expect(all(`SELECT kind FROM credentials WHERE id = 'vm-a'`)).toEqual([{ kind: 'runner' }]);
       expect(all(`SELECT actor FROM events`)).toEqual([{ actor: 'runner:7' }]);
       expect(all(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'worker%'`)).toEqual([]);
+      expect(all('PRAGMA foreign_key_check')).toEqual([]);
+    });
+  });
+});
+
+// B-287 / S-BTN-243: migrate populated state, then mutate and rebuild derived sets.
+describe('migration 0065: normalized matching inputs and ready candidates', () => {
+  it('backfills deployed rows and keeps capability sets and candidates consistent through cascades', async () => {
+    const stub = env.BATON.get(env.BATON.idFromName('migrations-0065'));
+    await runInDurableObject(stub, (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
+      for (const o of sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray()) sql.exec(`DROP TABLE "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id < 65)) sql.exec(m.sql);
+    });
+    // The rewind's implicit transaction must commit before foreign_keys can be re-enabled.
+    await runInDurableObject(stub, (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = ON');
+      expect(sql.exec('PRAGMA foreign_keys').toArray()).toEqual([{ foreign_keys: 1 }]);
+      sql.exec("INSERT INTO repositories(id, github, default_branch, sync_workflow) VALUES ('docs','o/docs','main','sync.yml')");
+      sql.exec(`INSERT INTO courses(repository_id,id,version,skill,course_json,step_kinds,min_runner_version,leg_capabilities_json,person_legs_json)
+        VALUES ('docs','roadmap-pr',1,'run','{}','[]',1,'{"implement":["capability:code"],"approve":[]}','["approve"]')`);
+      sql.exec("INSERT INTO credentials(id,hostname,allowed_capabilities,kind) VALUES ('key','host','[]','runner')");
+      sql.exec(`INSERT INTO runner_grants(credential_id,repository_id,capabilities,granted_by,granted_at) VALUES ('key','docs','["capability:*"]','owner',0)`);
+      sql.exec(`INSERT INTO tickets(id,repository_id,local_id,path,title,status,node,queue,tags,requires_clause,depends_on,blocked_by,repos,snapshot_sha,row_hash)
+        VALUES ('docs:A','docs','A','A.mdx','A','available','ready-autonomous','autonomous','[]','none','[]','[]','["O/Docs"]','sha','hash')`);
+      sql.exec(`INSERT INTO ticket_stations(ticket_id,station,path,path_len,to_end,next_leg,next_source,snapshot_sha,observation)
+        VALUES ('docs:A','filed','[]',0,3,'implement','course','sha',1)`);
+      sql.exec("INSERT INTO ticket_next_legs(ticket_id,leg,state,ready_since) VALUES ('docs:A','implement','ready',10)");
+      sql.exec(MIGRATIONS.find((m) => m.id === 65)!.sql);
+      const all = (q: string) => sql.exec(q).toArray();
+      expect(all('SELECT leg,person FROM course_legs ORDER BY leg')).toEqual([{ leg: 'approve', person: 1 }, { leg: 'implement', person: 0 }]);
+      expect(all('SELECT capability FROM course_leg_capabilities')).toEqual([{ capability: 'capability:code' }]);
+      expect(all('SELECT capability_pattern FROM grant_capabilities')).toEqual([{ capability_pattern: 'capability:*' }]);
+      expect(all('SELECT repository_key FROM ticket_repositories')).toEqual([{ repository_key: 'o/docs' }]);
+      expect(all('SELECT ticket_id,ready_since FROM ready_tickets')).toEqual([{ ticket_id: 'docs:A', ready_since: 10 }]);
+      sql.exec(`UPDATE courses SET leg_capabilities_json='{"implement":["new"]}', person_legs_json='[]'`);
+      expect(all('SELECT capability FROM course_leg_capabilities')).toEqual([{ capability: 'new' }]);
+      expect(all('SELECT leg FROM course_legs')).toEqual([{ leg: 'implement' }]);
+      sql.exec(`UPDATE runner_grants SET capabilities='["new"]'`);
+      expect(all('SELECT capability_pattern FROM grant_capabilities')).toEqual([{ capability_pattern: 'new' }]);
+      sql.exec("UPDATE ticket_next_legs SET state='waiting'");
+      expect(all('SELECT * FROM ready_tickets')).toEqual([]);
+      sql.exec("UPDATE ticket_next_legs SET state='ready'");
+      sql.exec('DELETE FROM ready_tickets');
+      sql.exec('INSERT INTO ready_tickets SELECT * FROM ready_ticket_source');
+      expect(all('SELECT * FROM ready_tickets EXCEPT SELECT * FROM ready_ticket_source')).toEqual([]);
+      expect(all('SELECT * FROM ready_ticket_source EXCEPT SELECT * FROM ready_tickets')).toEqual([]);
+      sql.exec("DELETE FROM tickets WHERE id='docs:A'");
+      sql.exec('DELETE FROM runner_grants');
+      sql.exec('DELETE FROM courses');
+      for (const table of ['ready_tickets','ticket_repositories','grant_capabilities','course_legs','course_leg_capabilities']) expect(all(`SELECT * FROM ${table}`)).toEqual([]);
       expect(all('PRAGMA foreign_key_check')).toEqual([]);
     });
   });
