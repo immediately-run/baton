@@ -1,14 +1,18 @@
 // board-check.test.ts — the board post's validation (BATON_SPEC §4.4): the dependency cycle a
 // post is refused for (B-111), naming it as `B-1 → B-2 → B-1`; a diamond and an edge to a closed
 // ticket accepted; and `bodyDependencies`, the `**Depends on:**` line that B-111 checks the
-// markdown source's `depends_on` against. Pure and host-neutral: the validator, no route.
+// markdown source's `depends_on` against. B-113 round 1: a self-qualified edge (the posting
+// repository's own id spelled out) reads as its local id in the one-board graph, so a loop
+// however spelled is refused. Pure and host-neutral: the validator, no route.
 import { describe, it, expect } from 'vitest';
 import { bodyDependencies, checkPayload, dependsCycles } from '../../src/core/board';
 import { ticket } from '../helpers';
 
-/** A normative post of `tickets`, with `closed` as given: what `checkPayload` reads. */
-const post = (tickets: Record<string, unknown>[], closed: { id: string; as: 'done' | 'withdrawn' }[] = []) =>
-  checkPayload({ sha: '0'.repeat(40), parent_sha: null, observation: 1, tickets, closed });
+/** A normative post of `tickets`, with `closed` as given: what `checkPayload` reads. The
+ *  posting repository's id (B-113 round 1), when the caller knows it, reads a self-qualified
+ *  `depends_on` entry as the local id alone in the one-board cycle graph. */
+const post = (tickets: Record<string, unknown>[], closed: { id: string; as: 'done' | 'withdrawn' }[] = [], repo?: string) =>
+  checkPayload({ sha: '0'.repeat(40), parent_sha: null, observation: 1, tickets, closed }, repo);
 
 describe('a board post with a dependency cycle is refused (B-111)', () => {
   it('refuses a two-ticket cycle, naming it once and naming the field', () => {
@@ -46,6 +50,62 @@ describe('a board post with a dependency cycle is refused (B-111)', () => {
     // An interim post carries no `dependsOn` here; a loop among them is refused since round 1
     // (1-A-4) — the case below — and this one pins that a clean interim post still passes.
     expect(() => checkPayload({ sha: '0'.repeat(40), parent_sha: null, observation: 1, state: { items: [{ id: 'T-1', title: 'T', status: 'available', queue: 'q', node: 'n' }] }, ready: ['T-1'] })).not.toThrow();
+  });
+});
+
+describe('a qualified depends_on names another repository\'s ticket (B-113)', () => {
+  it('the shape takes a qualified id in depends_on, in both post shapes, and keeps blocked_by local', () => {
+    expect(post([ticket('B-1', { depends_on: ['baton:B-111', 'B-2'] }), ticket('B-2')]).tickets).toHaveLength(2);
+    // The interim shape's `dependsOn` carries them too (B-111's round 1 read, kept).
+    expect(() => checkPayload({
+      sha: '0'.repeat(40), parent_sha: null, observation: 1,
+      state: { items: [{ id: 'T-1', title: 'T', status: 'available', queue: 'q', node: 'n', dependsOn: ['baton:B-1'] }] }, ready: ['T-1'],
+    })).not.toThrow();
+    // A malformed qualified id, and `blocked_by` — a parent's children, R-BTN-47 — stays local.
+    expect(() => post([ticket('B-1', { depends_on: ['NotARepo:x'] })])).toThrow('depends_on must be a list');
+    expect(() => post([ticket('B-1', { depends_on: ['docs:B-1:x'] })])).toThrow('depends_on must be a list');
+    expect(() => post([ticket('B-1', { blocked_by: ['baton:B-1'] })])).toThrow('blocked_by must be a list');
+  });
+
+  it('a qualified edge is no node of the one-board cycle graph — the cross-board walk is the post\'s judgment', () => {
+    // B-1 → baton:B-9 → B-2 → B-1 would loop only if baton's board answered; the shape check
+    // holds one board's own graph and follows no qualified edge (§4.4).
+    expect(post([ticket('B-1', { depends_on: ['baton:B-9'] })]).tickets).toHaveLength(1);
+    // The same holds with the posting repository named, for an edge that is another
+    // repository's however read (round 1).
+    expect(post([ticket('B-1', { depends_on: ['baton:B-9'] })], [], 'docs').tickets).toHaveLength(1);
+  });
+
+  it('a self-qualified edge is its local id in the one-board graph: a loop however spelled is refused (round 1)', () => {
+    // `docs:T-2` posted by docs is the local edge `T-2` (§3.1) — before round 1 both cycle
+    // checks missed the loop: the one-board graph keyed bare local ids, and the cross-board
+    // walk skipped what it detected as one board's own.
+    expect(() => post([ticket('T-1', { depends_on: ['docs:T-2'] }), ticket('T-2', { depends_on: ['docs:T-1'] })], [], 'docs'))
+      .toThrow('a dependency cycle: T-1 → T-2 → T-1');
+    // The mixed spelling — one edge bare, one self-qualified — is the same loop.
+    expect(() => post([ticket('T-1', { depends_on: ['T-2'] }), ticket('T-2', { depends_on: ['docs:T-1'] })], [], 'docs'))
+      .toThrow('a dependency cycle: T-1 → T-2 → T-1');
+    // A self-dependency spelled self-qualified is T-1 → T-1.
+    expect(() => post([ticket('T-1', { depends_on: ['docs:T-1'] })], [], 'docs')).toThrow('a dependency cycle: T-1 → T-1');
+    // Another repository's qualified edge among them stays no node: T-1 → baton:B-9 is fine.
+    expect(post([ticket('T-1', { depends_on: ['docs:T-2', 'baton:B-9'] }), ticket('T-2')], [], 'docs').tickets).toHaveLength(2);
+    // Without the repository named (a test kit's post), the spelling is not normalized here;
+    // the cross-board walk and the board route's own call, which names it, are the judgment.
+    expect(post([ticket('T-1', { depends_on: ['docs:T-2'] }), ticket('T-2', { depends_on: ['docs:T-1'] })]).tickets).toHaveLength(2);
+  });
+
+  it('the interim shape reads a self-qualified edge as its local id too (round 1)', () => {
+    const items = (ids: string[], repo?: string) => checkPayload({
+      sha: '0'.repeat(40), parent_sha: null, observation: 1,
+      state: { items: [
+        { id: 'T-1', title: 'T', status: 'available', queue: 'q', node: 'n', dependsOn: ['docs:T-2'] },
+        { id: 'T-2', title: 'T', status: 'available', queue: 'q', node: 'n', dependsOn: ids },
+      ] },
+      ready: ['T-1', 'T-2'],
+    }, repo);
+    expect(() => items(['docs:T-1'], 'docs')).toThrow('state.items: a dependency cycle: T-1 → T-2 → T-1');
+    // Another repository's edge closes no loop here.
+    expect(() => items(['baton:T-1'], 'docs')).not.toThrow();
   });
 });
 

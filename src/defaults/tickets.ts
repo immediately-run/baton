@@ -33,7 +33,7 @@ import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { claimMismatch, formatTicket, ticketPathsUnder, ticketPrView } from '../shared/ticketPr.mjs';
 import { defaultBranch } from './request';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { remoteSlug } from './cli';
+import { remoteSlug, ownRepositoryId } from './cli';
 import { builtIn, DEFAULT_COURSE } from './courses';
 import { holderRefusal, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
 import { batonTarget, fallbackNote, floorFor, nextMain, parseKind, takeNumber } from './sequences';
@@ -401,14 +401,76 @@ function handoffLines(o: { id: string; prs: string[]; baton: BatonPosition | nul
 
 /** Whether `id` is done, for a claim's dependency: archived, or a live file whose `status:` is
  * `done` or `superseded` — the ticket's rule. `deferred` and `withdrawn` are closed but not
- * done: a deferred dependency keeps the claim waiting. */
+ * done: a deferred dependency keeps the claim waiting.
+ *
+ * B-113: a qualified id (`baton:B-111`) names another repository's ticket, resolved through the
+ * `repos` map of the head the claim lands on — the short name's forge path is the git remote to
+ * read (`owner/name` stands for `https://github.com/<owner/name>`; a value that already names a
+ * remote — a URL or a path — is used as written). The target's default branch is read at depth
+ * 1 in a throwaway clone, its own `.baton/baton.json` naming its items folder, and the same
+ * rule decides there: archived, or live `done`/`superseded`. The claim is git-only here — no
+ * forge, no Baton — so what git holds is what there is; a dependency the target does not hold
+ * refuses the claim naming it, as the board post would (§4.4).
+ *
+ * The posting repository's own id spelled qualified (`baton:B-1` in baton's own checkout,
+ * §3.1) is the local id's own dependency read as itself: this checkout's archive and status
+ * answer it, never a depth-1 clone of the repository's own remote — so an `--offline` claim
+ * carrying one stays offline (round 1). */
 function isDone(dir: string, settings: TicketSettings, id: string): boolean {
+  const own = id.includes(':') ? ownRepositoryId(dir, readSettingsJson(dir).repos ?? {}) : null;
+  if (own != null && id.startsWith(`${own}:`)) return isDoneLocal(dir, settings, id.slice(own.length + 1));
+  if (id.includes(':')) return isDoneElsewhere(dir, id);
+  return isDoneLocal(dir, settings, id);
+}
+
+/** `isDone`'s local half: this checkout's items folder, its archive and its live statuses. */
+function isDoneLocal(dir: string, settings: TicketSettings, id: string): boolean {
   const items = (settings.items ?? 'tickets').replace(/\/$/, '');
   const found = locate(items, id, fileAt(dir));
   if (!found) return false;
   if (found.archived) return true;
   const status = /^status:[ \t]*["']?([A-Za-z-]+)["']?[ \t]*$/m.exec(readFileSync(join(dir, found.path), 'utf8'))?.[1];
   return status === 'done' || status === 'superseded';
+}
+
+/** The remote a `repos` map entry names: a forge path `owner/name` is GitHub's, as the map has
+ *  always read it (tickets-markdown resolves `repos:` the same way); anything that already names
+ *  a remote — `https://…`, `ssh://…`, `git@…`, `file://…`, an absolute or relative path — is the
+ *  remote as written, so a test (or an off-forges setup) points the name at a repository it
+ *  holds. */
+export function dependencyRemote(map: Record<string, string>, repository: string): string {
+  const path = map[repository];
+  if (path == null) throw new Error(`${repository}: the baton.json repos map does not resolve it — a qualified dependency names a repository the map knows (B-113)`);
+  return /^(?:[a-z][a-z0-9+.-]*:\/\/|git@|[.\\/])/.test(path) ? path : `https://github.com/${path}`;
+}
+
+/** A qualified dependency's own half, read from the target repository's default branch at
+ *  depth 1: its `.baton/baton.json` names the items folder; the ticket is done when archived
+ *  there or live `done`/`superseded` (the same rule `isDone` holds here). */
+function isDoneElsewhere(dir: string, id: string): boolean {
+  const at = id.indexOf(':');
+  const repository = id.slice(0, at);
+  const local = id.slice(at + 1);
+  const remote = dependencyRemote(readSettingsJson(dir).repos ?? {}, repository);
+  const clone = mkdtempSync(join(tmpdir(), 'baton-dep-'));
+  try {
+    execFileSync('git', ['clone', '-q', '--depth', '1', remote, clone], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    const items = ((JSON.parse(readFileSync(join(clone, '.baton', 'baton.json'), 'utf8')) as { items?: string }).items ?? 'tickets').replace(/\/$/, '');
+    const found = locate(items, local, (path) => existsSync(join(clone, path)));
+    if (!found) throw new Error(`depends_on names ${id}, which is neither live nor archived on ${remote} (B-113)`);
+    if (found.archived) return true;
+    const status = /^status:[ \t]*["']?([A-Za-z-]+)["']?[ \t]*$/m.exec(readFileSync(join(clone, found.path), 'utf8'))?.[1];
+    return status === 'done' || status === 'superseded';
+  } catch (e) {
+    // git's own words for an unreachable remote ride along (a clone that cannot answer names
+    // the remote, never the map's reading of it).
+    if (e instanceof Error && e.message.includes('(B-113)')) throw e;
+    const err = e as { stderr?: string | Uint8Array; message?: string };
+    const why = typeof err.stderr === 'string' ? err.stderr : err.stderr ? new TextDecoder().decode(err.stderr) : (err.message ?? String(e));
+    throw new Error(`${id}: the dependency's repository ${remote} could not be read (${why.split('\n').filter(Boolean).at(-1) ?? 'git failed'}) — the claim waits on the dependency, and git is the claim's only word here (B-113)`);
+  } finally {
+    rmSync(clone, { recursive: true, force: true });
+  }
 }
 
 /** Where the ticket commands' Baton reads go (B-129): moved to sequences.ts, beside the
@@ -588,6 +650,13 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
     // rather than write a wrong one.
     if (!allocates(settings, id)) throw new Error(`new allocates ${prefix}<n>, but ${prefix}'s pattern in .baton/baton.json is \`${settings.prefixes[prefix]}\` — write the pattern's number as \\d+, or name another ticket_prefix`);
     for (const dep of deps) {
+      // B-113: a qualified id (`baton:B-111`) names another repository's ticket — resolved at
+      // the claim through the repos map and gated against its board, never looked for among
+      // this repository's files. An unqualified id stays local, as before.
+      if (dep.includes(':')) {
+        if (!/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(dep)) throw new Error(`--depends-on ${dep} is not a qualified id <repository>:<local> (B-113)`);
+        continue;
+      }
       if (!accepting(settings, dep)) throw new Error(`--depends-on ${dep} is not a ticket id of this repository — its ids are ${acceptedList(settings)}`);
       if (!read.tickets.some((x) => x.id === dep) && !read.closed.some((x) => x.id === dep)) throw new Error(`--depends-on ${dep}: no such ticket on ${remote}/${branch}`);
     }
@@ -608,12 +677,16 @@ export async function newTicket(root: string, io: TicketsIo, t: NewTicket): Prom
     const updates = withMentions ? reverseMentions(files, id, deps) : [];
     const after = [...files.filter((f) => !updates.some((u) => u.path === f.path)), ...updates, { path: `${id}.mdx`, text }];
     // The board's own reading of what the commit would leave: one post, validated here rather
-    // than by a sync that a broken filing would wedge.
+    // than by a sync that a broken filing would wedge — this repository's own id spelled
+    // qualified (§3.1, B-113 round 1) read as the local id alone in the cycle graph, as the
+    // board's own judgment reads it.
     const posted = ticketsMarkdown(after, { items, repos: readSettingsJson(dir).repos });
-    const cycle = dependsCycles(posted.tickets.map((x) => ({ id: x.id, depends_on: x.depends_on ?? [] })))[0];
+    const ownId = ownRepositoryId(dir, readSettingsJson(dir).repos ?? {});
+    const selfAsLocal = (d: string): string => ownId != null && d.startsWith(`${ownId}:`) ? d.slice(ownId.length + 1) : d;
+    const cycle = dependsCycles(posted.tickets.map((x) => ({ id: x.id, depends_on: (x.depends_on ?? []).map(selfAsLocal) })))[0];
     if (cycle) throw new Error(`${id}: a dependency cycle: ${cycle.join(' → ')}`);
     try {
-      checkPayload({ sha: '0'.repeat(40), parent_sha: null, observation: 1, tickets: posted.tickets, closed: posted.closed });
+      checkPayload({ sha: '0'.repeat(40), parent_sha: null, observation: 1, tickets: posted.tickets, closed: posted.closed }, ownId ?? undefined);
     } catch (e) {
       throw new Error(`${id}: the board would refuse the filing: ${(e as Error).message}`);
     }
@@ -775,7 +848,10 @@ function ticketText(o: { id: string; title: string; project: string; settings: T
  *  so a filing can never introduce the disagreement the check would report. */
 function judgeFiling(o: { id: string; text: string; deps: string[]; settings: TicketSettings }): void {
   const { id, text, deps, settings } = o;
-  const named = (dependsLine(text) ?? []).filter((x) => accepts(settings, x));
+  // B-113: a qualified id (`baton:B-111`) is named on the line as `--depends-on` wrote it —
+  // this repository's prefixes never cover it, so `accepts` alone would drop it from the
+  // comparison and the agreement would be judged half-blind.
+  const named = (dependsLine(text) ?? []).filter((x) => x.includes(':') || accepts(settings, x));
   const said = deps.length ? deps.join(', ') : 'none';
   for (const dep of named) if (!deps.includes(dep)) throw new Error(`${id}: **Depends on:** names ${dep}, which --depends-on does not (--depends-on names ${said})`);
   for (const dep of deps) if (!named.includes(dep)) throw new Error(`${id}: --body-file's **Depends on:** line does not name ${dep}, which --depends-on names — the two must agree (${said})`);

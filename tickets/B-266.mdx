@@ -1,0 +1,54 @@
+---
+title: B-266 — The trusted runner pushes to a host-configured remote and may hold no forge credential
+id: B-266
+project: baton
+status: available
+updated: 2026-11-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "Fieldhouse's landing gate (FIELDHOUSE_SPEC section 6, R-FH-94) holds the merge identity's credential and checks each of the trusted runner's pushes by shape. Amend R-BTN-182 so the credential may live in a gate of the deployment, and give the CLI a host setting for the remote its trusted writes go to. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** immediately-run/fieldhouse `spec/FIELDHOUSE_SPEC.md` §6 (the forge gate, fieldhouse#37) takes the merge identity's credential out of the trusted runner: its pushes go to a host-side landing gate that holds the credential and checks each push's shape. Baton's CLI must be able to push there. The owner, 2026-11-19: "file these and push to main".
+
+**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-182](../spec/BATON_SPEC/12-security.md#sec-12-8): a trusted runner "holds the only non-human credential able to perform that leg's action"; [R-BTN-183](../spec/BATON_SPEC/12-security.md#sec-12-8) *How*: "a compare-and-swap push of the merge result onto the main tip it was computed from"), and its list of what the guarantees leave to the deployment (the forge gate).
+**Depends on:** none.
+**Used by:** fieldhouse FLDH-61.
+
+### What to build
+
+1. **Amend R-BTN-182 first, by PR**: the credential that performs a trusted leg's action is held by the trusted runner *or by a gate of its deployment that answers it alone*; Baton's guarantee is unchanged (the trusted domain is still one domain that can land).
+2. **A host setting for where the trusted runner pushes**, read from the runner's environment or its start flags, never from the repository: a git remote URL per registered repository (a unix-socket or loopback URL included), used for every write the CLI makes as a trusted runner — the merge, a proposal's branch, a proposal merge, a foreign-commit reset, a branch deletion, the done ticket's archive change. Reads may use a second URL.
+3. **The CLI's behaviour is otherwise the same**: its own checks first, then the push; a refused push is the leg's failure with the remote's message, never retried as another shape.
+
+### Do not
+
+- Read the remote from `.baton/baton.json` or anything else a pusher writes.
+- Send a credential to the configured remote: with the setting on, the runner holds none.
+
+### Exit criteria
+
+- [ ] R-BTN-182 amended with a history entry; a scenario in which the trusted runner merges through a local bare repository standing in for the gate, holding no forge credential
+- [ ] `npm test` green
+
+### Trust
+
+The new input is a host setting (environment or flags of the runner's unit), written by whoever administers the host — in Fieldhouse the human-only identity, through the host repository. No repository content, ticket or leg can set it. A wrong value sends the trusted runner's pushes somewhere else: that is a host compromise, already outside every guarantee (§12.8).
+
+### Invariants
+
+- R-BTN-182: no other runner performs a trusted leg's action — the setting is read only by a runner whose grant is `trusted-runner`.
+- R-BTN-183: the merge is still at exactly `H`, base-pinned — the push is the same compare-and-swap, to another URL.
+- R-BTN-185: no human-only credential is involved.
+
+## Status
+
+_filed 2026-11-19._

@@ -121,6 +121,25 @@ export function unnamedEntries(history, since = RULES_LINE_SINCE, prefix = 'R-BT
   return out;
 }
 
+/** Lines of the spec that carry its lineage instead of its current state (spec-writing rule 4:
+ *  dates, the owner's words and replaced choices live in BATON_SPEC_HISTORY.md): a calendar
+ *  date, or the owner quoted. A date that is itself a fact a rule states is allowed by the
+ *  phrase beside it (DATED_FACTS): the page's own Updated line, a measurement's span, the
+ *  cutoff a check reads, a protocol revision. Returns `{line, text}` each. */
+export const DATED_FACTS = [/\*\*Updated:\*\*/, /^updated: /, /`\*\/15` cron/, /entry dated (after|on or before)/, /amendments from \d{4}-\d{2}-\d{2} on/, /MCP_VERSIONS|MCP-Protocol-Version|an absent header means/];
+export function lineage(spec) {
+  const out = [];
+  const lines = spec.split(/\r?\n/);
+  lines.forEach((text, i) => {
+    // The phrase that makes a date a fact may sit on the wrapped line before or after it.
+    const around = [lines[i - 1] ?? '', text, lines[i + 1] ?? ''];
+    const dated = /(?<![\d-])\d{4}-\d{2}-\d{2}(?![\d-])/.test(text) && !DATED_FACTS.some((re) => around.some((l) => re.test(l)));
+    const quoted = /\bthe owner[,:]\s+"|",?\s+the owner\b/.test(text);
+    if (dated || quoted) out.push({ line: i + 1, text: text.trim().slice(0, 80) });
+  });
+  return out;
+}
+
 /** Every `R-BTN-n` in a text. */
 export function citedIds(text) {
   return new Set([...text.matchAll(/\bR-BTN-(\d+)\b/g)].map((m) => `R-BTN-${m[1]}`));
@@ -160,6 +179,9 @@ export function check(spec, code, tickets, history = '', testNames = [], allowed
   }
   for (const e of unnamedEntries(history)) {
     problems.push(`spec/BATON_SPEC_HISTORY.md: the ${e.date} entry "${e.title.length > 60 ? `${e.title.slice(0, 59)}…` : e.title}" names no rule id in its title and has no \`Rules changed: <ids>\` line under it (R-BTN-74)`);
+  }
+  for (const l of lineage(spec)) {
+    problems.push(`the spec carries lineage, not current state ("${l.text}…"): move the date or the owner's words to spec/BATON_SPEC_HISTORY.md`);
   }
   for (const term of SCRUBBED) {
     if (spec.toLowerCase().includes(term)) problems.push(`the spec contains the scrubbed term "${term}"`);

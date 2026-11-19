@@ -2,7 +2,7 @@
 title: "immediately.run Baton — the factory's live state, off git"
 description: "BATON_SPEC's front: its title, status, companions and contents."
 status: proposal
-updated: 2026-11-02
+updated: 2026-11-19
 ---
 
 # immediately.run Baton — the factory's live state, off git
@@ -11,7 +11,7 @@ updated: 2026-11-02
 amendments, rationale, retired requirement ids and the map from the old section numbers — is
 in [`spec/BATON_SPEC_HISTORY.md`](../BATON_SPEC_HISTORY.md).
 
-**Updated:** 2026-11-02
+**Updated:** 2026-11-19
 
 > **Companions.** History: `spec/BATON_SPEC_HISTORY.md`. The reference deployment — docs and
 > its `roadmap-pr` course, the first repository Baton served — is in docs'
