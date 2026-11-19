@@ -94,6 +94,11 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   `npm run test:full`, in `npm run model:pr` (about half an hour), whose report a PR
   that changes what the model checks read (the model, the core, the scenarios, …) carries in its
   body, and in the weekly `npm run model:full` on `main` (about three hours).
+- `npm run test:load` — the load test (§15, R-BTN-87): the envelope's mix — 50 runners, 20
+  repositories, a 5,000-ticket board post, 1,000,000 seeded history rows, bursts — on the local
+  host, failing on any error or route over its latency budget and reporting the figures it
+  reached (G-BTN-77). The Cloudflare budgets are read on production's own `capacity` log and
+  live figures (B-224), never from a staging run.
 - `npm run start:local -- --db <path> --port <n>` — Baton as a local process (below).
 - `node cli/baton.mjs test-course <repository root> <course> [--base REF|none] [--board FILE]` — the course test kit
   (§2d, R-BTN-64/-65): the working tree's `.baton/` against REF's (default `origin/HEAD`, else
@@ -353,6 +358,32 @@ Edit on the account, plus Zone: Read and Workers Routes: Edit on the `immediatel
 
 With a sibling docs checkout present, the suite also fails when `src/shared/` or the board
 fixtures have drifted from docs.
+
+## Moving a Baton (R-BTN-88)
+
+Owner state — the settings, keys, grants, bars, holds and closed tickets git does not hold —
+moves between Batons as one file; the tickets and readiness rebuild from git at the target's
+first sync. The tenant's administrator drives it (BATON_SPEC §4.8):
+
+1. `baton admin -i KEY freeze` — new claims and owner writes are refused `frozen`; the work
+   holding claims drains, its lease upkeep untouched. `baton admin -i KEY unfreeze` undoes it
+   before the seal.
+2. Let the claims drain and the mirrors catch up (`GET /v1/sync/events` acknowledges each
+   mirror's cursor), then `baton admin -i KEY seal`. A seal with work left is `conflict`,
+   naming the claims and the lagging mirrors; an administrator's fence clear runs while frozen.
+   From the seal the source logs nothing and serves nothing but an administrator's read.
+3. `baton admin -i KEY export [--with-history]` — `baton.owner-state/v1`, deterministic, its
+   digest over the RFC 8785 canonical JSON of the rest; the CLI writes it mode `0600`.
+   `--with-history` adds the ticket history and the outputs and inputs replay reads.
+4. Provision the target (a FRESH Baton — the import is into an empty one), then
+   `baton admin -i KEY import FILE`. One transaction: the digest and the schema version are
+   checked, every row through the write path's invariants, the runners resume unkeyed, the
+   event sequence continues from the source's, and each repository's first snapshot applies the
+   ticket-scoped rows (holds and overrides) to the tickets it posts — or drops and logs the
+   ones it does not.
+5. Keep the origin (move DNS), or give each repository the new `baton_url` and repoint every
+   sidecar — signatures are bound to the origin. The sealed source never serves again; an
+   abandoned move is finished by importing into a fresh Baton at the source's origin.
 
 ## Releasing the CLI
 

@@ -108,7 +108,9 @@ process for development and CI. Nothing crosses a tenant.
   A deployment holding a cut-over repository (R-BTN-28), or serving several tenants, runs on
   Workers Paid, because a quota outage then stops all claiming. The dashboard shows the day's
   usage against the plan's limits; a deployment serving several tenants shows each tenant its
-  own counters only.
+  own counters only. The plan the limits come from is the one Worker var `BATON_PLAN_LIMITS` —
+  `{"requests": <n>, "rows_written": <n>}` a UTC day (R3-1258), defaulting to Workers Free's
+  100,000 each; nothing is refused at a limit.
 
 ### 2.2 Tenants
 

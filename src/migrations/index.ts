@@ -61,6 +61,7 @@ import sequences from './0059_sequences.sql';
 import runners from './0061_runners.sql';
 import dependencyConsents from './0062_dependency_consents.sql';
 import runnersViewReads from './0063_runners_view_reads.sql';
+import childrenOwnerState from './0064_children_owner_state.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -199,4 +200,8 @@ export const MIGRATIONS: Migration[] = [
   // 0063 is B-250's (the Runners view's own order and its status-report read), written as 0060
   // over the `workers` names and renumbered at the merge behind 0061's rename and B-113's 0062.
   { id: 63, sql: runnersViewReads },
+  // 0064 is R3-1258's (§4.6 children, §4.8 owner state: `tickets.parent`, `pending_owner_state`,
+  // the `spawned_children` a `spawned` end reports, and the `capacity`, `parent-invalid`,
+  // `frozen`, `unfrozen`, `sealed`, `imported` event kinds).
+  { id: 64, sql: childrenOwnerState },
 ];

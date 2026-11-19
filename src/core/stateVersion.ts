@@ -38,6 +38,10 @@ export interface VersionedStore extends Store {
   liveness<T>(fn: () => T): T;
   /** Start counting (after the migrations: the table exists from 0054 on). */
   track(): void;
+  /** R-BTN-2 (R3-1258): the rows the statements since the last take wrote — the cursor's
+   *  `rowsWritten`, or one for a statement whose host cannot say. The request's tail reads it
+   *  into the day's usage counter, outside `liveness` so the counter's own writes never count. */
+  takeWritten(): number;
 }
 
 /** A drained write's rows, with the host's counts kept for whoever measures them. */
@@ -59,12 +63,15 @@ export function versionedStore(inner: Store): VersionedStore {
   let depth = 0;
   let dirty = false;
   let quiet = 0;
+  // R-BTN-2: the rows written since the last `takeWritten()` — the day's usage counter's source.
+  let written = 0;
   // Through `self`, so whoever measures the store's statements sees these two as well.
   const bump = () => {
     self.exec('UPDATE state_version SET v = v + 1 WHERE id = 1');
   };
-  const wrote = () => {
-    if (!tracking || quiet) return;
+  const wrote = (rows: number) => {
+    if (!tracking || quiet || rows <= 0) return;
+    written += rows;
     if (depth > 0) dirty = true;
     else bump();
   };
@@ -76,12 +83,13 @@ export function versionedStore(inner: Store): VersionedStore {
       // A write's cursor is drained here (its RETURNING rows kept), so its count is final.
       const rows = cur.toArray();
       const counts = cur as { rowsRead?: number; rowsWritten?: number };
-      if (counts.rowsWritten == null || counts.rowsWritten > 0) wrote();
+      // B-237: a host that cannot say counts as a change; one that says zero changed nothing.
+      wrote(counts.rowsWritten == null ? 1 : counts.rowsWritten > 0 ? counts.rowsWritten : 0);
       return cursorOf(rows, counts);
     },
     script(sql: string): void {
       inner.script(sql);
-      wrote();
+      wrote(1);
     },
     transaction<T>(fn: () => T): T {
       return inner.transaction(() => {
@@ -111,6 +119,11 @@ export function versionedStore(inner: Store): VersionedStore {
     },
     track(): void {
       tracking = true;
+    },
+    takeWritten(): number {
+      const n = written;
+      written = 0;
+      return n;
     },
   };
   return self;
