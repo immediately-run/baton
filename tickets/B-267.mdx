@@ -1,0 +1,48 @@
+---
+title: "B-267 — A selector for the merge method: merge commit or squash"
+id: B-267
+project: baton
+status: available
+updated: 2026-11-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "R-BTN-183 says squash or merge and names nothing that selects. Fieldhouse's landing gate forwards only a merge commit whose tree is the clean merge. Add a policy knob merge.method and have the trusted runner's CLI merge by it. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** immediately-run/fieldhouse `spec/FIELDHOUSE_SPEC.md` §6 (the forge gate, fieldhouse#37)'s landing gate forwards a push to a default branch only as a merge commit whose tree is the clean merge of the pull request's head onto the tip, so it can check what lands without trusting the runner. R-BTN-183 says "Squash or merge" and names nothing that selects. The owner, 2026-11-19: "file these and push to main".
+
+**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-183](../spec/BATON_SPEC/12-security.md#sec-12-8) *How*: "Squash or merge at exactly `H`, with the base pinned too"; [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), the policy's `merge` knobs).
+**Depends on:** none.
+**Used by:** fieldhouse FLDH-61, FLDH-41.
+
+### What to build
+
+1. **Amend R-BTN-183 and R-BTN-188 first, by PR**: say what selects the method. Proposed: a policy knob `merge.method`, `merge` or `squash`, default today's behaviour, not a condition of any guarantee; the trusted runner's CLI merges by it. If the method is the course's today, say so in R-BTN-183 and make the knob override it.
+2. **The CLI**: under `merge`, the merge result is a two-parent commit, first parent the tip, second `H`, its tree the three-way merge with no other change; a conflict is the leg's refusal, as today.
+
+### Exit criteria
+
+- [ ] R-BTN-183 and R-BTN-188 amended with a history entry; a scenario merging under each value and asserting the commit's parents and tree
+- [ ] `npm test` green
+
+### Trust
+
+The new input is a policy knob, written only through `approvers.policy` like every knob (R-BTN-188). A leg or a pusher cannot set it. It changes the shape of the commit that lands, not what may land.
+
+### Invariants
+
+- R-BTN-183: at exactly `H`, base pinned, the runner's own commit message — unchanged under either method.
+- R-BTN-189: no guarantee's condition reads the knob, so no stored floor breaks on deploy.
+- R-BTN-192: the `pr-merged` arrival's `ref` is the merge result under either method.
+
+## Status
+
+_filed 2026-11-19._

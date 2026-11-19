@@ -166,7 +166,9 @@ describe('B-236 the alarm reads through indexes', () => {
       [`SELECT id, ticket_id, runner_id, ended_at, end_reason, ended_at_sha FROM claims
         WHERE status = 'completed' AND confirmed_at IS NULL AND ended_at <= ? ORDER BY ended_at`, [T0], 'claims_unconfirmed_by_end'],
       [`SELECT id, reaped_at FROM runners WHERE credential_id = ? AND secret_hash = ?`, ['x', 'y'], 'runners_by_secret'],
-      [`SELECT id, hostname, session_name FROM runners WHERE reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? ORDER BY hostname, id`, [T0], 'runners_live', true],
+      // B-250 pinned the lanes read to the live set's index: 0063's name-ordered
+      // `runners_by_hostname` would otherwise walk every runner ever registered.
+      [`SELECT id, hostname, session_name FROM runners INDEXED BY runners_live WHERE reaped_at IS NULL AND last_seen_at + lease_timeout_ms > ? ORDER BY hostname, id`, [T0], 'runners_live', true],
     ];
     for (const [sql, params, index, sorts] of cases) {
       const detail = await plan(sql, params);
