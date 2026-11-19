@@ -3581,6 +3581,23 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   twice on the Cloudflare host; the timeline's lanes read stays pinned to `runners_live`
   (0052), whose selective walk the new name-ordered index would otherwise displace.
 
+- **2026-11-19 — §8.3 R-BTN-202: a runner's local queue, and local orders while Baton is
+  unreachable (B-248).** Rules introduced: R-BTN-202; scenario S-BTN-242. §14's advance and end
+  bodies take `local_order`. The owner filed B-248 on 2026-11-15, after the second day the Durable
+  Object's read quota took Baton down and every runner sat idle for about ten hours; on 2026-11-19
+  Baton's write quota took it down again. The ticket proposed a git lock — the marker
+  `baton tickets claim --offline` writes — before an offline order. The owner ruled it out on
+  2026-11-19: "I don't want the git based lock to remain as a fallback because then anyone trying
+  to understand lock state must take it into account (who knows which client has temporary issues
+  reaching the baton server...). Instead, I think we should print a warning stating that there is
+  no guarantee that another runner is not executing the very same ticket's pending leg. And then
+  just let the runner do its thing. It should keep trying to reach the baton server." The owner
+  chose, the same day, to report the offline result through an ordinary claim and advance rather
+  than a new route. The ticket's other safeguards — refusing an order the last snapshot showed
+  held, on hold or outside the grant — need a snapshot the runner does not keep; Baton's claim on
+  return judges each instead. The provenance rides the `advanced` event (or the end's) rather
+  than an event kind of its own: a new kind rebuilds `events`, a write of every row.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

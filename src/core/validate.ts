@@ -577,6 +577,9 @@ export interface End {
   scope_exceeded: ScopeReport;
   /** R-BTN-153 (B-175): the check command's exit status, when the end is its verdict. */
   exit_status: number | null;
+  /** B-248 (R-BTN-202): the local order the finished leg was worked under while Baton was
+   *  unreachable — who gave it and when the leg ran, recorded, never trusted for a decision. */
+  local_order: LocalOrder | null;
   /** R-BTN-113 (B-4): the session link of the leg this end finishes, as an advance carries one. */
   session_url: string | null;
   /** R-BTN-86 (§4.6, R3-1258): the local ids of the child tickets the ending leg filed in git,
@@ -734,7 +737,28 @@ export function checkEnd(body: unknown): End {
     spawned = b.spawned as string[];
     if (reason === 'done') bad('spawned', 'a done end spawns nothing — its open children are superseded by the close (R-BTN-86, R-BTN-168)');
   }
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), exit_status: optional(b.exit_status, exitStatus) ?? null, session_url: carriedSessionUrl(b.session_url), spawned, local_order: checkLocalOrder(b.local_order) };
+}
+
+/** B-248 (R-BTN-202): a local order's provenance, as the advance or end that reports the leg
+ *  carries it — the order's giver (`user@host`, as the runner's host names its OS user) and the
+ *  instant the leg ran. Filter fields only (R-BTN-33): a name and an instant, never the order's
+ *  text. */
+export interface LocalOrder {
+  by: string;
+  ran_at: string;
+}
+
+const LOCAL_ORDER_BY = /^[A-Za-z0-9_][A-Za-z0-9._@+-]{0,127}$/;
+const LOCAL_ORDER_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+
+function checkLocalOrder(v: unknown): LocalOrder | null {
+  if (v === undefined || v === null) return null;
+  if (!isObj(v)) bad('local_order', 'must be {by, ran_at} (R-BTN-202)');
+  const o = v as Record<string, unknown>;
+  if (typeof o.by !== 'string' || !LOCAL_ORDER_BY.test(o.by)) bad('local_order.by', 'must be the order\'s giver as user@host, at most 128 characters (R-BTN-202)');
+  if (typeof o.ran_at !== 'string' || !LOCAL_ORDER_AT.test(o.ran_at) || Number.isNaN(Date.parse(o.ran_at))) bad('local_order.ran_at', 'must be an ISO 8601 UTC instant (R-BTN-202)');
+  return { by: o.by as string, ran_at: o.ran_at as string };
 }
 
 export interface Advance {
@@ -755,6 +779,8 @@ export interface Advance {
    *  input as a pointer, and the ticket's version with the digest of what its source's `read`
    *  returned for the run. Stored in `leg_run_inputs` for replay. */
   run_inputs: RunInputs;
+  /** B-248 (R-BTN-202): the local order the finished leg was worked under, as an end's. */
+  local_order: LocalOrder | null;
   /** R-BTN-113 (B-4): the session link of the leg this advance finishes, shape-checked as the
    *  heartbeat's is; one that fails the link rule is dropped and logged, never a refused
    *  advance. Null when the advance carries none. */
@@ -908,7 +934,7 @@ export function checkAdvance(body: unknown): Advance {
   const head_sha = optional(b.head_sha, matches(GIT_SHA, 'head_sha')) ?? null;
   if (b.course !== undefined && JSON.stringify(b.course).length > 4096) bad('course', 'must be at most 4 KB');
   retiredFields(b);
-  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs), session_url: carriedSessionUrl(b.session_url), exit_status: optional(b.exit_status, exitStatus) ?? null };
+  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs), session_url: carriedSessionUrl(b.session_url), exit_status: optional(b.exit_status, exitStatus) ?? null, local_order: checkLocalOrder(b.local_order) };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */

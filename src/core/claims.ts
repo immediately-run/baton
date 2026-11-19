@@ -1420,7 +1420,10 @@ export class Claims {
     // R-BTN-178: the seats of the leg this advance starts, rewritten in its transaction — an
     // advance into a leg not requiring a capability releases that seat.
     this.writeSeats(claimId, item, leg);
-    this.event('advanced', `runner:${runnerId}`, { from: station, reached: at, leg, ...(b.bars.length ? { bars: b.bars } : {}), ...(b.evidence ? { evidence: b.evidence } : {}) }, c.ticket_id, claimId);
+    // R-BTN-202 (B-248): an advance finishing a leg that ran under a local order while Baton was
+    // unreachable records the order's provenance on its event — the gates above judged it as any
+    // other advance; the provenance decides nothing.
+    this.event('advanced', `runner:${runnerId}`, { from: station, reached: at, leg, ...(b.bars.length ? { bars: b.bars } : {}), ...(b.evidence ? { evidence: b.evidence } : {}), ...(b.local_order && run ? { local_order: { leg: run.leg, ...b.local_order } } : {}) }, c.ticket_id, claimId);
     this.c.dispatch?.('sync', c.ticket_id); // R-BTN-73: after every advance
     // R-BTN-90: the answer also names the run's `claim_legs.seq` — the runner's `leg_finished`
     // heartbeat (§7.5's finishing half) carries it when the run's script returns. R-BTN-113: a
@@ -1498,6 +1501,7 @@ export class Claims {
     // dropped count is logged `scope-invalid`, never a refusal.
     this.c.scope?.exceeded(c.id, e.scope_exceeded);
     if (e.scope_exceeded?.dropped) this.event('scope-invalid', `runner:${runnerId}`, { dropped: e.scope_exceeded.dropped, claim: c.id }, c.ticket_id, c.id);
+    // R-BTN-202 (B-248): an end that finishes a leg worked under a local order records who gave it.
     // R-BTN-126's capability branch: the holding the runner says it lost leaves its declared
     // set, and the fleet's counts follow (R-BTN-75) — rule 4 refuses this runner at once. A
     // valid blocked end is not a failed attempt, not a run for max_runs, and starts no backoff
@@ -1514,7 +1518,10 @@ export class Claims {
                  ON CONFLICT (repository_id, ticket_id, claim_id) DO UPDATE SET children_json = excluded.children_json, observation = excluded.observation, ended_at = excluded.ended_at`,
         repo, c.ticket_id, c.id, JSON.stringify(e.spawned), this.handedOut(repo), this.c.now());
     }
-    this.finish(c.id, c.ticket_id, e.status, e.end_reason, `runner:${runnerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next });
+    // R-BTN-202 (B-248): an end finishing a leg run under a local order records its provenance
+    // on the end's event, as an advance does.
+    const localOrder = e.local_order && finished ? { leg: this.runningLeg(c.id)?.leg ?? null, ...e.local_order } : null;
+    this.finish(c.id, c.ticket_id, e.status, e.end_reason, `runner:${runnerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next, localOrder });
     return { ok: true, ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
   }
 
@@ -1650,7 +1657,7 @@ export class Claims {
    *  `from` (R-BTN-71), open activities close `abandoned` (§6.9), the resume record is written
    *  for every end (R-BTN-24), and the end is logged. */
   private finish(claimId: number, ticketId: string, status: 'completed' | 'released' | 'reaped', reason: string, actor: string,
-    opts: { ended_at_sha?: string | null; fence?: { incarnation: number } | null; detail?: string | null; reached?: string | null; finished?: boolean; evidence?: string | null; next?: string | null } = {}) {
+    opts: { ended_at_sha?: string | null; fence?: { incarnation: number } | null; detail?: string | null; reached?: string | null; finished?: boolean; evidence?: string | null; next?: string | null; localOrder?: { leg: string | null; by: string; ran_at: string } | null } = {}) {
     const now = this.c.now();
     const c = this.rows<{ station: string; regressed_since: number | null }>('SELECT station, regressed_since FROM claims WHERE id = ?', claimId)[0];
     const run = this.runningLeg(claimId);
@@ -1687,7 +1694,7 @@ export class Claims {
     // reaped incarnation may still be driving (R-BTN-19): those go at `fence-cleared` or the
     // fence deadline (the alarm's lapse, or `fenced`).
     if (!opts.fence) this.exec('DELETE FROM claim_seats WHERE claim_id = ?', claimId);
-    this.event(status, actor, { end_reason: reason, reached, ...(opts.detail ? { detail: opts.detail } : {}), ...(opts.ended_at_sha ? { ended_at_sha: opts.ended_at_sha } : {}), ...(opts.fence ? { fence_pending: true } : {}) }, ticketId, claimId);
+    this.event(status, actor, { end_reason: reason, reached, ...(opts.detail ? { detail: opts.detail } : {}), ...(opts.ended_at_sha ? { ended_at_sha: opts.ended_at_sha } : {}), ...(opts.fence ? { fence_pending: true } : {}), ...(opts.localOrder ? { local_order: opts.localOrder } : {}) }, ticketId, claimId);
     // §12: the mirror writes the end; R-BTN-73: every end dispatches a sync, which confirms a
     // completion (R-BTN-10) without waiting for an unrelated push and makes the ticket claimable.
     this.c.dispatch?.('mirror', ticketId);

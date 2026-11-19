@@ -16,12 +16,13 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
+import { type LocalOrder, type LocalQueue, type WorkedLeg } from './queue';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { verifySignedCommit, nodeKeygen } from '../shared/commitSign.mjs';
 import { controlGroupsOf, groupUnchangedAt } from '../defaults/signed-control';
 import { checkRaise, dispositionOf, errorClassOf, SEVERITIES, type ConditionDeclaration } from '../core/conditionTypes';
 import type { ScopeAction } from '../core/scope';
-import { BatonApi, BatonRefusal } from './api';
+import { BatonApi, BatonRefusal, batonUnreachable } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
 import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
@@ -44,10 +45,18 @@ export const SIGNAL_GRACE_MS = 30_000;
  *  match the list the claim will carry — one for a fresh or legacy runner, one for the change it
  *  settles (review round 4, finding 4). */
 const MAX_STALE_BEATS = 2;
+/** R-BTN-202 (B-248): how long recommendations are kept as the runner's queue before it asks
+ *  again — a stale entry costs one refused claim (R-BTN-72), so the bound is freshness of
+ *  choice, not safety. */
+export const RECOMMENDATIONS_KEPT_MS = 10 * 60_000;
 /** What one leg's snapshot shows of the legs leaving the claim's station (R-BTN-70). */
 type NextLegs = { leg: string; state: string; waiting_on?: string }[];
 
 export interface RunnerOptions {
+  /** R-BTN-202 (B-248): this home checkout's local work queue — the host user's orders, the
+   *  recommendations kept between attempts, and the legs run offline awaiting their report.
+   *  Absent, the runner asks for a recommendation on every attempt and never runs offline. */
+  queue?: LocalQueue;
   api: BatonApi;
   /** B-229: a separate API for another session's runner, by its secret — how a runner that
    *  starts ends the claims its host's earlier sessions left (their state files, beside this
@@ -359,6 +368,14 @@ class Slot {
   cloneIndex: number | null = null;
   /** R-BTN-72 (B-188): the running leg's place, persisted for a restart's reattach. */
   place: Pick<PersistedClaim, 'run_id' | 'seq' | 'leg' | 'at' | 'handle' | 'ctx'> = {};
+  /** R-BTN-202 (B-248): a leg run under a local order while Baton is unreachable — no claim, no
+   *  lease: nothing fences it, and no beat reports it. */
+  offline = false;
+  /** R-BTN-202 (B-248): the leg this claim's ticket already ran under a local order, offline —
+   *  its result reported in place of running it again when Baton offers that same leg. */
+  preworked: WorkedLeg | null = null;
+  /** R-BTN-202: the provenance the call that finishes the preworked leg carries, once. */
+  localOrder: { by: string; ran_at: string } | null = null;
   constructor(public checkout: string) {}
 }
 
@@ -468,6 +485,8 @@ export class Runner {
   /** R-BTN-6, R-BTN-26: the current claim is fenced — the runner's lease is lost, or Baton no
    *  longer lists this claim alone. */
   private claimLost(): boolean {
+    // R-BTN-202 (B-248): an offline leg holds no lease to lose.
+    if (this.cur.offline) return false;
     return this.lostLease || this.cur.lost;
   }
   /** R-BTN-4 (B-188): the most claims this runner holds at once. */
@@ -495,6 +514,11 @@ export class Runner {
   private readonly resumed: Promise<ClaimOutcome | null>[] = [];
   /** Set when a claim's run ends, so an idle wait at k > 1 asks again at once. */
   private roomMade = false;
+  /** R-BTN-202 (B-248): the leg running under a local order while Baton is unreachable — held
+   *  by no claim, so no beat reports it; the stop paths reach it here. */
+  private offlineSlot: Slot | null = null;
+  /** R-BTN-202: why each order waits, once said — idle retries say it again only when it changes. */
+  private saidOffline = new Map<string, string>();
 
   constructor(options: RunnerOptions) {
     this.o = { beatEvery: BEAT_MS, ...options };
@@ -1272,6 +1296,7 @@ export class Runner {
     // The call is killed; its session stays for the hand-off the release still writes, and
     // goes when the claim ends. B-188: every claim's leg.
     for (const x of this.liveSlots()) if (x.inflight?.child) this.killGroup(x.inflight.child);
+    if (this.offlineSlot?.inflight?.child) this.killGroup(this.offlineSlot.inflight.child);
   }
 
   /** B-227: the immediate stop's last resort, when the leg would not take its release in time:
@@ -1296,6 +1321,7 @@ export class Runner {
     }
     // B-188: every leg in flight, each claim ended at its own safe point.
     for (const x of this.liveSlots()) this.signalSlot(x, 'release', 'released:requested');
+    if (this.offlineSlot) this.signalSlot(this.offlineSlot, 'release', 'released:requested');
   }
 
   async work(): Promise<void> {
@@ -1330,6 +1356,9 @@ export class Runner {
           process.exit(1);
         }
         this.log(`baton: the loop failed (${msg(e)}) — retrying after a beat`);
+        // R-BTN-202 (B-248): Baton is unreachable — an order queued on this host runs its leg
+        // without a claim, and Baton is asked again after it.
+        if (batonUnreachable(e) && !this.draining && !this.stopped && await this.runOffline(msg(e))) continue;
         await this.idleWait();
       }
     }
@@ -1460,12 +1489,26 @@ export class Runner {
       this.saidEmpty = true;
       this.log(`baton: this runner declared nothing — its key's grant allows no capability on the repositories its courses are in, so every leg requiring one refuses it rule 4 (missing-capability); have the owner grant it (baton owner grant <repository> --key …, R-BTN-58)`);
     }
+    // R-BTN-202 (B-248): the local queue first — a leg run offline whose result waits for Baton,
+    // then the host user's oldest order, then the recommendations kept from the last ask. Each
+    // is only a claim attempt: Baton's claim decides, every gate in force.
+    const q = this.o.queue;
+    const queued = q?.read() ?? null;
+    const preworked = queued?.worked[0] ?? null;
+    const order = preworked == null ? (queued?.orders[0] ?? null) : null;
+    let wanted: string | undefined = preworked?.ticket_id ?? order?.ticket_id;
+    if (wanted == null && q && queued!.recommendations.length && queued!.recommended_at != null && this.now() - queued!.recommended_at < RECOMMENDATIONS_KEPT_MS) {
+      wanted = q.shiftRecommendation()?.ticket_id;
+    }
     // R-BTN-72: it recommends, then claims — the first recommendation is what a claim without
     // an id would take anyway, asked for here so the runner knows what it is going for.
-    let wanted: string | undefined;
-    try {
+    if (wanted == null) try {
       const recs = await this.o.api.recommendations();
-      wanted = (recs.recommendations ?? [])[0]?.ticket_id;
+      const list = (recs.recommendations ?? []) as { ticket_id: string; station: string; legs?: string[] }[];
+      wanted = list[0]?.ticket_id;
+      // R-BTN-202: the rest are kept, in Baton's order, for the attempts after this one.
+      q?.setRecommendations(list.map((r) => ({ ticket_id: r.ticket_id, station: r.station, legs: Array.isArray(r.legs) ? r.legs : [] })), this.now());
+      q?.shiftRecommendation();
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
       // A runner the gates refuse entirely still claims below: Baton's refusal is the answer.
@@ -1489,6 +1532,19 @@ export class Runner {
       // B-106 (R-BTN-178): a refused claim releases the locks it would have used — the machine's
       // singleton is not held by an idle runner (B-188: nor taken from a claim's running leg).
       if (this.locks && e instanceof BatonRefusal) this.locks.releaseAll((c) => this.lockHeldByLive(c, null));
+      // R-BTN-202 (B-248): Baton refused the order's ticket (or the offline result's) — a gate,
+      // another holder, a ticket no longer on the board. The order goes; an offline result is
+      // not reported, and what its leg pushed stays in git. An unreachable Baton keeps both.
+      if (q && (order || preworked) && e instanceof BatonRefusal && !batonUnreachable(e)) {
+        if (preworked) {
+          q.takeWorked(preworked.ticket_id);
+          this.log(`baton: Baton refused the claim on ${preworked.ticket_id} (${e.message}) — the ${preworked.leg} run offline under ${preworked.by}'s order is not reported; what it pushed stays in git (R-BTN-202)`);
+        } else {
+          q.dropOrder(order!.ticket_id);
+          this.log(`baton: Baton refused the claim on ordered ${order!.ticket_id} (${e.message}) — the order is dropped (R-BTN-202)`);
+        }
+        return null;
+      }
       if (e instanceof BatonRefusal && e.code === 'no-eligible-ticket') return null;
       if (e instanceof BatonRefusal && e.code === 'not-eligible' && /already held|runner-holds/.test(e.message)) {
         // The runner still holds a claim Baton knows and this runner does not (its state was
@@ -1520,6 +1576,16 @@ export class Runner {
     slot.requestId = requestId;
     this.slots.add(slot);
     this.writeClaims();
+    if (q) {
+      // R-BTN-202 (B-248): whether this repository requires owner-signed control, as the last
+      // claim answer said — what decides whether an order may run offline.
+      q.setControlRequired(claim.control?.required === true);
+      if (preworked && ticket === preworked.ticket_id) slot.preworked = q.takeWorked(ticket);
+      if (order && ticket === order.ticket_id) {
+        q.dropOrder(ticket);
+        this.log(`baton: claimed ${ticket} under ${order.by}'s order (R-BTN-202)`);
+      }
+    }
     // B-127 item 7: the brief's mark, posted whether or not signed control is required — an
     // unsigned `**Brief:** the owner …` line is a claim, not the owner (the standing CLAUDE.md
     // rule), and the log says so before any agent is told to read the ticket. B-126
@@ -1531,6 +1597,130 @@ export class Runner {
       + (brief ? ` — brief ${brief.signed ? 'owner-signed' : `unsigned (changed at ${String(brief.commit).slice(0, 8)}): a claim, not the owner`}` : '')
       + (wrote?.pusher ? ` — ticket last written by ${wrote.pusher}${wrote.commit ? ` at ${String(wrote.commit).slice(0, 8)}` : ''}` : ''));
     return { claim, slot };
+  }
+
+  /** R-BTN-202 (B-248): Baton is unreachable — run the first order queued on this host that can
+   *  run offline, its leg started without a claim. Returns whether a leg ran. An order runs
+   *  offline only at one claim (`--concurrency 1`, the home checkout), on a one-course runner,
+   *  where the last claim answer said the repository requires no owner-signed control (B-127:
+   *  only Baton's record names the signed commits), and when its leg is known — the order's
+   *  `@leg`, else the leg Baton last recommended for the ticket — with the station it leaves.
+   *  Nothing tells this runner whether another runner works the same leg meanwhile; it says so
+   *  and runs. A finished leg is closed (its evidence in git) and its result kept in the queue,
+   *  reported through an ordinary claim when Baton answers again; nothing else is decided here. */
+  private async runOffline(why: string): Promise<boolean> {
+    const q = this.o.queue;
+    if (!q) return false;
+    const d = q.read();
+    const wait = (ticket: string, reason: string) => {
+      if (this.saidOffline.get(ticket) === reason) return;
+      this.saidOffline.set(ticket, reason);
+      this.log(`baton: the order for ${ticket} waits for Baton — ${reason} (R-BTN-202)`);
+    };
+    for (const order of d.orders) {
+      if (this.concurrency !== 1) { wait(order.ticket_id, 'an order runs offline only at --concurrency 1'); continue; }
+      if (d.control_required !== false) {
+        wait(order.ticket_id, d.control_required ? 'the repository requires owner-signed control (B-127), whose signed commits only Baton\'s record names' : 'no claim answer has yet said whether the repository requires owner-signed control (B-127)');
+        continue;
+      }
+      if (this.o.courses.length !== 1) { wait(order.ticket_id, `this runner serves ${this.o.courses.length} courses, and without Baton it cannot tell which one the ticket is on`); continue; }
+      const seen = d.seen.find((r) => r.ticket_id === order.ticket_id) ?? null;
+      const leg = order.leg ?? seen?.legs[0] ?? null;
+      if (leg == null) { wait(order.ticket_id, `it names no leg and Baton's last recommendations did not list the ticket — queue it as ${order.ticket_id}@<leg>`); continue; }
+      let sha: string;
+      let course: CourseLoad;
+      try {
+        sha = readHead(this.o.home);
+        course = loadCourse(this.o.home, sha, courseOf(this.o.home, sha, this.o.courses[0].course));
+      } catch (e) {
+        wait(order.ticket_id, `the home's course would not load (${msg(e)})`);
+        continue;
+      }
+      const def = course.graph.legs.get(leg);
+      const at = seen && seen.legs.includes(leg) ? seen.station : def?.from.length === 1 ? def.from[0] : null;
+      if (def == null || at == null) {
+        dropCourse(course.scratch);
+        wait(order.ticket_id, def == null ? `${leg} is not a leg of course ${course.course}` : `${leg} leaves ${def.from.join(' or ')}, and Baton's last recommendations did not say where the ticket rests`);
+        continue;
+      }
+      this.saidOffline.delete(order.ticket_id);
+      await this.runOfflineLeg(order, leg, at, sha, course, why);
+      return true;
+    }
+    return false;
+  }
+
+  /** R-BTN-202: one order's leg, run offline in the home checkout — see `runOffline`. */
+  private async runOfflineLeg(order: LocalOrder, leg: string, at: string, sha: string, course: CourseLoad, why: string): Promise<void> {
+    const q = this.o.queue!;
+    const ticket = order.ticket_id;
+    const ranAt = new Date(this.now()).toISOString();
+    this.log(`baton: Baton is unreachable (${why}) — running ${ticket}'s ${leg} from ${at} WITHOUT A CLAIM, under ${order.by}'s local order, at the home's ${sha.slice(0, 10)} (R-BTN-202)`);
+    this.log(`baton: WARNING: nothing guarantees that another runner is not executing ${ticket}'s ${leg} at this moment — with Baton down, no one holds the ticket's lease. The result is reported to Baton through an ordinary claim when it answers again, and its gates decide it then`);
+    const slot = new Slot(this.o.home);
+    slot.offline = true;
+    slot.ticket = ticket;
+    this.offlineSlot = slot;
+    const scratch = claimScratch();
+    await this.als.run(slot, async () => {
+      try {
+        if (!(await this.ensureLegLocks(leg, course))) {
+          this.log(`baton: ${ticket}'s ${leg} needs a machine lock another process holds — the order waits (R-BTN-178)`);
+          return;
+        }
+        this.inflight = { claimId: 0, ticket, course, leg, legAt: this.now(), child: null, waiters: [] };
+        const bare = bareTicketId({ id: ticket, home: this.o.repository });
+        let path: string | null = null;
+        try {
+          path = git(this.o.home, ['ls-files', '--', `*/${bare}.md`, `*/${bare}.mdx`]).split('\n').find((l) => l.trim() !== '') ?? null;
+        } catch { path = null; }
+        const ctx: Record<string, unknown> = {
+          ticket: { id: ticket, path, home: this.o.repository },
+          // No claim: the leg runs under a local order (R-BTN-202) — no id, no nonce, only the
+          // station it leaves, which leg scripts read (`ctx.claim?.station`).
+          claim: { id: null, nonce: null, station: at },
+          local_order: { by: order.by, ran_at: ranAt },
+          leg, run: runNumber(course.graph, [], leg, []),
+          snapshot: { sha, path: [], next: [] },
+          handoff: null, resume: null, advice: null,
+          checkout: this.o.home, session: null,
+          state: this.o.stateFile, runner: this.state.get().runner_id,
+        };
+        const outcome = await this.runLeg(course, leg, ctx, scratch);
+        if (outcome.kind !== 'ok') {
+          const what = outcome.kind === 'crashed' ? `failed (${maskLegOutput(outcome.error, this.legSecrets)})` : outcome.kind === 'missing' ? `has no legs/${leg}.mjs at ${sha.slice(0, 10)}` : 'was stopped';
+          q.dropOrder(ticket);
+          this.log(`baton: ${ticket}'s offline ${leg} ${what} — the order is dropped, nothing is reported, and Baton offers the ticket as it stands (R-BTN-202)`);
+          return;
+        }
+        const verdict = decide(outcome.result, course.graph, leg, at);
+        if ('bug' in verdict) {
+          q.dropOrder(ticket);
+          this.log(`baton: ${ticket}'s offline ${leg} script bug: ${maskLegOutput(verdict.why, this.legSecrets)} — the order is dropped (R-BTN-202)`);
+          return;
+        }
+        const closed = await this.callClose(course.scripts.get(leg) ?? null, ctx, outcome.result);
+        if (closed === undefined) {
+          q.dropOrder(ticket);
+          this.log(`baton: ${ticket}'s offline ${leg} would not close — the order is dropped (R-BTN-202)`);
+          return;
+        }
+        q.recordWorked({ ticket_id: ticket, leg, at, result: outcome.result, closed: closed ?? null, by: order.by, ran_at: ranAt });
+        this.log(`baton: ${ticket}'s offline ${leg} finished: reached ${verdict.reached} — kept for Baton, and reported through a claim when it answers (R-BTN-202)`);
+      } finally {
+        await this.stopSession('offline-ended');
+        this.legChannel?.close();
+        this.legChannel = null;
+        this.legSessionUrl = null;
+        this.inflight = null;
+        this.pendingAbort = null;
+        this.locks?.releaseAll((c) => this.lockHeldByLive(c, slot));
+        for (const [c, owner] of [...this.lockOwners]) if (owner === slot) this.lockOwners.delete(c);
+        dropCourse(course.scratch);
+        rmSync(scratch, { recursive: true, force: true });
+        this.offlineSlot = null;
+      }
+    });
   }
 
   /** B-188: a fresh slot — in the home checkout at one claim, else in a free clone of its own. */
@@ -2151,7 +2341,20 @@ export class Runner {
           checkout: this.checkout, session,
           state: this.o.stateFile, runner: this.state.get().runner_id,
         };
-        const outcome = resuming ? await this.reattachedLeg(course, legName, resuming.handle) : await this.runLeg(course, legName, ctx, scratch);
+        // R-BTN-202 (B-248): the leg this ticket already ran under a local order while Baton was
+        // unreachable — Baton offered that same leg from that same station, so its result is
+        // reported (the gates below judge it as any other) instead of running it again. Any other
+        // offer runs as offered: the offline result is not Baton's position, and what it left in
+        // git stays there for the leg that runs now.
+        const pre = this.cur.preworked;
+        this.cur.preworked = null;
+        const usePre = pre != null && !resuming && pre.leg === legName && pre.at === at;
+        if (pre != null && !usePre) this.log(`baton: ${ticket}'s ${pre.leg} ran offline from ${pre.at} under ${pre.by}'s order, but Baton offers ${legName} at ${at} — the offline result is not reported, and ${legName} runs as offered (what the offline leg pushed stays in git) (R-BTN-202)`);
+        if (usePre) {
+          this.cur.localOrder = { by: pre.by, ran_at: pre.ran_at };
+          this.log(`baton: ${ticket}'s ${legName} ran offline at ${pre.ran_at} under ${pre.by}'s order — its result is reported now, gated as usual (R-BTN-202)`);
+        }
+        const outcome = usePre ? { kind: 'ok' as const, result: pre.result } : resuming ? await this.reattachedLeg(course, legName, resuming.handle) : await this.runLeg(course, legName, ctx, scratch);
         resuming = undefined;
         // R-BTN-72 (B-188): the run is over — nothing of it is left for a restart to reattach to.
         if (this.cur.place.handle) {
@@ -2226,7 +2429,7 @@ export class Runner {
         }
         // R-BTN-83: `close` writes the closing marker from the validated result before anything
         // is reported; a suspension or release follows with `handoff`, so it can cite the position.
-        const closed = await this.callClose(script, ctx, result);
+        const closed = usePre ? pre.closed : await this.callClose(script, ctx, result);
         if (closed === undefined) {
           return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: at, next: legName }, await this.callHandoff(script, ctx));
         }
@@ -2317,9 +2520,16 @@ export class Runner {
   /** One `advance`, its refusal settled by §6.13: off-graph ends `released:course-changed`; an
    * `entry` refusal (R-BTN-109) ends `released:cannot-finish:contract-output`; every other
    * refusal suspends at the station the claim reached, never releasing. */
-  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number } | { settle: Record<string, unknown> }> {
+  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number } | { settle: Record<string, unknown> }> {
+    // R-BTN-202 (B-248): the advance that finishes a leg run under a local order says who gave
+    // it — once; a refused advance's settling end carries it instead (`finish`).
+    if (this.cur.localOrder && body.reached) {
+      body = { ...body, local_order: this.cur.localOrder };
+    }
     try {
-      return await this.o.api.advance(claimId, body) as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number };
+      const answer = await this.o.api.advance(claimId, body);
+      if (body.local_order) this.cur.localOrder = null;
+      return answer as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number };
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
       const kind = refusalKind(e.ruleCode);
@@ -2365,6 +2575,8 @@ export class Runner {
   private async runLeg(course: CourseLoad, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'missing' } | { kind: 'lease-lost' }> {
     const script = course.scripts.get(leg);
     if (script == null) return { kind: 'missing' };
+    // R-BTN-202 (B-248): a leg run under a local order while Baton is unreachable has no lease.
+    const offlineLeg = this.cur.offline;
     const tag = randomBytes(4).toString('hex');
     // R-BTN-107 (B-184): the session key — its run id's first session, or a tag when the advance
     // named none.
@@ -2509,7 +2721,7 @@ export class Runner {
       const timer = setInterval(() => {
         // R-BTN-26: the fence computes the lease itself from the state file — the wall clock
         // against `last_ok` — never trusting only the sidecar's flag.
-        if (leaseLostFrom(this.state.get(), this.now()) || this.claimLost() || this.stopped) {
+        if ((!offlineLeg && leaseLostFrom(this.state.get(), this.now())) || this.claimLost() || this.stopped) {
           clearInterval(timer);
           resolve();
         }
@@ -2759,6 +2971,9 @@ export class Runner {
     // and the body names none — the belt-and-braces beside the beats, so a run whose landing
     // beat never reached Baton still reports its link on the call that finishes it.
     if (this.legSessionUrl != null && body.session_url === undefined) body = { ...body, session_url: this.legSessionUrl };
+    // R-BTN-202 (B-248): an end that finishes a leg run under a local order says who gave it.
+    if (this.cur.localOrder && body.local_order === undefined) body = { ...body, local_order: this.cur.localOrder };
+    this.cur.localOrder = null;
     try {
       await this.o.api.end(claimId, body);
     } catch (e) {

@@ -23,6 +23,14 @@ export class BatonRefusal extends Error {
   }
 }
 
+/** R-BTN-202 (B-248): a call that never reached Baton — the transport failed or timed out. A
+ *  5xx answer is a `BatonRefusal` with its status; together they are what "unreachable" means. */
+export class BatonUnreachable extends Error {}
+
+/** R-BTN-202: Baton could not answer — the call did not reach it, or it answered 5xx. */
+export const batonUnreachable = (e: unknown): boolean =>
+  e instanceof BatonUnreachable || (e instanceof BatonRefusal && (e.status >= 500 || e.code === 'unavailable'));
+
 export type Transport = (req: Request) => Promise<Response>;
 
 /** The headers that authenticate one request: the SSHSIG signature, or the transition's bearer
@@ -100,7 +108,7 @@ export class BatonApi {
       res = await this.o.transport(new Request(url, { method, headers, body: text === '' && method === 'GET' ? undefined : text, signal: AbortSignal.timeout(CALL_TIMEOUT_MS) }));
     } catch (e) {
       this.log(`baton: ${method} ${path} did not reach Baton (${e instanceof Error ? e.message : String(e)})`);
-      throw e;
+      throw new BatonUnreachable(e instanceof Error ? e.message : String(e), { cause: e });
     }
     this.warnVersions(res.headers.get('Baton-Client-Versions'));
     let json: Record<string, any> | null = null;
@@ -173,7 +181,7 @@ export class BatonApi {
   claim(body: { request_id: string; ticket_id?: string }): Promise<Record<string, any>> {
     return this.call('POST', '/v1/runner/claim', body);
   }
-  advance(claimId: number, body: { reached?: string; leg: string; bars?: string[]; evidence?: string; outputs?: unknown[]; taken?: { choice: string; alternative: string; dead: string[] }[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string }): Promise<Record<string, any>> {
+  advance(claimId: number, body: { reached?: string; leg: string; bars?: string[]; evidence?: string; outputs?: unknown[]; taken?: { choice: string; alternative: string; dead: string[] }[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }): Promise<Record<string, any>> {
     return this.call('POST', `/v1/runner/claims/${claimId}/advance`, body);
   }
   end(claimId: number, body: Record<string, unknown>): Promise<Record<string, any>> {

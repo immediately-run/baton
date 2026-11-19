@@ -21,6 +21,7 @@ import { Runner, stampLine, withTimestamps } from './runner';
 import { loadExecutor } from './executor';
 import { readMaskEnv, runnerConfigPath, underBatonDirectory } from './mask';
 import { runnerHome } from '../defaults/homes';
+import { LocalQueue, queueMain, queuePath } from './queue';
 import { fileURLToPath } from 'node:url';
 
 /** The CLI's wrapper (R-BTN-133), which every executor runs. */
@@ -245,6 +246,11 @@ function cacheDir(): string {
   return dir;
 }
 
+/** `baton queue …` (R-BTN-202, B-248): the host user's orders for the runners on one home. */
+export function queueCommand(argv: string[]): number {
+  return queueMain(argv, cacheDir(), runnerHome);
+}
+
 /** R-BTN-34's bounded fetch: one `git fetch origin main` in the home checkout, its failure
  * logged and swallowed — `ensureSha` re-checks and releases `stale-board` when the commit is
  * still missing, which is exactly the bound. */
@@ -458,6 +464,8 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     // of them must declare by its own version (rule 9 per course).
     legNeeds: () => courses.flatMap((c) => legNeeds(home, readHead(home), c.course)),
     stateFile: join(cacheDir(), `${a.session}.json`),
+    // R-BTN-202 (B-248): the home's local work queue, shared with `baton queue` and its other runners.
+    queue: new LocalQueue(queuePath(cacheDir(), home)),
     beatEvery: a.beatEvery, log, verbose: a.verbose, // the Runner stamps its own lines under verbose
     fetch: io.fetch ?? ((home) => fetchMain(home, say)),
     ...(agentCommand ? { agentCommand } : {}),
