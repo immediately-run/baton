@@ -6,7 +6,7 @@
     "vocabulary.mjs": "84a724a62e326fc97f7deedb53810abe8c15cd2c65e8a3c1b5e1e324edddcb91",
     "sessionUsage.mjs": "8e89c71f5a4d1fa45d1b28f24c7d29668644edeb75494075784ed64c105f727a",
     "batonSync.mjs": "782ff02cc42496faa8de9af234a760eed322eafc0e7a37bf9754c395e8eac3df",
-    "ticketPr.mjs": "5ca644d267c591008d1b494d016c5a868e72e224a2147c255014a195876025d0"
+    "ticketPr.mjs": "3e6859d70b723495b8c515fdc7ab0c80c5babc9b56dc9d150ddee4e316ad6e7a"
   },
   "fixtures": {
     "test/fixtures/courses/roadmap-pr/course.json": "f1de3e3cee8f210a7b687c00d24d62404e6fbd5a96408278574930cb2813decf"

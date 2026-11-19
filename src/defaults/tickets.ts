@@ -961,7 +961,7 @@ function ticketPrFindings(root: string, settings: TicketSettings, base: string |
       throw new Error(`--forge ${forgePath} does not parse (${(e as Error).message})`);
     }
     if (typeof parsed !== 'object' || parsed === null || typeof (parsed as { pr_author?: unknown }).pr_author !== 'string' || typeof (parsed as { commits?: unknown }).commits !== 'object') {
-      throw new Error(`--forge ${forgePath} is not {"pr_author": "…", "commits": {"<sha>": {author, committer, verified}}}`);
+      throw new Error(`--forge ${forgePath} is not {"pr_author": "…", "commits": {"<sha>": {author, committer}}}`);
     }
     forge = parsed as ForgeFile;
   }

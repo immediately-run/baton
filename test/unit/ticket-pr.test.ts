@@ -162,15 +162,15 @@ describe('B-133: the ticket-PR view', () => {
     const dir = repo({}, { 'tickets/B-2.mdx': ticket({ id: 'B-2' }) });
     const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const forge = join(dir, 'forge.json');
-    writeFileSync(forge, JSON.stringify({ pr_author: 'immediately-run-worker', commits: { [sha]: { author: null, committer: 'immediately-run-worker', verified: true } } }));
+    writeFileSync(forge, JSON.stringify({ pr_author: 'immediately-run-worker', commits: { [sha]: { author: null, committer: 'immediately-run-worker' } } }));
     const r = await run(dir, ['--forge', forge]);
     expect(r.code).toBe(0);
     const printed = r.lines.join('\n');
     expect(printed).toMatch(/provenance: git's reading beside the forge's — the PR is opened by immediately-run-worker/);
     // The forge's accounts are email-derived — the commit's writer chooses the email that picks
     // the account (round two's finding) — so the row labels them as what they are.
-    expect(printed).toMatch(/ · forge: author no forge account, committer immediately-run-worker — the accounts those commit emails map to; signature verified/);
-    // Without the forge, git's agent-settable reading is named as such — never as verified.
+    expect(printed).toMatch(/ · forge: author no forge account, committer immediately-run-worker — the accounts those commit emails map to$/m);
+    // Without the forge, git's agent-settable reading is named as such — never as the forge's.
     const plain = await run(dir);
     expect(plain.lines.join('\n')).toMatch(/provenance: git's reading — anyone sets an author or committer; the forge's reading is not read here \(B-126\)/);
   });
@@ -195,7 +195,7 @@ describe('B-133: the ticket-PR view', () => {
     const forge = join(dir, 'forge.json');
     writeFileSync(forge, '[]');
     await expect(ticketsCheckMain(['--repo', dir, '--pr', 'main', '--forge', forge], { log: () => {} }))
-      .rejects.toThrow(/--forge .* is not \{"pr_author": "…", "commits": \{"<sha>": \{author, committer, verified\}\}\}/);
+      .rejects.toThrow(/--forge .* is not \{"pr_author": "…", "commits": \{"<sha>": \{author, committer\}\}\}/);
     writeFileSync(forge, 'not json');
     await expect(ticketsCheckMain(['--repo', dir, '--pr', 'main', '--forge', forge], { log: () => {} }))
       .rejects.toThrow(/--forge .* does not parse/);
