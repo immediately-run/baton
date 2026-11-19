@@ -43,5 +43,5 @@ await build({
   logLevel: 'warning',
 });
 
-export const { runMain } = await import(pathToFileURL(join(OUT, 'baton-run.mjs')).href);
+export const { runMain, queueCommand } = await import(pathToFileURL(join(OUT, 'baton-run.mjs')).href);
 export const { replayMain } = await import(pathToFileURL(join(OUT, `baton-replay-${process.pid}.mjs`)).href);

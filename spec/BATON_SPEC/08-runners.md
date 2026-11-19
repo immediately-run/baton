@@ -526,6 +526,29 @@ the runner's credentials under any other executor is that executor's, never Bato
     ends suspended at once (R-BTN-71), and never `interact`, whose session stays running for the
     person (R-BTN-195).
 
+- **R-BTN-202 (a runner's local queue; local orders while Baton is unreachable).** A runner keeps a
+  local work queue for its home checkout, on its host and outside every leg session, so no leg can
+  write it. It holds the **orders** the host's user gives with `baton queue add <repository>:<id>[@leg]` (`baton queue list`,
+  `baton queue remove`). Baton is **unreachable** when a call does not reach it or it answers 5xx.
+  - **While Baton answers, an order is a claim attempt.** The runner claims its oldest order
+    by name before an unnamed claim (R-BTN-72), through every gate; a refused claim drops
+    the order.
+  - **While Baton is unreachable, an order's leg starts without a claim.** The leg is the
+    order's `@leg` and the station the leg's only `from`; an order naming no leg, or a leg leaving
+    several stations, waits for Baton. Such a leg runs only at one claim (R-BTN-4's
+    bound 1), on a runner serving one course, at the home checkout's head. Its `ctx.claim` names
+    only the station it leaves. The runner logs that nothing guarantees another runner is not
+    running the same leg, and keeps asking Baton. No git write stands in for the lease
+    (R-BTN-193). A leg that finishes is closed — its evidence in git (R-BTN-83) — and its result
+    kept in the queue; a leg that fails drops the order and reports nothing.
+  - **The result is reported through a claim, and gated as usual.** When Baton answers again the
+    runner claims the ticket. When the claim's queued leg is the one run offline, from the same
+    station, the first `advance` starts it and the runner finishes it from the kept result
+    without running it again; the call that finishes it carries `local_order: {by, ran_at}`,
+    recorded on its event and deciding nothing, and the course goes on. A claim offered another
+    leg runs that leg and reports nothing of the offline one; a refused claim drops the kept
+    result. Whatever the offline leg pushed stays in git.
+
 ### 8.4 Where and how a leg runs
 
 - **R-BTN-143 (a runner runs only code the default branch holds).** Before reading any file at a

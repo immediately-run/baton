@@ -75,7 +75,7 @@ is stale. Never edit it by hand.
 | [`08-runners.md`](BATON_SPEC/08-runners.md) | **8. Runners** | — |
 | | 8.1 Runners, heartbeats and the doorbell | R-BTN-3, R-BTN-9, R-BTN-14, R-BTN-91 |
 | | 8.2 Keys and grants | R-BTN-102, R-BTN-146, R-BTN-117 |
-| | 8.3 The runner | R-BTN-72, R-BTN-106, R-BTN-107, R-BTN-123, R-BTN-113, R-BTN-201 |
+| | 8.3 The runner | R-BTN-72, R-BTN-106, R-BTN-107, R-BTN-123, R-BTN-113, R-BTN-201, R-BTN-202 |
 | | 8.4 Where and how a leg runs | R-BTN-143, R-BTN-133, R-BTN-144, R-BTN-145, R-BTN-119 |
 | | 8.5 A running leg's output | R-BTN-128 |
 | [`09-claims.md`](BATON_SPEC/09-claims.md) | **9. Claims** | — |
@@ -307,6 +307,7 @@ is stale. Never edit it by hand.
 | R-BTN-199 | Baton hands out every identifier that concurrent branches write to git | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-200 | a ticket source that shows positions shows Baton's | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-201 | a launcher starts sessions; Baton reserves nothing for them | [`08-runners.md`](BATON_SPEC/08-runners.md) |
+| R-BTN-202 | a runner's local queue; local orders while Baton is unreachable | [`08-runners.md`](BATON_SPEC/08-runners.md) |
 
 ## Scenarios
 
@@ -507,6 +508,7 @@ is stale. Never edit it by hand.
 | S-BTN-239 | a control path changed outside a course | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-240 | unlisted repositories and the `builtin` executor are the policy's | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-241 | dependencies on another repository's tickets (B-113) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-242 | a runner's local queue (R-BTN-202) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-243 | SQLite reads under mixed busy/idle polling (B-287) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates

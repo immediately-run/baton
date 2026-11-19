@@ -106,6 +106,11 @@
 //                signed with an owner key of the repository or a human-only key; --ref names the
 //                answer for idempotence when it rode a commit (R-BTN-39)
 //
+//   baton queue add <repository>:<id>[@leg] | list | remove <repository>:<id> [--home DIR]
+//                — this host's local work queue for the runners on one home checkout (R-BTN-202):
+//                an order goes first through the ordinary claim while Baton answers, and runs
+//                its leg without a claim only while Baton is unreachable, reported on its return
+//
 //   baton repo sync [--root DIR] [--url URL] [--latest BRANCH] [--facts FILE] [--sync-key FILE] [--busy-retry S]
 //   baton repo init [--course C] [--agent opencode|claude-code] [--agent-command CMD] [--override LEG]…
 //   baton repo migrate-markers [--root DIR]   — the one-time fold of the retired .baton/markers.jsonl into the tickets (B-100)
@@ -1240,6 +1245,12 @@ export async function main(argv) {
     // its devDependencies), then run it in this process's stead.
     const { runMain } = await import('../scripts/baton-run.mjs');
     return runMain(argv.slice(1));
+  }
+  if (argv[0] === 'queue') {
+    // R-BTN-202 (B-248): this host's local work queue for the runners on one home — local
+    // files only, never a request to Baton.
+    const { queueCommand } = await import('../scripts/baton-run.mjs');
+    return queueCommand(argv.slice(1));
   }
   if (argv[0] === 'leg' && argv[1] === 'replay') {
     // §9.8 R-BTN-84: re-run one recorded leg run without a claim — the replay half of the

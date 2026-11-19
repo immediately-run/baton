@@ -2,23 +2,24 @@
 title: B-248 — A runner keeps a local work queue, and local orders run while Baton is unreachable
 id: B-248
 project: baton
-status: available
-updated: 2026-11-15
+status: in-progress
+updated: 2026-11-19
 repos:
   - baton
 tags:
   - roadmap-item
-description: "Recommendations kept as a runner-side queue; a host administrator's orders start without Baton only while it is down, and their ends meet the gates on return"
+description: "A runner-side queue of a host administrator's orders, started without Baton only while it is down, and their ends meet the gates on return"
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/296
 depends_on: []
 ---
 
 **What:** each runner keeps a local work queue, and a local administrator can add orders to it that run without waiting for Baton. Owner direction, 2026-11-15, after the second day the Durable Object quota (5M rows_read/day) took Baton down and every runner sat idle on "no recommendation (internal error)" for ~10 hours.
 
-- **The queue.** Recommendations the runner receives are kept as an ordered local queue (persisted beside the runner's state), not discarded after one claim attempt. Only a claimed entry may start; an unclaimed entry is a hint the claim re-checks (R-BTN-72), so a stale entry costs one refused claim, as today. A runner holding a non-empty queue does not need to ask for recommendations every beat — fewer reads.
+- **The queue.** ~~Recommendations the runner receives are kept as an ordered local queue (persisted beside the runner's state), not discarded after one claim attempt. Only a claimed entry may start; an unclaimed entry is a hint the claim re-checks (R-BTN-72), so a stale entry costs one refused claim, as today. A runner holding a non-empty queue does not need to ask for recommendations every beat — fewer reads.~~ (2026-11-19: dropped — B-287's runner reads no recommendations; the queue holds the orders, persisted beside the runner's state.)
 - **Local orders.** `baton queue add <repo>:<ticket>[@leg]` (and `list`, `remove`), run as the user who runs the runner on its host, adds an *order*. Never writable from inside a leg (sandboxed legs cannot reach the host; keep it so).
 - **"Unconditional" means "does not wait for Baton", never "skips the gates"** (owner ruling). While Baton answers, an order is a strong preference: it goes first, through the normal claim and every gate. Only while Baton is unreachable does the runner start an order without a claim.
 - **The work runs unconditionally; its result does not** (owner ruling). When Baton is back, the runner reports the leg as worked under a local order, naming who gave it (provenance + an audit event). The end then meets the gates in force at that moment and the course continues as usual (review, CI, confirm). A refused end leaves the PR in place; nothing is lost.
@@ -42,3 +43,5 @@ New input: a local order — a ticket id and optional leg written by the runner 
 ## Status
 
 _filed 2026-11-15._
+- 2026-11-19 — built on `claude/B-248-runner-local-queue`: [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-202](../spec/BATON_SPEC/08-runners.md#sec-8-3)), scenario S-BTN-242. The owner's rulings of 2026-11-19 change the safeguards above: **no git lock** — the runner warns that nothing guarantees another runner is not running the same leg and keeps asking Baton ([R-BTN-193](../spec/BATON_SPEC/01-what-baton-is.md) stands) — and the result is reported through an ordinary claim and advance, no new route. The last-snapshot refusals are Baton's claim on return.
+- 2026-11-19 — merged `main` with B-287 (#297), whose runner claims in one unnamed request and reads no recommendations: ~~recommendations kept as a runner-side queue~~ is dropped, the queue holds only orders, an order is claimed by name, and an offline order runs only with `@leg`, from the leg's only station.
