@@ -239,11 +239,11 @@ What is missing is any link from a rule to the fact of its being built.
 
 ## Tickets to file
 
-In priority order. Each is written to be filed as it stands (`baton tickets new`); none has been
-filed.
+In priority order. Filed on 2026-11-19 as B-265 to B-280, in this order: item 1 is B-265, item 2
+B-266, and so on to item 16, B-280. The owner decided item 1 the same day: shrink.
 
-1. **Decide the model: shrink it to a design-time core.** *Owner decision — amends values 10 and
-   R-BTN-68.* Keep `baton.qnt`, `properties.qnt`, `regressions.qnt`, `witnesses.qnt`, `check.mjs`
+1. **Shrink the model to a design-time core.** *Decided by the owner, 2026-11-19 — amends values
+   10 and R-BTN-68.* Keep `baton.qnt`, `properties.qnt`, `regressions.qnt`, `witnesses.qnt`, `check.mjs`
    and the `sim` instance; run `model:quick` in CI on changes under `model/`. Fix or drop
    `oneClaimPerRunner` for B-188 first. Retire `verify.mjs`, `full.mjs`, `liveness.qnt`,
    `lightQuestion.qnt`, the `small` instance, `check-traces.mjs` and `trace-scope.json`,
@@ -355,7 +355,9 @@ nonces; `heartbeatTx` at 187 lines; `.local/` growing by one replay bundle per `
 
 ### Owner one-liners
 
-Each is small and outside what this review may change.
+Each is small and was outside what this review might change on its own. The owner approved all
+five on 2026-11-19 and they are applied on this branch; what the README still gets wrong is
+listed in the pull request.
 
 - **`.github/workflows/ci.yml`**: `cancel-in-progress: true` applies to `main` too — 11 of the
   last 30 runs on `main` were cancelled, so `main` is rarely verified end to end. Cancel only on
