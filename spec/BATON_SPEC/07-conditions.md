@@ -598,13 +598,14 @@ Limits that hold throughout:
   - **Cascade.** Cancelling a ticket supersedes its open children whose `lifetime` is `parent`.
 ### 7.8 The outbox
 
-- **R-BTN-171 (every git write and check run Baton intends goes through one outbox, which runners deliver).**
-  Baton holds no credential that writes git or posts a check run; starting a workflow is its own
-  call (R-BTN-94). Each git write or check run Baton intends is an **outbox entry**. A
+- **R-BTN-171 (every git write, check run and ticket-store write Baton intends goes through one outbox, which runners deliver).**
+  Baton holds no credential that writes git, posts a check run or writes a ticket store; starting
+  a workflow is its own call (R-BTN-94). Each git write, check run or ticket-store write Baton
+  intends is an **outbox entry**. A
   **deliverer** — a runner (R-BTN-3) whose host holds the credential the effect needs, on a grant
   whose role the repository policy's `outbox` admits (R-BTN-188) — claims the entry under a lease,
   delivers it and reports it with a `std:effect@1` attestation (R-BTN-191); Baton then confirms it
-  by reading the effect back.
+  by reading the effect back, in a snapshot, wherever the ticket source's reader posts it.
   - **Entries.** Each entry is an `outbox` row: `id` (an integer per repository, increasing),
     repository, ticket, `kind`, `fields`, `state` (`queued`; `claimed` while a deliverer's lease
     holds it; `delivered`, `confirmed` or `dropped`), `queued_at`, `delivered_ref` (the
@@ -616,12 +617,15 @@ Limits that hold throughout:
     |---|---|---|---|---|
     | `withdraw` | the withdrawal of a cancelled ticket (R-BTN-168), through the source's `withdraw(ticket, reason)` export (the markdown source sets `status: withdrawn` and `withdrawn_reason`) | a log, per ticket | a snapshot shows the ticket withdrawn or closed | not confirmed 24 hours after it was queued |
     | `forge-check` | a check run on a change's head (R-BTN-114, R-BTN-115) | the latest, per `(repository, sha, name)` | the sync reads the run back (R-BTN-115) | not delivered 15 minutes after it was queued |
+    | `source-show` | a station's `display_status` to a ticket store (R-BTN-200), through the source's `show(ticket, value)` | the latest, per ticket: queuing one drops the ticket's older `queued` one | the first accepted snapshot after its delivery posts the ticket's `display.status` equal to its value; one that posts another value drops it, and R-BTN-200 judges that snapshot afresh | not delivered 15 minutes after it was queued |
+    | `source-note` | a note for people on the ticket (R-BTN-200), through the source's `note(ticket, {entry, reason, station})` | a log, per ticket | at its delivery: no snapshot carries a note | not delivered 24 hours after it was queued |
 
     `withdraw` is the one **git kind**: Baton files no ticket of its own (R-BTN-163). The two
-    kinds are the two **delivery classes**, `git` and `forge-check`.
+    `source-` kinds are the **source kinds**, written to whatever store the ticket source reads.
+    The kinds make three **delivery classes**: `git`, `forge-check` and `source`.
   - **Deliverers are runners.** No key role exists for delivery (the owner, 2026-11-01, "Couriers
     into runners"): a runner that holds the credential declares the classes it delivers in its
-    heartbeat (`delivers: [git | forge-check]`, nothing by default; kept in `runners.delivers`,
+    heartbeat (`delivers: [git | forge-check | source]`, nothing by default; kept in `runners.delivers`,
     §13), and Baton offers it the entries of those classes on the repositories its grant covers.
     A deliverer is a signed machine key: an API-key runner never delivers, as it never syncs
     (R-BTN-159).
@@ -633,7 +637,7 @@ Limits that hold throughout:
       admit, `forbidden` with the unmet knob.
     - The credential the effect needs lives only on the deliverer's host, never in Baton: push
       access to the repository for `git`, the check App's private key for `forge-check`
-      (R-BTN-115).
+      (R-BTN-115), the ticket store's write credential for `source`.
     - **Woken, not polling.** A deliverer's doorbell socket (R-BTN-91) is rung `outbox` when an
       entry of a class it delivers is queued on a repository it serves; it then claims at once.
     - Admitting `runner` for `forge-check` lets any granted runner withhold a check. It still
@@ -643,13 +647,15 @@ Limits that hold throughout:
       repository whose ticket source is ejected (`.baton/tickets.mjs`), Baton offers a git entry
       to no `trusted-runner` grant, since it would write from a template the source does not use:
       the entry waits for a `runner` deliverer, and a policy admitting none there is refused
-      (R-BTN-188).
+      (R-BTN-188). It never delivers a `source` entry, which only the source's own `show` or
+      `note` can write: the policy's `outbox.source` admits `runner` alone (R-BTN-188).
   - **Claiming and marking.**
     - `POST /v1/runner/outbox/claim {limit?}` claims up to 50 queued entries, each leased for 10
       minutes, of the classes the caller declared and the `outbox` policy of each repository its
       grant covers admits it to.
-    - A ticket's git entries are claimed together, in `id` order, and none while an earlier entry
-      of that ticket is `claimed` or `delivered`. Entries of different tickets are unordered.
+    - A ticket's entries of one class are claimed together, in `id` order, and none while an
+      earlier entry of that ticket and class is `claimed` or `delivered`. Entries of different
+      tickets or classes are unordered.
     - `POST /v1/runner/outbox/{repository}/{id}` marks one: `delivered` with its `ref`, or
       `failed` with `transient` or `refused`. `failed` is a mark, not a state: the entry returns to
       `queued`, after a backoff for `transient` and with its ticket held for `refused`.
@@ -672,6 +678,9 @@ Limits that hold throughout:
       then marks the entry `failed` with `transient`.
     - `forge-check`: the check run's `external_id` carries the id, and R-BTN-115's `seq` keeps an
       older entry from overwriting a newer one.
+    - `source-show` sets a value, so a repeat writes the same status again. `source-note` hands
+      `note` its entry id, so a source that can find its earlier notes writes each once; one that
+      cannot may note twice.
   - **What Baton holds until a git entry is confirmed.**
     - **Withdraw entry.** The cancelled ticket stays `cancelling` (R-BTN-168) until a snapshot
       posts it withdrawn or closed, which closes it `withdrawn`.
@@ -681,7 +690,8 @@ Limits that hold throughout:
       `retry` queues the entry again.
   - **Dropping.** A `withdraw` entry for a ticket whose course names a `cancel` leg is queued in
     the transaction that records that leg's end (R-BTN-168). A `withdraw` entry whose ticket a snapshot shows
-    withdrawn or closed before any deliverer claimed it is `dropped`. Retiring a repository drops
+    withdrawn or closed before any deliverer claimed it is `dropped`, and so is a source entry
+    whose ticket closed before its delivery. Retiring a repository drops
     every `queued`, `claimed` or `delivered` entry of it, and a later mark is ignored (R-BTN-47).
   - **Records.**
     - Queuing, delivering and confirming each log an `outbox {id, kind, state}` event in the

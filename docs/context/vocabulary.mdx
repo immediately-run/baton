@@ -17,8 +17,13 @@ board, its courses and its owners. The repositories a ticket's work changes are 
 repositories**: the home's owners list them in `code_repos`, and they hold no tickets of their
 own. What a home covers is its owners' choice; Baton has no word for it.
 
-**Ticket.** A unit of work, filed in git. Baton knows its id, course, tier and requirements,
-never its body.
+**Ticket.** A unit of work, filed in its repository's ticket source. Baton knows its id, course,
+tier and requirements, never its body.
+
+**Ticket source, reader, writer.** The repository's code that reads its tickets from their store
+and posts them in each sync — the **reader** — and may write to that store: a new ticket, a
+withdrawal, the status a station shows people, a note — the **writer**. The default is the
+markdown source, the store a git folder (R-BTN-74).
 
 **Course.** The state machine a ticket follows: **stations** it rests at and **legs** it runs
 between them. Defined in `course.json`; changed by a commit.
@@ -171,10 +176,10 @@ or only steers advice; the repository's policy says whose count.
 owner's or administrator's action. Baton accepts or refuses it by its gates; it is not evidence. A
 command may carry an attestation: an advance moves the lease and reports where the leg reached.
 
-**Outbox, deliverer.** Every git write and check run Baton intends — a ticket's withdrawal, a
-merge check — is an outbox entry; a deliverer, a runner whose host holds the credential the effect
+**Outbox, deliverer.** Every git write, check run and ticket-store write Baton intends — a
+ticket's withdrawal, a merge check, the status a ticket store shows — is an outbox entry; a deliverer, a runner whose host holds the credential the effect
 needs and whose grant role the policy admits, delivers it, and Baton confirms it by reading it
-back. Baton itself holds no credential that writes git or posts a check; a workflow dispatch is
+back. Baton itself holds no credential that writes git, posts a check or writes a ticket store; a workflow dispatch is
 its own call, made with the App key it holds (R-BTN-94, R-BTN-171).
 
 **Reply.** Baton's answer to a command or a read: a claim response, a recommendation, a policy

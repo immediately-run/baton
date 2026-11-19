@@ -3314,6 +3314,40 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   each of V2's session-readable GETs, whose convention this row states for the one route that
   has it today. The scenario is S-BTN-235.
 
+- **2026-11-19 — R-BTN-200 and R-BTN-201 added; R-BTN-74, R-BTN-33, R-BTN-69, R-BTN-171,
+  R-BTN-188 and R-BTN-115 amended; S-BTN-237, S-BTN-238, G-BTN-170 and G-BTN-171 added: a ticket
+  source as a reader and a writer, a store that shows Baton's positions, and launchers.**
+  Rules changed: R-BTN-200 (new, §4.7), R-BTN-201 (new, §8.3), R-BTN-74 (the ticket source is a
+  reader and an optional writer; `show` and `note`; `source.writes` in the post; the version
+  contract excludes the writer's own writes; the markdown source exports no `show` or `note`,
+  `changes` is a reader alone), R-BTN-33 (core reads `display.status` for R-BTN-200 too, by
+  equality), R-BTN-69 (the station field `display_status`), R-BTN-171 (the source kinds
+  `source-show` and `source-note`, the `source` delivery class, ordering per class, idempotence
+  and dropping), R-BTN-188 (the knob `outbox.source`), R-BTN-115 (`forge-check` is the one kind
+  written to the forge outside git); also §4.4's post, §4.8's export, §11's `runner start`, §13's
+  `runners.delivers`, `outbox.kind` and the late clock, §14's heartbeat, and G-BTN-154.
+  Driven by an adopter persona: an organization that plans in Linear, talks in Slack and runs
+  agents in Claude Code on the web sessions, prompted by a comparison with a software-factory
+  proposal that used an issue tracker as the human view and a controller that starts hosted
+  sessions. The owner's rulings: tickets may live outside git ("yes", 2026-11-19) — git stays
+  the ledger for the work's evidence, the ticket source becomes the ledger for tickets, and the
+  context pages (`architecture.mdx`, `vocabulary.mdx`, `product.mdx`) say so; Baton steers and
+  the tracker shows (option A, 2026-11-18), status moves made in the tracker steering a few
+  commands later (option B, not specified here); the source's interface named as a reader and
+  a writer (the owner's proposal, 2026-11-18); a status a person sets in the store shown again
+  by a generic core rule rather than left until the next move or caught by tracker code ("b",
+  2026-11-19), which narrows nothing in 2026-11-01's ruling, since a refresh catches no pusher;
+  and a launcher outside Baton for hosted sessions ("a is fine", 2026-11-18). Rejected: the
+  executor starting hosted sessions, since a session started by a provider's trigger offers no
+  `stop` or `end` (R-BTN-107's contract); launches queued as outbox entries, since Baton would
+  decide when work runs (R-BTN-45); R-BTN-85's `position-disagrees` as the drift signal, since it
+  reads the markdown source's `available` alone and lists only on the Sync screen. A tracker
+  source is allowed under `cooperative` alone with no new knob: a `protected` repository never
+  ejects its source (R-BTN-188), and `outbox.source` admits no deliverer there. Slack as a
+  notice channel needs no amendment: a delivery runner already sends Needs you by any channel
+  and core names none (R-BTN-163). Answers taken in Slack, through the tracker, are a later
+  amendment. Design: `docs/plans/duvo-persona-integrations.mdx`.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

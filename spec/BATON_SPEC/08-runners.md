@@ -497,6 +497,25 @@ the runner's credentials under any other executor is that executor's, never Bato
   under an executor whose handle names its session's link (R-BTN-107), it is that link, or a
   page the runner serves that leads a person to the session.
 
+- **R-BTN-201 (a launcher starts sessions; Baton reserves nothing for them).** A **launcher** is
+  a process outside Baton, run by the deployment, that starts runner sessions when there is work
+  for them. It reads `GET /v1/runner/launch-candidates` (R-BTN-99) with a machine key, orders them
+  by the course's `rank.mjs` with `runner: null` (R-BTN-98), and starts each session it decides
+  on by whatever its host offers — a provider's session trigger, a VM, a process — handing the
+  session, as a hint, the ticket and leg it ranked first. Baton records no launch.
+  - **The session decides.** The started session's runner claims with `prefer` naming the hinted
+    ticket (R-BTN-100); refused, it claims what else it is offered, or ends. Nothing is reserved
+    for a launch, and a hint is never a grant.
+  - **The lease stops it.** A launcher needs no way to stop a session: a session whose lease
+    lapses — ended, paused by its host or lost — is fenced (R-BTN-6) and reaped (§9.5).
+  - **Credentials stay with the launcher.** The launcher holds what its starts need, Baton none
+    (R-BTN-53). Where the agent in a session can read the session's runner key, as in a hosted
+    agent session, that key's grant is `runner`, never `trusted-runner` (R-BTN-182).
+  - **A session its host may pause holds no wait on a person.** Its leg that needs a person ends
+    its claim suspended (R-BTN-71) or raises `interact` with the run's session link (R-BTN-195);
+    it does not wait under its claim, which a paused session would hold until its lease lapses
+    (R-BTN-9).
+
 ### 8.4 Where and how a leg runs
 
 - **R-BTN-143 (a runner runs only code the default branch holds).** Before reading any file at a

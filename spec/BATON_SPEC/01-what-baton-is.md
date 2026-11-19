@@ -65,7 +65,8 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   matching (§6) and the dashboard's lists read: id, title, path, course, tier, `requires`,
   expedite, `depends_at`, `parent`, `repos`, rank, the position Baton holds (R-BTN-39), and an
   opaque `display` object core never reads, except its `project` for the ticket's row and its
-  `status` for R-BTN-85's `position-disagrees`. It never stores a body, Status notes, exit
+  `status` for R-BTN-85's `position-disagrees` and R-BTN-200's comparison with the station's
+  `display_status`, by equality alone. It never stores a body, Status notes, exit
   criteria, a PR list or other prose; the dashboard links each ticket to its file on the forge.
   - It may hold **pointers and digests, never content**: a leg's evidence pointer and position,
     input and output URIs and digests (R-BTN-82, R-BTN-83), a leg run's log directory (R-BTN-128),
