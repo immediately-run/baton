@@ -76,8 +76,9 @@ export function retiredScenarioIds(history) {
 
 /** Test files that may stay named for a retired scenario: they still test their (retired) rows,
  *  and B-67 (S-BTN-46, S-BTN-60) deletes them — empty the list then. (B-167 deleted S-BTN-139 and
- *  S-BTN-147 with the ontology and route choices, the spec restructure's part 4.) */
-export const RETIRED_TESTS_ALLOWED = ['S-BTN-46', 'S-BTN-60'];
+ *  S-BTN-147 with the ontology and route choices, the spec restructure's part 4.) B-263 deletes
+ *  S-BTN-218 and S-BTN-219 with signed control, retired 2026-11-19. */
+export const RETIRED_TESTS_ALLOWED = ['S-BTN-46', 'S-BTN-60', 'S-BTN-218', 'S-BTN-219'];
 
 /** The scenario a test file is named for (`S-BTN-2.silent-runner.test.ts` → `S-BTN-2`), if any. */
 export function fileScenario(name) {

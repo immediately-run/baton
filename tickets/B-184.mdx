@@ -47,8 +47,8 @@ the spec*), with the owner's approval; the implementing PR builds what that PR s
 [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8)); `docs/context/architecture.mdx` (*Parallelism is
 horizontal*); `docs/security-model.mdx` (reach 1, options 17 and 19).
 **Depends on:** B-185 (a handle is keyed by the run id). B-186 defines `salvage`; until it lands,
-an executor's `salvage` may return null. B-127 (owner-signed control) is needed only for the `home-signed` source;
-until it lands, `home-signed` is refused at start with a message naming B-127.
+an executor's `salvage` may return null. ~~B-127 (owner-signed control) is needed only for the `home-signed` source;
+until it lands, `home-signed` is refused at start with a message naming B-127.~~
 **Used by:** B-189 (trusted runners; forge actions), Fieldhouse's sandbox executor (FIELDHOUSE_SPEC section 5). Overlaps B-139, B-141, B-185 and
 B-186 (below).
 
@@ -89,8 +89,8 @@ B-186 (below).
    `baton runner start --executor <source>`; never a repository file:
    - `builtin` (default, no configuration): today's `process` mode, legs as child processes;
    - `home`: the home's `.baton/executor.mjs` at the claim's snapshot;
-   - `home-signed`: the same, only at a commit an owner key signed (B-127's walk, the file added to
-     its control inputs); refused at start until B-127 lands;
+   - ~~`home-signed`: the same, only at a commit an owner key signed (B-127's walk, the file added to
+     its control inputs); refused at start until B-127 lands;~~
    - `pinned:<path>@sha256:<digest>`: a bundle on the host (a directory or archive whose digest
      covers every file in it, by a stated canonical listing), loaded only when it matches, with
      imports resolved only inside the bundle.
@@ -272,8 +272,8 @@ B-186 (below).
   end to end exactly as `process` mode does today.
 - `home`: a home's `.baton/executor.mjs` starts the leg; a runner configured `builtin` ignores the
   same file and logs that it did.
-- `home-signed`: refused at start with B-127 named while B-127 is unbuilt; once built, an unsigned
-  change to `.baton/executor.mjs` keeps the last signed version in force.
+- ~~`home-signed`: refused at start with B-127 named while B-127 is unbuilt; once built, an unsigned
+  change to `.baton/executor.mjs` keeps the last signed version in force.~~
 - `pinned`: a module whose bytes do not match the digest is refused at start.
 - Repository code: a leg script's `close` and `handoff`, a ticket source's `read`, a course's
   `sync.mjs` and an install each execute through a recording executor's `exec` with the right kind
@@ -306,3 +306,5 @@ _filed 2026-11-08._
 - 2026-11-09: the spec half is drafted on `claude/B-184-executor-spec` (R-BTN-107 rewritten as the executor rule). The owner settled two choices for it: check legs require `checks:withheld-credentials`, declared only from an executor's `provides` (R-BTN-114); and a leg's agent command is the first present of the home's `legs.<course>.<leg>.agent_command`, the course file's per-leg `agent_command`, the home's top-level `agent_command` (a permanent default) and the `--harness` fill (R-BTN-131) — item 6's "dual-read window" is superseded.
 
 _(2026-11-14: rules re-read: R-BTN-107. Its `end` now also resolves a joinable session at the result posted on the channel (R-BTN-195); the interface item says so.)_
+
+_(2026-11-19: rules re-read: R-BTN-107, R-BTN-133. The `home-signed` source is retired with signed control (`spec/BATON_SPEC_HISTORY.md`, that date): R-BTN-107's sources are `builtin`, `home` and `pinned`. The three clauses that define it are struck; wherever else the plan names `home-signed` beside `home`, read `home` alone. A policy may now refuse `builtin` (`executor.builtin`, R-BTN-188; B-264 builds it).)_

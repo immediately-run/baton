@@ -102,7 +102,7 @@ is stale. Never edit it by hand.
 | | 12.5 The local host and bearers | R-BTN-158 |
 | | 12.6 Capability roles and links | R-BTN-157 |
 | | 12.7 Baton's GitHub App | — |
-| | 12.8 The repository policy and its guarantees *(proposal — B-127, B-131, B-133, B-136, B-137, B-139, B-140, B-145, B-146, B-147)* | R-BTN-188, R-BTN-189, R-BTN-180, R-BTN-181, R-BTN-191, R-BTN-192, R-BTN-182, R-BTN-183, R-BTN-184, R-BTN-185, R-BTN-186, R-BTN-187 |
+| | 12.8 The repository policy and its guarantees *(proposal — B-131, B-133, B-136, B-137, B-139, B-140, B-145, B-146, B-147)* | R-BTN-188, R-BTN-189, R-BTN-180, R-BTN-181, R-BTN-191, R-BTN-192, R-BTN-182, R-BTN-183, R-BTN-184, R-BTN-185, R-BTN-186, R-BTN-187 |
 | | 12.9 A leg's scope *(B-134)* | — |
 | [`13-data-model.md`](BATON_SPEC/13-data-model.md) | **13. Data model** | — |
 | | 13.1 Repositories, courses and tenant settings | — |
@@ -485,8 +485,6 @@ is stale. Never edit it by hand.
 | S-BTN-215 | code repository settings refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-216 | the ids decide for a code repository | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-217 | pushers across hosts | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-218 | owner-signed briefs and the control record (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-219 | require_signed_control (B-127) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-220 | ticket provenance (B-126) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-221 | the screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-222 | an interaction request | [`15-verification.md`](BATON_SPEC/15-verification.md) |
@@ -506,6 +504,8 @@ is stale. Never edit it by hand.
 | S-BTN-236 | runner names (B-68) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-237 | a ticket source that shows positions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-238 | a launcher | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-239 | a control path changed outside a course | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-240 | unlisted repositories and the `builtin` executor are the policy's | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 
@@ -660,3 +660,4 @@ is stale. Never edit it by hand.
 | G-BTN-169 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-170 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-171 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-172 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
