@@ -1,0 +1,57 @@
+---
+title: "B-273 — A forge is one table entry on each side: FORGE_SHAPES in core, a ForgeClient per forge in course code"
+id: B-273
+project: baton
+status: available
+updated: 2026-11-19
+tags:
+  - roadmap-item
+description: "Five forge lists and GitHub knowledge in about 20 files become one shape table in core and one client per forge in src/defaults; create-pr runs against a Gitea fake with no gh"
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**What:** a git forge has no contract. Five separate lists name the forges, GitHub knowledge sits
+in about 20 files, and the standard pull-request courses write through `gh`. Make a forge one
+table entry in core and one client in course code.
+
+From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
+
+### What to build
+
+1. `src/core/forges.ts`: `FORGE_SHAPES: Record<Forge, ForgeShape>` — path depth, pull-request
+   URL shape, blob URL, default web base, CI identity — read by `links.ts`, `registry.ts` and
+   `codeRepos.ts`. One `PR_URL` pattern.
+2. `src/defaults/forges/`: a `ForgeClient` per forge with `openPr`, `listOpenPrs`, `comment`,
+   `facts` (returning `PrFact[]`) and `protectedRefusal`, chosen from the repository's registered
+   forge. `pr-close`, `pr-verify` and `tickets new` go through it.
+3. Rename the dispatch port's `github` field to the forge-neutral name.
+
+Coordinate with R3-1263, which adds dispatch adapters per forge: one table, not two.
+
+**Done when:** no forge literal exists in `src/` outside the two tables and the migrations;
+`create-pr` runs against a Gitea fake with no `gh` on `PATH`; one contract test runs every
+client.
+
+### Trust
+
+A `ForgeClient` reads a forge's answers (pull-request state, reviews, check runs), which are
+written by whoever can write to the forge. They stay facts weighed by their writer, as now: the
+client parses and bounds them and decides nothing. The client uses the runner's own forge
+credential; Baton gains none.
+
+### Invariants
+
+- [BATON_SPEC §5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-190](../spec/BATON_SPEC/05-courses.md#sec-5-8)): where leg state lives is decided by the repository's `forge`,
+  not by a policy knob.
+- Baton holds no credential that writes git or posts a check (the architecture page's "one
+  outbound path for effects").
+- Core imports nothing from `src/defaults/`: the shape table is core's, the clients are course
+  code.
+
+## Status
+
+_filed 2026-11-19._

@@ -1,0 +1,54 @@
+---
+title: "B-277 — Check the spec's second copies: check:api for routes and schema, retired ids, paths and script names"
+id: B-277
+project: baton
+status: available
+updated: 2026-11-19
+tags:
+  - roadmap-item
+description: "Compare section 14 with the routes served and section 13 with the migrated tables behind shrink-only lists; a retired id cited in code is an error; every backticked path and npm script named in the docs exists"
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**What:** the spec restates the code in three places and nothing compares them. The route table
+of [BATON_SPEC §14](../spec/BATON_SPEC/14-api.md#sec-14) lists 113 paths where the code serves about 73; [§13](../spec/BATON_SPEC/13-data-model.md#sec-13)'s schema and the command
+tree differ from the code by dozens of entries; the spec names two npm scripts that do not exist
+(`check:actions`, `test:load`).
+
+From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
+
+### What to build
+
+1. `check:api`: compare §14 with the routes the core serves and §13 with the tables the
+   migrations produce. Each comparison has two explicit lists that may only shrink: specified and
+   not built; built and not specified.
+2. A retired rule id cited in code is an error, behind an allowlist that may only shrink.
+3. Check each `§n R-BTN-m` pair against the index.
+4. Extend `check:wiki`: every backticked repository path and `npm run` name in the README,
+   `AGENTS.md`, the context pages and the spec exists.
+5. `spec:impact` also lists the code and tests that cite a changed rule.
+6. Run `node scripts/link-spec-refs.mjs --check` with them; it fails on `main` today on three
+   pages.
+
+**Done when:** `npm test` runs all of it, and `check:actions` and `test:load` either exist or
+are not named. Adding the job to hosted CI is a workflow edit: the owner's to land.
+
+### Trust
+
+No new input: every check reads the repository's own files. The allowlists are the risk — an
+entry is a recorded exception, so each names its ticket, and the lists may only shrink.
+
+### Invariants
+
+- One home per statement: where the spec and the code state the same table, one is generated
+  from the other or the difference is listed by name.
+- [BATON_SPEC §15](../spec/BATON_SPEC/15-verification.md#sec-15) ([R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15)): the checks join `npm test`, which stays green and stays within its
+  five to seven minutes.
+
+## Status
+
+_filed 2026-11-19._
