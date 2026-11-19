@@ -30,9 +30,9 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   derived and says so. A claim status a mirror writes to git (§16) says a claim exists; Baton
   says who holds it.
 
-  | Git: the home repository, and the repositories and PRs its course reads | Baton |
+  | Git: the home repository, and the repositories and PRs its course reads; and the ticket source's store (R-BTN-74), git by default | Baton |
   |---|---|
-  | ticket files, bodies, Status notes, ids, statuses, closure; tags such as `EXPEDITE` | each live ticket's filter fields (R-BTN-33), as a cache; each ticket's course history and position (R-BTN-39), which git never writes |
+  | tickets — ticket files in the default store — bodies, Status notes, ids, statuses, closure; tags such as `EXPEDITE` | each live ticket's filter fields (R-BTN-33), as a cache; each ticket's course history and position (R-BTN-39), which git never writes |
   | leg evidence: commits, branches, PRs, checks, reviews, closing markers, hand-off documents, a person's answer in git | claims, leases, activities, history, events; attestations (R-BTN-181) |
   | `.baton/`: courses, ticket source, station functions, ranking code, condition bindings; course data | the course registry and each course's opaque data, as posted |
   | transcripts | pointers to them |
@@ -67,7 +67,7 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   opaque `display` object core never reads, except its `project` for the ticket's row and its
   `status` for R-BTN-85's `position-disagrees` and R-BTN-200's comparison with the station's
   `display_status`, by equality alone. It never stores a body, Status notes, exit
-  criteria, a PR list or other prose; the dashboard links each ticket to its file on the forge.
+  criteria, a PR list or other prose; the dashboard links each ticket that has a `path` to its file on the forge.
   - It may hold **pointers and digests, never content**: a leg's evidence pointer and position,
     input and output URIs and digests (R-BTN-82, R-BTN-83), a leg run's log directory (R-BTN-128),
     `session_url`, transcript pointers, `closed_tickets`' final station and path, and the
@@ -98,7 +98,7 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
     not caught up with, or a station or leg the course file lacks (R-BTN-64) leave the claim
     alone. A new version of a held ticket leaves the claim alone too: R-BTN-198 says what the
     runner does with it, after R-BTN-5's check at the claim's version.
-  - A ticket gone from git loses its `tickets` row; its claims, events and course history stay.
+  - A ticket gone from its source loses its `tickets` row; its claims, events and course history stay.
 - **R-BTN-39 (where a ticket is: Baton's course history).** Baton is the one authority on a
   ticket's course history (R-BTN-81) and on its position: its station, its path (the legs run,
   each with the station it reached) and its queued leg (R-BTN-83). Git never writes them: no

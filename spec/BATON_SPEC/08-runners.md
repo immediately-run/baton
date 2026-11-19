@@ -503,18 +503,26 @@ the runner's credentials under any other executor is that executor's, never Bato
   by the course's `rank.mjs` with `runner: null` (R-BTN-98), and starts each session it decides
   on by whatever its host offers — a provider's session trigger, a VM, a process — handing the
   session, as a hint, the ticket and leg it ranked first. Baton records no launch.
-  - **The session decides.** The started session's runner claims with `prefer` naming the hinted
-    ticket (R-BTN-100); refused, it claims what else it is offered, or ends. Nothing is reserved
-    for a launch, and a hint is never a grant.
+  - **The launcher bounds itself.** It keeps its own record of the starts it made whose session
+    has not yet claimed, and launches again for a candidate only after that record expires; it
+    bounds its concurrent starts by its host's limits, which Baton does not know. It runs
+    `rank.mjs` as R-BTN-98 says, through an executor, never in the process that holds its start
+    credentials.
+  - **The session decides.** The started session's runner reads the hint as a ticket id and a
+    leg alone, and never hands it to the agent; it claims with `prefer` naming that ticket
+    (R-BTN-100) and, refused, claims what else it is offered, or ends. Nothing is reserved for a
+    launch, and a hint is never a grant.
   - **The lease stops it.** A launcher needs no way to stop a session: a session whose lease
     lapses — ended, paused by its host or lost — is fenced (R-BTN-6) and reaped (§9.5).
   - **Credentials stay with the launcher.** The launcher holds what its starts need, Baton none
     (R-BTN-53). Where the agent in a session can read the session's runner key, as in a hosted
-    agent session, that key's grant is `runner`, never `trusted-runner` (R-BTN-182).
-  - **A session its host may pause holds no wait on a person.** Its leg that needs a person ends
-    its claim suspended (R-BTN-71) or raises `interact` with the run's session link (R-BTN-195);
-    it does not wait under its claim, which a paused session would hold until its lease lapses
-    (R-BTN-9).
+    agent session, that key is an API key (R-BTN-159), so the session never syncs or delivers,
+    and its grant is `runner`, never `trusted-runner` (R-BTN-182), on the repositories the
+    deployment scopes it to.
+  - **A session its host may pause.** Its runner declares the lowest lease timeout (R-BTN-9). A
+    leg there that needs a person raises `suspend` with `wait_s: 0` (R-BTN-162), so its claim
+    ends suspended at once (R-BTN-71), and never `interact`, whose session stays running for the
+    person (R-BTN-195).
 
 ### 8.4 Where and how a leg runs
 

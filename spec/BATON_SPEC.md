@@ -205,7 +205,7 @@ is stale. Never edit it by hand.
 | R-BTN-85 | every disagreement with git is logged | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-86 | tickets are sequential; child tickets are how work runs in parallel | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-87 | the capacity envelope: one Baton per team, not sharded | [`02-deployments.md`](BATON_SPEC/02-deployments.md) |
-| R-BTN-88 | owner state and course history are exportable; git holds the work | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
+| R-BTN-88 | owner state and course history are exportable; the ticket source and git hold the work | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-89 | a queued leg may wait for a time | [`06-prerequisites-blocks-advice.md`](BATON_SPEC/06-prerequisites-blocks-advice.md) |
 | R-BTN-90 | the deadline in a claim | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-91 | the doorbell: a ring, while the heartbeat stays the truth | [`08-runners.md`](BATON_SPEC/08-runners.md) |
@@ -274,7 +274,7 @@ is stale. Never edit it by hand.
 | R-BTN-158 | the local host, and bearers over `http` | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-159 | an SSH key or an API key, the holder's choice | [`11-people.md`](BATON_SPEC/11-people.md) |
 | R-BTN-160 | conditions: typed, declared, raised by any leg | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
-| R-BTN-161 | bindings choose a handler course; the handler is a ticket file | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
+| R-BTN-161 | bindings choose a handler course; the handler is a ticket | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-162 | a suspended leg waits in its claim, then blocks; it resumes with a restart | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-163 | the debugger: unhandled conditions, waiting people, and core's own | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |
 | R-BTN-165 | a call leg runs a course and waits for it | [`07-conditions.md`](BATON_SPEC/07-conditions.md) |

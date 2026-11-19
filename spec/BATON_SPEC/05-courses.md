@@ -122,7 +122,7 @@ mean (R-BTN-50).
   | `capability_types`, `capability_roles` | course | the capability types its legs may require, and named lists of capabilities | R-BTN-121 |
   | `rank_advice`, `rank_launch` | course | schema ids (R-BTN-108) that `rank.mjs`'s `advice` and `launch` must meet; absent, they are dropped | R-BTN-152 |
   | `label` | station, leg | display text | — |
-  | `display_status` | station | the status a ticket source's writer shows people for a ticket at this station (`show`, R-BTN-74): a string of 1–64 characters, compared by equality with the posted `display.status`, never otherwise read | R-BTN-200 |
+  | `display_status` | station | the status a ticket source's writer shows people for a ticket at this station (`show`, R-BTN-74): a string of 1–64 characters naming a status the source's reader posts as live | R-BTN-74, R-BTN-200 |
   | `renamed_from` | station, leg | the earlier name this one carries over | R-BTN-64, R-BTN-142 |
   | `entry` | station | outputs any leg arriving here must have produced | R-BTN-109 |
   | `from` | leg | the stations it leaves | R-BTN-69 |

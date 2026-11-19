@@ -154,7 +154,7 @@ Limits that hold throughout:
     attempt (R-BTN-90).
 ### 7.2 Handlers
 
-- **R-BTN-161 (bindings choose a handler course; the handler is a ticket file).**
+- **R-BTN-161 (bindings choose a handler course; the handler is a ticket).**
   - **Binding.** A binding maps a type prefix to a course id, for example
     `"conditions": {"hitl": "ask", "warning": "announce"}`; for an `error` type the value may be `{"course":
     <id>, "replaces": "retry"}` (R-BTN-122). It is written in one of two scopes:
@@ -177,11 +177,11 @@ Limits that hold throughout:
     (R-BTN-195), and so is a binding of `baton` or `baton.*`: Baton's own conditions are delivered
     from Baton's list, never through a ticket (R-BTN-163).
   - **The handler ticket.**
-    - The runner writes the handler ticket git first, through the ticket source's `file(ticket)`
-      export (R-BTN-74; the markdown source writes `<items>/<local id>.md`), its id one Baton
-      itself names — the raising ticket's id and its own count of conditions raised, never a
-      scan (R-BTN-131). It pushes the file
-      before the raise returns or the leg ends. Under the policy's `tickets.created: proposed`
+    - The runner writes the handler ticket to the ticket source first, through its `file(ticket)`
+      export (R-BTN-74; the markdown source writes and pushes `<items>/<local id>.md`), its id one
+      Baton itself names — the raising ticket's id and its own count of conditions raised, never a
+      scan (R-BTN-131). It is written before the raise returns or the leg ends; on a source with
+      no `file`, the raise fails, naming the export. Under the policy's `tickets.created: proposed`
       (R-BTN-188) the handler ticket is proposed, not filed: the runner writes it on
       `baton/proposed/<ticket>`, and it is not claimable until it lands with a `std:approval@1`
       (R-BTN-180).
@@ -496,8 +496,8 @@ Limits that hold throughout:
     planned one is a person's leg (R-BTN-116), one from inside a leg a `suspend` raise
     (R-BTN-162).
   - **What the script does.**
-    - The script runs as any leg's does and writes the children git first, through the source's
-      `file` export, each child's id taken as R-BTN-131's allocator says. Each child names a course its `spawns` allows and `called_by: {leg, run}`.
+    - The script runs as any leg's does and writes the children to the ticket source first,
+      through its `file` export, each child's id taken as R-BTN-131's allocator says. Each child names a course its `spawns` allows and `called_by: {leg, run}`.
       Under the policy's `tickets.created: proposed` (R-BTN-188) the children are proposed, not
       filed, and not claimable until they land with a `std:approval@1` (R-BTN-180).
     - The script then returns `spawned` (R-BTN-86).
@@ -586,11 +586,13 @@ Limits that hold throughout:
     holding its capabilities claims it like any leg. In the transaction that records the run's
     `done` end at the leg's end station (confirmed by acceptance alone, R-BTN-10), or at once for a
     course with no `cancel` leg leaving the station, Baton closes the ticket:
-    - a ticket with a file still live in git waits for its withdrawal: Baton queues the
-      `withdraw` outbox entry (R-BTN-171) and the ticket closes `withdrawn` when a snapshot posts
-      it withdrawn or closed;
-    - a ticket withdrawn in git already, or one with no file, closes `withdrawn` at once.
-  - **Withdrawn in git first.** A ticket a snapshot posts withdrawn whose course names a `cancel`
+    - a ticket still live in its source waits for its withdrawal: where the post's
+      `source.writes` names `withdraw`, Baton queues the `withdraw` outbox entry (R-BTN-171);
+      where it does not, the ticket waits for its store's own closure, shown on its view. It
+      closes `withdrawn` when a snapshot posts it withdrawn or closed;
+    - a ticket withdrawn in its source already, or one its source no longer posts, closes
+      `withdrawn` at once.
+  - **Withdrawn in the source first.** A ticket a snapshot posts withdrawn whose course names a `cancel`
     leg leaving its station, and whose path ran a leg that leg undoes (any leg whose `to` the
     cancel leg leaves), is kept live and `cancelling`: its board rows stay (§13), the `closed`
     entry is kept and applied when the cancel leg's run ends, and no snapshot stales the leg's
@@ -617,12 +619,15 @@ Limits that hold throughout:
     |---|---|---|---|---|
     | `withdraw` | the withdrawal of a cancelled ticket (R-BTN-168), through the source's `withdraw(ticket, reason)` export (the markdown source sets `status: withdrawn` and `withdrawn_reason`) | a log, per ticket | a snapshot shows the ticket withdrawn or closed | not confirmed 24 hours after it was queued |
     | `forge-check` | a check run on a change's head (R-BTN-114, R-BTN-115) | the latest, per `(repository, sha, name)` | the sync reads the run back (R-BTN-115) | not delivered 15 minutes after it was queued |
-    | `source-show` | a station's `display_status` to a ticket store (R-BTN-200), through the source's `show(ticket, value)` | the latest, per ticket: queuing one drops the ticket's older `queued` one | the first accepted snapshot after its delivery posts the ticket's `display.status` equal to its value; one that posts another value drops it, and R-BTN-200 judges that snapshot afresh | not delivered 15 minutes after it was queued |
+    | `withdraw` on a custom source | as above, through the source's own `withdraw` export, to its store (git for an ejected markdown source) | a log, per ticket | as above | as above |
+    | `source-show` | a station's `display_status` to a ticket store (R-BTN-200), through the source's `show(ticket, value)` | the latest, per ticket | as R-BTN-200 says | not delivered 15 minutes after it was queued |
     | `source-note` | a note for people on the ticket (R-BTN-200), through the source's `note(ticket, {entry, reason, station})` | a log, per ticket | at its delivery: no snapshot carries a note | not delivered 24 hours after it was queued |
 
-    `withdraw` is the one **git kind**: Baton files no ticket of its own (R-BTN-163). The two
-    `source-` kinds are the **source kinds**, written to whatever store the ticket source reads.
-    The kinds make three **delivery classes**: `git`, `forge-check` and `source`.
+    `withdraw` on the markdown source is the one **git kind**: Baton files no ticket of its own
+    (R-BTN-163). The **source kinds** — `withdraw` on a custom source (`source.kind: custom`,
+    §4.4) and the two `source-` kinds — are written through the source's own code to whatever
+    store it reads. The kinds make three **delivery classes**: `git`, `forge-check` and `source`.
+    Queuing a `withdraw` drops the ticket's `queued` `source-show` and `source-note` entries.
   - **Deliverers are runners.** No key role exists for delivery (the owner, 2026-11-01, "Couriers
     into runners"): a runner that holds the credential declares the classes it delivers in its
     heartbeat (`delivers: [git | forge-check | source]`, nothing by default; kept in `runners.delivers`,
@@ -637,18 +642,20 @@ Limits that hold throughout:
       admit, `forbidden` with the unmet knob.
     - The credential the effect needs lives only on the deliverer's host, never in Baton: push
       access to the repository for `git`, the check App's private key for `forge-check`
-      (R-BTN-115), the ticket store's write credential for `source`.
+      (R-BTN-115), and for `source` the credential the source's store needs — push access for an
+      ejected markdown source, a tracker's write token for a tracker.
+    - Admitting `runner` for `source` lets a runner holding that credential withhold a show or a
+      note, or mark a note delivered unwritten. A show it fakes is caught as unconfirmed
+      (R-BTN-200).
     - **Woken, not polling.** A deliverer's doorbell socket (R-BTN-91) is rung `outbox` when an
       entry of a class it delivers is queued on a repository it serves; it then claims at once.
     - Admitting `runner` for `forge-check` lets any granted runner withhold a check. It still
       cannot post one Baton did not issue unseen (R-BTN-115).
-    - **A trusted-runner deliverer runs no repository code.** It never loads the source's
-      `withdraw` export: it writes from the CLI's own markdown-source templates. On a
-      repository whose ticket source is ejected (`.baton/tickets.mjs`), Baton offers a git entry
-      to no `trusted-runner` grant, since it would write from a template the source does not use:
-      the entry waits for a `runner` deliverer, and a policy admitting none there is refused
-      (R-BTN-188). It never delivers a `source` entry, which only the source's own `show` or
-      `note` can write: the policy's `outbox.source` admits `runner` alone (R-BTN-188).
+    - **A trusted-runner deliverer runs no repository code.** It never loads the source's code:
+      it writes from the CLI's own markdown-source templates, so it delivers no source entry,
+      which only the source's own code can write. Every outbox write of a custom source
+      (`.baton/tickets.mjs`, an ejected markdown source included) is a source entry, waiting for
+      a `runner` deliverer; a policy admitting none there is refused (R-BTN-188).
   - **Claiming and marking.**
     - `POST /v1/runner/outbox/claim {limit?}` claims up to 50 queued entries, each leased for 10
       minutes, of the classes the caller declared and the `outbox` policy of each repository its
@@ -658,12 +665,14 @@ Limits that hold throughout:
       tickets or classes are unordered.
     - `POST /v1/runner/outbox/{repository}/{id}` marks one: `delivered` with its `ref`, or
       `failed` with `transient` or `refused`. `failed` is a mark, not a state: the entry returns to
-      `queued`, after a backoff for `transient` and with its ticket held for `refused`.
+      `queued`, after a backoff for `transient` and, for a git or forge-check entry, with its
+      ticket held for `refused`, as for a source `withdraw`; a `source-show` or `source-note` marked
+      `refused` is R-BTN-200's.
     - A lapsed lease re-queues the entry. A mark arriving after its lease lapsed is accepted. A mark
       from any credential but the claimer is `forbidden`. An entry the claimer leaves unmarked goes
       back to `queued` when its lease lapses.
     - `transient` re-queues the entry after 1, 5 and 30 minutes, then hourly.
-    - `refused` (the forge refused the deliverer's credential, a misconfiguration) holds the entry's
+    - `refused` on a `withdraw` or `forge-check` entry (the forge or store refused the deliverer's credential, a misconfiguration) holds the entry's
       ticket (`hold_reason: outbox-refused`) and raises `baton.outbox-late` naming the deliverer,
       until the deliverer is fixed and the hold lifted by an approver on `approvers.policy`
       (R-BTN-186, R-BTN-188), which queues the entry again.
@@ -678,14 +687,13 @@ Limits that hold throughout:
       then marks the entry `failed` with `transient`.
     - `forge-check`: the check run's `external_id` carries the id, and R-BTN-115's `seq` keeps an
       older entry from overwriting a newer one.
-    - `source-show` sets a value, so a repeat writes the same status again. `source-note` hands
-      `note` its entry id, so a source that can find its earlier notes writes each once; one that
-      cannot may note twice.
+    - `source-show` sets a value, so a repeat writes the same status again; `source-note` hands
+      `note` its entry id, which `note` writes once (R-BTN-74).
   - **What Baton holds until a git entry is confirmed.**
     - **Withdraw entry.** The cancelled ticket stays `cancelling` (R-BTN-168) until a snapshot
       posts it withdrawn or closed, which closes it `withdrawn`.
-    - **Delivered, not confirmed.** A `delivered` entry is never claimed again. An entry still not
-      `confirmed` after 3 accepted snapshots at or after its commit raises `baton.outbox-late`; a
+    - **Delivered, not confirmed.** A `delivered` entry is never claimed again. A `withdraw` entry still not
+      `confirmed` after 3 accepted snapshots at or after its delivery raises `baton.outbox-late`; a
       `withdraw` entry's ticket, already `cancelling` (R-BTN-168), stays so, and the condition's
       `retry` queues the entry again.
   - **Dropping.** A `withdraw` entry for a ticket whose course names a `cancel` leg is queued in
@@ -697,7 +705,7 @@ Limits that hold throughout:
     - Queuing, delivering and confirming each log an `outbox {id, kind, state}` event in the
       ticket's history.
     - An entry late by its kind's column above raises `baton.outbox-late` (R-BTN-163) with its
-      `kind`; for `forge-check` the change stays pending.
+      `kind`, a late `source-show` or `source-note` being R-BTN-200's; for `forge-check` the change stays pending.
   - **Not in the outbox.** Positions that start in Baton are Baton's (R-BTN-39), held until the
     station changes: a call's settlement (R-BTN-165), a person leg's expiry (R-BTN-116), an
     `exhausted` leg (R-BTN-122) and the `cancel` leg (R-BTN-168). Messages to runners ride the

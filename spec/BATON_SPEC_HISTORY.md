@@ -3314,18 +3314,31 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   each of V2's session-readable GETs, whose convention this row states for the one route that
   has it today. The scenario is S-BTN-235.
 
-- **2026-11-19 — R-BTN-200 and R-BTN-201 added; R-BTN-74, R-BTN-33, R-BTN-69, R-BTN-171,
-  R-BTN-188 and R-BTN-115 amended; S-BTN-237, S-BTN-238, G-BTN-170 and G-BTN-171 added: a ticket
-  source as a reader and a writer, a store that shows Baton's positions, and launchers.**
+- **2026-11-19 — R-BTN-200 and R-BTN-201 added; R-BTN-1, R-BTN-33, R-BTN-35, R-BTN-69, R-BTN-74,
+  R-BTN-85, R-BTN-86, R-BTN-88, R-BTN-115, R-BTN-161, R-BTN-165, R-BTN-168, R-BTN-171, R-BTN-188
+  and R-BTN-189 amended; S-BTN-237, S-BTN-238, G-BTN-170 and G-BTN-171 added: a ticket source as
+  a reader and a writer, a store that shows Baton's positions, and launchers.**
   Rules changed: R-BTN-200 (new, §4.7), R-BTN-201 (new, §8.3), R-BTN-74 (the ticket source is a
-  reader and an optional writer; `show` and `note`; `source.writes` in the post; the version
-  contract excludes the writer's own writes; the markdown source exports no `show` or `note`,
-  `changes` is a reader alone), R-BTN-33 (core reads `display.status` for R-BTN-200 too, by
-  equality), R-BTN-69 (the station field `display_status`), R-BTN-171 (the source kinds
-  `source-show` and `source-note`, the `source` delivery class, ordering per class, idempotence
-  and dropping), R-BTN-188 (the knob `outbox.source`), R-BTN-115 (`forge-check` is the one kind
-  written to the forge outside git); also §4.4's post, §4.8's export, §11's `runner start`, §13's
-  `runners.delivers`, `outbox.kind` and the late clock, §14's heartbeat, and G-BTN-154.
+  reader and an optional writer; `show` and `note`; `source.writes` in the post, §4.4; `read`
+  returns no status or note, and the version contract excludes the writer's own writes; the
+  markdown source writes `[file, withdraw]`, `changes` is a reader alone), R-BTN-1 (tickets live
+  in the ticket source's store, git by default), R-BTN-33 (core reads `display.status` for
+  R-BTN-200 too; the dashboard links a ticket with a `path`), R-BTN-35 (a ticket gone from its
+  source), R-BTN-69 (the station field `display_status`), R-BTN-85 (the subs
+  `display-unconfirmed` and `display-unwritable`), R-BTN-86, R-BTN-161 and R-BTN-165 (children
+  and handler tickets are written to the ticket source, not git; a raise on a source with no
+  `file` fails), R-BTN-88 (tickets rebuilt from the ticket source and git; source entries not
+  exported), R-BTN-168 (a cancel on a source with no `withdraw` waits for the store's closure),
+  R-BTN-171 (the source kinds — `source-show`, `source-note` and a custom source's `withdraw` —
+  and the `source` class; ordering per class; a queued `withdraw` drops the ticket's queued
+  source entries; refusal and lateness of `source-show` and `source-note` are R-BTN-200's; the
+  withhold caveat), R-BTN-188 (the knob `outbox.source`; an ejected source needs a deliverer on
+  `outbox.source`, no longer on `outbox.git`), R-BTN-189 (`tickets-approved` needs the markdown
+  source), R-BTN-115 (`forge-check` is the one kind written to the forge outside git); also the §4
+  lede, R-BTN-127's `runner start` row, §13 (`board_head.source_writes`,
+  `tickets.display_refresh`, `outbox.kind`, `fields`, `delivered_ref`, the late clock), §14's
+  heartbeat and outbox claim, G-BTN-154, G-BTN-156, and the Decisions on git as the home of
+  ticket content, the two exceptions to core reading opaque values, and the outbox.
   Driven by an adopter persona: an organization that plans in Linear, talks in Slack and runs
   agents in Claude Code on the web sessions, prompted by a comparison with a software-factory
   proposal that used an issue tracker as the human view and a controller that starts hosted
@@ -3337,16 +3350,33 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   a writer (the owner's proposal, 2026-11-18); a status a person sets in the store shown again
   by a generic core rule rather than left until the next move or caught by tracker code ("b",
   2026-11-19), which narrows nothing in 2026-11-01's ruling, since a refresh catches no pusher;
-  and a launcher outside Baton for hosted sessions ("a is fine", 2026-11-18). Rejected: the
-  executor starting hosted sessions, since a session started by a provider's trigger offers no
-  `stop` or `end` (R-BTN-107's contract); launches queued as outbox entries, since Baton would
-  decide when work runs (R-BTN-45); R-BTN-85's `position-disagrees` as the drift signal, since it
-  reads the markdown source's `available` alone and lists only on the Sync screen. A tracker
-  source is allowed under `cooperative` alone with no new knob: a `protected` repository never
-  ejects its source (R-BTN-188), and `outbox.source` admits no deliverer there. Slack as a
-  notice channel needs no amendment: a delivery runner already sends Needs you by any channel
+  and a launcher outside Baton for hosted sessions ("a is fine", 2026-11-18). The markdown
+  source exports no `show`, since a status written into git for people to read would bring back
+  the status-in-git pattern R-BTN-193 retires. Rejected: the executor starting hosted sessions,
+  since a session started by a provider's trigger offers no `stop` or `end` (R-BTN-107's
+  contract); launches queued as outbox entries, since Baton would decide when work runs
+  (R-BTN-45); R-BTN-85's `position-disagrees` as the drift signal, since it reads the markdown
+  source's `available` alone. A tracker source stays off `protected` with no new knob:
+  `outbox.source` admits no deliverer there, and an ejected source needs one (R-BTN-188); and
+  `tickets-approved` now requires the markdown source, whose tickets are files a human lands.
+  Slack as a notice channel needs no amendment: a delivery runner sends Needs you by any channel
   and core names none (R-BTN-163). Answers taken in Slack, through the tracker, are a later
   amendment. Design: `docs/plans/duvo-persona-integrations.mdx`.
+  Review: two adversarial reviews of the first draft, one for consistency and one for mechanism,
+  found, among others, that a refused or late status write held the ticket and raised a
+  condition; that the snapshot a move's own sync started read the store before the show was
+  delivered and posted a false drift and note; that a value the reader never posts back looped
+  forever; that the recommended `<updatedAt>:<digest>` version moved on the source's own
+  writes; that `show` could close a ticket and an unordered `withdraw` could be undone by a
+  later show; that a tracker source's `withdraw` was still a git write; that nothing bounded a
+  launcher's repeat starts or kept the hint out of the agent's prompt; that `interact` still
+  waits under a claim a paused session cannot hold; and that R-BTN-1, R-BTN-35, R-BTN-86,
+  R-BTN-88, R-BTN-161 and a Decision still placed tickets in git. Each is fixed above: judging
+  only snapshots observed after the delivery, three unconfirmed deliveries then a Sync-screen
+  discrepancy, refused or late source writes dropped, `read` free of status and notes, `show`
+  refusing a closing value, `withdraw` dropping queued source entries in the same class, the
+  launcher's own start record, an API key for agent-readable sessions, and suspend at once on a
+  host that pauses.
 
 ## Retired requirements
 

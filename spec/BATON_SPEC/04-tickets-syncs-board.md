@@ -5,10 +5,10 @@ description: "A repository describes itself in its .baton/ folder."
 ## 4. Tickets, syncs and the board *(proposal)*
 
 A repository describes itself in its `.baton/` folder. Its **sync** — `baton repo sync`, run by
-a CI workflow, a cron loop or a runner (R-BTN-94, R-BTN-105) — reads the tickets and their
-courses' evidence from git and posts a **board** to Baton. Baton keeps the board as a cache of
-git at the posted commit (R-BTN-35) and orders boards by compare-and-set and observation
-numbers. Tickets, readiness and blocks are rebuilt from git; owner state and course history
+a CI workflow, a cron loop or a runner (R-BTN-94, R-BTN-105) — reads the tickets from the
+ticket source and their courses' evidence from git, and posts a **board** to Baton. Baton keeps
+the board as a cache of both at the posted commit (R-BTN-35) and orders boards by compare-and-set and observation
+numbers. Tickets, readiness and blocks are rebuilt from the ticket source and git; owner state and course history
 live solely in Baton, and both are exportable (R-BTN-88).
 
 ### 4.1 The `.baton/` folder and the registry
@@ -88,11 +88,12 @@ live solely in Baton, and both are exportable (R-BTN-88).
       a new ticket (handler tickets, R-BTN-161; call children, R-BTN-165); `withdraw(ticket,
       reason)` writes a withdrawal (R-BTN-168, R-BTN-171); `show(ticket, value)` sets the status
       the store shows people to a station's `display_status` (R-BTN-69, R-BTN-200); and
-      `note(ticket, {entry, reason, station})` adds a note for people, its text the source's own.
-      `show` and `note` run only in an outbox deliverer (R-BTN-171). The sync posts which of
-      `show` and `note` the source exports (`source.writes`, §4.4), and Baton queues an entry
-      only for an export the post names. A runner asked to `file` or `withdraw` through a source
-      that lacks the export fails that write, naming it.
+      `note(ticket, {entry, reason, station})` adds a note for people, its text the source's own,
+      written once per `entry`. `show` and `note` run only in an outbox deliverer (R-BTN-171).
+      `show` never closes a ticket: it refuses, marking its entry `refused`, a value its reader
+      would post as closed. The sync posts which writer exports the source has (`source.writes`,
+      §4.4); Baton queues an outbox entry only for an export the post names, and a runner asked
+      to `file` through a source that lacks it fails that write, naming the export.
     - **A write is confirmed through the same source's reader** (R-BTN-171): a later snapshot
       posts the ticket withdrawn, filed or showing the value, as its kind says.
   - **Each ticket's version** (B-183). `tickets(ctx)` gives each live ticket a `version`: an
@@ -102,9 +103,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
     ticket's version changes exactly when something a runner reads of it changes — its body, exit
     criteria, filter fields, closure. A source that bumps it for anything else (a comment, a
     watcher, its own writer's `show` or `note`, a status set in the store) stales claims, and tells running legs their ticket changed (R-BTN-198), for nothing;
-    one that misses a change lets a runner work a ticket that moved. A digest of what `read` returns, optionally prefixed by the store's own stamp
-    (`<updatedAt>:<digest>`), is recommended over a timestamp alone, which collides within its
-    resolution.
+    one that misses a change lets a runner work a ticket that moved. `read` returns neither the
+    status the store shows nor its notes. A digest of what `read` returns is recommended over a
+    timestamp alone, which collides within its resolution, prefixed by the store's own stamp
+    (`<updatedAt>:<digest>`) only where that stamp does not move on a status or a note.
   - **How the source reads** (B-183). The default export may declare `versions` — `"pinned"`
     (it can read a ticket **at** a version) or `"current"` (only as it is now) — and a
     declaration exports `read(id, {version?, checkout?})` → `{version, ticket}`, run on the
@@ -165,9 +167,9 @@ live solely in Baton, and both are exportable (R-BTN-88).
     Other fields are ignored. Two files with one `id`, or a `repos` name with no mapping, fail
     the sync: nothing is posted and the run names the file. Its writer is `file(ticket)`, which
     writes `<items>/<local id>.md`, and `withdraw`, which sets `status: withdrawn` and
-    `withdrawn_reason`. It exports no `show` and no `note`: a status written into git is the
-    pattern R-BTN-193 retires, so a markdown ticket's position is shown by Baton alone. The
-    **`changes`** source is a reader alone.
+    `withdrawn_reason`; its `source.writes` is `[file, withdraw]`. It exports no `show` and no
+    `note`, so a markdown ticket's position is shown by Baton alone. The **`changes`** source is
+    a reader alone.
   - **`baton ticket check [--repo DIR] [--quiet]`** (B-111, R-BTN-127) reads that source as a sync does — an
     ejected `.baton/tickets.mjs`, else the markdown default — and checks what it would post, without
     posting: the source's own refusal (a duplicate `id`, an unknown `repos` short name, an `order`
@@ -540,7 +542,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
   read_sha?,                                                      -- B-183: the commit the tickets were read at, when not
                                                                  -- `sha` itself; a refresh materializes only when it is the head (§4.3)
   source: { kind: 'markdown' | 'custom', versions?, writes?, cli },  -- R-BTN-74, B-183; writes: the writer's
-                                                                 -- exports among `show`, `note` (R-BTN-200)
+                                                                 -- exports among `file`, `withdraw`, `show`, `note`
   contains?: [<sha>],                                            -- the provisional commits (R-BTN-126) this post contains
   bindings?: { <type prefix>: <course> | { course, replaces } },   -- the repository's scope, from `.baton/baton.json` (R-BTN-161)
   registry: [{ id, version, min_runner_version, skill?,
@@ -709,7 +711,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
 - **R-BTN-86 (tickets are sequential; child tickets are how work runs in parallel).** A ticket
   has one holder and one position at a time; no two legs of one ticket run at once. Parallel
   work is **child tickets**.
-  - **Spawning.** A leg writes child ticket files git first, each naming `parent: <local id>`
+  - **Spawning.** A leg writes child tickets to the ticket source first (its `file`, R-BTN-74), each naming `parent: <local id>`
     of the same repository and each taking its id as R-BTN-131's allocator says; Baton stores
     the qualified id. A child is an ordinary ticket on any
     course; parent and children may be held at once. Handler tickets (R-BTN-161) and a call's
@@ -768,6 +770,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
   | `closed-under-claim` | a ticket closed while a claim is active on it, a claim of its `cancel` leg excepted (R-BTN-168) |
   | `spawned-unposted` | a reported child the first snapshot after the end does not post (R-BTN-86) |
   | `output-invalid` | a posted output pointer failed its schema or digest (R-BTN-109): logged and raised, nothing adopted |
+  | `display-unconfirmed`, `display-unwritable` | a ticket store that never shows, or cannot be written to show, the station's `display_status` (R-BTN-200): logged and listed on the Sync screen (§11.4), nothing adopted, nothing raised, never on Needs you |
 
   About what Baton owns there is no disagreement to log: git never writes a position (R-BTN-39),
   and an arrival Baton does not apply is an `arrival-unapplied` row on the ticket, listed under
@@ -775,29 +778,42 @@ live solely in Baton, and both are exportable (R-BTN-88).
   A discrepancy accompanies the events
   those cases log; any condition a case raises is its owning rule's. The dashboard lists
   discrepancies by sub and age.
-- **R-BTN-200 (a ticket source that shows positions shows Baton's).** Where the post's
-  `source.writes` names `show` (R-BTN-74) and a live ticket's current station (R-BTN-39) has a
-  `display_status` (R-BTN-69), Baton keeps the store showing that value, through `source-show`
-  entries (R-BTN-171):
-  - **On a move.** The transaction that places or moves the ticket at such a station queues one.
-  - **On a drift.** An accepted snapshot that posts the ticket's `display.status` other than its
-    station's `display_status` queues one, unless a `source-show` entry of the ticket is already
-    queued, claimed or delivered — so a refresh is in flight at most once per ticket, and a
-    status a person keeps changing costs one entry per accepted snapshot at most. The first drift
-    at a position — one arrival at the station — also queues a `source-note` with reason
-    `display-drift` and the station, so the person who changed it reads how to steer instead;
-    later drifts at that position queue no note.
-  - **What it is not.** It keeps a view of Baton's position current, and is not a discrepancy:
-    it moves no ticket, holds or stales no claim, raises no condition, puts nothing on Needs you
-    and names no writer of the status. A status set in the store steers nothing (R-BTN-39); a
-    person steers through Baton's own commands — hold, route, adopt, cancel.
+- **R-BTN-200 (a ticket source that shows positions shows Baton's).** Where the last accepted
+  post's `source.writes` names `show` (R-BTN-74) and a live ticket's current station (R-BTN-39)
+  has a `display_status` (R-BTN-69), Baton keeps the ticket's store showing that value through
+  `source-show` entries (R-BTN-171). Its record per ticket, `display_refresh` (§13), holds the
+  arrival it applies to (the history row that placed the ticket at its station), the observation
+  number (R-BTN-62) last handed out when the latest `source-show` was marked delivered, how many
+  of that arrival's deliveries no snapshot confirmed, and whether one was confirmed and whether
+  one note was queued at that arrival.
+  - **On a move.** The transaction that places or moves the ticket at such a station starts the
+    record afresh at the new arrival, drops the ticket's `queued` source entries and queues one
+    `source-show`.
+  - **Which snapshots judge.** An accepted snapshot judges the ticket's posted `display.status`
+    only when no `source-show` of the ticket is queued or claimed, the snapshot did not place the
+    ticket, and its observation number is greater than the one recorded at the latest delivery,
+    so it read the store after the write.
+  - **Confirmed.** A judging snapshot that posts the value confirms a delivered `source-show`.
+  - **Drift.** A judging snapshot that posts another value drops a delivered `source-show`,
+    counting it unconfirmed, and queues one `source-show`. The first drift at an arrival whose
+    show was confirmed — a person changed the status in the store — also queues one
+    `source-note` with reason `display-drift`, the station and the arrival, so that person reads
+    how to steer instead; no other drift at that arrival queues a note.
+  - **Given up.** After 3 unconfirmed deliveries at one arrival — a value the reader never posts
+    back as written — Baton queues nothing more for that arrival and logs the discrepancy
+    `display-unconfirmed` (R-BTN-85). A `source-show` or `source-note` entry marked `refused`, or
+    late by its kind's column (R-BTN-171), is dropped and logged as `display-unwritable`. Neither holds the ticket or raises a
+    condition; the next move starts afresh.
+  - **What it is not.** It keeps a view of Baton's position current: it moves no ticket, holds
+    or stales no claim, raises no condition, puts nothing on Needs you and names no writer of
+    the status. A status set in the store steers nothing (R-BTN-39); a person steers through
+    Baton's own commands — hold, route, adopt, cancel.
   - A station without `display_status`, a closed ticket, or a post whose source exports no `show`
-    queues nothing. R-BTN-85's `position-disagrees` reads the markdown source's `available`, which
-    has no `show`, and is unchanged.
+    queues nothing.
 ### 4.8 Owner state
 
-- **R-BTN-88 (owner state and course history are exportable; git holds the work).** Baton
-  rebuilds tickets and readiness from git. **Owner state** and **course history** live only in
+- **R-BTN-88 (owner state and course history are exportable; the ticket source and git hold the work).** Baton
+  rebuilds tickets and readiness from the ticket source and git. **Owner state** and **course history** live only in
   SQLite (R-BTN-66, R-BTN-39); the tenant's administrator exports them and imports them into
   another Baton.
   - **Format** `baton.owner-state/v1`: `{format, schema_version (highest applied migration),
