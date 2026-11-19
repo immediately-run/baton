@@ -1,4 +1,4 @@
-// S-BTN-235 dependencies on another repository's tickets (BATON_SPEC §3.1 R-BTN-47 *Relations
+// S-BTN-241 dependencies on another repository's tickets (BATON_SPEC §3.1 R-BTN-47 *Relations
 // stay home* as relaxed, §4.4, R-BTN-120; B-113): a ticket's `depends_on` may name another
 // registered repository's ticket by its qualified id. Must hold: a target that is no live
 // repository, or a ticket neither live nor closed there, refuses the post naming the id, nothing
@@ -45,7 +45,7 @@ beforeEach(async () => {
 
 const consent = (who: TestKey, body: unknown) => keyCall(who, '/v1/owner/ops/dependency-consents', body);
 
-describe('S-BTN-235 dependencies on another repository\'s tickets', () => {
+describe('S-BTN-241 dependencies on another repository\'s tickets', () => {
   it('refuses an unregistered repository and an unknown ticket, naming the id, and stores nothing', async () => {
     const ghost = new Git(await fhToken()).add('F-1', { depends_on: ['ghost:B-1'] });
     expect(await ghost.post()).toMatchObject({ status: 400, code: 'invalid-params', message: 'depends_on names ghost:B-1, which is not a repository registered here (B-113)' });

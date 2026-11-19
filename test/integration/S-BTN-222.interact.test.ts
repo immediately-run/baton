@@ -16,7 +16,7 @@
 // unjoined one's `leg-timeout` — is S-BTN-222.runner-half.test.ts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { advance, claimItem, course, cutover, endClaim, Git, keyCall, ORIGIN, placed, register, rows, setAdminKeys, setClock, tick, withCore, workerCall } from '../helpers';
+import { advance, claimItem, course, cutover, endClaim, Git, keyCall, ORIGIN, placed, register, rows, setAdminKeys, setClock, tick, withCore, runnerCall } from '../helpers';
 import { beat } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
@@ -41,9 +41,9 @@ let owner: TestKey;
 let reader: TestKey;
 let git: Git;
 
-/** `POST /v1/runner/claims/{id}/conditions` as the claiming worker. */
+/** `POST /v1/runner/claims/{id}/conditions` as the claiming runner. */
 async function raise1(cred: 'vm-a' | 'vm-b', secret: string, claimId: number, body: Record<string, unknown>) {
-  const res = await workerCall(`/v1/runner/claims/${claimId}/conditions`, { cred, secret, body });
+  const res = await runnerCall(`/v1/runner/claims/${claimId}/conditions`, { cred, secret, body });
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 

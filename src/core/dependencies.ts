@@ -54,7 +54,7 @@ function liveRepository(sql: Sql, id: string): { id: string; forge: Forge; web_b
 }
 
 /** Whether every principal that sees `dependent` sees `target` too (B-113, the visibility the
- *  consent rule reads): every owner key of the one is an owner of the other, and every worker
+ *  consent rule reads): every owner key of the one is an owner of the other, and every runner
  *  grant on the one is a grant on the other. An administrator sees every board, so administrator
  *  keys lower nothing. */
 export function atLeastAsVisible(sql: Sql, target: string, dependent: string): boolean {
@@ -65,9 +65,9 @@ export function atLeastAsVisible(sql: Sql, target: string, dependent: string): b
                         AND t.fingerprint = d.fingerprint AND t.removed_at IS NULL AND t.revoked_at IS NULL)`, dependent, target)[0].n;
   if (owners > 0) return false;
   const grants = sql<{ n: number }>(
-    `SELECT count(*) AS n FROM worker_grants d
+    `SELECT count(*) AS n FROM runner_grants d
      WHERE d.repository_id = ? AND d.revoked_at IS NULL
-       AND NOT EXISTS (SELECT 1 FROM worker_grants t WHERE t.repository_id = ? AND t.credential_id = d.credential_id AND t.revoked_at IS NULL)`, dependent, target)[0].n;
+       AND NOT EXISTS (SELECT 1 FROM runner_grants t WHERE t.repository_id = ? AND t.credential_id = d.credential_id AND t.revoked_at IS NULL)`, dependent, target)[0].n;
   return grants === 0;
 }
 

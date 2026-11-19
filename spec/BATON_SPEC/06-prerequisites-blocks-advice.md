@@ -452,9 +452,10 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | 9 | The runner declares the course at `min_runner_version` or later (R-BTN-22, R-BTN-65); not re-checked at an advance | claim | `stale-skills` |
   | 10 | No `retry` block on the leg | claim, advance | `backing-off` with `until` |
   | 11 | Every capability with a capacity in rule 4's set for the leg (the ticket's `requires` and the leg's) has a seat no other claim holds (R-BTN-178) | claim, advance | `capacity-full`, naming the holders where the caller may see them |
-  | 13 | No repository of the ticket (home, or a `repos:` entry reaching `code_repos`, R-BTN-140) has a held rename (R-BTN-138) | claim | `rename-held` |
+  | 13 | No repository of the ticket (home, or a `repos:` entry with reach, R-BTN-140) has a held rename (R-BTN-138) | claim | `rename-held` |
   | `person` | The leg is not a person's (R-BTN-116) | claim, advance | `person` |
-  | `floor` | Every guarantee a floor names holds on every repository the ticket reaches: its home and each `repos:` entry reaching `code_repos` (R-BTN-140, R-BTN-189); the protection checker is exempt | claim, advance | `floor-broken` |
+  | `floor` | Every guarantee a floor names holds on every repository the ticket reaches: its home and each `repos:` entry with reach (R-BTN-140, R-BTN-189); the protection checker is exempt | claim, advance | `floor-broken` |
+  | `executor` | The runner's last heartbeat reported an executor other than `builtin`, wherever a repository the ticket reaches (its home and each `repos:` entry with reach, R-BTN-140) has a policy whose `executor.builtin` is `refused` (R-BTN-107, R-BTN-188); not re-checked at an advance | claim | `executor-refused` |
 
   Rules `chain` (R-BTN-106), `entry` (R-BTN-109), `not-queued` (R-BTN-72), `check-runner`
   (R-BTN-114) and `trusted` (R-BTN-182) are gates too; a capability an executor `provides` is
@@ -547,10 +548,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
 - **R-BTN-12 (expedite and hold).** A ticket is expedited when its snapshot carries `EXPEDITE`
   or its override says so; the override stays until an owner clears it, whatever later snapshots
-  show, and the mirror writes the tag (§16). Under `require_signed_control` (B-127, R-BTN-66)
-  the tag is a control input: it counts only when the commit that last changed it is
-  owner-signed, and the sync posts the tag's last signed state — an `EXPEDITE` a push alone
-  added does not expedite, one a push alone removed stays, and the notice names it either way.
+  show, and the mirror writes the tag (§16).
   - A **hold** means "do not hand this ticket out" (rule 3), with `hold_reason` `owner`,
     `mcp:<name>`, `parked` (R-BTN-163), `attempts-exhausted`, `non-retryable:<class>`,
     `blocked-exhausted` (R-BTN-122, R-BTN-126), or `outbox-refused` (R-BTN-171). A cancellation

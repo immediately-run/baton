@@ -1,0 +1,56 @@
+---
+title: B-269 — The GitHub fact adapter and the standard stubs use REST, never GraphQL
+id: B-269
+project: baton
+status: available
+updated: 2026-11-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "Fieldhouse's forge gate (FIELDHOUSE_SPEC section 6) refuses the forge's GraphQL endpoint whole, and Baton's GitHub fact adapter and its standard stubs' gh pr subcommands use it. Move both to REST and keep one tested list of the routes they call. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** immediately-run/fieldhouse `spec/FIELDHOUSE_SPEC.md` §6 (the forge gate, fieldhouse#37) puts a host-side gate between every runner and the forge, and the gate refuses the forge's GraphQL endpoint whole: the owner, 2026-11-19, "I realize the additional complexity of having to parse graphql versus just filtering REST API actions based on HTTP method and path. Let's cut graphql." Baton's GitHub fact adapter reads pull-request facts over GraphQL (`src/defaults/cli.ts`, `conn.graphql` in `repoFacts` and `byAuthor`), and its standard courses' stubs call `gh pr create`, `gh pr comment`, `gh pr checks` and `gh pr list`, which the forge CLI sends over GraphQL (`src/defaults/tickets.ts`, `src/defaults/pr-close.ts`). Behind the gate none of these works. Of the Baton changes Fieldhouse's §6 needs, the owner said: "file these and push to main".
+
+**Spec:** [BATON_SPEC §3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), the facts a sync reads; [R-BTN-141](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), which PRs count), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) (what the guarantees leave to the deployment: the forge gate).
+**Depends on:** none.
+**Used by:** fieldhouse FLDH-61.
+
+### What to build
+
+1. **The GitHub fact adapter reads over REST**: pull requests by head branch, their reviews, comments and check runs, the collaborator-permission and user reads it already makes over REST. The facts it posts are unchanged, byte for byte, for the same forge state; where REST needs more requests than one GraphQL query did, page and bound them as the adapter bounds its reads today.
+2. **The standard stubs call REST**: opening a pull request, commenting, listing by head and reading checks go through `gh api` (or the CLI's own fetch) with the REST routes, never a `gh pr …` subcommand that uses GraphQL.
+3. **One list of the routes** the adapter and the stubs use, in the repository, which a test compares with what they actually request: a deployment's gate builds its allowlist from it.
+4. No spec rule names the transport, so this is a build change; if a rule turns out to, amend it first.
+
+### Do not
+
+- Keep a GraphQL fallback: a gate that refuses the endpoint would turn a silent fallback into a failed sync.
+- Change what a fact means or which PRs count (R-BTN-141).
+
+### Exit criteria
+
+- [ ] `grep -rn "graphql" src/defaults cli` prints nothing but comments naming this ticket
+- [ ] the fact adapter's fixtures give the same posted facts as before, from REST fixtures
+- [ ] `npm test` green
+
+### Trust
+
+No new input. The adapter reads the same forge facts through other routes; they are the forge's statements, authenticated by the same credential (or, behind a gate, by the gate's), and Baton treats them as it does today (`docs/security-model.mdx`, the forge as a source of facts). The route list is a file in this repository, changed by pull request like any code.
+
+### Invariants
+
+- R-BTN-139: the facts a sync posts are the same for the same forge state.
+- R-BTN-141: a PR counts only when its head repository is its base repository — the REST reads carry both ids.
+- R-BTN-33: no PR body or comment text is stored — the REST responses hold more than the GraphQL selections did, and the adapter still keeps filter fields only.
+
+## Status
+
+_filed 2026-11-19._

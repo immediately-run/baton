@@ -124,6 +124,9 @@ const prebuilt = (...path: string[]): string => join(packageRoot(), 'dist', 'def
 interface CourseEntry {
   id: string;
   version: number;
+  min_runner_version?: number;
+  /** B-68's dual-read window: an older file spells the floor `min_worker_version` — this
+   *  repository's own still does — read beside the new name until B-69 retires it. */
   min_worker_version?: number;
   skill?: string;
   step_kinds?: string[];
@@ -165,9 +168,10 @@ interface BatonJson {
 const defaultSkill = (course: string): string => `baton-${course}`;
 
 /** The `courses` entry `baton repo init` writes: every R-BTN-51 field, so a repository edits
- * them where the spec says rather than discovering them. */
-function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source'>> {
-  return { id: course, version: 1, min_worker_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
+ * them where the spec says rather than discovering them. Never `min_worker_version`: init
+ * writes the new name only; the window is on the read (above). */
+function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
+  return { id: course, version: 1, min_runner_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
 export interface SyncArgs {
@@ -187,7 +191,7 @@ export interface SyncArgs {
    * Defaults to `BUSY_RETRY_S`. */
   busyRetryS?: number;
   /** The repository's sync key (B-88, R-BTN-93): the key file the three calls are signed
-   * with, as a worker's are. Set, it is the sync's credential — the no-CI path. */
+   * with, as a runner's are. Set, it is the sync's credential — the no-CI path. */
   syncKey?: string;
   transport?: Transport;
   auth?: Auth;
@@ -434,7 +438,9 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     courseData[c.id] = out.course_data;
     registry.push({
       ...courseSchemas(root, c.id),
-      id: c.id, version: c.version, min_worker_version: c.min_worker_version ?? c.version, skill: c.skill ?? defaultSkill(c.id), course,
+      // B-68's window: a file still carrying `min_worker_version` keeps its floor — the new
+      // name wins when both are set — instead of silently falling back to `version`.
+      id: c.id, version: c.version, min_runner_version: c.min_runner_version ?? c.min_worker_version ?? c.version, skill: c.skill ?? defaultSkill(c.id), course,
       step_kinds: c.step_kinds ?? Object.keys(course.legs ?? {}),
       branch_pattern: branchPatterns[0], ...(c.previous_branch_pattern ? { previous_branch_pattern: c.previous_branch_pattern } : {}),
       // B-182 (R-BTN-134): what the course's entry declares it reads — `prs` when this sync reads
@@ -811,19 +817,19 @@ function bearerAuth(token: string | null): Auth {
   if (!token) {
     throw new Error(`no sync credential: run in the sync workflow (id-token: write), pass --sync-key FILE (or set ${SYNC_KEY_ENV}), pass --token, or set BATON_SYNC_TOKEN`);
   }
-  return (_m, _u, _b, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
+  return (_m, _u, _b, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) });
 }
 
 /** A sync key (B-88, R-BTN-93): the file's key signs the three sync calls, through the runner's
- * own helper (`envAuth`, imported and not copied), so a sync signs exactly as a worker does. The
+ * own helper (`envAuth`, imported and not copied), so a sync signs exactly as a runner does. The
  * file is an SSH key — a private key, or a `.pub` whose private half an `ssh-agent` holds; an API
- * key — a worker's credential, never a sync's — is refused by name here instead of being spent as
+ * key — a runner's credential, never a sync's — is refused by name here instead of being spent as
  * a bearer the server would deny. */
 function syncKeyAuth(file: string): Auth {
-  // R-BTN-159's API key (`cli/sign.mjs`): a worker's credential, never a sync's — `envAuth` would
+  // R-BTN-159's API key (`cli/sign.mjs`): a runner's credential, never a sync's — `envAuth` would
   // spend it as a bearer the sync routes deny, so it is refused by name.
   if (existsSync(file) && API_KEY.test(readFileSync(file, 'utf8').trim())) {
-    throw new Error(`--sync-key ${file}: an API key is a worker's credential, not a sync key — register an SSH key (\`baton admin repo add --sync-key <key.pub>\`) and pass its private file`);
+    throw new Error(`--sync-key ${file}: an API key is a runner's credential, not a sync key — register an SSH key (\`baton admin repo add --sync-key <key.pub>\`) and pass its private file`);
   }
   let auth: Auth;
   try {

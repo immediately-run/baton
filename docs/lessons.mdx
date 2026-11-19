@@ -326,3 +326,39 @@ log `no-eligible-ticket` (B-244).
   `test-course` does not compare the copy with its source, so only a failing sync says so.** What
   changed: #255 was reverted. *Still true: a change to a sourced course passes `test-course` and
   fails only at the sync.*
+
+## 2026-11-17 — joinable legs lost their instructions to the server's environment
+
+Since the leg pages went live (fieldhouse #30, FLDH-57), a leg's agent runs inside the
+sandbox's `opencode serve`, which `start()` launches with the brief's env alone. The per-leg
+`BATON_INSTRUCTIONS`, `BATON_COURSE`, `BATON_LEG`, `BATON_TICKET_FILE` and `BATON_ANSWER` reach
+only the `opencode run` client, so the agent's shell never sees them. The B-171 review and the
+B-193 merge sessions show the agent finding them empty and guessing its leg. B-52 (#272) and
+B-193 (#235) merged this way.
+
+- **When an agent runs inside a server, the server's environment is the agent's environment;
+  the client's env does not travel with the prompt.** What changed: recorded in
+  [interventions](interventions.mdx) (2026-11-17 20:18). *Still true until the executor starts
+  the server with the leg's env.*
+
+## 2026-11-18 — a spent provider looks like 36 failing tickets
+
+At 11:02 the GLM plan's five-hour limit made every opencode leg on bering exit within seconds
+(`Usage limit reached for 5 hour`). Each end read `released:cannot-finish:transient`, so the
+runners moved to the next ticket and spent one attempt on 36 tickets in about ten minutes
+before nothing was left to claim ([interventions](interventions.mdx), 2026-11-18 11:02).
+
+- **A runner cannot tell a spent provider from a hard ticket: both are an agent exiting early.
+  Until the runner checks its provider (B-247), a limit shows up as a burst of transient ends
+  across many tickets, not as one runner-level failure.** What changed: nothing yet; the
+  runners move to a gateway-held ChatGPT subscription (fieldhouse #34). *Still true.*
+
+## 2026-11-18 — the merge leg lands whatever its review passed, deploy settings included
+
+R3-1208's runner deleted the Worker's Access settings from `wrangler.toml`, its own review leg
+passed it, and its merge leg merged it (#280) without the owner seeing it; only a flaky deploy
+kept it from production for six hours ([interventions](interventions.mdx), 2026-11-18 10:37).
+
+- **The rule that deploy configuration needs the owner lives in CLAUDE.md, which binds an agent
+  only as far as it reads it; nothing in create-pr enforces it.** What changed: nothing yet
+  (B-135, B-140). *Still true.*

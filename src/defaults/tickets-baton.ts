@@ -19,8 +19,8 @@
 // unreadable key (judged before any request, so a key problem is never reported as Baton
 // unreachable) or a `forbidden` is thrown as `Undetermined` naming which, and the claim refuses rather than fall
 // through to the frontmatter (the failure this ticket exists to end). The one exception is the
-// branch-holder query asked with a key that is not a worker's: an owner's or an administrator's
-// key cannot sign worker routes, and the board's `holders` has already answered the ticket's own
+// branch-holder query asked with a key that is not a runner's: an owner's or an administrator's
+// key cannot sign runner routes, and the board's `holders` has already answered the ticket's own
 // lock, so that one read is skipped, not fatal.
 import { readFileSync } from 'node:fs';
 import { send } from '../../cli/baton.mjs';
@@ -29,7 +29,7 @@ import { requestCredential } from '../../cli/sign.mjs';
 /** One live claim on a ticket, as the board's `holders` answers it (B-129). */
 export interface Holder {
   ticket_id: string;
-  worker_id: number;
+  runner_id: number;
   hostname: string | null;
   session_name: string | null;
   /** When the holder's lease ends (`reap_at`); null for a claim with none. */
@@ -64,7 +64,7 @@ export interface BatonPosition {
   /** The repository's live claims (the lock Baton holds). */
   holders: Holder[];
   /** The branch-holder query's answer for the branch the change lives on, when one was asked:
-   *  `unavailable` names a key that cannot sign worker routes — the board's `holders` answered
+   *  `unavailable` names a key that cannot sign runner routes — the board's `holders` answered
    *  the ticket's own lock instead. */
   branch: { branch: string; held_by_other: boolean; fence_pending: boolean; tickets: string[] } | { unavailable: string } | null;
   /** Where Baton holds the ticket now: the board's ready row's station when it is ready, else
@@ -92,7 +92,7 @@ const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is
 
 /** One GET's JSON, refusing the undetermined: a fault names Baton unreachable, a refusal names
  *  its code and message. `tolerate` names the codes a caller answers null for (the
- *  branch-holder query's principal refusals, for a key that is not a worker's). */
+ *  branch-holder query's principal refusals, for a key that is not a runner's). */
 async function getJson(o: { url: string; keyFile: string; path: string; which: string; fetchImpl?: typeof fetch }, tolerate: readonly string[] = []): Promise<Record<string, unknown> | null> {
   let answer: { status: number; json: Record<string, unknown> | null; text: string };
   try {
@@ -147,7 +147,7 @@ export async function readTicketPosition(o: {
     .find((t) => t.local_id === o.ticket || t.id === full) ?? null;
   const holders = ((Array.isArray(board.holders) ? board.holders : []) as Record<string, unknown>[]).map((h) => ({
     ticket_id: String(h.ticket_id),
-    worker_id: Number(h.worker_id),
+    runner_id: Number(h.runner_id),
     hostname: typeof h.hostname === 'string' ? h.hostname : null,
     session_name: typeof h.session_name === 'string' ? h.session_name : null,
     lease_ends_at: typeof h.lease_ends_at === 'number' ? h.lease_ends_at : null,
@@ -164,7 +164,7 @@ export async function readTicketPosition(o: {
     prs: strings(rawResume.prs),
   };
   // The branch-holder query (§9): asked for the branch the change lives on — the history's
-  // `resume` names it — with a key that can sign worker routes. A principal refusal names a key
+  // `resume` names it — with a key that can sign runner routes. A principal refusal names a key
   // that cannot (an owner's); the board's `holders` answered the ticket's own lock.
   let branch: BatonPosition['branch'] = null;
   const first = resume?.branches[0];
@@ -172,7 +172,7 @@ export async function readTicketPosition(o: {
     const q = `?repo=${encodeURIComponent(o.forgePath)}&branch=${encodeURIComponent(first.replace(/^refs\/heads\//, ''))}`;
     const b = await getJson({ ...o, which: `the branch-holder query for ${first}`, path: `/v1/runner/branch-holder${q}` }, ['unauthenticated', 'forbidden']);
     branch = b == null
-      ? { unavailable: 'the key cannot sign worker routes — the board\'s holders answered the ticket\'s own lock' }
+      ? { unavailable: 'the key cannot sign runner routes — the board\'s holders answered the ticket\'s own lock' }
       : { branch: first, held_by_other: b.held_by_other === true, fence_pending: b.fence_pending === true, tickets: strings(b.tickets) };
   }
   const ready = readyRow && typeof readyRow.station === 'string' && typeof readyRow.leg === 'string'
@@ -191,8 +191,8 @@ export async function readTicketPosition(o: {
 /** The refusal that names a holder (B-129): who holds it and its lease — not ended yet, ended
  *  (judged against Baton's own `server_time`) with the claim awaiting reaping, or none at all
  *  (a legacy claim, reaped at its own deadline). */
-export function holderRefusal(id: string, h: { worker_id: number; hostname: string | null; session_name: string | null; lease_ends_at: number | null }, now: number | null): string {
-  const who = `${[h.hostname, h.session_name].filter((x): x is string => x != null).join(' · ') || `worker ${h.worker_id}`} (worker ${h.worker_id})`;
+export function holderRefusal(id: string, h: { runner_id: number; hostname: string | null; session_name: string | null; lease_ends_at: number | null }, now: number | null): string {
+  const who = `${[h.hostname, h.session_name].filter((x): x is string => x != null).join(' · ') || `runner ${h.runner_id}`} (runner ${h.runner_id})`;
   const lease = h.lease_ends_at == null
     ? 'a claim with no lease to end (a legacy claim); it is released, adopted or reaped first'
     : now != null && h.lease_ends_at <= now

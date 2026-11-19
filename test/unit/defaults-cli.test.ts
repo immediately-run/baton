@@ -176,7 +176,7 @@ describe('syncMain’s sync key (B-88, R-BTN-93)', () => {
     expect(seen).toEqual([]);
   });
 
-  it('an API key in the --sync-key file is refused by name: a worker’s credential, never a sync’s', async () => {
+  it('an API key in the --sync-key file is refused by name: a runner’s credential, never a sync’s', async () => {
     dir = await scaffold();
     keyDir = mkdtempSync(join(tmpdir(), 'baton-b88-key-'));
     const file = join(keyDir, 'apikey');
@@ -185,7 +185,7 @@ describe('syncMain’s sync key (B-88, R-BTN-93)', () => {
     // Never spent as a bearer: `verifySyncCredential` denies an API key on the sync's routes, so
     // the operator hears why the file is wrong instead of the server's refusal.
     await expect(syncMain({ root: dir, url: 'https://baton.test', syncKey: file, transport, log: () => {} }))
-      .rejects.toThrow(/--sync-key .*apikey: an API key is a worker's credential, not a sync key/);
+      .rejects.toThrow(/--sync-key .*apikey: an API key is a runner's credential, not a sync key/);
     expect(seen).toEqual([]);
   });
 
@@ -429,6 +429,47 @@ describe('syncMain’s busy retry (B-89, R-BTN-62)', () => {
   });
 });
 
+describe('the sync reads a course floor spelled either way (B-68’s window)', () => {
+  /** A scaffolded repository, as the B-88 block's: one ticket, an origin, no course code. */
+  const scaffold = async (): Promise<string> => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-b68-'));
+    gitInit(dir);
+    mkdirSync(join(dir, 'tickets'), { recursive: true });
+    writeFileSync(join(dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\n---\n');
+    execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git'], { stdio: 'ignore' });
+    expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
+    commitAll(dir);
+    writeFileSync(join(dir, '.baton', 'facts.json'), '[]');
+    return dir;
+  };
+  /** One sync's posted registry, from a transport answering the three calls and keeping the board's body. */
+  const registryOf = async (dir: string): Promise<Record<string, unknown>[]> => {
+    let board: Record<string, unknown> = {};
+    const transport = async (req: Request): Promise<Response> => {
+      const path = new URL(req.url).pathname;
+      if (path === '/v1/sync/observation') return new Response(JSON.stringify({ sha: null, observation: 1, bars: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (path === '/v1/sync/board') board = await req.json() as Record<string, unknown>;
+      return new Response(JSON.stringify({ sha: null }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    expect(await syncMain({ root: dir, url: 'https://baton.test', factsFile: join(dir, '.baton', 'facts.json'), token: 't', transport, log: () => {} })).toBe(0);
+    return board.registry as Record<string, unknown>[];
+  };
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('a file still carrying min_worker_version keeps its floor, and the new name wins when both are set', async () => {
+    dir = await scaffold();
+    const settingsFile = join(dir, '.baton', 'baton.json');
+    // The old spelling alone: without the window the entry would silently post `version` (3) as
+    // its floor, changing rule 9's minimum hands-up on the next sync.
+    writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), courses: [{ id: 'create-pr', version: 3, min_worker_version: 2 }] }));
+    expect(await registryOf(dir)).toMatchObject([{ id: 'create-pr', version: 3, min_runner_version: 2 }]);
+    // Both spellings: the new one wins, as the server's own dual read resolves them (courses.ts).
+    writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), courses: [{ id: 'create-pr', version: 3, min_runner_version: 1, min_worker_version: 2 }] }));
+    expect(await registryOf(dir)).toMatchObject([{ id: 'create-pr', version: 3, min_runner_version: 1 }]);
+  }, 120_000);
+});
+
 describe('syncOnce’s confirm-only re-post (B-183, review round 1)', () => {
   /** `syncOnce` with every effect injected (the module is pure): a head, a payload and an
    * ancestry the test scripts, recording the one board post. */
@@ -556,7 +597,7 @@ describe('baton repo init, through the built CLI', () => {
     expect(settings.agent_command).not.toMatch(/[<>|]/);
     expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_runner_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -2270,8 +2311,8 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     expect(settings.default_course).toBe('create-pr');
     expect(settings.courses.map((c: { id: string }) => c.id)).toEqual(['create-pr', 'bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets']);
-    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_worker_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('bug-report') });
-    expect(settings.courses[5]).toEqual({ id: 'spec-to-tickets', version: 1, min_worker_version: 1, skill: 'baton-spec-to-tickets', step_kinds: ['decompose', 'check', 'file'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('spec-to-tickets') });
+    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_runner_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('bug-report') });
+    expect(settings.courses[5]).toEqual({ id: 'spec-to-tickets', version: 1, min_runner_version: 1, skill: 'baton-spec-to-tickets', step_kinds: ['decompose', 'check', 'file'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('spec-to-tickets') });
     for (const [course, legs] of [['bug-report', 6], ['decision', 2], ['review-pr', 2], ['draft-ticket', 3], ['spec-to-tickets', 3]] as const) {
       expect(readdirSync(join(root, '.baton', 'courses', course, 'legs')).length, course).toBe(legs * 2);
     }

@@ -9,13 +9,13 @@
 // The queued leg each post carries is the model's own (R-BTN-83), so a claim is offered the same
 // leg in both.
 // Baton also renews a lease on every authenticated call, not only on heartbeats and claims as
-// §6.3 states it (the safe side: it reaps later); `seen` keeps each worker's last call, and a
-// generated trace reaps a claim only when its worker is silent by both readings. A force-reap of
-// a worker already silent past its lease is not fenced in Baton — R-BTN-19's fence that has
+// §6.3 states it (the safe side: it reaps later); `seen` keeps each runner's last call, and a
+// generated trace reaps a claim only when its runner is silent by both readings. A force-reap of
+// a runner already silent past its lease is not fenced in Baton — R-BTN-19's fence that has
 // already timed out, the model's forceReap and fenceTimeout in one step — so generated traces
-// force-reap only a worker Baton still hears from.
+// force-reap only a runner Baton still hears from.
 module replay {
-  import baton(TICKETS = Set("t1", "t2"), WORKERS = Set("w1", "w2", "w3"), SLOTS = Set(1, 2),
+  import baton(TICKETS = Set("t1", "t2"), RUNNERS = Set("w1", "w2", "w3"), SLOTS = Set(1, 2),
                MAX_CLAIMS = 6, GIT_BUDGET = 2, OWNER_BUDGET = 2,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
                REQUIRED = Set("fix", "merge"), MAX_TIME = 24,
@@ -24,12 +24,12 @@ module replay {
                REQUIRES = Map("t1" -> Set(), "t2" -> Set()), RESOURCES = Set(), NEEDS = Map("implement" -> Set(), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set()),
                CAPPED = Set(), SEATCAP = Map()).* from "./baton"
 
-  // the tick of each worker's last authenticated call to Baton
+  // the tick of each runner's last authenticated call to Baton
   var seen: str -> int
   // the tick each sync run took its number at
   var numbered: int -> int
 
-  action rinit = all { initWith(WORKERS.mapBy(w => 0)), seen' = WORKERS.mapBy(w => 0), numbered' = SLOTS.mapBy(s => 0) }
+  action rinit = all { initWith(RUNNERS.mapBy(w => 0)), seen' = RUNNERS.mapBy(w => 0), numbered' = SLOTS.mapBy(s => 0) }
   action called(w: str): bool = all { seen' = seen.set(w, st.now), numbered' = numbered }
   action quiet: bool = all { seen' = seen, numbered' = numbered }
   action takes(s: int): bool = all { seen' = seen, numbered' = numbered.set(s, st.now) }
@@ -39,13 +39,13 @@ module replay {
   // a lease lapsed by both readings: the model's and Baton's last call
   def lapsed(i: int): bool = {
     val c = st.claims.get(i)
-    c.leaseUntil <= st.now and seen.get(c.worker) + TIMEOUT <= st.now
+    c.leaseUntil <= st.now and seen.get(c.runner) + TIMEOUT <= st.now
   }
   def lapsedActive: Set[int] = claimsWhere(c => c.status == "active" and c.leaseUntil <= st.now)
   def lapsedFences: Set[int] = claimsWhere(c => c.status == "reaped" and c.fencePending and c.leaseUntil <= st.now)
 
   action rstep = {
-    nondet w = WORKERS.oneOf()
+    nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()
     nondet leg = LEGS.oneOf()
     nondet s = SLOTS.oneOf()
@@ -83,14 +83,14 @@ module replay {
   // Every run of it is a run of rstep.
   // the legs leaving where w's claim is — drawing from these makes advances likely
   def legChoices(w: str): Set[str] =
-    if (workerClaim(w).size() == 1) {
+    if (runnerClaim(w).size() == 1) {
       val c = theClaim(w)
       val ls = legsFrom(if (c.leg == "") c.station else TO.get(c.leg))
       if (ls.size() > 0) ls else LEGS
     } else LEGS
 
   action rprogress = {
-    nondet w = WORKERS.oneOf()
+    nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()
     nondet leg = legChoices(w).oneOf()
     nondet kind = Set("done", "suspended", "release").oneOf()
@@ -115,10 +115,10 @@ module replay {
     }
   }
 
-  // Fences: a force-reap of a live worker, then either its fence-cleared report or its silence
+  // Fences: a force-reap of a live runner, then either its fence-cleared report or its silence
   // past the lease (R-BTN-19) — the paths rstep reaches too rarely to test.
   action rfence = {
-    nondet w = WORKERS.oneOf()
+    nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()
     nondet leg = legChoices(w).oneOf()
     nondet i = 1.to(MAX_CLAIMS).oneOf()
@@ -141,7 +141,7 @@ module replay {
   // so the required bar is met (R-BTN-67), and a done only at an end station — the runs that
   // reach fix, merge and a confirmed done, which random ends cut short elsewhere.
   action rlegs = {
-    nondet w = WORKERS.oneOf()
+    nondet w = RUNNERS.oneOf()
     nondet t = TICKETS.oneOf()
     nondet leg = legChoices(w).oneOf()
     nondet postBars = TICKETS.setOfMaps(FAMILIES.powerset().exclude(Set(Set()))).oneOf()

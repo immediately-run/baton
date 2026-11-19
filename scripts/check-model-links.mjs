@@ -2,7 +2,7 @@
 // check-model-links.mjs — `npm run model:links` (R3-1244; owner, 2026-10-15: code and model kept
 // in sync, checkably). Each action of model/baton.qnt names its implementation in the comment
 // above it — `// @impl src/core/<file>.ts#<function>` — or `// @impl external — <who>` for a
-// step only the environment takes (a worker's push, git, time). Each implementing function names
+// step only the environment takes (a runner's push, git, time). Each implementing function names
 // the action back in its own leading comment, with a hash of the action's text:
 // `// @model <action> sha256:<12 hex>`. A missing end, a function that is not there, or a stale
 // hash fails, naming them — so a model change names the functions to re-check, and re-stamping

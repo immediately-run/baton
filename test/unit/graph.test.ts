@@ -28,7 +28,7 @@ describe('legCapabilities: a leg\'s names as the capabilities rule 4 compares (R
 
   // Review round 6, finding 0: `human-operator` is a built-in bare capability R-BTN-121 compares as a
   // string, never a role. The vocabulary gives it the agent venue's four, so expanding it here let an
-  // autonomous `agent-venue` worker take a leg the course reserved for a person.
+  // autonomous `agent-venue` runner take a leg the course reserved for a person.
   it('keeps human-operator literal, beside — never instead of — what it expands to', () => {
     const needs = legCapabilities({ capabilities: ['human-operator', 'agent-venue'] }, undefined);
     expect(needs).toContain('human-operator');

@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { adminSession, course, cutover, hbBody as baseHb, keyCall, ORIGIN, placed, sessionCall, rows, setAdminKeys, setClock, sha256, syncCall, ticket, tick, withCore, workerCall } from '../helpers';
+import { adminSession, course, cutover, hbBody as baseHb, keyCall, ORIGIN, placed, sessionCall, rows, setAdminKeys, setClock, sha256, syncCall, ticket, tick, withCore, runnerCall } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { projectState, type Projection } from '../integration/trace';
 import { fromItf, kindOf, FROM, TO, LEGS } from '../../scripts/check-traces.mjs';
@@ -104,7 +104,7 @@ async function setup(): Promise<Run> {
   const secrets: Record<string, string> = {};
   for (const [w, cred] of Object.entries(CREDS)) {
     secrets[w] = `secret-${w}`;
-    const hb = await workerCall('/v1/runner/heartbeat', { cred, body: hbBody(w, { secret_hash: await sha256(secrets[w]) }) });
+    const hb = await runnerCall('/v1/runner/heartbeat', { cred, body: hbBody(w, { secret_hash: await sha256(secrets[w]) }) });
     expect(hb.status).toBe(200);
   }
   await cutover();
@@ -115,21 +115,21 @@ function hbBody(w: string, over: Record<string, unknown> = {}) {
   return baseHb(CREDS[w as keyof typeof CREDS], { session_name: `s-${w}`, lease_timeout_s: (4 * TICK_MS) / 1000, tags: [...TAGS[w as keyof typeof TAGS]], ...over });
 }
 
-const worker = async (w: string, path: string, body: unknown, secret: string) =>
-  answered(await workerCall(path, { cred: CREDS[w as keyof typeof CREDS], secret, body }));
+const runner = async (w: string, path: string, body: unknown, secret: string) =>
+  answered(await runnerCall(path, { cred: CREDS[w as keyof typeof CREDS], secret, body }));
 
 /** The core's side of one model step. */
 async function drive(r: Run, before: any, after: any, action: string, p: Record<string, any>) {
   await setClock(T0 + after.st.now * TICK_MS);
   const b = before.st;
   const w: string = p.w;
-  const active = (st: any, who: string) => Object.entries(st.claims as Record<string, any>).find(([, c]) => c.worker === who && c.status === 'active');
+  const active = (st: any, who: string) => Object.entries(st.claims as Record<string, any>).find(([, c]) => c.runner === who && c.status === 'active');
   switch (action) {
     case 'claim': {
       // a crashed or sleeping machine makes no request; past MAX_CLAIMS is the model's bound only
       if (!b.up[w] || b.asleep[w] || b.nextId > 6) return;
       const t: string = p.t;
-      const res = await worker(w, '/v1/runner/claim', { request_id: `req-${w}-${after.st.nextId}-${Math.random().toString(16).slice(2, 8)}`, ticket_id: `docs:${TICKET(t)}` }, r.secrets[w]);
+      const res = await runner(w, '/v1/runner/claim', { request_id: `req-${w}-${after.st.nextId}-${Math.random().toString(16).slice(2, 8)}`, ticket_id: `docs:${TICKET(t)}` }, r.secrets[w]);
       const json = (await res.json()) as { claim_id?: number };
       if (after.st.nextId > b.nextId && json.claim_id) r.claims.set(b.nextId, json.claim_id);
       return;
@@ -137,7 +137,7 @@ async function drive(r: Run, before: any, after: any, action: string, p: Record<
     case 'advance': {
       const [id, c] = active(b, w)!;
       const body = { leg: p.leg, bars: p.holderBars, ...(c.leg !== '' ? { reached: TO[c.leg as keyof typeof TO] } : {}) };
-      await worker(w, `/v1/runner/claims/${r.claims.get(Number(id))}/advance`, body, r.secrets[w]);
+      await runner(w, `/v1/runner/claims/${r.claims.get(Number(id))}/advance`, body, r.secrets[w]);
       r.sentBars = { claim: r.claims.get(Number(id))!, bars: [...p.holderBars].sort() };
       return;
     }
@@ -147,14 +147,14 @@ async function drive(r: Run, before: any, after: any, action: string, p: Record<
       const reach = p.b && c.leg !== '' && b.pushed[w];
       const station = reach ? TO[c.leg as keyof typeof TO] : c.station;
       const end_reason = p.kind === 'done' || action === 'endDoneAtEnd' ? 'done' : p.kind === 'suspended' ? `suspended:${station}` : 'released:requested';
-      await worker(w, `/v1/runner/claims/${r.claims.get(Number(id))}/end`, { end_reason, reached: station }, r.secrets[w]);
+      await runner(w, `/v1/runner/claims/${r.claims.get(Number(id))}/end`, { end_reason, reached: station }, r.secrets[w]);
       return;
     }
     case 'heartbeat':
       await heartbeat(r, w);
       return;
     case 'fenceCleared': {
-      const fenced = Object.entries(b.claims as Record<string, any>).find(([, c]) => c.worker === w && c.fencePending);
+      const fenced = Object.entries(b.claims as Record<string, any>).find(([, c]) => c.runner === w && c.fencePending);
       await heartbeat(r, w, { fenced: { claim_id: r.claims.get(Number(fenced![0])), terminated: true } });
       return;
     }
@@ -218,13 +218,13 @@ async function drive(r: Run, before: any, after: any, action: string, p: Record<
   }
 }
 
-/** A heartbeat; a worker the alarm reaped re-keys first (R-BTN-14: its old secret is refused). */
+/** A heartbeat; a runner the alarm reaped re-keys first (R-BTN-14: its old secret is refused). */
 async function heartbeat(r: Run, w: string, over: Record<string, unknown> = {}) {
-  const reaped = (await rows<{ reaped_at: number | null }>('SELECT reaped_at FROM workers WHERE session_name = ?', `s-${w}`))[0]?.reaped_at != null;
+  const reaped = (await rows<{ reaped_at: number | null }>('SELECT reaped_at FROM runners WHERE session_name = ?', `s-${w}`))[0]?.reaped_at != null;
   if (reaped) {
     r.secrets[w] = `secret-${w}-${Math.random().toString(16).slice(2, 8)}`;
-    await worker(w, '/v1/runner/heartbeat', hbBody(w, { rekey: true, secret_hash: await sha256(r.secrets[w]), ...over }), r.secrets[w]);
-  } else await worker(w, '/v1/runner/heartbeat', hbBody(w, over), r.secrets[w]);
+    await runner(w, '/v1/runner/heartbeat', hbBody(w, { rekey: true, secret_hash: await sha256(r.secrets[w]), ...over }), r.secrets[w]);
+  } else await runner(w, '/v1/runner/heartbeat', hbBody(w, over), r.secrets[w]);
 }
 
 const owner = async (r: Run, path: string, body: unknown) =>
@@ -270,8 +270,8 @@ function differences(m: any, core: Projection, r: Run): string[] {
     eq(`claim ${i} status`, c.status, k.status);
     eq(`claim ${i} kind`, c.kind, kindOf(k.endReason));
     eq(`claim ${i} station`, c.station, k.station);
-    // a reaped claim keeps its leg in the model, as its worker's view (a push it may still try);
-    // the core keeps no worker's view: compared while the claim is active
+    // a reaped claim keeps its leg in the model, as its runner's view (a push it may still try);
+    // the core keeps no runner's view: compared while the claim is active
     if (c.status === 'active') eq(`claim ${i} leg`, c.leg, k.leg);
     eq(`claim ${i} finished`, c.finished, k.finished);
     eq(`claim ${i} startPath`, c.startPath, k.startPath);

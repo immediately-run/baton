@@ -1,0 +1,54 @@
+---
+title: "B-265 — The executor brief carries the session's course, the claim's scope and the leg's trusted and check declarations"
+id: B-265
+project: baton
+status: available
+updated: 2026-11-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "Fieldhouse's forge gate (FIELDHOUSE_SPEC section 6) scopes each session's forge token to its claim; the runner's executor registers that scope and today's brief (R-BTN-107) lacks it. Amend R-BTN-107 and have the runner fill the fields from the claim answer and the loaded course. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** immediately-run/fieldhouse `spec/FIELDHOUSE_SPEC.md` §6 (the forge gate, fieldhouse#37) has a host service hold every forge credential and give each session a token scoped to its claim. The runner's executor registers that scope before a session starts, and today's `brief` does not carry what it needs. The owner, 2026-11-19, of the Baton changes Fieldhouse's §6 needs: "file these and push to main".
+
+**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3): `brief` "holds the session's kind, the ticket, the leg, its input URIs, the hand-off document, the leg's instructions and its agent command, and, as hints, whether the leg is `autonomous` and `reads_only`"), [§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9) (a leg's scope, which the claim answer carries), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), [R-BTN-141](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)).
+**Depends on:** none.
+**Used by:** fieldhouse FLDH-61.
+
+### What to build
+
+1. **Amend R-BTN-107 first, by PR** (a spec change: `executor_api` gains fields, so decide whether it stays 1 with optional fields or becomes 2). `brief` additionally carries, for a session with a claim: the course's id; the leg's `trusted` declaration and whether it is a check leg (R-BTN-114), as it already carries `reads_only`; and the claim's scope as the claim answer served it — the home and each `repos:` entry with reach, as forge paths. For a session with no claim: the home's forge path.
+2. **The runner fills them** from the claim answer and the course it loaded, never from the checkout's ticket file.
+3. **`builtin` and `home` ignore them**; a `pinned` executor may read them.
+
+### Do not
+
+- Put the claim id, the runner secret or any Baton credential in `brief` (R-BTN-107 forbids it today, and still does).
+- Let an executor's answer change the scope: the fields are one-way.
+
+### Exit criteria
+
+- [ ] R-BTN-107 amended, with a history entry and a scenario that starts a pinned executor's session and asserts the new fields against the claim answer
+- [ ] `npm test` green
+
+### Trust
+
+The new fields are written by the runner, from Baton's own claim answer (authenticated as every runner response is) and from the course files the runner loaded (control paths, R-BTN-184). Their only reader is the executor the host pinned, in the runner's process. A leg cannot write them: `brief` is built before the session exists. A compromised runner can lie in them, as it can lie about everything else it tells its own executor (`docs/security-model.mdx`, reach 5); nothing Baton decides reads them back.
+
+### Invariants
+
+- R-BTN-107: `brief` holds no claim id, runner secret or Baton credential — the added fields are a course id, three booleans and forge paths.
+- R-BTN-33: nothing of a ticket's body is stored or passed — the scope is filter fields Baton already serves.
+- R-BTN-50: no deployment vocabulary enters core — the fields name Baton's own concepts (course, scope, `trusted`), not a gate.
+
+## Status
+
+_filed 2026-11-19._

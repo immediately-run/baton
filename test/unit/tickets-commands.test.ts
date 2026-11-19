@@ -1142,7 +1142,7 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
   let keyFile: string;
 
   beforeEach(() => {
-    keyFile = join(tmp('baton-b129-key-'), 'worker.key');
+    keyFile = join(tmp('baton-b129-key-'), 'runner.key');
     mkdirSync(dirname(keyFile), { recursive: true });
     key = `bak_${'0'.repeat(16)}_${'a'.repeat(64)}`;
     writeFileSync(keyFile, `${key}\n`);
@@ -1184,15 +1184,15 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
     }
   }, 60_000);
 
-  it('the same state with a live claim by another worker refuses, naming the holder and the lease', async () => {
+  it('the same state with a live claim by another runner refuses, naming the holder and the lease', async () => {
     const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
     const leaseEnds = Date.parse('2026-10-27T11:00:00Z');
-    const baton = await fakeBaton({ ...B91, holders: [{ ticket_id: 'baton:B-91', worker_id: 7, hostname: 'host-3', session_name: 'claude-review', lease_ends_at: leaseEnds }] });
+    const baton = await fakeBaton({ ...B91, holders: [{ ticket_id: 'baton:B-91', runner_id: 7, hostname: 'host-3', session_name: 'claude-review', lease_ends_at: leaseEnds }] });
     try {
       const before = f.head().sha;
       const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', baton.url);
       expect(r.code).toBe(2);
-      expect(r.err).toBe(`baton: B-91 is held by host-3 · claude-review (worker 7), its lease ends 2026-10-27T11:00:00.000Z — its lease has not ended; it is released or reaped first (Baton's board, B-129)\n`);
+      expect(r.err).toBe(`baton: B-91 is held by host-3 · claude-review (runner 7), its lease ends 2026-10-27T11:00:00.000Z — its lease has not ended; it is released or reaped first (Baton's board, B-129)\n`);
       expect(f.head().sha).toBe(before);
     } finally {
       baton.close();
@@ -1450,19 +1450,19 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
   it('a holder whose lease has ended awaits reaping, and a legacy holder has no lease: both refuse, naming it', async () => {
     const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
     const ended = Date.parse('2026-10-27T11:00:00Z');
-    const stale = await fakeBaton({ ...B91, serverTime: ended + 60_000, holders: [{ ticket_id: 'baton:B-91', worker_id: 7, hostname: 'host-3', session_name: 'claude-review', lease_ends_at: ended }] });
+    const stale = await fakeBaton({ ...B91, serverTime: ended + 60_000, holders: [{ ticket_id: 'baton:B-91', runner_id: 7, hostname: 'host-3', session_name: 'claude-review', lease_ends_at: ended }] });
     try {
       const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', stale.url);
       expect(r.code).toBe(2);
-      expect(r.err).toBe("baton: B-91 is held by host-3 · claude-review (worker 7), its lease ended 2026-10-27T11:00:00.000Z and the claim awaits reaping; it is reaped first (Baton's board, B-129)\n");
+      expect(r.err).toBe("baton: B-91 is held by host-3 · claude-review (runner 7), its lease ended 2026-10-27T11:00:00.000Z and the claim awaits reaping; it is reaped first (Baton's board, B-129)\n");
     } finally {
       stale.close();
     }
-    const legacy = await fakeBaton({ ...B91, holders: [{ ticket_id: 'baton:B-91', worker_id: 3, hostname: 'legacy', session_name: 'item-B-91', lease_ends_at: null }] });
+    const legacy = await fakeBaton({ ...B91, holders: [{ ticket_id: 'baton:B-91', runner_id: 3, hostname: 'legacy', session_name: 'item-B-91', lease_ends_at: null }] });
     try {
       const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', legacy.url);
       expect(r.code).toBe(2);
-      expect(r.err).toBe("baton: B-91 is held by legacy · item-B-91 (worker 3), a claim with no lease to end (a legacy claim); it is released, adopted or reaped first (Baton's board, B-129)\n");
+      expect(r.err).toBe("baton: B-91 is held by legacy · item-B-91 (runner 3), a claim with no lease to end (a legacy claim); it is released, adopted or reaped first (Baton's board, B-129)\n");
     } finally {
       legacy.close();
     }

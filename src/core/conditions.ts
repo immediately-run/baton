@@ -86,12 +86,12 @@ export class Conditions {
    * session link and refuses the raise when none is stored; the open `interact` of the same run
    * closes `superseded` in this transaction, one open per run.
    */
-  report(workerId: number, claimId: number, body: unknown): { ok: true; condition_id: number; disposition: string } {
+  report(runnerId: number, claimId: number, body: unknown): { ok: true; condition_id: number; disposition: string } {
     const b: ConditionReport = checkConditionReport(body);
     const now = this.c.now();
-    const c = this.rows<{ ticket_id: string; status: string; worker_id: number; course_id: string | null }>(
-      'SELECT ticket_id, status, worker_id, course_id FROM claims WHERE id = ?', claimId)[0];
-    if (!c || c.worker_id !== workerId) throw new BatonError('claim-ended', 'no such claim of this worker');
+    const c = this.rows<{ ticket_id: string; status: string; runner_id: number; course_id: string | null }>(
+      'SELECT ticket_id, status, runner_id, course_id FROM claims WHERE id = ?', claimId)[0];
+    if (!c || c.runner_id !== runnerId) throw new BatonError('claim-ended', 'no such claim of this runner');
     if (c.status !== 'active') throw new BatonError('claim-ended', `the claim already ended (${c.status})`);
     const repo = repositoryOf(c.ticket_id);
     // The raising run: the claim's running leg row, whose run id and session link the condition
@@ -143,7 +143,7 @@ export class Conditions {
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id, repo, c.ticket_id, claimId, run.run_id, run.leg, b.type, disposition, b.severity, url, JSON.stringify(restarts), b.default ?? null, now,
       closesAtRaise ? 'recorded' : 'open', closesAtRaise ? now : null, closesAtRaise ? 'raised' : null);
-    logEvent(this.c.store, now, 'condition', `worker:${workerId}`,
+    logEvent(this.c.store, now, 'condition', `runner:${runnerId}`,
       { ticket: c.ticket_id, leg: run.leg, run_id: run.run_id, type: b.type, disposition, ...(b.severity !== 'normal' ? { severity: b.severity } : {}), ...(url ? { url } : {}) },
       c.ticket_id, claimId, repo);
     this.c.history?.record(c.ticket_id, { kind: 'condition', claim_id: claimId, leg: run.leg, run_id: run.run_id, detail: { type: b.type, disposition, ...(b.severity !== 'normal' ? { severity: b.severity } : {}), ...(url ? { url } : {}) } });

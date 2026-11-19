@@ -7,14 +7,14 @@
 //      same refusals — over two groups, owner bars that only the gate sees, a full expedite
 //      lane, a stale course and an idle board;
 //   2. `state_version` moves with a write, not with a steady heartbeat or a call's liveness;
-//   3. an idle worker's "nothing eligible" is memoised: a write, a heartbeat changing what it
+//   3. an idle runner's "nothing eligible" is memoised: a write, a heartbeat changing what it
 //      declares, or a passing clock deadline (an owner bar ending, a backoff lapsing) ends it;
 //   4. on the Cloudflare host, an idle beat's recommendations and refused claim read at most
 //      ~50 rows (`SqlStorageCursor.rowsRead`) on a production-sized state.
 // Runs on both hosts (the rows_read case on Cloudflare only).
 import { describe, it, expect, beforeEach } from 'vitest';
 import chore from '../fixtures/courses/chore/course.json';
-import { HOST, Git, beat, claimItem, course, cutover, placed, register, rows, seedClaim, setClock, withCore, workerCall } from '../helpers';
+import { HOST, Git, beat, claimItem, course, cutover, placed, register, rows, seedClaim, setClock, withCore, runnerCall } from '../helpers';
 
 const T0 = Date.parse('2026-11-15T12:00:00Z');
 const M = 60_000;
@@ -32,21 +32,21 @@ const reference = (on: boolean) => withCore((c) => { c.claims.reference = on; })
 const version = () => withCore((c) => c.stateVersion());
 
 async function recs(secret: string, limit = 10, cred: 'vm-a' | 'mac' = 'vm-a'): Promise<string[]> {
-  const res = await workerCall(`/v1/runner/recommendations?limit=${limit}`, { cred, secret });
+  const res = await runnerCall(`/v1/runner/recommendations?limit=${limit}`, { cred, secret });
   const body = (await res.json()) as { recommendations: { ticket_id: string }[] };
   expect(res.status).toBe(200);
   return body.recommendations.map((r) => r.ticket_id);
 }
 
-/** Every answer a worker can get without claiming: each limit's full recommendation list, and
+/** Every answer a runner can get without claiming: each limit's full recommendation list, and
  *  `next` (the claim's own decision). */
 async function answers(secret: string) {
   const out: Record<string, unknown> = {};
   for (const limit of [1, 2, 3, 5, 10, 25, 50]) {
-    const res = await workerCall(`/v1/runner/recommendations?limit=${limit}`, { secret });
+    const res = await runnerCall(`/v1/runner/recommendations?limit=${limit}`, { secret });
     out[`limit=${limit}`] = { status: res.status, body: await res.json() };
   }
-  const next = await workerCall('/v1/runner/next', { secret });
+  const next = await runnerCall('/v1/runner/next', { secret });
   out.next = { status: next.status, body: await next.json() };
   return out;
 }
@@ -163,7 +163,7 @@ describe('B-237 the state version and the idle memo (R-BTN-196)', () => {
     expect(await recs(w.secret)).toEqual([]);
     expect((await claimItem('vm-a', w.secret)).json).toMatchObject({ code: 'no-eligible-ticket' });
     expect(await version()).toBe(v0);
-    // A heartbeat that changes what the worker declares is a change.
+    // A heartbeat that changes what the runner declares is a change.
     expect((await beat('vm-a', w.secret, { tags: ['y'] })).status).toBe(200);
     const v1 = await version();
     expect(v1).toBeGreaterThan(v0);
@@ -219,7 +219,7 @@ describe('B-237 the state version and the idle memo (R-BTN-196)', () => {
   it('a passing clock deadline ends it: an owner bar ending, a backoff lapsing', async () => {
     git.add('T-1', { rank: 1 });
     expect((await git.post()).status).toBe(200);
-    // An owner bar on the worker's tag until +5 min: nothing eligible, memoised.
+    // An owner bar on the runner's tag until +5 min: nothing eligible, memoised.
     await bar('*', 'x', [], T0 - M, T0 + 5 * M);
     expect(await recs(w.secret)).toEqual([]);
     expect((await claimItem('vm-a', w.secret)).json).toMatchObject({ code: 'no-eligible-ticket' });
@@ -275,7 +275,7 @@ describe.runIf(HOST === 'cloudflare')('B-237 an idle beat reads about nothing (r
     const w = await register('vm-a');
     const other = await register('vm-b');
     await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < 600)
-                INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, end_reason, ended_at, ended_at_sha, confirmed_at, end_observation)
+                INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, end_reason, ended_at, ended_at_sha, confirmed_at, end_observation)
                 SELECT 'docs:T-' || (1 + i % 180), ?, 'hist-' || i, 'abc123', '', ?, 'completed', 'suspended:reviewed', ?, 'abc', ?, 0 FROM k`, other.id, T0 - 86_400_000, T0 - 86_400_000, T0 - 86_400_000);
     await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < 3000)
                 INSERT INTO events (at, kind, actor, detail_json, repository_id) SELECT ?, 'claimed', 'test', '{}', 'docs' FROM k`, T0 - 86_400_000);

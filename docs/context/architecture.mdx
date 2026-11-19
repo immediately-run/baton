@@ -37,9 +37,12 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
 
 ## The ledger and the cache
 
-- **Git is the ledger for the work; Baton owns what no push may decide.** Every ticket, its
-  body and its evidence live in the repository, and Baton's board is a cache of them, rebuilt
-  by each sync. Baton owns the rest: claims and leases, each ticket's course history (B-120),
+- **Git is the ledger for the work's evidence, the ticket source for tickets; Baton owns what
+  no push may decide.** Every ticket and its body live in the repository's ticket source — its
+  git folder by default, or a store such as an issue tracker (BATON_SPEC
+  [R-BTN-74](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)) — and the work's evidence
+  lives in the repository; Baton's board is a cache of both, rebuilt by each sync (the owner,
+  2026-11-19). Baton owns the rest: claims and leases, each ticket's course history (B-120),
   attestations (BATON_SPEC [R-BTN-181](../../spec/BATON_SPEC/12-security.md#sec-12-8)), owner settings and grants. Some of it is duplicated in
   git for people to read; some of it is in git nowhere, because a push must not be able to
   write it. Losing it fails closed: work is reviewed and approved again, never restored from
@@ -51,7 +54,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
 
 ## Who decides what
 
-- **Baton holds the lock; it does not police the work.** A refusal keeps cooperating workers
+- **Baton holds the lock; it does not police the work.** A refusal keeps cooperating runners
   from colliding; a capability, `human-operator` included, is a runner's own statement; Baton's
   permissions cover only its own state — who takes a repository's leases, who changes its
   settings (values 12). A threat that needs a runner stopped belongs to the deployment, the
@@ -95,7 +98,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
   in its path or on its branch — or it does not exist. This retired `markers.jsonl`
   (B-100) and shapes every course since; the audit that stated it is
   [`docs/review/parallel-collaboration-2026-10-22.mdx`](../review/parallel-collaboration-2026-10-22.mdx).
-- **Several dozen parallel workers** — humans and agents — are the load the architecture
+- **Several dozen parallel runners** — humans and agents — are the load the architecture
   is for, provided they work separate tickets.
 - **Parallelism is horizontal: many legs, each in its own session.** A runner may hold several
   claims, each running its ticket's legs one at a time in an executor session of its own and a

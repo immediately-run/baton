@@ -10,7 +10,7 @@
 // `next` suspends at its station; a release aborts the leg at its next safe point, writes the
 // hand-off and ends `released:requested` naming whether the leg reached its `to`; a leg
 // session's claim is refused, since it carries BATON_PARENT, and leg sessions register no
-// worker of their own; an `unblocked` message is acknowledged. Node only: it spawns the legs'
+// runner of their own; an `unblocked` message is acknowledged. Node only: it spawns the legs'
 // child processes and runs git.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -114,7 +114,7 @@ function makeRunner(over: Record<string, unknown> = {}): Runner {
   const api = new BatonApi({
     url: 'https://baton.test',
     transport: (req) => hostCall(req),
-    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+    auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   });
   const runner = new Runner({
     api, home: home.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
@@ -188,7 +188,7 @@ describe('S-BTN-41 the runner', () => {
       { leg: 'check', to_station: 'checked', bars: '[]' },
       { leg: 'merge', to_station: 'merged', bars: '["family:anthropic"]' },
     ]);
-    // The leg session's env named its parent and the runner's state file (it registers no worker
+    // The leg session's env named its parent and the runner's state file (it registers no runner
     // of its own); the session token travelled from build's result into check's ctx. Each leg's
     // run number is 1 on its first run — the path gains a leg only when it finishes.
     const lines = home.evidence();
@@ -313,8 +313,8 @@ describe('S-BTN-41 the runner', () => {
     await until(() => rows('SELECT 1 FROM claims'));
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`)); // the wait holds
-    const worker = (await rows<{ id: number }>('SELECT id FROM workers ORDER BY id DESC LIMIT 1'))[0].id;
-    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', to_worker_id: worker, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
+    const runnerId = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0].id;
+    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
     expect(send.status).toBe(200);
     // No leg was running when the release landed — the claim still ends released, never
     // suspended, and the message is acked because it was acted on.
@@ -451,8 +451,8 @@ describe('S-BTN-41 the runner', () => {
     runner.start();
     const done = runner.runOnce();
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
-    const worker = (await rows<{ id: number }>('SELECT id FROM workers ORDER BY id DESC LIMIT 1'))[0].id;
-    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', to_worker_id: worker, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
+    const runnerId = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0].id;
+    const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'release', to_runner_id: runnerId, payload: { ticket_id: 'docs:T-1', reason: 'requested' } }) });
     expect(send.status).toBe(200);
     // It names that the leg reached its to — validated and closed like any result (R-BTN-83),
     // the marker before the hand-off — and releases naming a leg leaving where it rests.
@@ -477,10 +477,10 @@ describe('S-BTN-41 the runner', () => {
     runner.start();
     const done = runner.runOnce();
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
-    const worker = (await rows<{ id: number }>('SELECT id FROM workers ORDER BY id DESC LIMIT 1'))[0].id;
+    const runnerId = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0].id;
     // Two wind-downs, the owner's ask: the first sets the drain flag, the second changes nothing.
     for (let i = 0; i < 2; i++) {
-      const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'wind-down', to_worker_id: worker }) });
+      const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'wind-down', to_runner_id: runnerId }) });
       expect(send.status).toBe(200);
     }
     // The leg ran to its end — a drain abandons nothing — and the claim ends at the boundary
@@ -564,7 +564,7 @@ describe('S-BTN-41 the runner', () => {
     expect(await untilDead(pid)).toBe(true);
     expect(home.evidence().some((l) => l.startsWith('handoff'))).toBe(false);
     // R-BTN-19: the next heartbeat reports the fence it cleared, so the ticket is re-issued
-    // instead of waiting for the worker to go silent…
+    // instead of waiting for the runner to go silent…
     await until(() => rows('SELECT 1 FROM claims WHERE fence_pending = 0'));
     // The owner's reap ended the claim first; the runner's own end was answered claim-ended and
     // the outcome stands — the ticket is re-issued, not fence-pending.
@@ -667,7 +667,7 @@ describe('S-BTN-41 the runner', () => {
     home.commit();
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'ready']]) });
     const runner = makeRunner();
-    await runner.tick(); // registers the worker
+    await runner.tick(); // registers the runner
     const stateFile = join(tmpdir(), `baton-runner-${process.pid}-spool.json`);
     rmSync(stateFile, { force: true });
     const spooling = makeRunner({ stateFile, session: 'spool' } as Record<string, unknown>);
@@ -707,15 +707,15 @@ describe('S-BTN-41 the runner', () => {
     home.leg('check', `return { suspend: true, reached: 'checked' };`);
     home.commit();
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'ready']]) });
-    // A first runner registers the worker, then dies with a claim live — the state file and
+    // A first runner registers the runner, then dies with a claim live — the state file and
     // the server each hold half of it, as a killed process leaves them.
     const stateFile = join(tmpdir(), `baton-runner-${process.pid}-orphan.json`);
     rmSync(stateFile, { force: true });
     const first = makeRunner({ stateFile, session: 'orphan' } as Record<string, unknown>);
     await first.tick();
-    const workerId = (await rows<{ id: number }>('SELECT id FROM workers'))[0].id;
-    await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, station, start_path, course_id)
-                 VALUES ('docs:T-1', ?, 'seed:orphan', 'orphan1', '', ?, 'active', 'built', '[]', 'relay')`, workerId, clock.now);
+    const runnerId = (await rows<{ id: number }>('SELECT id FROM runners'))[0].id;
+    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, station, start_path, course_id)
+                 VALUES ('docs:T-1', ?, 'seed:orphan', 'orphan1', '', ?, 'active', 'built', '[]', 'relay')`, runnerId, clock.now);
     const orphan = (await rows<{ id: number }>('SELECT id FROM claims'))[0].id;
     const state = JSON.parse(readFileSync(stateFile, 'utf8')) as Record<string, unknown>;
     state.claim = { id: orphan, ticket_id: 'docs:T-1', nonce: 'orphan1' };
@@ -749,10 +749,10 @@ describe('S-BTN-41 the runner', () => {
       const file = join(dir, `${session}.json`);
       const r = makeRunner({ stateFile: file, session } as Record<string, unknown>);
       await r.tick();
-      const workerId = (await rows<{ id: number }>('SELECT id FROM workers WHERE session_name = ?', session))[0].id;
-      await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, station, start_path, course_id)
-                   VALUES (?, ?, ?, 'n', '', ?, 'active', 'built', '[]', 'relay')`, `docs:${ticket}`, workerId, `seed:${session}`, clock.now);
-      const claim = (await rows<{ id: number }>('SELECT id FROM claims WHERE worker_id = ?', workerId))[0].id;
+      const runnerId = (await rows<{ id: number }>('SELECT id FROM runners WHERE session_name = ?', session))[0].id;
+      await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, station, start_path, course_id)
+                   VALUES (?, ?, ?, 'n', '', ?, 'active', 'built', '[]', 'relay')`, `docs:${ticket}`, runnerId, `seed:${session}`, clock.now);
+      const claim = (await rows<{ id: number }>('SELECT id FROM claims WHERE runner_id = ?', runnerId))[0].id;
       const state = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
       state.claim = { id: claim, ticket_id: `docs:${ticket}`, nonce: 'n' };
       writeFileSync(file, JSON.stringify(state));
@@ -769,7 +769,7 @@ describe('S-BTN-41 the runner', () => {
       const other = new BatonApi({
         url: 'https://baton.test',
         transport: (req) => hostCall(req),
-        auth: (_m, _u, _b, s) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(s ? { 'X-Worker-Secret': s } : {}) }),
+        auth: (_m, _u, _b, s) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(s ? { 'X-Runner-Secret': s } : {}) }),
       });
       other.setSecret(secret);
       return other;
@@ -785,7 +785,7 @@ describe('S-BTN-41 the runner', () => {
     rmSync(dir, { recursive: true, force: true });
   }, 30_000);
 
-  it('a reaped worker re-keys on its next beat and carries on (R-BTN-14)', async () => {
+  it('a reaped runner re-keys on its next beat and carries on (R-BTN-14)', async () => {
     home.leg('check', `return { suspend: true, reached: 'checked' };`);
     home.commit();
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'ready']]) });
@@ -793,11 +793,11 @@ describe('S-BTN-41 the runner', () => {
     await runner.tick();
     const stateFile = (runner as unknown as { o: { stateFile: string } }).o.stateFile;
     const before = JSON.parse(readFileSync(stateFile, 'utf8')) as { secret: string };
-    await rows(`UPDATE workers SET reaped_at = ?`, clock.now); // the alarm's verdict arrived
+    await rows(`UPDATE runners SET reaped_at = ?`, clock.now); // the alarm's verdict arrived
     await runner.tick(); // the beat that learns it and parks the re-key
     expect(JSON.parse(readFileSync(stateFile, 'utf8')).lease_lost).toBe(true);
     await runner.tick(); // the beat that re-keys
-    expect(await rows(`SELECT reaped_at FROM workers`)).toEqual([{ reaped_at: null }]); // a new incarnation
+    expect(await rows(`SELECT reaped_at FROM runners`)).toEqual([{ reaped_at: null }]); // a new incarnation
     const after = JSON.parse(readFileSync(stateFile, 'utf8')) as { secret: string; incarnation: number };
     expect(after.secret).not.toBe(before.secret);
     expect(after.incarnation).toBe(2);
@@ -824,7 +824,7 @@ describe('S-BTN-41 the runner', () => {
     expect(legacy.stderr).toMatch(/no credential: BATON_KEY_FILE, BATON_KEY or BATON_TOKEN/);
   }, 60_000);
 
-  it('the state file carries the runner across a restart: the same worker, not a second one', async () => {
+  it('the state file carries the runner across a restart: the same runner, not a second one', async () => {
     home.leg('build', `return { suspend: true, reached: 'built' };`);
     home.commit();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
@@ -833,12 +833,12 @@ describe('S-BTN-41 the runner', () => {
     const first = makeRunner({ stateFile, session: 'restart' } as Record<string, unknown>);
     expect(await first.runOnce()).toMatchObject({ end_reason: 'suspended:built' });
     first.stop();
-    // A second runner over the same state file: its heartbeat authenticates as the worker the
-    // first registered — the secret and the worker id are what survived (§6.4).
+    // A second runner over the same state file: its heartbeat authenticates as the runner the
+    // first registered — the secret and the runner id are what survived (§6.4).
     const second = makeRunner({ stateFile, session: 'restart' } as Record<string, unknown>);
     await second.tick();
-    expect(await rows('SELECT count(*) AS n FROM workers')).toEqual([{ n: 1 }]);
-    expect(JSON.parse(readFileSync(stateFile, 'utf8')).worker_id).toBe(1);
+    expect(await rows('SELECT count(*) AS n FROM runners')).toEqual([{ n: 1 }]);
+    expect(JSON.parse(readFileSync(stateFile, 'utf8')).runner_id).toBe(1);
   }, 30_000);
 
   it('nothing to claim: one idle attempt, no claim row', async () => {
@@ -852,7 +852,7 @@ describe('S-BTN-41 the runner', () => {
   // enables — so a granted machine serves what its grant already says. This scenario's Baton
   // grants nothing (its fleet beats under bearer tokens, whose reach is their own), so these
   // tests answer the beat as the granted server would — `grant` and nothing else. The route from
-  // a grant to that answer is the core's (a unit test of `WorkerApi`); what is exercised here is
+  // a grant to that answer is the core's (a unit test of `RunnerApi`); what is exercised here is
   // the runner's — declare, then claim — end to end. The needs are real ones: the course file's
   // (`legNeeds`, over the home checkout `runMain` wires it to) and the ticket's `Requires:` clause
   // (`requires: ['create-pr']`, the ticket-clause input of gates.ts's rule 4).
@@ -877,12 +877,12 @@ describe('S-BTN-41 the runner', () => {
       const answer = await beat.call(api, body) as Record<string, any>;
       const declaring = (body.capabilities ?? []) as string[];
       seen.beats.push(declaring);
-      if (typeof answer.worker_id === 'number') {
-        await rows('DELETE FROM worker_capabilities WHERE worker_id = ?', answer.worker_id);
+      if (typeof answer.runner_id === 'number') {
+        await rows('DELETE FROM runner_capabilities WHERE runner_id = ?', answer.runner_id);
         const stored = new Set<string>();
         for (const name of declaring) {
-          for (const cap of capabilitiesOf([name])) if (!stored.has(cap)) { stored.add(cap); await rows('INSERT INTO worker_capabilities (worker_id, capability, declared) VALUES (?, ?, ?)', answer.worker_id, cap, name); }
-          if (name === 'human-operator' && !stored.has(name)) { stored.add(name); await rows('INSERT INTO worker_capabilities (worker_id, capability, declared) VALUES (?, ?, ?)', answer.worker_id, name, name); }
+          for (const cap of capabilitiesOf([name])) if (!stored.has(cap)) { stored.add(cap); await rows('INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (?, ?, ?)', answer.runner_id, cap, name); }
+          if (name === 'human-operator' && !stored.has(name)) { stored.add(name); await rows('INSERT INTO runner_capabilities (runner_id, capability, declared) VALUES (?, ?, ?)', answer.runner_id, name, name); }
         }
       }
       return answer;
@@ -890,7 +890,7 @@ describe('S-BTN-41 the runner', () => {
     return seen;
   }
 
-  it('a granted worker with no --capabilities declares the grant and claims a create-pr leg (exit criterion 1)', async () => {
+  it('a granted runner with no --capabilities declares the grant and claims a create-pr leg (exit criterion 1)', async () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
     home.commit();
     // The ticket's clause: relay's build leg requires create-pr (rule 4's ticket-clause input,
@@ -907,10 +907,10 @@ describe('S-BTN-41 the runner', () => {
     // Finding 1 (round 4): the answer's names are declared exactly — the granted key's answer is
     // its expanded capabilities, so that is the list, verbatim.
     expect(seen.beats.at(-1)).toEqual(['agent-venue', 'create-pr', 'drivable-browser', 'llm-call']);
-    const [worker] = await rows<{ id: number }>('SELECT id FROM workers');
-    expect((await rows<{ declared: string }>('SELECT DISTINCT declared FROM worker_capabilities WHERE worker_id = ? ORDER BY declared', worker.id)).map((r) => r.declared)).toEqual(['agent-venue']);
+    const [runnerRow] = await rows<{ id: number }>('SELECT id FROM runners');
+    expect((await rows<{ declared: string }>('SELECT DISTINCT declared FROM runner_capabilities WHERE runner_id = ? ORDER BY declared', runnerRow.id)).map((r) => r.declared)).toEqual(['agent-venue']);
     // Through the role the server stores as its capabilities (§4): `authentication` and the rest.
-    expect((await rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ? ORDER BY capability', worker.id)).map((r) => r.capability)).toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call']);
+    expect((await rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ? ORDER BY capability', runnerRow.id)).map((r) => r.capability)).toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call']);
     // The declaration is the grant's role, said once, and the leg requiring create-pr runs:
     // before the fix `--capabilities` defaulted to agent-venue, which happened to pass this
     // clause — the narrowing tests below are where the default's absence matters.
@@ -931,16 +931,16 @@ describe('S-BTN-41 the runner', () => {
     const runner = asGranted(makeRunner({ legNeeds: () => needs }));
     const seen = recording(runner);
     // The server's own record at the moment of the claim, read by the gate: `rewriteSettings`
-    // writes `worker_capabilities` per answered beat, so this is what rule 4 saw — never the
+    // writes `runner_capabilities` per answered beat, so this is what rule 4 saw — never the
     // client's word about what it sent.
     let atClaim: { declared: string; capabilities: string }[] | null = null;
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const claim = api.claim;
     api.claim = async (body: { request_id: string; ticket_id?: string }) => {
-      const worker = (await rows<{ id: number }>('SELECT id FROM workers ORDER BY id DESC LIMIT 1'))[0];
-      atClaim = worker
-        ? await rows<{ declared: string; capabilities: string }>(`SELECT DISTINCT declared, (SELECT group_concat(capability) FROM (SELECT capability FROM worker_capabilities c WHERE c.worker_id = worker_capabilities.worker_id ORDER BY capability)) AS capabilities
-                                                                   FROM worker_capabilities WHERE worker_id = ?`, worker.id)
+      const runner = (await rows<{ id: number }>('SELECT id FROM runners ORDER BY id DESC LIMIT 1'))[0];
+      atClaim = runner
+        ? await rows<{ declared: string; capabilities: string }>(`SELECT DISTINCT declared, (SELECT group_concat(capability) FROM (SELECT capability FROM runner_capabilities c WHERE c.runner_id = runner_capabilities.runner_id ORDER BY capability)) AS capabilities
+                                                                   FROM runner_capabilities WHERE runner_id = ?`, runner.id)
         : [];
       return claim.call(api, body);
     };
@@ -980,8 +980,8 @@ describe('S-BTN-41 the runner', () => {
     // Before the fix the role was dropped for its one named capability: a declaration narrower
     // than the allow-list the key holds.
     expect(seen.beats.at(-1)).toEqual(['agent-venue', 'llm-call']);
-    const [worker] = await rows<{ id: number }>('SELECT id FROM workers');
-    expect((await rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ? ORDER BY capability', worker.id)).map((r) => r.capability))
+    const [runnerRow] = await rows<{ id: number }>('SELECT id FROM runners');
+    expect((await rows<{ capability: string }>('SELECT capability FROM runner_capabilities WHERE runner_id = ? ORDER BY capability', runnerRow.id)).map((r) => r.capability))
       .toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call']);
     expect(await rows(`SELECT leg FROM claim_legs WHERE leg = 'build'`)).toHaveLength(1);
   }, 30_000);
@@ -1150,7 +1150,7 @@ describe('S-BTN-41 the runner', () => {
     // The owner narrows the grant: llm-call is gone, so the stale declaration is refused.
     grant = ['agent-venue', 'create-pr', 'drivable-browser'];
     api.heartbeat = async (body: Record<string, unknown>) => {
-      // The heartbeat's own check, refused exactly as the server would (workerApi.ts).
+      // The heartbeat's own check, refused exactly as the server would (runnerApi.ts).
       const declaring = (body.capabilities ?? []) as string[];
       if (declaring.some((c) => !grant.includes(c))) throw new BatonRefusal('forbidden', undefined, `this credential may not declare ${declaring.filter((c) => !grant.includes(c)).join(', ')}`, 403);
       return { ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } };
@@ -1232,10 +1232,37 @@ describe('S-BTN-41 the runner', () => {
     await home.post({});
     const runner = makeRunner();
     await runner.tick();
-    const [{ id: worker }] = await rows<{ id: number }>('SELECT id FROM workers');
-    await rows(`INSERT INTO messages (kind, payload_json, from_principal, to_worker_id, sent_at, status) VALUES ('unblocked', '{"tickets":[]}', 'baton', ?, ?, 'pending')`, worker, T0);
+    const [{ id: runnerId }] = await rows<{ id: number }>('SELECT id FROM runners');
+    await rows(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status) VALUES ('unblocked', '{"tickets":[]}', 'baton', ?, ?, 'pending')`, runnerId, T0);
     await runner.tick(); // delivered, and acknowledged at once: the runner holds no claim
     expect(await rows(`SELECT status FROM messages WHERE kind = 'unblocked'`)).toEqual([{ status: 'acknowledged' }]);
+  }, 30_000);
+
+  it('an unblocked message that arrives while a leg runs is acknowledged at that beat and logged once (R-BTN-77)', async () => {
+    // Found live 2026-11-18: the acknowledgement waited for the claim's end, so Baton delivered
+    // the cue again with every beat of a 40-minute leg and the runner logged it each time.
+    const lines: string[] = [];
+    home.leg('build', `await new Promise((resolve) => setTimeout(resolve, 3000));
+  out(ctx, 'build ran');
+  return { reached: 'built', next: 'check' };`);
+    home.leg('check', `out(ctx, 'check ran');
+  return { reached: 'checked', next: 'merge' };`);
+    home.leg('merge', `out(ctx, 'merge ran');
+  return { reached: 'merged' };`, true);
+    const runner = makeRunner({ log: (l: string) => lines.push(l), now: () => Date.now() });
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    const done = runner.work();
+    await until(async () => lines.filter((l) => l.includes("docs:T-1's build has run")));
+    const [{ id: runnerId }] = await rows<{ id: number }>('SELECT id FROM runners');
+    await rows(`INSERT INTO messages (kind, payload_json, from_principal, to_runner_id, sent_at, status) VALUES ('unblocked', '{"tickets":[]}', 'baton', ?, ?, 'pending')`, runnerId, Date.now());
+    // Acknowledged while the build leg still runs — not held for the claim's end.
+    await until(async () => (await rows<{ status: string }>(`SELECT status FROM messages WHERE kind = 'unblocked'`)).filter((r) => r.status === 'acknowledged'));
+    expect(lines.join('\n')).not.toContain('build ran');
+    await until(async () => lines.filter((l) => l.includes('docs:T-1 done at')));
+    runner.stop();
+    await done;
+    expect(lines.filter((l) => l.includes('baton: message unblocked received'))).toHaveLength(1);
   }, 30_000);
 
   // B-108 — the runner's liveness line: while a leg runs, each beat says how long and how live,

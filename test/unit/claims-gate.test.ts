@@ -3,7 +3,7 @@
 // server, the hold and legacy branches, and the dashboard's Running / Timeline / Needs you data.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import {
-  beat, claimItem, claimRow, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, withCore, workerCall, tick, refresh, recommended, seedClaim,
+  beat, claimItem, claimRow, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, withCore, runnerCall, tick, refresh, recommended, seedClaim,
 } from '../helpers';
 
 const board = inject('board');
@@ -157,10 +157,10 @@ describe('§6.5 ends', () => {
     expect((await claimRow(c.claim_id)).status).toBe('active');
   });
 
-  it('R-BTN-8 vs R-BTN-35: a sync that releases the claim stale-board before the worker’s own done keeps the completion', async () => {
+  it('R-BTN-8 vs R-BTN-35: a sync that releases the claim stale-board before the runner’s own done keeps the completion', async () => {
     const { secret } = await register('vm-a');
     const { json: c } = await claimItem('vm-a', secret, { ticket_id: 'docs:R3-9002' });
-    // The worker pushed git first; the sync sees the item gone before its end call arrives.
+    // The runner pushed git first; the sync sees the item gone before its end call arrives.
     const gone = items().filter((i) => i.id !== 'R3-9002');
     await syncCall('/v1/sync/board', payload(fake('b'), sha.A, { ...board.states.A, state: { items: gone }, ready: ['R3-9001', 'R3-9003'] }));
     expect((await claimRow(c.claim_id)).end_reason).toBe('released:stale-board');
@@ -179,7 +179,7 @@ describe('§6.5 ends', () => {
     await syncCall('/v1/sync/board', payload(fake('b'), sha.A, { ...board.states.A, state: { items: retiered }, ready: board.states.A.ready }));
     expect((await claimRow(c.claim_id)).end_reason).toBe('released:stale-board');
     expect((await endClaim('vm-a', a.secret, c.claim_id, { end_reason: 'done', ended_at_sha: fake('b') })).json.code).toBe('claim-ended');
-    // Gone from git, but another worker claimed it in between: still claim-ended.
+    // Gone from git, but another runner claimed it in between: still claim-ended.
     await refresh(); // §6.7: claimable again after a reading since the end
     const { json: c2 } = await claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9001' });
     expect(c2.claim_id).toBeGreaterThan(c.claim_id);
@@ -223,7 +223,7 @@ describe('§9: two stale releases reap a claim once', () => {
     const a = await register('vm-a', { lease_timeout_s: 43_200 });
     const { json: c } = await claimItem('vm-a', a.secret);
     for (const reason of ['requested', 'owner-cancel']) {
-      await owner('/v1/ui/messages', { to_worker_id: a.id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason } });
+      await owner('/v1/ui/messages', { to_runner_id: a.id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason } });
     }
     await beat('vm-a', a.secret, { lease_timeout_s: 43_200 });
     await alarmAt(T0 + 2 * H);
@@ -235,7 +235,7 @@ describe('§9: two stale releases reap a claim once', () => {
 describe('the holder query takes only an item id', () => {
   it('a malformed escape or a non-id is invalid-params, never a 500', async () => {
     for (const bad of ['%E0%A4%A', 'not-an-item', '..%2F..']) {
-      const res = await workerCall(`/v1/runner/tickets/${bad}/holder`, { cred: 'vm-a' });
+      const res = await runnerCall(`/v1/runner/tickets/${bad}/holder`, { cred: 'vm-a' });
       expect([bad, res.status]).toEqual([bad, 400]);
     }
   });
@@ -252,7 +252,7 @@ describe('§7.2 rules 2 and 8 through the server', () => {
     expect((await recommended(t.id))[0]).toBe('docs:R3-9001');
     await seedClaim(b.id, 'docs:R3-9004'); // a second active expedited claim
     // Two: R3-9001 loses the lane in the recommendations, flagged…
-    const recs = (await (await workerCall('/v1/runner/recommendations', { cred: 'test', secret: t.secret })).json()) as { recommendations: { ticket_id: string; flags: string[] }[] };
+    const recs = (await (await runnerCall('/v1/runner/recommendations', { cred: 'test', secret: t.secret })).json()) as { recommendations: { ticket_id: string; flags: string[] }[] };
     expect(recs.recommendations.find((r) => r.ticket_id === 'docs:R3-9001')?.flags).toEqual(['expedite-bound']);
     // …and a claim of it anyway is accepted, the advice it went against recorded.
     const c = await claimItem('test', t.secret, { ticket_id: 'docs:R3-9001' });
@@ -261,7 +261,7 @@ describe('§7.2 rules 2 and 8 through the server', () => {
       .toEqual([{ advice: 'expedite-bound' }]);
   });
 
-  it('rule 8: a worker carrying a tag the sync bars from the ticket’s queued leg is refused barred-tag; one without it claims', async () => {
+  it('rule 8: a runner carrying a tag the sync bars from the ticket’s queued leg is refused barred-tag; one without it claims', async () => {
     await rows(`INSERT INTO ticket_bars (ticket_id, leg, tag) VALUES ('docs:R3-9001', 'implement', 'family:glm')`);
     const glm = await register('vm-a', { tags: ['family:glm', 'account:zai'] });
     expect(await claimItem('vm-a', glm.secret, { ticket_id: 'docs:R3-9001' })).toMatchObject({ status: 409, json: { code: 'barred-tag', rule: 8 } });
@@ -282,16 +282,16 @@ describe('the hold override and legacy claims', () => {
 
   it('a legacy claim is reaped at its reap_after, never by silence, and is not "another live holder"', async () => {
     await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('legacy', 'legacy', '[]') ON CONFLICT (id) DO NOTHING`);
-    await rows(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+    await rows(`INSERT INTO runners (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
                 VALUES ('legacy', 'docs:R3-9001', '', 'legacy', 'claude-code', 'legacy', 'critical', 0, '', 0, 0)`);
-    const lw = (await rows<{ id: number }>(`SELECT id FROM workers WHERE kind = 'legacy'`))[0].id;
-    await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, reap_after)
+    const lw = (await rows<{ id: number }>(`SELECT id FROM runners WHERE kind = 'legacy'`))[0].id;
+    await rows(`INSERT INTO claims (ticket_id, runner_id, request_id, nonce, snapshot_sha, claimed_at, status, reap_after)
                 VALUES ('docs:R3-9001', ?, 'legacy:R3-9001', 'abc123', '', 0, 'active', ?)`, lw, T0 + 7 * 24 * H);
-    expect(await (await workerCall('/v1/runner/tickets/docs:R3-9001/holder', { cred: 'vm-b' })).json()).toEqual({ held_by_other: false, fence_pending: false });
+    expect(await (await runnerCall('/v1/runner/tickets/docs:R3-9001/holder', { cred: 'vm-b' })).json()).toEqual({ held_by_other: false, fence_pending: false });
     await alarmAt(T0 + 7 * 24 * H - 1);
-    expect(await rows(`SELECT status FROM claims WHERE worker_id = ?`, lw)).toEqual([{ status: 'active' }]);
+    expect(await rows(`SELECT status FROM claims WHERE runner_id = ?`, lw)).toEqual([{ status: 'active' }]);
     await alarmAt(T0 + 7 * 24 * H);
-    expect(await rows(`SELECT status, end_reason FROM claims WHERE worker_id = ?`, lw)).toEqual([{ status: 'reaped', end_reason: 'reaped:legacy' }]);
+    expect(await rows(`SELECT status, end_reason FROM claims WHERE runner_id = ?`, lw)).toEqual([{ status: 'reaped', end_reason: 'reaped:legacy' }]);
   });
 });
 
@@ -311,7 +311,7 @@ describe('§14: Running, Timeline and Needs you', () => {
   it('Timeline: alive lanes only, with each activity’s detail and transcript link', async () => {
     const { secret } = await register('vm-a');
     const { json: c } = await claimItem('vm-a', secret);
-    await workerCall('/v1/runner/activities', { secret, body: { activities: [
+    await runnerCall('/v1/runner/activities', { secret, body: { activities: [
       { id: 'r1', claim_id: c.claim_id, kind: 'review-round', seq: 1, source: 'skill', started_at: T0 },
       { id: 'rv', claim_id: c.claim_id, parent_id: 'r1', kind: 'reviewer', label: 'review-pr-glm', source: 'hook', started_at: T0 },
       { id: 'pr', claim_id: c.claim_id, kind: 'open-pr', source: 'hook', started_at: T0, ended_at: T0 + 1, outcome: 'succeeded', detail: { pr: 'https://github.com/immediately-run/docs/pull/5' } },
@@ -329,10 +329,10 @@ describe('§14: Running, Timeline and Needs you', () => {
   it('Needs you: unacknowledged releases and fence-pending claims appear and clear', async () => {
     const a = await register('vm-a');
     const { json: c } = await claimItem('vm-a', a.secret);
-    await owner('/v1/ui/messages', { to_worker_id: a.id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } });
+    await owner('/v1/ui/messages', { to_runner_id: a.id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } });
     expect((await uiState()).needs_you.unacknowledged_releases).toHaveLength(1);
     const msg = (await beat('vm-a', a.secret)).json.messages.find((m: { kind: string }) => m.kind === 'release');
-    await workerCall(`/v1/runner/messages/${msg.id}/ack`, { secret: a.secret, method: 'POST' });
+    await runnerCall(`/v1/runner/messages/${msg.id}/ack`, { secret: a.secret, method: 'POST' });
     expect((await uiState()).needs_you.unacknowledged_releases).toEqual([]);
     await owner(`/v1/ui/claims/${c.claim_id}/reap`, { confirm: true });
     expect((await uiState()).needs_you.fence_pending).toEqual([expect.objectContaining({ id: c.claim_id })]);

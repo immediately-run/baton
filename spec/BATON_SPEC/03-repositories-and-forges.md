@@ -96,7 +96,7 @@ repository reachable over SSH is enough (R-BTN-105).
     - **Visibility and consent.** A dependency exposes the target's ticket — its state, its
       title — wherever the dependent's board is seen. It is accepted when the target's
       repository is **at least as visible** as the dependent's: every owner key and every
-      worker grant that sees the dependent's board sees the target's too (an administrator sees
+      runner grant that sees the dependent's board sees the target's too (an administrator sees
       every board, so administrator keys lower nothing). Otherwise the dependency needs the
       target repository owners' consent, recorded as R-BTN-140's cross-repository consent is:
       one row on the target naming the dependent, given by `POST
@@ -108,8 +108,7 @@ repository reachable over SSH is enough (R-BTN-105).
       (§4.4) is the target's registration, not a stored URL, and no other field of the target
       crosses.
   - **Repositories a ticket changes** (`repos:`) are filter fields its course reports. They
-    need no registration and reach nothing unless the home's owners list them in `code_repos`
-    (R-BTN-140).
+    need no registration; what they reach is R-BTN-140's.
 
 - **R-BTN-92 (a repository is a forge, a forge path, a remote and a web base).**
   - **`forge`**: `github`, `gitlab`, `gitea` or `git` (none), fixed for the repository's life.
@@ -119,7 +118,7 @@ repository reachable over SSH is enough (R-BTN-105).
     among the tenant's live repositories. It is for display and links; the forge's ids identify
     the repository (R-BTN-138). Every repository name a ticket carries — `repos:`, `git:` URIs
     (§12.3), the branch-holder query's `?repo=` (§9), the markdown source's `repos` map (R-BTN-74)
-    — is a forge path naming the home or a `code_repos` entry (R-BTN-140); a `code_repos` path is
+    — is a forge path naming the home or an entry with reach (R-BTN-140); a `code_repos` path is
      unique case-insensitively among the home's path and every entry, whatever its host, so a name
      resolves without one.
   - **`remote`**: the URL the sync and runners clone (`https://…`, `ssh://…` or
@@ -290,7 +289,7 @@ repository reachable over SSH is enough (R-BTN-105).
     ref}`, with the trigger token; `{kind: 'gitea', workflow, ref}`, whose token belongs to a bot
     user with write access to that one repository only. Baton holds these credentials as Worker
     secrets (`BATON_GITHUB_APP_KEY`, and the tokens in `BATON_FORGE_SECRETS`), never in SQLite or
-    an export: Baton's server is trusted with them (§12.8; the owner, 2026-11-01, "Drop it": no
+    an export: Baton's server is trusted with them (§12.8: no
     dispatch courier stands between Baton and the forge). Without a target (every `git`
     repository) Baton dispatches nothing and the runners alone answer wants; a dispatch that
     fails is retried once and then only adds latency, since the want stands until a post answers
@@ -324,14 +323,15 @@ repository reachable over SSH is enough (R-BTN-105).
     `baton.mirror-late` (a mirror more than 30 minutes behind).
   - **The GitHub App** (§12.7) is GitHub's dispatch target and Baton's webhook source.
 - **R-BTN-73 / R-BTN-95 (forge notifications are only triggers).** A notification records a
-  want; it never computes or carries state. Besides the want a delivery produces two things:
+  want; it never computes or carries state. Besides the want a delivery produces three things:
   a GitHub push's record for ticket provenance (B-126, R-BTN-194, below), and the scope
   cross-check (B-134, §12.9): a push by a worker pusher of the owners'
-  `worker_pushers` setting to a repository no open claim's scope covers records an
+  `runner_pushers` setting to a repository no open claim's scope covers records an
   `unclaimed-write` finding from the delivery's own fields — no repository content is read
   (an open claim is one still holding its ticket, as rule 3 reads it: active, or completed
   and unconfirmed, or reaped fence-pending, so a delivery of an ordinary leg-end push that
-  lands after the claim's `end()` is still covered).
+  lands after the claim's `end()` is still covered); and, for a push to the default branch,
+  §12.9's `out-of-course` check, from the push record's paths.
   - **Routes.** `POST /v1/github/webhook` takes the App's deliveries for every repository it is
     installed on (`X-Hub-Signature-256` under `BATON_GITHUB_WEBHOOK_SECRET`).
     `POST /v1/forges/{repository}/notify` takes a GitLab notification (`X-Gitlab-Token`
@@ -449,7 +449,7 @@ repository reachable over SSH is enough (R-BTN-105).
   approvals, Gitea PRs and reviews — mapped to one set of facts: a PR's head branch, state, head checks and verdicts on
   the head. Each fact carries `repository`, fork-ness and `pusher` (R-BTN-139). The verdict line
   `<!-- baton:verdict approve|changes -->` works on every forge.
-  - The adapter reads the home repository and every `code_repos` repository a live ticket on a
+  - The adapter reads the home repository and every repository with reach (R-BTN-140) a live ticket on a
     PR-reading course names (deduplicated, case-insensitive), under one request budget **per
     host**. A `git` home is read by no adapter; its code repositories are read on their own
     forges. An unreadable or missing repository fails the sync, naming the tickets; a partial
@@ -493,7 +493,7 @@ repository reachable over SSH is enough (R-BTN-105).
   - **PRs that count.** A PR found by `branch_pattern` counts only when its head repository is
     its base repository by id — GitHub `pull.head.repo.id == pull.base.repo.id` (a null
     `head.repo` is a fork), GitLab `source_project_id == target_project_id`, Gitea
-    `head.repo_id == base.repo_id` — and its base is the home or a `code_repos` entry. A fork's PR
+    `head.repo_id == base.repo_id` — and its base is the home or a `repos:` entry with reach (R-BTN-140). A fork's PR
     counts only when a pusher names it in `prs:`; its outsiders' words still do not count.
   - **Words that count only from pushers:** verdict lines, adjudication and conclusion
     lines, forge review states and approvals, and every `baton:` marker (comment, review or PR
@@ -532,8 +532,12 @@ repository reachable over SSH is enough (R-BTN-105).
   or takes `--forge-ids`, and posts them; Baton never fetches. **The ids decide** at every
   read: the fact adapter compares the forge's ids for the repository it reads with the entry's
   and fails the sync on a mismatch, naming the entry, so a re-created path never gains reach.
-  A re-written list keeps the ids of the paths it keeps, and a home that lists no `code_repos`
-  keeps today's reading — its `repos:` entries resolve by name on its own forge host (R-BTN-92).
+  A re-written list keeps the ids of the paths it keeps. **Reach by name.** A home that lists no `code_repos` at all, under a policy whose
+  `repos.unlisted` is `by-name` (R-BTN-188), reaches a `repos:` entry as a listed one when the
+  posted forge path is under the home's owner, on the home's forge host as R-BTN-92 reads it. Such an entry carries no id, so nothing
+  fences a re-created path and no consent is judged for it; a repository registered in the
+  tenant is reached this way only while its own policy's `repos.unlisted` is `by-name` too.
+  In every other case — `none`, or a home that lists any entry — the list alone gives reach.
   While a code repository sits on a host other than the home's, the policy may name no
   `human_identity` and no floor may stand (R-BTN-188).
   - An entry whose `{host, repo_id}` is a registered repository of the tenant — the live one
@@ -545,13 +549,12 @@ repository reachable over SSH is enough (R-BTN-105).
     `withdraw: true` withdraws it. Without consent the entry has no reach and raises
     `baton.code-repo-unconsented`.
   - A `repos:` entry gains reach only when it resolves — path first mapped to its current one by
-    id, so a re-created former path never gains reach outside the fence — to an id in
-    `code_repos`. Only such an entry may be named by a `git:` or `https://` input URI the runner
+    id, so a re-created former path never gains reach outside the fence — to an id in `code_repos`, or by name as `repos.unlisted` allows above. Only such an entry may be named by a `git:` or `https://` input URI the runner
     fetches (§12.3); be searched for PRs or named in `prs:` (R-BTN-139); map a branch in the
     branch-holder query (R-BTN-141); carry a person leg's question `url` (R-BTN-116). Any other entry is
     shown and filtered on only, and the ticket raises `baton.repo-not-listed`.
   - `POST /v1/sync/observation` hands the sync the effective `code_repos` (consented entries
-    with their ids) and `pushers`.
+    with their ids), the policy's `repos.unlisted` (`repos_unlisted`) and `pushers`.
 
 - **R-BTN-141 (a branch pattern's grammar and reach).**
   - `branch_pattern` and `previous_branch_pattern` (R-BTN-51): a literal prefix of 1–64
@@ -567,7 +570,7 @@ repository reachable over SSH is enough (R-BTN-105).
     functions, the local branch check and the branch-holder query all apply this. A child not yet
     posted cannot win yet: until its first snapshot the query maps its branch to the parent.
   - **The branch-holder query** (§9) maps a branch of git repository G only to tickets whose
-    home is G or whose `repos:` entry for G is in the home's `code_repos`, and names only
+    home is G or whose `repos:` entry for G has reach (R-BTN-140), and names only
     tickets of repositories the asking key is granted on; any other match answers
     `held_by_other: true`, with no ids.
 

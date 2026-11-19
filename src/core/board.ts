@@ -30,7 +30,7 @@ export interface StateItem {
   /** factory-state's date the item entered its status (`YYYY-MM-DD`): for an in-progress item,
    *  its claim note's date, which the legacy import's `reap_after` counts from (§13). */
   since?: string;
-  /** The claim note's holder session (`holderOf`), when the sync posts it: the legacy worker's
+  /** The claim note's holder session (`holderOf`), when the sync posts it: the legacy runner's
    *  session name, which adoption matches (§13 step 3). */
   holder?: string;
   /** The ticket's course (R-BTN-48): absent, `roadmap-pr`, so no existing docs item changes. */
@@ -248,7 +248,7 @@ const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 // B-183 (§12.3): a ticket's opaque version, the source's own string — a git blob id, a store's
 // stamp, a digest — compared for equality only, never ordered or read as a time (values 4).
 const VERSION = /^[A-Za-z0-9._:+/=-]{1,128}$/;
-// A title comes from git, not from a worker, and the dashboard renders it with textContent
+// A title comes from git, not from a runner, and the dashboard renders it with textContent
 // (§10.4), so it is only bounded and free of control characters.
 const TEXT = /^[^\u0000-\u001f\u007f]{1,500}$/;
 

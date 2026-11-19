@@ -46,7 +46,7 @@ export function signingKey(file, keygen = KEYGEN) {
   return { file, fingerprint };
 }
 
-/** R-BTN-159: an API key, `bak_<id>_<secret>` — an administrator's, an owner's or a worker's.
+/** R-BTN-159: an API key, `bak_<id>_<secret>` — an administrator's, an owner's or a runner's.
  *  The one copy outside `src/core/auth.ts` (whose `API_KEY` the CLI and the runner do not import:
  *  it would bring jose); every client tests a key file against this. */
 export const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;

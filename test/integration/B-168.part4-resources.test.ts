@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, adminSession, advance, claimItem, cutover, keyCall, register, rows, sessionCall, setAdminKeys, setClock } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { COOPERATIVE } from '../../src/core/policy';
-import { grantedWorker, SCHEMA } from '../lib/fleet';
+import { grantedRunner, SCHEMA } from '../lib/fleet';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const H = 3_600_000;
@@ -34,8 +34,8 @@ beforeEach(async () => {
 });
 
 describe('B-168 the resources: two scopes, no runner uses, one reading per instrument', () => {
-  it('registers account and service resources, refusing worker and host scopes and a retired atoms_from', async () => {
-    expect((await keyCall(admin, '/v1/admin/resources', { name: 'github-api', scope: 'worker', detail_schema: SCHEMA })).json).toMatchObject({ code: 'invalid-params' });
+  it('registers account and service resources, refusing runner and host scopes and a retired atoms_from', async () => {
+    expect((await keyCall(admin, '/v1/admin/resources', { name: 'github-api', scope: 'runner', detail_schema: SCHEMA })).json).toMatchObject({ code: 'invalid-params' });
     expect((await keyCall(admin, '/v1/admin/resources', { name: 'github-api', scope: 'host', detail_schema: SCHEMA })).json).toMatchObject({ code: 'invalid-params' });
     expect((await keyCall(admin, '/v1/admin/resources', { name: 'llm:cap', scope: 'account', detail_schema: SCHEMA, atoms_from: 'any' })).json).toMatchObject({ code: 'invalid-params' });
     expect((await keyCall(admin, '/v1/admin/resources', { name: 'llm:cap', scope: 'account', detail_schema: SCHEMA })).status).toBe(200);
@@ -51,12 +51,12 @@ describe('B-168 the resources: two scopes, no runner uses, one reading per instr
   it('a runner\'s heartbeat `uses` and a claim\'s `bills` are read as absent, logged once a day, and refuse nothing', async () => {
     await keyCall(admin, '/v1/admin/resources', { name: R, scope: 'account', detail_schema: SCHEMA });
     await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
-    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO, 'Not A Name']);
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue'], [GO, 'Not A Name']);
     // Nothing was stored for the uses, and the heartbeat answered no refused name.
     expect(w.id).toBeGreaterThan(0);
     expect((await w.beat({ uses: [GO] })).json).not.toHaveProperty('refused_uses');
     const fields = async () => (await rows<{ field: string; actor: string }>(`SELECT json_extract(detail_json, '$.field') AS field, actor FROM events WHERE kind = 'deprecated-field' ORDER BY seq`));
-    expect(await fields()).toEqual([{ field: 'heartbeat.uses', actor: expect.stringMatching(/^(credential|worker):/) }]);
+    expect(await fields()).toEqual([{ field: 'heartbeat.uses', actor: expect.stringMatching(/^(credential|runner):/) }]);
     // A second beat the same day logs nothing; the next day does.
     await setClock(T0 + 5 * 60_000);
     await w.beat({ uses: [GO] });
@@ -136,7 +136,7 @@ describe('B-168 the settings: the unblocked trigger is a loosening, and the dash
     const settings = state.limits.settings.find((s) => s.repository_id === 'docs')!;
     // B-182's forge, web_base, code_repos and pushers and B-127's require_signed_control beside
     // them; required_independence is not among them.
-    expect(Object.keys(settings).sort()).toEqual(['code_repos', 'forge', 'pushers', 'remind_after', 'repository_id', 'require_signed_control', 'required_bars', 'retry', 'scope_policy',
-      'transcript_repos', 'unblocked_trigger', 'web_base', 'worker_pushers']);
+    expect(Object.keys(settings).sort()).toEqual(['code_repos', 'forge', 'pushers', 'remind_after', 'repository_id', 'require_signed_control', 'required_bars', 'retry', 'runner_pushers', 'scope_policy',
+      'transcript_repos', 'unblocked_trigger', 'web_base']);
   });
 });

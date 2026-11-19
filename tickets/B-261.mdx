@@ -1,0 +1,63 @@
+---
+title: "B-261 — docs' verify is red on main — R3-1350's unmarked deferral blocks every docs PR (B-68's docs#229 waits)"
+id: B-261
+project: baton
+status: available
+updated: 2026-11-18
+repos:
+  - docs
+tags:
+  - roadmap-item
+description: "docs main's check:archive fails on R3-1350.mdx:92 (unmarked-deferral: the sandbox .md scan gap 'gets its own item', never filed); every docs PR's verify is red on it, so B-68's docs#229 cannot merge until the deferral is marked — file the item or record the owner's decision"
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**What:** docs' `npm run verify` is red on its `main` — and so on every pull request's head —
+since [ca62b1f](https://github.com/immediately-run/docs/commit/ca62b1f) ("roadmap: archive R3-1350 … file
+R3-1353", 2026-11-18 06:40 UTC). `check:archive` fails:
+
+```
+R3-1350.mdx:92 [unmarked-deferral]
+  - The `.md` frontmatter indexing gap found with Open Knowledge Format bundles is not this
+    project. The sandbox's scan reads only `.mdx` (`bundler.ts:194`, `:1714`); it gets its own item.
+```
+
+The promised item was never filed: no live or archived docs id covers the sandbox `.md` scan gap
+(R3-1349/1351/1352 are adjacent — parsing, parity, rejected rows — not which files are scanned).
+docs main's own `ci` run failed on it at 16:52 UTC on 2026-11-18, before any of B-68's commits.
+
+**The fix is docs roadmap curation**, which a baton merge leg must not improvise: either file the
+sandbox `.md` scan-gap item in docs' roadmap and put its id on `R3-1350.mdx:92` (the checker's
+"add a filed id"), or record the owner's decision not to file (an `unfiled-by-design:` reason —
+which contradicts the line as written — or a grandfather entry citing a LIVE owner, of which
+none exists). The judgement stays with docs' owner.
+
+**Why baton cares:** B-68's docs PR ([immediately-run/docs#229](https://github.com/immediately-run/docs/pull/229)) is approved with no
+blocking finding, but its `verify` runs the unscoped sweep, so it is red on this pre-existing
+failure — and a red check is not merged (B-105's lesson, baton `docs/lessons.mdx` 2026-10-31:
+"the second pass merged the PR red"). Until docs' main is green, B-68's second PR cannot land
+and the ticket rests `in-review`.
+
+**Done when:** docs' `npm run verify` is green on `main` again; then B-68's merge leg re-runs,
+merges docs#229 and closes B-68.
+
+### Trust
+
+No new input: the change is docs roadmap content (`content/roadmap/`), written through docs'
+own filing flow; nothing reaches Baton's code, requests or settings.
+
+### Invariants
+
+- R3-460 (docs `scripts/check-roadmap-archive.mjs`): an archived item may not leave work behind
+  invisibly — a deferral phrase carries a filed id or an `unfiled-by-design:` reason on the same
+  line. Filing the promised item satisfies it without weakening the check; an
+  `unfiled-by-design:` marker is written only with the owner's recorded decision, never to
+  quiet the lint.
+
+## Status
+
+_filed 2026-11-18._

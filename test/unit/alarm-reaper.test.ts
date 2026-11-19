@@ -16,7 +16,7 @@ beforeEach(async () => {
   await cutover();
 });
 
-/** A claim whose worker beats once at T0 and then goes silent. */
+/** A claim whose runner beats once at T0 and then goes silent. */
 async function silentClaim(host: 'vm-a' | 'vm-b', ticket: string): Promise<number> {
   const w = await register(host);
   const { json } = await claimItem(host, w.secret, { ticket_id: ticket });

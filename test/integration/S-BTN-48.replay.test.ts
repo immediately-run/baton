@@ -151,7 +151,7 @@ export async function close() { return 'https://example.test/close'; }
     const api = new BatonApi({
       url: ORIGIN,
       transport: (req) => hostCall(req),
-      auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+      auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
     });
     return new Runner({
       api, home: this.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session,
@@ -368,7 +368,7 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     expect(tampered.report.ran).toBeUndefined();
   });
 
-  it('the runs read is an owner\'s or an administrator\'s: a worker\'s key is refused, and the record names what replay needs', async () => {
+  it('the runs read is an owner\'s or an administrator\'s: a runner\'s key is refused, and the record names what replay needs', async () => {
     repo = new Repo(false);
     repos.push(repo);
     await repo.setup();
@@ -381,9 +381,9 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     expect(body.default_branch).toBe('main');
     expect(body.runs).toHaveLength(1);
     expect(body.runs[0]).toMatchObject({ run: 1, run_id: expect.stringMatching(/^r_/), snapshot_sha: repo.head(), head_sha: repo.head(), ticket: { version: repo.blob('tickets/one.mdx') } });
-    // A worker credential may not read it (§14), and so replay with one refuses at the read.
-    const worker = await call(`/v1/repositories/docs/tickets/T-1/legs/implement/runs`, { headers: { Authorization: `Bearer ${TOKENS['vm-a']}` } });
-    expect(worker.status).toBe(403);
+    // A runner credential may not read it (§14), and so replay with one refuses at the read.
+    const runner = await call(`/v1/repositories/docs/tickets/T-1/legs/implement/runs`, { headers: { Authorization: `Bearer ${TOKENS['vm-a']}` } });
+    expect(runner.status).toBe(403);
   });
 
   it('the recorded snapshot must be code the default branch holds (R-BTN-143): an off-branch sha is refused, --against excepted', async () => {

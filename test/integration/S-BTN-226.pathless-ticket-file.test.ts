@@ -110,7 +110,7 @@ class Repo {
     const api = new BatonApi({
       url: ORIGIN,
       transport: (req) => hostCall(req),
-      auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+      auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
     });
     return new Runner({
       api, home: this.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session,

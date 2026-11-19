@@ -72,7 +72,7 @@ beforeEach(async () => {
   await setAdminKeys(admin);
   { const reg = await keyCall(admin, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', forge: 'github', remote: 'ssh://git@github.com/immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', sync_keys: [], owner_keys: [owner.publicKey] }); expect(reg.status).toBe(200); }
   git = new Git(await syncToken(OPS_SYNC));
-  git.registry = [{ id: 'check', version: 1, min_worker_version: 1, skill: 'next-roadmap-item', course: CHECK_COURSE, step_kinds: ['implement'], branch_pattern: 'claude/{ticket}-*' }];
+  git.registry = [{ id: 'check', version: 1, min_runner_version: 1, skill: 'next-roadmap-item', course: CHECK_COURSE, step_kinds: ['implement'], branch_pattern: 'claude/{ticket}-*' }];
   for (const id of ['check.1', 'check.2', 'check.3']) git.add(id, { course_id: 'check' }, FILED);
   expect((await git.post()).status).toBe(200);
   await cutover(1, 'ops');
@@ -86,23 +86,23 @@ async function held(w: { secret: string }, ticket: string) {
   return { secret: w.secret, claimId: c.claim_id as number };
 }
 
-/** A check worker of `ops`, its one session registered once per test. */
-const checkWorker = () => register('vm-a', { courses: [{ repository: 'ops', course: 'check', version: 1 }] });
+/** A check runner of `ops`, its one session registered once per test. */
+const checkRunner = () => register('vm-a', { courses: [{ repository: 'ops', course: 'check', version: 1 }] });
 
 describe('B-175 the check conclusions', () => {
   it('no owners’ map, or one that names another course: any done stands', async () => {
     // The map names only `probe`, so `check`'s stations are ordinary ones.
-    git.registry = [...git.registry, { id: 'probe', version: 1, min_worker_version: 1, skill: 'next-roadmap-item', course: PROBE_V1, step_kinds: ['implement'], branch_pattern: 'claude/{ticket}-*' }];
+    git.registry = [...git.registry, { id: 'probe', version: 1, min_runner_version: 1, skill: 'next-roadmap-item', course: PROBE_V1, step_kinds: ['implement'], branch_pattern: 'claude/{ticket}-*' }];
     expect((await git.post()).status).toBe(200);
     expect((await as(owner, '/v1/owner/ops/settings', { checks: { probe: { conclusions: { passed: 'success', failed: 'failure' } } } }, 'PUT')).status).toBe(200);
-    const { secret, claimId } = await held(await checkWorker(), 'check.1');
+    const { secret, claimId } = await held(await checkRunner(), 'check.1');
     const out = await endClaim('vm-a', secret, claimId, { end_reason: 'done', reached: 'passed' });
     expect([out.status, (await claimRow(claimId)).status]).toEqual([200, 'completed']);
   });
 
   it('a success-mapped station is the check command’s alone: an agent’s done, or a numbered exit, is refused; exit_status: 0 lands; a suspension there concludes nothing', async () => {
     expect((await as(owner, '/v1/owner/ops/settings', { checks: { check: { conclusions: PASS } } }, 'PUT')).status).toBe(200);
-    const w = await checkWorker();
+    const w = await checkRunner();
     const { secret, claimId } = await held(w, 'check.1');
     // An agent's `baton-leg-result` or channel `done` carries no exit status.
     const agent = await endClaim('vm-a', secret, claimId, { end_reason: 'done', reached: 'passed' });
@@ -126,7 +126,7 @@ describe('B-175 the check conclusions', () => {
   it('failure and timed_out stations take an agent’s done; a 0 exit belongs to success, a numbered exit to failure, a timeout to neither', async () => {
     expect((await as(owner, '/v1/owner/ops/settings', { checks: { check: { conclusions: PASS } } }, 'PUT')).status).toBe(200);
     // An agent's done toward a timed_out station — and toward a failure one — stands.
-    const w = await checkWorker();
+    const w = await checkRunner();
     for (const [ticket, body] of [['check.1', { end_reason: 'done', reached: 'hung' }], ['check.2', { end_reason: 'done', reached: 'failed', exit_status: 2 }]] as const) {
       const { secret, claimId } = await held(w, ticket);
       const out = await endClaim('vm-a', secret, claimId, body);
@@ -149,7 +149,7 @@ describe('B-175 the check conclusions', () => {
     // a station the map does not name, round 1, finding 3: an agent's done reaches only a
     // `failure` or `timed_out` station, and `hung` is neither, so the end is refused where the
     // narrower first build let it stand. The owners map every end station or drop it.
-    const w = await checkWorker();
+    const w = await checkRunner();
     const hung = await held(w, 'check.1');
     const refused = await endClaim('vm-a', hung.secret, hung.claimId, { end_reason: 'done', reached: 'hung' });
     expect([refused.status, refused.json.code, String(refused.json.message).startsWith('exit_status:')]).toEqual([400, 'invalid-params', true]);
@@ -163,7 +163,7 @@ describe('B-175 the check conclusions', () => {
   });
 
   it('an advance arriving at a success-mapped station — a stale map’s, the course having grown a leg out of it — carries exit_status: 0; the departure out of it is never asked for one', async () => {
-    const probeAt = (version: number, course: unknown) => ({ id: 'probe', version, min_worker_version: 1, skill: 'next-roadmap-item', course, step_kinds: ['implement'], branch_pattern: 'claude/{ticket}-*' });
+    const probeAt = (version: number, course: unknown) => ({ id: 'probe', version, min_runner_version: 1, skill: 'next-roadmap-item', course, step_kinds: ['implement'], branch_pattern: 'claude/{ticket}-*' });
     git.registry = [...git.registry, probeAt(1, PROBE_V1)];
     expect((await git.post()).status).toBe(200);
     // The map is validated against v1, where `passed` is an end; then v2 makes it a station a
@@ -181,7 +181,7 @@ describe('B-175 the check conclusions', () => {
     expect((await rows<{ leg: string }>('SELECT leg FROM claims WHERE id = ?', c.claim_id)).map((r) => r.leg)).toEqual(['run']);
     expect((await advance('vm-a', w.secret, c.claim_id, { ...arrive, exit_status: 0 })).status).toBe(200);
     // Round 1, finding 1: the claim rests at `passed` (here suspended by its holder, there
-    // reclaimed by a second worker) and the leg out of it merely departs — a departure reaches
+    // reclaimed by a second runner) and the leg out of it merely departs — a departure reaches
     // nothing, so the advance that starts it demands no exit status, and without the fix the
     // ticket could leave a success-mapped station only by releases.
     expect((await endClaim('vm-a', w.secret, c.claim_id, { end_reason: 'suspended:passed' })).status).toBe(200);
@@ -196,9 +196,9 @@ describe('B-175 the check conclusions', () => {
 
   it('a stale-board recovery meets the same verdict: the holder’s done toward a success-mapped station is refused, the command’s green exit recovered', async () => {
     expect((await as(owner, '/v1/owner/ops/settings', { checks: { check: { conclusions: PASS } } }, 'PUT')).status).toBe(200);
-    const { secret, claimId } = await held(await checkWorker(), 'check.1');
+    const { secret, claimId } = await held(await checkRunner(), 'check.1');
     // R-BTN-8 pushes git first: the sync sees the ticket gone from the board and releases the
-    // claim stale-board before the worker's own end arrives — the recovery branch below `end`'s
+    // claim stale-board before the runner's own end arrives — the recovery branch below `end`'s
     // active path, which round 1, finding 2 traced re-completing an agent's `done` at a
     // success-mapped station as the recorded (and confirmable) verdict. (A closure `done` would
     // be the holder's own archive, never staleness — the ticket simply vanishes.)
@@ -215,7 +215,7 @@ describe('B-175 the check conclusions', () => {
   });
 
   it('exit_status is an integer from 0 to 255, whatever the map', async () => {
-    const { secret, claimId } = await held(await checkWorker(), 'check.1');
+    const { secret, claimId } = await held(await checkRunner(), 'check.1');
     for (const exit_status of [256, -1, '0', 1.5]) {
       const out = await endClaim('vm-a', secret, claimId, { end_reason: 'done', reached: 'failed', exit_status });
       expect([JSON.stringify(exit_status), out.status, out.json.code, String(out.json.message).startsWith('exit_status:')]).toEqual([JSON.stringify(exit_status), 400, 'invalid-params', true]);

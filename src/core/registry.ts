@@ -200,10 +200,10 @@ export function transcriptReposOf(store: Store, repo: string): string[] {
   return list.length ? list : DEFAULT_TRANSCRIPT_REPOS;
 }
 
-/** A worker's ceiling in one repository's ladder (§7.2 rule 5, R-BTN-66): the one it declared
+/** A runner's ceiling in one repository's ladder (§7.2 rule 5, R-BTN-66): the one it declared
  *  for that repository; else its single `tier_ceiling` where the ladder has that name; else the
  *  ladder's top if that ceiling is the unrestricted default (`critical`, docs' top), and the
- *  ladder's bottom otherwise — a restricted worker is never widened by a ladder it did not name.
+ *  ladder's bottom otherwise — a restricted runner is never widened by a ladder it did not name.
  *  A grant's `max_tier` caps it further (R-BTN-58, Claims.ceiling). */
 export function ceilingIn(repo: string, ladder: string[], ceilings: Record<string, string>, legacy: string): string {
   const named = ceilings[repo];
@@ -282,7 +282,7 @@ export class Registry {
   }
 
   /** R-BTN-93: a sync key for `repository` in `role`. A key serves one repository and holds one
-   *  role (R-BTN-57): one that is already a sync key, a worker, probe or courier credential, or an
+   *  role (R-BTN-57): one that is already a sync key, a runner, probe or courier credential, or an
    *  administrator's key is refused `conflict`. `adminKeys` are BATON_ADMIN_KEYS' lines. */
   async addSyncKey(repository: string, publicKey: string, role: 'sync' | 'mirror', addedBy: string, adminKeys: string[]): Promise<string> {
     const key = await this.prepareSyncKey(publicKey, adminKeys);
@@ -304,7 +304,7 @@ export class Registry {
     {
       if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NULL', repository).length) bad('repository', `${repository} is not registered`);
       if (this.rows('SELECT 1 FROM credentials WHERE id = ? OR public_key = ?', key.fingerprint, key.line).length) {
-        throw new BatonError('conflict', 'this key is already a worker, probe or courier key (R-BTN-57: one role per key)');
+        throw new BatonError('conflict', 'this key is already a runner, probe or courier key (R-BTN-57: one role per key)');
       }
       if (this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND removed_at IS NULL', key.fingerprint).length) {
         throw new BatonError('conflict', 'this key is an owner key (R-BTN-57: one role per key)');

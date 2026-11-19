@@ -11,6 +11,11 @@ tags: [security, runbook]
 signed, an unsigned change keeps the last signed version in force, and each runner verifies the
 signature itself before loading anything (B-127, security model mitigation C).</Lede>
 
+**Retired on 2026-11-19.** BATON_SPEC verifies no commit signature any more
+(`spec/BATON_SPEC_HISTORY.md`, that date); B-263 removes the setting, the tooling and this page.
+Do not turn `require_signed_control` on for a home that does not have it. This page describes
+the code as it still runs.
+
 ## What counts, and who may sign
 
 The control inputs are `.baton/**` (the settings, `agent_command`, course sources, overrides,

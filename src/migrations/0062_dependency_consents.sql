@@ -1,7 +1,7 @@
--- 0060_dependency_consents.sql — B-113 (BATON_SPEC §3.1 R-BTN-47 *Relations stay home* as
+-- 0062_dependency_consents.sql — B-113 (BATON_SPEC §3.1 R-BTN-47 *Relations stay home* as
 -- relaxed, §4.4): a ticket's `depends_on` may name another registered repository's ticket by
 -- its qualified id. A dependency on a repository less visible than the dependent's — an owner
--- key or a worker grant that sees the dependent's board and not the target's — needs the target
+-- key or a runner grant that sees the dependent's board and not the target's — needs the target
 -- repository owners' consent, recorded as R-BTN-140's cross-repository consent is: one row on
 -- the target, naming the dependent, judged by id at every use (a post, the sync's dependencies
 -- read) and never written by the dependent's own settings — only by the target's owners
@@ -18,7 +18,7 @@ CREATE TABLE dependency_consents (              -- B-113: repository T's owners'
 
 -- The events table rebuilt with the `dependency-consent` kind beside it, its indexes restored,
 -- as 0035 through 0059 did: nothing references the table beyond its indexes.
-CREATE TABLE events_0060 (
+CREATE TABLE events_0062 (
   seq           INTEGER PRIMARY KEY,
   at            INTEGER NOT NULL,
   kind          TEXT NOT NULL CHECK (kind IN ('claimed','completed','confirmed',
@@ -39,7 +39,7 @@ CREATE TABLE events_0060 (
   detail_json   TEXT,
   repository_id TEXT
 );
-INSERT INTO events_0060 (seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id)
+INSERT INTO events_0062 (seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id)
   SELECT seq, at, kind, ticket_id, claim_id, actor, detail_json, repository_id FROM events;
 DROP INDEX IF EXISTS events_by_ticket;
 DROP INDEX IF EXISTS events_by_claim;
@@ -49,7 +49,7 @@ DROP INDEX IF EXISTS events_by_kind_at;
 DROP INDEX IF EXISTS events_unsigned_control;
 DROP INDEX IF EXISTS events_retention;
 DROP TABLE events;
-ALTER TABLE events_0060 RENAME TO events;
+ALTER TABLE events_0062 RENAME TO events;
 CREATE INDEX events_by_ticket ON events(ticket_id, kind, seq);
 CREATE INDEX events_by_claim ON events(claim_id, kind, seq);
 CREATE INDEX events_by_repository ON events(repository_id, seq);

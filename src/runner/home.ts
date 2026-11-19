@@ -261,7 +261,7 @@ export function claimScratch(): string {
   return mkdtempSync(join(tmpdir(), 'baton-claim-'));
 }
 
-/** A stable secret for the runner's own worker: fresh per state file, kept across restarts —
+/** A stable secret for the runner's own runner: fresh per state file, kept across restarts —
  * R-BTN-14's random 256-bit value. */
 export function freshSecret(): string {
   return randomBytes(32).toString('hex');

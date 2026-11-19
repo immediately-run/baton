@@ -50,11 +50,10 @@ function wranglerVars(): Record<string, string> {
 /** §13a: tests run on an instance whose repositories have no owners — a test's own owner key is
  *  the one it registers (B-91's seed makes an installed deployment's repository owned from its
  *  first start; B-91's own test runs `wrangler.toml`'s entry). Two groups of vars go: the seed's
- *  `owner_keys`, and the Access settings `wrangler.toml` carries for the deployed instance —
- *  `ACCESS_AUD` and `OWNER_EMAILS` are its application's and its one owner's, not the test
- *  instance's (R-BTN-16: a token this file's `bindings` signs is checked against the test
- *  audience, and `owner@example.com` is the only owner a test signs as). Every other var
- *  `wrangler.toml` sets is the instance's own. */
+ *  `owner_keys`, and the Access audience and owner a test signs as (`owner@example.com`;
+ *  R-BTN-16) — `wrangler.toml` carries no Access setting (R3-1208's restatement sets none), so
+ *  these and the team beside them come from `bindings` too. Every other var `wrangler.toml`
+ *  sets is the instance's own. */
 function testVars(vars: Record<string, string>): Record<string, string> {
   const out = { ...vars };
   if (out.BATON_REPOSITORIES) {

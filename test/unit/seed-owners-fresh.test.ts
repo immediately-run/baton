@@ -85,13 +85,13 @@ describe('B-91: a rebuilt instance serves the owner CLI without a manual re-add'
   it('the owner the seed names signs as an owner: its grant is written, as no key of an unowned repository can', async () => {
     const admin = await makeKey('ssh-ed25519', 'owner-route-admin');
     const owner = await makeKey('ssh-ed25519', 'owner-route-owner');
-    const worker = await makeKey('ssh-ed25519', 'owner-route-worker');
+    const runner = await makeKey('ssh-ed25519', 'owner-route-runner');
     const host = await fresh([{ ...batonEntry(), owner_keys: [owner.publicKey] }], admin);
-    const body = JSON.stringify({ public_key: worker.publicKey, hostname: 'seeded-owner-host', capabilities: ['agent-venue'] });
+    const body = JSON.stringify({ public_key: runner.publicKey, hostname: 'seeded-owner-host', capabilities: ['agent-venue'] });
     const res = await host.handle(await signedRequest(owner, `${ORIGIN}/v1/owner/baton/grants`, { body }));
     expect(res.status).toBe(200);
-    expect(host.core.store.exec<{ credential_id: string; granted_by: string }>('SELECT credential_id, granted_by FROM worker_grants').toArray())
-      .toEqual([{ credential_id: worker.fingerprint, granted_by: `owner:${owner.fingerprint}` }]);
+    expect(host.core.store.exec<{ credential_id: string; granted_by: string }>('SELECT credential_id, granted_by FROM runner_grants').toArray())
+      .toEqual([{ credential_id: runner.fingerprint, granted_by: `owner:${owner.fingerprint}` }]);
   });
 
   it('an instance seeded as before names baton in admin repos — the gap is visible before it bites', async () => {
