@@ -21,7 +21,7 @@ path, R-BTN-193) — and the object refuses to serve until every migration is ap
   `repositories.id`; `credential_id` and `fingerprint` are a key's fingerprint (`SHA256:…` for an
   SSH key, `bak_<id>` for an API key); `runner_id` and `claim_id` are integers.
 - An actor column (`set_by`, `added_by`, `granted_by`, `created_by`, `actor`) holds
-  `admin:<fp>`, `owner:<fp>`, `runner:<id>`, `runner:<fp>` (a worker key's fingerprint, when no
+  `admin:<fp>`, `owner:<fp>`, `runner:<id>`, `runner:<fp>` (a runner key's fingerprint, when no
   runner session stands behind the call — a sequence's take from a CLI or a delegated key,
   R-BTN-199), `mcp:<id>` (an MCP key's immutable id, never its reusable name, R-BTN-130), `sync`, `alarm` (or `alarm:<reason>`, e.g. `alarm:leg-timeout`) or `server`.
 - When a ticket leaves the board (closed or dropped), exactly its board rows are deleted:

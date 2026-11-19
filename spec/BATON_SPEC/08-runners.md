@@ -262,7 +262,7 @@ the runner's credentials under any other executor is that executor's, never Bato
     binds, is answered its credential's allow-list, as it always declared. A runner whose
     declaration lacks a capability a leg of its course requires says so once, in one line, at
     startup — the missing ones and `missing-capability` (rule 4) — and a runner whose grant allows
-    nothing says that instead of idling in silence. A worker registered before the answer carried
+    nothing says that instead of idling in silence. A runner registered before the answer carried
     `grant` asks by declaring nothing on its next beat, so the answer fills the declaration in.
     The identity banner `baton runner start` logs at startup names the declaration this way: the granted
     name (`grant`, or `grant:*` read as the grant) where no flag was given, the flag's own list
