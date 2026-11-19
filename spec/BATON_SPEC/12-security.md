@@ -252,7 +252,7 @@ Every value below is validated on write; a value over its cap is refused `invali
     content through it.
   - **Key.** Baton holds the App's private key as the Worker secret `BATON_GITHUB_APP_KEY` and
     mints short-lived installation tokens per repository from it, in the host shell's `Dispatch`
-    (R-BTN-55), never in the object (§2.1). Baton's server is trusted with it (§12.8, the owner, 2026-11-01: a compromised
+    (R-BTN-55), never in the object (§2.1). Baton's server is trusted with it (§12.8: a compromised
     Baton is recovered, not resisted, and it already decides which commit every runner runs).
     Without the App, a repository's workflows run on their schedule and runners answer wants.
   - **Dispatch only what is named.** Actions: write lets the App dispatch any workflow, so Baton
@@ -280,8 +280,7 @@ requires guarantees by name and lists them as the policy's floors, which Baton e
 team running runners on one machine needs none.
 
 **Baton's server is trusted.** Its compromise, or its Cloudflare account's (reach 0 of
-`docs/security-model.mdx`), is recovered by B-125's runbook, not resisted (the owner, 2026-11-01,
-"Out of scope"). So nothing here is built for a verifier that distrusts Baton: Baton signs no
+`docs/security-model.mdx`), is recovered by B-125's runbook, not resisted. So nothing here is built for a verifier that distrusts Baton: Baton signs no
 outbox entry and no policy read, publishes no signing key, a trusted runner pins nothing and acts
 on Baton's record as Baton gives it, and the claim response carries no roll-back check. What
 Baton records, Baton may be asked for; who may tell Baton something is the question every rule
@@ -866,7 +865,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     its own. Commits reachable from the default branch (a merge of main into the branch) are not
     part of any range. A rebase replaces the range: the leg that rebases reports the new one. Who
     wrote a commit is what the chain of ranges says; commits carry no signature Baton requires
-    (the owner, 2026-11-01, "Remove until designed": a host-side signer is not designed, and a
+    (a host-side signer is not designed, and a
     runner's own key would sign whatever a hostile leg on its host wrote). Review rounds go to the
     PR conversation or, on a `git` repository, to the ticket's leg-state branch, never to the work
     branch (R-BTN-190, B-101), so a reviewer never becomes a writer.
@@ -877,8 +876,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     a writer nobody labelled cannot be told from its reviewers. A grant's domain is set by the
     `approvers.roles` approver, and a run's label by its runner under `domains.per_run` (R-BTN-180).
   - **Checks**, under `merge.checks: required`. Check runs whose workflow file is on the protected
-    default branch with the same blob as at merge time, concluded `success` at `H` (never `neutral` or `skipped`) ("Forge checks suffice",
-    the owner, 2026-11-01); or a `std:checks@1` at `H` where the owner named its writer
+    default branch with the same blob as at merge time, concluded `success` at `H` (never `neutral` or `skipped`); or a `std:checks@1` at `H` where the owner named its writer
     (R-BTN-181, R-BTN-114). Commit statuses are never read. Checks show that the change's own tests
     pass; they are not a security gate.
   - **Paths.** The changed paths are `git diff-tree -r -z --no-renames --name-only` from the default
@@ -983,7 +981,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
   a surface lacks an action only for a mechanical reason the registry names.
   - **A delegated key** (an MCP key, R-BTN-130) acts as an owner of its repository, never as
     `human`, for the actions listed at its minting, and may **tighten, and undo its own
-    tightenings** (the owner, 2026-11-01): add a hold or a bar, stop a leg, cancel a ticket; and
+    tightenings**: add a hold or a bar, stop a leg, cancel a ticket; and
     lift a hold it set, lift a bar it added. Resolving a condition is neither: a restart closes
     what Baton or a leg raised — ending a block or a hold another set, routing, or (`park` on
     `baton.stalled`) setting a hold under a reason the key's own test never matches — so it is

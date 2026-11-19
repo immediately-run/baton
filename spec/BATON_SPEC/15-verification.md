@@ -56,8 +56,7 @@ description: "BATON_SPEC — 15. Verification: the model, the harness, scenarios
     what it imports, replay and its helpers, the scenarios and their hosts, the trace check, the
     Quint version — carries `npm run model:pr`'s report for its head (typecheck and regression
     runs, 200 model-drawn traces driving the core, every scenario trace checked) when a machine
-    to run it is available. **The report is advisory, never a merge requirement** (the owner,
-    2026-11-06: a report costs hours on the fleet's machines and VM0's scenario replay hangs on
+    to run it is available. **The report is advisory, never a merge requirement** (a report costs hours on the fleet's machines and VM0's scenario replay hangs on
     the person-legs traces): the CI job `model-report` validates what is pasted — green for a
     passing report naming the head, green with none pasted, red only for a pasted report that
     shows a failed check.

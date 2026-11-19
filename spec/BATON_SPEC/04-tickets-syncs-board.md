@@ -257,7 +257,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
       cycle among it) over the files the commit would leave — and a filing that fails is written to
       no branch at all. A description that ends with a `Requires:` clause (`… Requires: human-operator,
       drivable-browser.`) has the capabilities it names written on the `**Requires:**` line.
-      - **The landing** (B-176, the owner, 2026-11-03: "Yes" to filing new tickets in a PR).
+      - **The landing**.
         `new` files through a PR by default: the new ticket file ALONE — one commit, cut from the
         freshly fetched default head in a throwaway worktree — pushed to `baton-ticket/<id>`
         (a reserved namespace no `branch_pattern` may match, R-BTN-190, read by the floor scan

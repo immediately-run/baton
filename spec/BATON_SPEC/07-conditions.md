@@ -336,7 +336,7 @@ Limits that hold throughout:
     the session's repositories; otherwise it serves the shell, which shows sign-in to the
     signed-out and `not-found` for no such id and for another repository's alike. Nothing in git
     is read for it, and Baton files no handler ticket,
-    queues no outbox entry and withdraws nothing for it (the owner, 2026-11-01). How the owner
+    queues no outbox entry and withdraws nothing for it. How the owner
     learns of it is a **delivery runner's**: any runner, or a process with a key granted on the
     repository, that polls `GET /v1/repositories/{repository}/conditions?open=1` — with `person=1` for
     what waits on a person (the list `baton decision list --watch` reads, below) and with
@@ -628,8 +628,7 @@ Limits that hold throughout:
     §4.4) and the two `source-` kinds — are written through the source's own code to whatever
     store it reads. The kinds make three **delivery classes**: `git`, `forge-check` and `source`.
     Queuing a `withdraw` drops the ticket's `queued` `source-show` and `source-note` entries.
-  - **Deliverers are runners.** No key role exists for delivery (the owner, 2026-11-01, "Couriers
-    into runners"): a runner that holds the credential declares the classes it delivers in its
+  - **Deliverers are runners.** No key role exists for delivery: a runner that holds the credential declares the classes it delivers in its
     heartbeat (`delivers: [git | forge-check | source]`, nothing by default; kept in `runners.delivers`,
     §13), and Baton offers it the entries of those classes on the repositories its grant covers.
     A deliverer is a signed machine key: an API-key runner never delivers, as it never syncs

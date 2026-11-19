@@ -269,7 +269,7 @@ repository reachable over SSH is enough (R-BTN-105).
     ref}`, with the trigger token; `{kind: 'gitea', workflow, ref}`, whose token belongs to a bot
     user with write access to that one repository only. Baton holds these credentials as Worker
     secrets (`BATON_GITHUB_APP_KEY`, and the tokens in `BATON_FORGE_SECRETS`), never in SQLite or
-    an export: Baton's server is trusted with them (§12.8; the owner, 2026-11-01, "Drop it": no
+    an export: Baton's server is trusted with them (§12.8: no
     dispatch courier stands between Baton and the forge). Without a target (every `git`
     repository) Baton dispatches nothing and the runners alone answer wants; a dispatch that
     fails is retried once and then only adds latency, since the want stands until a post answers
