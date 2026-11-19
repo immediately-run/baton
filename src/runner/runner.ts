@@ -1406,7 +1406,7 @@ export class Runner {
     // B-93 (review round 1): the beat must be *finished* here, not merely started. During it
     // Baton already holds the new runner's secret — `beatOnce` sends `secret_hash` for one the
     // state does not name yet — but the state names neither the runner nor the re-key until the
-    // answer, so a recommendation that overlapped a slow beat was refused `unauthenticated` and
+    // answer, so a claim that overlapped a slow beat was refused `unauthenticated` and
     // logged: the first-beat noise again. `tick()` refuses to run beside a beat (it returns at
     // once while the timer's is out), so a beat in flight is waited for, never skipped.
     await this.waitForBeat();
@@ -1415,7 +1415,7 @@ export class Runner {
     // the wait, or every `start()` → `work()` start beat a second time for nothing — and by
     // `stray` too, so a registration attempt is the one that began with no runner at all.
     const runner = this.state.get().runner_id;
-    // A beat of the attempt's own, when no runner is named yet; the recommendation after it is the
+    // A beat of the attempt's own, when no runner is named yet; the claim after it is the
     // first ask of one Baton may hold no secret for, so it is a registration attempt too.
     let beating = false;
     if (runner == null) { await this.tick(); beating = true; }
@@ -1460,36 +1460,25 @@ export class Runner {
       this.saidEmpty = true;
       this.log(`baton: this runner declared nothing — its key's grant allows no capability on the repositories its courses are in, so every leg requiring one refuses it rule 4 (missing-capability); have the owner grant it (baton owner grant <repository> --key …, R-BTN-58)`);
     }
-    // R-BTN-72: it recommends, then claims — the first recommendation is what a claim without
-    // an id would take anyway, asked for here so the runner knows what it is going for.
-    let wanted: string | undefined;
-    try {
-      const recs = await this.o.api.recommendations();
-      wanted = (recs.recommendations ?? [])[0]?.ticket_id;
-    } catch (e) {
-      if (!(e instanceof BatonRefusal)) throw e;
-      // A runner the gates refuse entirely still claims below: Baton's refusal is the answer.
-      // B-93: the registration beat's own refusal — the recommendation right after the beat that
-      // registered this session, refused `no runner holds this secret` before a runner exists —
-      // is not news, and is not logged (2026-10-21's runs: every start printed it). Only that
-      // refusal goes quiet: `authRunner` answers `unauthenticated` for a missing
-      // `X-Runner-Secret` and a replayed nonce too, and a registered runner's refusal (a
-      // replaced secret) still names itself. The registration is either a state with no runner
-      // before this attempt or a beat of this attempt's own, whose answer Baton may have no
-      // secret for — never a resumed runner's ordinary attempt.
-      const stray = (beating || !registered) && e.code === 'unauthenticated' && /no runner holds this secret/.test(e.message);
-      if (!stray) this.log(`baton: no recommendation (${e.message})`);
-    }
+    // R-BTN-72 / B-287: an unnamed claim selects and claims atomically. An extra
+    // recommendations request repeated the same decision and introduced a race between them.
     let claim: Record<string, any>;
     const requestId = `run-${randomBytes(8).toString('hex')}`;
     this.claimsOut++;
     try {
-      claim = await this.o.api.claim({ request_id: requestId, ...(wanted ? { ticket_id: wanted } : {}) });
+      claim = await this.o.api.claim({ request_id: requestId });
     } catch (e) {
       // B-106 (R-BTN-178): a refused claim releases the locks it would have used — the machine's
       // singleton is not held by an idle runner (B-188: nor taken from a claim's running leg).
       if (this.locks && e instanceof BatonRefusal) this.locks.releaseAll((c) => this.lockHeldByLive(c, null));
       if (e instanceof BatonRefusal && e.code === 'no-eligible-ticket') return null;
+      if (e instanceof BatonRefusal && e.code === 'unauthenticated') {
+        // B-93: only the registration's own missing-secret refusal is quiet. A replaced
+        // secret or replayed nonce still names itself, now on the single claim request.
+        const stray = (beating || !registered) && /no runner holds this secret/.test(e.message);
+        if (!stray) this.log(`baton: no claim (${e.message})`);
+        return null;
+      }
       if (e instanceof BatonRefusal && e.code === 'not-eligible' && /already held|runner-holds/.test(e.message)) {
         // The runner still holds a claim Baton knows and this runner does not (its state was
         // lost with the container): the heartbeat's claim view named it, so end it loudly
@@ -1503,7 +1492,10 @@ export class Runner {
         return null;
       }
       // R-BTN-4 (B-188): `max-claims` among them — the runner is at its bound for now.
-      if (e instanceof BatonRefusal && e.code === 'not-eligible') return null;
+      if (e instanceof BatonRefusal && e.code === 'not-eligible') {
+        this.log(`baton: no claim (${e.message})`);
+        return null;
+      }
       throw e;
     } finally {
       this.claimsOut--;

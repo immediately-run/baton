@@ -2,7 +2,7 @@
 title: "B-287 — Bound SQLite reads for polling, syncs and dashboard lists"
 id: B-287
 project: baton
-status: in-progress
+status: in-review
 updated: 2026-11-19
 repos: [baton]
 tags: [roadmap-item]
@@ -50,7 +50,7 @@ an unchanged sync. Preserve Baton's relational model and authoritative gates.
 
 ## Acceptance
 
-- S-BTN-242 exercises a busy runner beside an idle runner with activity and unchanged syncs
+- S-BTN-243 exercises a busy runner beside an idle runner with activity and unchanged syncs
   between polls; idle reads stay in tens of rows rather than thousands.
 - Candidate membership and ordering match the reference query through changes, rollback,
   restart, claim/fence/confirmation transitions, course changes and clock deadlines.
@@ -82,4 +82,51 @@ back with their source. Migration files already merged remain unchanged.
 _filed 2026-11-19._
 
 The CLI selected B-287 using its documented remote-branch fallback because this session has
-no Baton key configured. Recheck identifiers against the remote before publication.
+no Baton key configured. Remote refs were checked before publication: B-287 and migration
+0065 are unused; the scenario is S-BTN-243 because an older remote branch already names 242.
+
+
+## Implementation and measurements
+
+Migration 0065 backfills the normalized matching sets and the ready-ticket projection.
+SQLite triggers maintain derived rows in the source transaction, including direct imports;
+`ready_ticket_source` is the single membership definition and rebuild source. Matching retains
+its gate checks, group order and page bound. The runner makes one unnamed claim request.
+
+Workerd cursor measurements on the regression fixture (181 live tickets including held work,
+600 ended claims, 3,000 events):
+
+| Operation | Rows read | Rows written |
+|---|---:|---:|
+| Cold idle claim | 609 | fewer than 10 |
+| Warm idle claim after peer activity and identical sync | 27 | fewer than 10 |
+| Identical sync, observation response and board post together | 235 | 9 |
+| Successful automatic claim after making one ticket compatible | 695 | fewer than 30 |
+| One-runner page with 3,000 reports and 3,000 transcript pointers | 42 | 1 |
+
+The observation endpoint still returns every ticket's version (181 reads here); its response
+contract is preserved. The identical board post skips per-ticket materialization. Cold matching
+can still inspect incompatible candidates to preserve order; this does not claim B-243's
+100–300-row target, nor close B-239 or B-243 as separate tickets.
+
+The new authenticated repository ticket and runner endpoints paginate and have separate ETags.
+The React dashboard is currently a shell, so this provides its list APIs; it does not add UI
+screens. The legacy aggregate endpoint retains its existing fleet batching and payload.
+
+Regression coverage includes a populated migration, foreign-key cleanup, projection rebuild,
+rollback, backoff deadlines, reference recommendation equivalence, claim admission, changed
+same-head placements and ticket versions, page boundaries, authorization and latest-pointer
+query plans. Existing fencing, confirmation, course and matching scenarios run on both hosts.
+
+
+### Validation
+
+- Full `npm test`: 2,553 passed, 21 skipped, 2 todo; model links passed. Run with npm 10.9.4
+  in a temporary tool directory, a neutral npm user config and four test workers. npm 12's
+  new lifecycle approval policy breaks the unchanged offline dependency fixture; npm 10
+  passes it without modifying the fixture or project dependencies.
+- Final upgrade adjustment: 34 workerd tests passed; mixed polling/reference tests also
+  rerun on the local host.
+- `npm run typecheck`, `npm run check:wiki`, `npm run check:spec`, and `git diff --check` passed.
+- `link-spec-refs --check` reports the pre-existing unlinked citation in B-262; B-287's
+  citations are linked. No unrelated ticket was rewritten.

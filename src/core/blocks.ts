@@ -141,7 +141,7 @@ export const BLOCK_SQL = {
   /** The tickets with a row of the kind, through `blocks_by_ref`. */
   onAny: 'SELECT DISTINCT ticket_id FROM ticket_blocks WHERE repository_id = ? AND kind = ? ORDER BY ticket_id',
   /** A page of the repository's blocked tickets, through `tickets_blocked`. */
-  page: 'SELECT id, blocked_since FROM tickets WHERE repository_id = ? AND blocked_since IS NOT NULL AND id > ? ORDER BY id LIMIT ?',
+  page: 'SELECT id, blocked_since FROM tickets INDEXED BY tickets_blocked WHERE repository_id = ? AND blocked_since IS NOT NULL AND id > ? ORDER BY id LIMIT ?',
 } as const;
 
 /** The SQL test of a live runner (§5): alive, not reaped, its key in force. B-236: the lease is

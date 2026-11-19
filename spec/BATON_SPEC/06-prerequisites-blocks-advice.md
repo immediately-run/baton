@@ -162,7 +162,7 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
   - **On `unblocked`** Baton queues, for each live idle runner granted on the repository that the
     ticket would now pass the gates for, one `unblocked` message (§6.9), updated in place while
     pending, at most 20 tickets (oldest dropped), expired by the alarm when the runner stops
-    being live; an idle `baton runner start` then asks for recommendations (R-BTN-72). Baton
+    being live; an idle `baton runner start` then attempts a claim (R-BTN-72). Baton
     also dispatches the repository's `unblocked_trigger` (R-BTN-94) when set — a workflow under
     `.github/workflows/` through the App, or a GitLab or Gitea target (R-BTN-94); none
     on plain `git` — with one input `tickets`, a JSON array of `{ticket, cleared}`, one
@@ -464,8 +464,11 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   the SQL is tested against it (G-BTN-40).
 
 - **The pipeline.** Matching reads only `tickets` and Baton's tables (R-BTN-33).
-  1. One query returns candidates, one row per ticket, per (repository, course) group in the
-     default order, 50 per group per page (R-BTN-61). With `q` the queued leg (route override,
+  1. Indexed reads return candidates from the rebuildable `ready_tickets` projection (§13),
+     one row per ticket, per (repository, course) group in the default order, 50 per group per
+     page (R-BTN-61). Keyset continuation preserves that order without a board-wide window sort.
+     Normalized course-leg and grant capabilities are matched against the runner's effective
+     holdings computed once per repository in the request. With `q` the queued leg (route override,
      else `ticket_stations.next_leg`), it requires: `q` `ready` in `ticket_next_legs`, or `q` the `cancel` leg of a ticket marked
      `cancelling` (R-BTN-168); no
      `ticket_bars` row on `q` matching `runner_tags`; no refusing `ticket_blocks` row on `q` or

@@ -365,9 +365,9 @@ export class Webhooks {
     const name = full.slice(slash + 1);
     const out = new Set(registered.filter((r) => r.github.toLowerCase() === full).map((r) => r.id));
     for (const r of this.rows<{ repository_id: string }>(
-      `SELECT DISTINCT t.repository_id FROM tickets t JOIN repositories p ON p.id = t.repository_id, json_each(t.repos) j
-       WHERE lower(j.value) = ?
-          OR (lower(j.value) = ? AND instr(j.value, '/') = 0 AND lower(substr(p.github, 1, instr(p.github, '/') - 1)) = ?)`, full, name, owner)) {
+      `SELECT DISTINCT t.repository_id FROM ticket_repositories j JOIN tickets t ON t.id = j.ticket_id JOIN repositories p ON p.id = t.repository_id
+       WHERE j.repository_key = ?
+          OR (j.repository_key = ? AND instr(j.repository_key, '/') = 0 AND lower(substr(p.github, 1, instr(p.github, '/') - 1)) = ?)`, full, name, owner)) {
       if (registered.some((g) => g.id === r.repository_id)) out.add(r.repository_id);
     }
     return [...out].sort();
