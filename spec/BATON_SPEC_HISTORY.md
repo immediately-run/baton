@@ -3314,6 +3314,110 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   each of V2's session-readable GETs, whose convention this row states for the one route that
   has it today. The scenario is S-BTN-235.
 
+- **2026-11-19 — R-BTN-66, R-BTN-133, R-BTN-194, R-BTN-107, R-BTN-140, R-BTN-188, R-BTN-189,
+  R-BTN-184, R-BTN-183, R-BTN-182, R-BTN-198, R-BTN-47, R-BTN-92, R-BTN-96, R-BTN-139, R-BTN-141,
+  R-BTN-26, R-BTN-13, R-BTN-12, R-BTN-73 / R-BTN-95 and §12.9 amended; S-BTN-218 and S-BTN-219
+  retired; S-BTN-116, S-BTN-209, S-BTN-220, S-BTN-233, G-BTN-136 and G-BTN-168 amended;
+  S-BTN-237, S-BTN-238 and G-BTN-170 added: no commit signature is verified (B-263, B-264).**
+  Rules changed: R-BTN-66 (the owner-signed control inputs and `require_signed_control` are
+  gone), R-BTN-133 (the runner verifies no signature and loads from the claim's snapshot),
+  R-BTN-194 (the brief mark is gone; `last_written_by` carries `human`, decided when it is
+  recorded, and a brief is the owner's only where it is true), R-BTN-198 and §8.1's heartbeat
+  (the handed ticket carries no `brief`), R-BTN-13 (no `git`-namespace signature), R-BTN-12
+  (`EXPEDITE` is never a signed input), R-BTN-107 (no `home-signed` source; `builtin` is
+  refusable by policy, sidecars with it), R-BTN-182 (the one executor a policy may refuse a
+  trusted leg is `builtin`), R-BTN-183 (a merge leg's end names the merge result), R-BTN-140 (reach by name: a list-less home's, under the policy's
+  `repos.unlisted`), R-BTN-47, R-BTN-92, R-BTN-96, R-BTN-139, R-BTN-141, R-BTN-26 and
+  R-BTN-189 (each says "with reach" and cites R-BTN-140 where it said `code_repos`),
+  R-BTN-188 (the knobs `repos.unlisted` and `executor.builtin` and their dry run), §12.8's
+  list of what lies outside every guarantee (the deployment's forge gate; a session on the
+  human identity's forge credential), R-BTN-184 (the floor gains the rest of `.github/**`,
+  both other `CODEOWNERS` places and Codex's configuration, names agent and package
+  configuration at any depth, and states how a glob matches), R-BTN-73 / R-BTN-95 and §12.9
+  (the `out-of-course` finding), §4.4's board post (no `brief`, no `control`) and §4.3's
+  observation (`repos_unlisted`), §6.6's rule table (rule `executor`, and "with reach" in
+  rules 13 and `floor`), §13 and §14 (the fields that carried the record; `scope_findings`;
+  `stops.runners` and `stops.unreached`).
+  The adversarial review of 2026-11-18 (`spec/review/`) found that `require_signed_control`
+  promised more than it verified: R-BTN-66 named agent configuration, goals and `EXPEDITE`
+  among the inputs that count only when owner-signed, while only the four groups a runner
+  loads were verified (its SEC-3), and a merge could carry unsigned bytes past the first-parent
+  walk (its SEC-1). The owner's answer was to ask what the signature was for: "do we need
+  signature verification at all if we have controls in place to prevent untrusted commits to
+  main in the first place?" In the deployment that needs the protection, no leg holds a forge
+  credential: its writes pass a host-side gate, the merge runner's included, and board posts
+  come from a trusted process ("I don't think commits need to be signed as the board goes into
+  baton's db, not git"). What a signature still stopped was an agent session on a human's
+  forge credential, and the owner ruled that out of the model: "this is an unsupported
+  scenario in the 'protected' mode implemented in fieldhouse. Think of it as a 'break glass'
+  emergency option where an incident necessitates circumventing the normal factory workflow,
+  thus protections like siganture verifiction don't make sense." On whether to keep the
+  mechanism for `cooperative` homes: "Retire it everywhere. cooperative then openly means 'no
+  protection for control paths', and the spec loses a large mechanism."
+  So the spec verifies no commit signature. The brief mark goes with it: Baton records who last
+  pushed a ticket's file with `human`, true only for the policy's human identity, and a quote
+  is the owner's only there. A break-glass change is made visible and never
+  refused — the `out-of-course` finding, whose Needs-you line the owner worded ("Emergency
+  interactive session … this session was *not* a normal Fieldhouse process"; "'an interactive
+  session' is fine, no need to name the harness"). Two more of the review's findings were
+  decided with it, each as a policy knob because the owner wanted the restriction for the
+  protected case alone ("agreed for the fieldhouse case (cooperative case needs no git proxy
+  in the first place, so in that case this is unenforced)"): `repos.unlisted` settles the
+  review's FND-2 — R-BTN-140's by-name reading for a home with no list, against R-BTN-47's
+  "reach nothing" — by keeping that reading exactly as the code has it under `by-name` and
+  ending it under `none`; and `executor.builtin` lets a policy refuse the one executor that
+  keeps nothing apart. Neither knob is a guarantee's condition, so no stored floor breaks when
+  a deployment gains them. What the deployment makes true — the gate, per-leg credentials, what
+  each kind of leg may write — is its own specification's, named in §12.8's list. The code
+  that verified signatures stays until B-263 removes it, and its two scenario tests stay under
+  `RETIRED_TESTS_ALLOWED` until then; B-264 builds the knobs, `human` and the finding.
+  Review, round 1 (three fresh reviewers given the diff and the impact list: residue, security,
+  implementability; 27 findings, each checked against the text, none refuted). Fixed: the
+  brief rule's `tickets-approved` disjunct let a policy applied later vouch for words written
+  before it, and no leg could decide the rule, so Baton computes `human`; `by-name` as first
+  drafted reached every unlisted entry of every home, and is the list-less home's reading
+  again; rule `executor` applied at an advance with no stated outcome, and is the claim's
+  alone; R-BTN-107 still said no knob reads `source`; S-BTN-233 still expected the brief mark;
+  the rule table was cited as §6.9; `.gitmodules` had been added to the floor against
+  R-BTN-183's outright refusal and is out again; the deployment's gate, read literally,
+  refused every leg of a `**` repository and is the forge-executed paths alone; the finding's
+  paths are judged by the floor's outright globs, so a `**` repository raises nothing for its
+  ordinary merges; one finding per head; an owner resolves one only once listed.
+  Round 2 (two fresh reviewers: the new mechanisms, and whole-amendment consistency; 18
+  findings, none refuted). The finding's accounting was wrong twice over. Round 1's "any open
+  trusted claim" and round 2's first repair ("an arrival naming one of the delivery's
+  commits") each let a session on the human's credential hide a push behind any ticket's PR,
+  while the merge runner's own large merges were listed as emergencies. It is now a record
+  naming the delivery's head: a trusted leg's reported end, or a `pr-merged` arrival (round 3
+  took out a further condition, below). The delivery-chain-gap finding
+  could not be accounted and fired on webhook reordering; it is gone, and what the finding
+  does not see is listed in §12.9. `human` was computed at each read, so naming a human
+  identity later vouched for earlier pushes; it is decided when the record is made. Reach by
+  name could put a protected, unconsenting repository in a cooperative home's scope; it now
+  needs that repository's own `by-name`. The floor's grammar left nested agent and package
+  configuration outside it; those entries are any-depth. Five rules still defined reach as
+  `code_repos` membership, S-BTN-116 tested the opposite of S-BTN-238, a Decisions line still
+  said "no exception", and the seven re-read notes did not parse.
+  Round 3 (one fresh reviewer, the last round the process allows; 7 findings, one high, none
+  refuted). Round 2 had made the human's merge account only when it "left `human-merge` with
+  no discrepancy against the presented head": Baton records neither the presented head nor
+  the head a merge merged, a forge's merge commit never equals a PR's head, and the station's
+  name is the course's word, not core's — so the honest landing of a control path would have
+  been listed as an emergency every time. The condition is gone: a named fact reader's
+  `pr-merged` arrival naming the delivery's head accounts, from any station, and §12.9 says
+  what that costs. No rule made a merge leg report its merge commit; R-BTN-183 now does. A
+  cooperative home with reach to a protected repository could account that repository's
+  findings with its own trusted runner; a record now counts only from a runner granted
+  `trusted-runner` on the pushed repository, or the fact reader its own policy names. Round
+  3's repairs were not themselves reviewed.
+  Left open, for the owner. `human` says who landed a ticket's last change, not who wrote each
+  line: a runner-written quote in a pull request the human merges reads as the human's, and a
+  ticket change the merge runner lands with the human's `std:approval@1` reads as a claim. The
+  finding shows a control-path push that is no ticket's merge; a change pushed onto a ticket's
+  branch, or beneath its merge commit, and merged by hand is not shown, so it serves an honest
+  emergency and not a session that hides. Findings are listed only on the dashboard. A forced push back to
+  an older head, and a push whose delivery never arrives, raise nothing.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -3386,6 +3490,8 @@ defined in docs' `BATON_ROADMAP_PR_COURSE` (check-spec's `COURSE_IDS`).
 | G-BTN-159 | the gate stratum is monotone in granted holdings | B-166 part 4 (2026-11-02, B-162) | G-BTN-5 |
 | G-BTN-160 | the evaluator agrees with clingo, bounded by counts | B-166 part 4 (2026-11-02, B-162) | — |
 | G-BTN-161 | a route choice's advice never refuses, identifiers only | B-166 part 4 (2026-11-02, B-162) | G-BTN-49 |
+| S-BTN-218 | owner-signed briefs and the control record | the 2026-11-19 amendment | nothing: no brief mark and no `control` record; `test/integration/S-BTN-218.signed-briefs.test.ts` tests retired behaviour until B-263 deletes it |
+| S-BTN-219 | `require_signed_control` | the 2026-11-19 amendment | nothing: no commit signature is verified; `test/integration/S-BTN-219.require-signed-control.test.ts` tests retired behaviour until B-263 deletes it |
 
 Parts retired from surviving rows: S-BTN-105 and G-BTN-124 keep only the override half (the rest
 became S-BTN-110 and G-BTN-129, 2026-10-19); S-BTN-95 and G-BTN-115 lost the legacy
@@ -3397,7 +3503,8 @@ block; G-BTN-87 delivery as a worker courier; G-BTN-120 S-BTN-60's half. The sec
 keys, R-BTN-159) is G-BTN-155. The schema review (2026-10-20) retired S-BTN-64's and S-BTN-123's
 `isolation` refusal (now rule 4's `missing-capability`), S-BTN-68's course-file `checks` proposal,
 G-BTN-127's `run` selector and G-BTN-152's "timing" qualifier (every retired course field is
-refused).
+refused). The 2026-11-19 amendment retired S-BTN-209's `home-signed` case, S-BTN-220's
+and S-BTN-233's brief mark, and G-BTN-168's `home-signed` host.
 
 ## Old § → new §
 

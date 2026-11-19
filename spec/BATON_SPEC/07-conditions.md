@@ -827,8 +827,8 @@ Limits that hold throughout:
       - **`continue`** (the default): the leg goes on. It may read a version handed to it by
         `ctx.readTicket({version?})` or `baton leg ticket [--version <v>]` (default the newest
         handed, refused `unknown-version` when none was, or when this claim never handed the
-        version named). The runner verifies the version, then returns its `brief` and
-        `last_written_by` (B-127, R-BTN-194), printed first as at the claim, and the ticket as
+        version named). The runner verifies the version, then returns its
+        `last_written_by` (R-BTN-194), printed first as at the claim, and the ticket as
         R-BTN-5's read returns it, a pathless ticket's `file` included (R-BTN-74). A refusal is
         answered on the channel with its reason, and the leg goes on with the text it has. The
         claim's scope and `ctx.ticket` stay as they were. The verbs read only the claim's own

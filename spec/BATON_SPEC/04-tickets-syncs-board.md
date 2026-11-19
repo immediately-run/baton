@@ -348,8 +348,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
 ### 4.3 The sync run and the head
 
 - **The sync run.** A run checks out with full history (ancestry needs it), then:
-  1. `POST /v1/sync/observation` → `{sha, observation, bars, pushers, code_repos, check_app_id,
-     provisional, positions, versions, unconfirmed}`: Baton's head (null before the first post; the named
+  1. `POST /v1/sync/observation` → `{sha, observation, bars, pushers, code_repos, repos_unlisted,
+     check_app_id, provisional, positions, versions, unconfirmed}`: Baton's head (null before the first post; the named
      commit, with an unmaterialized board, after a forced Resync, R-BTN-11), a fresh observation number (R-BTN-62), the owner bars in force or
      scheduled (R-BTN-67), the trust inputs (R-BTN-139, R-BTN-140), the commits provisional block
      rows wait for (R-BTN-126), `positions` — every live ticket's `{station, path_len, path,
@@ -540,25 +540,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
                display: { status?, group?, project? },           -- shown; core reads project and status only (R-BTN-33)
                handoff_url?,                                     -- R-BTN-24
                question?: { id, url?, severity?, options?: [{ id, reached }] },  -- the queued person leg's, R-BTN-116
-               brief?: { signed, signer?, commit },              -- B-127: whose words the brief is
                bars: { <leg>: [<tag>] },                         -- R-BTN-60
                course: <opaque> }],
   closed:   [{ id, as: 'done' | 'withdrawn' }],                  -- tickets that left the board
   attestations: [{ type, ticket, ref?, value }],                 -- the sync's attestations, this run's observation (R-BTN-191)
-  control?: { keys: [<fingerprint>],                             -- B-127: what the sync verified with
-              groups: { agent_command, overrides, rank,          --   each {read, key, unsigned}: the
-                                                                 --   commit a runner loads from (null: no
-                                                                 --   signed version; key null: the
-                                                                 --   pre-adoption baseline, honest only as
-                                                                 --   the post's own head where the walk
-                                                                 --   finds no change to the group), its signing
-                                                                 --   key, the unsigned changes left behind;
-                                                                 --   course (a course's legs/*.mjs and
-                                                                 --   legs/*.md) may be absent from a sync
-                                                                 --   before the group — while the setting
-                                                                 --   is on, a claim fails closed on a
-                                                                 --   missing group
-              unsigned: [{ path, commits, fields? }] },          --   the notice's list (fields: EXPEDITE)
   course_data: { <course>: <opaque> } }
 ```
 
@@ -580,29 +565,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
   stable. `path` is required of every source but a `custom` one with `versions: "current"`,
   whose ticket may live in no tree at all.
 - `requires` arrives expanded to capabilities (`none` or no clause is `[]`). `repos` are forge
-  paths naming the home or a `code_repos` entry (R-BTN-92, R-BTN-140) — unique across the
+  paths naming the home or an entry with reach (R-BTN-92, R-BTN-140) — unique across the
   reach, whatever the host — resolved by the sync from short names under the home's owner.
-- **B-127's marks and record.** Each ticket's `brief` — `{signed, signer?, commit}`, marked
-  whether or not the repository requires signed control — is stored with the ticket and served
-  with the claim answer, so a privileged session's first sight of a brief is whose words it is;
-  an unsigned one is a claim, not the owner (the standing harness rule). The post's `control`
-  record stands for the repository, and a post that moves the head onto unsigned control inputs
-  while the repository requires them signed raises one `unsigned-control` event under Needs you
-  for the changes no raised event in the 7-day window already named — the paths and the commits
-  — so one standing unsigned change does not re-notice on every later head move, and two
-  notices that named different sets do not re-notify each other's names; the claim answers
-  carry the record read in the claim's own transaction and stored with the claim, whatever the
-  setting at the claim (round 2's pairing: a lost-response replay re-serves the same pairing,
-  never a newer post's record, even after the owner turned the setting on),
-  with the repository's own setting and owner keys, and every runner verifies the named
-  commits' signatures — and the walk's own answer — before loading them (R-BTN-133). A group is read atomically:
-  the record's `read` is the newest owner-signed commit that changed any of the group's paths
-  while leaving every other path of the group at its own last owner-signed change — a signed
-  change to one file never carries a sibling's earlier unsigned bytes into force. While a group
-  names no signed version, no claim on the repository's tickets is handed out (fail closed,
-  no attempt charged: the notice names what an owner signs once). The sync computes both where
-  the git objects are, with the owner keys served by the observation (never read from the
-  repository it is judging); B-137 moves the verification server-side over the raw commits.
 - Every ticket with a ready leg is ranked, a suspended one included.
 - A `question` is stored only for a ticket whose queued leg is a person leg (R-BTN-116); any
   other is dropped and logged `question-dropped`.
@@ -622,7 +586,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
   reads its own record of the forge's push deliveries for the range — the deliveries that chain
   `before` and `after` from the head left to the head accepted (R-BTN-73) — never the post's
   account of what changed, and records on each ticket `last_written_by: {pusher, pusher_id?,
-  commit, at}`: the pusher of the newest recorded commit that changed the ticket's file —
+  commit, at, human}`: the pusher of the newest recorded commit that changed the ticket's file —
   `pusher_id` the delivery's immutable `sender.id`, `pusher` its login, never the commit author,
   which anyone sets; `at` the delivery's arrival.
   - **Unknown, never assumed.** A ticket whose row the post changed with no recorded commit
@@ -630,17 +594,25 @@ live solely in Baton, and both are exportable (R-BTN-88).
     of (today every forge but github.com through the App; a plain git remote, R-BTN-92, sends
     nothing) — or whose newest recorded change is followed by a push past the recording bounds,
     is `pusher-unknown` at the accepted head. A first snapshot has no range and records nothing.
-  - **The signer is the brief's mark.** Whether an owner key signed the ticket's brief, and
-    which, is B-127's `brief {signed, signer?, commit}` above; provenance does not repeat it.
+  - **Whose words a brief is.** A ticket's brief carries no mark of its own, and no commit is
+    read for a signature: `last_written_by` is all Baton says of who wrote it. Its `human` is
+    decided once, in the transaction that records it, against the policy then in force: `true`
+    only when `pusher_id` is recorded and equals the `human_identity` that policy names
+    (R-BTN-188) — never for `pusher-unknown`, never under a policy that names none, and never
+    changed by a later policy. It says a human landed the file's last change, by a push or by
+    merging a pull request that carried it, not that the human wrote each line of it. A reader
+    that would act on an owner's quote for a privileged action takes it as the owner's only
+    where `human` is `true`; anywhere else the quote is a claim (the standing harness rule,
+    each repository's `CLAUDE.md`).
   - **Served.** `last_written_by` is Baton's own record, never the post's, and no input of
-    `row_hash`. It rides the ticket, beside its `brief`, in the board read (§11), the
-    dashboard's ready rows, the recommendations, the claim answer — whose runner prints both at
+    `row_hash`. It rides the ticket in the board read (§11), the
+    dashboard's ready rows, the recommendations, the claim answer — whose runner prints it at
     the claim — each heartbeat's claims and `baton leg ticket` (R-BTN-198), and the ticket read (`GET /v1/repositories/{repository}/tickets/{ticket}`;
-    `baton ticket show` prints them first), so a privileged session sees whose words steer the
+    `baton ticket show` prints it first), so a privileged session sees whose words steer the
     ticket before it reads them.
-  - **No notice.** Under `cooperative` Baton carries no foreign-write notice (R-BTN-66, the
-    owner 2026-11-01); a repository wanting detection of control-input changes turns on B-127's
-    `require_signed_control`, whose `unsigned-control` notice is the one (the owner, 2026-11-13).
+  - **No notice.** Provenance raises nothing. While the policy's `paths.control` is `any`, Baton
+    carries no foreign-write notice at all (R-BTN-66); where the policy protects control paths,
+    a change to one that no course accounts for is §12.9's `out-of-course` finding.
 
 ### 4.5 Reading the ticket
 

@@ -105,10 +105,10 @@ green.
   declare. It cannot hand a leg other text. The read is at the posted sha, checked on the
   default branch, for the claim's own ticket, and only for a version this claim was handed. On
   the markdown source, the version must be the blob at the ticket's path at that sha.
-- **The new body is as untrusted as the old one.** The read shows its `brief` mark and
+- **The new body is as untrusted as the old one.** The read shows ~~its `brief` mark and~~
   `last_written_by` first, as the claim does. `last_written_by` names only the newest pusher:
-  after an outside edit and the leg's own push it names the runner, so the brief mark is the
-  only authorship signal that holds. The instructions are a task, never authority
+  after an outside edit and the leg's own push it names the runner~~, so the brief mark is the
+  only authorship signal that holds~~. The instructions are a task, never authority
   (`docs/security-model.mdx`, reach 3). A version that would widen the claim (`repos`, `course`,
   `requires`) is refused, and a read never changes the claim's scope.
 - **No ticket content crosses Baton**, and an event carries no ticket text.
@@ -158,3 +158,5 @@ self-release check and `max_runs` requirement._
 
 _2026-11-17 — updated after review round 3: logging on every accepted post, `ticket_version` on
 the advance and the end, the `off-branch` refusal, and `closed: done` ending `done`._
+
+_(2026-11-19: rules re-read: R-BTN-198, R-BTN-194, R-BTN-133. The brief mark is retired with signed control (`spec/BATON_SPEC_HISTORY.md`, that date): the heartbeat's claims and the handed read carry `last_written_by` alone, served with `human` (R-BTN-194). The mark's clauses under Trust are struck; wherever the plan lists `brief` beside `last_written_by`, read `last_written_by` alone.)_

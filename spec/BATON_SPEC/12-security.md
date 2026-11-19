@@ -269,7 +269,7 @@ Every value below is validated on write; a value over its cap is refused `invali
   never on "All repositories" (R-BTN-115). Branch protection names it,
   never the dispatch App: the merge check is a gate against Baton as much as against any token
   (R-BTN-115).
-### 12.8 The repository policy and its guarantees *(proposal — B-127, B-131, B-133, B-136, B-137, B-139, B-140, B-145, B-146, B-147)*
+### 12.8 The repository policy and its guarantees *(proposal — B-131, B-133, B-136, B-137, B-139, B-140, B-145, B-146, B-147)*
 
 Baton specifies mechanisms, each with what it guarantees; a repository's **policy** chooses which
 of them hold. The policy is Baton state, one document per repository, set by its owners and never
@@ -299,6 +299,16 @@ below answers.
   their keys live (never on a machine an agent session drives, for a deployment that relies on
   `human-gates`). Baton records the declarations (R-BTN-183); a deployment that relies on them
   states and enforces them itself;
+- likewise the deployment's: that a leg's session holds no forge credential of its own, its
+  forge writes passing a gate that holds the only one and refuses, on every ref, what the forge
+  runs from the ref it is pushed to (`.github/**`) — the forge's rules guard the refs `refs.*`
+  names, never a workflow file on a leg's own branch (R-BTN-180 keeps secrets from such a run; the gate keeps a
+  pushed workflow file from running at all). A leg's branch still carries its other control-path
+  changes to `human-merge` (R-BTN-184);
+- an agent session acting with the human identity's forge credential, which the forge cannot
+  tell from the human: Baton shows its control-path push as an `out-of-course` finding when the push
+  is no ticket's merge, and stops nothing; §12.9 says what the finding does not see and who may
+  resolve it;
 - a human-only key an agent session can use (always possible while the repository's `human_key`
   is `any`, which is why `human-gates` holds only under `hardware`);
 - a compromised host of trusted runners or of the protection checker (R-BTN-180);
@@ -334,8 +344,10 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     requirements the new `attestations` entries admit no writer for, tickets on a course whose
     `merge` leg a new `merge.trusted` leaves without a trusted runner, and, for a change to
     `domains.per_run`, the credentials listed or un-listed, the course legs whose `no_chain_from`
-    then admits a listed credential's labelled run from another claim (R-BTN-106) (`baton owner
-    policy apply <preset> --dry-run`); `baton owner
+    then admits a listed credential's labelled run from another claim (R-BTN-106), for a change to
+    `executor.builtin`, the granted runners whose last heartbeat reported `builtin` or no executor
+    (`stops.runners`), and, for a change to `repos.unlisted`, the live tickets whose `repos:`
+    entries lose reach (`stops.unreached`) (`baton owner policy apply <preset> --dry-run`); `baton owner
     policy show` lists the per-run credentials beside the guarantees. Each change is logged `admin` with the versions and the
     knobs it changed. Every change is checked against the floors (R-BTN-189) and the current
     courses (R-BTN-181) in its transaction.
@@ -356,7 +368,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     | `human_identity` — the human-only identity (R-BTN-185) as the fact reader and the merge runner see it: on a forge its immutable forge user id (R-BTN-138's kind), on `git` the pusher identity the `pre-receive` hook logs (R-BTN-180); the owners set it before applying `protected`, since Baton refuses `paths.control: human`, or an `attestations` entry admitting no `sync` for `std:arrival@1`, while it is null (`invalid-params`, naming it). B-182: `human_identity` names one identity, so a human's merge or verdict on a code repository on another host cannot be told from a pusher's — while the repository's `code_repos` names an entry on a host other than the home's, the policy may set no `human_identity` and no floor may stand, and adding such an entry is refused while either does (`invalid-params`, naming the entry or the knob); per-host human identities are a later ticket | null | no value: an apply never writes it | no value | Baton, trusted runners | R-BTN-184, R-BTN-192, R-BTN-140 |
     | `refs.default_branch`, `refs.tags`, `refs.other` (branches outside `branch_pattern`, `baton/proposed/*` among them, `baton-legs/*` not) — who may update them, from `runner`, `trusted-runner`, `mirror` (*adoption*; on its deletion it stays legal and inert in stored versions and is refused in new ones, §16), `human` | all four, for each | `[trusted-runner, human]` for each | | the forge; Baton prints it, the protection checker checks it | R-BTN-180 |
     | `paths.protected` — the owner's protected paths, beside the computed floor | `[]` | `[]` | | trusted runners, the forge | R-BTN-184 |
-    | `paths.control` — who lands a control path | `any` | `human` | | trusted runners, the forge | R-BTN-184 |
+    | `paths.control` — who lands a control path | `any` | `human` | | trusted runners, the forge; Baton for §12.9's finding | R-BTN-184 |
     | `paths.tickets` — a ticket or goal change the merge runner merges needs a `std:approval@1`; a human's own merge of a ticket's PR (`merged-by-hand`, R-BTN-131), or of a request PR (R-BTN-131), is their approval of the ticket files it carries | `any` | `approval` | | trusted runners | R-BTN-183, R-BTN-184 |
     | `merge.trusted` — merge legs are trusted legs, and no course commits to the default branch | `false` | `true` | | Baton, the forge | R-BTN-182 |
     | `merge.reviews` — `{count}`: the `std:review@1` a merge needs at its head, from `count` distinct domains, each other than every writer domain | `{count: 0}` | `{count: 2}` | | trusted runners | R-BTN-183 |
@@ -365,13 +377,16 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     | `tickets.created` — how a ticket a runner's action creates (a handler ticket, a call leg's child, a supersession's replacement) and a withdrawal reach git | `filed` | `proposed` | | Baton, trusted runners | R-BTN-161, R-BTN-165, R-BTN-171, R-BTN-180 |
     | `outbox.git`, `outbox.forge-check` — `{deliverers}`: which grant roles may deliver the kind, from `runner`, `trusted-runner` | `{deliverers: [runner]}`, each | `{deliverers: [trusted-runner]}`, each | | Baton | R-BTN-171 |
     | `inputs.board` — who may post the board, from `sync-key`, `ci-identity`, `machine` | all three | `[sync-key, ci-identity]` | | Baton | R-BTN-93, R-BTN-102, R-BTN-187 |
+    | `repos.unlisted` — whether a home that lists no `code_repos` reaches its tickets' `repos:` entries by name: `by-name` or `none` | `by-name` | `none` | | Baton, the sync | R-BTN-140 |
+    | `executor.builtin` — whether a runner reporting the `builtin` executor, or none, is given a claim on a ticket that reaches the repository: `allowed` or `refused` | `allowed` | `refused` | | Baton | R-BTN-107 |
     | `attestations` — `{<type>: writers}`: whose attestations about work count; an absent type admits none | each `std:` type's standard writer (R-BTN-181; R-BTN-191: `runner` for the holder's `std:arrival@1` and a deliverer's `std:effect@1`), with `sync` admitted for `std:arrival@1` and `std:decision@1` too (R-BTN-191) and `std:checks@1` absent until the owner names a check-runner's key (R-BTN-114) | as `cooperative`, except that `std:arrival@1` also admits the fact reader's `service:` key once the owner names it (R-BTN-192) and never `sync`, and `std:decision@1` admits `human` alone | | Baton, trusted runners | R-BTN-181 |
     | `readings` — `{<resource> \| "*": {writers}}`: whose readings count for this repository; `*` covers every resource not listed, one registered later included; a trusted leg's resources are further restricted by R-BTN-181 | `{"*": {writers: every writer R-BTN-76 lets report}}` | as `cooperative`; the owner narrows the resources a gate reads | | Baton | R-BTN-76, R-BTN-181 |
     | `floors` — the guarantees (R-BTN-189) no change to this policy may break | no value: an applied preset never writes it | no value | no value | Baton | R-BTN-189 |
 
     Owner settings kept outside the policy (`retry`, bars, `checks`,
     `transcript_repos`, `leg_log_root`, `artifact_buckets`) stay R-BTN-66 settings, whose loosening
-    `approvers.policy` governs. Three values that were knobs are constants: `refs/baton/*` is open
+    `approvers.policy` governs. A stored version naming no `repos.unlisted` or no
+    `executor.builtin` reads as `by-name` and as `allowed`. Three values that were knobs are constants: `refs/baton/*` is open
     to every writer (GitHub cannot restrict it, R-BTN-180); `baton-legs/*` is open to `runner`,
     `trusted-runner` and `human` (R-BTN-190); and where leg state lives follows where the PRs
     the course reads live (R-BTN-190).
@@ -470,7 +485,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
       keeps checking, until it reports a match.
   - **A broken floor stops the repository, in Baton.** While a guarantee `floors` names is broken,
     Baton offers and accepts no claim or advance on any ticket that reaches the repository, homed
-    there or naming it in `repos:` (rule `floor`, `floor-broken`), and sends every running claim on
+    there or naming it in a `repos:` entry with reach (rule `floor`, `floor-broken`), and sends every running claim on
     such a ticket a `release` with reason `floor`, which ends it `released:floor`. The protection
     checker is exempt. Baton enforces this itself, never by asking runners: an ordinary `runner`
     grant may share its host with the code it builds, so a check it promised to make proves nothing.
@@ -824,7 +839,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     there is the deployment's to make true (§12.8).
   - **A course's `legs/<leg>.run.mjs` for a trusted leg may only add refusals.** It runs as any
     leg's code does, through the runner's executor (R-BTN-107) — Baton names no sandbox for a
-    trusted leg and refuses none for the lack of one — with the computed diff as its only input, and returns `{refuse, reasons}`, `reasons`
+    trusted leg, and the one executor a policy may refuse it is `builtin` (R-BTN-107) — with the computed diff as its only input, and returns `{refuse, reasons}`, `reasons`
     from a closed list with path ids. The CLI applies R-BTN-183 afterwards, whatever it returns.
     That the override cannot reach the trusted runner's credential is the deployment's (§12.8).
 - **R-BTN-183 (what the merge runner merges).** At the PR's exact head `H`, under the policy's
@@ -878,7 +893,9 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
   - **How.** Squash or merge at exactly `H`, with the base pinned too (a compare-and-swap push of
     the merge result onto the main tip it was computed from), and a commit message the merge runner
     writes itself, carrying no trailer from the branch. A branch that moved since an attestation was
-    made is refused, and the ticket returns to the leg the course names.
+    made is refused, and the ticket returns to the leg the course names. The leg's end names
+    the merge result as its `ended_at_sha` (R-BTN-8), a commit sha always: §12.9 accounts for
+    the push by it.
   - **Leg state** (R-BTN-190). A work branch whose merge result, or any commit in the ticket's
     ranges, holds an entry folding to `.baton-legs` is refused.
   - **Foreign commits.** A commit on a ticket's branch that no claim of that ticket reported is found
@@ -890,11 +907,16 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
 - **R-BTN-184 (protected paths).** The policy's `paths.protected` (R-BTN-188), with a floor no
   course or owner removes. Baton computes what it can and fails closed on the rest:
   - computed: `.baton/**`; every path `.baton/baton.json` lists in `imports`; the items glob and goal
-    glob the ticket source declares in `baton.json`; `.github/workflows/**`, `.github/actions/**`
-    and every local path a workflow `uses`; `.github/CODEOWNERS`; agent configuration for each
-    supported harness (Claude Code: `.claude/**`, `**/CLAUDE.md`, `.mcp.json`; opencode:
-    `opencode.json`, `.opencode/**`; and `**/AGENTS.md`); package-manager and environment
-    configuration (`.npmrc`, `.yarnrc*`, `.envrc`);
+    glob the ticket source declares in `baton.json`; `.github/**` and every local path a workflow `uses`; `CODEOWNERS` and `docs/CODEOWNERS`;
+    agent configuration for each
+    supported harness, at any depth (Claude Code: `**/.claude/**`, `**/CLAUDE.md`,
+    `**/.mcp.json`; Codex: `**/.codex/**`; opencode: `**/opencode.json`, `**/.opencode/**`; and
+    `**/AGENTS.md`); package-manager and environment
+    configuration (`**/.npmrc`, `**/.yarnrc*`, `**/.envrc`). A glob is matched against a path normalised
+    as R-BTN-183 normalises one (case-folded, NFC): it is anchored at the repository root
+    unless it begins `**/`, which is any depth, the root included; a trailing `/**` is
+    everything beneath, and `**` alone every path; `*` is any run of characters within a
+    segment;
   - declared by the owner: authority documents as whole files (the context corpus, `lessons`, the
     spec), and what deploying or releasing workflows execute. A repository whose workflow uses a
     secret in a deploy or release environment is protected `**` until the owner narrows it; `baton`
@@ -999,11 +1021,11 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
 
 ### 12.9 A leg's scope *(B-134)*
 
-A leg's scope is its ticket's home and `repos:` entries (R-BTN-140's `code_repos` once built;
-until then every `repos:` entry that resolves to a forge path on the home's forge host, as
-R-BTN-92 reads a short name under the home's owner), each by its whole forge path (a GitLab
+A leg's scope is its ticket's home and the `repos:` entries that have reach (R-BTN-140), each by
+its whole forge path (a GitLab
 subgroup's `group/sub/repo` names its repository by all three segments). The claim answer
-carries it, and two halves report what a leg did outside it:
+carries it. Two reports say what a leg did outside it, and a third what changed a control
+path outside any course:
 
 - **The runner's audit is a cooperative aid, not a control.** At each leg's end the runner reads
   the refs the leg's window moved in the home checkout — evidence the agent does not supply —
@@ -1028,8 +1050,49 @@ carries it, and two halves report what a leg did outside it:
   push (R-BTN-8: the push precedes the end) that lands after the claim's `end()` still finds
   the claim that covers it: a push to a repository no open claim's scope covers records an
   `unclaimed-write` finding. The forge's word, not the agent's.
-- **Findings.** Each `scope-exceeded` or `unclaimed-write` finding is one open row per shape,
-  listed under Needs you (§14) until an owner resolves it — the acknowledgement that it was
+- **A control path changed outside a course.** While the policy's `paths.control` is not `any`
+  (R-BTN-188), Baton checks every recorded push delivery (R-BTN-73) to the default branch
+  against what it knows landed it, from the delivery's own record: no repository content is
+  read.
+  - **Which paths.** The added, removed and modified paths of the delivery's commits, judged
+    by the globs of R-BTN-184's computed floor that name a path outright — every computed
+    entry but `imports`, the ticket source's globs and a workflow's `uses`, which are read
+    from files. The owner's `paths.protected` is not judged here, so a repository protected
+    `**` raises no finding for its ordinary merges.
+  - **Accounted.** A delivery is accounted by a record Baton holds that names the delivery's
+    head commit, made before the delivery comes in or at any time after, for a ticket whose
+    scope covers the repository: the commit a claim on a `trusted: true` leg reported at its
+    end (`claims.ended_at_sha`, R-BTN-183), from a runner whose grant on the pushed repository
+    is `trusted-runner`; or the `ref` of a `pr-merged` arrival (R-BTN-192) written by the fact
+    reader's `service:` key the pushed repository's policy names, never by `sync`. Nothing
+    else accounts: not an open claim, not an arrival naming another of the delivery's commits,
+    not a record from a runner or a fact reader another repository's policy admits.
+  - **The finding.** A delivery that changes such a path and is not accounted when it comes in
+    opens an `out-of-course` finding, logged `out-of-course`: its target the delivery's head
+    commit, its detail the pusher's id and login, the delivery's commit ids and at most sixteen
+    of the paths with the count of any beyond them. A delivery recorded `truncated` opens one
+    with no path. There is at most one finding per head commit, open or closed: a redelivery
+    opens nothing.
+  - **Closed.** A record that accounts for the head closes the finding, `resolved_by` `baton`,
+    logged `scope-resolved`. An owner resolves one only once it is listed (`not-found` before).
+  - **Listed late.** The finding is under Needs you only once 15 minutes have passed since it
+    was raised, by Baton's clock (R-BTN-32), compared at each read: a merge the fact reader
+    attests within its minute, or a merge leg reports at its end, is never listed. It reads
+    `Emergency interactive session: <pusher> changed <paths> at <commit>. This was not a
+    course's work.`, `<paths>` reading `unrecorded paths` when the finding names none.
+  - **What it does not see.** A change whose head is the merge of a ticket's pull request,
+    made by hand: the fact reader attests that merge whatever it carried, from any station, so
+    a change pushed onto a ticket's branch, or beneath its merge commit, is not shown. The
+    finding shows the push that is no ticket's merge at all, which is what an emergency fix
+    is; it is no defence against a session that hides one. Nor does it see a push whose
+    delivery never reaches Baton, a forge whose pushes Baton holds no record of (R-BTN-194), or
+    a forced push back to an older head, which names no path. Under `paths.control: any`
+    nothing is checked (R-BTN-66).
+  - **Information only.** Nothing is refused, held or reverted, and `scope_policy` does not
+    read it.
+- **Findings.** Each finding is one open row per shape. A `scope-exceeded` or `unclaimed-write`
+  finding is listed under Needs you (§14) from the moment it is raised, an `out-of-course` one
+  as its bullet says, each until an owner resolves it — the acknowledgement that it was
   looked at, logged `scope-resolved`. With the owners' `scope_policy: hold`, a
   `scope-exceeded` finding also holds its ticket until an owner lifts the hold (R-BTN-12); an
   owner lifts it the way any hold is lifted. Both settings are R-BTN-66's: a hold that stops
