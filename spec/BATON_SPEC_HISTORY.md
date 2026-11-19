@@ -3512,6 +3512,42 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   Everything removed is kept verbatim under *Lineage moved out of the spec, 2026-11-19*, below
   the Decisions in full. No review round was run: the change removes words and adds a check.
 
+- **2026-11-18 — §3.1 R-BTN-47, §4.2 R-BTN-74, §4.4, §6.1 R-BTN-120 and §11.3's owner routes
+  amended; S-BTN-241 added: dependencies on another repository's tickets (B-113).**
+  Rules changed: R-BTN-47 (*Relations stay home* relaxed for `depends_on` alone, with the
+  visibility-and-consent clause), R-BTN-74 (the markdown source posts qualified ids as written;
+  `baton ticket check` and the ticket commands take them), §4.4 (the post's judgment of a
+  qualified `depends_on` — unregistered and unknown targets refused, consent, the cross-board
+  cycle, the sync's dependencies read), R-BTN-120 (a qualified prerequisite resolves against the
+  target's board, as for a local one), §11.3 (the owner route
+  `POST /v1/owner/{repository}/dependency-consents`). Until now a wait on another repository's
+  ticket could only be written as prose (a `**Waits on:**` line), so nothing stopped a claim
+  before the other repository's work was done; a file URL was considered and rejected — a done
+  ticket moves to `archive/`, so the URL breaks exactly when the dependency is met. The owner,
+  2026-10-25, asked for a dependency that is not just a local id, and Baton already names
+  tickets by their qualified id (`docs:R3-1205`), so `depends_on` takes it. `parent` (so
+  `blocked_by`) stays home, and an unqualified id stays local. Visibility is judged over the
+  principals a board reaches — its owner keys and runner grants, an administrator's lowering
+  nothing — so a dependency on an equally visible target (the same owners, the instance's usual
+  shape) asks for nothing, and one on a less visible target needs the target repository owners'
+  consent, recorded as R-BTN-140's cross-repository consent is (its `code_repo_consents` table
+  itself still waits on its own ticket; `dependency_consents` is migration 0062). Round 1 of
+  its review closed a hole at the centre: a one-board cycle any of whose edges was spelled
+  self-qualified escaped both checks — the one-board graph keyed bare local ids, and the
+  cross-board walk detected the loop but skipped it as one board's own — so a self-qualified
+  edge now reads as its local id in the one-board graph (`checkPayload` takes the posting
+  repository's id), and everywhere else that reading belongs: the sync's dependencies read
+  answers a self-qualified id against the posting repository's own board (a checkout whose
+  `repos` map names no id of its own — no origin to match, or a `.git` suffix on the map's
+  value — no longer fails its run on one), `baton ticket claim` reads one from the same
+  checkout's archive and status, never a depth-1 clone of the repository's own remote, and
+  `baton ticket check` checks one as a local id. Round 1 also made the walk's bound real
+  (`BOARDS_MAX`, written as a refusal but never thrown, could be walked past within a pass)
+  and the read's `url` honest: null for a closed target, whose file the archive moved along a
+  path no closing keeps, rather than a guessed `tickets/<id>.mdx`. The ticket is
+  B-113; fieldhouse FLDH-27's wait becomes `depends_on: [baton:B-111, baton:B-112]` when the CLI
+  release carrying this is pinned.
+
 - **2026-11-18 — §13's Runners view indexes: the Runners view reads one query per list, however
   many runners were ever registered (B-250).**
   Rules changed: none; §13's index notes.

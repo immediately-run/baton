@@ -161,6 +161,12 @@ export class BatonApi {
   head(): Promise<Record<string, any>> {
     return this.call('GET', '/v1/sync/head');
   }
+  /** B-113 (§4.3): the sync's dependencies read — the qualified `depends_on` entries of other
+   *  repositories the posting repository's tickets name, resolved against their boards (their
+   *  doneness is what a station function gates a leg on, R-BTN-120). */
+  dependencies(ids: string[]): Promise<Record<string, any>> {
+    return this.call('POST', '/v1/sync/dependencies', { ids });
+  }
   board(body: Record<string, unknown>): Promise<Record<string, any>> {
     return this.call('POST', '/v1/sync/board', body);
   }

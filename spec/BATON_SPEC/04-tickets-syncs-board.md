@@ -158,7 +158,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
     | `course` | `course_id` (default `default_course`, else `create-pr`) |
     | `requires` | capability names, expanded |
     | `tags` | `EXPEDITE` → `expedite`; `OP` → `human-operator` in `requires` |
-    | `depends_on` | `depends_at: {ticket, done: true, leg: <the course's start_leg>}` per id (R-BTN-120) |
+    | `depends_on` | `depends_at: {ticket, done: true, leg: <the course's start_leg>}` per id (R-BTN-120); an id may be qualified (B-113) and is posted as written |
     | `repos` | forge paths, short names resolved through the `repos` setting (`owner/name` stands) |
     | `order` | `rank` (by `order`, then id) |
     | `conditions` | the ticket's bindings (R-BTN-161) |
@@ -174,10 +174,15 @@ live solely in Baton, and both are exportable (R-BTN-88).
     ejected `.baton/tickets.mjs`, else the markdown default — and checks what it would post, without
     posting: the source's own refusal (a duplicate `id`, an unknown `repos` short name, an `order`
     that is not a number), the board post's validation (§4.4, the cycle among it), every
-    `depends_on` naming a live or a closed ticket, and no cycle (named once or more, `B-1 → B-2 → B-1`). With
+    `depends_on` naming a live or a closed ticket — this repository's own id spelled qualified
+    reads as the local id alone (§3.1) and is checked as one; another repository's qualified id
+    (B-113) is not this repository's to check, resolved at the claim through the `repos` map and
+    against its board by the sync (§4.4) — and no cycle (named once or more,
+    `B-1 → B-2 → B-1`). With
     `check: {depends_line: true}` in `.baton/baton.json` (default off) it also holds each markdown
     ticket's `**Depends on:**` body line — which runs to the next blank line or `**Label:**` line;
-    a `**Used by:**` line is never read — to its `depends_on`, both ways; a ticket with no such line
+    a `**Used by:**` line is never read — to its `depends_on`, both ways, a qualified id named as
+    one token (`baton:B-111`); a ticket with no such line
     is not compared. A ticket is dated by the day it was filed: its `## Status` `_filed
     YYYY-MM-DD` line, else the author day (`%as`) of its file's first commit
     (`--diff-filter=A`), else — a file not yet committed — today; never by a later edit. The
@@ -244,7 +249,9 @@ live solely in Baton, and both are exportable (R-BTN-88).
       key, no configured Baton, an unreachable Baton or `--offline`, the next free `<prefix>-<n>`
       on the head it files on (across the items folder at any depth, `archive/` included, among
       files whose frontmatter carries an `id`), said in the output, the sync's duplicate-id
-      refusal that path's backstop. It writes the conventional body unless
+      refusal that path's backstop. `--depends-on` takes a local id or a qualified one
+      (`baton:B-111`, B-113), named on the body's `**Depends on:**` line as written. It writes the
+      conventional body unless
       `--body-file` names one: `**Brief:**` (the description), `**Spec:**`, `**Depends on:**`
       (from `--depends-on`; `none.` when empty), `**Used by:**`, `### What to build`,
       `### Trust` (every new input the ticket adds — a field, a file, a commit trailer, a request —
@@ -274,7 +281,16 @@ live solely in Baton, and both are exportable (R-BTN-88).
         its own Decisions entry records: for `new` alone, PR-first.
     - `claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]` moves a ticket available → in-progress, and
       refuses one that is not available or whose `depends_on` are not all done (archived, or
-      carrying any of the markdown source's closed statuses). Before it writes it reads the
+      carrying any of the markdown source's closed statuses). A qualified dependency (B-113) is
+      resolved through `.baton/baton.json`'s `repos` map — the repository id to its forge path,
+      `owner/name` a GitHub remote as the map has always read it — and the target repository's
+      default branch is read at depth 1: the dependency is done when the target is archived or
+      live `done`/`superseded` there, the same rule as a local one; a repository the map does
+      not name, or a ticket the target does not hold, refuses naming it, as the board post would
+      (§4.4). This repository's own id spelled qualified is the local id's own dependency
+      (§3.1), answered by the same checkout's archive and status, never a clone of the
+      repository's own remote — so an `--offline` claim carrying one stays offline. The markdown
+      source posts qualified ids as written. Before it writes it reads the
       ticket from Baton with the key `-i` names (else `BATON_KEY_FILE`) — the pickup side of the
       owner's ruling that Baton owns a ticket's course history (B-120, B-129): the board answers
       the station, the ready leg and the repository's live claims; the history answers the path
@@ -329,8 +345,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
     the items folder — the same text in every repository, with the id prefix, the legacy patterns
     and the default project read from that repository's `.baton/baton.json` — covering the
     frontmatter keys and statuses; the ids; the tags Baton reads; the body's header lines
-    (`**Depends on:**` naming exactly `depends_on`; reverse mentions on `**Used by:**`; a wait on
-    another repository's ticket on `**Waits on:**`, relations staying inside one repository, §4);
+    (`**Depends on:**` naming exactly `depends_on`, another repository's ticket by its qualified
+    id `<repository>:<id>` (B-113); reverse mentions on `**Used by:**`; `**Waits on:**` for a
+    wait no dependency can carry — a spec, a decision — `parent` and every unqualified id
+    staying inside one repository, §4);
     projects (choose or create a related set's project before filing); and the commands. It is
     written again when it differs, and `baton ticket check` reports a page that differs from the
     release's text, so docs, baton and fieldhouse cannot diverge.
@@ -596,9 +614,40 @@ live solely in Baton, and both are exportable (R-BTN-88).
   (R-BTN-153).
 - A post whose live tickets' `depends_on` form a cycle is refused `invalid-params`, naming it once
   as its path (`B-1 → B-2 → B-1`); an edge to a closed ticket, or to an id the post does not name,
-  is no cycle here — the latter is `baton ticket check`'s finding (B-111). The interim shape's
+  is no cycle here — the latter is `baton ticket check`'s finding (B-111). A self-qualified edge
+  — this repository's own id spelled out (`baton:B-1` posted by baton) — is read as the local id
+  alone (§3.1), so a loop however its edges are spelled is named here (B-113 round 1); another
+  repository's qualified edge is no node of this graph. The interim shape's
   `state.items[].dependsOn` is the same graph and is refused the same way (B-111, round 1): no
   ticket source can post a loop, whichever shape it posts.
+- **Qualified `depends_on` (B-113).** An entry may name another repository's ticket by its
+  qualified id (`baton:B-111`, §3.1); `blocked_by` and `parent` stay local. Judged in the
+  transaction that accepts the post, before anything is written:
+  - the target repository must be live-registered (a retired one is as one never registered,
+    R-BTN-47), and the named ticket live or closed **there** — on its own board, not this one.
+    Either failing is `invalid-params`, naming the qualified id;
+  - the target must be at least as visible as the posting repository, or its owners' consent
+    recorded (§3.1): without either, `invalid-params`, naming the consent route;
+  - a cycle through two boards is refused as one board's is (B-111's rule across repositories):
+    the post's live tickets and every touched repository's stored ones, qualified edges followed
+    across boards, the cycle named once as its path with qualified ids
+    (`baton:B-1 → fieldhouse:FLDH-2 → baton:B-1`). An edge to a closed or unknown ticket is no
+    cycle here, as within one board; one board's own loop, however its edges are spelled, is that
+    board's own post's refusal above. A graph over more boards than the post's walk bounds is
+    out of scale, refused as one, naming the board that crossed the bound.
+  - **The sync resolves them against those boards** (§4.3): after its number, before the forge
+    is read, one `POST /v1/sync/dependencies {ids}` with the qualified ids its live tickets
+    name, answered per id — `{ticket, repository, local, done, withdrawn, closed, station, url}`
+    — the doneness the station functions gate a leg on (R-BTN-120: done, reached or at a leg, as
+    for a local one), and `url` the target file's link **built from its registration**
+    (`web_base`, forge path, the branch, the path), never a stored URL — null for a closed
+    target (its file moved to the target's archive, whose path no closing keeps) or a `git`
+    repository — the shape the dashboard and the wiki board draw for a qualified dependency.
+    A self-qualified id (§3.1) is answered against the posting repository's own board, read as
+    the local id alone, so a checkout whose `repos` map names no id of its own still syncs
+    (B-113 round 1). The read makes the post's own refusals (unregistered, unknown,
+    unconsented — that one `forbidden`) at the moment the sync can still fail whole, naming
+    them, never posting a partial reading.
 - Free text and identifiers are validated on write (§12.3).
 - **R-BTN-194 (every ticket carries who last wrote it).** Provenance, for the compromised-runner
   hardening (B-126; the security model's reach 3, option 9): information, never a gate — nothing
