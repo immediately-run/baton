@@ -14,7 +14,7 @@ in `archive/` — and posts the tickets to Baton; the body is for people, and Ba
 | `id` | the ticket’s id; the file is named after it |
 | `title` | its title on the board |
 | `status` | `available`, `in-progress`, `in-review` and `deprioritized` are live; `done` is done, in `archive/`; `deferred` and `superseded` are closed as withdrawn |
-| `depends_on` | the tickets this one waits for: it is offered only once each is done |
+| `depends_on` | the tickets this one waits for: it is offered only once each is done — another repository’s by its qualified id `<repository>:<id>` |
 | `order` | where it ranks on the board, lower first |
 | `tags` | the tags Baton reads, below |
 | `requires` | capability names a runner must hold to be offered the ticket |
@@ -48,8 +48,12 @@ Another tag is the repository’s own ranking word; Baton reads it nowhere.
   on in `.baton/baton.json`, `baton tickets check` holds the line to the frontmatter.
 - `**Used by:**` names the tickets that depend on this one: the reverse mention, kept by the
   ticket that adds the dependency, so a file says who waits on it without a search.
-- `**Waits on:**` names work outside this repository — another repository’s ticket, a spec, a
-  decision — since `depends_on` and its relations stay inside one repository (`BATON_SPEC` §4).
+- A dependency on **another repository’s ticket** is `depends_on: [<repository>:<id>]` — as
+  `baton:B-111` — named the same way on the `**Depends on:**` line: the ticket is offered
+  once the target is done on its own board, and the repository must be one `.baton/baton.json`’s
+  `repos` map names. `parent` stays inside this repository, and so does every unqualified id.
+- `**Waits on:**` names work no dependency can carry — a spec, a decision — since every
+  ticket-to-ticket wait is `depends_on`, local or qualified (`BATON_SPEC` §4).
 
 ## Projects
 

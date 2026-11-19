@@ -31,6 +31,48 @@ function bundle(marker: Record<string, unknown>, page = '# Page\n\n<RoadmapBoard
 
 const WIKI = { kind: 'wiki' };
 
+describe('check-wiki: a qualified depends_on (B-113)', () => {
+  /** A tickets bundle (an item.schema.json, so its `.mdx` files are tickets) with the tickets
+   *  given, `path → frontmatter overrides`; returns the script's result. */
+  function tickets(files: Record<string, Record<string, unknown>>): { code: number; out: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-wiki-'));
+    try {
+      writeFileSync(join(dir, 'immediately.run.json'), JSON.stringify(WIKI));
+      writeFileSync(join(dir, 'item.schema.json'), JSON.stringify({
+        definitions: { itemId: { type: 'string', pattern: '^(B-\\d+|baton:B-\\d+)$' } },
+        required: ['title', 'id', 'status', 'depends_on'],
+        propertyNames: { enum: ['title', 'description', 'id', 'status', 'depends_on'] },
+        properties: { status: { enum: ['available', 'done'] } },
+      }));
+      for (const [path, fm] of Object.entries(files)) {
+        writeFileSync(join(dir, path), `---\n${Object.entries({ title: 'T', description: 'A ticket.', status: 'available', depends_on: [], ...fm }).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join('\n')}\n---\n\nBody.\n`);
+      }
+      try {
+        const out = execFileSync(process.execPath, [SCRIPT, dir], { encoding: 'utf-8', stdio: 'pipe' });
+        return { code: 0, out };
+      } catch (e) {
+        const err = e as { status?: number; stdout?: string; stderr?: string };
+        return { code: err.status ?? 1, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('a qualified id is not looked for in this bundle; a malformed one fails the shape (round 1)', () => {
+    expect(tickets({ 'B-1.mdx': { id: 'B-1', depends_on: ['baton:B-9'] } }).code).toBe(0);
+    // An unknown repository (`garbage:x`) is the board post's to refuse, never this bundle's —
+    // but the shape is this check's (round 1): `:B-1`, `a:b:c` and an uppercase repository id
+    // passed here while the board post's own DEPENDENCY_ID refuses them.
+    expect(tickets({ 'B-1.mdx': { id: 'B-1', depends_on: ['garbage:x'] } }).code).toBe(0);
+    for (const bad of [':B-1', 'a:b:c', 'NotARepo:x']) {
+      const r = tickets({ 'B-1.mdx': { id: 'B-1', depends_on: [bad] } });
+      expect(r.code).toBe(1);
+      expect(r.out).toMatch(new RegExp(`depends_on ${bad.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')} is not a qualified id`));
+    }
+  });
+});
+
 describe('check-wiki: the component vocabulary (B-114)', () => {
   it('a bundle with no viewer app fails an unregistered component, and a misspelling of a Grove one', () => {
     const plain = bundle({ ...WIKI, opensWith: { task: 'open-wiki', version: '1.0' } });
