@@ -1,12 +1,12 @@
 ---
-title: "B-278 — A harness is one adapter: HarnessAdapter in the runner, and core validates the name by grammar"
-id: B-278
+title: "B-278 — Keep PostgreSQL possible: a dialect lint, a Store conformance test, and no new SQLite-only SQL"
+id: B-272
 project: baton
 status: available
 updated: 2026-11-19
 tags:
   - roadmap-item
-description: "The harness name is a closed list in core and a schema CHECK; a HarnessAdapter table in src/runner/harness.ts, a migration relaxing the CHECK, and section 8.1 amended"
+description: "A lint for SQLite-only constructs behind a shrink-only allowlist, a Store conformance test on both hosts, RETURNING id for last_insert_rowid, Sequences.next read inside its transaction, one Db helper"
 topics:
   - baton
 owns: {}
@@ -14,33 +14,46 @@ prs: []
 depends_on: []
 ---
 
-**What:** the harness name is a closed list (`opencode`, `claude-code`) in core and in a schema
-`CHECK`. A third harness must report itself as one of the two.
+**What:** replacing SQLite with PostgreSQL is feasible for one instance and large: the `Store`
+port is synchronous (about 2,000 call sites) and 894 SQL statements sit in 29 core files. Nothing
+stops that cost growing. Keep the move possible without making it.
 
 From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
 
 ### What to build
 
-1. `src/runner/harness.ts`: a `HarnessAdapter` (`name`, `agentCommand`, `activityPaths`,
-   `usage`) and a table of them.
-2. Core validates `harness` by grammar (a bounded name), not by membership.
-3. A migration relaxing the `CHECK`.
-4. Amend [BATON_SPEC §8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) in the same pull request: the harness is a name the runner declares.
+1. A dialect lint in `npm test` that fails on new uses of `last_insert_rowid`, `changes()`,
+   `rowid`, `INSERT OR`, scalar `MAX(a, b)`, `IS ?`, `COLLATE NOCASE` and `PRAGMA`, beyond an
+   allowlist that may only shrink.
+2. A `Store` conformance test run on both hosts: nested rollback, `one()`, `rowsWritten`,
+   integers above 2^53, unique-violation detection, a write followed by a throw outside a
+   transaction.
+3. Replace the six `last_insert_rowid()` reads with `RETURNING id`; give the five `rowid`
+   orderings a column; read the stored number in `Sequences.next` inside its transaction (it is
+   read outside it today).
+4. One `Db` helper replacing the 23 private `rows` wrappers; then a repository per aggregate
+   for the four files that hold 501 of the 894 statements.
+5. Record on the architecture page whether the synchronous store and the single writer are
+   permanent decisions. This is the owner's sentence to write; the leg proposes it.
 
-**Done when:** a test registers a third adapter and a runner declaring it claims and runs a leg.
+Several instances on one shared database is out of scope: correctness rests on a single writer.
+
+**Done when:** steps 1 to 3 are in `npm test` and green on both hosts; step 4 may be a second
+pull request.
 
 ### Trust
 
-`harness` is a runner-supplied string that reaches SQL and the dashboard. With the closed list
-gone, `src/core/validate.ts` bounds its length and character set before any write, and it is
-rendered as text.
+No new input. The SQL changes keep every value bound as a parameter; no statement is built from
+a runner- or owner-supplied string.
 
 ### Invariants
 
-- Capabilities and names are matched, never interpreted: core derives nothing from a harness
-  name.
-- Migrations are append-only: the relaxed `CHECK` is a new numbered file.
-- [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): filter fields only.
+- [BATON_SPEC §4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) ([R-BTN-199](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)): Baton hands out every identifier; `Sequences.next` never gives one
+  number twice, on either host.
+- [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) ([R-BTN-55](../spec/BATON_SPEC/02-deployments.md#sec-2-1)): one core, both hosts; the conformance test is what makes "unchanged"
+  checkable.
+- Migrations are append-only: a new column is a new numbered file.
+- A heartbeat's writes stay in one `store.transaction`.
 
 ## Status
 

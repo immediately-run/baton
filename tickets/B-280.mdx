@@ -1,15 +1,12 @@
 ---
-title: "B-280 — src/shared says what it is: the vendored files move to src/vendor, and the owner decides who owns baton.mjs"
-id: B-280
+title: "B-280 — A client layer and one git helper: src never imports cli/, one export table for both bundlers, shared wire types"
+id: B-274
 project: baton
 status: available
 updated: 2026-11-19
-repos:
-  - baton
-  - docs
 tags:
   - roadmap-item
-description: "Five vendored files sit under a name that reads as shared code; move them to src/vendor with the manifest and hash check, and decide whether Baton or docs is the source now that the spec lives here"
+description: "src/client holds send, signing and the default URL; one bounded src/defaults/git.ts; one table of entry and exports read by the checkout's bundlers and build-cli; ClaimAnswer, BeatAnswer and AdvanceAnswer shared with the runner"
 topics:
   - baton
 owns: {}
@@ -17,32 +14,39 @@ prs: []
 depends_on: []
 ---
 
-**What:** `src/shared/` holds five vendored files under a name that reads as "shared code, edit
-here". The spec moved into this repository, so the direction of vendoring may now be backwards
-for `baton.mjs`.
+**What:** `src/` imports `cli/baton.mjs` for `send`, signing and the default URL, so each
+development bundle inlines a second copy of the CLI entry. Eight places shell out to `git`, six
+with no timeout. The list of what each bundle exports is kept twice, which shipped a package
+whose `baton home` crashed with `homeMain is not a function`.
 
 From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
 
 ### What to build
 
-1. Move the five vendored files to `src/vendor/`, with the manifest and the suite's hash check.
-2. Put the decision to the owner, with the cost of each side: does Baton now own `baton.mjs`,
-   with docs vendoring from it? [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) ([R-BTN-37](../spec/BATON_SPEC/02-deployments.md#sec-2-1)) is amended either way to say which
-   repository is the source.
+1. `src/client/`: `send`, signing, `DEFAULT_URL`, `homesPath` and the git environment. The CLI
+   entry and `src/` both import it; `src/` never imports `cli/`.
+2. One `src/defaults/git.ts`: every `git` call bounded by a timeout and non-interactive by
+   default.
+3. One table of `{ entry, exports }` that the checkout's bundlers (`scripts/baton-*.mjs`) and
+   `scripts/build-cli.mjs` both read, replacing the comparison `check-package.mjs` makes today.
+4. Wire types `ClaimAnswer`, `BeatAnswer` and `AdvanceAnswer`, shared by
+   `src/core/runnerApi.ts` and the runner's `BatonApi`, which returns `Record<string, any>` today.
 
-**Done when:** no directory named `shared` holds vendored code, and R-BTN-37 names the source of
-each file.
+**Done when:** a boundary test shows `src/**` never imports `cli/`, and `check:package` passes.
 
 ### Trust
 
-Vendored files are another repository's code running in the core. The hash check is the control:
-the move keeps the manifest and the failing test, and changes no file's content.
+Signing moves; it does not change. The key file is read where it is read today and the client
+never logs it. The git helper runs `git` without a shell and with prompts disabled, so a remote
+that asks for a credential fails instead of hanging.
 
 ### Invariants
 
-- R-BTN-37: a vendored copy matches its manifest's hash or the suite fails.
-- No vendored file is edited by hand here: change the source, then `npm run vendor`.
-- [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) ([R-BTN-55](../spec/BATON_SPEC/02-deployments.md#sec-2-1)): the vendored modules load on both hosts.
+- One implementation of request signing, used by every caller.
+- The published package runs with dependencies only: no esbuild at run time
+  (`scripts/check-package.mjs`).
+- A runner's answer from Baton is checked at the boundary: the shared types describe the wire;
+  they do not replace the checks.
 
 ## Status
 

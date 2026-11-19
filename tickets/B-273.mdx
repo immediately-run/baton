@@ -1,12 +1,12 @@
 ---
-title: "B-273 — Scenarios do not write SQL: named seeders, one git fixture, one runner rig, and S-BTN-229 on an injected clock"
-id: B-273
+title: "B-273 — A forge is one table entry on each side: FORGE_SHAPES in core, a ForgeClient per forge in course code"
+id: B-267
 project: baton
 status: available
 updated: 2026-11-19
 tags:
   - roadmap-item
-description: "49 test files write raw SQL and a rename touched 124 of them; add seeders and readers to test/helpers.ts, test/lib/gitRepo.ts and test/lib/runnerRig.ts, and deflake S-BTN-229"
+description: "Five forge lists and GitHub knowledge in about 20 files become one shape table in core and one client per forge in src/defaults; create-pr runs against a Gitea fake with no gh"
 topics:
   - baton
 owns: {}
@@ -14,38 +14,43 @@ prs: []
 depends_on: []
 ---
 
-**What:** 49 test files write raw `INSERT`, `UPDATE` or `DELETE` against the core's tables, so
-a schema rename touches the suite by hand: the rename in `b704d0af` edited 124 test files.
-S-BTN-229 timed out in three of the last five failed CI runs.
+**What:** a git forge has no contract. Five separate lists name the forges, GitHub knowledge sits
+in about 20 files, and the standard pull-request courses write through `gh`. Make a forge one
+table entry in core and one client in course code.
 
 From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
 
 ### What to build
 
-1. Named seeders and readers in `test/helpers.ts`; scenarios call them and write no SQL.
-2. One git fixture, `test/lib/gitRepo.ts`, replacing the per-file `class Repo` and `class Home`.
-3. One runner rig, `test/lib/runnerRig.ts`, with a single `until`.
-4. S-BTN-229 gets an injected clock instead of waiting on wall time. `S-BTN-48.replay` and
-   `request-protected` hit their 5-second timeout under the full run on 2026-11-19 and pass
-   alone: give them the same treatment or a stated budget.
+1. `src/core/forges.ts`: `FORGE_SHAPES: Record<Forge, ForgeShape>` — path depth, pull-request
+   URL shape, blob URL, default web base, CI identity — read by `links.ts`, `registry.ts` and
+   `codeRepos.ts`. One `PR_URL` pattern.
+2. `src/defaults/forges/`: a `ForgeClient` per forge with `openPr`, `listOpenPrs`, `comment`,
+   `facts` (returning `PrFact[]`) and `protectedRefusal`, chosen from the repository's registered
+   forge. `pr-close`, `pr-verify` and `tickets new` go through it.
+3. Rename the dispatch port's `github` field to the forge-neutral name.
 
-**Done when:** a source-gate test finds no write statement under `test/unit` or
-`test/integration` outside an allowlist that may only shrink, and no `class Repo` or
-`class Home` remains there.
+Coordinate with R3-1263, which adds dispatch adapters per forge: one table, not two.
+
+**Done when:** no forge literal exists in `src/` outside the two tables and the migrations;
+`create-pr` runs against a Gitea fake with no `gh` on `PATH`; one contract test runs every
+client.
 
 ### Trust
 
-No new input: test code only. The seeders write through the same tables the core reads, so a
-seeder that skips a column the core validates would hide a bug; each seeder writes what the
-corresponding request would have written.
+A `ForgeClient` reads a forge's answers (pull-request state, reviews, check runs), which are
+written by whoever can write to the forge. They stay facts weighed by their writer, as now: the
+client parses and bounds them and decides nothing. The client uses the runner's own forge
+credential; Baton gains none.
 
 ### Invariants
 
-- [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) ([R-BTN-32](../spec/BATON_SPEC/02-deployments.md#sec-2-1)): one clock. Tests set time with `setClock`; no test sleeps on wall
-  time to make a lease lapse.
-- Every scenario test keeps its `S-BTN-n` name, and runs on both hosts unless it is in
-  `NODE_ONLY`.
-- Never add `BATON_TEST_BINDINGS` or a `TEST_*` binding to `wrangler.toml`.
+- [BATON_SPEC §5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-190](../spec/BATON_SPEC/05-courses.md#sec-5-8)): where leg state lives is decided by the repository's `forge`,
+  not by a policy knob.
+- Baton holds no credential that writes git or posts a check (the architecture page's "one
+  outbound path for effects").
+- Core imports nothing from `src/defaults/`: the shape table is core's, the clients are course
+  code.
 
 ## Status
 

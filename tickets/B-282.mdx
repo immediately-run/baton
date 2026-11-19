@@ -1,0 +1,52 @@
+---
+title: "B-282 — Lint in npm test, and every TypeScript file type-checked: a small ESLint rule set and no hand-kept file lists"
+id: B-276
+project: baton
+status: available
+updated: 2026-11-19
+tags:
+  - roadmap-item
+description: "ESLint with eqeqeq, no-var, prefer-const, no-explicit-any, Date.now and innerHTML restrictions and file-name rules; every .ts file in exactly one tsconfig project; the formatter is a separate owner decision"
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**What:** formatting and naming are uniform by habit; no tool enforces either. Two tsconfig file
+lists are kept by hand and had gone stale, and eleven modules are declared without types.
+
+From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
+
+### What to build
+
+1. ESLint in `npm test` with only: `eqeqeq`, `no-var`, `prefer-const`, `no-explicit-any`, a
+   restricted-syntax rule for `Date.now()` in `src/core` and for `innerHTML`, and a file-name
+   rule per directory. Expect near-zero findings.
+2. Replace the two hand-kept tsconfig lists with a convention, or a test that every `.ts` file
+   is in exactly one project.
+3. Type the eleven bare module declarations.
+4. The formatter is a separate decision for the owner: codify the existing style in the linter,
+   or one Prettier commit at a wide print width, listed in `.git-blame-ignore-revs`.
+
+An `.editorconfig` matching the existing style comes with the review's branch.
+
+**Done when:** `npm test` runs the linter and the coverage test. Running it in hosted CI as its
+own job is a workflow edit: the owner's to land.
+
+### Trust
+
+No new input. The linter is a new devDependency: pin it in the lockfile and keep it out of the
+published package's dependencies.
+
+### Invariants
+
+- [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) ([R-BTN-32](../spec/BATON_SPEC/02-deployments.md#sec-2-1)): one clock. The `Date.now()` rule makes the existing test's
+  guarantee visible in the editor; it does not replace the test.
+- Text, never markup: no `innerHTML`.
+- `src/shared/` is vendored and is excluded from any rewrite.
+
+## Status
+
+_filed 2026-11-19._

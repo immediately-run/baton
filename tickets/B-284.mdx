@@ -1,0 +1,47 @@
+---
+title: "B-284 — A harness is one adapter: HarnessAdapter in the runner, and core validates the name by grammar"
+id: B-278
+project: baton
+status: available
+updated: 2026-11-19
+tags:
+  - roadmap-item
+description: "The harness name is a closed list in core and a schema CHECK; a HarnessAdapter table in src/runner/harness.ts, a migration relaxing the CHECK, and section 8.1 amended"
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**What:** the harness name is a closed list (`opencode`, `claude-code`) in core and in a schema
+`CHECK`. A third harness must report itself as one of the two.
+
+From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
+
+### What to build
+
+1. `src/runner/harness.ts`: a `HarnessAdapter` (`name`, `agentCommand`, `activityPaths`,
+   `usage`) and a table of them.
+2. Core validates `harness` by grammar (a bounded name), not by membership.
+3. A migration relaxing the `CHECK`.
+4. Amend [BATON_SPEC §8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) in the same pull request: the harness is a name the runner declares.
+
+**Done when:** a test registers a third adapter and a runner declaring it claims and runs a leg.
+
+### Trust
+
+`harness` is a runner-supplied string that reaches SQL and the dashboard. With the closed list
+gone, `src/core/validate.ts` bounds its length and character set before any write, and it is
+rendered as text.
+
+### Invariants
+
+- Capabilities and names are matched, never interpreted: core derives nothing from a harness
+  name.
+- Migrations are append-only: the relaxed `CHECK` is a new numbered file.
+- [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)): filter fields only.
+
+## Status
+
+_filed 2026-11-19._

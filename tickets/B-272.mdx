@@ -1,12 +1,12 @@
 ---
-title: "B-272 — Keep PostgreSQL possible: a dialect lint, a Store conformance test, and no new SQLite-only SQL"
-id: B-272
+title: "B-272 — src/core/baton.ts is wiring only: the board post, the dashboard read model and the routes move out"
+id: B-266
 project: baton
 status: available
 updated: 2026-11-19
 tags:
   - roadmap-item
-description: "A lint for SQLite-only constructs behind a shrink-only allowlist, a Store conformance test on both hosts, RETURNING id for last_insert_rowid, Sequences.next read inside its transaction, one Db helper"
+description: "Three move-only changes: sync.ts, views.ts and routes/ (one file per principal family), with the repeated route preambles as helpers; a stepping stone to B-25"
 topics:
   - baton
 owns: {}
@@ -14,46 +14,44 @@ prs: []
 depends_on: []
 ---
 
-**What:** replacing SQLite with PostgreSQL is feasible for one instance and large: the `Store`
-port is synchronous (about 2,000 call sites) and 894 SQL statements sit in 29 core files. Nothing
-stops that cost growing. Keep the move possible without making it.
+**What:** `src/core/baton.ts` holds the composition root and also the router, every route's
+authorisation, the board post and the dashboard read model. Make it wiring only.
 
 From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
 
 ### What to build
 
-1. A dialect lint in `npm test` that fails on new uses of `last_insert_rowid`, `changes()`,
-   `rowid`, `INSERT OR`, scalar `MAX(a, b)`, `IS ?`, `COLLATE NOCASE` and `PRAGMA`, beyond an
-   allowlist that may only shrink.
-2. A `Store` conformance test run on both hosts: nested rollback, `one()`, `rowsWritten`,
-   integers above 2^53, unique-violation detection, a write followed by a throw outside a
-   transaction.
-3. Replace the six `last_insert_rowid()` reads with `RETURNING id`; give the five `rowid`
-   orderings a column; read the stored number in `Sequences.next` inside its transaction (it is
-   read outside it today).
-4. One `Db` helper replacing the 23 private `rows` wrappers; then a repository per aggregate
-   for the four files that hold 501 of the 894 statements.
-5. Record on the architecture page whether the synchronous store and the single writer are
-   permanent decisions. This is the owner's sentence to write; the leg proposes it.
+Three move-only changes, each its own commit:
 
-Several instances on one shared database is out of scope: correctness rests on a single writer.
+1. `src/core/sync.ts`: the board post and its helpers.
+2. `src/core/views.ts`: the dashboard read model.
+3. `src/core/routes/`: one file per principal family (runner, owner, admin, sync, public), each
+   a function `(core, req, url, principal) => Response | null`.
 
-**Done when:** steps 1 to 3 are in `npm test` and green on both hosts; step 4 may be a second
-pull request.
+The preambles the routes repeat become helpers: `liveRepoParam`, `ticketOf`, `requireGrant`
+(the same grant check is written eight times today), `runnerSecret`.
+
+This is a stepping stone to B-25 (the action registry), not a replacement: the route files are
+what B-25 later generates.
+
+**Done when:** `baton.ts` is under about 500 lines; no test changes beyond imports; each "one
+check for every route naming a repository" is one function.
 
 ### Trust
 
-No new input. The SQL changes keep every value bound as a parameter; no statement is built from
-a runner- or owner-supplied string.
+No new input, and no check moves relative to the SQL it guards: each route keeps its principal
+check and its `src/core/validate.ts` calls ahead of any write. The review of the change reads
+each moved route for a dropped check; a retired repository answering on a route
+(`registry.get` where `registry.live` was meant) is the mistake this file already made once.
 
 ### Invariants
 
-- [BATON_SPEC §4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) ([R-BTN-199](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)): Baton hands out every identifier; `Sequences.next` never gives one
-  number twice, on either host.
-- [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) ([R-BTN-55](../spec/BATON_SPEC/02-deployments.md#sec-2-1)): one core, both hosts; the conformance test is what makes "unchanged"
-  checkable.
-- Migrations are append-only: a new column is a new numbered file.
-- A heartbeat's writes stay in one `store.transaction`.
+- [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) ([R-BTN-55](../spec/BATON_SPEC/02-deployments.md#sec-2-1)): the core runs unchanged on both hosts; the new files import no
+  host module, and the boundary test covers them.
+- [BATON_SPEC §3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) ([R-BTN-47](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1)): every route naming a repository refuses a retired one as
+  `not-found`.
+- Validate before you write: every runner- or owner-supplied field passes `validate.ts` before
+  any SQL, as now.
 
 ## Status
 
