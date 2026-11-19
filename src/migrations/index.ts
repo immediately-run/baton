@@ -59,6 +59,8 @@ import severalClaims from './0057_several_claims.sql';
 import clientVersions from './0058_client_versions.sql';
 import sequences from './0059_sequences.sql';
 import runners from './0061_runners.sql';
+import dependencyConsents from './0062_dependency_consents.sql';
+import runnersViewReads from './0063_runners_view_reads.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -190,4 +192,11 @@ export const MIGRATIONS: Migration[] = [
   { id: 59, sql: sequences },
   // 0061 is B-68's implementation-wide worker → runner migration; 0060 belongs to B-259.
   { id: 61, sql: runners },
+  // 0062 is B-113's (R-BTN-47's relations rule relaxed for `depends_on`: the target repository's
+  // owners' consent to a less visible dependent, and the `dependency-consent` event), renumbered
+  // at the merge behind main's 0061.
+  { id: 62, sql: dependencyConsents },
+  // 0063 is B-250's (the Runners view's own order and its status-report read), written as 0060
+  // over the `workers` names and renumbered at the merge behind 0061's rename and B-113's 0062.
+  { id: 63, sql: runnersViewReads },
 ];

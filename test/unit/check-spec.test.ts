@@ -3,7 +3,7 @@
 // named for a scenario names one §15 defines and not one the history retired (B-71).
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error a plain .mjs script, no types
-import { check, definedIds, retiredIds, retiredScenarioIds, RULES_LINE_SINCE, scenarioIds, unnamedEntries } from '../../scripts/check-spec.mjs';
+import { check, definedIds, lineage, retiredIds, retiredScenarioIds, RULES_LINE_SINCE, scenarioIds, unnamedEntries } from '../../scripts/check-spec.mjs';
 // @ts-expect-error a plain .mjs script, no types
 import { impact, patchNotes, render, units } from '../../scripts/spec-tools.mjs';
 
@@ -67,6 +67,21 @@ describe('check-spec', () => {
     const problems = check(SPEC, [['src/a.ts', '// R-BTN-1']], new Set(['R3-1205']), history,
       ['S-BTN-46.decision-reaches-owner.test.ts', 'S-BTN-60.runner-couriers.test.ts']);
     expect([...problems]).toEqual([]);
+  });
+
+  it('finds lineage in the spec text — a date, the owner quoted — and allows a date that is a stated fact', () => {
+    const found = lineage([
+      '- Chose one thing over another (2026-11-01; R-BTN-1).',
+      '- A rule the owner settled (the owner, "Remove it").',
+      '',
+      '**Updated:** 2026-11-19',
+      '',
+      'an entry dated after',
+      '2026-11-03 that names no rule id fails',
+      '',
+      '- **R-BTN-1 (a rule).** It holds.',
+    ].join('\n'));
+    expect(found.map((l: { line: number }) => l.line)).toEqual([1, 2]);
   });
 
   it('fails a rule that opens with an italic patch note, unless allowlisted, and a stale allowlist entry', () => {

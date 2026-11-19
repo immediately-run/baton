@@ -132,7 +132,7 @@ print its way to `success`.
     policy's `attestations` entry for `std:checks@1` (R-BTN-188) may also post the verdict as
     that attestation, as its `service:` key, for a repository whose merge check is not a forge
     check run; the forge's own check runs from the protected default branch suffice without it
-    ("Forge checks suffice", the owner, 2026-11-01; R-BTN-183).
+    (R-BTN-183).
   - **The gate is the forge's.** Branch protection requires the check by name **and** by the
     check App's id — never Baton's own App (§12.7) — so neither a status any token could post
     nor Baton itself satisfies it. Checks are GitHub only, until GitLab or Gitea offers a status
