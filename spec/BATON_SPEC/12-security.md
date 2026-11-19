@@ -269,7 +269,7 @@ Every value below is validated on write; a value over its cap is refused `invali
   never on "All repositories" (R-BTN-115). Branch protection names it,
   never the dispatch App: the merge check is a gate against Baton as much as against any token
   (R-BTN-115).
-### 12.8 The repository policy and its guarantees *(proposal — B-131, B-133, B-136, B-137, B-139, B-140, B-145, B-146, B-147)*
+### 12.8 The repository policy and its guarantees *(partly built; proposal — B-131, B-136, B-137, B-139, B-140, B-146, B-147)*
 
 Baton specifies mechanisms, each with what it guarantees; a repository's **policy** chooses which
 of them hold. The policy is Baton state, one document per repository, set by its owners and never
@@ -1018,7 +1018,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
   from the source, at a first-parent or release-tag commit, and decline a leg whose source they cannot
   verify.
 
-### 12.9 A leg's scope *(B-134)*
+### 12.9 A leg's scope
 
 A leg's scope is its ticket's home and the `repos:` entries that have reach (R-BTN-140), each by
 its whole forge path (a GitLab

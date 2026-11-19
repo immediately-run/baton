@@ -60,7 +60,7 @@ is stale. Never edit it by hand.
 | | 6.8 Owner overrides: expedite and hold | R-BTN-12 |
 | | 6.9 Messages | — |
 | | 6.10 How a leg runs: the course's choice | — |
-| | 6.11 Capacity: exclusive use of a capability *(proposal — B-106)* | R-BTN-178 |
+| | 6.11 Capacity: exclusive use of a capability | R-BTN-178 |
 | [`07-conditions.md`](BATON_SPEC/07-conditions.md) | **7. Conditions** | — |
 | | 7.1 Raising a condition | R-BTN-160, R-BTN-125, R-BTN-195 |
 | | 7.2 Handlers | R-BTN-161, R-BTN-162 |
@@ -102,8 +102,8 @@ is stale. Never edit it by hand.
 | | 12.5 The local host and bearers | R-BTN-158 |
 | | 12.6 Capability roles and links | R-BTN-157 |
 | | 12.7 Baton's GitHub App | — |
-| | 12.8 The repository policy and its guarantees *(proposal — B-131, B-133, B-136, B-137, B-139, B-140, B-145, B-146, B-147)* | R-BTN-188, R-BTN-189, R-BTN-180, R-BTN-181, R-BTN-191, R-BTN-192, R-BTN-182, R-BTN-183, R-BTN-184, R-BTN-185, R-BTN-186, R-BTN-187 |
-| | 12.9 A leg's scope *(B-134)* | — |
+| | 12.8 The repository policy and its guarantees *(partly built; proposal — B-131, B-136, B-137, B-139, B-140, B-146, B-147)* | R-BTN-188, R-BTN-189, R-BTN-180, R-BTN-181, R-BTN-191, R-BTN-192, R-BTN-182, R-BTN-183, R-BTN-184, R-BTN-185, R-BTN-186, R-BTN-187 |
+| | 12.9 A leg's scope | — |
 | [`13-data-model.md`](BATON_SPEC/13-data-model.md) | **13. Data model** | — |
 | | 13.1 Repositories, courses and tenant settings | — |
 | | 13.2 Credentials and sign-in | — |

@@ -610,7 +610,7 @@ time-of-day price, a fallback provider or a subscription's limit is a rule in th
 new provider needs no change to Baton. A leg that requires an ability (R-BTN-174) may fall back
 from one provider to another within its run (R-BTN-122), and asks to end blocked on the
 capability or resource when none is usable (R-BTN-126).
-### 6.11 Capacity: exclusive use of a capability *(proposal — B-106)*
+### 6.11 Capacity: exclusive use of a capability
 
 - **R-BTN-178 (a capability with a capacity has that many seats).** Some things a leg uses take
   one client at a time, or a few: an RDP session to a machine, a device on a bench, a licence.

@@ -67,6 +67,18 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-234 Baton hands out the identifiers (B-176)', () => {
+  it('a retired repository hands out no number — not-found, as one never registered (R-BTN-47)', async () => {
+    expect(await take(opsOwner, 'ops', 'ticket-b', { floor: 5 })).toMatchObject({ status: 200, json: { number: 6 } });
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', retire: true, confirm: true })).status).toBe(200);
+    // Every principal that could take one before, the administrator included: the sequence is a
+    // repository's rule, and a retired repository has none.
+    for (const key of [admin, opsOwner, granted, syncKey]) {
+      expect((await take(key, 'ops', 'ticket-b')).json.number).toBeUndefined();
+    }
+    expect(await take(admin, 'ops', 'ticket-b')).toMatchObject({ status: 404, json: { code: 'not-found' } });
+    expect(await rows('SELECT last_number FROM sequences WHERE repository_id = ? AND kind = ?', 'ops', 'ticket-b')).toEqual([{ last_number: 6 }]);
+  });
+
   it('two filers racing get distinct ids; a floor seeds a fresh Baton above what git holds, and a number is never reissued', async () => {
     // A fresh Baton, seeded by the floor the filer read from git: the first number is above it.
     expect(await take(opsOwner, 'ops', 'ticket-b', { floor: 5 })).toMatchObject({ status: 200, json: { kind: 'ticket-b', number: 6 } });

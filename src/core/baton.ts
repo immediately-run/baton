@@ -55,6 +55,15 @@ const POLICY_READ_MS = 10 * 60_000;
 /** The namespace a signed policy read's Ed25519 signature is made in — never an outbox entry's. */
 const POLICY_SIGNATURE_NAMESPACE = 'baton-policy@1';
 
+/** One path segment, decoded: a malformed escape is the caller's error, never a 500. */
+function pathSegment(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    throw new BatonError('invalid-params', 'a malformed path segment');
+  }
+}
+
 export class BatonCore {
   /** The clock (R-BTN-32). Tests replace it; nothing else here reads the time. */
   now: () => number;
@@ -722,12 +731,7 @@ export class BatonCore {
       // owner's (R-BTN-57) and writes nothing here.
       const attestation = /^\/v1\/repositories\/([^/]+)\/attestations$/.exec(url.pathname);
       if (req.method === 'POST' && attestation) {
-        let repoId: string;
-        try {
-          repoId = decodeURIComponent(attestation[1]);
-        } catch {
-          throw new BatonError('invalid-params', 'a malformed path segment');
-        }
+        const repoId = pathSegment(attestation[1]);
         const repo = checkRepositoryId(repoId);
         // R-BTN-47 (B-173): a retired repository is `not-found`, as one never registered.
         if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
@@ -936,12 +940,7 @@ export class BatonCore {
       // §2d, §11: a course's record, for any key granted on the repository (R-BTN-58).
       // Aggregates and ids only (G-BTN-64).
       if (!cred) throw new BatonError('unauthenticated', 'no runner principal');
-      let segment: string;
-      try {
-        segment = decodeURIComponent(stats[1]);
-      } catch {
-        throw new BatonError('invalid-params', 'a malformed path segment');
-      }
+      const segment = pathSegment(stats[1]);
       const repo = checkRepositoryId(segment);
       // R-BTN-47 (B-173): a retired repository is `not-found`, as one never registered.
       if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
@@ -963,12 +962,7 @@ export class BatonCore {
     const conditionsList = /^\/v1\/repositories\/([^/]+)\/conditions$/.exec(p);
     if (m === 'GET' && conditionsList) {
       if (!cred) throw new BatonError('unauthenticated', 'no runner principal');
-      let segment: string;
-      try {
-        segment = decodeURIComponent(conditionsList[1]);
-      } catch {
-        throw new BatonError('invalid-params', 'a malformed path segment');
-      }
+      const segment = pathSegment(conditionsList[1]);
       const repo = checkRepositoryId(segment);
       // R-BTN-47 (B-173): a retired repository is `not-found`, as one never registered.
       if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
@@ -1193,13 +1187,7 @@ export class BatonCore {
     const p = url.pathname;
     const m = req.method;
     const body = async () => readJson(signed.req);
-    const seg = (raw: string) => {
-      try {
-        return decodeURIComponent(raw);
-      } catch {
-        throw new BatonError('invalid-params', 'a malformed path segment');
-      }
-    };
+    const seg = pathSegment;
     if (p.startsWith('/v1/admin/')) {
       if (!admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is required (R-BTN-57)');
       const actor = `admin:${fp}`;
@@ -1403,13 +1391,7 @@ export class BatonCore {
     // §12.8 (B-145, R-BTN-189): the signed policy read, for the same principals.
     const policyRead = /^\/v1\/repositories\/([^/]+)\/policy$/.exec(url.pathname);
     if (req.method !== 'GET' || (!blocks && !blocked && !history && !show && !boardRead && !policyRead && !runs && !children)) return null;
-    const seg = (raw: string) => {
-      try {
-        return decodeURIComponent(raw);
-      } catch {
-        throw new BatonError('invalid-params', 'a malformed path segment');
-      }
-    };
+    const seg = pathSegment;
     const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? show ?? boardRead ?? policyRead ?? runs ?? children)![1]));
     // R-BTN-47 (B-173): one check — a retired repository is `not-found` here as one never
     // registered.
@@ -1533,15 +1515,10 @@ export class BatonCore {
   private async sequenceRoute(req: Request, url: URL): Promise<Response | null> {
     const m = /^\/v1\/repositories\/([^/]+)\/sequences\/([^/]+)\/next$/.exec(url.pathname);
     if (!m || req.method !== 'POST') return null;
-    const seg = (raw: string): string => {
-      try {
-        return decodeURIComponent(raw);
-      } catch {
-        throw new BatonError('invalid-params', 'a malformed path segment');
-      }
-    };
+    const seg = pathSegment;
     const repo = checkRepositoryId(seg(m[1]));
-    if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
+    // R-BTN-47 (B-173): a retired repository is `not-found`, as one never registered.
+    if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
     const kind = seg(m[2]);
     if (!SEQUENCE_KIND.test(kind)) throw new BatonError('invalid-params', 'kind: must match ' + SEQUENCE_KIND);
     // The same principals the repository's reads take (blocksRoute), with the repository's sync
@@ -2105,7 +2082,7 @@ export class BatonCore {
    *  guarantee is refused, naming the guarantee. */
   private refuseCurrentUnderApprovalFloor(repo: Repository, p: BoardPayload): void {
     if (p.source?.kind !== 'custom' || p.source.versions !== 'current') return;
-    const floored = (this.policies?.floors(repo.id) ?? []).filter((f) => f.guarantees.includes('tickets-approved'));
+    const floored = this.policies.floors(repo.id).filter((f) => f.guarantees.includes('tickets-approved'));
     if (!floored.length) return;
     throw new BatonError('invalid-params',
       `this repository's policy floors include the tickets-approved guarantee, which is defined over a ticket file's approval (R-BTN-184) — a custom ticket source with versions: "current" cannot post it (B-183)`);

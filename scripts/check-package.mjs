@@ -23,7 +23,9 @@ const fail = (msg) => {
 const dir = mkdtempSync(join(tmpdir(), 'baton-package-'));
 try {
   // `npm pack` runs `prepack` (build:cli), as `npm publish` does.
-  const [packed] = JSON.parse(execFileSync('npm', ['pack', '--json', '--pack-destination', dir], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }));
+  // npm 12 prints an object keyed by package name where npm 10 and 11 print a one-element array.
+  const report = JSON.parse(execFileSync('npm', ['pack', '--json', '--pack-destination', dir], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }));
+  const packed = Array.isArray(report) ? report[0] : Object.values(report)[0];
   const files = packed.files.map((f) => f.path);
   const stray = files.filter((f) => !ALLOWED.some((re) => re.test(f)));
   if (stray.length) fail(`the tarball carries files outside its allowlist: ${stray.join(', ')}`);
@@ -46,6 +48,26 @@ try {
   // The API client: an unknown role is refused by the CLI itself, before any request.
   const api = spawnSync(join(app, 'node_modules', '.bin', 'baton'), [], { cwd: app, env, encoding: 'utf8' });
   if (!/baton admin … \| baton owner …/.test(api.stderr)) fail(`the installed \`baton\` did not print its usage:\n${api.stdout}${api.stderr}`);
+
+  // The prebuilt stand-ins (build-cli.mjs PREBUILT) carry every name the entry imports from the
+  // on-demand bundlers: `baton home list` reaches homeMain and BATON_HOME on an API command
+  // reaches resolveHomes — each was `… is not a function` in the package while a checkout worked.
+  const home = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['home', 'list'], { cwd: app, env, encoding: 'utf8' });
+  if (home.status !== 0 || !/no homes configured/.test(home.stdout)) fail(`the installed \`baton home list\` did not run:\n${home.stdout}${home.stderr}`);
+  const homed = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['board', 'none'], { cwd: app, env: { ...env, BATON_HOME: 'none' }, encoding: 'utf8' });
+  if (/is not a function/.test(homed.stderr)) fail(`the installed \`baton\` misses a prebuilt export:\n${homed.stdout}${homed.stderr}`);
+  // And for every other name, by the two lists themselves: each import the entry's source takes
+  // from a bundler is named in that bundler's stand-in.
+  const entry = readFileSync(join(ROOT, 'cli', 'baton.mjs'), 'utf8');
+  const builder = readFileSync(join(ROOT, 'scripts', 'build-cli.mjs'), 'utf8');
+  const taken = [...entry.matchAll(/const \{([^}]+)\} = await import\('\.\.\/scripts\/(baton-(?:cli|run|leg)\.mjs)'\)/g)];
+  if (!taken.length) fail('cli/baton.mjs no longer imports its subcommands the way this check reads them');
+  for (const m of taken) {
+    const stand = new RegExp(`'${m[2].replace('.', '\\.')}': \`([^\`]*)\``).exec(builder)?.[1] ?? '';
+    for (const name of m[1].split(',').map((n) => n.trim().split(/\s*:\s*/)[0]).filter(Boolean)) {
+      if (!new RegExp(`\\b${name}\\b`).test(stand)) fail(`cli/baton.mjs imports ${name} from scripts/${m[2]}, which scripts/build-cli.mjs does not prebuild`);
+    }
+  }
 
   // `baton repo init` (G1 of the 2026-10-19 gap run): the installed package scaffolds create-pr
   // with no checkout and no esbuild, naming the commit it was built from as the course's source.

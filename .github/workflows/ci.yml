@@ -15,8 +15,10 @@ permissions:
   pull-requests: read # the B-133 ticket-PR view reads the PR's commits (the forge's reading, B-126)
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push supersedes a pull request's run. On main each commit is its own group, so no
+  # run is cancelled or displaced from the queue: every commit there is verified to the end.
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
