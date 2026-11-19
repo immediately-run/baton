@@ -18,11 +18,10 @@ export interface TicketFieldChange {
 }
 /** The forge's reading of one commit (B-126): the account the commit's author and committer
  *  emails map to (null when none is associated — email-derived, steered by the commit's writer
- *  exactly as git's own names are) and the commit's signature verification. */
+ *  exactly as git's own names are). No commit signature is read. */
 export interface TicketForge {
   author: string | null;
   committer: string | null;
-  verified: boolean;
 }
 export interface TicketProvenance {
   sha: string;

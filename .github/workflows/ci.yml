@@ -65,7 +65,7 @@ jobs:
           # the forge's name is never printed over an empty reading.
           FORGE_ARGS=()
           if COMMITS=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" \
-              --jq '.[] | {(.sha): {author: (.author.login // null), committer: (.committer.login // null), verified: (.commit.verification.verified // false)}}'); then
+              --jq '.[] | {(.sha): {author: (.author.login // null), committer: (.committer.login // null)}}'); then
             FORGE=$(mktemp)
             printf '{"pr_author":"%s","commits":%s}' "$PR_AUTHOR" "$(printf '%s' "$COMMITS" | jq -s 'add // {}')" > "$FORGE"
             FORGE_ARGS=(--forge "$FORGE")
