@@ -1,0 +1,133 @@
+---
+title: "B-306 — Needs you for a notifier: who each entry is for, escalation steps, one read of what is due, and the notifier's attestation of what it sent"
+id: B-306
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1306
+tier: judgement
+description: "Baton tells a delivery runner nothing about people today. Give every Needs-you entry its recipients and its steps (the owner setting escalations), answer what is due and unattested across a caller's repositories from one read, store the notifier's std:notified@1 from the service keys the policy names, and raise baton.notifier-silent when a due step goes unattested for 15 minutes. Baton sends nothing and holds no address. Requires: none."
+topics:
+  - baton
+  - people
+  - conditions
+owns: {}
+prs: []
+depends_on:
+  - B-305
+  - B-146
+---
+
+**Brief:** the owner, 2026-11-20: groups exist so a team "can be alerted in broadcast when
+human attention is necessary (or can be organized into escalation chains)"; "Don't store
+addresses in Baton … It's the notifier's job to know where to find these"; and, on where the
+notifier keeps its place, "Baton may store the typed input and output JSON of legs - could the
+cursor not be persisted as such?". The design that came out of the second review round keeps no
+cursor at all: the notifier attests each step it worked, a typed statement Baton stores, and
+asks for what is due and unattested. This is §5 of [the users and groups proposal](../spec/proposals/users-and-groups.md), Baton's side.
+
+**Spec:** the proposal, §5 (U-4) and its rows in §7. [BATON_SPEC §7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3)), [§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4)
+([R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4)), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-191](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5)
+([R-BTN-110](../spec/BATON_SPEC/05-courses.md#sec-5-5)). The conditions proposal, `spec/proposals/conditions.md` [§2](../spec/BATON_SPEC/02-deployments.md#sec-2), [§3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3) and [§9](../spec/BATON_SPEC/09-claims.md#sec-9) ([R-BTN-161](../spec/BATON_SPEC/07-conditions.md#sec-7-2),
+[R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3), R-BTN-169): its delivery runner "sends each entry it has not yet sent"; this ticket
+replaces that sentence.
+
+**Depends on:** B-305, B-146.
+
+**Used by:** B-307 (the notifier).
+
+### Decision needed
+
+- **Attestation in place of a cursor.** The proposal's §9 took this without a ruling. The
+  owner's question was whether the cursor could be a typed value Baton stores. **(a)** the
+  notifier attests `std:notified@1` per step and holds no cursor *(default; recommended)*;
+  **(b)** a cursor as a reading on a resource instance, which the review found lapses in the
+  outage it is for, is not exported, and is writable by any runner granted on a listed
+  repository; **(c)** a cursor in a local file on the notifier's host.
+
+### What to build
+
+1. **Recipients.** For each Needs-you entry: the users with a key matching the leg's
+   `answerers` entry (B-305), else the users with a key that is an owner; `unreached` counts
+   owner keys attached to no user.
+2. **Steps.** The owner setting `escalations`, `{<label> | "*": [{after_s, notify}]}`,
+   validated (8 steps, `after_s` 60 seconds to 30 days, `notify` of B-304's forms). Step 0 is
+   the recipients, due when the entry opens; step n is due `after_s` later while the entry is
+   open. Baton drops from a step everyone who could neither answer the entry nor read the
+   repository as an owner. Removing a step or lengthening `after_s` is a loosening
+   (`loosensSettings`).
+3. **`std:notified@1`**, about an entry, `{step, told, unreachable}`: accepted on the
+   attestations route from a writer the policy's `attestations` entry admits for the type,
+   `service:` keys only; one per entry, step and writer. It joins the standard library
+   (R-BTN-110). B-146 builds the general attestation record this rides on.
+4. **The read.** `GET /v1/needs-you` across the caller's repositories and
+   `GET /v1/repositories/{repository}/conditions`, one shape, with `steps` and `?due=1` (every
+   open entry with a step due that no admitted writer has attested, resolved as the read is
+   made). Callers: the conditions list's, and a key matching a label's `answerers` entry for
+   that label's entries.
+5. **`baton.notifier-silent`:** raised by the alarm where the policy admits a writer for
+   `std:notified@1` and a step has been due and unattested for 15 minutes; closed when none
+   remains; never an entry of `due=1` itself.
+6. **Needs you** on the dashboard and `baton decision list`: each entry's recipients, its
+   steps with what was attested, and any user a notifier reported `unreachable`.
+
+### Trust
+
+- `escalations`: an owner's setting (R-BTN-66), with loosening under `approvers.policy`
+  (R-BTN-186). It decides who is told, never who may answer, and Baton filters every step so it
+  cannot name a stranger to the repository.
+- `std:notified@1`: the credential that posted it, counted only when the policy names its key.
+  It is the notifier's word, not evidence that anyone read anything: no rule of Baton's may
+  treat a told person as having seen the entry, and no leg waits on it (R-BTN-116: a leg waits
+  on an effect, never a delivery). A notifier that lies can suppress its own sends and nothing
+  else; a key the policy does not name is refused.
+- The read: recipients' user ids and channel names go to every key granted on the repository.
+  They are identifiers; no address exists to leak.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3): core names no channel and sends nothing. The proposal amends "records
+  no delivery" to "stores the notifier's word of it"; the entry stays on the floor whatever is
+  attested, and closes only as it does today.
+- BATON_SPEC [R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4): `expires` alone bounds how long a person leg waits. No step, attested
+  or not, moves a ticket.
+- BATON_SPEC [R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) and the owner's ruling: no address is stored. `std:notified@1` carries
+  user ids and a step number, and its schema refuses any other property.
+- BATON_SPEC [R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): core knows no course. Nothing here reads whether a ticket is on
+  `deliver`; a `deliver` runner that should count is a key the policy names.
+- BATON_SPEC [R-BTN-58](../spec/BATON_SPEC/11-people.md#sec-11-2): a key granted on A alone reads A's entries alone.
+- BATON_SPEC [R-BTN-32](../spec/BATON_SPEC/02-deployments.md#sec-2-1): `due_at` and the 15 minutes read `this.now`.
+
+### Tests
+
+The scenarios *who an entry is for, and when*; *a notifier keeps no place*; *a silent notifier
+is seen*, both hosts, with `setClock`.
+
+### Exit criteria
+
+- A person leg queued for a label shows its holders as step 0 and its later steps with their
+  instants; a holder removed before a step is due is not in that step.
+- A script that reads `due=1`, attests, and reads again gets nothing; a second script with
+  another admitted key gets nothing either; a key the policy does not name is refused.
+- With no `escalations` and no notifier named, every existing scenario passes and the
+  conditions list answers as before, plus `recipients`.
+- BATON_SPEC holds U-4 and the amended [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3); the conditions proposal's delivery runner
+  reads `needs-you?due=1`.
+
+The change that builds a part moves that part of the proposal into BATON_SPEC, in the section
+that owns each rule (`docs/context/spec-writing.mdx`): new rules and scenarios take their ids
+from Baton's sequence (BATON_SPEC [R-BTN-199](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)), the rows of the proposal's [§7](../spec/BATON_SPEC/07-conditions.md#sec-7) move into [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) and
+[§14](../spec/BATON_SPEC/14-api.md#sec-14), the proposal's [§8](../spec/BATON_SPEC/08-runners.md#sec-8) says which existing rules are amended in place, the new words land on
+`docs/context/vocabulary.mdx` and in [R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)'s table, and `spec/BATON_SPEC_HISTORY.md` gets
+its dated entry. What stays unbuilt stays on the proposal page.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-20._ From [the users and groups proposal](../spec/proposals/users-and-groups.md) (pull request immediately-run/baton#300). The id is the next free
+number in `tickets/`.

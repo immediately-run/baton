@@ -1,0 +1,133 @@
+---
+title: "B-303 — The directory: a tenant's users and groups, a user's keys attached by one-time code, and notification channels"
+id: B-303
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1303
+tier: critical
+description: "Baton knows credentials, not people. Add the tenant's directory: users and groups written by the administrator, keys a person attaches themselves with a one-time code, an ordered list of channel names per user, the user principal, the reads scoped by caller, caps, and the export sections. A directory entry confers nothing yet: no repository reads it until B-304. Requires: none."
+topics:
+  - baton
+  - security
+  - people
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-20, in the design discussion that produced [the users and groups proposal](../spec/proposals/users-and-groups.md): "Baton currently
+has no concept of users … No way to record per-user notification preferences … No way to create
+groups of users who function as a team". The owner ruled that users and groups are the tenant's,
+that only the administrator writes the directory, and that Baton stores no address of anyone.
+This ticket builds the directory itself, the proposal's §1 and the channels of §5. [Its review](../docs/review/users-and-groups-2026-11-20.mdx) records
+two adversarial rounds; build from the proposal's text, not from the review.
+
+**Spec:** the proposal, §1 (U-1, U-2), §5 (*Channels*, *Addresses are the notifier's*) and the
+rows of §7 it names. [BATON_SPEC §11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) ([R-BTN-57](../spec/BATON_SPEC/11-people.md#sec-11-2), [R-BTN-58](../spec/BATON_SPEC/11-people.md#sec-11-2)), [§11.1](../spec/BATON_SPEC/11-people.md#sec-11-1) ([R-BTN-13](../spec/BATON_SPEC/11-people.md#sec-11-1), [R-BTN-159](../spec/BATON_SPEC/11-people.md#sec-11-1)), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3)
+([R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3), [R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3)), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (the principal table and the one-role rule), [§12.2](../spec/BATON_SPEC/12-security.md#sec-12-2), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)
+([R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) ([R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8)), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)).
+
+**Depends on:** none.
+
+**Used by:** B-304 (acceptance and entries), B-306 (recipients read channels), B-308 (links).
+
+### What to build
+
+1. **Tables**, one new migration: `users`, `groups`, `directory_ids`, `user_keys`,
+   `attach_codes`, `group_members`, `user_channels`, as the proposal's §7 gives them. `groups`
+   carries its `forge_*` columns now, unused until B-308. `human_keys` gains
+   `fido_attestation`.
+2. **The administrator's routes and commands:** create and retire a user or group, change a
+   `baton` group's members. Ids share one namespace and are never reused; the caps of §1.
+3. **Attaching a key in two requests.** `POST /v1/users/{user}/attach-codes` by a key attached
+   to the user or an administrator; `POST /v1/users/{user}/keys {code}` authenticated by the key
+   being attached, SSH or API. Detach, with the `human_only` rule of §1. `POST /v1/human-keys`
+   refuses an attached key.
+4. **The principal `user`** in the router beside its neighbours (the registry, B-25, is not
+   built): a key attached to a user, scope `own`. The one-role check counts `user_keys`.
+5. **Channels:** `PUT /v1/users/{user}/channels`, with the `human_only` rule of §5.
+6. **Reads,** scoped as §1's *Reading the directory*: all to an administrator, its own record
+   to a `user`, one record by id to an owner. The owner's list of what its repositories name is
+   B-304's, which adds the entries it reads.
+7. **Retirement** as §1 says. The refusal that protects a gate (`unsatisfiable-approvers`,
+   `baton.removal-blocked`) is B-304's, since no list can name a user before it.
+8. **Export and import** (R-BTN-88): the new tables are owner-state sections; `attach_codes`
+   is not exported.
+9. **The CLI:** `admin user …`, `admin group …`, `admin group-member …`, `user list|show`,
+   `group show`, `user-key invite|add|remove`, `user-channel set|remove` (R-BTN-127's table).
+
+### Trust
+
+New inputs, and who may write each:
+
+- A user or group id, a display name, a membership: an administrator's signed request
+  (R-BTN-57). Ids go through `validate.ts` by the proposal's pattern; the display name by
+  §12.3's free-text rule, and it reaches a screen only as a text node.
+- An attach code: minted for a user by a key already attached to that user, or an
+  administrator; stored as a hash; valid 10 minutes, used once. Guessing is bounded by the
+  per-credential limit and by the code's life.
+- The attach request: authenticated by the key being attached (R-BTN-13 or R-BTN-159), so a key
+  is attached only by whoever holds it. A key holding another role is refused `conflict`.
+- A channel list: the user's own key. Channel names are identifiers, never addresses: the
+  validator refuses anything outside the name pattern, so no address can be stored by mistake.
+- Nothing in this ticket is read from git, a board post or a runner (reaches 1 to 3 of
+  `docs/security-model.mdx` write none of it).
+
+Attaching confers nothing in this ticket: no rule reads `user_keys` to decide authority until
+B-304. An administrator can attach its own key to any user; B-304's acceptance is what keeps
+that from counting.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8): a key becomes an owner of a repository only by that repository's
+  `approvers.members` action. Nothing here makes any key an owner; `repository_owners` is not
+  written.
+- BATON_SPEC [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8): `human_only` is set only by its registration. Attaching never sets the
+  mark, and registration refuses an attached key, so the mark is never added to a key already
+  counted somewhere.
+- [BATON_SPEC §12.1](../spec/BATON_SPEC/12-security.md#sec-12-1), the one-role rule: an attached key is an owner key. A machine, sync,
+  instrument or administrator key is never attached, and an attached key is never granted.
+- BATON_SPEC [R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) and the owner's ruling: Baton holds no address. No column added here can
+  hold one.
+- BATON_SPEC [R-BTN-137](../spec/BATON_SPEC/02-deployments.md#sec-2-2): users and groups are one tenant's.
+- [BATON_SPEC §12](../spec/BATON_SPEC/12-security.md#sec-12), *No existence oracle*: a read of an id outside the caller's reach answers
+  `not-found`, the same as an unknown id.
+- BATON_SPEC [R-BTN-32](../spec/BATON_SPEC/02-deployments.md#sec-2-1): code expiry reads `this.now`.
+
+### Tests
+
+New scenarios, ids from the sequence, both hosts: *a key is attached only by its holder*;
+*unknown, retired and reused ids* (the directory's half); *Baton holds no address*. Unit tests
+for the caps, the one-role check across `user_keys`, the export round trip, and
+`POST /v1/human-keys` refusing an attached key.
+
+### Exit criteria
+
+- An administrator creates a user and a group, adds the user to the group, and retires both;
+  a retired id cannot be created again as either kind.
+- A person attaches a second SSH key and an API key with codes, and detaches one; a
+  `human_only` key is detached only by a `human_only` key of the same user.
+- No route answers a channel address, because none is stored; channel names are answered only
+  to the callers §1 lists.
+- An export and import carries the directory.
+- BATON_SPEC holds U-1 and U-2 under their new ids, with their scenarios in [§15](../spec/BATON_SPEC/15-verification.md#sec-15).
+
+The change that builds a part moves that part of the proposal into BATON_SPEC, in the section
+that owns each rule (`docs/context/spec-writing.mdx`): new rules and scenarios take their ids
+from Baton's sequence (BATON_SPEC [R-BTN-199](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)), the rows of the proposal's [§7](../spec/BATON_SPEC/07-conditions.md#sec-7) move into [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) and
+[§14](../spec/BATON_SPEC/14-api.md#sec-14), the proposal's [§8](../spec/BATON_SPEC/08-runners.md#sec-8) says which existing rules are amended in place, the new words land on
+`docs/context/vocabulary.mdx` and in [R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)'s table, and `spec/BATON_SPEC_HISTORY.md` gets
+its dated entry. What stays unbuilt stays on the proposal page.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-20._ From [the users and groups proposal](../spec/proposals/users-and-groups.md) (pull request immediately-run/baton#300), after two adversarial
+review rounds. The id is the next free number in `tickets/`: this session had no Baton key to
+ask the sequence.

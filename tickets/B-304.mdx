@@ -1,0 +1,160 @@
+---
+title: "B-304 — Acceptance, and people in owner sets and approver lists: user and group entries that admit a key only once the repository accepts it, and members.source"
+id: B-304
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1304
+tier: critical
+description: "Let a repository's owner set and approver lists name users and groups (user:, group:, human:user:, human:group:), admitting a key only once that repository's own approvers.members approver has accepted it for the person. Additions wait, removals act at once, no removal strands a gate, and a session or delegated key ends when its key stops being an owner. The policy knob members.source chooses the repository's own acceptance or the administrator's. Requires: none."
+topics:
+  - baton
+  - security
+  - people
+  - policy
+owns: {}
+prs: []
+depends_on:
+  - B-303
+---
+
+**Brief:** the owner, 2026-11-20: users and groups "carry authority beside keys", bound per
+repository, with acceptance per repository and, on the owner's question "could we also do per
+tenant?", the administrator's acceptance as a repository's opt-in. This is the part of
+[the users and groups proposal](../spec/proposals/users-and-groups.md) that changes who may act: its §2 and §3. The first draft let a key become an owner with no
+approver acting; [its review](../docs/review/users-and-groups-2026-11-20.mdx) says how, and the acceptance rule is the answer. Read both.
+
+**Spec:** the proposal, §1 (*A removal never leaves a gate without a key*, *Reading the
+directory*), §2 (U-3), §3, and the rows of §7 they name. [BATON_SPEC §11.2](../spec/BATON_SPEC/11-people.md#sec-11-2) ([R-BTN-57](../spec/BATON_SPEC/11-people.md#sec-11-2), [R-BTN-58](../spec/BATON_SPEC/11-people.md#sec-11-2)),
+[§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4)), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3)), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1),
+[§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3)), [§8.2](../spec/BATON_SPEC/08-runners.md#sec-8-2) ([R-BTN-102](../spec/BATON_SPEC/08-runners.md#sec-8-2)), [§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) ([R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8)).
+
+**Depends on:** B-303.
+
+**Used by:** B-305 (`answerers` uses the entry forms and the match), B-308 (`forge`).
+
+### Decision needed
+
+- **Tenant acceptance.** The proposal's §9 took, without a ruling: under `members.source:
+  tenant` a key a user attached themselves counts only once an administrator accepts it.
+  **(a)** as written *(default; recommended: otherwise an injected agent key mints a lasting
+  owner key)*; **(b)** every attached key counts.
+- **A removal that would strand a gate.** **(a)** refused `unsatisfiable-approvers`, the
+  repository told by `baton.removal-blocked`, as a revocation is refused today *(default)*;
+  **(b)** applied, the repository left to break-glass.
+
+### What to build
+
+1. **Tables:** `repository_owner_entries`, `acceptances` (with `status`), and
+   `user_keys.tenant_accepted_by`.
+2. **The match.** One function in `src/core/` answers "does key K match entry E on repository
+   R", for `user:`, `group:` and the `human:` forms, reading acceptances under `repository` and
+   the administrator's under `tenant`. Every caller that asks "is this key an owner" or "is
+   this credential an approver" goes through it: `admin.ts`'s owner check, `policy.ts`'s
+   approver and human-only-list checks, the session's repository list. A key holding a role
+   other than owner never matches.
+3. **Acceptances:** `GET`, `POST /v1/owner/{repository}/acceptances` (accept, drop, decline),
+   each an `approvers.members` action naming exactly the fingerprints or member ids;
+   `POST /v1/admin/acceptances` for the tenant; the `accept: [<repository>]` field on an attach
+   code and a membership change, applied only where the sender matches that repository's list.
+4. **Additions wait, removals act at once.** `pending` rows and one `baton.unaccepted` per
+   repository and person; every detach, removal, retirement and revocation drops the
+   acceptances it touches in its own transaction.
+5. **Entries:** `POST /v1/owner/{repository}/owners` takes `{entry}`; the approver lists take
+   the four forms; an unknown or retired id is `invalid-params`; a group named anywhere cannot
+   be retired.
+6. **No gate without a key** over entries: the check runs on a dropped acceptance, a policy
+   change, a `members.source` change, and the directory's removals (B-303's routes gain the
+   refusal and `baton.removal-blocked`). Break-glass satisfies the `human:` forms.
+7. **`members.source`** in the policy document: `repository` and `tenant` (`forge` is
+   validated and refused until B-308). A stored version naming none reads `repository`; a
+   preset's apply keeps it. `human-gates`, and each built guarantee that includes it
+   (`src/core/policy.ts`), holds only under `repository`.
+8. **When a key stops being an owner** (R-BTN-58, proposed): the dashboard session loses the
+   repository at once. Delegated keys are not built (B-25); leave the hook where it will read.
+9. **Reads:** an owner's list of the users and groups its repositories name; the owners read
+   (`GET /v1/owner/{repository}/grants`) lists entries and acceptances.
+10. **The CLI:** `owner owner add --user|--group`, `owner acceptance list|add|drop|decline`,
+    `admin acceptance add|drop`, `user-key invite --accept`, `admin group-member add --accept`.
+    `owner acceptance add` prints each key with who attached it and asks before sending.
+11. **Export and import:** entries and acceptances are owner state; an import refuses one
+    naming a user, group or key the export does not hold.
+
+### Trust
+
+- An owner entry, an approver entry, an acceptance: an `approvers.members` or
+  `approvers.policy` approver's signed request on that repository, as the lists stood before
+  the change. An acceptance names fingerprints and ids, never "whatever is attached now", and
+  Baton refuses one that names a key not attached to that user: the approver accepts what it
+  read.
+- `accept:` on another principal's request is not trusted: it is applied only where the
+  sending credential itself matches that repository's `approvers.members`, and reported per
+  repository.
+- A tenant acceptance: an administrator's. The administrator is the deployment (R-BTN-57) and
+  no human; a repository that sets `members.source: tenant` has said it takes that word, and
+  its `human-gates` reads broken.
+- Nothing here is read from git, a board post, a runner or a forge.
+
+The threat this ticket exists to stop is an owner's agent key, or an administrator, attaching
+a key to a person some repository already names. Under `repository` such a key matches nothing
+until that repository's own approver names it.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8): a key becomes an owner of a repository only by that repository's
+  `approvers.members` action. Under `repository` an acceptance is that action; under `tenant`
+  the policy change that chose `tenant` is the repository's consent, made under
+  `approvers.policy`.
+- BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), *No gate without a key to open it*: after every write in this ticket
+  each list has a live key that matches it, or the write was refused.
+- BATON_SPEC [R-BTN-58](../spec/BATON_SPEC/11-people.md#sec-11-2): owning one repository confers nothing on another. No act of A's
+  approver changes what counts on B; the scenario *one repository's acceptance is not
+  another's* holds it.
+- BATON_SPEC [R-BTN-102](../spec/BATON_SPEC/08-runners.md#sec-8-2) and [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1): a machine key is never an owner. The match refuses a key of
+  another role before reading any entry.
+- BATON_SPEC [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8): a floor naming `human-gates` refuses a change to `tenant`.
+- BATON_SPEC [R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8): a delegated key matches no entry; tightening stays open, so a removal
+  needs no approver.
+- BATON_SPEC [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8): no session satisfies a human-only list, a `human:` form included.
+- Validate before you write; one transaction per request, so an acceptance and the check that
+  the key is attached cannot be split by a detach.
+
+### Tests
+
+New scenarios, both hosts: *an attached key counts only where it is accepted*; *an
+administrator's attach confers nothing under `repository`*; *one repository's acceptance is not
+another's*; *removals act at once, and never strand a gate*; *a repository may take the
+administrator's acceptance*; *a `human:` entry needs a human-only key*; *unknown, retired and
+reused ids* (the entries' half); *applying a preset keeps who was named* (for `members.source`).
+A property test over the match: for random directories, entries and acceptances, the set of
+matching keys under `repository` is a subset of the keys some `approvers.members` request
+named.
+
+### Exit criteria
+
+- A repository's owner set names a group; a member's key is an owner there only after an
+  acceptance naming that key, and stops being one in the transaction that removes the member.
+- The injected-agent sequence of the review's round one (an owner's agent key attaches a
+  second key on a `protected-hardware` repository) ends with the second key matching nothing.
+- A policy with `approvers.policy: [human:group:g]` is changed only by a `human_only` key of an
+  accepted member, or a break-glass key.
+- Every existing scenario of §15 still passes: a tenant with no users behaves as before.
+- BATON_SPEC holds U-3 and the amended [R-BTN-58](../spec/BATON_SPEC/11-people.md#sec-11-2), [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8) and [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8).
+
+The change that builds a part moves that part of the proposal into BATON_SPEC, in the section
+that owns each rule (`docs/context/spec-writing.mdx`): new rules and scenarios take their ids
+from Baton's sequence (BATON_SPEC [R-BTN-199](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)), the rows of the proposal's [§7](../spec/BATON_SPEC/07-conditions.md#sec-7) move into [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) and
+[§14](../spec/BATON_SPEC/14-api.md#sec-14), the proposal's [§8](../spec/BATON_SPEC/08-runners.md#sec-8) says which existing rules are amended in place, the new words land on
+`docs/context/vocabulary.mdx` and in [R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)'s table, and `spec/BATON_SPEC_HISTORY.md` gets
+its dated entry. What stays unbuilt stays on the proposal page.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-20._ From [the users and groups proposal](../spec/proposals/users-and-groups.md) (pull request immediately-run/baton#300). The id is the next free
+number in `tickets/`.

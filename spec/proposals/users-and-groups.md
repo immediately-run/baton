@@ -2,7 +2,7 @@
 title: "Proposal: users, groups, answerers and the notifier"
 description: "A tenant's directory of users and groups, each repository's acceptance of the keys and members that count for it, a policy knob naming who may answer a person leg, what Baton hands a notifier, and a directory attestation from the forge."
 ---
-**Status:** proposal — not built, no ticket filed; moves into BATON_SPEC §3, §7, §11, §12 and §13 when built. Reviewed adversarially twice on 2026-11-20 ([the review](../../docs/review/users-and-groups-2026-11-20.mdx)); this text is the second revision, with the owner's rulings of the same day.
+**Status:** proposal — not built; moves into BATON_SPEC §3, §7, §11, §12 and §13 when built (tickets B-303, B-304, B-305, B-306, B-307, B-308; the secret strategy it waits on is B-309). Reviewed adversarially twice on 2026-11-20 ([the review](../../docs/review/users-and-groups-2026-11-20.mdx)); this text is the second revision, with the owner's rulings of the same day.
 
 BATON_SPEC knows credentials, not people: an owner is a key ([R-BTN-58](../BATON_SPEC/11-people.md#sec-11-2)),
 a human is a `human_only` key ([R-BTN-185](../BATON_SPEC/12-security.md#sec-12-8)), and a person
