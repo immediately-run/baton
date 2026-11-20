@@ -19,7 +19,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 ## Changelog
 
 - **2026-11-19 — The spec cut to what is built, and each fact to one home (R-BTN-97, R-BTN-154, R-BTN-169, R-BTN-200).**
-  Rules changed: R-BTN-97, R-BTN-154, R-BTN-169, R-BTN-200, R-BTN-39, R-BTN-74, R-BTN-91, R-BTN-107, R-BTN-117, R-BTN-123, R-BTN-124, R-BTN-128, R-BTN-129, R-BTN-130, R-BTN-131, R-BTN-133, R-BTN-134, R-BTN-135, R-BTN-146, R-BTN-155, R-BTN-161, R-BTN-162, R-BTN-165, R-BTN-168, R-BTN-171, R-BTN-180, R-BTN-182, R-BTN-183, R-BTN-184, R-BTN-188, R-BTN-192, R-BTN-198, R-BTN-201.
+  Rules changed: R-BTN-97, R-BTN-154, R-BTN-169, R-BTN-200, R-BTN-39, R-BTN-74, R-BTN-91, R-BTN-107, R-BTN-117, R-BTN-123, R-BTN-124, R-BTN-128, R-BTN-129, R-BTN-130, R-BTN-131, R-BTN-133, R-BTN-134, R-BTN-135, R-BTN-146, R-BTN-155, R-BTN-161, R-BTN-162, R-BTN-165, R-BTN-168, R-BTN-171, R-BTN-180, R-BTN-182, R-BTN-183, R-BTN-184, R-BTN-188, R-BTN-192, R-BTN-198, R-BTN-201, R-BTN-106, R-BTN-114, R-BTN-115, R-BTN-153, R-BTN-181, R-BTN-185, R-BTN-187, R-BTN-191, R-BTN-11, R-BTN-83, R-BTN-94, R-BTN-99, R-BTN-100, R-BTN-126, R-BTN-193.
   The owner asked for a review of where the spec "could be simplified"
   (`docs/review/spec-simplification-review-2026-11-19.mdx`) and ruled on its five questions:
   unbuilt designs go to "proposal pages" until built; a shipped course's contract lives in
@@ -34,8 +34,20 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   each, the former text under *Decisions in full*; rationale and procedure removed from rule
   bodies under *Removed by the simplification of 2026-11-19*. The mirror, the git lock, the
   check-runner and the `resource` prerequisite are built and keep their rules until their code is
-  removed. No adversarial review round has been run on this amendment, and live tickets that cite
-  moved rules and scenarios are not yet re-read.
+  removed. S-BTN-225 named two scenarios; the retention one is S-BTN-244.
+  Review, three rounds, each finding verified against the old text and the code before it was
+  fixed. Round 1, six reviewers over the whole amendment: four built statements the rewrite had
+  dropped were restored (the webhook's drop of the mirror's own pushes, R-BTN-73; the
+  `session_hosts` default, R-BTN-113; the run-id format, R-BTN-63; what a heartbeat writes,
+  R-BTN-196), about fifty unbuilt designs still stated as built were marked or moved, and the
+  contradictions the split left between sections were removed; one finding was rejected
+  (`ctx.replay` is built). Round 2, three reviewers over the fixes: about twenty findings, the
+  one of weight that R-BTN-11's new sentence on a `force` post missed the owner's accept and the
+  24-hour auto-accept. Round 3, one reviewer over those fixes: none wrong; six leftover mentions
+  elsewhere corrected. Disagreements between the spec and the code that the text already had
+  before this amendment were not resolved here: they are tickets B-288 to B-302. Live tickets
+  were re-read in the same change: 70 edited, each clause the amendment contradicts rewritten or
+  struck, each ticket that builds a moved design pointed at its proposal page.
 
 - **2026-11-19 — SQLite polling reads (B-287, S-BTN-243, R-BTN-196, R-BTN-72).** R-BTN-196 now separates scheduling
   invalidation from telemetry after a busy runner's activity repeatedly cleared every idle
@@ -5944,7 +5956,8 @@ so in its last sentence; several entries here may stand behind one line there.
   quotes in ruling 3 are the owner's. Per-run domains and `executor.builtin: refused` existed only
   in the spec and left it the same day, with the two Decisions entries that chose them ("Chose
   per-run domains …" and the `executor.builtin` half of "Chose two policy knobs …", both above).
-  The check-runner with its forge-check deliverer and the `resource` prerequisite are built, as
+  The `checks` map, the exit-status verdict, the `outbox.forge-check` knob and the `resource`
+  prerequisite are built (no check-runner is), as
   are the mirror and the git lock's `position-disagrees`: their rules stay until a ticket removes
   the code with them. The Decisions entries about the mirror, the cutover and the adoption
   appendix left with ruling 4, and the entries that recorded choices of the dashboard V2 project

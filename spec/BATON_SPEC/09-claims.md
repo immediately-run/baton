@@ -46,9 +46,11 @@ is `active` until it ends `completed`, `released` or `reaped`.
   starts with `POST /v1/runner/claims/{id}/advance` naming it (R-BTN-63): Baton checks the edge
   and the gates in one transaction and moves the claim on (event `advanced`, a new `claim_legs`
   row with its run number, `run_id`, `started_at` and `head_sha`) or refuses.
-  - The body carries `leg`, and for the leg it finishes `reached`, `evidence`, `bars`, `outputs`,
-    `scope_exceeded` (§12.9), `exit_status` (R-BTN-153) and `session_url` (R-BTN-113); for the
-    run it starts, `head_sha` and `run_inputs` (R-BTN-84).
+  - The body carries `leg`, and for the leg it finishes `reached`, `evidence`, `outputs`,
+    `scope_exceeded` (§12.9), `exit_status` (R-BTN-153), `session_url` (R-BTN-113) and
+    `local_order` (R-BTN-202); for the run it starts, `bars` (the tags the holder bars from
+    it), `head_sha` and `run_inputs` (R-BTN-84); and `course`, at most 4 KB, which Baton
+    accepts and never reads.
   - The reply carries the run's `run_id`, the leg's resolved inputs (R-BTN-82) and Baton's
     advice flags; the course's own advice is `rank.mjs`'s (R-BTN-98).
 - **R-BTN-38 (legs are stateless at their boundaries).** Each leg reads its input from, and

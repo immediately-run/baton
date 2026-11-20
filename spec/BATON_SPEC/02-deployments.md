@@ -188,8 +188,9 @@ process for development and CI. Nothing crosses a tenant.
   rule 10), an owner bar's `starts_at` or `ends_at` (R-BTN-67), an instance's `until`
   (R-BTN-76) — and at most 10 minutes; an idle beat then reads a handful of rows. The answer
   remembered is always the one computing it gives (R-BTN-61, R-BTN-72).
-  - **What a heartbeat writes.** A live runner's heartbeat writes its liveness only, unless what
-    it declares (its capabilities, tags, courses, or its settings hash) changed or it carries
+  - **What a heartbeat writes.** A live runner's heartbeat writes its liveness only, unless
+    anything it declares (harness, kind, model, tier ceilings, lease timeout, isolation,
+    concurrency, profile, capabilities, tags, courses) changed, it re-keys, or it carries
     something to record.
 - **R-BTN-149 (hard caps per repository).** Safety limits at twice the envelope; none refuses
   lease upkeep.

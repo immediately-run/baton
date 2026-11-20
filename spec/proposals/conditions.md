@@ -2,7 +2,7 @@
 title: "Proposal — conditions: handlers, the suspend wait, calls, cancellation, the outbox and leg events"
 description: "The parts of BATON_SPEC §7 that are designed and not built: bindings and handler tickets, the suspend wait and its restart, an owner's resolve of a leg's condition, calls, supersession and the cancel leg, the outbox, the standard handler courses and leg events; with the parts of §6 that depend on them."
 ---
-**Status:** proposal — not built; moves into BATON_SPEC §7 when built (tickets B-55, B-57, B-61, B-62, B-63, B-65, B-260 among them)
+**Status:** proposal — not built; moves into BATON_SPEC §7 when built (tickets B-55, B-57, B-58, B-59, B-61, B-62, B-65, B-260 among them)
 
 This page holds designs. Nothing here binds Baton as built. What is built is in
 [BATON_SPEC §7](../BATON_SPEC/07-conditions.md) and

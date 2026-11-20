@@ -9,7 +9,7 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
 
 Not built, each a design its rule below still states:
 
-- R-BTN-120: a leg's `requires.tickets` (the course validator accepts `requires.capabilities`
+- R-BTN-120: a leg's `requires.tickets` and `requires.resources` (the course validator accepts `requires.capabilities`
   alone, [courses proposal](../proposals/courses.md)), `baton.prerequisite-unmet`,
   `baton.prerequisite-cycle`, the `/prerequisites` route and `baton leg why`.
 - R-BTN-75: the `retry` kind and the `found`, `provisional` and `binds` columns of
@@ -243,7 +243,7 @@ Not built, each a design its rule below still states:
   - **Clearing.** `POST /v1/admin/readings {instance, clear: {source?}}` ends readings of both
     kinds from one instrument or all, logged.
   - **The `resource` prerequisite and block.** To be removed with its code.
-    - **Needs** — a leg's `requires.resources`, the sync's posted `needs` (joined for the leg)
+    - **Needs** — a leg's `requires.resources` (not built), the sync's posted `needs` (joined for the leg)
       and `end`-sourced needs — are stored in `leg_needs`; an invalid or unregistered name is
       logged and blocks nothing.
     - **Blocked** when at least one live runner is granted on the repository, the repository has
@@ -517,7 +517,7 @@ Which model a leg uses, through which key, and how it reacts to a reading is cou
     and a later snapshot never changes it. The seats counted are the rows of `claim_seats`.
   - **Taking a seat.** A claim or `advance` that needs a seat on a capability whose every seat
     other claims hold is refused by rule 11. A claim's own seat never counts against it. The
-    refusal is never a failed attempt, and a `prefer` claim goes on to its next candidate. The
+    refusal is never a failed attempt. The
     holders' hostnames and tickets are named only where the caller's key is granted on the
     holder's repository (R-BTN-99). Claims are serialized in the tenant's object, so the first
     to take a free seat holds it.

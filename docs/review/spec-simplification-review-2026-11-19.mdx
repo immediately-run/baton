@@ -268,7 +268,7 @@ adopt`; and many course-file fields the validator refuses, the `cancel` leg amon
 these rules keeps its id and a line in its section, with a link to the proposal page that holds
 the design.
 
-**Where the spec and the code disagree**, found on the way and left as they were: the policy
+**Where the spec and the code disagree**, found on the way and ticketed (*Left for tickets*): the policy
 document in `src/core/policy.ts` has an older shape than §12.8's knob table; a break-glass key
 satisfies every `human` entry in the code, whatever `human_key` asks; retries are per ticket in
 the code and per leg in R-BTN-122; `baton:retries` and `baton:stalled` are decisions in the code
@@ -279,20 +279,51 @@ routes in the code have no row in §13 or §14. S-BTN-225 named two scenarios; t
 
 ## Left for tickets
 
-Each of these removes or changes built behaviour, or changes another repository, so the rule
-leaves with the code.
+Filed with this page, on the same branch. Each removes or changes built behaviour, changes
+another repository, or settles a disagreement between the spec and the code that the text had
+before this review.
 
-1. **Remove the mirror and the adoption machinery** (`src/core/mirror.ts` and its callers), and
-   with it §16 and the mirror rows of §13, §14 and §15 (ruling 4).
-2. **Remove the git lock** (`claim`, `set` and `done`'s push-retry, `position-disagrees`; B-178
-   already retires the commands) and the next-free id scan.
-3. **Remove the check-runner and the forge-check deliverer** (ruling 5), and merge what remains of
-   the role into the runner's.
-4. **Remove the `resource` prerequisite and block** (ruling 5); readings stay as advice.
-5. **Fieldhouse**: drop its one line on `executor.builtin`, repoint its §3 anchors from the index
-   to the section files, and rename "trusted executor".
-6. **Build the action registry** (B-25), then delete the hand-kept lists of §11 and generate §14.
-7. **Owner decisions not taken here**: one who-lands knob in place of five that move together; the
-   dashboard as read-and-tighten only; one audit of forge protection, Baton's hourly checker or
-   Fieldhouse's weekly one; whether multi-tenancy stays specified before B-45; who owns
-   `sessionUsage` and the provider fixtures; whether the policy read serves the computed floor.
+| Ticket | What |
+|---|---|
+| B-288 | Remove the mirror and the adoption machinery, and with it §16 (ruling 4) |
+| B-289 | Remove the git lock and the next-free id scan (after B-178) |
+| B-290 | Remove what is built of checks: the `checks` map, the exit-status verdict, the `outbox.forge-check` knob (ruling 5). No check-runner or deliverer exists in the code |
+| B-291 | Remove the `resource` prerequisite and block (ruling 5); readings stay as advice |
+| B-292 | Fieldhouse: its line on `executor.builtin`, its anchors into the old index, "trusted executor" |
+| B-293 | The policy document in `src/core/policy.ts` against §12.8's knob table, presets and guarantees |
+| B-294 | A break-glass key satisfies every `human` entry, whatever `human_key` asks (a security defect) |
+| B-295 | `max_duration` in the validator against `deadline_s` in the spec |
+| B-296 | The administrator's session length |
+| B-297 | §13 and §14 against the schema and the routes, table by table |
+| B-298 | The proposal pages and the tickets that build each; the building PR moves the rules and scenarios back |
+| B-299 | Runner rules the reference runner does not keep: the ancestry check (R-BTN-143), the leg's environment and masking (R-BTN-144), the stop ladder (R-BTN-119), the fence deadline (R-BTN-19) |
+| B-300 | Browser and local-server hardening the spec states and the code lacks (R-BTN-16, R-BTN-158), and §12.2's confirmations |
+| B-301 | §3 rules with no code: owners' sync-key routes, coalescing off the webhook path |
+| B-302 | §4: the owner-state export against `ownerState.ts`, the post's `stations`, the held post's auto-accept |
+
+Already covered by live tickets, so not filed: per-leg retries (B-11, B-56), the CLI's renamed
+commands (B-23, B-157), the action registry (B-25), ticket prerequisites (B-10, B-41), blocked
+ends (B-21), tenancy and forge ids (B-45).
+
+**Owner decisions not taken here**: one who-lands knob in place of five that move together; the
+dashboard as read-and-tighten only; one audit of forge protection, Baton's hourly checker or
+Fieldhouse's weekly one; who owns `sessionUsage` and the provider fixtures; whether the policy
+read serves the computed floor.
+
+## Review of the amendment
+
+Three adversarial rounds were run on the applied text, each by fresh reviewers given the diff and
+the code and not the editors' reasoning, each finding verified before it was fixed. Round 1 (six
+reviewers, the whole amendment) found four built statements the rewrite had dropped, all
+restored, and about fifty places where an unbuilt design still read as built or two sections
+disagreed after the split. Round 2 (three reviewers, the fixes) found about twenty, one of weight:
+the new sentence on a `force` post missed the owner's accept and the 24-hour auto-accept. Round 3
+(one reviewer, those fixes) found none wrong. No reviewer found a security guarantee weakened.
+
+The rounds also showed that the spec before this review stated as plain rules a good deal that
+was never built, beyond what the findings above list. This branch moved or marked what the
+reviewers found; it does not make every remaining sentence true of the code. The tickets above
+carry the gaps that were found.
+
+Live tickets were re-read against the amendment: 70 edited, B-187 (per-run domains), B-5 and B-6
+(the check-runner design) set to `superseded`.

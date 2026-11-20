@@ -40,7 +40,7 @@ here; every other cause is its rule's.
 | `backing-off` | `until` | R-BTN-122 |
 | `barred-tag` | | R-BTN-60, R-BTN-67 |
 | `stale-skills` | | R-BTN-65 |
-| `no-eligible-ticket` | `refusals`, for a `prefer` list | R-BTN-100 |
+| `no-eligible-ticket` | | §9.1 |
 | `not-holder`, `claim-ended` | | §9 |
 | `head-moved` | | R-BTN-11 |
 | `stale-observation`, `sync-busy` | | R-BTN-62, R-BTN-150 |
@@ -70,9 +70,9 @@ here; every other cause is its rule's.
 |---|---|---|---|---|
 | **Runner** | | | | |
 | `POST /v1/runner/heartbeat` | machine | §8's heartbeat body, with `hostname`, `session_name` and `last_activity_at?` | §8's heartbeat response, with `runner_id`, `incarnation`, `lease_timeout_s` and `grant: {capabilities[]}` | R-BTN-3, R-BTN-9, R-BTN-14 |
-| `POST /v1/runner/claim` | machine | `{request_id}` and at most one of `ticket_id` or `prefer: [{ticket_id, leg?}]`; `rationale?` | §9.1's claim response. `version` is `''` when the source posts none; `course_id` and `course_version` are `null` for a claim with no course | §9.1, R-BTN-4, R-BTN-45, R-BTN-100, R-BTN-143 |
+| `POST /v1/runner/claim` | machine | `{request_id, ticket_id?}` | §9.1's claim response. `version` is `''` when the source posts none; `course_id` and `course_version` are `null` for a claim with no course | §9.1, R-BTN-4, R-BTN-45, R-BTN-143 |
 | `POST /v1/runner/claims/{id}/advance` | holder | §9.1's advance body, with `outputs?: [{name, schema, uri?, digest?, value?}]` and `scope_exceeded?: {actions: [{kind, target, ref?}], dropped?}`; and `local_order?: {by, ran_at}` on the advance that finishes a leg run under a local order (R-BTN-202) | §9.1's reply: `{ok, station, next[], flags[], run_id?, inputs: [{name, uri?, digest?, value?, from_leg, from_run, leg_version}]}`; `run_id` when the advance starts a run | §9.1, R-BTN-63, R-BTN-64, R-BTN-82, R-BTN-84, R-BTN-108, R-BTN-202, §12.9 |
-| `POST /v1/runner/claims/{id}/end` | holder | §9.4's end body, with `prerequisite?: {kind, ref}`; a blocked end's `reading?` and `commit?` (R-BTN-126); `local_order?` (R-BTN-202) | `{ok: true}` | §9.4, R-BTN-83, R-BTN-86, R-BTN-126, R-BTN-198, R-BTN-202 |
+| `POST /v1/runner/claims/{id}/end` | holder | §9.4's end body, with `prerequisite?: {kind: "capability", ref}` (R-BTN-126); `local_order?` (R-BTN-202) | `{ok: true}` | §9.4, R-BTN-83, R-BTN-86, R-BTN-126, R-BTN-202 |
 | `POST /v1/runner/claims/{id}/conditions` | holder | `{type, disposition, restarts, default?, severity?, url?}` | `{condition_id}`; `invalid-params` for `baton` or `baton.*` | R-BTN-160 |
 | `POST /v1/runner/messages/{id}/ack` | machine | `{reply?: {text}}` | `{ok: true}` | §6 |
 | `POST /v1/runner/activities` | machine | `{activities: [{id, claim_id, parent_id?, kind, seq?, label?, source, started_at, ended_at?, outcome?, detail?}]}` | `{ok, refused: [{id, code}]}` | §9 |
@@ -107,8 +107,8 @@ here; every other cause is its rule's.
 | `GET /v1/owner/{repository}/policy/log` | owner | `?after=<version>` | `{versions: [{version, hash, previous_hash, changed_by, approver, preset?, at, changed[]}]}` | R-BTN-188 |
 | `POST /v1/human-keys` | a `human_only` key | `{public_key, signature}`, `signature` the new key's SSHSIG over its own public line; or `{fingerprint, revoke: true, confirm: true}` | `{ok: true}`; `conflict`; `unsatisfiable-approvers` | R-BTN-185, R-BTN-188 |
 | **Sync and forges** | | | | |
-| `POST /v1/sync/observation` | sync | an empty body, or `{release: <number>}` | §4.3's observation; a release `{ok: true}` | R-BTN-11, R-BTN-62, R-BTN-126, R-BTN-139, R-BTN-140, R-BTN-150 |
-| `POST /v1/sync/board` | sync | the board post (§4), with `legs_landed?: {count, tickets}` | `{ok: true}`; `head-moved` | R-BTN-11, R-BTN-147, R-BTN-149, R-BTN-190 |
+| `POST /v1/sync/observation` | sync | an empty body, or `{release: <number>}` | §4.3's observation; a release `{released: <number>}` | R-BTN-11, R-BTN-62, R-BTN-126, R-BTN-139, R-BTN-140, R-BTN-150 |
+| `POST /v1/sync/board` | sync | the board post (§4), with `legs_landed?: {count, tickets}` | `{ok: true}`; `head-moved`; `snapshot-rejected` for a held `force` post | R-BTN-11, R-BTN-147, R-BTN-149, R-BTN-190 |
 | `POST /v1/github/webhook` | the GitHub App, by `X-Hub-Signature-256` | a delivery | `204`; repeats and the sync's own events ignored | R-BTN-73 |
 | `POST /v1/forges/{repository}/notify` | a GitLab or Gitea notification, verified against `BATON_FORGE_SECRETS` | the notification | not built: `not-found`, or `too-large` over R-BTN-73's cap | R-BTN-95 |
 | `POST /v1/probe/readings` | instrument | `{readings: [{instance, kind, available?, until?, valid_for?, detail?}]}` | `{ok, refused: [{instance, code}]}` | R-BTN-101 |
@@ -135,6 +135,7 @@ here; every other cause is its rule's.
 | `GET /v1/ui/repositories/{repository}/runners` | session | `limit` (1–100, default 50), `after` (the last runner id), `If-None-Match` | `{runners, cursor}`, one page of the runners declaring a course in the repository, ordered by runner id, each with its current claims, activity, latest transcript and latest report; the `ETag` also covers R-BTN-196's activity version and a coarse clock bucket | §11, R-BTN-196 |
 | `POST /v1/ui/messages` | session | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold; any other kind `invalid-params` | §6, R-BTN-119 |
 | `POST /v1/ui/overrides/{ticket}` | session | `{expedite}` or `{hold}` | `{ok: true}` | §6 |
+| `POST /v1/ui/board/accept` | session | `{repository, sha}` | `{ok: true}`; `not-found` for no such held history | R-BTN-11 |
 | `POST /v1/ui/scope/{id}/resolve` | session | `{}` | `{ok: true}`; `not-found` for none open | §12.9 |
 | `POST /v1/ui/claims/{id}/reap` | session | `{confirm: true}` | `{ok: true}` | §9 |
 | `POST /v1/ui/claims/{id}/fence-clear` | session | `{confirm: true}` | `{ok: true}`; `conflict` when the claim's fence is not pending | R-BTN-19 |

@@ -1,0 +1,134 @@
+---
+title: "B-300 — The dashboard's headers, the confirmed actions and the local host's network rules: build what R-BTN-16 and §12.2 say, and stop R-BTN-158 stating a local host that B-46 has not built"
+id: B-300
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1300
+tier: critical
+description: "R-BTN-16 says every response carries a five-directive Content-Security-Policy and Cross-Origin-Resource-Policy, and that every session request is checked for Origin and Sec-Fetch-Site; the code sends a two-directive policy, no Cross-Origin-Resource-Policy, and checks Origin on writes only. R-BTN-158 describes --bind, --trusted-proxy, bearer refusal and revocation over http, baton.bearer-over-http and file-mode checks, none of which exist: the flag is --host. Section 12.2 lists ten actions refused confirm-required without confirm: true; two are, two more answer invalid-params, and six take no confirmation. Build the header half and the confirmations here; for the local host, mark the rule not built until B-46 and settle the flag's name."
+topics:
+  - baton
+  - security
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** two rules of §12 describe browser and network hardening as in force. Read against
+the code on 2026-11-20, part of each is not there, and it was not there before the spec
+simplification either ([the review](../docs/review/spec-simplification-review-2026-11-19.mdx),
+*Where the spec and the code disagree*; the adversarial review's A5 could not confirm
+R-BTN-158 and this ticket did). B-192 extends the session's checks to more routes "as on
+`/v1/ui/*` today", which assumes the missing half of R-BTN-16 exists.
+
+**Spec:** [BATON_SPEC §12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4)), [§12.2](../spec/BATON_SPEC/12-security.md#sec-12-2), [§12.5](../spec/BATON_SPEC/12-security.md#sec-12-5) ([R-BTN-158](../spec/BATON_SPEC/12-security.md#sec-12-5)), [§9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5) ([R-BTN-19](../spec/BATON_SPEC/09-claims.md#sec-9-5)), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§2.2](../spec/BATON_SPEC/02-deployments.md#sec-2-2) ([R-BTN-135](../spec/BATON_SPEC/02-deployments.md#sec-2-2)), [§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4)),
+[§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-124](../spec/BATON_SPEC/15-verification.md#scenarios)).
+
+## The gaps
+
+| # | Rule | The spec says | The code does |
+|---|---|---|---|
+| 1 | R-BTN-16, *Headers* | `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'` | `default-src 'self'; frame-ancestors 'none'` (`src/core/http.ts:6-11`) |
+| 2 | R-BTN-16, *Headers* | `Cross-Origin-Resource-Policy: same-origin` on every response | not sent: `SECURITY_HEADERS` holds the policy above, `X-Frame-Options`, `X-Content-Type-Options` and `Referrer-Policy` only (same lines) |
+| 3 | R-BTN-16, *Every session request* | any request a session authorizes, reads included, carries an `Origin` equal to the origin when it carries one, and `Sec-Fetch-Site: same-origin` when it carries that header, else `forbidden` | one check, on state-changing requests only: `Content-Type` and `Origin` (`src/core/auth.ts:152-156`). `Sec-Fetch-Site` is read nowhere in `src/` |
+| 4 | R-BTN-158, *Binding* | `baton server start` binds `127.0.0.1` unless `--bind <address>` | the flag is `--host`, default `127.0.0.1` (`src/local/main.ts:72`); `--bind` does not exist (§2.2 line 78 repeats the name) |
+| 5 | R-BTN-158, *Bearers never cross `http`* | the CLI and the runner refuse to send a bearer to a non-loopback `http` origin; the Cloudflare host refuses a bearer on a plain-`http` URL; an `http` listener refuses every bearer from a peer that is neither loopback nor the trusted proxy; a bearer that verifies is revoked and raises `baton.bearer-over-http` | none of it: no scheme or peer test in `src/runner/api.ts`, `cli/baton.mjs`, `src/core/auth.ts`, `src/core/front.ts` or `src/local/`; `bearer-over-http` occurs nowhere in `src/` or `cli/` |
+| 6 | R-BTN-158, *The trusted proxy* | `--trusted-proxy <address>` | no such flag |
+| 7 | R-BTN-158, *File modes* | the local host exits 2 on a group- or world-writable database, secret file or directory, and creates the database `0600` in a `0700` directory | no mode is read or set in `src/local/` |
+| 8 | §12.2 | `claim.force-reap` and `claim.fence-clear` without `confirm: true` are refused `confirm-required` | refused `invalid-params` (`checkConfirm`, `src/core/validate.ts:1005-1008`, called at `src/core/claims.ts:2133` and `:2156`) |
+| 9 | §12.2 | `ticket.cancel`, `leg.stop`, `owner.owner.remove`, `owner.grant.revoke`, `owner.sync-key.revoke` and `admin.key.revoke` take `confirm: true`; so does a change of a repository's path | no confirmation is read for any of them: `confirm-required` is thrown in three places only, a repository's retirement (`src/core/admin.ts:356`), a human key's revocation (`admin.ts:888`) and a floor's removal (`src/core/policy.ts:905`), and the last is not on §12.2's list. `owner.sync-key.revoke` has no route at all (B-301 row 1) |
+
+Rows 4 to 7 are B-46's to build (its items 4, 6 and 7 name `--bind`, file modes, the peer
+refusal, `--trusted-proxy`, the clients' refusal and the revocation). B-46 is `available`, is
+one ticket for twenty rules, and waits on B-45.
+
+## Plan
+
+1. **Rows 1 to 3: build to the spec, here.** They are the cheap half and the spec's values are
+   right. `SECURITY_HEADERS` gains the three directives and `Cross-Origin-Resource-Policy`.
+   The session's check (`auth.ts`) runs on every request a dashboard session authorizes: an
+   `Origin` header, when present, must equal `BATON_ORIGIN`; `Sec-Fetch-Site`, when present,
+   must be `same-origin`; the JSON `Content-Type` stays a rule for writes. Before changing the
+   policy string, load the dashboard under it in a browser on both hosts and read the
+   console: `form-action 'self'` and `base-uri 'none'` must not break sign-in or a dialog
+   (`src/dashboard/`, B-206, B-207). A navigation to a screen path arrives with `Sec-Fetch-Site: none`
+   or `cross-site` from a bookmark or a link: the check is on `/v1/ui/*`, the session's API,
+   never on the page loads, and the PR says so in R-BTN-16 if the text is unclear on it.
+2. **Rows 4 to 7: decide, in the same spec PR.** Recommended: keep R-BTN-158 as the design and
+   mark each unbuilt bullet "not built (B-46)", leaving stated only what holds: the default
+   bind is loopback, TLS is the operator's, `--origin` names the front. For row 4, rename the
+   flag in the spec to `--host`, which is shipped and documented in `src/local/main.ts`, and
+   have B-46 keep that name.
+   What that leaves open until B-46: an operator who starts the local host with `--host
+   0.0.0.0` and no TLS front serves API keys and the dashboard's sign-in over clear `http`
+   with nothing refusing and nothing revoking. That is a credential on the wire, which every
+   reach of `docs/security-model.mdx` starts from. If the owner would rather not wait, the
+   two smallest pieces close most of it and can be built here instead of marked: the
+   clients' refusal to send a bearer to a non-loopback `http` origin (one test in
+   `src/runner/api.ts` and in the CLI's request helper), and the local host refusing to start
+   on a non-loopback `--host` without an `https` `--origin`. The PR asks; the default is to
+   mark.
+3. **Rows 8 and 9: build to the spec, here, with one addition to the list.** A destructive
+   action sent by mistake is the cost; the check is one line per route. Each listed action
+   that has a route reads `confirm: true` and answers `confirm-required` (428) without it;
+   `checkConfirm` throws that code instead of `invalid-params`; §12.2 gains the floor's
+   removal, which the code already confirms. Before the server refuses, the callers send it:
+   `cli/baton.mjs` (asking, or `--yes`) and the dashboard's dialogs for cancel, Stop, an
+   owner's removal, a grant's and an administrator key's revocation. The server change and
+   the callers land in one release, and R-BTN-197's minimum client version decides whether an
+   older CLI is told `client-too-old` or `confirm-required`; the PR says which. If the owner
+   would rather shorten the list than build it, the spec PR strikes the actions instead; a
+   list that says "refused" for actions that are not is the one outcome to avoid.
+4. **Spec.** R-BTN-16 is unchanged if step 1 lands as written. R-BTN-158 and §2.2 as step 2
+   rules. History entry with `Rules changed:` naming R-BTN-158 (and R-BTN-16 only if its text
+   moves); `npm run spec:index`.
+5. **Notes.** B-46 gains a dated line (rows 4 to 7 as ruled, the flag's name); B-192 gains one
+   (the session-read checks it relies on arrive here).
+6. **Tests.** For rows 8 and 9, one table-driven integration test over §12.2's list: each
+   action without `confirm` is `confirm-required` and changes nothing, and with it behaves as
+   before. Unit, on `http.ts`: every response of both hosts carries the five headers with
+   the exact values. Integration: a `GET /v1/ui/…` with a session cookie and `Origin` of
+   another origin is `forbidden`; with `Sec-Fetch-Site: cross-site` is `forbidden`; with
+   neither header passes (the CLI sends neither and holds no session); a write keeps its
+   refusals. The scenario each case belongs to is named in the PR (R-BTN-31); a new one comes
+   from `node cli/baton.mjs tickets next scenario --for B-300`.
+
+### Trust
+
+New inputs: the `confirm` field on six more request bodies, written by the caller that already
+holds the authority for the action and checked in `src/core/validate.ts` before any SQL; it
+admits nothing, a request still needs its credential and approver class. And two request headers Baton starts to read on session requests, `Origin` on reads
+and `Sec-Fetch-Site`. A browser sets both and page script cannot forge them; any other client
+can send anything, which is why they only ever refuse, never admit: a request still needs the
+session cookie (R-BTN-155), and the check adds a refusal on top. No header is trusted from a
+bearer- or signature-authenticated request. Step 2 changes no listener, key, grant or deploy by
+itself; if the owner picks the two small builds, the new refusals are on the client's own
+configuration (`--url`, the origin it was given) and on the operator's flags, both written by
+whoever runs the process.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4): a session authenticates no route outside `/v1/ui/*`, and its cookie
+  stays `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict`. The new check is added before the
+  session is honoured and changes neither.
+- BATON_SPEC [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): sign-in and the 12-hour session are untouched; `POST /v1/login` keeps
+  its `Origin` and `Content-Type` rule.
+- BATON_SPEC [R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3): every action has one authorisation. A confirmation is a second
+  refusal after it, never a way in: the test's unauthorised caller is refused as before,
+  with or without `confirm`.
+- BATON_SPEC [R-BTN-135](../spec/BATON_SPEC/02-deployments.md#sec-2-2): the host check against the tenant's origin runs first, as today.
+- Text, never markup (`CLAUDE.md`, *Rules*): a stricter `Content-Security-Policy` must not be met by adding
+  an inline script or style; the dashboard is `textContent` only.
+- BATON_SPEC [R-BTN-197](../spec/BATON_SPEC/11-people.md#sec-11-3): the CLI's requests carry no `Origin` and no `Sec-Fetch-Site` and must
+  keep working; the integration test's third case holds that.
+
+## Status
+
+_filed 2026-11-20._ From the adversarial review of PR #299 (the spec simplification of
+2026-11-19): A5's unverified note on R-BTN-158, the fix round's list for §12, and round 2's finding on §12.2's confirmations. Related: B-46
+(items 4, 6 and 7), B-45, B-192, B-296 (the session's length, also R-BTN-16), B-206, B-207.

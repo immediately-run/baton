@@ -1,0 +1,126 @@
+---
+title: "B-294 — A break-glass key obeys human_key: a BATON_HUMAN_KEYS line that does not meet hardware satisfies nothing on a repository that requires it"
+id: B-294
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1294
+tier: critical
+description: "Security defect. Section 12.8 says a break-glass line satisfies a repository's human entries only where it meets that repository's human_key. In src/core/policy.ts humanEntryOk returns true for any BATON_HUMAN_KEYS fingerprint before human_key is read, and the person's-answer route accepts any such key as human with no human_key check. On a hardware repository a software key in the host's configuration therefore opens every human gate. Write the failing tests first, then make both paths read human_key."
+topics:
+  - baton
+  - security
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8)'s *Break-glass* reads: a key in the host's `BATON_HUMAN_KEYS`
+"satisfies every `human` entry of every repository on the instance whose `human_key` it meets; a
+line that does not meet `hardware` satisfies nothing on a repository that requires it". The code
+does the opposite. `humanEntryOk` in `src/core/policy.ts` begins `if
+(facts.breakGlass.has(credential)) return true;` and never reads its `humanKey` argument for
+such a key; its comment says "no `human_key` rises above it". `entryMatches` uses it for
+`PUT …/policy` (`put`), for removing a floor (`floorsRoute`, `remove_by: human`) and for
+membership (`requireMembersApprover` in `src/core/admin.ts`). Separately, the person's-answer
+route in `src/core/baton.ts` takes `isHumanKey(fp)`, which is true for every break-glass line,
+as writer `human` without reading the repository's `human_key` at all. So on a repository whose
+policy says `human_key: hardware`, an ordinary `ssh-ed25519` line in the host's configuration
+changes the policy, removes floors, changes membership and answers person legs as a human.
+Found by the spec simplification
+([the review](../docs/review/spec-simplification-review-2026-11-19.mdx), *Where the spec and
+the code disagree*).
+
+**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), *Break-glass* and *No gate without a key to open it*;
+[R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8); [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8), `human-gates`; [R-BTN-191](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) ([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1)), [§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4) ([R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4)), [§15](../spec/BATON_SPEC/15-verification.md#sec-15)
+([S-BTN-192](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-190](../spec/BATON_SPEC/15-verification.md#scenarios)).
+
+## Plan
+
+1. **Say what "meets `hardware`" is for a configuration line, in the spec, first.** The full
+   test (a FIDO attestation against an allowlist) is a proposal (B-136), and
+   `meetsHumanKey` finds no key that passes it today. Two readings are possible until then, and
+   the owner picks one in this ticket's spec PR:
+   - **closed** (the default this ticket builds if no ruling comes): no line meets `hardware`
+     until B-136; a break-glass key satisfies nothing on a `hardware` repository. Then a floor
+     with `remove_by: human` on such a repository cannot be removed, and R-BTN-188's "the only
+     recovery from a lost key" does not exist there, until B-136. The PR states that sentence
+     in R-BTN-185.
+   - **by key type**: a line whose key type is `sk-ssh-ed25519@openssh.com` or
+     `sk-ecdsa-sha2-nistp256@openssh.com` (both in `KEY_TYPES`, `src/core/auth.ts`) meets
+     `hardware`, on the deployment's custody promise (§12.8's list of what Baton does not
+     observe); any other line does not.
+2. **Failing tests, before the fix**, as new cases of the S-BTN-192 test
+   (`test/integration/S-BTN-192.approver-lists.test.ts`) and S-BTN-190's, each asserting
+   `forbidden` and each red on today's code. The fixture: a repository with `human_key:
+   hardware`, `approvers.policy` and `approvers.members` of `[owner, human]` (a human-only
+   list is refused there today as unsatisfiable), a floor with `remove_by: human`, and a host
+   configuration holding one `ssh-ed25519` break-glass line that owns nothing.
+   1. That line signs `PUT …/policy`: refused.
+   2. That line removes the floor (`POST …/policy/floors`): refused.
+   3. That line adds an owner where `approvers.members` is `[owner, human]`: refused.
+   4. That line posts a person's answer to `…/attestations` on a repository whose
+      `inputs.answers` is `attestation`: refused.
+   5. Controls that must stay green: the same four calls on a `human_key: any` repository
+      succeed; and, under the *by key type* reading, an `sk-ssh-ed25519@openssh.com` line
+      succeeds on the `hardware` repository.
+   6. An instance whose `human_key` floor is `hardware` and a repository whose own knob says
+      `any`: the instance's floor is the one applied (R-BTN-188, the `human_key` row).
+3. **Fix.** `humanEntryOk` asks one function whether a break-glass line meets `humanKey`, and
+   returns false when it does not. `ApproverFacts.breakGlass` carries each line's key type so
+   the function has what it needs. `isHumanKey` gains the repository and applies the same
+   function, and the answer route passes it. `listSatisfiable` is unchanged: break-glass never
+   made a list satisfiable.
+4. **Sweep for the same shape.** Grep every use of `breakGlass`, `humanMarks`, `isHumanKey` and
+   `facts.humans` (`admin.ts`, `policy.ts`, `baton.ts`, `front.ts`) and list each in the PR as
+   "reads `human_key`" or "does not need to, because …". `signingKeys` is B-263's to remove;
+   `human-key add | revoke` (`POST /v1/human-keys`) is tenant-wide, not a repository's gate,
+   and the PR says which `human_key` governs it (the instance's).
+5. **Spec, same PR.** R-BTN-185 and R-BTN-188 gain only the sentence of step 1. The S-BTN-192
+   row gains "a break-glass line below the repository's `human_key` satisfies no entry". If the
+   cases outgrow S-BTN-192, take a new scenario number from `node cli/baton.mjs tickets next
+   scenario --for B-294`. History entry with `Rules changed:`.
+6. **Tell the owner before deploying.** A merge to `main` deploys the server. If the reference
+   deployment has a `hardware` repository whose only working human key is a software
+   break-glass line, this fix locks its human gates. Step 1's instance read (which repositories
+   say `hardware`, which `BATON_HUMAN_KEYS` key types exist, not the keys) goes in the PR, and
+   the owner confirms the merge.
+
+### Trust
+
+The input at issue is the host's `BATON_HUMAN_KEYS` configuration: written outside Baton by
+whoever holds the host (the Cloudflare account, or the local host's file), read per request,
+never registered over the API. Baton cannot verify that a person holds such a key; it verifies
+the SSH signature and, after this ticket, the line's fitness for the repository's `human_key`.
+Under the *by key type* reading the key type is the public key's own prefix, which the
+signature check already binds; it proves the key is a security-key type, not that a touch
+happened, and the spec sentence says so. No new input is added. This ticket reads
+`BATON_HUMAN_KEYS` in tests through the test bindings only and changes no host configuration,
+key, grant or owner setting: an instruction to edit the deployment's keys is a stop for the
+owner (CLAUDE.md).
+
+### Invariants
+
+- BATON_SPEC [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8): a human gate is satisfied only by a human-only key's own signature
+  that meets the repository's `human_key`. This ticket removes the one exception in the code.
+- BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), *No gate without a key to open it*: unchanged and re-tested. The fix
+  narrows who matches an entry; it must not make `put` accept a list that no live credential
+  can satisfy, and `listSatisfiable` still ignores break-glass.
+- BATON_SPEC [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8), `human-gates`: the guarantee holds only where `human_key` is
+  `hardware`; after the fix its "every human approval is made on a hardware key" is true of the
+  break-glass path too, or, under the *closed* reading, of no path until B-136, which the
+  guarantee's row then says.
+- BATON_SPEC [R-BTN-57](../spec/BATON_SPEC/11-people.md#sec-11-2): one role per key. A break-glass line is tested as a key of no other
+  role; an administrator's key is still never an owner's or a human's.
+- Trust only verified JWTs and signatures (CLAUDE.md): no `TEST_*` binding reaches
+  `wrangler.toml`.
+
+## Status
+
+_filed 2026-11-20._ From the spec simplification review of 2026-11-19, *Where the spec and the
+code disagree* (PR #299). Related: B-136 (what meets `hardware`), B-293 (the policy document),
+B-164 (`human-gates` claims only what holds).

@@ -143,7 +143,8 @@ Designs for this section that are not built are on the proposal page
     (a route, or an adopt, R-BTN-39). The reason is in the position's history row. An owner's
     route, a retry policy's `exhausted` leg (R-BTN-122) and a person leg's expiry (R-BTN-116)
     stay queued until the ticket's station changes, whatever readiness a later snapshot posts.
-  - **Route.** `baton ticket route <ticket> <leg>` (R-BTN-127) queues any leg leaving Baton's
+  - **Route** (not built: [the proposal](../proposals/data-model-and-api.md#other-reads-and-owner-routes)).
+    `baton ticket route <ticket> <leg>` (R-BTN-127) queues any leg leaving Baton's
     station for the ticket, `next_source: owner`, restarting its run count (R-BTN-63);
     `{clear: true}` restores the course's choice. Both are logged `re-routed`.
   - **The queue is the queued leg.** A ticket waits in exactly one queue, its queued leg's
@@ -189,7 +190,7 @@ Designs for this section that are not built are on the proposal page
   The next claimant starts at Baton's station.
 - **Disagreement, not movement.** A ticket moves only along edges. A snapshot whose facts
   disagree with Baton's position moves nothing: its arrival is recorded unapplied (R-BTN-39),
-  and the owner settles the disagreement with adopt or a route.
+  the owner's adopt and route that would settle it are not built.
 
 ### 5.4 Legs are queues
 

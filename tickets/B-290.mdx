@@ -1,0 +1,99 @@
+---
+title: "B-290 — Remove the checks: the owners' conclusions map, exit_status verdicts, the forge-check knob and check_app_id, with §10"
+id: B-290
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1290
+tier: judgement
+description: "The owner cut the check-runner and the forge-check deliverer on 2026-11-19. What is built of them is the owner setting checks (the conclusions map) in src/core/admin.ts, the exit_status verdict in src/core/claims.ts, the policy's outbox.forge-check knob, the instance setting check_app_id that nothing reads, and a check-runners screen row. Remove the code and section 10's three rules, and settle what a merge leg's std:checks@1 comes from once no check-runner exists."
+topics:
+  - baton
+  - simplification
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** ruling 5 of the spec simplification ("cut them",
+[the review](../docs/review/spec-simplification-review-2026-11-19.mdx)) removes the check-runner
+and the forge-check deliverer, and §10 now reads "to be removed with its code". The code that
+exists is narrower than the design: `checksSetting` and `checkMap` in `src/core/admin.ts`
+(R-BTN-114's map, with its loosening rule and the delegated-key refusal), `checkVerdict` in
+`src/core/claims.ts` and the `exit_status` field of `advance` and end (R-BTN-153), the
+`outbox.forge-check` route in `src/core/policy.ts` (the knob, three presets and the `git`-forge
+refusal), `check_app_id` in `src/core/instanceSettings.ts`, the `repository/check-runners` row of
+`src/core/screens.ts` and the knob's name in `cli/baton.mjs`. No check-runner key kind, check
+ticket or deliverer is built. Tests: `B-175.check-conclusions`, `B-169.security-corrections`,
+`S-BTN-189.repository-policy`, `S-BTN-198.retirement`, `S-BTN-77.host-allowlists`,
+`policy.test.ts` and `cli.test.ts`.
+
+**Spec:** [BATON_SPEC §10](../spec/BATON_SPEC/10-checks.md#sec-10) ([R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10), [R-BTN-153](../spec/BATON_SPEC/10-checks.md#sec-10), [R-BTN-115](../spec/BATON_SPEC/10-checks.md#sec-10)), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), the `checks` setting),
+[§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7) (`check_app_id`), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), the `outbox.forge-check` knob and the `attestations`
+row's `std:checks@1`), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-68](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-93](../spec/BATON_SPEC/15-verification.md#gates)).
+
+## Plan
+
+1. **Spec, same PR.** Delete `spec/BATON_SPEC/10-checks.md` (the three rules retire, named in
+   the history entry); `checks` from R-BTN-66's settings; `check_app_id` from §12.7;
+   `outbox.forge-check` from §12.8's knob table and from *`plain-git`*; "registering
+   check-runners" from the `approvers.members` row; the check rows of §13 and §14; S-BTN-68 and
+   G-BTN-93. In `spec/proposals/checks-and-executors.md` and `data-model-and-api.md`, delete the
+   check ticket, check-runner, bound check claim and deliverer parts rather than leave a design
+   the owner cut.
+2. **One question the cut opens, answered in that spec PR.** §12.8's `merge.checks: required`
+   and the `independent-review` guarantee read `std:checks@1`, whose only writer was to be a
+   check-runner's `service:` key. Name the writer that remains (the trusted runner's merge leg
+   running the checks itself, R-BTN-183's proposal) or name the knob as waiting on B-140. This
+   is the "merge what remains of the role into the runner's" half of the review's item 3, and it
+   is the owner's to confirm before the code step.
+3. **Server.** Remove `checksSetting`, `checkMap`, `CONCLUSIONS` and the `checks` field of
+   `PUT /v1/owner/{repository}/settings`; `checkVerdict` and `exit_status` from the advance and
+   end validators (an `exit_status` sent by an older runner is refused as any unknown field is,
+   or dropped, as R-BTN-197's client-version rule decides in step 1); `outbox['forge-check']`
+   from `PolicyDocument`, `KNOBS`, the presets and `policyForPreset`; `check_app_id` from
+   `instanceSettings.ts` and `PUT /v1/admin/settings`; the screen row.
+4. **Stored state.** A new migration (number from `node cli/baton.mjs tickets next migration
+   --for B-290`) drops the stored `checks` setting and the `check_app_id` column. A stored
+   policy version that names `outbox.forge-check` is read without it; its hash is the stored
+   one, so the log stays verifiable, and the next write stores the new shape.
+5. **CLI.** Remove the knob from `cli/baton.mjs`'s list. The reference runner sends no
+   `exit_status` today (nothing in `src/runner/` or `src/defaults/` names it), so nothing
+   changes there.
+6. **Tests.** Delete `B-175.check-conclusions.test.ts`; drop the cases in the other six files
+   listed above. Add to the S-BTN-189 test: a policy written with `outbox.forge-check` is
+   refused `invalid-params` as an unknown knob, and a stored version carrying it reads back
+   without it.
+
+### Trust
+
+No new input. Inputs removed: the owners' `checks` map (an owner setting, written by an owner
+key under `approvers.policy`), a runner's `exit_status` on `advance` and end (a runner's
+statement, never verified by Baton beyond its range), and an administrator's `check_app_id`. The
+map was a gate on one thing only: which station a runner's end could reach in a check course.
+Removing it removes that gate, so step 2 must not leave a guarantee in R-BTN-189's table that
+rested on it; the PR lists each guarantee and says it never read the map. No key, grant or CI
+workflow is touched; the GitHub App of B-6 is not created.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8): no guarantee holds by a knob that no longer exists. After the change,
+  `guaranteesFor` computes the same value for every stored policy version as before, shown by a
+  test over the presets.
+- BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8): every policy change is still authorised by `approvers.policy` as it
+  stood; dropping a knob on read is not a policy change and writes no version.
+- BATON_SPEC [R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8): removing `checks` removes a setting with a loosening direction; the
+  loosening list in `admin.ts` loses the entry and no other setting changes class.
+- BATON_SPEC [R-BTN-10](../spec/BATON_SPEC/09-claims.md#sec-9-6): an end is confirmed as before; `checkVerdict` was an extra refusal on
+  top, and nothing else read `exit_status`.
+- Migrations are append-only; validation still runs before any SQL (`src/core/validate.ts`).
+
+## Status
+
+_filed 2026-11-20._ From the spec simplification review of 2026-11-19, *Left for tickets*,
+item 3 (PR #299). Live tickets written for the cut design and needing a note or a supersession:
+B-5, B-6, B-155 (a defined checks writer), B-199 (the `/check-runners` screen), B-159.

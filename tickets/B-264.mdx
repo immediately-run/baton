@@ -1,5 +1,5 @@
 ---
-title: "B-264 — Build the 2026-11-19 amendment: the out-of-course finding and the policy knobs repos.unlisted and executor.builtin"
+title: "B-264 — Build the 2026-11-19 amendment: the out-of-course finding and the policy knob repos.unlisted"
 id: B-264
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1264
 tier: judgement
-description: "Build what the 2026-11-19 amendment adds: section 12.9's out-of-course finding (a default-branch push changing a control path whose head neither a trusted leg's end nor a ticket's merge by hand names, listed under Needs you after 15 minutes as 'Emergency interactive session'), last_written_by.human (R-BTN-194), and R-BTN-188's knobs repos.unlisted (by-name or none: whether a home listing no code_repos reaches repos: by name, R-BTN-140) and executor.builtin (allowed or refused: rule executor, R-BTN-107). Scenarios S-BTN-239 and S-BTN-240."
+description: "Build what the 2026-11-19 amendment adds: section 12.9's out-of-course finding (a default-branch push changing a control path whose head neither a trusted leg's end nor a ticket's merge by hand names, listed under Needs you after 15 minutes as 'Emergency interactive session'), last_written_by.human (R-BTN-194), and R-BTN-188's knob repos.unlisted (by-name or none: whether a home listing no code_repos reaches repos: by name, R-BTN-140). The knob executor.builtin left the spec in the simplification of 2026-11-19 and is not built. Scenarios S-BTN-239 and S-BTN-240."
 topics:
   - baton
   - security
@@ -25,21 +25,17 @@ depends_on: []
 **Spec:** [BATON_SPEC §12.9](../spec/BATON_SPEC/12-security.md#sec-12-9),
 [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-184](../spec/BATON_SPEC/12-security.md#sec-12-8)),
 [§3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) ([R-BTN-73](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3)), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)),
-[§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (rule `executor`),
-[§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3)),
 [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`scope_findings`).
 
 ### What to build
 
 The spec is the authority; where this list and a rule differ, the rule wins.
 
-1. **The knobs (R-BTN-188).** `repos.unlisted` (`by-name` | `none`) and `executor.builtin`
-   (`allowed` | `refused`) in the policy document, its validation, `policy show | diff`, and
-   the presets: `cooperative` and `plain-git` write `by-name` and `allowed`, `protected` and
-   `protected-hardware` write `none` and `refused`. A stored version naming neither reads
-   `by-name` and `allowed`; no guarantee reads either knob. The dry run names, in
-   `stops.runners`, the granted runners a change to `executor.builtin` would stop, and in
-   `stops.unreached` the live tickets whose `repos:` entries a change to `repos.unlisted`
+1. **The knob (R-BTN-188).** `repos.unlisted` (`by-name` | `none`) in the policy document, its
+   validation, `policy show | diff`, and the presets: `cooperative` and `plain-git` write
+   `by-name`, `protected` and `protected-hardware` write `none`. A stored version that does not
+   name it reads `by-name`; no guarantee reads the knob. The dry run names, in
+   `stops.unreached`, the live tickets whose `repos:` entries a change to `repos.unlisted`
    leaves without reach.
 2. **`repos.unlisted` (R-BTN-140).** `by-name` is the code's present reading for a home that
    lists no `code_repos` (`src/core/codeRepos.ts`, `src/defaults/cli.ts`), with two things the
@@ -48,9 +44,11 @@ The spec is the authority; where this list and a rule differ, the rule wins.
    `none` the reading ends: the entry has no reach and its ticket raises
    `baton.repo-not-listed`. The observation hands the sync the knob as `repos_unlisted` (§4.3,
    §14). R-BTN-92, R-BTN-96, R-BTN-139, R-BTN-141 and R-BTN-26 read "with reach".
-3. **`executor.builtin` (R-BTN-107, §6.6).** Rule `executor` at the claim only, refusal
+3. ~~**`executor.builtin` (R-BTN-107, §6.6).** Rule `executor` at the claim only, refusal
    `executor-refused`, for a runner whose last heartbeat reported `builtin` or no `executor` (a
-   sidecar), on every repository the ticket reaches whose policy says `refused`.
+   sidecar), on every repository the ticket reaches whose policy says `refused`.~~ Removed: the
+   simplification of 2026-11-19 took the knob, rule `executor` and `executor-refused` out of the
+   spec on the owner's ruling, and nothing replaces them.
 4. **`last_written_by.human` (R-BTN-194).** Decided in the transaction that records
    `last_written_by`, against the policy then in force, stored in its JSON and never recomputed;
    rows recorded before this ticket read `false`. Served wherever `last_written_by` is; printed
@@ -75,15 +73,15 @@ The spec is the authority; where this list and a rule differ, the rule wins.
 ### Exit criteria
 
 - S-BTN-239 and S-BTN-240 pass as their rows read; S-BTN-220 passes with `human`.
-- A `protected` policy stored before the knobs holds every guarantee it held (R-BTN-189).
+- A `protected` policy stored before the knob holds every guarantee it held (R-BTN-189).
 
 ### Trust
 
-- **The policy knobs**: written only by an `approvers.policy` approver (R-BTN-188), validated
+- **The policy knob**: written only by an `approvers.policy` approver (R-BTN-188), validated
   on write, never read from git.
-- **A runner's `executor.source`**: the runner's own statement on its heartbeat (a machine key).
+- ~~**A runner's `executor.source`**: the runner's own statement on its heartbeat (a machine key).
   Rule `executor` trusts it only to stop a misconfigured host; a lying runner passes, and the
-  spec says so (R-BTN-107).
+  spec says so (R-BTN-107).~~
 - **Push records**: Baton's own record of the forge's deliveries, verified in the Worker
   (`X-Hub-Signature-256`, R-BTN-73). The finding reads `sender`, `after` and the commits' paths
   from them and nothing a board post or a runner says (reach 7). A pusher controls the paths
@@ -106,11 +104,17 @@ The spec is the authority; where this list and a rule differ, the rule wins.
   `Date.now()`.
 - Migrations are append-only: one new file widens the CHECK; 0034 is not edited.
 - R-BTN-33: the row stores identifiers only (pusher, commit, paths), no file content.
-- R-BTN-189: neither knob is a guarantee's condition; adding them breaks no stored floor
-  (test: a `protected` policy stored before the knobs keeps every guarantee it held).
+- R-BTN-189: the knob is no guarantee's condition; adding it breaks no stored floor
+  (test: a `protected` policy stored before the knob keeps every guarantee it held).
 - R-BTN-66: under `paths.control: any` nothing is checked and nothing is raised.
 - R-BTN-31: S-BTN-239, S-BTN-240.
 
 ## Status
 
 _filed 2026-11-19._
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) removed the policy knob `executor.builtin` with rule `executor` and the refusal `executor-refused`, on the owner's ruling of that day ("cut them"). The title, the description, the spec line, items 1 and 3, the exit criterion and the trust and invariant lines are rewritten or struck; nothing replaces the knob. `repos.unlisted` and `last_written_by.human` stay in the section files.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the policy's dry run, the floor's entries and glob grammar, and the `out-of-course` finding are parts 1, 9 and 12 of [the security proposal](../spec/proposals/security.md). S-BTN-239 and S-BTN-240 are no longer rows of the verification section: they are in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The repository policy's enforcement". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
+
+_(2026-11-20: rules re-read: R-BTN-188, R-BTN-107)_

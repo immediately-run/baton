@@ -307,4 +307,10 @@ _filed 2026-11-08._
 
 _(2026-11-14: rules re-read: R-BTN-107. Its `end` now also resolves a joinable session at the result posted on the channel (R-BTN-195); the interface item says so.)_
 
-_(2026-11-19: rules re-read: R-BTN-107, R-BTN-133. The `home-signed` source is retired with signed control (`spec/BATON_SPEC_HISTORY.md`, that date): R-BTN-107's sources are `builtin`, `home` and `pinned`. The three clauses that define it are struck; wherever else the plan names `home-signed` beside `home`, read `home` alone. A policy may now refuse `builtin` (`executor.builtin`, R-BTN-188; B-264 builds it).)_
+_(2026-11-19: rules re-read: R-BTN-107, R-BTN-133. The `home-signed` source is retired with signed control (`spec/BATON_SPEC_HISTORY.md`, that date): R-BTN-107's sources are `builtin`, `home` and `pinned`. The three clauses that define it are struck; wherever else the plan names `home-signed` beside `home`, read `home` alone. ~~A policy may now refuse `builtin` (`executor.builtin`, R-BTN-188; B-264 builds it).~~)_
+
+_(2026-11-20: the last sentence of the note of 2026-11-19 is struck: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) removed the policy knob `executor.builtin` on the owner's ruling, so no policy refuses the `builtin` executor and B-264 builds no such knob.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the executor's Baton-side declaration, the `home` source, salvage, the shipped `session` and `attached` executors, executor data and the run's record are part 2 of [the checks-and-executors proposal](../spec/proposals/checks-and-executors.md); the built part of the rule stays in the section file. Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
+
+_(2026-11-20: rules re-read: R-BTN-107)_

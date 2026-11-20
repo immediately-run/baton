@@ -1,0 +1,91 @@
+---
+title: "B-289 — Remove what is left of the git lock after B-178: position-disagrees, the next-free id scan and the no-Baton path"
+id: B-289
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1289
+tier: judgement
+description: "B-178 moves ticket claim, set and done to Baton's lease for a repository Baton serves, and keeps the git-lock path for a repository with no Baton. Three legacy pieces have no ticket: the position-disagrees discrepancy in src/core/baton.ts, the next-free scan that numbers a ticket, a migration or a scenario when Baton does not answer (src/defaults/sequences.ts, request.ts), and the no-Baton path itself. Remove them with R-BTN-193's legacy paragraphs."
+topics:
+  - baton
+  - simplification
+owns: {}
+prs: []
+depends_on:
+  - B-178
+---
+
+**Brief:** [B-178](B-178.mdx) retires `ticket claim | set | done`'s push-retry for a repository
+Baton serves; it does not cover the rest of the git lock. `notePositionDisagreements` in
+`src/core/baton.ts` still logs a `position-disagrees` discrepancy (listed in
+`src/core/history.ts`) for every posted `status: available` past a course's start, which exists
+only because `status:` in git was a lock. `takeNumber` and `nextMain` in
+`src/defaults/sequences.ts` and `nextId` in `src/defaults/request.ts` fall back to scanning git
+for the next free number (`fallbackNote`, `--offline`), which is git as a counter. And B-178's
+item 3 keeps `transact`'s six-try push loop (`TICKET_TRIES`, `src/defaults/tickets.ts`) for a
+repository with no Baton. The review's *Left for tickets*, item 2, asks for all of it to go
+([the review](../docs/review/spec-simplification-review-2026-11-19.mdx)).
+
+**Spec:** [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-193](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-36](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [§4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2), *The git-lock commands*), [§4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)
+([R-BTN-199](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3), *The next-free scan*), [§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) ([R-BTN-85](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7), the `position-disagrees` row), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-189](../spec/BATON_SPEC/15-verification.md#scenarios),
+[S-BTN-199](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-234](../spec/BATON_SPEC/15-verification.md#scenarios)).
+
+## Plan
+
+1. **Decide the no-Baton case in the spec, first.** With the scan and the lock gone, a checkout
+   with no key, no configured Baton or an unreachable one cannot claim a ticket or take a number.
+   Write that into R-BTN-74 and R-BTN-199 as a refusal that names what is missing, and say what
+   `--offline` then does (the proposal here: the flag is removed). If the owner wants an offline
+   path kept, this ticket stops at that sentence: the spec PR states the path, and it is not a
+   lock or a counter. `tickets new` filing through a PR on `baton-ticket/<id>` already needs
+   Baton for the id.
+2. **Spec, same PR.** Delete R-BTN-74's *The git-lock commands*, R-BTN-199's *The next-free
+   scan*, R-BTN-36, the `position-disagrees` row of R-BTN-85's table, its Decisions line, and the
+   "legacy" clauses of R-BTN-193, which then states the rule with no exception. S-BTN-199 goes;
+   S-BTN-189 and S-BTN-234 lose their fallback cases. History entry, `npm run spec:index`,
+   `npm run spec:impact`.
+3. **Server.** Remove `notePositionDisagreements` and `position-disagrees` from the discrepancy
+   kinds; a stored `position-disagrees` event stays in the log and is read as history, never
+   listed on the Sync screen.
+4. **CLI.** Remove the scan from `takeNumber`, `nextMain` and `fileRequest`, with `fallbackNote`
+   and `--offline`; remove `transact`'s retry-as-mutex for `claim`, `set` and `done` on the
+   no-Baton path and what B-178 left of B-129's pickup. `ticket done`'s move to the archive stays
+   a plain git write of the work's record.
+5. **This repository's instructions.** `CLAUDE.md`'s *Claiming a ticket* and the babysit skill's
+   *Ticket numbers and status* describe the fallback and its renumbering; rewrite both to the one
+   path. They are standing guidance: the change goes through the owner's review of the PR.
+6. **Tests.** Delete `test/integration/S-BTN-199.ticket-pickup.test.ts` and its trace; in the
+   S-BTN-189 and S-BTN-234 tests replace each fallback case with the refusal of step 1 (no
+   number printed, no commit made, exit non-zero naming Baton).
+
+### Trust
+
+No new input. One input stops deciding anything: a ticket file's `status:` on the default branch
+(written by any pusher, reach 5) no longer raises a discrepancy, and the set of ids git happens
+to show a checkout no longer allocates a number. Every number then comes from
+`POST …/sequences/{kind}/next` under the existing filing principals and validation (R-BTN-199,
+S-BTN-234). No credential, grant or workflow changes. The edits to `CLAUDE.md` and the skill are
+instructions to agents (reach 3) and land only through the owner's merge.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-193](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): git is never a lock or a counter, with no legacy exception left in the
+  code or the rule.
+- BATON_SPEC [R-BTN-199](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3): every identifier concurrent branches write to git is one Baton hands
+  out; the refusal of step 1 never prints a guessed number.
+- BATON_SPEC [R-BTN-4](../spec/BATON_SPEC/09-claims.md#sec-9-1): one active claim per ticket, decided by Baton alone (B-178).
+- BATON_SPEC [R-BTN-85](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7): the other discrepancy kinds are untouched, and the event log keeps its
+  old rows ([R-BTN-81](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7)).
+- The duplicate-id refusal at the sync (R-BTN-74) stays: it is the backstop for a hand-written
+  ticket file, which this ticket does not forbid.
+
+## Status
+
+_filed 2026-11-20._ From the spec simplification review of 2026-11-19, *Left for tickets*,
+item 2 (PR #299). B-178 covers the commands for a Baton-served repository; this ticket is the
+remainder.

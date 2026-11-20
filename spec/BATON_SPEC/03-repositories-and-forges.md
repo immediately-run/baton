@@ -227,9 +227,11 @@ route, with the events and fields the table lists for it, is
 - **R-BTN-94 (Baton dispatches a sync after the commit that wants one).** Where this
   specification says Baton dispatches a sync, the object records the dispatch in the transaction
   that causes it — a claim, an `advance`, an end, a person's answer held in Baton, an owner bar
-  set or lifted, a forge notification — once per repository and workflow, and the host shell
-  performs it through `Dispatch` (R-BTN-55) after the transaction commits, for a request and for
-  the alarm alike, awaited by neither. A repository without a dispatch target is synced by
+  set or lifted, an owners' `required_bars` change, a forge notification — once per repository
+  and workflow, and the host shell performs it through `Dispatch` (R-BTN-55) after the
+  transaction commits, for a request and for the alarm alike, awaited by neither (for a
+  repository before its cutover, §16, only a forge notification's and the unblocked trigger's
+  are sent). A repository without a dispatch target is synced by
   whatever runs `baton repo sync` for it: a CI schedule or a cron loop.
   - **Not built:** a stored want that stands until a post answers it, its routes
     (`GET /v1/sync/wanted`, `POST /v1/sync/want`, the owner's `sync-want`), runners that pull

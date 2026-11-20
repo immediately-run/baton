@@ -137,3 +137,7 @@ _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
 _(2026-10-20: adversarial review of the spec — R-BTN-162 now blocks the leg on its `suspend` condition at any end of the waiting claim other than the consuming one, and at any reap, `leg-timeout` included, for every suspend, light or not; `resume` is a list and carries `answered`. Build this here; S-BTN-128 and G-BTN-147 are extended.)_
 
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton owner resolve` is `baton ticket resolve` (R-BTN-127).)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the suspend wait and its restart are part 2 of [the conditions proposal](../spec/proposals/conditions.md). S-BTN-127, S-BTN-128 and G-BTN-147 are no longer rows of the verification section: they are in [the proposals' scenarios](../spec/proposals/scenarios.md), under "Conditions: handlers and the suspend wait". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
+
+_(2026-11-20: rules re-read: R-BTN-162)_

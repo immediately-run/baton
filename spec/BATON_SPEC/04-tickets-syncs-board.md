@@ -286,7 +286,10 @@ The fingerprint stores no ticket content and is an optimization, never authority
   observation is newer, then moves the head. A first snapshot is accepted with `parent_sha:
   null` only while no head exists. A lost race is `head-moved`; the sync re-reads and retries.
   A post marked `force` — neither its commit nor the head descends from the other — is refused
-  `snapshot-rejected` and held for the owner; the head stands.
+  `snapshot-rejected` and held; the head stands until an owner accepts the held history
+  (`POST /v1/ui/board/accept`) or 24 hours pass, after which the sync's next `force` post
+  against that head becomes the head. A held post's stations and confirmations are applied as a
+  refresh.
   Ordering never depends on a clock. An administrator's adoption of a rewritten default branch
   (a forced Resync) is proposed in [tickets and sources](../proposals/tickets-and-sources.md).
 
@@ -416,7 +419,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
     a privileged action takes the quote as the owner's only where `human` is `true`.
   - `last_written_by` is Baton's own record, no input of `row_hash`, and is served wherever
     the ticket is: the board read (§11), the dashboard's ready rows, recommendations, the claim
-    answer, each heartbeat's claims, `baton leg ticket` (R-BTN-198) and the ticket read
+    answer, each heartbeat's claims and the ticket read
     (`GET /v1/repositories/{repository}/tickets/{ticket}`, `baton ticket show`).
 
 ### 4.5 Reading the ticket
@@ -486,8 +489,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
   confirmed; a fact arrival, and an arrival not applied (R-BTN-39); an adoption; a re-route; a
   block or unblocking; a condition opened or closed; a person leg's question posted, answered or
   expired (R-BTN-116); inputs given and outputs reported (an `inputs` row names its
-  `leg_run_inputs` rows); `spawned`; a held ticket's version changed (`ticket-changed`,
-  R-BTN-198); `discrepancy`.
+  `leg_run_inputs` rows); `spawned`; `discrepancy`.
   - Rows hold names, ids, versions, pointers and digests only (R-BTN-33); `detail_json` at most
     2 KB.
   - It is the ticket's course history (R-BTN-39): the position Baton holds is its latest

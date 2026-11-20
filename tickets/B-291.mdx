@@ -1,0 +1,102 @@
+---
+title: "B-291 — Remove the resource prerequisite and block: leg_needs, resource_fleet and the resource rows; readings stay as advice"
+id: B-291
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1291
+tier: judgement
+description: "The owner cut the resource prerequisite on 2026-11-19. It is built: BLOCK_KINDS carries resource, src/core/blocks.ts keeps leg_needs and resource_fleet and writes resource rows with the lost-answer bookkeeping, claims.ts reads them as advice, and a blocked end may name a resource. Remove the kind, its tables (a new migration) and R-BTN-76's prerequisite paragraph; resources, instances and readings stay, served to rank.mjs as advice."
+topics:
+  - baton
+  - simplification
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** ruling 5 of the spec simplification ("cut them",
+[the review](../docs/review/spec-simplification-review-2026-11-19.mdx)) removes the `resource`
+prerequisite and block. In the code, `BLOCK_KINDS` in `src/core/blocks.ts` lists `resource`; the
+same file keeps `leg_needs` and `resource_fleet` (migration 0016, rebuilt in 0043), writes and
+clears `resource` rows in `ticket_blocks`, and carries the "answer lost" record
+(`tickets.answer_lost`, `lostAnswer`); `resourceAdvice` in `src/core/claims.ts` reads those rows
+to leave a leg out of recommendations and to log `advice-overridden`; `checkBlockedOn` in
+`src/core/validate.ts` admits `resource:` on a `blocked` end, which may carry a reading. Tests:
+`blocks.test.ts`, `migrations-0043.test.ts`, `cli.test.ts`, `S-BTN-44.blocks`,
+`S-BTN-45.block-edges`, `B-241.sync-unchanged`.
+
+**Spec:** [BATON_SPEC §6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) ([R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1), the `resource` row), [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2), [R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2)), [§6.3](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3)
+([R-BTN-76](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3), [R-BTN-101](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3), [R-BTN-151](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3)), [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6), [§6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) ([R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§13.7](../spec/BATON_SPEC/13-data-model.md#sec-13-7), [§15](../spec/BATON_SPEC/15-verification.md#sec-15)
+([S-BTN-20](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-24](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-44](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-45](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-91](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-224](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-70](../spec/BATON_SPEC/15-verification.md#gates), [G-BTN-111](../spec/BATON_SPEC/15-verification.md#gates)).
+
+## Plan
+
+1. **Spec, same PR, written before the code.** Delete R-BTN-76's *The `resource` prerequisite
+   and block* and the `resource` row of §6.1's table, of R-BTN-75's kinds and of the `blocked`
+   end's `on` (R-BTN-126). State in R-BTN-76 the one thing that stays: Baton stores and serves
+   readings (R-BTN-99), and a course's `rank.mjs` reads them; Baton itself neither blocks nor
+   leaves a leg out of recommendations for a reading. Three consequences are decided in that
+   text, not in the code:
+   - the sync's posted `needs` (the only source built: `src/core/course.ts` does not accept a
+     leg's `requires.resources`): removed from the board post, or kept as data served to
+     `rank.mjs` and stored nowhere;
+   - a leg that meets an exhausted account mid-run (S-BTN-20, S-BTN-91): it ends
+     `released:blocked` on a `capability` whose check is bound to the instance (R-BTN-121,
+     B-245), or it is a failed attempt; the reading it carried is posted as a reading;
+   - `baton.resource-unknown` and the `no-instance` word in `other`: retired with the row.
+2. **Scenarios.** S-BTN-44, S-BTN-45 and S-BTN-24 lose their resource cases; S-BTN-20, S-BTN-91
+   and G-BTN-111 are rewritten to the choice made above or retired; G-BTN-70 keeps the other
+   kinds. S-BTN-224 (a runner's readings of an account) stays. History entry with `Rules
+   changed:`, `npm run spec:index`, `npm run spec:impact -- R-BTN-76 R-BTN-75 R-BTN-126 --term
+   "resource"`.
+3. **Server.** Remove `resource` from `BLOCK_KINDS` and `checkBlockedOn`; the `leg_needs` and
+   `resource_fleet` maintenance, `lostAnswer`, `expectedBack` and `answer_lost` handling in
+   `blocks.ts`; `resourceAdvice` and its three call sites in `claims.ts` (recommendations, the
+   claim's advice list, the `advance` override event); the board post's `needs` in
+   `board.ts`. Keep `src/core/resources.ts`'s registry, instances, readings
+   and states, and the views that serve them.
+4. **Migration.** One new file (number from `node cli/baton.mjs tickets next migration --for
+   B-291`): delete `ticket_blocks` rows of kind `resource` and recompute `blocked_since` for the
+   tickets that had only those; drop `leg_needs` and `resource_fleet`; drop
+   `tickets.answer_lost`. Migration 0016 and 0043 are not edited. B-287's candidate projection
+   (PR #297) reads resource availability: whichever lands second removes or rebuilds that
+   column in its own migration.
+5. **Runner and CLI.** The runner stops sending a `resource` block; `baton leg why` and the
+   board's block list lose the kind; `baton admin resource …` and `admin reading …` stay.
+6. **Tests.** Remove the resource cases from the six files above. Add a migration test: a
+   ticket blocked on a `resource` row alone is unblocked by the migration with no `unblocked`
+   event and no dispatch (it was advice), and one blocked on a `ticket` row too stays blocked
+   with its original `blocked_since`.
+
+### Trust
+
+No new input. Inputs removed: the `needs` a sync posts with a placed ticket (a sync key's or a
+machine key's statement, reach 7) and the `resource:` target of a runner's `blocked` end. A reading keeps its writers and its
+checks unchanged: the policy's `readings` knob says whose count (R-BTN-181), and
+`src/core/validate.ts` bounds each. What changes is who acts on a reading: Baton no longer does;
+a course's `rank.mjs` does, on the runner, where a false reading from a compromised runner could
+already only misrank that runner's own choices.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2): a block is written in the transaction that changes its cause and read
+  from one index. The migration removes rows and recomputes `blocked_since` in one transaction;
+  the remaining kinds keep their writers.
+- BATON_SPEC [R-BTN-77](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2): a transition messages and dispatches once. Removing an advice row at
+  migration time sends nothing, tested.
+- BATON_SPEC [R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): core names no provider, model or account. Fewer places hold a resource
+  name; none is added.
+- BATON_SPEC [R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): filter fields only; `leg_needs` goes and nothing replaces it.
+- BATON_SPEC [R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8): a requirement bound `gate` still gates. The PR lists every binding kind
+  left and shows none referred to a `resource` row.
+
+## Status
+
+_filed 2026-11-20._ From the spec simplification review of 2026-11-19, *Left for tickets*,
+item 4 (PR #299). Related live tickets: B-245 (the runner confirms a leg's block, bound account
+readings), B-246, B-21, B-146, B-202 and B-214 (the `/resources` reads and screens, which stay).

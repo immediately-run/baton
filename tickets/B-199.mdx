@@ -57,8 +57,8 @@ The §14 row first, then the code (`admin.ts`'s `grantsView`).
    field and the code lacks it; the keys exist from B-25, in this ticket's closure), `tokens:
    [{id, role, capabilities,
    max_tier, expires_at, uses_left, registered: [credential_id]}]` (R-BTN-117), `sync_keys:
-   [{fingerprint, role: sync | mirror, added_by, added_at}]` (R-BTN-93), `check_runners:
-   [{fingerprint, name, capabilities, max_tier}]` (R-BTN-114), `consents: [{home, consented,
+   [{fingerprint, role: sync | mirror, added_by, added_at}]` (R-BTN-93), ~~`check_runners:
+   [{fingerprint, name, capabilities, max_tier}]` (R-BTN-114),~~ `consents: [{home, consented,
    by, at, withdrawn_at}]` (R-BTN-140: each home that lists this repository in `code_repos`),
    and on each owner `kind` (ssh or api), `human_only`, `added_at`; on each grant `pending`
    (R-BTN-146), `sync`, `checker`. One read for the credential screens and B-200's `/consents`.
@@ -68,7 +68,7 @@ The §14 row first, then the code (`admin.ts`'s `grantsView`).
    --capabilities <a,b> […]` and `… grant revoke …`; `baton owner owner add <repository> <pub>`;
    `baton owner token create <repository> --role runner […]`; `baton owner mcp-key create
    <repository> --name <name> […]`; `baton owner sync-key add <repository> <pub> --role
-   sync|mirror`; `baton owner check-runner add <repository> <pub> --name <hostname> […]`) as
+   sync|mirror`~~; `baton owner check-runner add <repository> <pub> --name <hostname> […]`~~) as
    text:
    - `/grants`: fingerprint (short, full on focus), hostname, label, capabilities as chips, max
      tier, role and domain, checker, sync, pending (marked), set by, granted by and at, other
@@ -78,7 +78,7 @@ The §14 row first, then the code (`admin.ts`'s `grantsView`).
    - `/tokens`: id, role, capabilities, max tier, expiry, uses left, what it registered;
    - `/mcp-keys`: name, minter, actions (each id), expiry, last used, client host and address;
    - `/sync-keys`: fingerprint, role, added by and at;
-   - `/check-runners`: fingerprint, name, capabilities, max tier.
+   - ~~`/check-runners`: fingerprint, name, capabilities, max tier.~~
    No control: no credential write lists a session (§12.2, R-BTN-155), and B-73's
    `owner.mcp-key.approve`, when it lands, places itself on `repository/mcp-keys` by `ui.view`
    (the control belongs to the ticket that builds the action).
@@ -106,7 +106,7 @@ The §14 row first, then the code (`admin.ts`'s `grantsView`).
 
 A scenario numbered at merge, on both hosts, with a fixture repository holding two owners (one
 human-only), an accepted and a pending grant, a token that registered one credential, an MCP key,
-a sync key, a check-runner and one consent: `owner.grant.list` returns every collection with the
+a sync key~~, a check-runner~~ and one consent: `owner.grant.list` returns every collection with the
 fields above and no secret; an owner's session reads it; a runner key is `forbidden`. Under
 `test/ui/`: each screen lists its rows, the pending grant is marked, every command line matches
 R-BTN-127's tree (a test reads the names from the registry's command table), no control is drawn,
@@ -129,3 +129,5 @@ verified against R-BTN-127's tree by a test._
 
 _2026-11-09 — revised after the second review: `mcp_keys` (with `id`) listed among the
 additions, since `grantsView` does not answer it today._
+
+_(2026-11-20: the owner cut the check-runner on 2026-11-19 (`docs/review/spec-simplification-review-2026-11-19.mdx`, ruling 5; the spec simplification of that date, baton#299), and B-290 removes what is built of it, the check-runners screen row included. The `check_runners` field, the `check-runner add` command line, the `/check-runners` screen and the fixture's check-runner are struck: five screens remain, where the title and the description say six and name check-runners.)_

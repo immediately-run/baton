@@ -1,0 +1,132 @@
+---
+title: "B-299 — The runner rules §8.4 and §9 state and the reference runner does not keep: rule on each, build the two cheap security ones now, and mark the rest not built until its ticket lands"
+id: B-299
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1299
+tier: critical
+description: "Section 8.4 and section 9 state as built what baton runner does not do: no ancestry check before reading a claim's snapshot (R-BTN-143), a leg environment that is the runner's whole environment with its Baton credentials (R-BTN-144), masking of classes 5 to 7 only, a stop that is one abort line and a kill after 30 seconds (R-BTN-119), no fence deadline (R-BTN-19), and end and signal reasons the tables do not list. Older tickets build most of it (B-46, B-79, B-9, B-184). This ticket takes the decision per rule, builds the two small security parts no reason delays, and has the spec say not built for the rest."
+topics:
+  - baton
+  - security
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the spec simplification of 2026-11-19 cut the spec to what is built, and its review
+found rules in §8 and §9 that the text already stated before the rewrite and that the reference
+runner (`src/runner/`, `baton runner start`) does not implement
+([the review](../docs/review/spec-simplification-review-2026-11-19.mdx), *Where the spec and
+the code disagree*). Every row below was read in the code on 2026-11-20. Most have a ticket
+that would build them, written before the owner's trusted-runner rulings (B-189), so "build to
+the spec" is no longer the obvious answer for each. Until someone decides, a reader of §8.4
+believes a runner refuses off-branch code and strips its credentials from a leg, and it does
+neither.
+
+**Spec:** [BATON_SPEC §8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-143](../spec/BATON_SPEC/08-runners.md#sec-8-4), [R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-4), [R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4), [R-BTN-145](../spec/BATON_SPEC/08-runners.md#sec-8-4), [R-BTN-119](../spec/BATON_SPEC/08-runners.md#sec-8-4)), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3)
+([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3), the leg's `ctx`), [§9.4](../spec/BATON_SPEC/09-claims.md#sec-9-4) (the end reasons), [§9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5) ([R-BTN-19](../spec/BATON_SPEC/09-claims.md#sec-9-5)), [§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) ([R-BTN-47](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1)), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)
+([R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-118](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-4](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-138](../spec/BATON_SPEC/15-verification.md#gates)).
+
+## The gaps
+
+| # | Rule | The spec says | The code does | Builder today |
+|---|---|---|---|---|
+| 1 | R-BTN-143 | before reading any file at a claim's `snapshot_sha` the runner checks it is an ancestor of `refs/baton/<repository>/default`, fetches once on failure, then ends `released:off-branch`; the rule "binds `baton runner start`" | only `baton leg replay` checks (`src/runner/replay.ts:304-307`). `baton runner` has no such check: `refs/baton/…/default` is named nowhere else in `src/runner/`, and the two other `--is-ancestor` calls test something else (`home.ts:119`, a fast-forward of the home; `runner.ts:2046`, a signed-control commit against the snapshot, which B-263 removes). `off-branch` is not in `RELEASE_END_REASONS` (`src/core/validate.ts:476-477`) | B-46 item 2 |
+| 2 | R-BTN-144, *The runner's own credentials* | the runner deletes `BATON_KEY`, `BATON_KEY_FILE`, `BATON_TOKEN` and any API key from its environment before loading repository code; no session inherits them | nothing is deleted (`delete process.env` occurs once in `src/runner/`, for another variable, `legProcess.mjs:27`); the leg's environment is `{...process.env, BATON_PARENT, BATON_STATE, …}` (`src/runner/runner.ts:2587-2605`) | B-46 item 2; B-189 item 10 keeps it "as cheap defence in depth" |
+| 3 | R-BTN-144, the `credential:<NAME>` row | a declared `credential:` variable is present only when the leg's `requires` names it; every other is removed | no code removes a variable by a course's declaration (same lines) | B-46 item 2 |
+| 4 | R-BTN-144, the table's "these `BATON_*` names are the only ones" | seven names, `BATON_ACTIVITY` and `BATON_RESUME` among them | `BATON_ACTIVITY` and `BATON_RESUME` are set nowhere in `src/` or `cli/`; the runner also sets `BATON_AGENT_COMMAND`, `BATON_VERBOSE` and `BATON_DEFAULT_BRANCH` (`runner.ts:2594-2602`) | none |
+| 5 | R-BTN-144, *Masking* | seven classes | classes 5, 6 and 7 only (`src/shared/mask.mjs:1-3`, `src/runner/mask.ts:1-3`): the runner secret (1), the runner's Baton credentials (2), declared `credential:` values (3) and the git and forge tokens it holds (4) are masked only where class 7's name endings happen to match | B-46 item 2 ("the masking set and patterns") |
+| 6 | R-BTN-119 | `requested`, `owner-cancel` and `floor` stop the leg at once by the executor's `stop`: interrupt, terminate after 10 s, kill after 25 s | every release writes one abort line to the leg (`runner.ts:1112-1123`) and the session is stopped after `SIGNAL_GRACE_MS`, 30 s (`runner.ts:43`); the `builtin` executor's `stop` kills at once (`src/runner/executor.ts:204-209`) | B-184 (the executor's `stop`), B-9 |
+| 7 | R-BTN-119 | `baton leg stop` | no such command in `cli/baton.mjs` | B-9 builds the dashboard's Stop; no ticket names the command |
+| 8 | R-BTN-19, R-BTN-47, §13's `claims` row | `fence_deadline`; the alarm clears a fence at it and logs `fence-cleared {deadline: true}`; `baton.fence-pending` 30 minutes after the reap | no `fence_deadline` column in `src/migrations/`; the alarm clears a fence when the runner has been silent past its lease and logs `fence-cleared {by: 'timeout'}` (`src/core/claims.ts:2580-2590`); no `baton.fence-pending` | B-79 items 1 and 2 |
+| 9 | R-BTN-72's `ctx` (`08-runners.md:169-170`) | the leg's `AbortSignal` reason is `lease-lost` or `release` | the wire carries `release` or `regressed`, a course change sent as `release` (`runner.ts:278`, `:1120-1122`); a lost lease stops the session and sends no reason | none |
+| 10 | §9.4's table | the release reasons a runner may end with | `RELEASE_END_REASONS` also accepts `provider-suspended` and `provider-exhausted`, which §9.4 does not list, and lists neither `floor` nor `off-branch`: `released:floor` passes only because any course-id word after `released:` is read as an owner bar's reason (`validate.ts:695-699`) | none |
+
+## Plan
+
+1. **Rule on each row, in one spec PR, before any code.** For every row the PR either keeps the
+   rule and marks the unbuilt part "not built" with its builder ticket (the form §6's and §7's
+   openings use since the fix round), or rewrites the rule to what the code does. Recommended:
+
+   | # | Recommendation | Why, and what stays open |
+   |---|---|---|
+   | 1 | **Build**, in this ticket | Board posts are reach 7 of `docs/security-model.mdx`, and R-BTN-143 is what stops a post naming a commit off the default branch from becoming reach 1, code on every runner that serves the home. Today whoever holds a sync key (R-BTN-93: "whoever holds it is the sync") can do that, and R3-1270 would extend it to every machine key. One `git merge-base` and one bounded fetch per claim. Amending the spec instead accepts: a sync credential is a code-execution credential on every runner. |
+   | 2 | **Build**, in this ticket | A leg is where reach 3 lands: an injected agent session. With `BATON_KEY` or the path in `BATON_KEY_FILE` in its environment it can sign as the runner: claim, end, report. Deleting four variables after the runner has read them is a few lines, and B-189 keeps this defence under trusted runners. |
+   | 3 | Mark not built; leave to B-46 | scoping by `requires` needs the course's declarations at the runner, which B-46 item 2 plans |
+   | 4 | **Amend the spec to the code** | list the three names the runner sets, and mark `BATON_ACTIVITY` (R3-1214) and `BATON_RESUME` (B-46 item 2) not built |
+   | 5 | Build classes 1 and 2 here with row 2; mark 3 and 4 not built | the runner knows its own secret and credentials at start; B-189 item 10 keeps exactly these two classes. Classes 3 and 4 wait on row 3 and on B-131 |
+   | 6 | **Amend the spec to the code** | R-BTN-145 already bounds the outcome, every process gone within 30 s; the ladder's steps are each executor's own (R-BTN-107). State the 30-second grace, and say `builtin` kills at once. No security difference: nothing here trusts a leg to stop itself |
+   | 7 | Mark not built; B-9 gains the command | — |
+   | 8 | Mark not built; B-79 builds it | availability, not authority: B-79's own *Why* gives the failure (a re-keyed runner keeps a fence pending for ever). The interim text says what the alarm does today |
+   | 9 | **Amend the spec to the code** | name the reasons the wire carries; a lost lease is a stopped session, not a reason |
+   | 10 | **Amend both** | add `provider-suspended` and `provider-exhausted` to §9.4 if the owner keeps them, else remove them from the validator; add `floor` to `RELEASE_END_REASONS` so it no longer rides the owner-bar branch (`off-branch` arrives with row 1) |
+
+   The owner confirms the table in the PR; a row the owner turns the other way is rewritten
+   there, not built.
+2. **Row 1, the ancestry check.** In `src/runner/`, before `course.json`, `.baton/baton.json`, a
+   leg script, an override or a leg's instructions is read at `snapshot_sha`: the check
+   `replay.ts:304-307` already makes, against the runner's own ref of the registered default
+   branch the claim response names, one bounded fetch on failure, then `released:off-branch`.
+   Server: `off-branch` joins `RELEASE_END_REASONS`; the end is not a failed attempt. The
+   `baton.off-branch` condition and the sync want stay B-46's and B-57's and are marked not
+   built in R-BTN-143.
+3. **Rows 2 and 5, the runner's own credentials.** `src/runner/api.ts` reads the credential once
+   (`:56-83`); after it, the runner deletes `BATON_KEY`, `BATON_KEY_FILE` and `BATON_TOKEN` from
+   `process.env`, so the spread at `runner.ts:2587` no longer carries them. The masked set
+   (`runner.ts`, where class 7 is computed) gains the runner secret and the credential's
+   literal value. Removing the variable does not hide a key file the leg's user can read: the
+   PR says so in R-BTN-144, and where the executor gives the leg its own user or sandbox that
+   is the executor's to keep. A child the runner starts for itself (the sync it runs, `close`, `handoff`)
+   that needs the key is handed it explicitly; list each such caller in the PR.
+4. **Rows 6, 9 and 10** are text, plus the two-line validator change of row 10.
+5. **Notes on the builders.** B-46, B-79, B-9 and B-184 each gain a dated line under `## Status`
+   naming the rows this ticket took or re-ruled, so none is built twice or built against a
+   rule the spec PR rewrote.
+6. **Tests.** S-BTN-118 exists as a scenario with no test under `test/`: write it for row 1 (a
+   claim whose snapshot is off the default branch ends `released:off-branch`, reads nothing at
+   that sha, and is not a failed attempt; a sha that arrives with the one fetch passes). For
+   rows 2 and 5, a runner test: a leg script that prints its environment sees none of the three
+   variables, and a leg that prints the runner's secret has it masked in the leg log. Each
+   behaviour change names its scenario (R-BTN-31); rows 2 and 5 take a new one from `node
+   cli/baton.mjs tickets next scenario --for B-299`.
+
+### Trust
+
+New inputs: none. The ticket narrows what existing inputs can do. `snapshot_sha` and
+`default_branch` come from the claim response, which is Baton's record of a board post; the
+post's writer is a sync key, a CI identity token or (unbuilt) a machine key, reach 7. The
+runner verifies the sha against a ref it fetches itself from the home's remote, never against
+anything the post or the checkout's configuration says. The leg's environment is written by the
+runner's host (its operator) and read by repository code and an agent session (reaches 1 and
+3); after step 3 it no longer holds a Baton credential. The recommendations table is a
+proposal: the spec PR is merged by the owner, and nothing here changes a key, a grant, an owner
+setting, a CI workflow or a deploy.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-143](../spec/BATON_SPEC/08-runners.md#sec-8-4) and [G-BTN-138](../spec/BATON_SPEC/15-verification.md#gates): a runner reads nothing at a sha off the default branch.
+  Row 1 makes the rule true for `baton runner start`; replay's check is unchanged.
+- BATON_SPEC [R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4): no session inherits the runner's Baton credentials. Step 3's test
+  reads the environment a leg actually gets.
+- BATON_SPEC [R-BTN-145](../spec/BATON_SPEC/08-runners.md#sec-8-4): every process a leg starts is gone within 30 s of a stop. Row 6
+  rewrites the ladder's wording only; the bound and its test stand.
+- BATON_SPEC [R-BTN-19](../spec/BATON_SPEC/09-claims.md#sec-9-5): a fence-pending ticket is not claimable until the fence clears. Row 8
+  changes text only; the alarm's clear on silence is what the spec then says, until B-79.
+- BATON_SPEC [R-BTN-6](../spec/BATON_SPEC/09-claims.md#sec-9-2): a runner that cannot reach Baton computes its own lease as lost.
+  Deleting the credential from `process.env` must not stop the runner's own later requests:
+  `envAuth` keeps the key file's path or the key material in its closure
+  (`src/runner/api.ts:63-78`), and the test of step 6 runs a second heartbeat.
+- One home per statement: each "not built" line names the ticket and restates no design.
+
+## Status
+
+_filed 2026-11-20._ From the adversarial review of PR #299 (the spec simplification of
+2026-11-19), findings A4-8 to A4-11 and the fix round's list for §8 and §9. Related: B-46
+(item 2), B-79, B-9, B-184, B-189 (items 7 and 10), B-263 (removes `runner.ts`'s
+signed-control check), R3-1270, B-131.

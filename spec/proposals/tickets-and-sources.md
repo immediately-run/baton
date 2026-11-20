@@ -2,7 +2,7 @@
 title: "Proposal: ticket source writers, the store's display, and stricter sync ordering"
 description: "Unbuilt designs moved out of BATON_SPEC §4: a ticket source's writer exports and the store showing Baton's position (R-BTN-200), observation renewal, voiding and the lapse bar, the founded-head check with its conditions, and the administrator's forced Resync."
 ---
-**Status:** proposal — not built; moves into BATON_SPEC §4 when built (tickets B-77, B-46 for the sync ordering parts; no ticket yet builds the writer exports or R-BTN-200)
+**Status:** proposal — not built; moves into BATON_SPEC §4 when built (tickets B-77, B-46 for the sync ordering parts, R3-1263 for sync wants and the dispatch adapters; no ticket yet builds the writer exports or R-BTN-200)
 
 Each part below names the rule of [BATON_SPEC §4](../BATON_SPEC/04-tickets-syncs-board.md) it
 would extend. The rule ids that stay defined there are written here as `R-BTN-n (proposed)`.

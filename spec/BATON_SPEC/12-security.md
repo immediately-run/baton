@@ -84,10 +84,10 @@ or takes `--yes`, and the dashboard's dialogs send it.
 - `owner.owner.remove`, `owner.grant.revoke`, `owner.sync-key.revoke`, `human-key.revoke`;
 - `admin.key.revoke`, `admin.repo.retire`.
 
-Two further changes take `confirm: true`: a repository's path (R-BTN-138) and a `code_repos`
-consent (R-BTN-140).
+A change of a repository's path also takes `confirm: true` (R-BTN-138).
 
-Proposed, each with the design that brings its action: `owner.check-runner.revoke` and
+Proposed, each with the design that brings its action: a `code_repos` consent (R-BTN-140;
+[data model and API](../proposals/data-model-and-api.md)), `owner.check-runner.revoke` and
 `owner.token.revoke` ([checks and executors](../proposals/checks-and-executors.md)),
 `attestation.revoke` ([security](../proposals/security.md)), `admin.repo.resync`
 ([tickets and sources](../proposals/tickets-and-sources.md)), `owner.mcp-key.revoke` and
@@ -208,8 +208,8 @@ Every value below is validated on write; a value over its cap is refused `invali
       for a cookie), because it crossed the network in clear, and raises
       `baton.bearer-over-http`. One that does not verify is only refused and counted in §2.3's
       failure buckets: an id or fingerprint alone, which is public, revokes nothing.
-  - **The trusted proxy.** `--trusted-proxy <address>` names the one front whose forwarded
-    client address Baton reads, for the sign-in limits
+  - **The trusted proxy.** Not built: `--trusted-proxy <address>`, naming the one front
+    whose forwarded client address Baton reads, for the sign-in limits
     ([proposed](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)).
   - **File modes.** At start the local host exits 2 on a group- or world-writable `--db`, secret
     file or directory, or a group- or world-readable secret file. It creates the database `0600`

@@ -355,7 +355,7 @@ the human-only identity (B-136), and `.github/CODEOWNERS` is itself under code-o
 Where no leg holds a forge credential, every forge write passes a host-side gate that refuses
 `.github/**` on every ref, and control paths land only by a human ([BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8), the deployment's), the signature guarded only an
 agent session on a human's forge credential, which the owner ruled break-glass: Baton is to make such
-a change visible as an `out-of-course` finding (proposed, not built: [the security proposal](../spec/proposals/security.md), §12; [§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9)) and refuses nothing. Under `cooperative`
+a change visible as an `out-of-course` finding (proposed, not built: [the security proposal](../spec/proposals/security.md), [§12](../spec/BATON_SPEC/12-security.md#sec-12); [§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9)) and refuses nothing. Under `cooperative`
 nothing protects a control path. The code stays until B-263 removes it. What follows is the
 mitigation as it was specified and built.
 

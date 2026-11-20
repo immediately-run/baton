@@ -64,7 +64,7 @@ script: setups, values and refusal codes are there and in the rules, not here. A
 | S-BTN-28 a course with no reviews | A toy three-station course runs the generic scenarios with no change to Baton, and `src/` passes the boundary test. | R-BTN-48, R-BTN-50 |
 | S-BTN-34 progress is not staleness | A claim that advanced ahead of the sync stays active; a claim ends `stale-board` only when its ticket is taken back; a git rewrite to an earlier station moves nothing and raises nothing. | R-BTN-39, R-BTN-35 |
 | S-BTN-39 limits no push changes | Owner bars, required bars, the retry policy and holds are Baton's settings: no commit drops them, a hold with its attempts and backoff survives the ticket's withdrawal and return, and a copy under a new id starts unheld. A tier written in git applies. | R-BTN-66, R-BTN-67 |
-| S-BTN-57 ranking on the runner | A course's `rank.mjs` runs on the runner and never in Baton; a `prefer` claim takes its first passing entry or lists each refusal; a runner whose course version lacks the ranking code is `stale-skills`. | R-BTN-98, R-BTN-100; *no test* |
+| S-BTN-57 ranking on the runner | A course's `rank.mjs` runs on the runner and never in Baton; a `prefer` claim (not built, R-BTN-100) takes its first passing entry or lists each refusal; a runner whose course version lacks the ranking code is `stale-skills`. | R-BTN-98, R-BTN-100; *no test* |
 | **§2** | | |
 | S-BTN-31 both hosts | Every scenario passes on each host it runs on; a sync token for another Baton's audience is refused. | R-BTN-55, R-BTN-29 |
 | S-BTN-122 caps, observations, readings | The per-repository caps refuse oversize items and never lease upkeep; an outstanding observation number can be taken over and an older post is `stale-observation`; measuring sessions are bounded and their readings clearable. | R-BTN-149, R-BTN-62, R-BTN-76; *no test* |
@@ -84,7 +84,7 @@ script: setups, values and refusal codes are there and in the rules, not here. A
 | S-BTN-116 cross-repository reach | A ticket reaches another repository only through the home's `code_repos`, which that repository's owner consents to; an unreachable `repos:` entry is raised and fences nothing; a `*` pattern is refused; an input's digest is checked before the leg runs. | R-BTN-140, R-BTN-141, R-BTN-82; *no test* |
 | S-BTN-125 CI tokens, notifications, import, local host | A CI token from an untrusted event is refused while schedule and dispatch runs pass; a notification wants only its own repository; an import refuses an edited export and a pre-seal replay; the local host refuses readable secret files and bearers over `http`. | R-BTN-156, R-BTN-95, R-BTN-88, R-BTN-158; *no test* |
 | **§4** | | |
-| S-BTN-13 board ordering | Two syncs finishing out of order never move the head back; a post whose parent is not the head, a force-pushed default branch included, is refused `head-moved`. | R-BTN-11 |
+| S-BTN-13 board ordering | Two syncs finishing out of order never move the head back; a post whose parent is not the head is refused `head-moved`, and a `force` post of a force-pushed default branch is held `snapshot-rejected`. | R-BTN-11 |
 | S-BTN-36 suspension confirmed from a PR | A suspension evidenced only in a code repository is confirmed by the next later snapshot, never by ancestry; an older observation arriving late is `stale-observation`. | R-BTN-10, R-BTN-62 |
 | S-BTN-40 slow and stale syncs | A ticket runs to its end under slow, stale-checkout and held syncs and a lost delivery: every `advance` is accepted, no end goes stale, a stale checkout posts nothing, and `done` is confirmed from the closure. | R-BTN-62, R-BTN-10 |
 | S-BTN-43 no course code | With no course code in the repository, the CLI's default markdown source and `create-pr` carry a ticket from filing through review, fix and merge; a dependent waits; an ejected source replaces the default; `src/core/` is unchanged. | R-BTN-74 |
@@ -129,7 +129,7 @@ script: setups, values and refusal codes are there and in the rules, not here. A
 | **§6** | | |
 | S-BTN-10 no reviewer capacity | With every review seat barred, `review` is posted `waiting` and its holder suspends; the leg is offered again after the lift; `baton.stalled` is raised at R-BTN-167's default. | R-BTN-67, R-BTN-167 |
 | S-BTN-20 the leg's account exhausted mid-leg | A leg whose account instance runs out ends `released:blocked` on `resource` with a reading for that instance, not failed; an override claim is accepted and work on another instance continues. | R-BTN-126, R-BTN-76; *no test* |
-| S-BTN-21 capacity | A capability with a capacity has that many seats across the tenant: a claim or advance past it is refused `capacity-full` with no failed attempt, a `prefer` claim taking its next candidate; a claim's own seat never refuses its advance; a seat is released when the claim leaves such legs or ends, and after the fence for a fence-pending reap; lowering the capacity takes no seat back. | R-BTN-178 |
+| S-BTN-21 capacity | A capability with a capacity has that many seats across the tenant: a claim or advance past it is refused `capacity-full` with no failed attempt; a claim's own seat never refuses its advance; a seat is released when the claim leaves such legs or ends, and after the fence for a fence-pending reap; lowering the capacity takes no seat back. | R-BTN-178 |
 | S-BTN-22 review queue bound | Tickets waiting for review are recommended in the default order with nothing flagged; an override is recorded. | R-BTN-99, R-BTN-45 |
 | S-BTN-44 blocks and resources | Each unmet prerequisite is a stored block row of its kind, served from one index; a blocked claim is refused, and an override by id accepted where the block is advice; `unblocked` is logged, messaged and dispatched once; a capability no runner declares is raised `baton.capability-missing` after a delay. | R-BTN-75, R-BTN-77, R-BTN-76 |
 | S-BTN-45 edges of blocks, a queue over its bound | Readings are validated, bounded and lapse at `until`, the later reading setting the state; an empty fleet writes no row; a returning runner swaps its rows with no `unblocked` event; a queue over `max_queue` raises `baton.queue-over` and closes the course until it is back under; an unblocking burst's dispatch is capped. | R-BTN-76, R-BTN-77, R-BTN-79 |
@@ -246,7 +246,7 @@ Each gate is an invariant, the rule that owns it, and the scenarios or tests tha
 | G-BTN-136 | Reach beyond the home is `code_repos` alone; input digests are verified before a leg runs (R-BTN-140) | S-BTN-116 |
 | G-BTN-145 | CI tokens pass only for the runs R-BTN-156 names; an import re-validates; the local host binds loopback and refuses unsafe file modes (R-BTN-158) | S-BTN-125 |
 | **§4** | | |
-| G-BTN-7 | A post whose `parent_sha` is not the head is refused `head-moved`, a rewritten default branch included (R-BTN-11) | tests, S-BTN-13 |
+| G-BTN-7 | A post whose `parent_sha` is not the head is refused `head-moved`; a `force` post is held, never adopted unaccepted (R-BTN-11) | tests, S-BTN-13 |
 | G-BTN-18 | An older push's sync never moves the head back (R-BTN-11) | S-BTN-13 |
 | G-BTN-39 | `tickets` holds no body or note (R-BTN-33); only changed rows are rewritten; a runner missing the snapshot commit fetches once, else releases `stale-board` (R-BTN-5) | tests |
 | G-BTN-42 | The station function gives each fixture ticket the leg states its repositories and PRs imply; Baton overrides it only by R-BTN-83's held positions | S-BTN-17, -18 |
@@ -256,7 +256,7 @@ Each gate is an invariant, the rule that owns it, and the scenarios or tests tha
 | G-BTN-75 | Every disagreement between git and a Baton value is logged as a discrepancy in the accepting transaction, never delaying it; what Baton owns is never one (R-BTN-85) | S-BTN-47 |
 | G-BTN-76 | One holder, one position; children are tickets with a same-repository `parent`, and an open child blocks its parent only through a call (R-BTN-86) | S-BTN-49 |
 | G-BTN-78 | Freeze is undoable until seal; an export is exactly R-BTN-88's sections and repeatable; an import is one transaction into an empty Baton | S-BTN-50 |
-| G-BTN-141 | A rewritten default branch is never adopted by a post, whoever posts it (R-BTN-11) | S-BTN-13 |
+| G-BTN-141 | A rewritten default branch is never adopted by a post that is not `force` nor by a `force` post before its history is accepted, whoever posts it (R-BTN-11) | S-BTN-13 |
 | G-BTN-167 | A ticket no accepted post names is never claimed, provisionally or otherwise (R-BTN-4) | S-BTN-58 |
 | **§5** | | |
 | G-BTN-32 | Below `min_runner_version` a runner gets no new claim but keeps and advances its own (R-BTN-22) | S-BTN-15 |
@@ -283,7 +283,7 @@ Each gate is an invariant, the rule that owns it, and the scenarios or tests tha
 | G-BTN-47 | Recommendations follow the default order and pass every gate (R-BTN-99) | S-BTN-22 |
 | G-BTN-70 | Blocks are written in the transaction that changes their cause and read from one index (R-BTN-75); a transition messages and dispatches once (R-BTN-77) | S-BTN-44, -45 |
 | G-BTN-79 | `not_before` comes only from git, validated; a `time` wait raises nothing (R-BTN-89) | S-BTN-51 |
-| G-BTN-85 | A `prefer` claim is one transaction (R-BTN-100) | S-BTN-57 |
+| G-BTN-85 | A `prefer` claim is one transaction (R-BTN-100; not built) | S-BTN-57 |
 | G-BTN-88 | Only `state` readings set an instance's state; tickets and hosts are shown only where granted (R-BTN-76) | S-BTN-61 |
 | G-BTN-111 | A `resource` blocked end stores its reading and need and writes its row in one transaction, spending nothing (R-BTN-126) | S-BTN-91, -224 |
 | G-BTN-112 | A `capability` blocked end drops the capability at once (R-BTN-126) | S-BTN-92, -223 |

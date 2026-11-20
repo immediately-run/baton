@@ -109,7 +109,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose bindings held in git with no owner setting (R-BTN-161).
 - Chose a short wait in the claim, then a suspension, over always suspending or holding the claim until an answer (R-BTN-162).
 - Chose to resume a withdrawn handler's leg with the default restart (R-BTN-162).
-- Chose to refuse a post that does not descend from the head and to adopt a rewritten default branch only by an administrator's forced Resync, over held snapshots (R-BTN-11, R-BTN-147; the forced Resync is proposed, [tickets and sources](../proposals/tickets-and-sources.md), and until it is built such a post is held for the owner).
+- Chose to hold a post that does not descend from the head until an owner accepts it or 24 hours pass (R-BTN-11); adopting a rewritten default branch only by an administrator's forced Resync is proposed, not built ([tickets and sources](../proposals/tickets-and-sources.md)).
 - Chose a course's ordinary `cancel` leg over compensation legs run in reverse path order (R-BTN-168).
 - Chose retries as the built-in default handler of `error` over a retry course (R-BTN-122).
 - Chose per-leg retry policies bounded by the owners' default, ceiling and floor, a backoff being a prerequisite, over per-repository policies (R-BTN-122).

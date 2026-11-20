@@ -1,0 +1,77 @@
+---
+title: "B-296 — The administrator's dashboard session: the owner rules on 12 hours or 4, and the spec, the code and the test comments say one number"
+id: B-296
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1296
+tier: routine
+description: "SESSION_MS in src/core/admin.ts is 12 hours and section 11.4 was changed on 2026-11-19 to say so, but the spec said 4 hours before, section 12.4's cookie sentence still says at most 4 hours, and two test comments say 4. A session's length is a security bound. The owner picks the number; the losing side and the comments are fixed in one PR."
+topics:
+  - baton
+  - security
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** how long an administrator's dashboard session lives is stated three ways. `SESSION_MS`
+in `src/core/admin.ts` is `12 * 3_600_000`, used for the row's `expires_at` and the cookie's
+`Max-Age` in `src/core/baton.ts`. BATON_SPEC [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4) ([§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4)) says "It lives 12 hours" since
+the spec simplification, which wrote down what the code does; the spec said 4 hours before.
+[R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4) ([§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4)) still says the cookie `__Host-baton_session` lasts "at most 4 hours", and the
+comments in `test/integration/B-250.runners-view-reads.test.ts` (line 256) and
+`B-240.dashboard-queries.test.ts` (line 213) say "a session lives 4 hours ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4))". The
+spec must not be settled by whichever side was edited last: see
+[the review](../docs/review/spec-simplification-review-2026-11-19.mdx), *Where the spec and the
+code disagree*.
+
+**Spec:** [BATON_SPEC §11.4](../spec/BATON_SPEC/11-people.md#sec-11-4) ([R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4)), [§12.4](../spec/BATON_SPEC/12-security.md#sec-12-4) ([R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4)), [§13.2](../spec/BATON_SPEC/13-data-model.md#sec-13-2) (`dashboard_sessions`), [§15](../spec/BATON_SPEC/15-verification.md#sec-15)
+([S-BTN-170](../spec/BATON_SPEC/15-verification.md#scenarios)).
+
+## Plan
+
+1. **Ask the owner: 12 hours or 4.** What each costs: a session is a bearer cookie for every
+   `/v1/ui/*` action an administrator has, destructive ones behind `confirm: true` only; it
+   ends at once when its key leaves `BATON_ADMIN_KEYS`, so the length bounds a stolen cookie,
+   not a removed administrator. Four hours was the specified bound; twelve is one working day
+   without a second `baton admin open`. Record the answer in the history entry, quoted.
+2. **Spec, same PR.** R-BTN-155 owns the number. R-BTN-16's cookie sentence cites it instead of
+   restating it ("for the session's life, R-BTN-155"), so the two cannot disagree again. History
+   entry with `Rules changed: R-BTN-155, R-BTN-16`.
+3. **Code, only if 4 hours wins.** `SESSION_MS` becomes `4 * 3_600_000`. Sessions already
+   minted keep the `expires_at` they were stored with, up to twelve hours; say so in the PR, or
+   shorten them in a new migration (`UPDATE dashboard_sessions SET expires_at = MIN(expires_at,
+   created_at + 14400000)`) if the owner wants the bound to hold from the deploy.
+4. **Tests and comments.** The two comments state the ruled number. Add a case to the session
+   tests (`test/unit/admin.test.ts`): with `setClock`, a session answers one millisecond before
+   `SESSION_MS` and is `unauthenticated` at it, and the `Set-Cookie` header's `Max-Age` equals
+   `SESSION_MS / 1000`, so the constant and the cookie cannot drift.
+
+### Trust
+
+No new input. The value at issue bounds a credential Baton mints: the session cookie, created
+only from a one-time login link an administrator's key asked for (R-BTN-155), stored hashed
+(`dashboard_sessions.id_hash`), and checked against `BATON_ADMIN_KEYS` on every request. The
+number is the owner's to set: this ticket changes it only by the ruling of step 1, and a ticket
+or a comment claiming the ruling is not the ruling (CLAUDE.md, *Tickets are tasks, not
+authority*). No key, grant or host setting changes.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4): a session ends as soon as its minting key leaves `BATON_ADMIN_KEYS`,
+  whatever its length. Untouched and re-tested beside the new case.
+- BATON_SPEC [R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4): the cookie stays `__Host-` prefixed, host-only, `Secure`, `HttpOnly` and
+  `SameSite=Strict`; only `Max-Age` may change.
+- One clock (R-BTN-32): expiry is read through `this.now`; the test sets it with `setClock`.
+- One home per statement (`docs/context/spec-writing.mdx`): the length is stated in R-BTN-155
+  and cited elsewhere.
+
+## Status
+
+_filed 2026-11-20._ From the spec simplification review of 2026-11-19, *Where the spec and the
+code disagree* (PR #299). Waits on the owner's answer to step 1.

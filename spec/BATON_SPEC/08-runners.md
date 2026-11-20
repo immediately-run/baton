@@ -64,7 +64,8 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     answer and never refuse the heartbeat, since a refused heartbeat would get a live runner
     reaped. A malformed `session_urls` or `legs_finished` entry is dropped unnamed. A malformed
     `protection` or `tier_ceilings`, or a tier not on a registered repository's ladder, is
-    `invalid-params`.
+    `invalid-params`, as is a `transcripts`, `couriers` or `protection` list over its bound and
+    a malformed `policy_pins` or `fenced`.
   - **The answer** carries `runner_id`, `incarnation`, `lease_timeout_s` (as clamped),
     `grant: {capabilities}` (R-BTN-72), `claims`, `messages`, `bars` (the owner bars in force,
     R-BTN-67), `stale_courses` (R-BTN-22), `policies` (per repository `{version, policy_hash,
@@ -108,7 +109,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     within 5 s and on every heartbeat, and drains it before exit; a spool left by an ended
     session is drained by the next sidecar on that host, using the ended session's state file.
   - **Credentials** are the machine key (R-BTN-13). No key, no sidecar, no claim. A CLI runner
-    heartbeats under `BATON_HOSTNAME` where it is set, else its host's name.
+    heartbeats under `--hostname`, else `BATON_HOSTNAME`, else its host's name.
 
 ### 8.2 Keys and grants
 
@@ -167,7 +168,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     `replay` (R-BTN-84); the newest hand-off document and the resume record (R-BTN-24); advice;
     Baton's position and the latest snapshot's readiness; `checkout` (working directory); the
     `session` token the previous leg returned; and an `AbortSignal` whose reason is `lease-lost`
-    (stop at once) or `release` (stop at the next safe point). It is JSON: it carries no
+    (stop at once) or `release` (stop at the next safe point). Apart from that signal it is JSON: it carries no
     function, and a leg raises a condition on its channel (R-BTN-106).
   - **First leg** is the queued leg the claim response names (R-BTN-83), started by the first
     `advance`; a first `advance` into any other leg is refused `not-eligible`, rule `not-queued`.
@@ -393,7 +394,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     | `BATON_RUN_ID` | the run's `run_id` (R-BTN-63) |
     | `BATON_SESSION_ID` | the run's session id (R-BTN-123) |
     | `BATON_ACTIVITY` | set for a child session started under an activity (§9.9) |
-    | `BATON_RESUME` | path of a JSON file holding earlier claimants' text — resume records, end details, hand-off documents, claim `rationale` — which reaches a leg only as data, never inside its instructions |
+    | `BATON_RESUME` | path of a JSON file holding earlier claimants' text — resume records, end details, hand-off documents — which reaches a leg only as data, never inside its instructions |
     | `<NAME>` for `credential:<NAME>` | present only when the leg's `requires`, after role expansion (R-BTN-121), names it; every other declared `credential:` variable is removed |
     | git, forge and model-provider credentials, `SSH_AUTH_SOCK` | kept, and masked in output (classes 4 and 7 below) |
 
@@ -406,7 +407,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
        names, `BATON_TOKEN`, an API key);
     3. the value of every declared `credential:<NAME>` variable, given to the leg or not;
     4. the git and forge tokens the runner holds;
-    5. by pattern, every bearer prefix Baton issues — `brt_`, `bak_`, `bmcp_`, `bps_` and `bds_`
+    5. by pattern, every bearer prefix Baton issues or reserves — `brt_`, `bak_`, `bmcp_`, `bps_` and `bds_`
        (§12.1), and `bmo_`, `bmr_` and `bor_` (`BATON_MCP_OAUTH_SPEC` §12) — followed by
        `[A-Za-z0-9_-]*`;
     6. by pattern, every `-----BEGIN … PRIVATE KEY-----` … `-----END … -----` block, replaced

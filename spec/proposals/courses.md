@@ -2,7 +2,7 @@
 title: "Proposal — courses: sources, fields, the standard courses' PR shape, and courses that do not ship"
 description: "The parts of BATON_SPEC §5 that are designed and not built: course sources in other repositories, course-file fields the validator does not accept yet, the cancel leg, the standard courses as PR record courses with fact legs, the courses that do not ship, runner capability checks, the leg-state branch, and bars that hold a course file."
 ---
-**Status:** proposal — not built; moves into BATON_SPEC §5 when built (tickets B-28, B-29, B-40, B-154 among them)
+**Status:** proposal — not built; moves into BATON_SPEC §5 when built (tickets B-40, B-62, B-65, B-149, B-154 among them)
 
 This page holds designs. Nothing here binds Baton as built. What is built is in
 [BATON_SPEC §5](../BATON_SPEC/05-courses.md) and, for each shipped course, in

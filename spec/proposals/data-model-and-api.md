@@ -2,7 +2,7 @@
 title: "Proposal: tables and routes of designs not built"
 description: "The tables, columns, routes and wire fields that BATON_SPEC §13 and §14 named for designs Baton does not build yet, grouped by design."
 ---
-**Status:** proposal — not built; moves into BATON_SPEC §13 and §14 when built (tickets B-5, B-8, B-25, B-38, B-55, B-61, B-64, B-73, B-120, B-136, B-146, B-147, B-206)
+**Status:** proposal — not built; moves into BATON_SPEC §13 and §14 when built (tickets B-8, B-25, B-38, B-55, B-61, B-64, B-73, B-120, B-136, B-146, B-147, B-206)
 
 Nothing here binds Baton as built. [BATON_SPEC §13](../BATON_SPEC/13-data-model.md) holds the
 tables of the schema and [§14](../BATON_SPEC/14-api.md) the routes Baton serves; their

@@ -1,0 +1,109 @@
+---
+title: "B-288 — Remove the mirror and the adoption machinery: mirror.ts, cutover.ts, shadow reports and the legacy runner and credential kinds, with §16"
+id: B-288
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1288
+tier: judgement
+description: "The spec keeps section 16 and the mirror rows of sections 13, 14 and 15 only because the code is still there: src/core/mirror.ts, src/core/cutover.ts, POST /v1/runner/shadow-report, the legacy runner and credential kinds and the mirror key. Remove the code, its tests and its stored state in a new migration, and delete the section and every passage that serves only it. Starts with a check that no registered repository is still in shadow or mirrored."
+topics:
+  - baton
+  - simplification
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the spec simplification of 2026-11-19 marks adoption "Legacy, removed with its code"
+and leaves the code. `src/core/mirror.ts` (154 lines) and `src/core/cutover.ts` (177 lines) are
+live, with callers in `baton.ts`, `runnerApi.ts` (`mode`, `shadowReport`, `POST
+/v1/runner/shadow-report`), `claims.ts` (eleven `kind = 'legacy'` branches in the reaper, the
+holder reads and the lease), `auth.ts`, `admin.ts`, `registry.ts`, `retention.ts`, `ownerState.ts`
+and the runner (`src/runner/`, `src/defaults/cli.ts`); `policy.ts` still admits `mirror` as a
+`refs.*` writer. The ruling that docs has cut over (ruling 4) and the reasons are in
+[the review](../docs/review/spec-simplification-review-2026-11-19.mdx), *The owner's rulings*
+and *Left for tickets*, item 1.
+
+**Spec:** [BATON_SPEC §16](../spec/BATON_SPEC/16-adoption.md#sec-16) ([R-BTN-28](../spec/BATON_SPEC/16-adoption.md#sec-16-1), [R-BTN-17](../spec/BATON_SPEC/16-adoption.md#sec-16-3)), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-193](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-36](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [§3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) ([R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2), the
+mirror key), [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) ([R-BTN-3](../spec/BATON_SPEC/08-runners.md#sec-8-1), the `legacy` kind), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) ([R-BTN-179](../spec/BATON_SPEC/12-security.md#sec-12-1)), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), the `mirror`
+writer of `refs.*`), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-16](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-50](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-55](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-56](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-244](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-9](../spec/BATON_SPEC/15-verification.md#gates),
+[G-BTN-19](../spec/BATON_SPEC/15-verification.md#gates), [G-BTN-35](../spec/BATON_SPEC/15-verification.md#gates), [G-BTN-41](../spec/BATON_SPEC/15-verification.md#gates), [G-BTN-87](../spec/BATON_SPEC/15-verification.md#gates)).
+
+## Plan
+
+The spec is the authority; where this list and a rule differ, the rule wins.
+
+1. **Check the instance first, and stop if it is not clean.** Read the reference deployment's
+   registry: every repository has `cutover_at` set, none has a mirror configured or a live mirror
+   key, and no active claim belongs to a `legacy` runner. Put the read's output in the PR. A
+   repository still in shadow, a live mirror or an unadopted legacy claim is a question for the
+   owner, not something this ticket migrates.
+2. **Spec, in the same PR.** Delete `spec/BATON_SPEC/16-adoption.md` and every passage marked
+   legacy for it: R-BTN-28 and R-BTN-17, R-BTN-36, the mirror key in §3.2 and §12.1, the `legacy`
+   runner kind in §8.1, `mirror` in §12.8's `refs.*` row, the mirror, cutover, adoption and
+   shadow rows of §13 and §14, and the scenario and gate rows above that test only this. Trim
+   S-BTN-50, S-BTN-55, S-BTN-56, S-BTN-244 and G-BTN-87 to what remains. Add the history entry
+   (`Rules changed:` naming each id), run `npm run spec:index` and `npm run spec:impact` with the
+   ids, and carry its checklist in the PR body.
+3. **Server.** Remove `mirror.ts` and `cutover.ts` with their wiring in `baton.ts` and `ports.ts`;
+   the routes `POST /v1/runner/shadow-report`, `GET /v1/runner/mode`, `POST /v1/ui/cutover` and
+   the mirror's own; the heartbeat's `mode` map; the `not-cut-over` refusal; the `legacy` branches
+   in `claims.ts`, `blocks.ts`, `capacity.ts` and `ownerState.ts`; the mirror cursor in
+   `retention.ts` and the seal's wait for lagging mirrors; the mirror credential kind in `auth.ts`
+   and `admin.ts`; `mirror` from `REF_WRITERS` in `policy.ts`, with a stored policy that names it
+   read without it.
+   *(Added 2026-11-20, from the fix round of PR #299.)* `flushDispatch` sends a sync dispatch
+   that is neither the webhook path's nor the unblocked trigger's only for a repository after
+   its cutover (`src/core/baton.ts:278-285`, `this.cutover.cutoverAt(wf.repository) != null`),
+   which R-BTN-94 does not say. With `cutover.ts` gone the filter goes too and every
+   repository with a dispatch target is dispatched to after a claim, an advance, an end, an
+   answer or a bar, as the rule reads. Step 1's check of the instance also lists the
+   repositories this starts dispatching for, so the first deploy surprises no one; a test
+   covers a never-cut-over repository receiving the dispatch. The events CHECK's legacy
+   kinds (`adopted`, `cutover`, `foreign-claim`, `shadow-conflict`) are named in B-297's list
+   and leave with this ticket's migration or stay as dead values; say which.
+4. **Runner and CLI.** Remove the shadow report, the mode read and the `IR_BATON_*` variables
+   from `src/runner/`, `src/defaults/cli.ts`, `src/defaults/ticket-state.ts` and `cli/baton.mjs`.
+   A repository registers cut over; `cut_over` is no longer a field.
+5. **Migration.** One new numbered file (its number from `node cli/baton.mjs tickets next
+   migration --for B-288`) drops `adoptions`, the mirror's tables and cursor columns and the
+   `legacy` credential and runner rows, after ending any `legacy` claim as `reaped:legacy` so no
+   ticket is left held by a runner that no longer exists. No earlier migration is edited.
+6. **Tests.** Delete `test/unit/mirror.test.ts`, the S-BTN-16 test and the mirror, shadow and
+   legacy cases of the suites that carry them (`auth`, `keys`, `registry`, `runners`,
+   `ownerState`, `webhook`, `migrations`, S-BTN-50, S-BTN-55, S-BTN-198, S-BTN-244). Add one
+   migration test: a database holding a legacy claim and a mirror cursor migrates to one with
+   neither, the ticket claimable again.
+
+### Trust
+
+No new input. Two inputs go: a mirror key's requests, and a git claim tool's shadow reports,
+which any runner key could post for its repository (reach 7's neighbour: a statement Baton
+recorded without deciding on it). `PUT …/policy` loses the value `mirror`; the document is still
+validated field by field in `src/core/policy.ts`, and a stored version naming `mirror` is read
+with the writer dropped, never widened to another writer. The instance check of step 1 reads the
+registry with an administrator's key the owner supplies; this ticket holds no credential and
+changes no grant.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-4](../spec/BATON_SPEC/09-claims.md#sec-9-1): one active claim per ticket. The migration ends each `legacy` claim before
+  it deletes the runner, in one transaction, so no ticket is left with a claim whose holder is
+  gone.
+- BATON_SPEC [R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): filter fields only. Removing the mirror removes a writer of notes to git;
+  nothing new is stored.
+- BATON_SPEC [R-BTN-193](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): git is never a lock. After this ticket no code path reads a claim from
+  git.
+- BATON_SPEC [R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8): owner state survives. The export and import keep their shape minus the
+  mirror cursor; [S-BTN-50](../spec/BATON_SPEC/15-verification.md#scenarios)'s "two exports are identical" still holds.
+- Migrations are append-only (CLAUDE.md): one new file, none edited.
+
+## Status
+
+_filed 2026-11-20._ From the spec simplification review of 2026-11-19, *Left for tickets*,
+item 1 (PR #299).

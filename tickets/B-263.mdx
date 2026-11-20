@@ -67,7 +67,8 @@ The spec is the authority; where this list and a rule differ, the rule wins.
 8. **Tests.** Delete `test/integration/S-BTN-218.signed-briefs.test.ts`,
    `S-BTN-219.require-signed-control.test.ts` and `test/unit/signed-control.test.ts`; take
    S-BTN-218 and S-BTN-219 out of `RETIRED_TESTS_ALLOWED` (`scripts/check-spec.mjs`); bring
-   S-BTN-209, S-BTN-220 and S-BTN-233's tests to their rows as amended.
+   S-BTN-209 and S-BTN-220's tests to their rows as amended (S-BTN-233, leg events, is unbuilt
+   and has no test: its row is in [the proposals' scenarios](../spec/proposals/scenarios.md)).
 9. **`CLAUDE.md` in each home**: baton's reads a brief by `last_written_by.human`; check the docs
    and Fieldhouse homes' copies say the same, and ask their owners where they do not.
 
@@ -92,7 +93,7 @@ home that needs the protection applies a policy under which `control-paths-human
   change any row's hash for a ticket whose file did not change (test: a re-post after the
   upgrade materializes nothing).
 - Migrations are append-only: one new file, nothing edited.
-- R-BTN-31: S-BTN-209, S-BTN-220, S-BTN-233.
+- R-BTN-31: S-BTN-209, S-BTN-220.
 
 ### Exit criteria
 
@@ -105,3 +106,5 @@ home that needs the protection applies a policy under which `control-paths-human
 ## Status
 
 _filed 2026-11-19._
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved S-BTN-233 (leg events, B-260) out of the verification section to [the proposals' scenarios](../spec/proposals/scenarios.md): it has no test to amend, so item 8 and the last invariant name S-BTN-209 and S-BTN-220 alone.)_
