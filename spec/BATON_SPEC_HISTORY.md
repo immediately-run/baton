@@ -18,6 +18,19 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-20 — A session's reads outside `/v1/ui/*`, the strip's ready count, V1's paged lists (R-BTN-16, R-BTN-155, S-BTN-243, S-BTN-254).**
+  Rules changed: R-BTN-16, R-BTN-155.
+  The V2 dashboard (BATON-UI-V2, merged 2026-11-20) reads the repository and tenant `GET`s §14
+  lists a session on, and §12.1's principals row, R-BTN-16's Sessions clause and R-BTN-155's
+  still said a session authenticates nothing outside `/v1/ui/*`; they now say what is built: a
+  session reads those `GET`s and writes only under `/v1/ui/*`. `GET /v1/repositories`' `ready`
+  counted the board's ready rows, so the strip read "ready 10" over a Tickets list of two; it
+  now counts the rows the Tickets list calls `ready` (S-BTN-254). `GET
+  /v1/ui/repositories/{repository}/tickets` and `…/runners`, V1's paged lists (B-287), had no
+  caller once B-203 retired the rest of V1's reads and are removed with their §14 rows;
+  S-BTN-243's dashboard case runs against the session's entity reads, and `repo.tickets`'
+  `ETag` hashes the version runner activity does not move, as V1's ticket page did.
+
 - **2026-11-19 — The spec cut to what is built, and each fact to one home (R-BTN-97, R-BTN-154, R-BTN-169, R-BTN-200).**
   Rules changed: R-BTN-97, R-BTN-154, R-BTN-169, R-BTN-200, R-BTN-39, R-BTN-74, R-BTN-91, R-BTN-107, R-BTN-117, R-BTN-123, R-BTN-124, R-BTN-128, R-BTN-129, R-BTN-130, R-BTN-131, R-BTN-133, R-BTN-134, R-BTN-135, R-BTN-146, R-BTN-155, R-BTN-161, R-BTN-162, R-BTN-165, R-BTN-168, R-BTN-171, R-BTN-180, R-BTN-182, R-BTN-183, R-BTN-184, R-BTN-188, R-BTN-192, R-BTN-198, R-BTN-201, R-BTN-106, R-BTN-114, R-BTN-115, R-BTN-153, R-BTN-181, R-BTN-185, R-BTN-187, R-BTN-191, R-BTN-11, R-BTN-83, R-BTN-94, R-BTN-99, R-BTN-100, R-BTN-126, R-BTN-193.
   The owner asked for a review of where the spec "could be simplified"

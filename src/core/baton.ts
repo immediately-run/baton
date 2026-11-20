@@ -730,32 +730,6 @@ export class BatonCore {
           res.headers.set('Set-Cookie', `${SESSION_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0`);
           return res;
         }
-        // B-287 / S-BTN-243: the authenticated dashboard principal reads one repository's
-        // tickets or runners a page at a time. Authorization precedes the ETag (B-242,
-        // R-BTN-196: the state version, and the clock's coarse bucket where the answer shows
-        // what the clock decides), including a 304. The aggregate these stood beside is retired
-        // (B-203): the whole state is `GET /v1/admin/state`'s, an administrator's key's alone.
-        const list = /^\/v1\/ui\/repositories\/([^/]+)\/(tickets|runners)$/.exec(url.pathname);
-        if (req.method === 'GET' && list) {
-          const repository = checkRepositoryId(pathSegment(list[1]));
-          if (!this.registry.live(repository)) throw new BatonError('not-found', `no repository ${repository}`);
-          const limit = Number(url.searchParams.get('limit') ?? 50);
-          if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new BatonError('invalid-params', 'limit must be an integer from 1 to 100');
-          const after = url.searchParams.get('after') ?? '';
-          if (after.length > 256) throw new BatonError('invalid-params', 'after is too long');
-          const activity = list[2] === 'runners';
-          const runnerAfter = after === '' ? 0 : Number(after);
-          if (activity && (!Number.isSafeInteger(runnerAfter) || runnerAfter < 0)) throw new BatonError('invalid-params', 'after must be a runner id');
-          const etag = `"${sha256HexSync(JSON.stringify([owner, url.pathname, after, limit, this.store.readVersion(activity), activity ? clockBucket(this.now()) : null]))}"`;
-          if (ifNoneMatch(req, etag)) return new Response(null, { status: 304, headers: { ETag: etag } });
-          const rows = activity ? this.runners.runnersView(this.now(), { repository, after: runnerAfter, limit: limit + 1 })
-            : this.ticketList(repository, after, limit + 1);
-          const more = rows.length > limit;
-          const items = rows.slice(0, limit);
-          const res = json({ [list[2]]: items, cursor: more ? String((items.at(-1) as unknown as { id: string | number }).id) : null });
-          res.headers.set('ETag', etag);
-          return res;
-        }
       }
       // R-BTN-181's envelope (§14), B-7's slice: `POST /v1/repositories/{repository}/attestations`
       // with a `std:decision@1` — a person's answer to the ticket's queued person leg
@@ -2445,23 +2419,6 @@ export class BatonCore {
       const ladder = ladders.get(r.repository_id as string) ?? [...TIERS];
       return ladder.includes(t) && fitsTier((r.tier as string | null) ?? null, t, ladder);
     }).map((r) => r.id)]));
-  }
-
-  /** A ticket page reads only current list fields, with bounded child-row enrichment. */
-  private ticketList(repository: string, after: string, limit: number) {
-    const tickets = this.sql<{ id: string; title: string; local_id: string; course_id: string; tier: string | null; station: string | null; next_leg: string | null }>(
-      `SELECT t.id, t.local_id, t.title, t.course_id, t.tier, t.path, t.display, s.station, s.next_leg
-       FROM tickets t LEFT JOIN ticket_stations s ON s.ticket_id = t.id
-       WHERE t.repository_id = ? AND t.id > ? ORDER BY t.id LIMIT ?`, repository, after, limit);
-    if (!tickets.length) return [];
-    const ids = JSON.stringify(tickets.map((t) => t.id));
-    const requirements = new Map<string, string[]>();
-    for (const r of this.sql<{ ticket_id: string; name: string }>(
-      'SELECT ticket_id, name FROM ticket_requires WHERE ticket_id IN (SELECT value FROM json_each(?)) ORDER BY ticket_id, name', ids)) {
-      const list = requirements.get(r.ticket_id) ?? [];
-      list.push(r.name); requirements.set(r.ticket_id, list);
-    }
-    return tickets.map((t) => ({ ...t, requires: requirements.get(t.id) ?? [] }));
   }
 
   /** `GET /v1/admin/state` (R-BTN-57, R-BTN-179; B-118, B-216's Decision 4a): the state in one

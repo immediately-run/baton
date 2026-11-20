@@ -216,21 +216,11 @@ export const ACTIONS: Action[] = [
     input: { type: 'object', properties: { after: { type: 'string', description: 'A version number: the versions after it.' } } },
   },
 
-  // ── the session's own reads under /v1/ui/* (B-203 retired V1's whole-state read; the two
-  //    paged lists are B-287's, S-BTN-243, which no V2 screen calls) ──
+  // ── the session's own read under /v1/ui/* (B-203 retired V1's whole-state read, and V1's two
+  //    paged lists went with it: a session reads the entity reads) ──
   {
     id: 'ui.session', summary: 'Whether the caller’s dashboard session stands.',
     effect: 'read', http: { method: 'GET', path: '/v1/ui/session' }, callers: [SESSION_ANY], input: NONE,
-  },
-  {
-    id: 'ui.tickets', summary: 'One repository’s tickets, a page at a time (V1’s list).',
-    effect: 'read', http: { method: 'GET', path: '/v1/ui/repositories/{repository}/tickets' }, callers: [SESSION_REPO],
-    input: { type: 'object', properties: { after: { type: 'string' }, limit: { type: 'string' } } },
-  },
-  {
-    id: 'ui.runners', summary: 'One repository’s runners, a page at a time (V1’s list).',
-    effect: 'read', http: { method: 'GET', path: '/v1/ui/repositories/{repository}/runners' }, callers: [SESSION_REPO],
-    input: { type: 'object', properties: { after: { type: 'string' }, limit: { type: 'string' } } },
   },
 
   // ── a session's writes (the `/v1/ui/*` POSTs; R-BTN-155's table says what each takes) ──

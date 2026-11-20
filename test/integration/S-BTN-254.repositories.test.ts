@@ -7,7 +7,7 @@
 //      with `session` null;
 //   2. an owner key lists its repositories only, `session` null and no `seed_owners`;
 //   3. `running`, `ready`, `needs_you`, `runners_alive`, `runners_total` and
-//      `discrepancies_7d` equal the board's live claims, its ready rows, the open conditions,
+//      `discrepancies_7d` equal the board's live claims, the Tickets list's ready rows, the open conditions,
 //      the granted runners and the discrepancy events of 7 days;
 //   4. `exclusive_goal` is null (goals are not built); a retired repository is not listed;
 //   5. a runner key is `forbidden`, a stranger `unauthenticated`.
@@ -118,11 +118,13 @@ describe('S-BTN-254 the root read (B-204)', () => {
     expect((await read(opsOwner, '/v1/repositories')).status).toBe(401);
   });
 
-  it('the counts are the board’s live claims, its ready rows, the open conditions, the granted runners and 7 days of discrepancies', async () => {
+  it('the counts are the board’s live claims, the Tickets list’s ready rows, the open conditions, the granted runners and 7 days of discrepancies', async () => {
     const before = rowOf(await list(), 'docs');
     const board = (await read(docsOwner, '/v1/repositories/docs/board')).json;
+    // Nothing is claimed or held yet, so the Tickets list's ready rows are the board's.
     expect(before.ready).toBe((board.ready as unknown[]).length);
     expect(before.ready).toBe(3);
+    expect(before.ready).toBe((await read(docsOwner, '/v1/repositories/docs/tickets?state=ready')).json.matched);
     expect([before.running, before.needs_you, before.runners_alive, before.runners_total, before.discrepancies_7d]).toEqual([0, 0, 0, 0, 0]);
 
     // A granted runner registers, and a seed credential's runner claims a ticket.
@@ -147,7 +149,10 @@ describe('S-BTN-254 the root read (B-204)', () => {
     const now = (await read(docsOwner, '/v1/repositories/docs/board')).json;
     expect(after.running).toBe((now.holders as unknown[]).length);
     expect(after.running).toBe(1);
-    expect(after.ready).toBe((now.ready as unknown[]).length);
+    // The claimed ticket is `running` on the Tickets list, so it is no longer counted ready —
+    // the strip's number is the length of the list it links to, not the board's queue.
+    expect(after.ready).toBe(2);
+    expect(after.ready).toBe((await read(docsOwner, '/v1/repositories/docs/tickets?state=ready')).json.matched);
     expect(after.needs_you).toBe(1);
     const open = (await read(docsOwner, '/v1/repositories/docs/conditions?open=1')).json;
     expect(after.needs_you).toBe((open.conditions as unknown[]).length);

@@ -76,7 +76,10 @@ describe('S-BTN-170 the state in one request equals the entity reads (B-216)', (
       expect(mine.mode).toBe(row.mode.mode);
       expect(mine.head == null ? null : pick(mine.head, ['sha', 'received_at'])).toEqual(row.head == null ? null : pick(row.head, ['sha', 'received_at']));
       expect(mine.courses).toEqual((row.courses as Json[]).map((c) => pick(c, ['id', 'version'])));
-      expect(mine.ready).toBe((state.ready as Json[]).filter((t) => t.repository_id === row.id).length);
+      // repo.list counts the Tickets list's `ready` rows — the state's ready rows less those a
+      // claim, a hold, a block or a back-off outranks — so the strip links to a list of its length.
+      expect(mine.ready).toBe((await read(f, `/v1/repositories/${row.id}/tickets?state=ready`)).matched);
+      expect(mine.ready).toBeLessThanOrEqual((state.ready as Json[]).filter((t) => t.repository_id === row.id).length);
       expect(mine.running).toBe((state.running as Json[]).filter((c) => ofRepository(row.id)(c.ticket_id)).length);
       expect(mine.discrepancies_7d).toBe((state.discrepancies.rows as Json[]).filter((d) => ofRepository(row.id)(d.ticket_id)).length);
       // admin.repo.list carries the state's row whole, with the registry's own fields beside it.

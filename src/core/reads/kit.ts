@@ -49,6 +49,10 @@ export type ReadRoute = {
   /** True where the answer shows anything the clock decides — alive, stalled, `reap_at`, a
    *  lapse, a time window: the ETag then folds in B-242's coarse clock bucket. */
   clock?: boolean;
+  /** True where the answer is built from no activity row (activities, transcripts, messages,
+   *  events, ticket history) that could change without another table changing with it: its
+   *  ETag then stands through runners' reports (B-287, S-BTN-243). */
+  quiet?: boolean;
   /** False — or a predicate answering false for this call — where the answer must not be
    *  conditional (a read that does a check of its own after authorization). */
   etag?: false | ((call: ReadCall) => boolean);

@@ -4,6 +4,7 @@
 import { BatonError } from '../http';
 import { actionsFor } from '../actions';
 import { DISCREPANCY_WINDOW_MS } from '../history';
+import { countStates, ticketRows } from '../tickets';
 import { readableRepositories, type ReadCtx, type ReadPrincipal, type ReadRoute } from './kit';
 
 /** One repository as `GET /v1/repositories` lists it. Filter fields only (R-BTN-33): the
@@ -26,7 +27,9 @@ export type RepositoryRow = {
   mode: 'shadow' | 'cut-over';
   /** Live claims: `claims` rows with `status = 'active'` on the repository's tickets. */
   running: number;
-  /** Ready tickets: those whose queued leg the sync posts ready — the board's `ready` rows. */
+  /** Ready tickets: those the Tickets list calls `ready` (`ticketState`) — a queued leg posted
+   *  ready and nothing above it in the precedence (no claim, hold, block or back-off), so the
+   *  strip's number is the length of the list it links to. */
   ready: number;
   /** Open conditions (`conditions.outcome = 'open'`) and nothing else: the queued person legs
    *  R-BTN-163 also lists join the count with B-57. The strip labels it "conditions" until then. */
@@ -73,9 +76,6 @@ export function repositoriesAnswer(cx: ReadCtx, principal: ReadPrincipal): Repos
   const courses = new Map<string, { id: string; version: number }[]>();
   for (const c of cx.core.courses.all()) courses.set(c.repository_id, [...(courses.get(c.repository_id) ?? []), { id: c.id, version: c.version }]);
   const running = countBy(cx, `SELECT ${prefix} AS r, COUNT(*) AS n FROM claims WHERE status = 'active' GROUP BY r`);
-  const ready = countBy(cx,
-    `SELECT t.repository_id AS r, COUNT(*) AS n FROM tickets t JOIN ticket_stations s ON s.ticket_id = t.id
-     JOIN ticket_next_legs a ON a.ticket_id = t.id AND a.leg = s.next_leg AND a.state = 'ready' GROUP BY t.repository_id`);
   const needsYou = countBy(cx, `SELECT repository_id AS r, COUNT(*) AS n FROM conditions WHERE outcome = 'open' GROUP BY repository_id`);
   const total = countBy(cx,
     `SELECT g.repository_id AS r, COUNT(*) AS n FROM runner_grants g JOIN runners w ON w.credential_id = g.credential_id
@@ -97,7 +97,7 @@ export function repositoriesAnswer(cx: ReadCtx, principal: ReadPrincipal): Repos
         head: h?.sha ? { sha: h.sha, received_at: h.received_at, observation: h.observation } : null,
         mode: r.cutover_at != null ? 'cut-over' as const : 'shadow' as const,
         running: running.get(r.id) ?? 0,
-        ready: ready.get(r.id) ?? 0,
+        ready: countStates(ticketRows(cx, r.id)).ready,
         needs_you: needsYou.get(r.id) ?? 0,
         runners_alive: alive.get(r.id) ?? 0,
         runners_total: total.get(r.id) ?? 0,
