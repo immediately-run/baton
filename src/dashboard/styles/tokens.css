@@ -1,0 +1,79 @@
+/* tokens.css — the design's tokens, taken from the owner's mockup (docs/design/
+   baton-dashboard-v2.html): its colours in light and dark, its type faces and its spacing.
+   Light and dark follow the system setting; `data-theme` on the root element is the footer's
+   override (B-221). Nothing here loads from another origin (§12.3). */
+:root {
+  --bg: oklch(0.984 0.006 85);
+  --panel: oklch(0.996 0.003 85);
+  --sunk: oklch(0.962 0.008 85);
+  --line: oklch(0.905 0.01 80);
+  --line2: oklch(0.84 0.012 80);
+  --fg: oklch(0.25 0.01 70);
+  --mut: oklch(0.47 0.012 70);
+  --dim: oklch(0.6 0.01 70);
+  --link: oklch(0.48 0.11 42);
+  --clay: oklch(0.64 0.13 42);
+  --ok: oklch(0.5 0.11 150);
+  --warn: oklch(0.53 0.12 70);
+  --bad: oklch(0.52 0.16 25);
+  --warnbg: oklch(0.965 0.03 80);
+  --bar: oklch(0.64 0.13 42 / 0.16);
+  --barline: oklch(0.64 0.13 42 / 0.55);
+  --term: oklch(0.22 0.006 70);
+  --termfg: oklch(0.9 0.008 85);
+  --termerr: oklch(0.76 0.13 30);
+  --shade: oklch(0.25 0.01 70 / 0.35);
+  --pad: 9px;
+  --radius: 12px;
+  --radius-s: 8px;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --mono: ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: oklch(0.215 0.004 80);
+    --panel: oklch(0.245 0.005 80);
+    --sunk: oklch(0.195 0.004 80);
+    --line: oklch(0.315 0.006 80);
+    --line2: oklch(0.4 0.008 80);
+    --fg: oklch(0.93 0.008 85);
+    --mut: oklch(0.73 0.01 80);
+    --dim: oklch(0.58 0.01 80);
+    --link: oklch(0.79 0.09 52);
+    --clay: oklch(0.7 0.13 42);
+    --ok: oklch(0.78 0.12 150);
+    --warn: oklch(0.81 0.11 78);
+    --bad: oklch(0.74 0.14 25);
+    --warnbg: oklch(0.81 0.11 78 / 0.08);
+    --bar: oklch(0.7 0.13 42 / 0.2);
+    --barline: oklch(0.7 0.13 42 / 0.6);
+    --term: oklch(0.17 0.004 80);
+    --shade: oklch(0 0 0 / 0.55);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: oklch(0.215 0.004 80);
+  --panel: oklch(0.245 0.005 80);
+  --sunk: oklch(0.195 0.004 80);
+  --line: oklch(0.315 0.006 80);
+  --line2: oklch(0.4 0.008 80);
+  --fg: oklch(0.93 0.008 85);
+  --mut: oklch(0.73 0.01 80);
+  --dim: oklch(0.58 0.01 80);
+  --link: oklch(0.79 0.09 52);
+  --clay: oklch(0.7 0.13 42);
+  --ok: oklch(0.78 0.12 150);
+  --warn: oklch(0.81 0.11 78);
+  --bad: oklch(0.74 0.14 25);
+  --warnbg: oklch(0.81 0.11 78 / 0.08);
+  --bar: oklch(0.7 0.13 42 / 0.2);
+  --barline: oklch(0.7 0.13 42 / 0.6);
+  --term: oklch(0.17 0.004 80);
+  --shade: oklch(0 0 0 / 0.55);
+  color-scheme: dark;
+}

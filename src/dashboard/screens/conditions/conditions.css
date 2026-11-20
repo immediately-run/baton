@@ -1,0 +1,279 @@
+/* conditions.css — the mockup's Needs-you list (docs/design/baton-dashboard-v2.html): one
+   panel, a row per thing that waits — the kind's mark and name at the left, the ticket and one
+   sentence in the middle, what a person can do at the right — and, at phone width, the
+   controls under each row. Shared by the Conditions, Attestations and Sync screens. */
+.needs-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.needs-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: flex-start;
+  padding: calc(var(--pad) + 5px) 16px;
+  border-top: 1px solid var(--line);
+  margin-top: -1px;
+}
+
+.needs-kind {
+  flex: 0 0 170px;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding-top: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.needs-glyph {
+  flex: 0 0 12px;
+  font-size: 11px;
+  text-align: center;
+}
+
+.needs-main {
+  flex: 1 1 280px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+
+.needs-title {
+  text-wrap: pretty;
+}
+
+.needs-title .mono {
+  font-size: 12.5px;
+  margin-right: 7px;
+}
+
+.needs-detail {
+  font-size: 13px;
+  color: var(--mut);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  align-items: baseline;
+}
+
+.needs-act {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.needs-restarts,
+.needs-options {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.needs-options li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.needs-options .cli,
+.needs-line .cli {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+.needs-why {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+}
+
+.needs-answer {
+  min-width: 0;
+}
+
+/* The Resolve page: the restarts drawn large — it is the page a notification opens. */
+.resolve-restarts .needs-restarts {
+  gap: 8px;
+  font-size: 15px;
+}
+
+.resolve-restarts .needs-restarts li {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--panel);
+}
+
+.resolve-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: baseline;
+}
+
+/* A listing's rows: a field and its value, as text. */
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.fields dt,
+.fields dd {
+  display: inline;
+  margin: 0;
+}
+
+.fields dt {
+  color: var(--mut);
+}
+
+.fields dt::after {
+  content: " ";
+}
+
+.fields > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The filters of a list that are part of its URL. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.filters label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--mut);
+}
+
+.filters .input {
+  width: 180px;
+  max-width: 100%;
+}
+
+/* What Baton held, struck through: the mockup's discrepancy row. A style on a text node. */
+.had {
+  color: var(--mut);
+  text-decoration: line-through;
+  text-decoration-color: var(--dim);
+}
+
+.sync-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+  min-width: 0;
+}
+
+.sync-line > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sync-grow {
+  flex: 1 1 220px;
+}
+
+.value-cell details > summary {
+  cursor: pointer;
+  color: var(--link);
+  font-size: 12.5px;
+}
+
+.row-lapsed {
+  color: var(--mut);
+}
+
+@media (max-width: 640px) {
+  .needs-row {
+    padding: 12px;
+  }
+  .needs-kind {
+    flex: 1 1 100%;
+  }
+  .needs-main {
+    flex: 1 1 100%;
+  }
+  /* The controls sit under the row. */
+  .needs-act {
+    flex: 1 1 100%;
+    align-items: flex-start;
+  }
+  .filters .input {
+    width: 100%;
+  }
+  .filters label {
+    flex: 1 1 100%;
+  }
+  /* A table of discrepancies or attestations becomes cards: each cell under its heading. */
+  .cards-at-phone .table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .cards-at-phone .table,
+  .cards-at-phone .table tbody,
+  .cards-at-phone .table tr,
+  .cards-at-phone .table td,
+  .cards-at-phone .table th {
+    display: block;
+    width: auto !important;
+  }
+  .cards-at-phone .table tr {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-s);
+    background: var(--panel);
+    padding: 8px 10px;
+    margin-bottom: 8px;
+  }
+  .cards-at-phone .table td,
+  .cards-at-phone .table th {
+    border: 0;
+    padding: 2px 0;
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+  .cards-at-phone .table td[data-label]::before,
+  .cards-at-phone .table th[data-label]::before {
+    content: attr(data-label) ": ";
+    color: var(--mut);
+    font-size: 12px;
+    font-weight: 400;
+  }
+}

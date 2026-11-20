@@ -2,7 +2,7 @@
 // `roadmap-pr` below the registry's `min_runner_version`. Must hold: no new claim on its tickets
 // (`stale-skills`); its held claim finishes.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { beat, claimItem, claimRow, course, cutover, endClaim, ownerCall, payload, register, setClock, syncCall } from '../helpers';
+import { beat, claimItem, claimRow, course, cutover, endClaim, ownerCall, payload, register, setClock, syncCall, stateView } from '../helpers';
 
 const board = inject('board');
 const sha = board.shas;
@@ -23,7 +23,7 @@ describe('S-BTN-15 stale skills', () => {
     const hb = await beat('vm-a', secret, at(3));
     expect(hb.json.stale_courses).toEqual([{ repository: 'docs', course: 'roadmap-pr', version: 3, min_runner_version: 4 }]);
     expect(hb.json.claim?.id).toBe(c.claim_id); // still held: rule 9 is checked at a claim only
-    const state = (await (await ownerCall('/v1/ui/state')).json()) as { needs_you: { stale_skills: { id: number; course_id: string }[] } };
+    const state = (await stateView()) as { needs_you: { stale_skills: { id: number; course_id: string }[] } };
     expect(state.needs_you.stale_skills.map((w) => [w.id, w.course_id])).toEqual([[id, 'roadmap-pr']]);
     expect((await endClaim('vm-a', secret, c.claim_id, { end_reason: 'done', ended_at_sha: sha.B })).status).toBe(200);
     expect((await claimRow(c.claim_id)).status).toBe('completed');

@@ -4,7 +4,7 @@
 // refused. The hooks clause — a repository's hooks give the same results in a local `workerd`
 // with no outbound network — arrives with the hook runners (R3-1236).
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { call, claimItem, cutover, HOST, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, syncToken, TOKENS } from '../helpers';
+import { call, claimItem, cutover, HOST, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, syncToken, TOKENS, stateView } from '../helpers';
 
 const board = inject('board');
 
@@ -26,7 +26,7 @@ describe(`S-BTN-31 both hosts (${HOST})`, () => {
 
   it('a posted board is served back in the order the sync ranked it', async () => {
     expect((await syncCall('/v1/sync/board', payload(board.shas.A, null, board.states.A))).status).toBe(200);
-    const state = (await (await ownerCall('/v1/ui/state')).json()) as { repositories: { id: string; head: { sha: string } | null }[]; ready: { id: string }[] };
+    const state = (await stateView()) as { repositories: { id: string; head: { sha: string } | null }[]; ready: { id: string }[] };
     expect(state.repositories.find((r) => r.id === 'docs')!.head!.sha).toBe(board.shas.A);
     expect(state.ready.map((r) => r.id)).toEqual(board.states.A.ready.map((id: string) => `docs:${id}`));
   });
@@ -37,7 +37,7 @@ describe(`S-BTN-31 both hosts (${HOST})`, () => {
     await cutover();
     const a = await register('vm-a', { last_activity_at: 2 ** 60 });
     expect((await claimItem('vm-a', a.secret, { ticket_id: 'docs:R3-9002' })).status).toBe(200);
-    expect((await ownerCall('/v1/ui/state')).status).toBe(200);
+    expect((await stateView()).running).toHaveLength(1);
   });
 
   it('the runner API is under /v1/runner only: the old /v1/worker prefix is not served (R3-1261)', async () => {

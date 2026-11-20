@@ -7,7 +7,7 @@
 // lists keep the log's order. On the Cloudflare host the lookups' rows_read
 // (`SqlStorageCursor.rowsRead`) stays the same while the log grows. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, HOST, adminSession, cutover, rows, sessionCall, setAdminKeys, setClock, withCore } from '../helpers';
+import { Git, HOST, adminSession, cutover, rows, sessionCall, setAdminKeys, setClock, withCore, keyCall } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-15T12:00:00Z');
@@ -33,9 +33,11 @@ async function stateLookups(session: string): Promise<{ state: Record<string, an
     };
   });
   try {
-    const res = await sessionCall(session, '/v1/ui/state');
+    // B-203: the state is `GET /v1/admin/state`'s alone now — the same `stateView()`, read
+    // with the administrator's key the session was minted from.
+    const res = await keyCall(admin, '/v1/admin/state');
     expect(res.status).toBe(200);
-    return { state: (await res.json()) as Record<string, any>, lookups: log };
+    return { state: res.json as Record<string, any>, lookups: log };
   } finally {
     await withCore((c) => {
       const s = c.store as unknown as { exec: unknown; __b235?: unknown };

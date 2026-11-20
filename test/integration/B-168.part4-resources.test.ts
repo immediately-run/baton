@@ -132,7 +132,7 @@ describe('B-168 the settings: the unblocked trigger is a loosening, and the dash
   });
 
   it('the dashboard\'s limits list every setting the route writes, and none that is gone', async () => {
-    const state = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as { limits: { settings: Record<string, unknown>[] } };
+    const state = (await keyCall(admin, '/v1/admin/state')).json as { limits: { settings: Record<string, unknown>[] } };
     const settings = state.limits.settings.find((s) => s.repository_id === 'docs')!;
     // B-182's forge, web_base, code_repos and pushers and B-127's require_signed_control beside
     // them; required_independence is not among them.

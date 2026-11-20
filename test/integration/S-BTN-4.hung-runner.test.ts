@@ -111,7 +111,7 @@ describe('S-BTN-4 hung runner force-reaped (R-BTN-19)', () => {
     expect(await holder('docs:HUNG1')).toEqual({ held_by_other: false, fence_pending: true });
     // Needs you lists the fence-pending claim with the dialog's facts: the runner, its
     // last-seen and the deadline the clear would not wait for.
-    const state = (await (await sessionCall(session, '/v1/ui/state')).json()) as { needs_you: { fence_pending: { id: number; ticket_id: string; hostname: string; session_name: string; last_seen_at: number; ended_at: number; lease_timeout_ms: number }[] } };
+    const state = (await keyCall(admin, '/v1/admin/state')).json as { needs_you: { fence_pending: { id: number; ticket_id: string; hostname: string; session_name: string; last_seen_at: number; ended_at: number; lease_timeout_ms: number }[] } };
     expect(state.needs_you.fence_pending).toEqual([expect.objectContaining({
       id: c1.json.claim_id, ticket_id: 'docs:HUNG1', hostname: 'vm-12', session_name: 'w1', last_seen_at: T0, lease_timeout_ms: 900_000 })]);
     // The clear — one POST under the administrator's session — ends the fence now.

@@ -8,6 +8,7 @@ import { MAX_DELIVERY, pickDelivery, verifyDelivery } from './webhook';
 import { clientVersionOf, compareVersions, maxVersion, parseClientVersions } from '../shared/versions.mjs';
 import type { Config } from './ports';
 import { ID_SEGMENT, isScreenPath } from './screens';
+import { keyReadable, sessionReadable } from './actions';
 import page from '../dashboard/dist/index.html';
 import style from '../dashboard/dist/app.css';
 import script from '../dashboard/dist/app.js';
@@ -64,6 +65,17 @@ async function dashboardPrincipal(req: Request, env: Config): Promise<Record<str
   if (session) out['X-Baton-Session'] = session;
   if (!Object.keys(out).length) throw new BatonError('unauthenticated', 'a dashboard session is required: `baton admin open` mints a link');
   return out;
+}
+
+/** R-BTN-16, every session request: any request a dashboard session authorizes, reads
+ *  included, carries an `Origin` equal to this Baton's when it carries one, and
+ *  `Sec-Fetch-Site: same-origin` when it carries that header — else `forbidden`. */
+function checkSessionRequest(req: Request, env: Config): void {
+  const origin = req.headers.get('Origin');
+  const site = req.headers.get('Sec-Fetch-Site');
+  if ((origin != null && origin !== env.BATON_ORIGIN) || (site != null && site !== 'same-origin')) {
+    throw new BatonError('forbidden', 'a dashboard session’s request comes from the dashboard’s own origin (R-BTN-16)');
+  }
 }
 
 /** A signed request (R-BTN-13 as amended): a half-signed, malformed, foreign-@authority or
@@ -205,7 +217,22 @@ async function route(req: Request, env: Config, to: Forward): Promise<Answer> {
   // B-176 (R-BTN-199): the sequence route, a write for the same principals — the core checks
   // each, and the repository's sync key beside them.
   // R-BTN-86 (§4.6, R3-1258): a ticket's children, open and closed, read like its blocks.
-  if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|board|policy|attestations|conditions|sequences\/[^/]+\/next|tickets\/[^/]+(\/(blocks|history|children|legs\/[^/]+\/runs))?)$/.test(pathname)) {
+  // B-192: a read is the registry's (src/core/actions.ts) — no list of session paths lives
+  // here. A GET whose entry lists `session` is the session's when the request carries the
+  // session cookie and neither a signature nor an `Authorization` header: a signed request or
+  // a bearer is that key's, and its cookie decides nothing. R-BTN-16's checks of every session
+  // request apply. `/v1/ui/*` keeps its own branch below.
+  const read = (req.method === 'GET' || req.method === 'HEAD') && !pathname.startsWith('/v1/ui/');
+  if (read && sessionReadable(pathname) && !isSigned(req) && !req.headers.has('Authorization') && cookie(req, SESSION_COOKIE)) {
+    return under('private', async () => {
+      checkSessionRequest(req, env);
+      return forward(req, to, { 'X-Baton-Session': cookie(req, SESSION_COOKIE)! });
+    });
+  }
+  // …and a GET whose entry lists a key outside `/v1/admin/*` and `/v1/owner/*` is read as the
+  // repository reads are, so a read added to the registry needs no path added here.
+  const keyRead = read && !pathname.startsWith('/v1/admin/') && !pathname.startsWith('/v1/owner/') && (keyReadable(pathname) || sessionReadable(pathname));
+  if (keyRead || pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|board|policy|attestations|conditions|sequences\/[^/]+\/next|tickets\/[^/]+(\/(blocks|history|children|legs\/[^/]+\/runs))?)$/.test(pathname)) {
     return under('private', async () => {
       if (isSigned(req)) return forwardSigned(req, env, to);
       // R-BTN-159: a runner's (or, on the reads, an owner's or administrator's) API key.
@@ -235,6 +262,8 @@ async function route(req: Request, env: Config, to: Forward): Promise<Answer> {
       return forward(req, to, {});
     });
   }
+  const located = await conditionRedirect(req, env, to, pathname);
+  if (located) return located;
   if (ASSETS[pathname] || isShell(pathname)) return { res: serve(pathname, req), cache: 'public' };
   // A session's own routes — `/v1/ui/*` — until B-203 retires them with V1's state read: the
   // principal decides whether even the not-found is named (the dashboard's own pages are in the
@@ -242,11 +271,39 @@ async function route(req: Request, env: Config, to: Forward): Promise<Answer> {
   if (pathname.startsWith('/v1/ui/')) {
     return under('private', async () => {
       const principal = await dashboardPrincipal(req, env);
+      checkSessionRequest(req, env);
       if (req.method !== 'GET' && req.method !== 'HEAD') checkStateChanging(req, env);
       return forward(req, to, principal);
     });
   }
   throw refuse('not-found', 'no such route', 'public');
+}
+
+/** B-195 (R-BTN-163): `GET /conditions/{id}`, the address a notification carries. With a session
+ *  whose repositories hold the id, a `302` to the condition's Resolve page in the tree; in every
+ *  other case null, and the shell is served — the same bytes anyone gets — which draws sign-in
+ *  or "No such condition". The lookup is the core's `condition.locate`, asked as the session
+ *  (its repositories only) under R-BTN-16's checks of a session request: a request that fails
+ *  them, carries no cookie, or names an id the session does not hold reveals nothing. */
+async function conditionRedirect(req: Request, env: Config, to: Forward, pathname: string): Promise<Answer | null> {
+  const id = pathname.startsWith('/conditions/') ? pathname.slice('/conditions/'.length) : '';
+  const session = cookie(req, SESSION_COOKIE);
+  if (req.method !== 'GET' || !session || !ID_SEGMENT.test(id)) return null;
+  try {
+    checkSessionRequest(req, env);
+  } catch {
+    return null;
+  }
+  const lookup = new Request(new URL(`/v1/conditions/${encodeURIComponent(id)}`, req.url), { method: 'GET' });
+  const res = await forward(lookup, to, { 'X-Baton-Session': session }).catch(() => null);
+  if (!res) return null;
+  if (res.status !== 200) {
+    await res.body?.cancel().catch(() => {});
+    return null;
+  }
+  const path = ((await res.json().catch(() => null)) as { path?: unknown } | null)?.path;
+  if (typeof path !== 'string' || !isScreenPath(path)) return null;
+  return { res: new Response(null, { status: 302, headers: { Location: path } }), cache: 'private' };
 }
 
 function serve(pathname: string, req: Request): Response {

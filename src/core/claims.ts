@@ -30,7 +30,7 @@ export const REGRESSED_FLAG_MS = 30 * 60_000;
 const BARS_MISMATCH_LISTED_MS = 24 * 3_600_000;
 const RELEASE_ACK_MS = 2 * 3_600_000; // §9: a delivered release unacknowledged for 2 h reaps the claim
 export const UNCONFIRMED_FLAG_MS = 6 * 3_600_000; // §6.7
-const STALLED_MS = 2 * 3_600_000; // §14 Running: alive but no activity for 2 h
+export const STALLED_MS = 2 * 3_600_000; // §14 Running: alive but no activity for 2 h
 /** §7.5 R-BTN-90: what a `leg_finished` heartbeat re-arms a still-armed deadline to — now plus
  *  40 minutes, once per leg run, so finishing is never the end. */
 const LEG_FINISH_REARM_MS = 40 * 60_000;
@@ -1030,6 +1030,36 @@ export class Claims {
     const item = this.item(ticketId);
     if (!item?.station?.next_leg) return false;
     return this.gate(this.runner(runnerId), item, item.station.next_leg, 'claim').ok;
+  }
+
+  /** B-194 (§6.6, §11.4): for each ticket, which of `runnerIds` would pass the claim gates for
+   *  its queued leg now — `fits`, over a page of tickets and the live runners at once, the
+   *  per-request reads shared — and, where none would, the code of the rule that refused the
+   *  runner that came closest (the gates' own order; `no-runner` with no runner to ask). A
+   *  read: it decides nothing and writes nothing. */
+  eligibility(ticketIds: readonly string[], runnerIds: readonly number[]): Map<string, { eligible: number[]; failed_rule: string | null }> {
+    const order = ['not-ready', 'claimed', 'not-granted', 'missing-capability', 'above-tier-ceiling', 'barred-tag', 'chain', 'isolation', 'stale-skills', 'backing-off', 'capacity-full'];
+    return this.cached(() => {
+      const runners = runnerIds.map((id) => this.runner(id));
+      const out = new Map<string, { eligible: number[]; failed_rule: string | null }>();
+      for (const id of ticketIds) {
+        const item = this.item(id);
+        const leg = item?.station?.next_leg ?? null;
+        const eligible: number[] = [];
+        let failed: string | null = runners.length && item && leg ? null : item && leg ? 'no-runner' : 'not-ready';
+        let reach = -1;
+        if (item && leg) for (const w of runners) {
+          const v = this.gate(w, item, leg, 'claim');
+          if (v.ok) eligible.push(w.id);
+          else if (order.indexOf(v.code) >= reach) {
+            reach = order.indexOf(v.code);
+            failed = v.code;
+          }
+        }
+        out.set(id, { eligible, failed_rule: eligible.length ? null : failed });
+      }
+      return out;
+    });
   }
 
   // ── the runner calls (§11) ──────────────────────────────────────────────────────────────
@@ -2184,9 +2214,10 @@ export class Claims {
     }
   }
 
-  /** `POST /v1/ui/claims/{id}/resolve` (§6.7): an unconfirmed completion is never confirmed
-   *  automatically; the owner confirms it (git does carry it) or releases it (it never landed),
-   *  which makes the item claimable again. The commit it named stays in the event. */
+  /** `POST /v1/ui/claims/{id}/confirm` and `…/release` (§6.7; B-222's two routes, each handing
+   *  its own `action`): an unconfirmed completion is never confirmed automatically; the owner
+   *  confirms it (git does carry it) or releases it (it never landed), which makes the item
+   *  claimable again. The commit it named stays in the event. */
   // @model ownerResolve sha256:122aad00079b
   resolve(owner: string, claimId: number, body: unknown) {
     const { action } = checkResolve(body);

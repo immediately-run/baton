@@ -3,8 +3,7 @@
 // server, the hold and legacy branches, and the dashboard's Running / Timeline / Needs you data.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import {
-  beat, claimItem, claimRow, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, withCore, runnerCall, tick, refresh, recommended, seedClaim,
-} from '../helpers';
+  beat, claimItem, claimRow, cutover, endClaim, ORIGIN, ownerCall, payload, register, rows, setClock, syncCall, withCore, runnerCall, tick, refresh, recommended, seedClaim, stateView } from '../helpers';
 
 const board = inject('board');
 const sha = board.shas;
@@ -16,7 +15,7 @@ const alarmAt = async (ms: number) => {
   await setClock(ms);
   await tick();
 };
-const uiState = async () => (await (await ownerCall('/v1/ui/state')).json()) as Record<string, any>;
+const wholeState = async () => (await stateView()) as Record<string, any>;
 const items = () => structuredClone(board.states.A.state.items) as Record<string, any>[];
 const fake = (c: string) => c.repeat(40);
 
@@ -69,7 +68,7 @@ describe('§7.1: accepting a held history accepts the line', () => {
     expect(JSON.parse(ev[1].detail_json)).toMatchObject({ sha: sha.D, parent_sha: fake('7'), head: fake('7'), auto_accept_at: T0 + 25 * H });
     expect(await rows(`SELECT head_sha, accepted_at, received_at, auto_accept_at FROM held_snapshots WHERE sha = ?`, sha.D)).toEqual([
       { head_sha: fake('7'), accepted_at: null, received_at: T0 + H, auto_accept_at: T0 + 25 * H }]);
-    expect((await uiState()).held).toEqual([expect.objectContaining({ sha: sha.D, head_sha: fake('7'), auto_accept_at: T0 + 25 * H })]);
+    expect((await wholeState()).held).toEqual([expect.objectContaining({ sha: sha.D, head_sha: fake('7'), auto_accept_at: T0 + 25 * H })]);
     // The sync's 15-minute re-post: no new event, the first deadline stands.
     await setClock(T0 + H + 15 * 60_000);
     expect((await syncCall('/v1/sync/board', payload(sha.D, fake('7'), board.states.D, { force: true }))).status).toBe(409);
@@ -111,7 +110,7 @@ describe('§7.1: accepting a held history accepts the line', () => {
     expect((await syncCall('/v1/sync/board', payload(sha.D, sha.B, board.states.D, { force: true }))).status).toBe(409);
     await syncCall('/v1/sync/board', payload(fake('8'), sha.B, board.states.B));
     expect(await rows(`SELECT sha FROM held_snapshots`)).toEqual([]);
-    expect((await uiState()).held).toEqual([]);
+    expect((await wholeState()).held).toEqual([]);
     await alarmAt(T0 + 24 * H);
     // Back to B through an accepted rewind; a brand-new rewrite of B is then held.
     expect((await syncCall('/v1/sync/board', payload(sha.B, fake('8'), board.states.B, { force: true }))).status).toBe(409);
@@ -126,7 +125,7 @@ describe('§7.1: accepting a held history accepts the line', () => {
     expect((await owner('/v1/ui/board/accept', { repository: 'docs', sha: sha.D })).status).toBe(200);
     expect((await syncCall('/v1/sync/board', payload(sha.D, fake('7'), board.states.D, { force: true }))).status).toBe(200);
     expect(((await (await syncCall('/v1/sync/head')).json()) as { sha: string }).sha).toBe(sha.D);
-    expect((await uiState()).held).toEqual([]);
+    expect((await wholeState()).held).toEqual([]);
   });
 
   it('with no answer the alarm accepts the rewind 24 h after it was held, not after the first hold', async () => {
@@ -200,8 +199,8 @@ describe('§6.7: the owner resolves an unconfirmed completion', () => {
 
   it('confirm: the item is confirmed by the owner', async () => {
     const id = await unconfirmed();
-    expect((await owner(`/v1/ui/claims/${id}/resolve`, { action: 'confirm' })).status).toBe(400); // names its confirmation
-    expect((await owner(`/v1/ui/claims/${id}/resolve`, { action: 'confirm', confirm: true })).status).toBe(200);
+    expect((await owner(`/v1/ui/claims/${id}/confirm`, {})).status).toBe(400); // names its confirmation
+    expect((await owner(`/v1/ui/claims/${id}/confirm`, { confirm: true })).status).toBe(200);
     expect((await claimRow(id)).confirmed_at).toBe(T0);
     expect(await rows(`SELECT actor FROM events WHERE kind = 'confirmed'`)).toEqual([{ actor: 'owner:owner@example.com' }]);
   });
@@ -209,12 +208,12 @@ describe('§6.7: the owner resolves an unconfirmed completion', () => {
   it('release: the completion is voided and the item is claimable again; the commit stays in the event', async () => {
     const id = await unconfirmed();
     const b = await register('vm-b');
-    expect((await owner(`/v1/ui/claims/${id}/resolve`, { action: 'release', confirm: true })).status).toBe(200);
+    expect((await owner(`/v1/ui/claims/${id}/release`, { confirm: true })).status).toBe(200);
     expect(await claimRow(id)).toMatchObject({ status: 'released', end_reason: 'released:requested' });
     expect(await rows(`SELECT json_extract(detail_json, '$.unconfirmed.ended_at_sha') AS s FROM events WHERE kind = 'released'`)).toEqual([{ s: sha.C }]);
     await refresh();
     expect((await claimItem('vm-b', b.secret, { ticket_id: 'docs:R3-9001' })).status).toBe(200);
-    expect((await owner(`/v1/ui/claims/${id}/resolve`, { action: 'confirm', confirm: true })).status).toBe(404);
+    expect((await owner(`/v1/ui/claims/${id}/confirm`, { confirm: true })).status).toBe(404);
   });
 });
 
@@ -299,7 +298,7 @@ describe('§14: Running, Timeline and Needs you', () => {
   it('Running: the reap deadline, stalled after 2 h without activity, and events', async () => {
     const { secret } = await register('vm-a', { lease_timeout_s: 43_200 });
     const { json: c } = await claimItem('vm-a', secret);
-    const run = async () => (await uiState()).running[0];
+    const run = async () => (await wholeState()).running[0];
     expect(await run()).toMatchObject({ id: c.claim_id, alive: true, reap_at: T0 + 43_200_000, stalled: false, events: [expect.objectContaining({ kind: 'claimed' })] });
     await setClock(T0 + 2 * H);
     await beat('vm-a', secret, { lease_timeout_s: 43_200 });
@@ -317,26 +316,26 @@ describe('§14: Running, Timeline and Needs you', () => {
       { id: 'pr', claim_id: c.claim_id, kind: 'open-pr', source: 'hook', started_at: T0, ended_at: T0 + 1, outcome: 'succeeded', detail: { pr: 'https://github.com/immediately-run/docs/pull/5' } },
     ] } });
     await beat('vm-a', secret, { transcripts: [{ repo: 'immediately-run/claude-sessions', path: 'cc/s.jsonl' }] });
-    const lanes = (await uiState()).timeline.lanes;
+    const lanes = (await wholeState()).timeline.lanes;
     expect(lanes).toHaveLength(1);
     const acts = lanes[0].claims[0].activities;
     expect(acts.find((a: any) => a.id === 'rv')).toMatchObject({ parent_id: 'r1', transcript_url: 'https://github.com/immediately-run/claude-sessions/blob/HEAD/cc/s.jsonl' });
     expect(JSON.parse(acts.find((a: any) => a.id === 'pr').detail_json)).toEqual({ pr: 'https://github.com/immediately-run/docs/pull/5' });
     await setClock(T0 + 900_000); // silent past its lease: no longer a lane
-    expect((await uiState()).timeline.lanes).toEqual([]);
+    expect((await wholeState()).timeline.lanes).toEqual([]);
   });
 
   it('Needs you: unacknowledged releases and fence-pending claims appear and clear', async () => {
     const a = await register('vm-a');
     const { json: c } = await claimItem('vm-a', a.secret);
     await owner('/v1/ui/messages', { to_runner_id: a.id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } });
-    expect((await uiState()).needs_you.unacknowledged_releases).toHaveLength(1);
+    expect((await wholeState()).needs_you.unacknowledged_releases).toHaveLength(1);
     const msg = (await beat('vm-a', a.secret)).json.messages.find((m: { kind: string }) => m.kind === 'release');
     await runnerCall(`/v1/runner/messages/${msg.id}/ack`, { secret: a.secret, method: 'POST' });
-    expect((await uiState()).needs_you.unacknowledged_releases).toEqual([]);
+    expect((await wholeState()).needs_you.unacknowledged_releases).toEqual([]);
     await owner(`/v1/ui/claims/${c.claim_id}/reap`, { confirm: true });
-    expect((await uiState()).needs_you.fence_pending).toEqual([expect.objectContaining({ id: c.claim_id })]);
+    expect((await wholeState()).needs_you.fence_pending).toEqual([expect.objectContaining({ id: c.claim_id })]);
     await beat('vm-a', a.secret, { fenced: { claim_id: c.claim_id, terminated: true } });
-    expect((await uiState()).needs_you.fence_pending).toEqual([]);
+    expect((await wholeState()).needs_you.fence_pending).toEqual([]);
   });
 });

@@ -23,7 +23,7 @@ let git: Git;
  *  alike: one log shape, `sub: 'session-url'`). */
 const drops = () => rows<{ why: string }>(
   `SELECT json_extract(detail_json, '$.why') AS why FROM events WHERE kind = 'discrepancy' AND json_extract(detail_json, '$.sub') = 'session-url' ORDER BY seq`);
-const uiState = () => withCore((c) => c.uiState() as Record<string, any>);
+const wholeState = () => withCore((c) => c.stateView() as Record<string, any>);
 const historyRows = async () => ((await keyCall(owner, '/v1/repositories/docs/tickets/A/history')).json).rows as { kind: string; leg: string | null; detail: Record<string, unknown> | null }[];
 
 beforeEach(async () => {
@@ -146,12 +146,12 @@ describe('S-BTN-77: host allowlists (R-BTN-113)', () => {
     // The state read carries the settings (§11.4's tenant screen): `session_hosts` is the list
     // the client's own link gate checks against (§12.3); `recommended_client` is the version as
     // served — the code's own, until an administrator raises it (R-BTN-197, B-254).
-    expect((await uiState()).instance).toEqual({ link_hosts: ['links.example'], session_hosts: ['claude.ai', 'sessions.example'], check_app_id: '123456', recommended_client: '0.1.5' });
+    expect((await wholeState()).instance).toEqual({ link_hosts: ['links.example'], session_hosts: ['claude.ai', 'sessions.example'], check_app_id: '123456', recommended_client: '0.1.5' });
 
     // Clearing the setting restores what stands without it — the deploy's default (claude.ai)
     // — so a sessions.example link is dropped again.
     expect((await keyCall(admin, '/v1/admin/settings', { session_hosts: null }, 'PUT')).status).toBe(200);
-    expect((await uiState()).instance.session_hosts).toEqual(['claude.ai']);
+    expect((await wholeState()).instance.session_hosts).toEqual(['claude.ai']);
     expect((await beat('vm-a', w.secret, { session_url: OTHER })).json.session_url_dropped).toContain('sessions.example');
   });
 
@@ -161,7 +161,7 @@ describe('S-BTN-77: host allowlists (R-BTN-113)', () => {
     const a = await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' });
     expect((await beat('vm-a', w.secret, { session_url: LINK })).status).toBe(200);
 
-    const state = await uiState();
+    const state = await wholeState();
     expect(state.running).toEqual([expect.objectContaining({ ticket_id: 'docs:A', leg: 'implement', session_url: LINK })]);
     const lane = state.timeline.lanes.find((l: { id: number }) => l.id === w.id);
     const claim = lane.claims.find((x: { id: number }) => x.id === c.claim_id);

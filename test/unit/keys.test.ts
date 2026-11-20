@@ -59,7 +59,7 @@ describe('BATON_KEYS (R3-1239)', () => {
   });
 
   it('a list naming a revoked key, and a list that cannot be seeded, go to Needs you; Baton serves on (round 1, 1-A-2, 1-B-5)', async () => {
-    const state = async () => withCore((c) => (c as unknown as { uiState(): { needs_you: { keys: unknown } } }).uiState().needs_you.keys);
+    const state = async () => withCore((c) => (c as unknown as { stateView(): { needs_you: { keys: unknown } } }).stateView().needs_you.keys);
     const reseed = (keys: unknown) => withCore(async (c) => {
       const w = c.runners as unknown as { c: { config: object } };
       const config = w.c.config;

@@ -171,7 +171,7 @@ describe('R-BTN-85: a discrepancy before git wins', () => {
   it('the dashboard lists the last 7 days by kind', async () => {
     git.place('B', placed('merged', [['implement', 'pr-open'], ['merge', 'merged']], []));
     await git.post();
-    const state = (await (await ui('/v1/ui/state')).json()) as { discrepancies: { by_kind: Record<string, number>; rows: { ticket_id: string; sub: string }[] } };
+    const state = (await keyCall(admin, '/v1/admin/state')).json as { discrepancies: { by_kind: Record<string, number>; rows: { ticket_id: string; sub: string }[] } };
     expect(state.discrepancies.by_kind).toEqual({ 'off-graph': 1 });
     expect(state.discrepancies.rows.map((r) => [r.ticket_id, r.sub])).toEqual([['docs:B', 'off-graph']]);
   });

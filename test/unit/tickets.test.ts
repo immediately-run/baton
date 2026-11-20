@@ -4,7 +4,7 @@ import { describe, it, expect, inject } from 'vitest';
 import prices from '../fixtures/data/model-prices.json';
 import providers from '../fixtures/data/model-providers.json';
 import matrix from '../fixtures/data/reviewer-matrix.json';
-import { ownerCall, payload, q, rows, syncCall } from '../helpers';
+import { ownerCall, payload, q, rows, syncCall, stateView } from '../helpers';
 
 const board = inject('board');
 // The reference data: the fixture repository's own scripts/data files (one source with S-BTN-13).
@@ -97,7 +97,7 @@ describe('reference data and the dashboard state', () => {
 
   it('the Ready view orders each tier ceiling by rank', async () => {
     await post(A, null, stateA, reference);
-    const s = (await (await ownerCall('/v1/ui/state')).json()) as {
+    const s = (await stateView()) as {
       repositories: { id: string; head: { sha: string; ticket_count: number } }[];
       ready: { id: string; title: string; url: string; rank_reason: string; requires: string[]; operator_only: boolean }[];
       ready_by_tier: Record<string, string[]>;

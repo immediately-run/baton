@@ -173,7 +173,7 @@ describe('B-169 the security review’s corrections', () => {
   it('every answer a credential or a session authorizes carries Cache-Control: no-store, and a public page does not', async () => {
     // A dashboard session's read (S-BTN-124), and the sign-in that hands out the cookie.
     const cookie = await adminSession(admin);
-    const state = await sessionCall(cookie, '/v1/ui/state');
+    const state = await sessionCall(cookie, '/v1/repositories');
     expect([state.status, state.headers.get('Cache-Control')]).toEqual([200, 'no-store']);
     // A bearer that is no credential is refused by the core, and that refusal is the request's
     // answer: the header is the route's, on whatever it answers (R-BTN-16).
@@ -187,7 +187,8 @@ describe('B-169 the security review’s corrections', () => {
     const read = await as(owner, '/v1/owner/ops/grants');
     expect([read.status, read.headers.get('Cache-Control')]).toEqual([200, 'no-store']);
     const refused = await as(owner, '/v1/owner/nope/grants');
-    expect([refused.status, refused.headers.get('Cache-Control')]).toEqual([404, 'no-store']);
+    // B-192: a repository the caller cannot read — an unregistered one too — is `forbidden`.
+    expect([refused.status, refused.headers.get('Cache-Control')]).toEqual([403, 'no-store']);
     const delivery = await hostCall(new Request(ORIGIN + '/v1/github/webhook', { method: 'POST', headers: { 'X-Hub-Signature-256': 'sha256=' + '0'.repeat(64) }, body: '{}' }));
     expect([delivery.status, delivery.headers.get('Cache-Control')]).toEqual([401, 'no-store']);
     // A public asset holds no data, and is served by the public branch, not the withheld one: the
@@ -195,7 +196,7 @@ describe('B-169 the security review’s corrections', () => {
     // no cookie, where an unauthorized `/v1/ui` read is a 401).
     const page = await hostCall(new Request(ORIGIN + '/dashboard/app.js'));
     expect([page.status, page.headers.get('Cache-Control'), page.headers.get('Set-Cookie')]).toEqual([200, 'no-store', null]);
-    const anonymousUi = await sessionCall('', '/v1/ui/state');
+    const anonymousUi = await sessionCall('', '/v1/ui/session');
     expect([anonymousUi.status, anonymousUi.headers.get('Cache-Control')]).toEqual([401, 'no-store']);
     // A path no route answers is public, and its refusal carries no header of a route's.
     const nowhere = await hostCall(new Request(ORIGIN + '/nothing'));

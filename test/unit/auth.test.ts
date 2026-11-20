@@ -66,8 +66,10 @@ describe('the sync principal (R-BTN-15, G-BTN-11)', () => {
 });
 
 describe('the owner principal (R-BTN-16)', () => {
-  it('serves the state and the page to the owner', async () => {
-    expect((await ownerCall('/v1/ui/state')).status).toBe(200);
+  it('serves the session\'s read and the page to the owner', async () => {
+    // B-203: the state's own route under `/v1/ui/` is retired; the principal is the subject
+    // here, and `GET /v1/ui/session` is the read that answers it and nothing else.
+    expect((await ownerCall('/v1/ui/session')).status).toBe(200);
     const page = await ownerCall('/');
     expect(page.status).toBe(200);
     expect(page.headers.get('Content-Type')).toMatch(/text\/html/);
@@ -75,10 +77,10 @@ describe('the owner principal (R-BTN-16)', () => {
   });
 
   it('refuses another email, another aud, no assertion, and a sync token', async () => {
-    const as = async (token: string) => call('/v1/ui/state', { headers: { 'Cf-Access-Jwt-Assertion': token } });
+    const as = async (token: string) => call('/v1/ui/session', { headers: { 'Cf-Access-Jwt-Assertion': token } });
     expect((await as(await accessToken('someone@example.com'))).status).toBe(403);
     expect((await as(await accessToken('owner@example.com', { audience: 'another-app' }))).status).toBe(401);
-    expect((await call('/v1/ui/state')).status).toBe(401);
+    expect((await call('/v1/ui/session')).status).toBe(401);
     expect((await as(await syncToken())).status).toBe(401);
   });
 
@@ -90,7 +92,7 @@ describe('the owner principal (R-BTN-16)', () => {
     // code's client floor like the signature tests below, so the raw request is not refused
     // for its client first.
     const noAccess = { ...envAtCodesFloor, ACCESS_TEAM_DOMAIN: undefined, ACCESS_AUD: undefined, OWNER_EMAILS: undefined } as typeof env;
-    const res = await front(new Request(`${ORIGIN}/v1/ui/state`, { headers: { 'Cf-Access-Jwt-Assertion': await accessToken() } }), noAccess, async () => new Response('{}'));
+    const res = await front(new Request(`${ORIGIN}/v1/ui/session`, { headers: { 'Cf-Access-Jwt-Assertion': await accessToken() } }), noAccess, async () => new Response('{}'));
     expect(res.status).toBe(403);
     expect(await code(res)).toBe('forbidden');
   });
@@ -102,7 +104,7 @@ describe('the owner principal (R-BTN-16)', () => {
     expect(page.status).toBe(200);
     expect(page.headers.get('Content-Type')).toMatch(/text\/html/);
     expect(await page.text()).toContain('src="/dashboard/app.js"');
-    expect((await call('/v1/ui/state')).status).toBe(401);
+    expect((await call('/v1/ui/session')).status).toBe(401);
   });
 
   it('G-BTN-12: a state-changing /v1/ui call needs JSON and the dashboard Origin', async () => {
@@ -121,7 +123,7 @@ describe('every response carries the R-BTN-16 headers', () => {
     ['an owner page', () => ownerCall('/')],
     ['the module', () => ownerCall('/dashboard/app.js')],
     ['an API answer', () => syncCall('/v1/sync/head')],
-    ['a refusal', () => call('/v1/ui/state')],
+    ['a refusal', () => call('/v1/ui/session')],
     ['an unknown path', () => call('/nope')],
   ])('%s', async (_what, make) => {
     const res = await make();

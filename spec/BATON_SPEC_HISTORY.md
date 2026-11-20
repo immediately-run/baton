@@ -3829,18 +3829,34 @@ working until the stated condition holds, then removes it.
   (a bare `session_url` from a runner holding several is dropped and logged), until no
   registered runner runs a CLI before B-188.
 
-- **The V1 dashboard's views (B-191, 2026-11-09).** §11.4's screens replace its view list
-  outright; no view name is kept as an alias. The old names map — Runners to `/runners`,
-  Running and Ready to Board and Tickets, Needs you to Conditions, Timeline to the runner
-  page, Instances to `/instances`, Capacity to `/state`, Courses to the course screens and the
-  ticket page, Discrepancies to Sync, and the Resolve page to
-  `/repositories/{repository}/conditions/{condition}`, whose old address `GET
-  /conditions/{condition}` keeps answering with a `302` (R-BTN-163). V1 itself — `src/ui/`
-  (`index.html`, `app.css`, `app.js`), polling `GET /v1/ui/state` — is served until B-193's
-  shell lands and deleted with it, V2 replacing V1 outright at `/` (the owner's ruling); the
-  route and `ui.state`'s §14 row follow with B-203, `uiState()` staying as the one function
-  that builds `GET /v1/admin/state`'s kept shape (Decision 4a; B-216 renames it `stateView()`).
-  Stop when `src/ui/` and `GET /v1/ui/state` are gone.
+- **The V1 dashboard's views (B-191, 2026-11-09; retired by B-203 and B-216, 2026-11-20).**
+  §11.4's screens replaced its view list outright; no view name is kept as an alias. The
+  retired names, each with the screen that replaced it, as R-BTN-127 lists retired commands:
+
+  | V1's view | what replaced it |
+  |---|---|
+  | Needs you | Conditions, `/repositories/{repository}/conditions` — the open conditions, the queued person legs and, under "Also waiting", the repository's listings (`GET …/needs-you`); the instance-wide listings on State, `/state` (`GET /v1/admin/tenant`); an adoption on Sync, where it is confirmed |
+  | Running, Ready | Board `/repositories/{repository}/board` and Tickets `…/tickets`, one state word a ticket |
+  | Runners | `…/runners`, and a runner's page `…/runners/{runner}` |
+  | Timeline | the runner's page, its window of claims and activities |
+  | Courses | `…/courses` and `…/courses/{course}`; a ticket's position on its page `…/tickets/{ticket}` |
+  | Instances | `/instances`, with `/resources` and `/capacities` beside it |
+  | Capacity | State, `/state` |
+  | Limits | the credential screens (`…/grants`, `…/owners`, `…/sync-keys`), Governance (`…/policy`, `…/settings`, `…/bars`, `…/consents`) and `/resources` for the probe keys |
+  | Discrepancies | Sync, `…/sync`, with the held posts |
+  | Resolve, as the bare path `/conditions/{condition}` | `/repositories/{repository}/conditions/{condition}`; the bare path keeps answering with a `302` (R-BTN-163) |
+
+  V1 itself — `src/ui/` (`index.html`, `app.css`, `app.js`), polling `GET /v1/ui/state` — went
+  with B-193's shell. B-203 retired that route, its registry entry `ui.state` and its §14 row,
+  and `POST /v1/ui/claims/{id}/resolve` (replaced by `…/confirm` and `…/release`, B-222), once
+  every key of the state's `needs_you` had a home (S-BTN-305's ledger: nothing V1 listed is
+  lost). The function that built its answer stays, renamed `stateView()` (B-216, Decision 4a),
+  and serves `GET /v1/admin/state` to an administrator's key alone, its shape unchanged
+  (S-BTN-170). Nothing of this transition is carried any longer: the entry stays as the record
+  of the names. Two paged lists V1's successor never called, `GET
+  /v1/ui/repositories/{repository}/tickets` and `…/runners` (B-287, S-BTN-243), are still
+  served; they go when their scenario is restated on `GET /v1/repositories/{repository}/tickets`
+  and `…/runners`.
 
 - **Part 4's retired fields (B-166, 2026-11-02).** The board post's `ontology` and course
   entries' `route_choices` and `report_horizon_h`, the heartbeat's `uses`, the claim's and a

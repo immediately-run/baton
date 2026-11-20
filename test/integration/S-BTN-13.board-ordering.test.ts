@@ -9,7 +9,7 @@
 // `git merge-base --is-ancestor` of the fixture repository.
 import { describe, it, expect, inject } from 'vitest';
 import { syncOnce } from '../../src/shared/batonSync.mjs';
-import { observe, ownerCall, setClock, syncCall } from '../helpers';
+import { observe, ownerCall, setClock, syncCall, stateView } from '../helpers';
 
 type Label = 'A' | 'B' | 'C' | 'D';
 const board = inject('board');
@@ -94,7 +94,7 @@ describe('S-BTN-13 board ordering', () => {
     for (let i = 1; i < heads.length; i++) expect(board.ancestry[`${heads[i - 1]}<${heads[i]}`]).toBe(true);
 
     // The held history is on the dashboard once, with its first 24-hour auto-accept time.
-    const state = (await (await ownerCall('/v1/ui/state')).json()) as { held: { sha: string; head_sha: string; auto_accept_at: number }[]; repositories: { id: string; head: { sha: string } | null }[] };
+    const state = (await stateView()) as { held: { sha: string; head_sha: string; auto_accept_at: number }[]; repositories: { id: string; head: { sha: string } | null }[] };
     expect(state.repositories.find((r) => r.id === 'docs')!.head!.sha).toBe(sha.C);
     expect(state.held).toEqual([expect.objectContaining({ sha: sha.D, head_sha: sha.C, auto_accept_at: Date.parse('2026-10-14T12:10:00Z') })]);
   });

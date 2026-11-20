@@ -65,7 +65,7 @@ describe('S-BTN-63 no review by its author’s key', () => {
     // B-168 (§8.3, R-BTN-106): the owners' setting is gone — the file's `no_chain_from` alone holds.
     // The settings route reads it as no setting at all, and the dashboard's Settings lists none.
     expect((await keyCall(owner, '/v1/owner/docs/settings', { required_independence: { review: ['implement'] } }, 'PUT')).json).toMatchObject({ code: 'invalid-params' });
-    const state = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as { limits: { settings: Record<string, unknown>[] } };
+    const state = (await keyCall(admin, '/v1/admin/state')).json as { limits: { settings: Record<string, unknown>[] } };
     expect(state.limits.settings.find((s) => s.repository_id === 'docs')).not.toHaveProperty('required_independence');
     // With no list in the course file in force, the same key that implemented takes review: the
     // file is the one statement of it, and it says nothing here.

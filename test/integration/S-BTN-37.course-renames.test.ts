@@ -153,7 +153,7 @@ describe('S-BTN-37 a course changes under a claim (renames)', () => {
     git.registry = [course(6, 5, { course: LOOP })];
     expect(await git.post()).toMatchObject({ status: 200 });
     expect(await rows(`SELECT version FROM courses WHERE repository_id = 'docs' AND id = 'roadmap-pr'`)).toEqual([{ version: 5 }]);
-    const state = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as Record<string, any>;
+    const state = (await keyCall(admin, '/v1/admin/state')).json as Record<string, any>;
     expect(state.needs_you.courses_refused).toEqual([expect.objectContaining({ repository_id: 'docs', course_id: 'roadmap-pr', version: 6 })]);
 
     // A fourth leaves an end: `reopen` from `merged` back to `filed`, bounded, so only the
@@ -162,7 +162,7 @@ describe('S-BTN-37 a course changes under a claim (renames)', () => {
     git.registry = [course(7, 5, { course: REOPEN })];
     expect(await git.post()).toMatchObject({ status: 200 });
     expect(await rows(`SELECT version FROM courses WHERE repository_id = 'docs' AND id = 'roadmap-pr'`)).toEqual([{ version: 5 }]);
-    const after = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as Record<string, any>;
+    const after = (await keyCall(admin, '/v1/admin/state')).json as Record<string, any>;
     expect(after.needs_you.courses_refused).toEqual([expect.objectContaining({ repository_id: 'docs', course_id: 'roadmap-pr', version: 7 })]);
   });
 });
