@@ -1,0 +1,59 @@
+---
+title: "Review — the users and groups proposal, adversarially, 2026-11-20"
+description: Three independent reviewers attacked the first draft of the users and groups proposal — as an attacker, against the existing spec, and as its builder and operator. Their findings, and what the revised proposal does about each.
+tags: [review]
+order: 57
+---
+
+<Lede>The first draft of [the users and groups proposal](../../spec/proposals/users-and-groups.md)
+(commit `2a45a51`) was read by three review agents, none given the author's reasoning: one
+constructing attacks, one checking it against BATON_SPEC, the context pages and the sibling
+proposals, one walking its lifecycles as the engineer and operator. The findings are their
+claims; each row says what the revision does. Nothing here is built.</Lede>
+
+## What the draft got wrong
+
+Three faults were found independently by two or all three reviewers.
+
+1. **A key could become an owner with no `approvers.members` action.** The draft let a user's
+   key attach another key, which then owned wherever the user did. An injected owner's agent
+   could mint a lasting owner key on a `protected-hardware` repository, against R-BTN-188 and
+   `human-gates`. An administrator could do the same by attaching its own key to a user before
+   a repository named them.
+2. **A board post could write authority, across repositories.** The directory was read by the
+   sync and kept as one tenant-wide latest reading. Under `members.source: forge`, whoever
+   could post any repository's board decided every repository's approvers.
+3. **Tenant-wide acts by repository principals.** Any owner could edit any group's membership
+   or escalation; a membership change needed an approver of every repository at once, which no
+   one key may be; and any granted runner could read the whole directory.
+
+## Findings and dispositions
+
+| Finding | Severity | Disposition in the revision |
+|---|---|---|
+| Self-attach and administrator pre-seeding mint owner keys | blocker | Acceptance (§2): a key or member counts on a repository only once that repository's `approvers.members` approver accepts it, naming exactly what it accepts |
+| A user's first `human_only` key could not be attached; the mark had three homes | blocker | The mark is R-BTN-185's alone, set before attaching; `human-keys` refuses an attached key (§1) |
+| The directory forged by a board poster; one repository's reading used by another | blocker | `std:directory@1`, per repository, under the policy's `attestations`; `members.source: forge` needs a `service:` writer; 24-hour lapse (§6) |
+| A forge reading could leave a list with no key | blocker | A list must be satisfiable without a `forge` group; break-glass satisfies the `human:` forms (§3) |
+| "An approver of every repository" deadlocks and lets one repository veto another | blocker | Every repository decides alone; additions wait for each acceptance, removals act at once (§2) |
+| The notifier was a new key role, against "no key role exists for delivery" | major | A machine key's `notify` grant flag, per repository, like `sync` (§5) |
+| An administrator could read addresses by replacing the notifier | major | No tenant notifier; the CLI asks before sealing to a new recipient; `baton.notifier-changed`. The residual is stated (§5) |
+| Sealed addresses against "secrets never enter Baton" | major | Kept, and marked for the owner: Baton cannot open them (§5, §9) |
+| Any attached key could redirect contacts or detach the human-only key | medium | Both need the user's `human_only` key where one exists (§1, §5) |
+| Any owner could set any group's escalation, leaking another repository's tickets | medium | `escalations` is a repository's owner setting; Baton drops recipients who could not read the entry (§5) |
+| Indirect ownership outlived sessions and delegated keys | major | R-BTN-58 (proposed) defines when a key stops being an owner; both end on it (§3) |
+| "`[owner]`, today's behaviour" was false; who a label holder must be was unsaid | major | An absent knob narrows nothing; an entry narrows R-BTN-181 and need not be an owner; judged at acceptance (§4) |
+| A label binding is no boundary against a pusher or an adopting owner | medium | Stated as what the entry promises (§4) |
+| `GET /v1/users` was a tenant map for any runner | medium | Reads scoped by caller; nobody reads which repositories name whom (§1) |
+| The notifier could not dedupe across restarts; nobody saw it down; polling volume | major | A local cursor, one `notify` read, `baton.notifier-silent` (§5) |
+| The sync could not read teams with the App's key; directory size | major | The reader's own forge credential; only wanted teams and accounts, 256 KB (§6) |
+| Dangling and reused ids; retirement undefined | major | One namespace, never reused; unknown ids refused; retirement defined (§1) |
+| Attach signature replayable; seal bound nothing | low | Both bind origin, user and time (§1, §5) |
+| `roles`, "route" and "reading" used against the vocabulary; CLI grammar | minor | `answerers`, "contact", "directory attestation"; hyphenated nouns (§4 to §7) |
+| Rules amended without saying so | major | §8 lists every rule the proposal changes |
+| Scenarios that could not run, and rules with none | minor | §7's scenarios rewritten |
+
+## Left for the owner
+
+The proposal's §9 lists the five choices the revision made that the owner did not rule on, and
+three questions it leaves open.
