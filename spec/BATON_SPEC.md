@@ -405,7 +405,7 @@ is stale. Never edit it by hand.
 | S-BTN-159 | a quiet start | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-166 | the state with a key | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-167 | a merge dispatches the sync | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| S-BTN-170 | the dashboard state read with an administrator's key | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-170 | the state in one request equals the entity reads | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-171 | a dependency cycle is refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-172 | the ticket check | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-174 | the create-spec course | [`15-verification.md`](BATON_SPEC/15-verification.md) |
@@ -455,6 +455,39 @@ is stale. Never edit it by hand.
 | S-BTN-242 | a runner's local queue | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-243 | reads under mixed busy and idle polling | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-244 | retention | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-250 | sessions read the repository reads | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-251 | the key's or the session's | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-252 | the reads' ETags | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-253 | the list reads' cursor | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-254 | the root read | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-255 | a session's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-256 | children, courses and schemas | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-260 | the tickets list | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-261 | the ticket's read, extended | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-262 | the completion's confirm and release | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-270 | logout | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-275 | one condition | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-276 | what waits on a person | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-277 | the address of a condition | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-278 | a session writes no attestation | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-279 | the attestations read | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-280 | the mirror's view | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-281 | a session's resync and accept | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-285 | the repository's runners | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-286 | a poll of the runners | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-287 | one runner | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-288 | one course, joined | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-289 | a course's summary | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-295 | the grants read, extended | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-296 | the registry read | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-297 | the capacities read | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-298 | the instance and resource reads | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-299 | the tenant read | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-300 | the sessions read | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-301 | the tenant reads' callers | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-305 | no listing lost | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-306 | the cutover's retired routes | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-307 | a screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

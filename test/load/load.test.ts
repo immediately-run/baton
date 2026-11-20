@@ -164,7 +164,8 @@ describe('npm run test:load — the envelope mix on the local host (G-BTN-77)', 
         expect(done.status, `runner ${r.id} end`).toBe(200);
         ended++;
       }
-      const state = await read.run(async () => call('/v1/ui/state', { headers: { Cookie: session } }));
+      // B-203: the whole state is `GET /v1/admin/state`'s (`stateView()`), an administrator's key's.
+      const state = await read.run(async () => keyCall(admin, '/v1/admin/state'));
       expect(state.status).toBe(200);
       // The observation beside the load — its number released at once: this read judges
       // nothing, and an outstanding number would hold the next board post `sync-busy`.

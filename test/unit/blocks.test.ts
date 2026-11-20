@@ -170,7 +170,7 @@ describe('R-BTN-75 as amended by R3-1254, B-26: held versus blocked', () => {
     expect(await blockRows('A')).toHaveLength(1);
     expect(await kinds('blocked')).toEqual(['docs:A']);
     // The owner releases the completion: that ends the hold, and the end logs its blocked (B-26).
-    expect((await ownerPost(`/v1/ui/claims/${c.json.claim_id}/resolve`, { action: 'release', confirm: true })).status).toBe(200);
+    expect((await ownerPost(`/v1/ui/claims/${c.json.claim_id}/release`, { confirm: true })).status).toBe(200);
     expect(await since('A')).not.toBeNull();
     expect(await kinds('blocked')).toEqual(['docs:A', 'docs:A']);
     // The dependency closes: the unblocked follows the blocked the release logged.

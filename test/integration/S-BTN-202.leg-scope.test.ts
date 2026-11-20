@@ -46,9 +46,9 @@ const pushToDocs = (by: string, id: string) => webhookCall('push', {
 
 /** The Needs-you scope listing. */
 const findings = async () => {
-  const res = await sessionCall(session, '/v1/ui/state');
-  const body = (await res.json()) as Record<string, any>;
-  if (body.needs_you == null) throw new Error(`/v1/ui/state ${res.status}: ${JSON.stringify(body).slice(0, 300)}`);
+  const res = await keyCall(admin, '/v1/admin/state');
+  const body = res.json as Record<string, any>;
+  if (body.needs_you == null) throw new Error(`/v1/admin/state ${res.status}: ${JSON.stringify(body).slice(0, 300)}`);
   return (body.needs_you as { scope: { id: number; repository_id: string; ticket_id: string | null; kind: string; target: string }[] }).scope;
 };
 

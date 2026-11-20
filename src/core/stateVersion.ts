@@ -164,7 +164,7 @@ export function stateVersion(store: Store): number {
   return typeof s.version === 'function' ? s.version() : 0;
 }
 
-// ── B-242: the ETag of a read that polls (§11.4, §14's `/v1/ui/state` row) ───────────────
+// ── B-242: the ETag of a read that polls (§11.4, §14's conventions; B-205) ───────────────
 
 /** B-242: how long a poller may be answered `304` on the clock's own motion. Liveness writes
  *  no version (above), yet what the clock decides — alive, stalled, `reap_at`, a time window —

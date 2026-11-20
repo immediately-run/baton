@@ -94,6 +94,15 @@ export async function ownerCall(path: string, init: RequestInit = {}) {
   return call(path, { ...init, headers });
 }
 
+/** The whole state as `GET /v1/admin/state` answers it — the core's `stateView()` (B-216),
+ *  through the JSON it is served as. The tests' oracle where no administrator's key is
+ *  configured (an Access-fronted instance, where the route's own caller does not exist) since
+ *  B-203 retired the session's read of it; a test with an administrator's key reads the route
+ *  itself (`keyCall(admin, '/v1/admin/state')`). */
+export function stateView(): Promise<Record<string, any>> {
+  return withCore((c) => JSON.parse(JSON.stringify(c.stateView())) as Record<string, any>);
+}
+
 /** Set the core's clock to a fixed time (R-BTN-32). */
 export function setClock(ms: number) {
   return withCore((c) => {

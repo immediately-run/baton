@@ -670,6 +670,20 @@ export class Admin {
     return (await this.adminFingerprints()).has(s.admin_key) ? s.admin_key : null;
   }
 
+  /** `POST /v1/ui/logout` (`ui.logout`, R-BTN-155; B-206): ends the caller's own session — its
+   *  row is marked revoked, so the cookie's value authorizes nothing from this request on. A
+   *  value that names no live row ends nothing; the caller was authorized before this. */
+  async endSession(value: string | null): Promise<void> {
+    if (!value || !TOKEN.test(value)) return;
+    const id = await sha256Hex(value);
+    this.c.store.transaction(() => {
+      const s = this.rows<{ admin_key: string }>('SELECT admin_key FROM dashboard_sessions WHERE id_hash = ? AND revoked_at IS NULL', id)[0];
+      if (!s) return;
+      this.exec('UPDATE dashboard_sessions SET revoked_at = ? WHERE id_hash = ?', this.c.now(), id);
+      this.event(`admin:${s.admin_key}`, { act: 'logout' }, null);
+    });
+  }
+
   // ── grants (R-BTN-58) ───────────────────────────────────────────────────────────────────
 
   /** `POST /v1/owner/{repository}/grants` and `POST /v1/admin/grants`: grant a runner key access to

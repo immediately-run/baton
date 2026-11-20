@@ -46,7 +46,9 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/core/` | Everything Baton decides, on either host (R-BTN-55): no platform import, checked by `test/unit/boundary-host.test.ts` |
 | `src/core/ports.ts` | The platform services core takes: `Store`, `Scheduler`, `Clock`, `AdminKeys` (and `HumanKeys`, the same shape), `HookRunner`, `Dispatch`, `Gate`, and the instance's `Config` |
 | `src/core/front.ts` | What stands in front of the core: verifies the principal (OIDC for the sync, Access for the owner, a signed request's shape for a runner, the App's signature for a webhook), sets the R-BTN-16 headers, serves the dashboard's static files, forwards the API |
-| `src/core/baton.ts` | The core: migrations, board sync (§7.1), routing, the alarm, the dashboard state |
+| `src/core/baton.ts` | The core: migrations, board sync (§7.1), routing, the alarm, and `stateView()` — the whole state in one request, `GET /v1/admin/state`, an administrator's key's alone (R-BTN-57) |
+| `src/core/actions.ts` | The action registry (§11.3 R-BTN-129): one table of every read a session shares with the keys and every route a session may call — id, method and path, callers, input, and `ui.view`, the screens that draw it as a control. The front admits a cookie from it, the reads authorize by it, `GET /v1/actions` answers from it |
+| `src/core/reads/` | Every read a session may call, one module per domain (`tickets`, `runners`, `courses`, `conditions`, `sync`, `credentials`, `attestations`, `tenant`, …) behind one dispatcher (`index.ts`, which says how to add one): one principal, one authorization, the one refusal, the `ETag`; `kit.ts` holds the paging and query helpers, `src/core/cursor.ts` the opaque cursor |
 | `src/core/runnerApi.ts` | The runner API (§8): heartbeat and registration, activities, messages, mode and shadow reports, the Runners view |
 | `src/core/claims.ts` | The lease (§6, R3-1212): claim and end, matching (§7.2 rules 1–9 via `isEligible`), the alarm's reaps, the fence before re-issue, confirmations, git winning over a stale claim, the Running / Timeline / Needs you data |
 | `src/core/attempts.ts` | Pure: the retry policy (§6.10 R-BTN-23) — which ends count, backoff, holds, the review-capacity run, the resume record (R-BTN-24) |
@@ -92,7 +94,8 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/local/` | The local host: `node:sqlite` as the `Store` (`store.ts`), one queue for every request and alarm tick (`queue.ts`), a timer as the alarm (`host.ts`), `node:http` (`server.ts`), the command line (`main.ts`); the course test kit (`testCourse.ts`, R3-1248) |
 | `src/runner/` | `baton run`'s runner loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`), the CLI entry (`main.ts`) and `baton leg replay` (§9.8 R-BTN-84, `replay.ts`) |
 | `src/migrations/` | Numbered schema migrations, applied before the object serves |
-| `src/dashboard/` | The dashboard (BATON-UI-V2): today only the shell B-193 built — one page saying "Baton dashboard — sign in", with no sign-in flow, router, polling or controls — in React 19 and TypeScript, no other runtime dependency, built by `npm run build:ui` (esbuild) into `src/dashboard/dist/` (gitignored) — one bundle served as text by both hosts (R-BTN-55), never Workers assets. B-193 deleted the old dashboard on 2026-11-13; its screens return with B-206, B-207 and B-208, on the reads of B-194 and B-195 |
+| `src/dashboard/` | The dashboard (BATON-UI-V2), in React 19 and TypeScript with no other runtime dependency: a walk down the entity tree — sign in, pick a repository, then one entity a screen. `app/` is the frame, the router, the sign-in and the controls drawn from the registry; `screens/` one folder per entity (`root`, `board`, `tickets`, `goals`, `courses`, `conditions`, `runners`, `credentials`, `governance`, `attestations`, `sync`, `tenant`), each registered in `screens/index.ts` under its id in `src/core/screens.ts` and kept to `screens/README.md`'s contract; `lib/` the shared pieces (`Text` and `View`, the polling store, the link rule). Every screen draws its entity's reads (`src/core/reads/`) and the registry entries `ui.view` places on it — never the whole state. Built by `npm run build:ui` (esbuild) into `src/dashboard/dist/` (gitignored): one bundle served as text by both hosts (R-BTN-55), never Workers assets |
+| `test/ui/` | The dashboard's tests (vitest project `ui`, jsdom): each screen over a mocked `fetch`, the source gate (no markup-parsing API under `src/dashboard/**`, §12.3), hostile values through the real screens (S-BTN-76) and a screen drawing only its caller's actions (S-BTN-307) |
 | `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list` (`decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
 | `src/shared/` | **Vendored** from docs `scripts/lib/` — never edit here (R-BTN-37); `batonSync.mjs` is the board sync's own decision code, which S-BTN-13 drives. Except two of Baton's own, which every part imports: `schema.mjs`, the one validator of leg outputs and readings (R-BTN-108: the subset, the linear-time pattern engine, the refinement check), and `std.mjs`, the `std:` library (R-BTN-110) |
 | `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
@@ -128,6 +131,20 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   `min_runner_version`, each `legs/` script pairs with a leg and exports `run`, `handoff` and
   `close`, and a ticket runs the shortest route to a confirmed done. Exit 1 names each violation.
 - `npm run typecheck` — the Worker, the local host, the Node scripts and the dashboard.
+- `npm run check:actions` — the action registry against the screen table (R-BTN-129): every
+  `ui.view` names a screen of `src/core/screens.ts`, stands only on an entry a session may call,
+  and every id is well-formed and listed once; it lists, without failing, the screens no control
+  names.
+- `baton admin -i <key> open` — the dashboard: a one-time link (5 minutes) that signs an
+  administrator's browser in at the instance's origin (*Administrators and owners*, below).
+  The screens are a tree: `/` lists the repositories; under `/repositories/{repository}/` are
+  `board`, `tickets` and `tickets/{ticket}`, `goals`, `courses` and `courses/{course}`,
+  `conditions` and `conditions/{condition}`, `runners` and `runners/{runner}`, the credentials
+  (`grants`, `owners`, `tokens`, `mcp-keys`, `sync-keys`, `check-runners`), the governance screens
+  (`policy`, `settings`, `bars`, `consents`, `attestations`) and `sync`; an administrator also has
+  `/repositories`, `/instances`, `/resources`, `/capacities`, `/settings`, `/state` and
+  `/sessions`. What a terminal reads in one request is `baton admin state`'s
+  `GET /v1/admin/state`.
 - `npm run build:ui` — the dashboard's one esbuild bundle into `src/dashboard/dist/` (gitignored):
   `app.js` and `app.css` with `index.html` copied beside them, served as text by both hosts and
   embedded in the published CLI. `npm test`, `npm run typecheck`, `npm run dev`,
@@ -280,8 +297,9 @@ is granted, with what that repository granted (rules 4 and 7) and under its `max
 administrator grants `human-operator`, or takes over a `BATON_KEYS`-seeded key. Owner bars join the posted barred tags of their course
 (or every course, `*`), at claims and, with `--applies claim+advance`, advances; a leg missing a
 required bar's tag prefix waits on `policy` under Needs you. Tiers, `retry` and
-`transcript_repos` come only from Baton: a snapshot changes none of them. The dashboard, a shell
-today (Layout, `src/dashboard/`), does not show them.
+`transcript_repos` come only from Baton: a snapshot changes none of them. The dashboard shows them,
+read-only, on a repository's credential and governance screens (`…/grants`, `…/owners`,
+`…/settings`, `…/bars`); the CLI changes them.
 
 The dashboard takes the `__Host-baton_session` cookie a login link sets (12 hours; it ends when
 its key leaves `BATON_ADMIN_KEYS`). Cloudflare Access may stand in front as extra hardening; on its

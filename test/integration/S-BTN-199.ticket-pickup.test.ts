@@ -206,8 +206,7 @@ describe('S-BTN-199 the git-lock pickup asks Baton', () => {
     expect(await rows<{ detail_json: string }>(`SELECT detail_json FROM ticket_history WHERE kind = 'discrepancy' AND ticket_id = 'docs:T-1' AND json_extract(detail_json, '$.sub') = 'position-disagrees'`))
       .toEqual([{ detail_json: event[0].detail_json }]);
     // The dashboard lists it (R-BTN-85, the Discrepancies of the last 7 days)…
-    const cookie = await adminSession(admin);
-    const state = (await (await sessionCall(cookie, '/v1/ui/state')).json()) as Record<string, any>;
+    const state = (await keyCall(admin, '/v1/admin/state')).json as Record<string, any>;
     expect(state.discrepancies.by_kind['position-disagrees']).toBe(2);
     expect(state.discrepancies.rows).toEqual(expect.arrayContaining([expect.objectContaining({ ticket_id: 'docs:T-1', sub: 'position-disagrees' })]));
     // …and a later post with the same station is the same disagreement, not a new one every

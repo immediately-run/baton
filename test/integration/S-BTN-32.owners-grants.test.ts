@@ -109,7 +109,7 @@ describe('S-BTN-32 owners and grants', () => {
     expect(cookie).toMatch(/^__Host-baton_session=[0-9a-f]{64}; Path=\/; Secure; HttpOnly; SameSite=Strict; Max-Age=43200$/);
     expect((await login(token)).status).toBe(401); // single use
     const session = cookie.split(';')[0];
-    const state = () => hostCall(new Request(`${ORIGIN}/v1/ui/state`, { headers: { Cookie: session } }));
+    const state = () => hostCall(new Request(`${ORIGIN}/v1/ui/session`, { headers: { Cookie: session } }));
     expect((await state()).status).toBe(200);
     expect((await hostCall(new Request(`${ORIGIN}/`, { headers: { Cookie: session } }))).status).toBe(200);
     // Another link, used after 5 minutes: refused.

@@ -73,12 +73,14 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     const docs = (res.json.repositories as { id: string; head: { sha: string } | null; courses: { id: string }[] }[]).find((r) => r.id === 'docs')!;
     expect(docs.head?.sha).toBe(board.shas.A);
     expect(docs.courses.map((c) => c.id)).toContain('roadmap-pr');
-    // The dashboard's own answer, not a second one (no new core query): an administrator's
-    // session, minted from the same key, reads its `GET /v1/ui/state` — the same repositories.
-    const session = await adminSession(admin);
-    const viaSession = await sessionCall(session, '/v1/ui/state');
-    expect(viaSession.status).toBe(200);
-    expect(res.json.repositories).toEqual(((await viaSession.json()) as Record<string, unknown>).repositories);
+    // The state's own answer, not a second one (no new core query): the same key reads
+    // `GET /v1/admin/state` (`stateView()`, B-216) — the same repositories.
+    const whole = await read(admin, '/v1/admin/state');
+    expect(whole.status).toBe(200);
+    // B-202: the registry read carries the registry's own fields beside each such row (S-BTN-296).
+    const stateRows = (whole.json as { repositories: Record<string, unknown>[] }).repositories;
+    expect((res.json.repositories as unknown[]).length).toBe(stateRows.length);
+    stateRows.forEach((row, i) => expect(res.json.repositories[i]).toMatchObject(row));
     // Writes keep their route: the read is a GET, and a GET of a write is not a silent success.
     expect((await read(docsOwner, '/v1/admin/repositories')).json.code).toBe('forbidden');
   });
@@ -94,6 +96,8 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
       max_tier: null, max_claims: 1, granted_by: `owner:${docsOwner.fingerprint}`, granted_at: T0,
       // R-BTN-58: the other repositories this key is granted on — none yet.
       other_repositories: [],
+      // B-199 (S-BTN-295): the grant's role, domain and who set them — none set.
+      role: null, domain: null, set_by: null,
     }]);
     expect((res.json.settings as Record<string, unknown>).repository_id).toBe('docs');
     expect(res.json.bars).toEqual([]);
@@ -118,11 +122,11 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
       const tiers = Object.values(res.json.ready_by_tier as Record<string, string[]>).flat();
       expect(tiers.length).toBeGreaterThan(0);
       expect(tiers.every((id) => id.startsWith('docs:'))).toBe(true);
-      // One fact, one answer: the board's two sections are the dashboard session's own for this
-      // repository — the administrator's session reads `GET /v1/ui/state` (`uiRepo` and `readyRows`).
-      const viaSession = await sessionCall(await adminSession(admin), '/v1/ui/state');
-      expect(viaSession.status).toBe(200);
-      const state = (await viaSession.json()) as Record<string, any>;
+      // One fact, one answer: the board's two sections are the state's own for this repository —
+      // the administrator's key reads `GET /v1/admin/state` (`uiRepo` and `readyRows`).
+      const whole = await read(admin, '/v1/admin/state');
+      expect(whole.status).toBe(200);
+      const state = whole.json as Record<string, any>;
       expect(res.json.repository).toEqual(state.repositories.find((r: { id: string }) => r.id === 'docs'));
       expect(res.json.ready).toEqual((state.ready as { repository_id: string }[]).filter((r) => r.repository_id === 'docs'));
       expect(res.json.ready_by_tier).toEqual(Object.fromEntries(Object.entries(state.ready_by_tier as Record<string, string[]>)
@@ -145,7 +149,8 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     // A key Baton does not know is unauthenticated; a granted key knows its repository only.
     const unknown = await read(stranger, '/v1/repositories/docs/board');
     expect([unknown.status, unknown.json.code]).toEqual([401, 'unauthenticated']);
-    expect((await read(admin, '/v1/repositories/nope/board')).json.code).toBe('not-found');
+    // B-192 (S-BTN-250): an unregistered repository is `forbidden` on a read, for every principal.
+    expect((await read(admin, '/v1/repositories/nope/board')).json.code).toBe('forbidden');
     expect((await read(admin, '/v1/admin/repositories/extra')).json.code).toBe('not-found');
     // The grant is the repository's alone: revoked, the read is refused.
     expect((await keyCall(docsOwner, `/v1/owner/docs/grants/${encodeURIComponent(granted.fingerprint)}/revoke`, {})).status).toBe(200);

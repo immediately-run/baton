@@ -1013,6 +1013,17 @@ export function checkAccept(body: unknown): { repository: string; sha: string } 
   return { repository: checkRepositoryId(b.repository), sha: matches(GIT_SHA, 'sha')(b.sha) };
 }
 
+/** `POST /v1/ui/resync` (B-201): the repository whose sync is asked to run, and nothing else.
+ *  `force` and `sha` name a forced resync onto a rewritten head, which is not built (R-BTN-11):
+ *  they are refused by name, never ignored. */
+export function checkResync(body: unknown): { repository: string } {
+  if (!isObj(body)) bad('body', 'must be a JSON object');
+  const b = body as Record<string, unknown>;
+  if (b.force !== undefined || b.sha !== undefined) bad('force', 'a forced resync is not built (R-BTN-11): a rewritten history is held, and accepted with POST /v1/ui/board/accept');
+  for (const k of Object.keys(b)) if (k !== 'repository') bad(`body.${k}`, 'unknown field');
+  return { repository: checkRepositoryId(b.repository) };
+}
+
 /** §6.7: the owner's resolution of an unconfirmed completion. */
 export function checkResolve(body: unknown): { action: 'confirm' | 'release' } {
   if (!isObj(body) || (body.action !== 'confirm' && body.action !== 'release') || body.confirm !== true) {

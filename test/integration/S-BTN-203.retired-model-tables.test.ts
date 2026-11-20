@@ -9,7 +9,7 @@
 // posting `model_provider_id`, `billing`, `usage` and `rate_limits` accepted with them ignored —
 // is S-BTN-203's unit half in test/unit/runners.test.ts. Runs on both hosts.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
-import { Git, ownerCall, ORIGIN, payload, register, rows, setClock, syncCall } from '../helpers';
+import { Git, ownerCall, ORIGIN, payload, register, rows, setClock, syncCall, stateView } from '../helpers';
 
 const board = inject('board');
 const T0 = Date.parse('2026-11-08T12:00:00Z');
@@ -55,7 +55,7 @@ describe('S-BTN-203 the retired model tables', () => {
     const lift = await ownerPost('/v1/ui/suspensions/1/lift');
     expect(lift.status).toBe(404);
     expect(await lift.json()).toMatchObject({ code: 'not-found' });
-    const s = (await (await ownerCall('/v1/ui/state')).json()) as Record<string, unknown>;
+    const s = (await stateView()) as Record<string, unknown>;
     expect(s.providers).toBeUndefined();
     expect(s.suspensions).toBeUndefined();
   });

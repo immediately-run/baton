@@ -131,18 +131,21 @@ describe('S-BTN-198 retirement', () => {
     // The alarm's backstop sends it nothing.
     await tick();
     expect(sent.filter((s) => s.startsWith('ops:'))).toEqual([]);
-    // R-BTN-47: an administrator's dashboard session still shows its fence-pending claims, so
-    // the fence clear can be reached.
-    const state = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as { needs_you: { fence_pending: { id: number; ticket_id: string }[] } };
+    // R-BTN-47: the state an administrator reads still shows its fence-pending claims, so the
+    // fence clear can be reached.
+    const state = (await (await keyCall(admin, '/v1/admin/state')).json()) as { needs_you: { fence_pending: { id: number; ticket_id: string }[] } };
     expect(state.needs_you.fence_pending).toEqual([expect.objectContaining({ id: claimId, ticket_id: 'ops:T-1' })]);
     // Every route naming it answers not-found (R-BTN-47), whoever asks — an authenticated
     // principal gets not-found; a key whose only repository it was is no principal at all
     // (R-BTN-155), as a key that owns nothing has always been.
     expect(await code(await keyCall(owner, '/v1/owner/ops/settings', {}, 'PUT'))).toBe('not-found');
-    expect(await code(await keyCall(admin, '/v1/owner/ops/grants'))).toBe('not-found');
-    expect(await code(await keyCall(admin, '/v1/repositories/ops/board'))).toBe('not-found');
+    // B-192 (S-BTN-250): on the repository and owner READS a repository the caller cannot read —
+    // a retired one as an unregistered one — is `forbidden`, the one refusal; the writes keep
+    // `not-found`.
+    expect(await code(await keyCall(admin, '/v1/owner/ops/grants'))).toBe('forbidden');
+    expect(await code(await keyCall(admin, '/v1/repositories/ops/board'))).toBe('forbidden');
     expect(await code(await keyCall(opsOwner, '/v1/repositories/ops/attestations', {}))).toBe('not-found');
-    expect((await runnerCall('/v1/repositories/ops/stats')).status).toBe(404);
+    expect((await runnerCall('/v1/repositories/ops/stats')).status).toBe(403);
     const w = await register('vm-a');
     const claimed = await claimItem('vm-a', w.secret, { ticket_id: 'ops:T-1' });
     expect(claimed.status === 200 ? 200 : claimed.json.code).toBe('not-found');
@@ -358,6 +361,7 @@ describe('S-BTN-198 retirement', () => {
     expect(await rows(`SELECT detail_json FROM events WHERE kind = 'condition' AND json_extract(detail_json, '$.closed') = 'retired'`))
       .toEqual([{ detail_json: JSON.stringify({ ticket: 'ops:T-1', condition: hitlId, type: 'hitl', closed: 'retired' }) }]);
     expect(await withCore((c) => c.conditions.needsYou())).toEqual([]);
-    expect(await code(await signed(runner, '/v1/repositories/ops/conditions?open=1'))).toBe('not-found');
+    // B-192 (S-BTN-250): the conditions read of a retired repository is the one `forbidden`.
+    expect(await code(await signed(runner, '/v1/repositories/ops/conditions?open=1'))).toBe('forbidden');
   });
 });

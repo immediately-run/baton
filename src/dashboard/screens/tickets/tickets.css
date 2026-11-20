@@ -1,0 +1,331 @@
+/* tickets.css — the Board's, the Tickets table's and the ticket page's own pieces: chips, the
+   reason band under a row, the lease bar, the filter bar, and the rows as cards at phone width.
+   Tokens are styles/tokens.css's; nothing here loads from another origin. */
+
+.chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--line2);
+  border-radius: var(--radius-s);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.chip-unmet {
+  border-style: dashed;
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.chip-note {
+  font-family: var(--sans);
+}
+
+.tk-flag {
+  margin-left: 6px;
+  color: var(--mut);
+}
+
+/* ── the filter bar ── */
+
+.tk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin: 0 0 12px;
+}
+
+.tk-bar .tabs {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+}
+
+.tk-bar .tab {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.tk-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.tk-tier {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.tk-foot {
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
+/* ── the rows ── */
+
+.tk-table .tk-id {
+  font-weight: 400;
+  text-align: left;
+  min-width: 220px;
+}
+
+.tk-title {
+  font-family: var(--sans);
+  overflow-wrap: anywhere;
+}
+
+.tk-state {
+  white-space: nowrap;
+}
+
+.tk-also {
+  display: block;
+  font-size: 12px;
+  white-space: normal;
+}
+
+.tk-pos {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+}
+
+.tk-holder {
+  flex-basis: 100%;
+  font-size: 13px;
+}
+
+.tk-table tr.tk-has-band > th,
+.tk-table tr.tk-has-band > td {
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+
+.tk-table tr.tk-band > td {
+  padding-top: 0;
+  padding-bottom: 8px;
+  font-size: 13px;
+  color: var(--mut);
+  overflow-wrap: anywhere;
+}
+
+.tk-table tr.tk-band-warn > td {
+  color: var(--warn);
+}
+
+.tk-table tr.tk-band > td::before {
+  content: '└ ';
+  color: var(--dim);
+}
+
+/* ── the lease bar ── */
+
+.lease {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.lease-track {
+  position: relative;
+  display: inline-block;
+  width: 96px;
+  height: 8px;
+  border: 1px solid var(--barline);
+  border-radius: 4px;
+  background: var(--sunk);
+}
+
+.lease-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--bar);
+  border-radius: 3px 0 0 3px;
+}
+
+.lease-now {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--fg);
+}
+
+.lease-left {
+  font-size: 12px;
+  color: var(--mut);
+}
+
+/* ── the board ── */
+
+.bd-tiers {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.bd-wait {
+  display: inline-block;
+  margin-left: 6px;
+}
+
+/* ── the ticket's page ── */
+
+.tp-title {
+  font-family: var(--sans);
+  overflow-wrap: anywhere;
+}
+
+.tp-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 0 0 14px;
+}
+
+.tp-controls:empty {
+  display: none;
+}
+
+.tp-cli {
+  margin: 6px 0 0;
+  font-size: 13px;
+}
+
+.tp-path {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+}
+
+.tp-pointers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tp-pointer {
+  overflow-wrap: anywhere;
+}
+
+.tp-resume {
+  margin: 10px 0 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.tp-claim {
+  margin: 0 0 10px;
+}
+
+/* ── phone: one card per ticket, the state first; the tabs scroll sideways ── */
+
+@media (max-width: 760px) {
+  .tk-wrap {
+    overflow-x: visible;
+    border: 0;
+  }
+
+  .tk-table,
+  .tk-table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .tk-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .tk-table tr.tk-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0 0 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+  }
+
+  .tk-table tr.tk-row.tk-has-band {
+    margin-bottom: 0;
+    border-bottom: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+
+  .tk-table tr.tk-row > th,
+  .tk-table tr.tk-row > td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    white-space: normal;
+  }
+
+  .tk-table tr.tk-row > td[data-label]::before {
+    content: attr(data-label) ': ';
+    color: var(--mut);
+    font-size: 12px;
+  }
+
+  .tk-table tr.tk-row > td.tk-state {
+    order: -1;
+  }
+
+  .tk-table tr.tk-row > td.tk-state::before {
+    content: none;
+  }
+
+  .tk-table tr.tk-band {
+    display: block;
+    margin: 0 0 10px;
+    padding: 0 12px 10px;
+    border: 1px solid var(--line);
+    border-top: 0;
+    border-radius: 0 0 var(--radius) var(--radius);
+    background: var(--panel);
+  }
+
+  .tk-table tr.tk-band > td {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+
+  .tk-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .tk-filters .filter {
+    flex: 1 1 160px;
+    min-width: 0;
+  }
+
+  .lease-track {
+    width: 72px;
+  }
+}

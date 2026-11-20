@@ -31,8 +31,8 @@ const copies = (ref: string) => rows<{ credential_id: string; state: string; cla
   'SELECT credential_id, state, claimed_by FROM notices WHERE ref = ? ORDER BY credential_id', ref);
 const poolClaim = (w: FleetRunner) => signed(w.key, '/v1/courier/notices/claim?repository=docs', { body: {} });
 const needsYou = async () => {
-  const res = await sessionCall(await adminSession(admin), '/v1/ui/state');
-  return ((await res.json()) as { needs_you: { pool_unclaimed: unknown[]; no_owner_channel: unknown[] } }).needs_you;
+  const res = await keyCall(admin, '/v1/admin/state');
+  return (res.json as { needs_you: { pool_unclaimed: unknown[]; no_owner_channel: unknown[] } }).needs_you;
 };
 
 beforeEach(async () => {

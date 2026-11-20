@@ -275,9 +275,9 @@ describe('round 1: one role per key, revocations that stay, bars that name what 
   });
 
   it('the dashboard: Access alone serves only while no administrator key is configured; a session always (1-A-6)', async () => {
-    const access = () => ownerCall('/v1/ui/state');
+    const access = () => ownerCall('/v1/ui/session');
     expect((await access()).status).toBe(401);
-    expect((await sessionCall(await adminSession(admin), '/v1/ui/state')).status).toBe(200);
+    expect((await sessionCall(await adminSession(admin), '/v1/ui/session')).status).toBe(200);
     await setAdminKeys();
     expect((await access()).status).toBe(200);
   });
@@ -338,7 +338,7 @@ describe('round 3', () => {
   it('a session stands whatever Access assertion comes with it (3-A-0)', async () => {
     const cookie = await adminSession(admin);
     const stranger = await accessTokenFor('stranger@example.com');
-    const res = await hostCall(new Request(`${ORIGIN}/v1/ui/state`, { headers: { Cookie: cookie, 'Cf-Access-Jwt-Assertion': stranger } }));
+    const res = await hostCall(new Request(`${ORIGIN}/v1/ui/session`, { headers: { Cookie: cookie, 'Cf-Access-Jwt-Assertion': stranger } }));
     expect(res.status).toBe(200);
   });
 
@@ -349,7 +349,7 @@ describe('round 3', () => {
   it('the dashboard lists the probe keys (3-A-3)', async () => {
     const probe = await makeKey('ssh-ed25519', 'probe');
     expect(await code(adm('/probes', { public_key: probe.publicKey, label: 'neon probe', instances: ['neon:main'] }))).toBe(200);
-    const state = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as Record<string, any>;
+    const state = (await keyCall(admin, '/v1/admin/state')).json as Record<string, any>;
     expect(state.limits.probes).toEqual([expect.objectContaining({ fingerprint: probe.fingerprint, label: 'neon probe', allowed_instances: '[]' })]);
   });
 });

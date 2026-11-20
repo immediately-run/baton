@@ -111,7 +111,8 @@ describe('S-BTN-38 a course measures itself', () => {
     expect(await readAs(opsKey, '/v1/repositories/docs/stats')).toMatchObject({ status: 403, json: { code: 'forbidden' } });
     expect((await runnerCall('/v1/repositories/docs/stats', { cred: 'vm-a' })).status).toBe(403);
     expect((await hostCall(new Request(`${ORIGIN}/v1/repositories/docs/stats`))).status).toBe(401);
-    expect((await runnerCall('/v1/repositories/nope/stats', { cred: 'vm-a' })).status).toBe(404);
+    // B-192 (S-BTN-250): an unregistered repository is `forbidden`, as one the key is not granted on.
+    expect((await runnerCall('/v1/repositories/nope/stats', { cred: 'vm-a' })).status).toBe(403);
     expect((await readAs(docsKey, '/v1/repositories/docs/stats?since=yesterday')).json).toMatchObject({ code: 'invalid-params' });
     expect(await readAs(docsKey, '/v1/repositories/%zz/stats')).toMatchObject({ status: 400, json: { code: 'invalid-params' } });
   });

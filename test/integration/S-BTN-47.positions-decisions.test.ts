@@ -30,7 +30,7 @@ const queued = (local: string) => rows<{ next_leg: string | null; next_source: s
 const nextLegs = (local: string) => rows<{ leg: string; state: string; waiting_on: string | null }>('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', `docs:${local}`);
 const history = async (local: string, as: TestKey = owner) => (await signed(as, `/v1/repositories/docs/tickets/${local}/history`, { method: 'GET' })).json;
 const decisions = (local: string) => rows<{ decision_id: string; source: string }>('SELECT decision_id, source FROM ticket_decisions WHERE ticket_id = ? ORDER BY decision_id', `docs:${local}`);
-const needsYou = async () => ((await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as { needs_you: Record<string, unknown[]> }).needs_you;
+const needsYou = async () => ((await keyCall(admin, '/v1/admin/state')).json as { needs_you: Record<string, unknown[]> }).needs_you;
 
 beforeEach(async () => {
   await setClock(T0);

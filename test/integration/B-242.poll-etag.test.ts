@@ -1,11 +1,16 @@
 // B-242 — an unchanged dashboard poll costs about one row (S-BTN-235; BATON_SPEC §11.4's
-// polling, §14's `/v1/ui/state` row, R-BTN-196's `state_version`). Production passed
-// Cloudflare's free-tier 5,000,000 `rows_read`/day on 2026-11-14 and 15; `GET /v1/ui/state`
-// read ~14.4k rows of a production-sized state every 10 s poll. The answer now carries a strong
-// ETag of the state version, the caller and a coarse clock bucket — the state shows what the
-// clock decides (alive, stalled, `reap_at`, the time windows), and liveness moves no version
+// polling, §14's Requests, R-BTN-196's `state_version`). Production passed Cloudflare's
+// free-tier 5,000,000 `rows_read`/day on 2026-11-14 and 15: V1's one state read cost ~14.4k
+// rows of a production-sized state every 10 s poll. A polled answer now carries a strong ETag
+// of the state version, the caller and a coarse clock bucket — it shows what the clock decides
+// (alive, stalled, a lease's end, the time windows), and liveness moves no version
 // (R-BTN-196) — decided after the principal and before the read runs: a matching
-// `If-None-Match` answers `304` having read the version row alone. Must hold:
+// `If-None-Match` answers `304` having read the version row alone.
+//
+// B-203 retired the read this was written against (`GET /v1/ui/state`); the scenario stands on
+// the read V2's Board and Tickets screens poll in its place — `GET …/tickets` (`repo.tickets`),
+// the repository's whole ticket list, which shows the same clock-decided facts — through the
+// same helper (`stateEtag`, by B-205's dispatcher; S-BTN-252 covers every other read). Must hold:
 //   1. a served answer carries its ETag, and a repeat naming it is `304` with no body and the
 //      same ETag;
 //   2. any write moves the ETag; a steady heartbeat — liveness, R-BTN-196's exception — does
@@ -34,9 +39,12 @@ let second: TestKey;
 let git: Git;
 let cookie: string;
 
-/** `GET /v1/ui/state` under the session, naming `etag` when given. */
+/** The read the dashboard polls: one repository's tickets (`repo.tickets`). */
+const POLLED = '/v1/repositories/docs/tickets';
+
+/** `GET` of it under the session, naming `etag` when given. */
 function poll(etag?: string) {
-  return sessionCall(cookie, '/v1/ui/state', etag === undefined ? {} : { headers: { 'If-None-Match': etag } });
+  return sessionCall(cookie, POLLED, etag === undefined ? {} : { headers: { 'If-None-Match': etag } });
 }
 
 beforeEach(async () => {
@@ -96,14 +104,14 @@ describe('B-242 the dashboard poll’s ETag', () => {
   });
 
   it('the ETag is the caller’s own, and the principal is decided before it is compared', async () => {
-    const foreign = (await sessionCall(await adminSession(second), '/v1/ui/state')).headers.get('ETag')!;
+    const foreign = (await sessionCall(await adminSession(second), POLLED)).headers.get('ETag')!;
     expect(foreign).toMatch(/^"[0-9a-f]{64}"$/);
     // Another administrator's ETag names that caller's answer: this one is served in full.
     const served = await poll(foreign);
     expect(served.status).toBe(200);
     expect(served.headers.get('ETag')).not.toBe(foreign);
     // A stranger naming a valid ETag is refused as ever — no `304` past the principal check.
-    const stranger = await call('/v1/ui/state', { headers: { 'If-None-Match': foreign } });
+    const stranger = await call(POLLED, { headers: { 'If-None-Match': foreign } });
     expect(stranger.status).toBe(401);
   });
 
@@ -174,8 +182,11 @@ describe.runIf(HOST === 'cloudflare')('B-242 an unchanged poll reads about one r
     // at a handful, so a doubling of the poll's cost fails. The second poll is bounded, not
     // equated: workerd may run an overdue alarm in the background between the two measurements
     // (the cloudflare host's own header says it may), and its reads land in one window alone.
+    // One row more than the retired state read's five: a repository's read authorizes against
+    // the registry's row of that repository before the tag is compared (S-BTN-252 measures the
+    // same row on the board).
     expect(unchanged.read).toBeGreaterThan(0);
-    expect(unchanged.read).toBeLessThanOrEqual(5);
+    expect(unchanged.read).toBeLessThanOrEqual(6);
     expect(later.read).toBeLessThan(full.read / 4);
     expect(full.read).toBeGreaterThan(unchanged.read * 100);
 

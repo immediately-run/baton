@@ -181,7 +181,7 @@ async function drive(r: Run, before: any, after: any, action: string, p: Record<
       for (const { id } of await rows<{ id: number }>('SELECT id FROM owner_bars WHERE lifted_at IS NULL')) await keyCall(r.owner, `/v1/owner/docs/bars/${id}/lift`, {});
       return;
     case 'ownerResolve':
-      await owner(r, `/v1/ui/claims/${r.claims.get(p.i)}/resolve`, { action: 'confirm', confirm: true });
+      await owner(r, `/v1/ui/claims/${r.claims.get(p.i)}/confirm`, { confirm: true });
       return;
     case 'syncNumber': {
       const res = await syncCall('/v1/sync/observation', {});

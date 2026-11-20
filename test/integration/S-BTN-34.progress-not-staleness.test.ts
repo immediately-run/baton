@@ -7,7 +7,7 @@
 // regressed_since set, and after 30 minutes the ticket is under Needs you; a later path that
 // extends the expected one clears it. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { advance, beat, claimItem, claimRow, cutover, endClaim, Git, ownerCall, placed, register, rows, setClock } from '../helpers';
+import { advance, beat, claimItem, claimRow, cutover, endClaim, Git, ownerCall, placed, register, rows, setClock, stateView } from '../helpers';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const REVIEWED: [string, string][] = [['implement', 'pr-open'], ['review', 'reviewed']];
@@ -56,7 +56,7 @@ describe('S-BTN-34 progress is not staleness', () => {
     expect(await rows('SELECT status, regressed_since FROM claims WHERE id = ?', c3.claim_id)).toEqual([{ status: 'active', regressed_since: T0 }]);
     expect((await beat('mac', w3.secret, { lease_timeout_s: 86_400 })).json.claim).toMatchObject({ station: 'reviewed',
       git: { station: 'filed', path: [], path_len: 0, regressed: true } });
-    const needs = async () => ((await (await ownerCall('/v1/ui/state')).json()) as { needs_you: { regressed: { id: number }[] } }).needs_you.regressed.map((r) => r.id);
+    const needs = async () => ((await stateView()) as { needs_you: { regressed: { id: number }[] } }).needs_you.regressed.map((r) => r.id);
     await setClock(T0 + 30 * 60_000 - 1);
     expect(await needs()).toEqual([]);
     await setClock(T0 + 30 * 60_000);

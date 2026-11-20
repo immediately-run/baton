@@ -25,7 +25,7 @@ const AT_REVIEWED = (bars: Record<string, string[]>) =>
 let admin: TestKey;
 let owner: TestKey;
 let git: Git;
-const uiState = async () => (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as Record<string, any>;
+const wholeState = async () => (await keyCall(admin, '/v1/admin/state')).json as Record<string, any>;
 
 const own = (path: string, body: unknown, method?: string) => keyCall(owner, `/v1/owner/docs${path}`, body, method);
 
@@ -101,7 +101,7 @@ describe('S-BTN-39 limits agents cannot change', () => {
       { leg: 'fix', state: 'waiting', waiting_on: 'policy' },
       { leg: 'merge', state: 'waiting', waiting_on: 'policy' },
     ]);
-    const state = await uiState();
+    const state = await wholeState();
     expect(state.needs_you.policy).toEqual([
       { ticket_id: 'docs:T-3', leg: 'fix', waiting_since: T0 },
       { ticket_id: 'docs:T-3', leg: 'merge', waiting_since: T0 },
@@ -142,7 +142,7 @@ describe('S-BTN-39 limits agents cannot change', () => {
     // An agent re-tiers T-4 in git: the tier is git's, and the grant's cap now admits it.
     git.add('T-4', { rank: 4, tier: 'routine' });
     expect(await git.post()).toMatchObject({ status: 200 });
-    const state = await uiState();
+    const state = await wholeState();
     expect(state.ready.find((t: { id: string }) => t.id === 'docs:T-4')).toMatchObject({ tier: 'routine', changed_in: git.head });
     // The dashboard's limits show the grant's cap by name.
     expect(state.limits.grants).toEqual([expect.objectContaining({ repository_id: 'docs', hostname: 'k-host', max_tier: 'routine' })]);

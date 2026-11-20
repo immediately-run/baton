@@ -4,7 +4,7 @@
 // advances into it are refused, rule `isolation`. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { adminSession, advance, beat, claimItem, course, cutover, Git, placed, recommended, register, rows, sessionCall, setAdminKeys, setClock } from '../helpers';
+import { adminSession, advance, beat, claimItem, course, cutover, Git, placed, recommended, register, rows, sessionCall, setAdminKeys, setClock, keyCall } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-10-19T12:00:00Z');
@@ -29,7 +29,7 @@ describe('S-BTN-64 isolation floors', () => {
     // The dashboard's Runners view carries each runner's mode (R-BTN-107, §14).
     const admin = await makeKey('ssh-ed25519', 'admin');
     await setAdminKeys(admin);
-    const state = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as { runners: { id: number; isolation: string }[] };
+    const state = (await keyCall(admin, '/v1/admin/state')).json as { runners: { id: number; isolation: string }[] };
     expect(Object.fromEntries(state.runners.map((w) => [w.id, w.isolation]))).toEqual({ [attached.id]: 'attached', [proc.id]: 'process', [session.id]: 'session' });
 
     expect(await recommended(session.id)).toEqual(['docs:R-1', 'docs:F-1']);

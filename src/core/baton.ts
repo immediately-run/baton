@@ -6,7 +6,7 @@
 // reach it only through the front, which has verified the principal — all but a signed
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
 import { MIGRATIONS } from '../migrations';
-import { versionedStore, clockBucket, ifNoneMatch, stateEtag, nonScheduling, schedulingVersion, type VersionedStore } from './stateVersion';
+import { versionedStore, clockBucket, ifNoneMatch, nonScheduling, schedulingVersion, type VersionedStore } from './stateVersion';
 import { BatonError, CLIENT_HEADER, errorResponse, json, servedClientVersions, withClientVersions } from './http';
 import { checkPayload, DEFAULT_COURSE, resolveParents, retiredBoardFields, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
@@ -28,7 +28,7 @@ import { Sequences } from './sequences';
 import { Webhooks, type Delivery } from './webhook';
 import { checkCrossBoardCycle, checkCrossRepository, consentRoute, resolveDependencies } from './dependencies';
 import { fileUrl } from './links';
-import { Stats, STATS_WINDOW_MS } from './stats';
+import { Stats } from './stats';
 import { Blocks } from './blocks';
 import { Resources } from './resources';
 import { Notices, type Courier } from './notices';
@@ -39,6 +39,7 @@ import { Provenance, briefMark, writtenBy } from './provenance';
 import { Capacity, RequestRing, adjustCounts } from './capacity';
 import { OwnerState } from './ownerState';
 import { checkBlockedOn, checkNoticeClaim } from './validate';
+import { checkResync } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import { codeReposOf, pushersOf } from './codeRepos';
 import { Policies, canonicalJson, sha256HexSync } from './policy';
@@ -47,8 +48,11 @@ import { logEvent, randomHex, systemRandom } from './db';
 import { Deprecated } from './deprecated';
 import { Retention } from './retention';
 import type { DispatchTarget, Ports, Row, SqlValue, Store, Workflow } from './ports';
+import { dispatchRead } from './reads';
+import type { ReadPrincipal } from './reads/kit';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
+const RESYNC_WINDOW_MS = 30_000; // B-201: a session's resync, once per repository per R-BTN-73's dispatch window
 const ALARM_EVERY_MS = 60_000; // §3: one alarm, every 60 seconds
 /** R-BTN-189: a signed policy read lives this long. */
 const POLICY_READ_MS = 10 * 60_000;
@@ -693,6 +697,11 @@ export class BatonCore {
       // R-BTN-185 (B-145): the human-only keys' own route, beside the administrator's and the
       // owner's.
       if (req.method === 'POST' && url.pathname === '/v1/human-keys') return await this.humanKeysRoute(req);
+      // B-192, B-205: every read a session may call — the repository and owner reads it shares
+      // with the keys among them — is one entry of src/core/actions.ts served through
+      // src/core/reads/: one principal, one authorization, the one refusal, then the ETag.
+      const read = await dispatchRead({ core: this, store: this.store, sql: (q, ...p) => this.sql(q, ...p), now: () => this.now(), config: this.ports.config }, req, url);
+      if (read) return read;
       if (url.pathname.startsWith('/v1/admin/') || url.pathname.startsWith('/v1/owner/')) return await this.adminRoute(req, url);
       if (req.method === 'POST' && url.pathname === '/v1/login') {
         // R-BTN-57, R-BTN-16: the one-time link's token for the session cookie — `__Host-`,
@@ -711,14 +720,21 @@ export class BatonCore {
         if (!owner && !(await this.admin.adminFingerprints()).size) owner = req.headers.get('X-Baton-Owner');
         if (!owner) throw new BatonError('unauthenticated', 'the dashboard session ended or is unknown');
         if (req.method === 'GET' && url.pathname === '/v1/ui/session') return json({ ok: true });
-        // B-242 (R-BTN-196): the poll's ETag, decided after the principal and before the read
-        // runs — the version row it hashes is an unchanged poll's whole cost, and a matching
-        // `If-None-Match` answers `304` with that ETag and no body. The state shows what the
-        // clock decides (alive, stalled, `reap_at`, the time windows), so the coarse bucket is
-        // an input; the caller is one too. The helper is B-205's for every read a session polls.
-        // B-287 / S-BTN-243: the existing authenticated dashboard principal can read one
-        // repository screen without constructing the aggregate state. Authorization precedes
-        // ETags, including a 304. The legacy aggregate endpoint remains compatible.
+        // B-206 (R-BTN-155, `ui.logout`): a session's own end — its row is revoked and the
+        // cookie cleared, with the attributes it was set with (R-BTN-16). The caller is the
+        // principal just resolved; nothing but its own session is named or ended.
+        if (req.method === 'POST' && url.pathname === '/v1/ui/logout') {
+          await readJson(req); // R-BTN-16's JSON body, read whole; it names nothing
+          await this.admin.endSession(req.headers.get('X-Baton-Session'));
+          const res = json({ ok: true });
+          res.headers.set('Set-Cookie', `${SESSION_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0`);
+          return res;
+        }
+        // B-287 / S-BTN-243: the authenticated dashboard principal reads one repository's
+        // tickets or runners a page at a time. Authorization precedes the ETag (B-242,
+        // R-BTN-196: the state version, and the clock's coarse bucket where the answer shows
+        // what the clock decides), including a 304. The aggregate these stood beside is retired
+        // (B-203): the whole state is `GET /v1/admin/state`'s, an administrator's key's alone.
         const list = /^\/v1\/ui\/repositories\/([^/]+)\/(tickets|runners)$/.exec(url.pathname);
         if (req.method === 'GET' && list) {
           const repository = checkRepositoryId(pathSegment(list[1]));
@@ -737,13 +753,6 @@ export class BatonCore {
           const more = rows.length > limit;
           const items = rows.slice(0, limit);
           const res = json({ [list[2]]: items, cursor: more ? String((items.at(-1) as unknown as { id: string | number }).id) : null });
-          res.headers.set('ETag', etag);
-          return res;
-        }
-        if (req.method === 'GET' && url.pathname === '/v1/ui/state') {
-          const etag = stateEtag(this.store, owner, '/v1/ui/state', clockBucket(this.now()));
-          if (ifNoneMatch(req, etag)) return new Response(null, { status: 304, headers: { ETag: etag } });
-          const res = json(this.uiState());
           res.headers.set('ETag', etag);
           return res;
         }
@@ -779,8 +788,6 @@ export class BatonCore {
         const b = checkAttestation(await readJson(signed.req), repo);
         return json(this.store.transaction(() => this.questions.answer(repo, b.ticket, b.value, human ? `human:${fp}` : `owner:${fp}`)));
       }
-      const read = await this.blocksRoute(req, url);
-      if (read) return read;
       // §4.6 (B-176, R-BTN-199): the sequence route — a write, so it has its own half beside
       // the blocks' reads, with the sync key admitted among its principals.
       const sequence = await this.sequenceRoute(req, url);
@@ -807,7 +814,7 @@ export class BatonCore {
   }
 
   /** Needs you: a BATON_KEYS list that was refused, or that names a revoked key (R3-1239). */
-  private keysNotice(): { refused?: string; revoked_listed?: string[] } | null {
+  keysNotice(): { refused?: string; revoked_listed?: string[] } | null {
     const raw = this.sql<{ value: string }>(`SELECT value FROM baton_settings WHERE key = 'keys_notice'`)[0]?.value;
     return raw ? JSON.parse(raw) : null;
   }
@@ -934,6 +941,28 @@ export class BatonCore {
     return { req, cred: await verifyApiKey(apiKey, lookup ?? ((fp) => this.runners.publicKey(fp))) };
   }
 
+  /** B-192: who reads — the one resolution of a read's caller into a principal. A signed
+   *  request or an API key is that key's, whatever cookie came with it (the front attaches no
+   *  session to one): an administrator's, an owner's or a runner's, by the key. A bearer token
+   *  the front verified is a runner's. Else the dashboard session, which authorizes with its
+   *  minting key's role (R-BTN-155) — an administrator's alone until B-76 builds an owner's
+   *  sign-in, whose branch `canRead` (src/core/reads/kit.ts) already holds. */
+  async readPrincipal(req: Request): Promise<{ principal: ReadPrincipal; req: Request }> {
+    if (req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key')) {
+      const admins = await this.admin.adminFingerprints();
+      const v = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.runners.publicKey(fp));
+      const role = admins.has(v.cred) ? 'admin' : this.admin.ownerKey(v.cred) ? 'owner' : 'runner';
+      return { req: v.req, principal: { kind: 'key', role, cred: v.cred } };
+    }
+    const cred = req.headers.get('X-Baton-Credential');
+    if (cred) return { req, principal: { kind: 'key', role: 'runner', cred } };
+    const session = req.headers.get('X-Baton-Session');
+    if (session == null) throw new BatonError('unauthenticated', 'no principal');
+    const fp = await this.admin.session(session);
+    if (!fp) throw new BatonError('unauthenticated', 'the dashboard session ended or is unknown');
+    return { req, principal: { kind: 'session', role: 'administrator', id: fp, repositories: null } };
+  }
+
   /** The runner and owner routes of R3-1211. The front passes the principal in
    *  `X-Baton-Credential` (a bearer token's credential, verified), `X-Baton-Signed` (a signed
    *  request's keyid, pre-checked; verifySigned finishes it here) or `X-Baton-Owner` (the Access
@@ -959,50 +988,7 @@ export class BatonCore {
       if ((await this.admin.adminFingerprints()).has(cred)) throw new BatonError('forbidden', 'an administrator key is never a runner key (R-BTN-57)');
     }
     const tx = <T>(f: () => T): T => this.store.transaction(f);
-    const stats = /^\/v1\/repositories\/([^/]+)\/stats$/.exec(p);
-    if (m === 'GET' && stats) {
-      // §2d, §11: a course's record, for any key granted on the repository (R-BTN-58).
-      // Aggregates and ids only (G-BTN-64).
-      if (!cred) throw new BatonError('unauthenticated', 'no runner principal');
-      const segment = pathSegment(stats[1]);
-      const repo = checkRepositoryId(segment);
-      // R-BTN-47 (B-173): a retired repository is `not-found`, as one never registered.
-      if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
-      // A grant on the repository, whatever the key (round 1, 1-A-0): a bearer or seed key has no
-      // grant, so it reads no repository's stats — the item's "Do not".
-      this.runners.credential(cred);
-      if (!this.sql('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
-        throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
-      }
-      const raw = url.searchParams.get('since');
-      const now = this.now();
-      const since = raw == null ? now - STATS_WINDOW_MS : Date.parse(raw);
-      if (!Number.isFinite(since) || since > now) throw new BatonError('invalid-params', 'since: must be an ISO time not in the future');
-      return json({ ok: true, ...this.stats.of(repo, since, now) });
-    }
-    // R-BTN-163 (B-234): the conditions list — what a delivery runner polls
-    // (`?open=1&type=interact`, R-BTN-195) and the dashboard's Conditions screen draws. Any key
-    // granted on the repository reads it, as it reads the stats.
-    const conditionsList = /^\/v1\/repositories\/([^/]+)\/conditions$/.exec(p);
-    if (m === 'GET' && conditionsList) {
-      if (!cred) throw new BatonError('unauthenticated', 'no runner principal');
-      const segment = pathSegment(conditionsList[1]);
-      const repo = checkRepositoryId(segment);
-      // R-BTN-47 (B-173): a retired repository is `not-found`, as one never registered.
-      if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
-      this.runners.credential(cred);
-      if (!this.sql('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
-        throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
-      }
-      const open = url.searchParams.get('open');
-      if (open != null && open !== '1' && open !== 'true') throw new BatonError('invalid-params', 'open: 1, or nothing');
-      return json({ ok: true, ...this.conditions.list(repo, {
-        open: open === '1' || open === 'true' || undefined,
-        type: url.searchParams.get('type') ?? undefined,
-        ticket: url.searchParams.get('ticket') ?? undefined,
-        cursor: url.searchParams.get('cursor') ?? undefined,
-      }) });
-    }
+    // The stats and the conditions list (§14) are served in src/core/reads/repository.ts (B-192).
     if (p.startsWith('/v1/runner/')) {
       if (!cred) throw new BatonError('unauthenticated', 'no runner principal');
       // R-BTN-197: every runner call records its Baton-Client as the runner's own statement of
@@ -1155,10 +1141,14 @@ export class BatonCore {
         const body = await readJson(req);
         return json(tx(() => this.claims.fenceClear(owner, Number(fenceClear[1]), body)));
       }
-      const resolve = /^\/v1\/ui\/claims\/(\d+)\/resolve$/.exec(p);
-      if (resolve) {
+      // B-222 (R-BTN-10, §9.6): the completion's confirm and its release, each a route of its
+      // own over `claims.resolve`. V1's one route taking `{action}` is retired (B-203).
+      const completion = /^\/v1\/ui\/claims\/(\d+)\/(confirm|release)$/.exec(p);
+      if (completion) {
         const body = await readJson(req);
-        return json(tx(() => this.claims.resolve(owner, Number(resolve[1]), body)));
+        // `confirm` is the caller's own word (§12.2): `checkResolve` refuses a body without it.
+        const confirm = (body as { confirm?: unknown } | null)?.confirm;
+        return json(tx(() => this.claims.resolve(owner, Number(completion[1]), { action: completion[2], confirm })));
       }
       if (p === '/v1/ui/cutover') {
         const body = await readJson(req);
@@ -1191,6 +1181,28 @@ export class BatonCore {
         const body = await readJson(req);
         return json(tx(() => this.claims.acceptHeld(owner, body)));
       }
+      // B-201 (`repo.resync`; R-BTN-73): a session asks the repository's sync to run now — the
+      // dispatch a webhook delivery sends, logged with who asked, at most one per repository per
+      // dispatch window. Nothing of the board moves here: the sync posts, and R-BTN-11 judges
+      // its post. A forced resync is not built and is refused by name (`checkResync`).
+      if (p === '/v1/ui/resync') {
+        const { repository } = checkResync(await readJson(req));
+        const repo = this.registry.live(repository);
+        if (!repo) throw new BatonError('forbidden', 'this repository is not yours or does not exist');
+        if (!repo.sync_workflow) throw new BatonError('conflict', `${repository} registers no sync workflow: Baton has nothing to dispatch for it`);
+        tx(() => {
+          const now = this.now();
+          // The request is an `admin` event (`act: resync`), as an administrator's other acts are:
+          // the window reads the last one, so no new event kind and no table is needed.
+          const last = this.sql<{ at: number }>(
+            `SELECT at FROM events WHERE kind = 'admin' AND at > ? AND repository_id = ? AND json_extract(detail_json, '$.act') = 'resync' ORDER BY at DESC, seq DESC LIMIT 1`,
+            now - RESYNC_WINDOW_MS, repository)[0];
+          if (last) throw new BatonError('conflict', `a resync of ${repository} was asked for under ${RESYNC_WINDOW_MS / 1000} seconds ago`);
+          logEvent(this.store, now, 'admin', `owner:${owner}`, { act: 'resync' }, null, null, repository);
+        });
+        this.syncNow([repository]);
+        return json({ ok: true });
+      }
     }
     return null;
   }
@@ -1215,16 +1227,11 @@ export class BatonCore {
     if (p.startsWith('/v1/admin/')) {
       if (!admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is required (R-BTN-57)');
       const actor = `admin:${fp}`;
-      // B-90: the registry, for an operator or an agent with a key — no new query: the same
-      // `uiRepo` rows `/v1/ui/state` lists as its `repositories`. B-91 adds `seed_owners`, the
-      // registrations that lean on the deploy for their owner keys (`Admin.seedOwnedRepositories`).
-      if (m === 'GET' && p === '/v1/admin/repositories') {
-        const seed_owners = this.admin.seedOwnedRepositories();
-        return json({ ...this.adminView(), ...(seed_owners.length ? { seed_owners } : {}) });
-      }
-      // B-118: what an administrator's dashboard session reads, for the key itself — the same
-      // `uiState()`, so the dashboard and a terminal cannot drift.
-      if (m === 'GET' && p === '/v1/admin/state') return json(this.uiState());
+      // `GET /v1/admin/repositories` and `GET /v1/admin/capacities` are reads of
+      // src/core/reads/tenant.ts (B-202), answered before this route is reached.
+      // B-118, B-216 (R-BTN-57, R-BTN-179): the state in one request for a terminal —
+      // `stateView()`, built by the functions the entity reads use, so the two cannot drift.
+      if (m === 'GET' && p === '/v1/admin/state') return json(this.stateView());
       if (m === 'POST' && p === '/v1/admin/repositories') return json(await this.admin.repositories(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/probes') return json(await this.admin.addProbe(actor, await body()));
       // R-BTN-76: external resources, their account instances, and a reading by hand.
@@ -1236,10 +1243,9 @@ export class BatonCore {
         if (b && typeof b === 'object' && !Array.isArray(b) && (b as { clear?: unknown }).clear !== undefined) return json(this.resources.clear(actor, b));
         return json(this.resources.post({ kind: 'admin', fingerprint: fp }, b, null));
       }
-      // R-BTN-178: a capability's capacity, and the courses whose legs require one — the read
-      // `baton admin capacity set` prints before it asks to confirm.
+      // R-BTN-178: a capability's capacity. The read `baton admin capacity set` prints before
+      // it asks to confirm is `admin.capacity.list` (src/core/reads/tenant.ts).
       if (m === 'PUT' && p === '/v1/admin/capacities') return json(this.resources.setCapacity(actor, await body()));
-      if (m === 'GET' && p === '/v1/admin/capacities') return json(this.resources.capacities(url.searchParams.get('capability') ?? undefined));
       // B-4 (R-BTN-113, §13.1): the instance settings — `link_hosts`, `session_hosts` and
       // `check_app_id`, each given replacing its own whole.
       if (m === 'PUT' && p === '/v1/admin/settings') return json(this.instance.set(actor, await body()));
@@ -1286,8 +1292,8 @@ export class BatonCore {
     if (!this.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
     const actor = `owner:${fp}`;
     const rest = o[2];
-    // B-90: the repository's grants and settings, read before any write below.
-    if (m === 'GET' && rest === 'grants') return json(this.grantsView(repo));
+    // B-90: the repository's grants and settings — and the policy's log below — are read in
+    // src/core/reads/repository.ts (B-192: a session's reads too).
     // B-127: the repository's owner signing keys — public keys of its human-only owners — the
     // read `baton owner verify-config` carries into a checkout (the same list the sync's
     // observation serves its own credential).
@@ -1314,11 +1320,6 @@ export class BatonCore {
       const b = await body();
       const breakGlass = await this.humanBreakGlass();
       return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, new Set(breakGlass.keys()))));
-    }
-    if (m === 'GET' && rest === 'policy/log') {
-      const after = Number(url.searchParams.get('after') ?? 0);
-      if (!Number.isInteger(after) || after < 0) throw new BatonError('invalid-params', 'after: must be a version number');
-      return json({ versions: this.policies.log(repo, after) });
     }
     if (m === 'POST' && rest === 'policy/floors') {
       const b = await body();
@@ -1393,9 +1394,10 @@ export class BatonCore {
    * `GET /v1/repositories/{repository}/tickets/{ticket}/blocks[?runner=me]` and
    * `GET /v1/repositories/{repository}/blocked[?on=…&transitive=1 | ?cursor=…]` (R-BTN-75, §11):
    * for any key granted on the repository, an owner of it, or an administrator. `runner=me` is a
-   * runner session's own answer, so it needs the session's secret.
+   * runner session's own answer, so it needs the session's secret. B-192: served through
+   * src/core/reads/repository.ts, for a session beside those keys.
    */
-  private async blocksRoute(req: Request, url: URL): Promise<Response | null> {
+  async repositoryRead(req: Request, url: URL, repo: string, who: ReadPrincipal): Promise<Response | null> {
     const blocks = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/blocks$/.exec(url.pathname);
     const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
     // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
@@ -1414,22 +1416,13 @@ export class BatonCore {
     const boardRead = /^\/v1\/repositories\/([^/]+)\/board$/.exec(url.pathname);
     // §12.8 (B-145, R-BTN-189): the signed policy read, for the same principals.
     const policyRead = /^\/v1\/repositories\/([^/]+)\/policy$/.exec(url.pathname);
-    if (req.method !== 'GET' || (!blocks && !blocked && !history && !show && !boardRead && !policyRead && !runs && !children)) return null;
+    if (!blocks && !blocked && !history && !show && !boardRead && !policyRead && !runs && !children) return null;
     const seg = pathSegment;
-    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? show ?? boardRead ?? policyRead ?? runs ?? children)![1]));
-    // R-BTN-47 (B-173): one check — a retired repository is `not-found` here as one never
-    // registered.
-    if (!this.registry.live(repo)) throw new BatonError('not-found', `no repository ${repo}`);
-    let cred = req.headers.get('X-Baton-Credential');
-    let role: 'admin' | 'owner' | 'runner' = 'runner';
-    if (req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key')) {
-      const admins = await this.admin.adminFingerprints();
-      const v = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.runners.publicKey(fp));
-      cred = v.cred;
-      role = admins.has(cred) ? 'admin' : this.admin.ownerKey(cred) ? 'owner' : 'runner';
-      if (role === 'owner' && !this.admin.owns(cred, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
-    }
-    if (!cred) throw new BatonError('unauthenticated', 'no principal');
+    // B-192: the caller is resolved and authorized before this is reached (src/core/reads/) —
+    // `repo` is live and the principal's to read; a session reads as its role's key does, with
+    // no grant of its own and no runner's secret.
+    const role: 'admin' | 'owner' | 'runner' = who.kind === 'session' ? (who.role === 'administrator' ? 'admin' : 'owner') : who.role;
+    const cred = who.kind === 'session' ? who.id : who.cred;
     // B-190 (§14): a leg's runs are what replay reads — an owner's or an administrator's read.
     if (runs && role === 'runner') throw new BatonError('forbidden', `a leg's runs are an owner's or an administrator's read, not a runner's (R-BTN-84)`);
     // R-BTN-179 (B-90): a granted key's board names its grant on THIS repository — the same grant the
@@ -1437,9 +1430,6 @@ export class BatonCore {
     // null for a key no grant binds there (a bearer's or a seed key's reach is its own).
     let granted: string[] | null = null;
     if (role === 'runner') {
-      if (!this.sql('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
-        throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
-      }
       const c = this.runners.credential(cred);
       granted = c.granted
         ? [...new Set(this.runners.grantedCapabilities(cred, repo))].filter((x) => x !== 'none').sort()
@@ -2336,7 +2326,7 @@ export class BatonCore {
 
   // ── the dashboard's state (§14: Ready and Providers in rollout step 1) ─────────────────
 
-  /** One registered repository as `/v1/ui/state` lists it (B-90: `baton board` reads the same):
+  /** One registered repository as the state lists it (B-90: `baton board` reads the same):
    *  its own head and its own mode (R-BTN-47, R-BTN-28), and its courses with their queues. */
   private uiRepo(repo: Repository) {
     const sha = this.headOf(repo.id);
@@ -2348,7 +2338,7 @@ export class BatonCore {
   }
 
   /** `GET /v1/admin/repositories` (B-90, R-BTN-179): the registry as the dashboard's state lists
-   *  it — one section of `uiState`'s answer, built by the same `uiRepo` it maps over. */
+   *  it — one section of `stateView`'s answer, built by the same `uiRepo` it maps over. */
   adminView() {
     return { repositories: this.registry.all().map((repo) => this.uiRepo(repo)) };
   }
@@ -2356,7 +2346,7 @@ export class BatonCore {
   /** `GET /v1/owner/{repository}/grants` (R-BTN-146, B-90): the repository's owner keys, the
    *  grants on it, and its owners' settings — the dashboard's state's own reads, for its owners. */
   grantsView(repo: string) {
-    // The same four sections `uiState().limits` serves, over one repository: owners, grants
+    // The same four sections `stateView().limits` serves, over one repository: owners, grants
     // (their max_tier as its name in the repository's ladder), settings and the bars in force.
     const limits = this.admin.view(this.now());
     return {
@@ -2378,7 +2368,7 @@ export class BatonCore {
   }
 
   /** `GET /v1/repositories/{repository}/board` (B-90): the dashboard's view of one repository —
-   *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order,
+   *  the repository as the state lists it, its `ready` tickets and the per-tier order,
    *  derived by the same `readyRows` it derives them with, for one repository — and one field the
    *  dashboard does not have. `granted_capabilities` is the key's grant's capabilities — the
    *  heartbeat answer's field — so a granted runner knows its grant from the read alone; null
@@ -2474,7 +2464,12 @@ export class BatonCore {
     return tickets.map((t) => ({ ...t, requires: requirements.get(t.id) ?? [] }));
   }
 
-  uiState() {
+  /** `GET /v1/admin/state` (R-BTN-57, R-BTN-179; B-118, B-216's Decision 4a): the state in one
+   *  request for a terminal, an administrator's key's alone — built by the functions the entity
+   *  reads use (`readyRows`, `claims.running`, `runners.runnersView`, `history.view`, the
+   *  modules' `needsYou`), so the two cannot drift (S-BTN-170). The dashboard session's own
+   *  `GET` of this answer is retired (B-203): a session reads the entity reads. */
+  stateView() {
     const now = this.now();
     // R3-1258 (R-BTN-87): the envelope's figures read ONCE for the whole answer — Needs you's
     // `capacity` listing and the Capacity view share them (B-240's statement budget).

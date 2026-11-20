@@ -4,7 +4,7 @@
 // ticket is not offered, flagged at 6 h; the peer's review moves the ticket to reviewed at the next
 // snapshot, which confirms the end. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { advance, claimItem, claimRow, cutover, endClaim, Git, ownerCall, placed, recommended, register, setClock } from '../helpers';
+import { advance, claimItem, claimRow, cutover, endClaim, Git, ownerCall, placed, recommended, register, setClock, stateView } from '../helpers';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const H = 3_600_000;
@@ -32,7 +32,7 @@ describe('S-BTN-18 git wins', () => {
     expect((await claimItem('vm-b', w2.secret, { ticket_id: 'docs:T-1' })).json).toMatchObject({ code: 'not-eligible', rule: 3 });
     // Flagged on the dashboard at 6 h, never confirmed by the clock.
     await setClock(T0 + 6 * H);
-    const state = (await (await ownerCall('/v1/ui/state')).json()) as { needs_you: { unconfirmed: { id: number }[] } };
+    const state = (await stateView()) as { needs_you: { unconfirmed: { id: number }[] } };
     expect(state.needs_you.unconfirmed.map((u) => u.id)).toEqual([c.claim_id]);
     // A peer's round-one review, marker and all: the next snapshot places the ticket at reviewed,
     // which extends the path the suspension expects — confirmed, and the ticket offered again.

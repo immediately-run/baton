@@ -55,6 +55,7 @@
     "traces": "node scripts/check-traces.mjs",
     "model:verify": "node model/verify.mjs",
     "check:wiki": "node scripts/check-wiki.mjs",
+    "check:actions": "node scripts/check-actions.mjs",
     "check:tickets": "node cli/baton.mjs tickets check --repo .",
     "spec:impact": "node scripts/spec-tools.mjs impact",
     "spec:index": "node scripts/spec-files.mjs",
