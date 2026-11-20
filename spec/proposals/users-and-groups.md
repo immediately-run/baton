@@ -22,10 +22,13 @@ section.
     reused), `display_name` (text under §12.3's caps), `forge_identities` (a list of `{host,
     user_id}`, the immutable id of R-BTN-138's kind) and `retired_at`. Baton holds no email
     address, telephone number or channel address of a user in the clear (R-BTN-33, §5).
-  - **Keys belong to users.** A key of any role (R-BTN-13, R-BTN-159) may be attached to at most
-    one user (`user_keys`). A user authenticates nothing: every request is still one key's, and
-    what the key may do is still decided by its role, its grants and the lists that admit it.
-    `human_only` stays a property of the key (R-BTN-185), never of the user.
+  - **Keys belong to users.** An owner key, or a key that holds no role yet, may be attached to
+    at most one user (`user_keys`); a machine key, a sync or mirror key, an instrument key and
+    an administrator's key never are. An attached key holds the owner role under the one-role
+    rule (§12.1), and is an owner of a repository only where §3 says. A user authenticates
+    nothing: every request is still one key's (R-BTN-13, R-BTN-159), and what the key may do is
+    still decided by the lists that admit it. `human_only` stays a mark on the key (R-BTN-185),
+    never on the user.
   - **Creating a user** is an administrator's action (`baton admin user add <id>`). A new user
     confers nothing: it is an owner of nothing and a member of nothing.
   - **Attaching a key is a grant of everything the user holds**, so it is one of two acts:
@@ -112,17 +115,20 @@ person's routes are kept so that nobody who can read Baton's API learns them.
 - U-3 (proposed) — a user's routes are channel names in the clear and addresses sealed to the
   notifier.
   - **A route** is `{channel, sealed?}`, in the user's order of preference. `channel` matches
-    `^[a-z][a-z0-9-]{0,31}$` and is opaque to core (`ntfy`, `email`, `whatsapp`). `sealed` is the
-    address encrypted to a notifier's public encryption key, at most 2 KB, which Baton stores
-    and never opens. A route with no `sealed` says the notifier's own host holds the address,
-    keyed by the user's id.
+    `^[a-z][a-z0-9-]{0,31}$` and is opaque to core (`ntfy`, `email`, `whatsapp`). `sealed` is
+    the JSON `{user, channel, address}` encrypted to the notifier's public encryption key (an
+    age X25519 recipient), at most 2 KB of base64, which Baton stores and never opens. A route
+    with no `sealed` says the notifier's own host holds the address, keyed by the user's id.
+    The notifier drops a sealed value whose `user` or `channel` is not its route's, so a copied
+    ciphertext reaches nobody else.
   - **Who writes it.** The user, with any key attached to them (`baton user route set`, scope
     `own`). The CLI seals the address locally; the address never reaches Baton in the clear.
-  - **The notifier** is a new principal: an SSH key an administrator registers for the tenant
-    with its public encryption key (`baton admin notifier add`). It reads the conditions lists
-    (R-BTN-163), the policy reads, and `GET /v1/notifier/routes`, the one route that answers
-    sealed addresses; it writes nothing and holds no grant. Every other reader gets a route's
-    `channel` alone.
+  - **The notifier** is a new principal and a role of its own under the one-role rule (§12.1):
+    an SSH key an administrator registers for the tenant with its public encryption key (`baton
+    admin notifier add`), one live at a time. It reads every repository's conditions list
+    (R-BTN-163) and policy (R-BTN-189), the users and groups, and `GET /v1/notifier/routes`,
+    the one route that answers sealed addresses; it writes nothing and holds no grant. Every
+    other reader, an administrator included, gets a route's `channel` alone.
   - **It runs no repository code.** `baton notifier start` is the CLI's own loop with the
     channel senders its host configures. It resolves an entry to people through the leg's label
     (§4) or, for a condition with no leg, the repository's owners, and sends each person the
@@ -160,7 +166,68 @@ readers, not from the channel's.
     the repository, which any pusher can write. A deployment whose git server maps keys to
     users may run its own adapter over that map.
 
-## 7. Decided, and still open
+## 7. Tables, routes and commands
+
+The conventions of BATON_SPEC [§13](../BATON_SPEC/13-data-model.md) and
+[§14](../BATON_SPEC/14-api.md) apply; the rows move there when built.
+
+| Table | Key | Columns | Purpose |
+|---|---|---|---|
+| `users` | `id` | `display_name`, `forge_identities` JSON `[{host, user_id, linked_by, linked_at}]`, `created_by`, `created_at`, `retired_at` | A tenant's users (U-1) |
+| `user_keys` | `fingerprint` | `user_id`, `public_key` (unique), `human_only`, `attached_by`, `attached_at`, `detached_at` | The keys attached to a user (U-1) |
+| `groups` | `id` | `source` (`baton`\|`forge`), `forge_team` JSON `{host, org_id, team_id}` (NULL for `baton`), `version`, `escalation` JSON, `created_by`, `created_at`, `retired_at` | A tenant's groups and each one's escalation steps (U-2, U-3) |
+| `group_members` | `(group_id, user_id)` | `added_by`, `added_at` | A `baton` group's members; a `forge` group's are derived from the latest reading (U-2, U-4) |
+| `repository_owners` | as built, its key also holding `user:<id>` and `group:<id>` | as built | Owner entries (R-BTN-58, proposed) |
+| `user_routes` | `(user_id, position)` | `channel`, `sealed` (NULL when the notifier's host holds the address), `recipient` (the encryption key it was sealed to), `set_at` | A user's routes (U-3) |
+| `notifiers` | `fingerprint` | `public_key`, `recipient`, `label`, `added_by`, `added_at`, `revoked_at` | The tenant's notifier (U-3) |
+| `directory_readings` | `(repository_id, host)` | `observation`, `reading_json` (users, teams, members and key fingerprints, ids only), `posted_at` | The latest directory reading per forge host (U-4) |
+
+| Route | Caller | Body or query | Response | Rules |
+|---|---|---|---|---|
+| `POST /v1/admin/users` | administrator | `{id, display_name}`; `{id, retire: true, confirm: true}` | `{ok: true}`; `conflict`; `unsatisfiable-approvers` | U-1 |
+| `GET /v1/users` | administrator, owner, a key granted on any repository, the notifier | — | `{users: [{id, display_name, forge_identities, groups[], routes: [{channel, sealed: <bool>, stale?}]}], groups: [{id, source, members[], carries_authority_on[]}]}` | U-1, U-2 |
+| `POST /v1/users/{user}/keys` | a key attached to the user; an administrator within U-1 | `{public_key, signature, human_only?}`, `signature` the new key's SSHSIG over its own public line; `{fingerprint, detach: true, confirm: true}` | `{ok: true}`; `conflict`; `forbidden`; `unsatisfiable-approvers` | U-1 |
+| `PUT /v1/users/{user}/routes` | a key attached to the user | `{routes: [{channel, sealed?}]}`, at most 8 | `{ok: true}`; `invalid-params` for a `sealed` over its cap | U-3 |
+| `POST /v1/users/{user}/forge-identities` | administrator; a key attached to the user that the latest reading lists for the account | `{host, user_id}`; `{host, user_id, unlink: true}` | `{ok: true}`; `forbidden` | U-4 |
+| `POST /v1/admin/groups` | administrator | `{id, source, forge_team?}`; `{id, retire: true, confirm: true}` | `{ok: true}`; `conflict`; `unsatisfiable-approvers` | U-2 |
+| `PUT /v1/groups/{group}/members` | as U-2 says | `{base_version, members[]}` | `{version}`; `conflict` when stale; `forbidden` naming a repository; `unsatisfiable-approvers` | U-2 |
+| `PUT /v1/groups/{group}/escalation` | administrator, owner | `{steps: [{notify[], after_s}]}`, at most 8 steps | `{ok: true}` | U-3 |
+| `POST /v1/admin/notifiers` | administrator | `{public_key, recipient, label}`; `{fingerprint, revoke: true, confirm: true}` | `{ok: true}`; `conflict` | U-3 |
+| `GET /v1/notifier/routes` | the notifier | — | `{recipient, routes: [{user, channel, sealed}], escalations: {<group>: steps}}` | U-3 |
+| `POST /v1/owner/{repository}/owners` | owner | as built, and `{user}` or `{group}` to add; `{entry, remove: true, confirm: true}` | as built | R-BTN-58 |
+
+`GET /v1/repositories/{repository}/conditions` and `…/policy` also answer the notifier. The
+board post (§4.4) gains `directory: {host, users[], teams[]}`, accepted or refused with it.
+
+| Command | What it does | Rule |
+|---|---|---|
+| `admin user add <id> --name <display name>`, `admin user retire <id>` | creates or retires a user | U-1 |
+| `user list`, `user show [<id>]` | the users and groups | U-1, U-2 |
+| `user key add <pub> [--human-only]`, `user key remove <fingerprint>` | attaches or detaches one of the caller's own keys; `admin user key add <id> <pub>` is the administrator's | U-1 |
+| `user route set <channel> [--address <a>] [--position <n>]`, `user route remove <channel>` | seals and sets one of the caller's routes | U-3 |
+| `user forge link <host>` | links the caller's forge identity | U-4 |
+| `admin group add <id> [--forge-team <host>/<org>/<team>]`, `admin group retire <id>` | creates or retires a group | U-2 |
+| `group member add <group> <user>`, `group member remove <group> <user>` | changes a `baton` group's members | U-2 |
+| `group escalation set <group> <file>` | sets a group's escalation steps | U-3 |
+| `owner owner add <repository> --user <id> \| --group <id>` | adds a user or group to the owner set | R-BTN-58 |
+| `admin notifier add <pub> --recipient <age recipient> --label <l>`, `admin notifier revoke <fingerprint>` | registers or revokes the notifier | U-3 |
+| `notifier start --config <file>` | runs the notifier | U-3 |
+
+## 8. Scenarios
+
+Each takes its `S-BTN-n` from Baton's sequence (R-BTN-199) with the ticket that builds it.
+
+| Scenario | Sets up | Expects |
+|---|---|---|
+| a key attaches only by its user | an unattached key asks to attach itself; a user's key attaches a second; an owner's key attaches a `human_only` one; an administrator attaches to a user a repository names | `forbidden`; attached, and an owner wherever the user is; `forbidden`; `forbidden` |
+| user and group entries open gates only with a live key | `approvers.policy: [group:g]`; a member's key changes the policy; a non-member owner's does; the last member's key is detached | accepted; `forbidden`; `unsatisfiable-approvers` |
+| a `human:` entry needs a human-only key | `approvers.members: [human:group:g]`; a member's owner key, its session, then its `human_only` key | `forbidden`; `forbidden`; accepted, and the list reads human-only |
+| forge membership counts only where the policy says | a `forge` group in `approvers.policy` under `members.source: baton`, then `forge`; the reading drops the member | no key matches, the change that names it refused `unsatisfiable-approvers`; the member's key matches; it matches no longer |
+| a group's membership is each repository's to approve | a group named by two repositories' lists; an approver of one adds a member; an approver of both does | `forbidden` naming the other; accepted in both |
+| a person leg is answered by its label's holders | `roles: {release: [group:g]}`; an owner outside `g` answers; a member answers; the sync attests an answer in git; a course asks an unbound label | `forbidden`; applied, `answered_by` naming the user; `answer-invalid`; snapshot refused, the previous course in force |
+| only the notifier reads a sealed route | a user sets a sealed route; an owner, an administrator and a runner read the users; the notifier reads its routes; the notifier key is replaced | `channel` and `sealed: true` alone; the ciphertext; the route reads `stale` to its user |
+
+## 9. Decided, and still open
 
 Decided in the design discussion of 2026-11-20:
 
