@@ -73,7 +73,7 @@ function decoded(raw: string): string {
  *  decides — through B-242's one helper. Decided after authorization and before the read. */
 export function etagOf(cx: ReadCtx, call: ReadCall, route: ReadRoute): string {
   const query = [...call.url.searchParams].map(([k, v]) => `${k}=${v}`).sort().join('&');
-  return stateEtag(cx.store, callerKey(call.principal), `${call.action.id}\n${call.url.pathname}\n${query}`, route.clock ? clockBucket(cx.now()) : null);
+  return stateEtag(cx.store, callerKey(call.principal), `${call.action.id}\n${call.url.pathname}\n${query}`, route.clock ? clockBucket(cx.now()) : null, !route.quiet);
 }
 
 /** Serve `req` if it is a read registered here; null otherwise, and the core's older routes

@@ -106,6 +106,8 @@ function ticketAnswer(cx: ReadCtx, call: ReadCall) {
 
 export const TICKET_READS: ReadRoute[] = [
   // Stalled, the lease ends, a backoff's end and the 24-hour window are the clock's.
-  { action: 'repo.tickets', clock: true, run: ticketsAnswer },
+  // The list is built from the tickets, their positions, claims, holds and conditions; the one
+  // activity read behind it — a backing-off row's failed attempts — moves only as a claim ends.
+  { action: 'repo.tickets', clock: true, quiet: true, run: ticketsAnswer },
   { action: 'ticket.show', clock: true, run: ticketAnswer },
 ];

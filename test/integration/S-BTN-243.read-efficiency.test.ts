@@ -169,7 +169,7 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     await sameProjection();
   });
 
-  it('pages dashboard rows, isolates ETags from activities, and reads latest pointers without history scans', async () => {
+  it('isolates a session read’s ETag from activities, and reads latest pointers without history scans', async () => {
     const admin = await makeKey('ssh-ed25519', 'read-admin');
     await setAdminKeys(admin);
     const git = new Git();
@@ -177,13 +177,11 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     await git.post(); await cutover();
     const w = await register('vm-a');
     const cookie = await adminSession(admin);
-    const path = '/v1/ui/repositories/docs/tickets?limit=10';
+    // V1's paged lists are retired with the rest of `/v1/ui/*`'s reads (B-203): a session reads
+    // the entity reads, whose cursors are S-BTN-253's.
+    const path = '/v1/repositories/docs/tickets';
     const first = await sessionCall(cookie, path);
-    const page = await first.json() as { tickets: { id: string }[]; cursor: string };
-    expect(page.tickets).toHaveLength(10);
-    const next = await (await sessionCall(cookie, `${path}&after=${encodeURIComponent(page.cursor)}`)).json() as { tickets: { id: string }[] };
-    expect(next.tickets).toHaveLength(10);
-    expect(new Set([...page.tickets, ...next.tickets].map((t) => t.id)).size).toBe(20);
+    expect(((await first.json()) as { tickets: unknown[] }).tickets).toHaveLength(30);
     const tag = first.headers.get('ETag')!;
     await rows("INSERT INTO messages(kind, from_runner_id, to_runner_id, sent_at, status, payload_json) VALUES ('status_report', ?, ?, ?, 'pending', '{}')", w.id, w.id, T0);
     expect((await sessionCall(cookie, path, { headers: { 'If-None-Match': tag } })).status).toBe(304);
@@ -193,13 +191,13 @@ describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000
     await rows(`WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM k WHERE i<3000)
       INSERT INTO pending_transcripts(runner_id, repo, path, role, first_seen_at)
       SELECT ?, 'immediately-run/claude-sessions', 'log-' || i, 'session', ? + i FROM k`, w.id, T0);
-    const read = await measure(() => sessionCall(cookie, '/v1/ui/repositories/docs/runners?limit=10'));
+    const read = await measure(() => sessionCall(cookie, '/v1/repositories/docs/runners'));
     expect(read.value.status).toBe(200);
-    const body = await read.value.json() as { runners: { transcript_url: string; last_report: { payload_json: string } }[] };
+    const body = await read.value.json() as { runners: { transcript_url: string; last_report: { payload: unknown } }[] };
     expect(body.runners).toHaveLength(1);
     expect(body.runners[0].transcript_url).toContain('log-3000');
-    expect(JSON.parse(body.runners[0].last_report.payload_json)).toEqual({ text: 'last' });
-    for (const entry of read.log.filter((e) => e.sql.includes('FROM pending_transcripts WHERE') || e.sql.includes('FROM messages WHERE id IN'))) {
+    expect(body.runners[0].last_report.payload).toEqual({ text: 'last' });
+    for (const entry of read.log.filter((e) => e.sql.includes('FROM pending_transcripts') || e.sql.includes('FROM messages'))) {
       const plan = await rows<{ detail: string }>(`EXPLAIN QUERY PLAN ${entry.sql}`, ...entry.params);
       expect(plan.some((p) => /pending_transcripts_latest|messages_reports/.test(p.detail))).toBe(true);
     }

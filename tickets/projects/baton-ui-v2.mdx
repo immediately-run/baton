@@ -26,7 +26,7 @@ dashboard), [§11.3](../../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-129](.
 one registry, every surface derived from it), [§14](../../spec/BATON_SPEC/14-api.md#sec-14) (the
 API), [§12.3](../../spec/BATON_SPEC/12-security.md#sec-12-3) (text, never markup).
 
-**Status:** `active` — author-set.
+**Status:** `active` — author-set. Built and merged with residuals; see [Status](#status).
 
 ## The organizing rule
 
@@ -152,6 +152,90 @@ B-207 → a screen → B-203 → B-216. The screen tickets are independent of ea
 shell lands. Shared write targets are kept to one writer: the grants read is B-199's, the
 sidebar and the strip are B-206's and B-208's (screens only fill `repo.list` fields), `front.ts`
 is edited by B-192, B-193 and B-195 in dependency order, and the deploy workflow by B-193 alone.
+
+## Status
+
+_2026-11-20 — after [#301](https://github.com/immediately-run/baton/pull/301), from an audit of
+`main` against each ticket's What to build._
+
+The V2 app is merged and deployed, and `GET /v1/ui/state` is gone. **No item is done as written:**
+every ticket was built as far as the foundations outside the project allow, and each keeps the
+residuals below. The tickets stay open until their residuals are built or moved to tickets of
+their own — that choice is the owner's.
+
+**Done when, line by line.**
+
+- Every item above is done — no; see the residuals.
+- The dashboard at the instance's origin is the V2 app — merged and deployed by `baton-deploy`
+  at `376a03f3`; not checked on production (B-216 item 3 needs the owner's sign-in, and
+  Cloudflare Access stands in front).
+- `GET /v1/ui/state` is gone and `GET /v1/admin/state` is `stateView()` — yes (S-BTN-306,
+  S-BTN-170).
+- Every listing V1 drew has a home — yes (S-BTN-305), though the homes are "Also waiting" on
+  Conditions and `/state`, not `baton.<sub>` conditions (B-57).
+- Every screen is drawn from reads and controls a signed key could make the same way — the
+  reads, yes; the controls are an administrator's session's `/v1/ui/*` routes.
+
+**Residuals by what blocks them.**
+
+- **Owner sessions and the code sign-in (B-76)** — every session is an administrator's. Owner
+  paths are coded but unreachable and tested on fixtures only: B-192, B-194, B-197, B-199,
+  B-201, B-204, B-206 (the link sign-in, not R-BTN-155's code flow), B-208, B-217, B-218,
+  B-220, B-221. `admin.session.list` has no `id`, `repositories`, `last_seen_at` or
+  `client_addr`, and nothing revokes a session (B-202, B-215). No session writes an attestation
+  or answers a person leg (B-195, B-213, B-219).
+- **Key-confirmed codes (B-76, B-300)** — no route answers `202 {confirm_code}`; the code dialog
+  is fixture-tested. Force-reap, fence clear, completion confirm and release, cut over and
+  adoption confirm take the plain `confirm: true` dialog (B-207, B-220, B-222). Forced resync is
+  not built (B-201, B-214, B-220). Cut over and adoption confirm have no CLI command, so their
+  buttons are the only client.
+- **The registry proper (B-25)** — `src/core/actions.ts` is a minimal table, not
+  `src/shared/actions.mjs` with one `authorize`; no `ticket.cancel` (B-204, B-207, B-222); CLI
+  lines are checked against the CLI's parser, not the registry's command table (B-199, B-200,
+  B-207, B-214); the cursor key is a stored setting, not a host binding (B-205); no `mcp_keys`
+  (B-199, B-200).
+- **Conditions (B-55, B-56, B-57)** — `condition.show` has no `detail` or `handler`; nothing
+  resolves or restarts a condition and `allowed` is empty (B-195, B-219, B-222, B-216's
+  scenario on those screens); the strip's third count is open conditions only (B-204, B-208);
+  B-203's listings are not conditions.
+- **Goals (B-122)** — `/goals` is a placeholder and `exclusive_goal` is null (B-198, B-204,
+  B-208).
+- **The attestation store (B-146)** — `attestation.list` serves applied decision answers only;
+  no lapse, revocation, domain or other type (B-213).
+- **Prerequisites (B-10)** — no `…/prerequisites` read and no table on the ticket page (B-192,
+  B-210).
+- **Leg log directories and the CLI tree (B-23)** — `log_dir` is served and always null (B-196,
+  B-210, B-211, B-218).
+- **Executors (B-184)** — no executor, digest, environment or instance on runners and runs
+  (B-196, B-211).
+- **Stores that do not exist** — registration tokens (R-BTN-117: B-199), grant acceptance
+  (R-BTN-146: B-199), per-home consents (R-BTN-140: B-199, B-200), wants (R-BTN-94: B-201,
+  B-220), delegated keys (B-124: B-204, B-218).
+
+**Residuals nothing blocks.**
+
+- B-216: the production check and this page's check against the deployed instance; S-BTN-170's
+  `limits.couriers` is an `it.todo` (no entity read carries it).
+- B-202, B-214, B-215: no `storage_bytes`; probes have no `added_at`; reading shapes differ from
+  the ticket (§14 documents the built ones); `/instances` draws `detail` as JSON, not through
+  `View`; tables scroll at 375 px rather than collapse to cards.
+- B-194, B-218: a ticket closed today carries no title, course or tier; another repository's
+  ticket id answers `invalid-params`, not `not-found`; `attempts` are the ticket's failed
+  claims, not the current leg's; `brief` is still served.
+- B-217: `ticket.children` of a ticket outside the repository answers an empty list, not
+  `not-found`.
+- B-195, B-219: `?open=1` is in id order; `condition.show` carries no question; list rows do not
+  say what a condition unblocks.
+- B-197, B-212, B-223: path steps carry no `run_id`; no wait is marked against a p50; a station
+  panel lists only tickets on pages already loaded, and opens on click, not focus.
+- B-200: no `check_app_id` on `/policy`, and its log is not paged.
+- B-201, B-220: a refused post leaves no record, so only `snapshot-rejected` is ever shown; the
+  discrepancy link's `#history` reaches no anchor.
+- B-205, B-196: "about one row per unchanged poll" is asserted as eight or fewer, and the
+  runners read's cost as equal statement counts, not rows.
+- B-209: `granted_capabilities` are not served to a session, so the Board draws none.
+- B-210, B-211: leg runs show no `mode` and name the runner by id; `profile` is drawn as JSON.
+- B-206, B-208, B-209, B-210, B-211, B-221: no test at 375 px, only the CSS.
 
 ## Done when
 

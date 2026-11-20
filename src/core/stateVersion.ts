@@ -187,8 +187,17 @@ export const clockBucket = (at: number): number => Math.floor(at / CLOCK_BUCKET_
  *  answered `304` having read one row, the version's. The caller and the subject are inputs,
  *  so one caller's `304` is never another's and one read's never its neighbour's. B-205's
  *  reads hash theirs the same way, through here. */
-export function stateEtag(store: Store, caller: string, subject: string, bucket: number | null = null): string {
-  return `"${sha256HexSync([stateVersion(store), caller, subject, bucket].join('\u0000'))}"`;
+export function stateEtag(store: Store, caller: string, subject: string, bucket: number | null = null, activity = true): string {
+  return `"${sha256HexSync([activity ? stateVersion(store) : boardVersion(store), caller, subject, bucket].join('\u0000'))}"`;
+}
+
+/** B-287: the version a read that shows no activity row hashes — every write but those to the
+ *  activity tables (activities, transcripts, messages, events, ticket history) moves it, so a
+ *  busy runner's reports leave such a read's tag standing. The whole version where the store
+ *  tracks none. */
+function boardVersion(store: Store): string | number {
+  const s = store as Partial<VersionedStore>;
+  return typeof s.readVersion === 'function' ? `b${s.readVersion(false)}` : stateVersion(store);
 }
 
 /** B-242: whether `req`'s `If-None-Match` names `etag` — the strong tag itself, or its weak

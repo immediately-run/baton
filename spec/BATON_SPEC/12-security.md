@@ -31,7 +31,7 @@ stated once, in the rule it cites.
 | Instrument (probe) | `/v1/probe/*` | SSH-signed | post readings of any registered instance (R-BTN-101) |
 | Registration token (proposed, R-BTN-117) | `POST /v1/register` | `Authorization: Baton-Token <token>` | register one credential within its scope (R-BTN-117, R-BTN-157) |
 | Administrator | `/v1/admin/*`; any claim's leg runs | a `BATON_ADMIN_KEYS` line, SSH-signed or API key | R-BTN-57 |
-| Dashboard session | `/v1/ui/*` | the session cookie (R-BTN-155) | as `session` (R-BTN-129), an administrator's session: every action §14 lists `session` on. Owners' sessions, a session's calls outside `/v1/ui/*` and confirmation codes are proposed ([people and dashboard, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) |
+| Dashboard session | `/v1/ui/*`, and the `GET`s §14 lists a session on | the session cookie (R-BTN-155) | as `session` (R-BTN-129), an administrator's session: every action §14 lists `session` on. Outside `/v1/ui/*` a session reads only: the request is the session's when it carries the cookie and no key (§14). Owners' sessions and confirmation codes are proposed ([people and dashboard, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) |
 | Repository owner | `/v1/owner/{repository}/*`; the repository's reads and leg runs | an owner key, SSH-signed or API key | R-BTN-58 |
 | Human-only key | `POST /v1/human-keys`; `POST`, `DELETE …/attestations` as writer `human`; as an owner, or as a break-glass line on every repository it satisfies (R-BTN-188), the owner's routes | an SSH key registered `human_only` (R-BTN-185), on an owner key or a key of no other role | open human gates (R-BTN-185), `human-key.add` and `human-key.revoke` among them; as an owner, R-BTN-58; never through a session, which is `owner` |
 | MCP key (a delegated key; proposed, [people and dashboard, §2](../proposals/people-and-dashboard.md#2-mcp)) | `POST /v1/mcp` only | bearer `bmcp_…` | as `owner` on one repository, narrowed to the ids listed at minting: R-BTN-186, R-BTN-130 |
@@ -181,7 +181,8 @@ Every value below is validated on write; a value over its cap is refused `invali
     carries an `Origin` equal to the origin when it carries one, and `Sec-Fetch-Site:
     same-origin` when it carries that header, else `forbidden`.
   - **Sessions.** `/v1/ui/*` requires a dashboard session minted from an administrator key
-    (R-BTN-155), and a session authenticates no route outside `/v1/ui/*`.
+    (R-BTN-155). Outside `/v1/ui/*` a session authenticates only the `GET`s §14 lists it on —
+    the reads it shares with the keys — and no write.
     Cloudflare Access may stand in front of the dashboard; Baton never requires it and never reads
     its cookie. Baton verifies the assertion Access forwards, and that assertion alone
     authenticates `/v1/ui/*` only while no administrator key is configured (R-BTN-155). Where

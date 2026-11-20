@@ -298,7 +298,7 @@ contents are not built; their design is
     (R-BTN-16) only while the minting key is an administrator's.
   - **Sessions.** A session is its minting administrator key's. It lives 12 hours and ends as
     soon as the key leaves `BATON_ADMIN_KEYS`, checked on every request. It calls `/v1/ui/*`
-    (§14); a destructive action carries `confirm: true` (§12.2). Link tokens and session values
+    and reads the `GET`s §14 lists a session on (§14, R-BTN-16); a destructive action carries `confirm: true` (§12.2). Link tokens and session values
     are stored as hashes (§12.1).
   - **Cloudflare Access, with no administrator key.** While `BATON_ADMIN_KEYS` names no key, a
     request to `/v1/ui/*` is authenticated by a verified Cloudflare Access

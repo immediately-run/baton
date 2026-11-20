@@ -169,8 +169,6 @@ here; every other cause is its rule's.
 | **Dashboard** | | | | |
 | `POST /v1/login` | none | `{token}` | `{ok: true}` and the session cookie | R-BTN-155 |
 | `POST /v1/ui/logout` | session | `{}` | `{ok: true}` and the session cookie cleared; the caller's own session ends (`ui.logout`) | R-BTN-155 |
-| `GET /v1/ui/repositories/{repository}/tickets` | session | `limit` (1–100, default 50), `after` (the last ticket id), `If-None-Match` | `{tickets, cursor}`, one page of the repository's ticket list ordered by ticket id, `cursor: null` at the end; an `ETag` over the caller, the route, the page and R-BTN-196's board version, the principal checked before a `304` | §11, R-BTN-196 |
-| `GET /v1/ui/repositories/{repository}/runners` | session | `limit` (1–100, default 50), `after` (the last runner id), `If-None-Match` | `{runners, cursor}`, one page of the runners declaring a course in the repository, ordered by runner id, each with its current claims, activity, latest transcript and latest report; the `ETag` also covers R-BTN-196's activity version and a coarse clock bucket | §11, R-BTN-196 |
 | `POST /v1/ui/messages` | session | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold; any other kind `invalid-params` | §6, R-BTN-119 |
 | `POST /v1/ui/overrides/{ticket}` | session | `{expedite}` or `{hold}` | `{ok: true}` | §6 |
 | `POST /v1/ui/board/accept` | session | `{repository, sha}` | `{ok: true}` (`repo.accept-post`); `not-found` for no such held history | R-BTN-11 |
