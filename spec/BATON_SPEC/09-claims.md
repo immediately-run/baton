@@ -22,10 +22,10 @@ is `active` until it ends `completed`, `released` or `reaped`.
   A claim past that bound is refused `not-eligible`, rule `max-claims`, checked in the claim's
   own transaction; a runner whose bound drops below the claims it holds keeps them and claims
   again only once it has room. Baton counts claims, never a host's resources. Each claim keeps
-  its own nonce, legs, stop (R-BTN-119), end, reap and fence, and one claim's release, failure
-  or supersession touches no other; the lease that keeps them all is the runner's (R-BTN-9).
+  its own nonce, legs, stop (R-BTN-119), end, reap and fence, and one claim's release or
+  failure touches no other; the lease that keeps them all is the runner's (R-BTN-9).
 - **Claiming** (unnumbered). `POST /v1/runner/claim` with a client-generated `request_id` and
-  an optional `ticket_id`, plus optional `prefer` and `rationale` (R-BTN-100). A ticket
+  an optional `ticket_id`. A ticket
   Baton has not seen is `not-eligible` (`unknown-ticket`) until a post names it (R-BTN-5).
   - Without `ticket_id`, Baton returns the first eligible ticket in its default order (the first
     recommendation, R-BTN-45, R-BTN-61); with one, that ticket if every gate passes, else
@@ -37,7 +37,7 @@ is `active` until it ends `completed`, `released` or `reaped`.
   - **The response**, stated here once, carries `claim_id`, `ticket_id`, `course_id`,
     `course_version`, `station`, `legs` (the queued leg, R-BTN-83), `next`, `path`, `nonce` (6
     hex, public: written in markers, R-BTN-17), `snapshot_sha`, `default_branch` (R-BTN-143),
-    the ticket's `version`, `ticket_source?` and `last_written_by?` (R-BTN-198, R-BTN-194),
+    the ticket's `version`, `ticket_source?` and `last_written_by?` (R-BTN-194),
     `brief?` (R-BTN-194), `scope` (§12.9), the policy's `policy_hash`, `guarantees_hash` and
     `floors_hash` (R-BTN-189), `leg_state?` (R-BTN-188), `handoff_url?` and `previous_attempts`
     (R-BTN-24).
@@ -100,10 +100,10 @@ is `active` until it ends `completed`, `released` or `reaped`.
   key and following former paths (R-BTN-141). A branch that maps to tickets of two repositories
   sharing a local id is refused if either is held; a course whose ids may collide puts
   `{repository}` in its pattern.
-- **R-BTN-7 (status writes are fenced against holders).** Legacy, removed with its code
-  (R-BTN-193). A tool that writes a ticket's status to git first asks `GET
-  /v1/runner/tickets/{ticket}/holder` and is refused (`not-holder`, exit 10) only when another
-  runner's active claim holds the ticket or a reaped claim on it is fence-pending.
+- **R-BTN-7 (status writes are fenced against holders).** A tool that writes a ticket's status
+  to git first asks `GET /v1/runner/tickets/{ticket}/holder` and is refused (`not-holder`, exit
+  10) only when another runner's active claim holds the ticket or a reaped claim on it is
+  fence-pending. With no active claim the write proceeds.
 
 ### 9.3 Suspending and handing off
 
@@ -117,8 +117,8 @@ is `active` until it ends `completed`, `released` or `reaped`.
   station each heartbeat, for up to **30 minutes**, then suspends. The ticket then waits unheld
   and is recommended again, to any eligible runner. A suspension is a completed end, never a
   failed attempt.
-- **R-BTN-44 (the hand-off document).** Every suspension or release — except a lost lease and a
-  supersession — leaves a hand-off document, written by the leg script's `handoff(ctx)` for a
+- **R-BTN-44 (the hand-off document).** Every suspension or release — except a lost lease —
+  leaves a hand-off document, written by the leg script's `handoff(ctx)` for a
   successor with none of this session's context: what is done and where; what the next leg
   must do; decisions made and alternatives rejected, with reasons; what the environment needed
   that git does not hold; open questions. The course prescribes its sections and where it lives;
@@ -131,16 +131,14 @@ is `active` until it ends `completed`, `released` or `reaped`.
 
 A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once: `end_reason`,
 `reached`, `next` (required unless `reached` is an end station, R-BTN-83), and as applicable
-`not_before`, `spawned` (R-BTN-86), `outputs`, `detail`, `ended_at_sha` (R-BTN-8; a completed
-end's only), `error: {type, message?}`, `prerequisite` (R-BTN-126), `ticket_version` (a
-`released:ticket-changed` end's version, refused on any other end, R-BTN-198), `exit_status`
-(R-BTN-153), `scope_exceeded` (§12.9) and `session_url` (R-BTN-113).
+`spawned` (R-BTN-86), `outputs`, `detail`, `ended_at_sha` (R-BTN-8; a completed end's only),
+`prerequisite` (R-BTN-126), `exit_status` (R-BTN-153), `scope_exceeded` (§12.9), `session_url`
+(R-BTN-113) and `local_order` (R-BTN-202).
 
 - `detail` is free text of at most 200 characters under the untrusted-text rule (§12), stored
   and shown, never read. A claim the runner releases `cannot-finish:transient` because its leg
   failed carries the failure's last line — for an agent's leg, the agent's own last line of
   output — masked (R-BTN-144).
-- Baton stores `error.type` (`claims.error_type`), never the message.
 - Repeating the same end is answered `ok`; a different end on an ended claim is refused
   `claim-ended`.
 
@@ -157,14 +155,12 @@ end's only), `error: {type, message?}`, `prerequisite` (R-BTN-126), `ticket_vers
 | `released:cannot-finish:spec` | `released` | the ticket or its course contradicts itself; also a non-retryable course `interrupt` type; held at once, `non-retryable:spec` | yes |
 | `released:cannot-finish:contract-input` | `released` | an input failed its schema; held at once, raises `baton.contract` (R-BTN-82) | no |
 | `released:lease-lost` | `released` | the holder's lease lapsed (R-BTN-6) | yes, once per distinct runner per ticket and leg |
-| `released:blocked` | `released` | a prerequisite failed during the leg, or a raised condition or call outlived its wait (R-BTN-126, R-BTN-162, R-BTN-165) | no; counts toward `max_blocked` (R-BTN-122) except a `call` block |
+| `released:blocked` | `released` | a prerequisite failed during the leg (R-BTN-126) | no; counts toward `max_blocked` (R-BTN-126) |
 | `released:leg-timeout` | `released` | the running leg's deadline passed (R-BTN-167, R-BTN-90) | yes |
 | `released:requested` | `released` | an owner's release message, Stop leg, the runner's own stop signal (R-BTN-119, R-BTN-72) | no |
 | `released:owner-cancel` | `released` | Cancel: hold plus release (§6) | no |
-| `released:superseded` | `released` | Baton superseded the ticket (R-BTN-168) | no |
 | `released:floor` | `released` | a guarantee a floor names broke on a repository the ticket reaches, and Baton released the claim (R-BTN-189) | no |
 | `released:<bar reason>` | `released` | an owner bar that releases holders, with that bar's `reason` (R-BTN-67) | no |
-| `released:ticket-changed` | `released` | the ticket's version moved under the running leg, whose course restarts on it or which released itself for it (R-BTN-198) | no |
 | `released:course-changed` | `released` | the leg left the course under the claim: an `off-graph` refusal or a heartbeat `station: unknown` (R-BTN-64) | no |
 | `released:off-branch` | `released` | the claim's sha is not on the default branch (R-BTN-143) | no |
 | reaped, actor `alarm` | `reaped` | the runner was silent past its lease timeout (§9.5) | yes |
@@ -295,9 +291,6 @@ end's only), `error: {type, message?}`, `prerequisite` (R-BTN-126), `ticket_vers
     | Kind | Recorded by | When |
     |---|---|---|
     | `condition` | Baton, on `POST /v1/runner/claims/{id}/conditions` | a leg raises a condition (R-BTN-160) |
-    | `condition-wait` | the runner | a leg waits in its claim for a handler (R-BTN-162) |
-    | `context-handoff` | the runner | a fresh session replaces a full one (R-BTN-123) |
-    | `leg-log-write-failed` | the runner | a leg log's final write failed (R-BTN-128) |
 
   - **Sources.** `skill`: a skill marks a phase with `baton-activity start <kind> [--seq N]
     [--label …]` and `baton-activity end <id> --outcome <o>`. `hook`: harness hooks start and end

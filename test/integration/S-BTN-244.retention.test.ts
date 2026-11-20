@@ -1,4 +1,4 @@
-// S-BTN-225 retention (B-238; BATON_SPEC §2 R-BTN-149): the alarm prunes, a batch a tick, what
+// S-BTN-244 retention (B-238; BATON_SPEC §2 R-BTN-149): the alarm prunes, a batch a tick, what
 // Baton would otherwise keep forever. Repository events older than 90 days go only below every
 // live mirror's acknowledged cursor (a mirror's `GET /v1/sync/events` acknowledges the cursor it
 // starts from), a tenant event never; board snapshots older than 90 days go, never a head's; a
@@ -48,7 +48,7 @@ beforeEach(async () => {
   await cutover();
 });
 
-describe('S-BTN-225 R-BTN-149 retention', () => {
+describe('S-BTN-244 R-BTN-149 retention', () => {
   it('events older than 90 days go below the mirror’s acknowledged cursor; tenant events and younger ones stay', async () => {
     const fill = (n: number, at: number, repo: string | null) => rows(
       `WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < ?)

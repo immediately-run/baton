@@ -19,17 +19,17 @@ Designs for this section that are not built are on the proposal page
   - **The course directory** is the home's `.baton/courses/<course>/`: `course.json` (R-BTN-69),
     a script and an instruction file `legs/<leg>.md` for each leg (R-BTN-133), and optionally
     its station function `sync.mjs` (R-BTN-74), `rank.mjs` (R-BTN-98), `schemas/<name>@<n>.json`
-    (R-BTN-108) and leg overrides (R-BTN-131). A station function and a ticket source may import
-    the repository paths `.baton/baton.json` lists in `imports`, and nothing else of the
-    repository.
+    (R-BTN-108) and leg overrides (R-BTN-131). A standard course (R-BTN-131) with no `sync.mjs`
+    runs the CLI's station function for it; any other course without one fails the sync.
   - **A source** is `courses[].source` = `<provider>/<namespace>/<repository>/<commit>/<course>`:
     `<commit>` is all 40 hex characters, never a branch or tag, and `github` is the only
     provider. The short `id` is the name tickets, rows, rule 9 and branch patterns use. A course
     with no `source` is the repository's own. A source names the CLI's own repository; any other
     is refused.
   - **A sourced course keeps its graph.** The sync posts nothing while the home's `course.json`
-    differs from the source commit's. The home changes a sourced course only through its leg
-    instructions and leg overrides (R-BTN-131).
+    differs from the source commit's, or while the home has a `sync.mjs` for the course. The
+    home changes a sourced course only through its leg instructions and leg overrides
+    (R-BTN-131).
   - **Every reader goes through the snapshot.** The sync reads `.baton/` at the commit it posts
     (R-BTN-105), the runner at the claim's `snapshot_sha` after R-BTN-143's check, and
     re-verification at the commit it verifies (R-BTN-5), so all three use the same bytes.
@@ -165,9 +165,9 @@ Designs for this section that are not built are on the proposal page
     holds (§6). The first `advance` starts the first leg; every leg a claim runs has its own
     `advance`. Baton records each leg a claim starts and finishes (`claim_legs`).
   - **Every run has a run id.** The `advance` that starts a run, and an adoption that adds one,
-    mints its `run_id` through the core's clock (R-BTN-32) and random source. It is opaque and
-    unique in the tenant: readers compare it only for equality, and order comes from
-    `started_at` and `seq`. Anything a runner writes outside Baton where another tenant could
+    mints its `run_id` through the core's clock (R-BTN-32) and random source (`r_` and a
+    26-character ULID). It is opaque and unique in the tenant: readers compare it only for
+    equality, and order comes from `started_at` and `seq`. Anything a runner writes outside Baton where another tenant could
     also write is keyed by the tenant's host (R-BTN-135) and the run id.
   - **Baton's traversal record counts.** A ticket's runs of each leg and arrivals at each
     station are counted from Baton's own record, under resolved names (R-BTN-64). `max_runs`,
@@ -245,8 +245,8 @@ Designs for this section that are not built are on the proposal page
   - **Core owns the envelope.** A leg output is `{name, schema: "<id>@<version>", uri?,
     digest?, value?}`: `uri` and `digest` (R-BTN-82), or an inline `value` of at most 4 KB
     serialized, never both. A reading keeps R-BTN-76's envelope and names its `detail`'s schema
-    in `schema`. Core reads the envelope only, and a reading's `detail` only where a
-    requirement's `where` tests a path in it (R-BTN-181).
+    in `schema`. Core reads the envelope only; a requirement's `where` test over a reading's
+    `detail` is proposed ([security](../proposals/security.md)).
   - **An inline value is bounded.** Baton stores a `value` only when its schema chain sets
     `additionalProperties: false` on every object and a `maxLength` ≤ 256 on every string;
     anything else goes by pointer. Stored values are course data, in the owner-state export

@@ -166,3 +166,47 @@ forced Resync.
   re-verified against Baton's record (the claim response's station and queued leg), never
   against git, since its ticket may already be withdrawn or closed there.
 - `closed-under-claim` (R-BTN-85) is not logged for a claim of the ticket's `cancel` leg.
+
+## Sync wants, runners that sync and the per-repository notification route (R-BTN-94, R-BTN-105, R-BTN-73, proposed)
+
+What is built is R-BTN-94's dispatch after commit and R-BTN-73's App route. This is the rest of
+the design: Baton **records that a run is wanted**, a runner or a loop pulls the want, and a
+repository without the App notifies Baton by its own webhook.
+
+- **A want.** Where the specification says Baton dispatches a sync, Baton records a want in the
+  transaction that causes it: a claim, an `advance`, an end, a fact arrival, a raise that names a
+  handler (R-BTN-161), a person's answer held in Baton, an owner bar set or lifted, an unblocked
+  ticket, a forge notification, a forced Resync (R-BTN-11, §5 above), the dashboard's **Resync**,
+  `POST /v1/sync/want` (sync credential) or `POST /v1/owner/{repository}/sync-want`. Where the
+  repository has a dispatch target, Baton then starts the workflow as R-BTN-94 says.
+  - **The sync's want** is `sync_wanted_at` (earliest unanswered want; set when NULL) and
+    `sync_wanted_after` (`board_head.last_handed_out` at the latest want; 0 before any number).
+    A board post accepted whose observation is **strictly greater** than `sync_wanted_after`
+    clears both, so a want raised while a run reads is answered by the next run. Wants are not
+    exported (R-BTN-88). Retiring a repository deletes its wants (R-BTN-47).
+  - **`GET /v1/sync/wanted`** answers `{wanted, since?, head_sha}` for the credential's role;
+    `head_sha` is the newest commit any post named. It writes only its nonce row. A sync whose
+    repeated board post is `stale-observation` reads `head_sha` to learn whether its post landed.
+  - **Who answers a want**, any of: runners (below); the dispatch; a cron loop
+    (`baton repo sync --if-wanted`); a CI schedule; optionally a server `post-receive` hook that
+    only touches a spool file (`baton repo spool <repository>`), which the sync account's loop
+    turns into `POST /v1/sync/want` and a run. The hook never reads the sync key and never waits
+    for a sync.
+  - A dispatch that fails is retried once, and the want stands until a post answers it. Without a
+    dispatch target the other answers stand.
+  - Raises: `baton.sync-late` (a sync want older than 30 minutes); `baton.forge-secret-missing`
+    (a configured webhook with no secret, or a dispatch target with no credential).
+  - **The mirror's want** (legacy, §16) is implicit: unread events of a kind the mirror writes
+    above `mirror_acked_seq`. Baton raises `baton.mirror-late` for a mirror more than 30 minutes
+    behind.
+- **Runners sync (R-BTN-105).** A runner that pushes the default branch syncs after its push. A
+  runner that offers to sync a repository polls `GET /v1/sync/wanted?repository=<id>` and
+  `git ls-remote <remote>`, each at most once a minute while live, and runs `baton repo sync`
+  when `wanted` is true or the remote head differs from `head_sha`. Observation numbers and
+  `sync-busy` (R-BTN-62) keep several runners from posting at once.
+- **The per-repository notification route (R-BTN-73 / R-BTN-95).**
+  `POST /v1/forges/{repository}/notify` serves a GitLab or Gitea repository, and a GitHub one
+  without the App, with the verifier, events and fields §3's adapter table lists. It is verified
+  in the Worker before anything is read and answers `204`. A delivery to it records a want for
+  `{repository}` only, and only when its project is `{repository}` or one of its `code_repos`.
+  Today the route answers `not-found` after the size cap.

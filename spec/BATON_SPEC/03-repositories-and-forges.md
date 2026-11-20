@@ -20,7 +20,7 @@ repository has none of them.
 | `forge_repo_id`, `forge_owner_id` | repository `id`, owner `id` | project `id`, namespace `id` | repository `id`, owner `id` |
 | the CLI's token for reading ids and facts | `GITHUB_TOKEN` | `GITLAB_TOKEN` | `GITEA_TOKEN` |
 | CI identity token (R-BTN-15) and its ids | Actions OIDC: `repository_id`, `repository_owner_id` | CI `id_tokens`: `project_id`, `namespace_id` | none |
-| notification route and verifier (R-BTN-73) | the App's `POST /v1/github/webhook`, `X-Hub-Signature-256` under `BATON_GITHUB_WEBHOOK_SECRET`; without the App, a repository webhook at `POST /v1/forges/{repository}/notify` under the repository's own secret | `…/notify`, `X-Gitlab-Token` equal to the repository's `webhook` secret | `…/notify`, `X-Gitea-Signature` (HMAC-SHA256) |
+| notification route and verifier (R-BTN-73) | the App's `POST /v1/github/webhook`, `X-Hub-Signature-256` under `BATON_GITHUB_WEBHOOK_SECRET`; without the App, a repository webhook at `POST /v1/forges/{repository}/notify` under the repository's own secret (not built) | `…/notify`, `X-Gitlab-Token` equal to the repository's `webhook` secret (not built) | `…/notify`, `X-Gitea-Signature` (HMAC-SHA256) (not built) |
 | events accepted | `push`, `pull_request`, `pull_request_review`, `issue_comment`, `workflow_run` | `Push Hook`, `Merge Request Hook`, `Note Hook` | `push`, `pull_request`, `pull_request_review_*`, `issue_comment` |
 | fields read, and no others | `X-GitHub-Event`, `X-GitHub-Delivery`, `repository.full_name`, `repository.id`, `workflow_run.path`; push: `pusher.name`, `head_commit.author.email` and the push record's fields (R-BTN-73); `pull_request.merged` | `X-Gitlab-Event`, `X-Gitlab-Event-UUID`, `project.path_with_namespace`, `project.id`; push: `user_username`, head commit `author.email` | `X-Gitea-Event`, `X-Gitea-Delivery`, `repository.full_name`, `repository.id`, `repository.owner.id`; push: `pusher.login`, `head_commit.author.email` |
 | dispatch target (R-BTN-94) and its credential | `{kind: 'github-app'}`: `workflow_dispatch` with an installation token minted from the App's key (§12.7) | `{kind: 'gitlab-trigger', project_id, ref}`: the trigger token | `{kind: 'gitea', workflow, ref}`: the token of a bot user with write access to that one repository |
@@ -30,7 +30,9 @@ repository has none of them.
 | can push to the base (R-BTN-139) | `GET /repos/{owner}/{repo}/collaborators/{username}/permission` is `admin` or `write` | `GET /projects/:id/members/all/:user_id` has `access_level` ≥ 30 | collaborator permission `write`, `admin` or `owner` |
 
 No pipeline or job event is accepted from GitLab or Gitea. The App does not serve GitHub
-Enterprise hosts.
+Enterprise hosts. Only the App's notification route is built (R-BTN-73); the per-repository
+route, with the events and fields the table lists for it, is
+[proposed](../proposals/tickets-and-sources.md).
 
 ### 3.1 The registry
 
@@ -49,21 +51,18 @@ Enterprise hosts.
 
   - **Retirement** (`admin.repo.retire`, destructive, §12.2) is final. In the transaction that
     sets `retired_at`, Baton:
-    1. removes the repository from every owner session's reach, ending a session left with none
-       (R-BTN-155);
-    2. revokes every MCP key on it, OAuth grants included, with their tokens, and every pending
-       OAuth request and unredeemed code naming it (R-BTN-130);
-    3. revokes its sync keys and its runner grants and exhausts its registration tokens; the
-       credentials those tokens registered are not revoked;
-    4. reaps each active claim on its tickets as an administrator's force-reap does, so a claim
+    1. revokes its sync keys and its runner grants (R-BTN-93, R-BTN-58);
+    2. reaps each active claim on its tickets as an administrator's force-reap does, so a claim
        whose runner is alive is fence-pending (R-BTN-19), actor `admin:<fingerprint>`;
-    5. drops its `queued`, `claimed` and `delivered` outbox entries, logging each; a deliverer's
-       later mark of one is ignored (R-BTN-171);
-    6. deletes its sync wants, `webhook_syncs` rows, ticket timers and unblocked trigger, every
-       consent row it gave or was given, and its id from every account instance's `repositories`
-       list (R-BTN-94, R-BTN-140, R-BTN-76).
+    3. closes its conditions still open after those reaps (R-BTN-160);
+    4. deletes its `webhook_syncs` rows, its coalescing windows and its unblocked trigger, and
+       its id from every account instance's `repositories` list (R-BTN-94, R-BTN-77, R-BTN-76).
 
-    Afterwards every rule reads live repositories only: a retired one has no want, dispatch,
+    The steps for stores that are not built (owners' sessions, MCP keys and OAuth, registration
+    tokens, the outbox, ticket timers, code-repository consents) are
+    [proposed](../proposals/data-model-and-api.md) with each store.
+
+    Afterwards every rule reads live repositories only: a retired one has no dispatch,
     credential, owner, policy or count, and every call naming it is `not-found`, as for one never
     registered. Its rows stay, read-only, for administrators' reads. Two things stay live while
     one of its claims is fence-pending: the fence itself — the alarm clears it at its
@@ -88,7 +87,8 @@ Enterprise hosts.
   - **Relations stay home, `depends_on` excepted.** A ticket's `parent` (so its children's
     `blocked_by`) names tickets of the same repository. Its `depends_on` may name a ticket of
     another repository registered with the same Baton by its qualified id; an unqualified id
-    stays local. A qualified dependency resolves against the target's board (§4.4, R-BTN-120):
+    stays local, and a repository's own id spelled qualified is read as the local id alone. A
+    qualified dependency resolves against the target's board (§4.4, R-BTN-120):
     the target must be live-registered and its ticket live or closed there, and a cycle through
     two boards is refused as one board's is.
     - **Visibility and consent.** A dependency shows the target ticket's state and title
@@ -202,7 +202,7 @@ Enterprise hosts.
 
 - **R-BTN-15 / R-BTN-156 (CI identity tokens).** `ci_identity` (§13) is NULL (sync keys only),
   `{kind: 'github-actions'}` or `{kind: 'gitlab-ci', issuer, mirror}`. A token is verified in
-  the Worker. Its audience is `BATON_ORIGIN` (R-BTN-56), its ids equal the stored ones
+  the Worker. Its audience is `BATON_ORIGIN` (R-BTN-56; GitLab's adds `#sync`), its ids equal the stored ones
   (R-BTN-138), and it comes from a run on the default branch:
   - **GitHub Actions OIDC**: issuer `https://token.actions.githubusercontent.com`; `ref` is the
     default branch; `job_workflow_ref` is
@@ -224,35 +224,24 @@ Enterprise hosts.
 
 ### 3.3 Triggering a sync
 
-- **R-BTN-94 (Baton records that a run is wanted; a runner pulls it, and Baton may dispatch it).**
-  Where this specification says Baton dispatches a sync, Baton **records a want** in the
-  transaction that causes it: a claim, an `advance`, an end, a fact arrival, a raise that names a
-  handler (R-BTN-161), a person's answer held in Baton, an owner bar set or lifted, an unblocked
-  ticket, a forge notification, a forced Resync (R-BTN-11), the dashboard's **Resync**,
-  `POST /v1/sync/want` (sync credential) or `POST /v1/owner/{repository}/sync-want`. Where the repository has a dispatch target, Baton then
-  starts the workflow: the object records the dispatch, and the host shell performs it through
-  `Dispatch` (R-BTN-55) after the transaction commits, for a request and for the alarm alike,
-  awaited by neither.
-  - **The sync's want** is `sync_wanted_at` (earliest unanswered want; set when NULL) and
-    `sync_wanted_after` (`board_head.last_handed_out` at the latest want; 0 before any number).
-    A board post accepted whose observation is **strictly greater** than
-    `sync_wanted_after` clears both, so a want raised while a run reads is answered by the next
-    run. Wants are not exported (R-BTN-88).
-  - **`GET /v1/sync/wanted`** answers `{wanted, since?, head_sha}` for the credential's role;
-    `head_sha` is the newest commit any post named. It writes only its nonce row.
-  - **Who answers a want**, any of: runners (R-BTN-105); the dispatch below; a cron loop
-    (`baton repo sync --if-wanted`); a CI schedule; optionally a server `post-receive` hook that
-    only touches a spool file (`baton repo spool <repository>`), which the sync account's loop
-    turns into `POST /v1/sync/want` and a run. The hook never reads the sync key and never waits
-    for a sync.
+- **R-BTN-94 (Baton dispatches a sync after the commit that wants one).** Where this
+  specification says Baton dispatches a sync, the object records the dispatch in the transaction
+  that causes it — a claim, an `advance`, an end, a person's answer held in Baton, an owner bar
+  set or lifted, a forge notification — once per repository and workflow, and the host shell
+  performs it through `Dispatch` (R-BTN-55) after the transaction commits, for a request and for
+  the alarm alike, awaited by neither. A repository without a dispatch target is synced by
+  whatever runs `baton repo sync` for it: a CI schedule or a cron loop.
+  - **Not built:** a stored want that stands until a post answers it, its routes
+    (`GET /v1/sync/wanted`, `POST /v1/sync/want`, the owner's `sync-want`), runners that pull
+    it, the dashboard's **Resync** and `baton.sync-late`:
+    [the proposal](../proposals/tickets-and-sources.md).
   - **Dispatch targets** (`dispatch`, §13) name what Baton calls, per forge (the adapter table).
     Baton holds their credentials as host secrets (R-BTN-55), never in SQLite or an export
-    (§12.8). Without a target (every `git` repository) Baton dispatches nothing and the other
-    answers stand; a dispatch that fails is retried once, and the want stands until a post
-    answers it. Baton dispatches only the repository's `sync_workflow` and the owners' unblocked
+    (§12.8). Without a target (every `git` repository) Baton dispatches nothing; a dispatch the
+    forge refuses is logged with its reason. Baton dispatches only the repository's `sync_workflow` and the owners' unblocked
     trigger's workflow (§12.7).
   - **Coalescing.** Dispatches of one workflow coalesce into one per repository and workflow per
-    30 seconds, whatever recorded the want; one wanted inside a window is sent at its end, the
+    30 seconds; one wanted inside a window is sent at its end, the
     **trailing dispatch**. The window is the `webhook_syncs` row of that repository and
     workflow (§13), which the alarm reads.
   - **The unblocked trigger** (`unblocked_trigger`, owners' setting): NULL or a target of
@@ -267,27 +256,26 @@ Enterprise hosts.
     webhook secret verifies an inbound delivery; a trigger token and the App's key act, and act
     only to start the workflows above. Registration refuses a repository whose entry names
     another forge.
-  - Raises: `baton.forge-secret-missing` (a configured webhook with no secret, or a dispatch
-    target with no credential); `baton.sync-late` (a sync want older than 30 minutes).
-  - **The mirror.** Legacy, removed with its code (R-BTN-193). Its want is implicit: unread
-    events of a kind the mirror writes above `mirror_acked_seq`, acknowledged by the
-    `GET /v1/sync/events` a mirror run ends with. Baton dispatches the `mirror_workflow` for it
-    and at a seal, and raises `baton.mirror-late` for a mirror more than 30 minutes behind (§16).
-- **R-BTN-73 / R-BTN-95 (forge notifications are only triggers).** A notification records a
-  want; it never computes or carries state. Baton reads from it only the fields the adapter
+  - **The mirror.** Legacy, removed with its code (R-BTN-193). Baton dispatches the
+    `mirror_workflow` for the events a mirror writes and at a seal; a mirror run acknowledges
+    what it read with the `GET /v1/sync/events` it ends with (§16).
+- **R-BTN-73 / R-BTN-95 (forge notifications are only triggers).** A notification has Baton
+  dispatch a sync (R-BTN-94); it never computes or carries state. Baton reads from it only the fields the adapter
   table lists.
   - **Routes.** Each forge's route and verifier are the adapter table's; a `git` repository has
-    none. Both routes are verified in the Worker before anything is read and answer `204`. A
-    body over 26,214,400 bytes is refused `too-large` on its `Content-Length`, or once that many
-    bytes have been read, before any digest is computed. Every comparison is constant-time over
+    none. The App's route is verified in the Worker before anything is read and answers `204`;
+    the per-repository route is not built and answers `not-found`. On either, a body over
+    26,214,400 bytes is refused `too-large` on its `Content-Length`, or once that many bytes
+    have been read, before any digest is computed. Every comparison is constant-time over
     equal-length digests.
-  - **Dropped:** a delivery id seen in the last 24 hours (`webhook_deliveries`), and a
-    `workflow_run` whose path is the repository's `sync_workflow` or `mirror_workflow`.
-  - **Which want.** A delivery records a want for the repository it names (by id, R-BTN-138)
-    and for each registered repository whose `code_repos` lists it. A delivery to
-    `…/notify` records a want for `{repository}` only, and only when its project is
-    `{repository}` or one of its `code_repos`. A `pull_request` delivery records a want only
-    when it is a merge (`pull_request.merged` is `true`), whatever its base branch.
+  - **Dropped:** a delivery id seen in the last 24 hours (`webhook_deliveries`); a
+    `workflow_run` whose path is the repository's `sync_workflow` or `mirror_workflow`; and,
+    legacy (§16), a push by the Actions bot whose head commit's author email is the mirror's, so
+    a mirror write never triggers a sync. An author email alone, which any pusher can set,
+    drops nothing.
+  - **Which sync.** A delivery triggers the sync of the repository it names (by id, R-BTN-138)
+    and of each registered repository whose `code_repos` lists it. A `pull_request` delivery
+    triggers one only when it is a merge (`pull_request.merged` is `true`), whatever its base branch.
   - **The push record.** A GitHub push delivery to a branch is recorded for ticket provenance
     (R-BTN-194): `sender.id`, `sender.login`, `ref`, `before`, `after` and each commit's `id`
     with its `added`, `removed` and `modified` paths, up to 30 commits and 600 paths. A push past
@@ -297,8 +285,7 @@ Enterprise hosts.
   - **Findings.** From the delivery's own fields, reading no repository content: a push by a
     worker pusher of the owners' `runner_pushers` setting to a repository no open claim's scope
     covers records an `unclaimed-write` finding (§12.9), an open claim being one still holding
-    its ticket — active, completed and unconfirmed, or reaped fence-pending; and a push to the
-    default branch runs §12.9's `out-of-course` check on the push record's paths.
+    its ticket — active, completed and unconfirmed, or reaped fence-pending.
   - **The backstop.** Every dispatch this path decides stamps the repository's `webhook_syncs`
     row (`last_dispatch_at`) in the deciding transaction, before the shell sends it, so a failed
     send keeps its stamp. A live repository whose stamp is more than 10 minutes old is sent a
@@ -313,11 +300,8 @@ Enterprise hosts.
     default branch's head as just fetched — in a detached worktree of the whole commit (never
     a working tree), with `.baton/package.json`'s dependencies installed by R-BTN-133's rules
     and sourced courses read from their source (R-BTN-134).
-  - **Runners sync.** A runner that pushes the default branch syncs after its push. A runner that
-    offers to sync a repository polls `GET /v1/sync/wanted?repository=<id>` and
-    `git ls-remote <remote>`, each at most once a minute while live, and runs `baton repo sync`
-    when `wanted` is true or the remote head differs from `head_sha`. Observation numbers and
-    `sync-busy` (R-BTN-62) keep several runners from posting at once.
+  - **Runners that sync** are not built (R-BTN-94):
+    [the proposal](../proposals/tickets-and-sources.md).
   - **A plain repository** is a bare repository reachable over SSH. No hook, spool, sync account
     or sync key is required. `baton repo init --forge git` prints the server settings it relies
     on: no non-fast-forward pushes, no deletes, and a restricted login shell for runner keys.
@@ -387,20 +371,16 @@ Enterprise hosts.
     `by-name` too. In every other case the list alone gives reach. While a code repository sits
     on a host other than the home's, the policy may name no `human_identity` and no floor may
     stand (R-BTN-188).
-  - **Consent.** An entry whose `{host, repo_id}` is a registered repository B of the tenant
-    (a retired one's entry never has reach) needs B's consent, a `code_repo_consents` row judged by id at every use and never written by
-    the listing repository A's settings: `POST /v1/owner/{B}/code-repo-consents {repository: A,
-    confirm: true}` signed by B's owner, or an administrator's `code_repo_consents_add`;
-    `withdraw: true` withdraws it. Without consent the entry has no reach and raises
-    `baton.code-repo-unconsented`.
+  - **Consent.** The consent a registered repository of the tenant gives to being listed is not
+    built: [the proposal](../proposals/data-model-and-api.md).
   - **What reach gives.** A `repos:` entry has reach only when it resolves, its path first
     mapped to its current one by id, to an id in `code_repos`, or by name as above. Only such an
     entry may be named by a `git:` or `https://` input URI the runner fetches (§12.3); be
     searched for PRs or named in `prs:` (R-BTN-139); map a branch in the branch-holder query
     (R-BTN-141); carry a person leg's question `url` (R-BTN-116). Any other entry is shown and
     filtered on only, and the ticket raises `baton.repo-not-listed`.
-  - `POST /v1/sync/observation` hands the sync the effective `code_repos` (consented entries
-    with their ids), the policy's `repos.unlisted` (`repos_unlisted`) and `pushers`.
+  - `POST /v1/sync/observation` hands the sync the effective `code_repos` (entries with their
+    ids), the policy's `repos.unlisted` (`repos_unlisted`) and `pushers`.
 
 - **R-BTN-141 (a branch pattern's grammar and reach).**
   - `branch_pattern` and `previous_branch_pattern` (R-BTN-51): a literal prefix of 1–64

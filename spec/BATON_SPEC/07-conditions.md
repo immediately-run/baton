@@ -13,6 +13,19 @@ Not built, and specified in the [conditions proposal](../proposals/conditions.md
 handler tickets, the suspend wait and its restart, calls, cancellation, the outbox, the standard
 handler courses and the `ticket.changed` leg event.
 
+Not built either, each a design its rule below still states:
+
+- `baton.contract` (R-BTN-125, R-BTN-163, R-BTN-122): Baton refuses an answer to it and raises
+  none.
+- `reraised`, `baton ticket resolve` and the action `ticket.resolve` (R-BTN-163). An owner
+  resolves with `baton owner resolve <repository> <ticket> baton:retries|baton:stalled
+  retry|park`: Baton's code spells the two conditions with a colon.
+- The per-leg `retry` policy, its `exhausted` leg, `backoff_s` and its jitter, and the `retry`
+  prerequisite with `baton leg why` (R-BTN-122). The one policy is the owners' `retry` setting,
+  `{backoff_ms: [<ms>…], max_failed}`: a list of backoffs and the failed attempt that holds.
+- The name `deadline_s` (R-BTN-167, R-BTN-90, R-BTN-195): the course file's key is
+  `max_duration`, with the same bounds.
+
 ### 7.1 Raising a condition
 
 - **R-BTN-160 (conditions: typed, declared, raised by any leg).**
@@ -128,7 +141,8 @@ handler courses and the `ticket.changed` leg event.
 ### 7.2 Handlers
 
 - **R-BTN-161 (bindings choose a handler course; the handler is a ticket).** Not built. No binding
-  applies and no handler ticket is filed, so every leg-raised condition is unhandled (R-BTN-163).
+  applies and no handler ticket is filed, so every leg-raised condition is only recorded and
+  listed (R-BTN-160, R-BTN-163).
   The design is in the [conditions proposal](../proposals/conditions.md).
 - **R-BTN-162 (a suspended leg waits, then resumes with a restart).** Not built. A `suspend` raise
   is recorded and returns (R-BTN-160); nothing waits on it and no claim resumes from it. The

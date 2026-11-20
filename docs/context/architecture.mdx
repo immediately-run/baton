@@ -20,6 +20,9 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
 | **In** | an **attestation**: a statement Baton weighs by its writer | a **command**: a request Baton accepts or refuses |
 | **Out** | an **outbox entry**: an effect a runner delivers | a **reply**: the answer to a command or a read |
 
+The outbox and its deliverers are [proposed, not built](../../spec/proposals/conditions.md); so is the
+doorbell. Today Baton's only outbound act is a workflow dispatch, and runners write git themselves.
+
 - **One inbound path for facts.** A review, a human's answer, a runner's report of where its leg
   reached, a fact the sync read from git, a deliverer's delivery and a provider's quota are all
   attestations, differing only in writer; the repository's policy decides whose count. So there
@@ -28,7 +31,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
   and Baton's gates decide; a command may carry an attestation (an advance carries the holder's
   report of the leg), and the two are judged separately.
 - **One outbound path for effects.** Baton holds no credential that writes git or posts a check:
-  a git write and a check run are outbox entries, delivered by runners that hold the credentials
+  a git write and a check run are to be outbox entries (proposed, above), delivered by runners that hold the credentials
   and confirmed by reading the effect back. A workflow dispatch is Baton's own call, with the App
   key it holds: Baton's server is trusted, and its compromise is recovered, not resisted
   ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8), the owner, 2026-11-01).
@@ -59,8 +62,10 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
   permissions cover only its own state — who takes a repository's leases, who changes its
   settings (values 12). A threat that needs a runner stopped belongs to the deployment, the
   forge or the credential proxy, not here.
-  A repository's policy may opt into one exception: Baton's trusted runners decide what lands,
+  A repository's policy may declare one exception: Baton's trusted runners decide what lands,
   and the forge lets only them and the human-only identity land it ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
+  The policy holds and reports those values today; the trusted runners that enforce them are
+  [proposed, not built](../../spec/proposals/security.md).
 - **Policy, not modes.** Every rule about authority and trust is a knob of one versioned policy
   document per repository, held in Baton (BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8)). Presets such as `cooperative`
   and `protected` fill it; no rule reads a preset. A deployment requires named guarantees, which

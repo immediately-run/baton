@@ -23,9 +23,8 @@ is that map and the rule that only a command's exit status reaches the station m
     map (`forbidden`).
   - A course file carries no `checks` (R-BTN-69).
 - **R-BTN-153 (a verdict is a command's exit status).** To be removed with its code.
-  An `advance` or end may carry `exit_status`, an integer from 0 to 255: the exit status of the
-  check command the runner ran by its executor's `exec` (R-BTN-107). A timeout or an `exec` error
-  has none. In a course the owners' `checks` map names, Baton refuses `invalid-params`:
+  An `advance` or end may carry `exit_status`, an integer from 0 to 255: a check command's exit
+  status. No shipped runner sends one. In a course the owners' `checks` map names, Baton refuses `invalid-params`:
   - an arrival at the station mapped `success` that does not carry `exit_status: 0`;
   - `exit_status: 0` on an arrival at a station mapped `failure` or `timed_out`;
   - any `exit_status` on an arrival at the station mapped `timed_out`;

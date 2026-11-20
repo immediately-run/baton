@@ -344,7 +344,7 @@ a tier, drops a `requires` clause, removes a `ticket` block or a decision) raise
 
 ## 6. The leg's channel verbs and the bounded run (R-BTN-106, proposed)
 
-Built: `baton leg raise` and `baton leg done`. The full set:
+Built: the CLI command `baton leg raise`, and `done` as an op on the channel with no CLI command. The full set:
 
 wrapped by the CLI. Verbs act on that leg only and exit 2 "not inside a leg" elsewhere:
 `baton leg status` (leg, grant, deadline, `refresh`);

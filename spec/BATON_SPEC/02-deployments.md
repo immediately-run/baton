@@ -20,22 +20,22 @@ process for development and CI. Nothing crosses a tenant.
     notifications before forwarding; every key's signature, a sync key's included (R-BTN-93),
     is verified inside the object.
   - The object makes no outbound call. A workflow dispatch is the host shell's, after commit
-    (R-BTN-94); git writes and check runs are outbox entries runners deliver (R-BTN-171); the
-    doorbell's rings (R-BTN-91) are sent after commit too. No request awaits any of them.
+    (R-BTN-94), and no request awaits it. The outbox (R-BTN-171) and the doorbell (R-BTN-91)
+    are not built.
   - A claim's repeated `request_id` returns the first request's committed result (G-BTN-2);
     `claims.request_id` is the only stored request id. Every other write is safe to retry by
     its own key: a repeated end is `ok` (§9.4), owner and administrator writes set a value, a
-    repeated board post is `stale-observation` (the sync then reads `GET /v1/sync/wanted`'s
-    `head_sha` to learn whether its post landed), and a repeated raise or report finds its row.
+    repeated board post is `stale-observation` (the sync then takes a new number and reads the
+    head again, `GET /v1/sync/head`), and a repeated raise or report finds its row.
 - **One alarm, every 60 seconds**, also set early to the earliest instant Baton holds. Every
   start and every request sets it again for the next period when none is set or the one set is
   more than two periods overdue. It fires every due instant a rule stores, with the effect and
   the interval that rule gives: reaps and unacknowledged releases (R-BTN-9, R-BTN-90, §9);
   unconfirmed completions (R-BTN-10); deadlines, expiries, `not_before` and `retry_after`
   (R-BTN-167, R-BTN-116, R-BTN-89, R-BTN-122); owner bars (R-BTN-67); readings (R-BTN-76); an
-  idle runner's liveness (R-BTN-75); coalescing windows (R-BTN-94, R-BTN-77, R-BTN-91); outbox
-  entries (R-BTN-171); retention (R-BTN-13, R-BTN-73, R-BTN-149); capacity crossings (R-BTN-87);
-  and a fence-pending reap's seats (R-BTN-178).
+  idle runner's liveness (R-BTN-75); coalescing windows (R-BTN-94, R-BTN-77); retention
+  (R-BTN-13, R-BTN-73, R-BTN-149); capacity crossings (R-BTN-87); and a fence-pending reap's
+  seats (R-BTN-178).
 - **Code.** Schema migrations are numbered and append-only; the object refuses to serve until
   all are applied. There is no staging instance: a home repository binds to one Baton
   (R-BTN-56).
@@ -62,7 +62,7 @@ process for development and CI. Nothing crosses a tenant.
   | `Store` — synchronous `exec`, `transaction` | Durable Object SQLite | `node:sqlite` |
   | serialization — one request at a time between awaits | the object's input gate | one in-process queue in front of the handler and the alarm, released only at the signature check |
   | `Scheduler` — the alarm | the object's alarm | a timer |
-  | `Push` — the doorbell (R-BTN-91) | hibernating WebSockets, by runner id | an HTTP upgrade, one socket per runner |
+  | `Push` — the doorbell (not built, R-BTN-91) | hibernating WebSockets, by runner id | an HTTP upgrade, one socket per runner |
   | `Dispatch` — a workflow dispatch with the tenant's dispatch credentials (R-BTN-94, §12.7) | the object class's wiring, after commit | the server process, after commit |
   | `Clock` | `batonNow()` (R-BTN-32) | the same |
   | `Origin` | variable `BATON_ORIGIN` | `--origin` (default `http://127.0.0.1:<port>`) |
@@ -70,7 +70,7 @@ process for development and CI. Nothing crosses a tenant.
   | `HumanKeys` (R-BTN-185) | secret `BATON_HUMAN_KEYS` | `--human-keys <file>` |
   | `ForgeSecrets` — per-repository webhook secret and dispatch token (R-BTN-94, R-BTN-95) | secret `BATON_FORGE_SECRETS` | `--forge-secrets <file>` |
   | `GitHubApp` (optional, §12.7) | `BATON_GITHUB_APP_ID`, secrets `BATON_GITHUB_WEBHOOK_SECRET` and `BATON_GITHUB_APP_KEY` | `--github-app-id`, `--github-webhook-secret`, `--github-app-key <file>` |
-  | `CursorKey` (R-BTN-130) | secret `BATON_CURSOR_KEY` | `--cursor-key <file>` |
+  | `CursorKey` (not built, R-BTN-130) | secret `BATON_CURSOR_KEY` | `--cursor-key <file>` |
 
   - The Durable Object class is wiring only; `src/core/` imports no `cloudflare:*` module (a
     build check enforces it). Every integration scenario runs against both hosts. Signed
@@ -95,9 +95,8 @@ process for development and CI. Nothing crosses a tenant.
     reaches every port): two local hosts on one machine use different hostnames.
   - **The origin binds every credential**: a signature's `@authority` (R-BTN-13), a CI token's
     audience (R-BTN-15, R-BTN-56), the host-only dashboard cookie and the origin check on
-    state-changing and MCP requests (R-BTN-16, R-BTN-130), login and webhook URLs, and a
-    `forge-check` entry's signed `origin` (R-BTN-114). No route, token or header carries a
-    tenant id.
+    state-changing requests (R-BTN-16), and login and webhook URLs. No route, token or header
+    carries a tenant id.
   - **Served only at its origin.** The Worker answers `404`, before any object is reached, to a
     request whose URL host (lowercased, default port elided) is not the origin's authority. It
     uses the request URL's host, never `X-Forwarded-Host` or `Forwarded`; `workers_dev` and
@@ -152,7 +151,7 @@ process for development and CI. Nothing crosses a tenant.
   servers (R-BTN-18). `.baton/baton.json`'s `baton_url` names the repository's one Baton; its
   sync posts only there. Each Baton checks a CI token's audience against its origin (R-BTN-15),
   and the sync requests its token for `baton_url`, the same string: `BATON_ORIGIN` verbatim,
-  scheme included, no trailing slash. Moving a repository is its owners' act: they have an
+  scheme included, no trailing slash (GitLab's adds `#sync`, R-BTN-15). Moving a repository is its owners' act: they have an
   administrator retire it on one Baton (R-BTN-47) and register it on the other, and change
   `baton_url`. Baton never checks this across tenants.
 
@@ -189,6 +188,9 @@ process for development and CI. Nothing crosses a tenant.
   rule 10), an owner bar's `starts_at` or `ends_at` (R-BTN-67), an instance's `until`
   (R-BTN-76) — and at most 10 minutes; an idle beat then reads a handful of rows. The answer
   remembered is always the one computing it gives (R-BTN-61, R-BTN-72).
+  - **What a heartbeat writes.** A live runner's heartbeat writes its liveness only, unless what
+    it declares (its capabilities, tags, courses, or its settings hash) changed or it carries
+    something to record.
 - **R-BTN-149 (hard caps per repository).** Safety limits at twice the envelope; none refuses
   lease upkeep.
 
@@ -213,12 +215,11 @@ process for development and CI. Nothing crosses a tenant.
     `/v1/admin/*`) with no or a malformed signature, a stale `created` or a foreign `@authority`
     is refused before the object; key and nonce checks run inside it. Every other route is
     checked in the Worker for its own credential first: `/v1/sync/*` a CI identity token or a
-    signature (R-BTN-93); `/v1/ui/*` a dashboard session; `POST /v1/login` a pending sign-in
-    (R-BTN-155); the two forge-notification routes their forge's verifier (R-BTN-73). The static
-    pages (`/login`, `/oauth/authorize`, the shell at `/` and every §11.4 screen path, and
-    `/conditions/{condition}`, R-BTN-163) need no session; `/.well-known/oauth-*` and
-    `/v1/oauth/*` take no credential, and `POST /v1/mcp`'s bearer is checked in the object
-    (R-BTN-130).
+    signature (R-BTN-93); `/v1/ui/*` a dashboard session; `POST /v1/login` a one-time link's
+    token (R-BTN-155); the App's forge-notification route GitHub's signature (R-BTN-73). The
+    static pages (`/login`, the shell at `/` and every §11.4 screen path, and
+    `/conditions/{condition}`, R-BTN-163) need no session. The OAuth and MCP routes are not
+    built (R-BTN-130).
   - Rate limits — per IP for unauthenticated requests, per credential for authenticated ones, a
     filter on failed verifications, and lease upkeep's own buckets — are not built:
     [the proposal](../proposals/multi-tenancy.md). Whatever limits a deployment adds, a request

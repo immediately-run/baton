@@ -515,3 +515,20 @@ Under either value:
 - R-BTN-131 (proposed): the standard courses' legs require `runner:leg-trees` (R-BTN-133), and
   their shared code is copied into each course directory by `npm run courses`, checked in and
   checked current by CI.
+
+## A course's own ranking, `rank.mjs` (R-BTN-98, proposed)
+
+No runner runs a course's ranking today. The design:
+
+- A course may ship `rank.mjs` in its course directory. A runner loads it from the remote
+  default branch's head through a verified tree (R-BTN-133, R-BTN-134) and runs it through its
+  executor in a `rank` session (R-BTN-107), with the leg's environment (R-BTN-144). Its default
+  export `rank(view)` makes no Baton request and may make any other.
+- `view = {runner: {tags, profile, harness} | null, candidates, fleet, instances, now}`:
+  `candidates` this course's entries of `GET /v1/runner/recommendations?all=1` (of
+  `launch-candidates` when `runner` is `null`), `fleet` and `instances` R-BTN-99's views. It
+  returns `{order: [{ticket_id, leg, score?, reasons?, skip?}], advice?: {<ticket_id>:
+  <opaque>}, launch?: <opaque>}`, checked as R-BTN-152 says; on failure, Baton's order.
+- The runner orders each group by its course's ranking and keeps R-BTN-61's merge between
+  groups; without `rank.mjs`, Baton's order. Ranking is advice; a course needing every runner
+  to rank alike lists `rank.mjs` in `protocol_files` (R-BTN-65).

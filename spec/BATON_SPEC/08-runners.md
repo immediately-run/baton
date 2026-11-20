@@ -45,7 +45,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   | `lease_timeout_s` | R-BTN-9 |
   | `concurrency` | R-BTN-4 |
   | `courses` | `[{repository, course, version}]`, read from the runner's checkout at session start (R-BTN-22) |
-  | `isolation` | optional: `attached`, `process` (the default) or `session`, read by the gate rule `isolation`; the executor's declaration replaces it when built (R-BTN-107) |
+  | `isolation` | optional: `attached`, `process` (the default) or `session`. A claim or `advance` into a leg whose course file sets `"isolation": "session"` by a runner declaring anything else is refused `not-eligible`, rule `isolation` |
   | `profile` | optional: a JSON object of at most 4096 characters serialized, stored and never read (R-BTN-72) |
   | `last_activity_at` | optional: the time of the runner's newest activity signal |
   | `session_urls` | `[{claim_id, url}]` (R-BTN-113) |
@@ -59,9 +59,12 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
 
   - A runner holding one claim may send `session_url`, `leg_finished` and one `fenced` object in
     place of the three lists. Spooled activities go in their own call before the beat (§9.9).
-  - A malformed or refused entry of `session_urls`, `legs_finished`, `transcripts`, `couriers`,
-    `protection` or `tier_ceilings` is skipped and named in the answer; it never refuses the
-    heartbeat, since a refused heartbeat would get a live runner reaped.
+  - A refused `transcripts`, `couriers` or `protection` entry, a `tier_ceilings` entry for a
+    repository Baton does not serve and a dropped session link (R-BTN-113) are named in the
+    answer and never refuse the heartbeat, since a refused heartbeat would get a live runner
+    reaped. A malformed `session_urls` or `legs_finished` entry is dropped unnamed. A malformed
+    `protection` or `tier_ceilings`, or a tier not on a registered repository's ladder, is
+    `invalid-params`.
   - **The answer** carries `runner_id`, `incarnation`, `lease_timeout_s` (as clamped),
     `grant: {capabilities}` (R-BTN-72), `claims`, `messages`, `bars` (the owner bars in force,
     R-BTN-67), `stale_courses` (R-BTN-22), `policies` (per repository `{version, policy_hash,
@@ -70,7 +73,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     - `claims` lists the runner's active claims, empty when it holds none — each with its id,
       ticket, station, leg, nonce, `deadline_at`, Baton's position (`station`, `path`,
       `next_leg`), the ticket as the latest accepted snapshot holds it (`version`,
-      `snapshot_sha`, `last_written_by`, R-BTN-198), that snapshot's `git` view (`next` legs with
+      `snapshot_sha`, `last_written_by`, R-BTN-194), that snapshot's `git` view (`next` legs with
       state, `waiting_on` and `not_before`; or `closed: done | withdrawn`; or `unknown`) and its
       current `activity` (§9.9). A listed claim the runner's state does not hold is ended by the
       runner `released:lease-lost`, never left to idle (R-BTN-6).
@@ -104,7 +107,8 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     under 4 KB to the session's spool file and returns at once. The sidecar posts the spool
     within 5 s and on every heartbeat, and drains it before exit; a spool left by an ended
     session is drained by the next sidecar on that host, using the ended session's state file.
-  - **Credentials** are the machine key (R-BTN-13). No key, no sidecar, no claim.
+  - **Credentials** are the machine key (R-BTN-13). No key, no sidecar, no claim. A CLI runner
+    heartbeats under `BATON_HOSTNAME` where it is set, else its host's name.
 
 ### 8.2 Keys and grants
 
@@ -114,13 +118,11 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   - **work** (R-BTN-58);
   - **sync** — `/v1/sync/*` with `?repository=<id>` in the signed query, role `sync` only, no
     runner secret — unless the policy's `inputs.board` excludes `machine` (R-BTN-188);
-  - **report readings** (R-BTN-101);
-  - **deliver** outbox entries of the classes it declares, where the policy's `outbox` admits its
-    role (R-BTN-171).
+  - **report readings** (R-BTN-101).
 
   Every snapshot records its credential (`board_snapshots.posted_by`). A machine key is never an
   owner or administrator key, and neither is a machine key. API-key runners (R-BTN-159) work
-  and report readings but never sync or deliver. One machine key per tenant (R-BTN-137).
+  and report readings but never sync. One machine key per tenant (R-BTN-137).
 - **R-BTN-146 (a repository's grants).** A grant is in force from its creation until it is
   revoked. `GET /v1/owner/{repository}/grants` lists the grants in force on the repository. The
   holder's acceptance of a grant, and the per-repository sync opt-in of a key granted on several
@@ -142,7 +144,7 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   With room for another claim — fewer held than R-BTN-4's bound, and the host's own judgement
   that it can start one — it attempts an unnamed claim when a heartbeat carries `unblocked`, else
   at its own interval (R-BTN-77). Each attempt is one claim request and reads no
-  recommendations, which are for a caller choosing work (§6.6). A claim that waits (R-BTN-40, R-BTN-162, R-BTN-195) holds only
+  recommendations, which are for a caller choosing work (§6.6). A claim that waits (R-BTN-40, R-BTN-195) holds only
   its own place, never the runner's other claims.
   - **Course directory** (R-BTN-69, R-BTN-134):
 
@@ -162,12 +164,11 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     `legs/` holds a script for no leg, or whose script lacks one of the three.
   - **`ctx`** carries: the ticket (id, path, home repository, and a pathless ticket's `file`,
     R-BTN-74); the claim (id, nonce, the station the leg leaves); the leg and its run number;
-    resolved and validated `inputs` (R-BTN-82); `replay` (R-BTN-84); the newest hand-off
-    document and the resume record (R-BTN-24); advice; Baton's position and the latest
-    snapshot's readiness; `checkout` (working directory); the `session` token the previous leg
-    returned; `raise` (R-BTN-160) and `resume` (the chosen restart, R-BTN-162); `on`, `events`
-    and `readTicket` (leg events, R-BTN-198); and an `AbortSignal` whose reason is `lease-lost`
-    (stop at once) or `release` (stop at the next safe point).
+    `replay` (R-BTN-84); the newest hand-off document and the resume record (R-BTN-24); advice;
+    Baton's position and the latest snapshot's readiness; `checkout` (working directory); the
+    `session` token the previous leg returned; and an `AbortSignal` whose reason is `lease-lost`
+    (stop at once) or `release` (stop at the next safe point). It is JSON: it carries no
+    function, and a leg raises a condition on its channel (R-BTN-106).
   - **First leg** is the queued leg the claim response names (R-BTN-83), started by the first
     `advance`; a first `advance` into any other leg is refused `not-eligible`, rule `not-queued`.
   - **The result** always carries a position: `{reached, next, not_before?, outputs?, session?,
@@ -199,7 +200,8 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     SIGTERM, like the `wind-down` message, drains: the legs in flight complete, their claims end
     at the leg boundary, and the runner exits. SIGINT, SIGHUP and a second SIGTERM release every
     leg in flight at its next safe point — each hand-off written, each claim ended
-    `released:requested` — and a leg that does not take it within R-BTN-145's bound is stopped.
+    `released:requested` — and a leg that does not take it has its call killed after ten
+    seconds and its session stopped (R-BTN-107), waited on for at most ten more.
     On any of these, an uncaught exception or an unhandled rejection, the runner logs every
     claim it holds with its leg in flight and the time of its last answered beat.
   - **Leg sessions** a script starts get the leg environment (R-BTN-144). They start no sidecar
@@ -224,7 +226,8 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     names an address, not a transport: the transport is the executor's (R-BTN-107). It carries
     JSON lines, wrapped by the CLI's `baton leg` verbs, which act on that leg only and exit 2
     "not inside a leg" elsewhere. The verbs built are `raise` (`baton leg raise`, R-BTN-160) and `done`,
-    the posted ending of a session that does not exit by itself (R-BTN-107); anything else sent
+    the posted ending of a session that does not exit by itself (R-BTN-107), which has no CLI
+    command; anything else sent
     on the channel is refused, a raw `advance` or `end` included. The other verbs are
     in [the proposal page](../proposals/checks-and-executors.md). A script may return its result
     directly instead.
@@ -307,18 +310,18 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
 - **R-BTN-113 (a leg run carries its session's link).** A heartbeat may carry `session_urls`,
   one link for each claim's running leg, and `advance` or `end` a `session_url` for the leg it
   finishes. A link must be `https`, at most 512 characters, without userinfo, with its host in
-  the instance's `session_hosts` (an administrator's setting, §12.7), else it is dropped and
-  logged, never a refused call. It is stored on `claim_legs.session_url` (latest wins while
+  the instance's `session_hosts` (an administrator's setting, default `claude.ai`, §12.7), else
+  it is dropped and logged, never a refused call. It is stored on `claim_legs.session_url` (latest wins while
   running) and shown on Board and the runner page (§11.4). Under an executor whose handle names
   its session's link (R-BTN-107), it is that link, or a page the runner serves that leads a
   person to the session.
 - **R-BTN-201 (a launcher starts sessions; Baton reserves nothing for them).** A **launcher** is
   a process outside Baton, run by the deployment, that starts runner sessions when there is work
   for them. Baton records no launch and reserves nothing for one: a started session claims as
-  any runner does, with `prefer` naming the ticket it was started for (R-BTN-100), and a hint is
-  never a grant. A session whose lease lapses is fenced (R-BTN-6) and reaped (§9.5), so a
+  any runner does. A session whose lease lapses is fenced (R-BTN-6) and reaped (§9.5), so a
   launcher needs no way to stop one. The read a launcher would use, `GET
-  /v1/runner/launch-candidates`, is not built; the design is in
+  /v1/runner/launch-candidates`, and a claim's hint naming the ticket a session was started
+  for, are not built; the design is in
   [the proposal page](../proposals/checks-and-executors.md).
 - **R-BTN-202 (a runner's local queue; local orders while Baton is unreachable).** A runner keeps a
   local work queue for its home checkout, on its host and outside every leg session, so no leg can
@@ -423,16 +426,16 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     `TERM`, an isolated `HOME`, the read-only clone credential `runner.json`
     `replay_clone_credential` if configured, and names in `runner.json` `replay_env` or `--env`.
 - **R-BTN-145 (every process a leg starts is stopped with it).** When a leg stops — Stop, a
-  release, a lost lease, the runner's exit, a supersession — or its call returns, every process
+  release, a lost lease, the runner's exit — or its call returns, every process
   it started is gone within 30 s. The executor's `stop` keeps this (R-BTN-107).
 - **R-BTN-119 (stopping a running leg).** Baton kills nothing; it asks the runner.
   - A `release` with reason `requested` (an owner's release message, the dashboard's **Stop
     leg**, `baton leg stop`, a delegated key's `leg.stop`, R-BTN-130), `owner-cancel` (Cancel:
-    hold plus release, §6), `superseded` (R-BTN-168) or `floor` (R-BTN-189) reaches the runner
-    at its next heartbeat. For these four the runner stops the leg at once (told why first,
-    R-BTN-198), by its executor's `stop`: interrupt, terminate after 10 s, kill after 25 s.
-  - It then calls `close` and, except for `superseded`, `handoff`, and ends `released:<reason>`;
-    no output of the stopped leg is reported.
+    hold plus release, §6) or `floor` (R-BTN-189) reaches the runner at its next heartbeat. For
+    these three the runner stops the leg at once, by its executor's `stop`: interrupt,
+    terminate after 10 s, kill after 25 s.
+  - It then calls `close` and `handoff`, and ends `released:<reason>`; no output of the stopped
+    leg is reported.
   - Every other release reason stops the leg at its next safe point (§9.4).
 
 ### 8.5 A running leg's output

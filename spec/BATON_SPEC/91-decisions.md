@@ -15,7 +15,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose to keep Baton cooperative on one trusted machine and leave enforcement to the deployment (R-BTN-180).
 - Chose that courses and leg logic change by a human's push or merge, and that tickets land only with a human approval (R-BTN-184).
 - Chose human-only credentials for every human gate, used for nothing else and kept from agent sessions; `human-gates` is claimed only where `human_key` is `hardware` (R-BTN-185, R-BTN-189).
-- Chose two forge identities, a human-only one that administers protected repositories and an everyday one for the owner's agent sessions (R-BTN-180, R-BTN-185).
+- Chose two forge identities, a human-only one that administers protected repositories and an everyday one for the owner's agent sessions (R-BTN-185's `human_identity`; keeping the two apart is the deployment's, §12.8).
 - Chose authority by credential, not channel: a delegated key may tighten and undo its own tightenings, and only loosening a limit needs a human (R-BTN-186).
 - Chose to run a sourced course's code from its source, the home referring to Baton's legs rather than copying them (R-BTN-134).
 - Chose that a claim's branch appends its leg's progress to its own ticket's `## Status` section without a human approval (R-BTN-184).
@@ -109,7 +109,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose bindings held in git with no owner setting (R-BTN-161).
 - Chose a short wait in the claim, then a suspension, over always suspending or holding the claim until an answer (R-BTN-162).
 - Chose to resume a withdrawn handler's leg with the default restart (R-BTN-162).
-- Chose to refuse a post that does not descend from the head and to adopt a rewritten default branch only by an administrator's forced Resync, over held snapshots (R-BTN-11, R-BTN-147).
+- Chose to refuse a post that does not descend from the head and to adopt a rewritten default branch only by an administrator's forced Resync, over held snapshots (R-BTN-11, R-BTN-147; the forced Resync is proposed, [tickets and sources](../proposals/tickets-and-sources.md), and until it is built such a post is held for the owner).
 - Chose a course's ordinary `cancel` leg over compensation legs run in reverse path order (R-BTN-168).
 - Chose retries as the built-in default handler of `error` over a retry course (R-BTN-122).
 - Chose per-leg retry policies bounded by the owners' default, ceiling and floor, a backoff being a prerequisite, over per-repository policies (R-BTN-122).

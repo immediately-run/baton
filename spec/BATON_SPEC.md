@@ -211,7 +211,7 @@ is stale. Never edit it by hand.
 | R-BTN-91 | the doorbell | [`08-runners.md`](BATON_SPEC/08-runners.md) |
 | R-BTN-92 | a repository is a forge, a forge path, a remote and a web base | [`03-repositories-and-forges.md`](BATON_SPEC/03-repositories-and-forges.md) |
 | R-BTN-93 | sync keys and the one verifier | [`03-repositories-and-forges.md`](BATON_SPEC/03-repositories-and-forges.md) |
-| R-BTN-94 | Baton records that a run is wanted; a runner pulls it, and Baton may dispatch it | [`03-repositories-and-forges.md`](BATON_SPEC/03-repositories-and-forges.md) |
+| R-BTN-94 | Baton dispatches a sync after the commit that wants one | [`03-repositories-and-forges.md`](BATON_SPEC/03-repositories-and-forges.md) |
 | R-BTN-95 | forge notifications are only triggers | [`03-repositories-and-forges.md`](BATON_SPEC/03-repositories-and-forges.md) |
 | R-BTN-96 | course facts come from an adapter per forge | [`03-repositories-and-forges.md`](BATON_SPEC/03-repositories-and-forges.md) |
 | R-BTN-98 | Baton runs no repository code; runners rank | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
@@ -454,6 +454,7 @@ is stale. Never edit it by hand.
 | S-BTN-241 | dependencies on another repository's tickets | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-242 | a runner's local queue | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-243 | reads under mixed busy and idle polling | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-244 | retention | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

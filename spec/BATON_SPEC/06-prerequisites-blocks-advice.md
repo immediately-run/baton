@@ -7,6 +7,22 @@ description: "A leg starts when its prerequisites hold."
 A leg starts when its prerequisites hold. Baton stores each unmet one as a block, answers "why
 not" from that index, gates claims on the blocks safety needs, and advises on the rest.
 
+Not built, each a design its rule below still states:
+
+- R-BTN-120: a leg's `requires.tickets` (the course validator accepts `requires.capabilities`
+  alone, [courses proposal](../proposals/courses.md)), `baton.prerequisite-unmet`,
+  `baton.prerequisite-cycle`, the `/prerequisites` route and `baton leg why`.
+- R-BTN-75: the `retry` kind and the `found`, `provisional` and `binds` columns of
+  `ticket_blocks`. A backoff is a stored `retry_after`, which rule 10 reads.
+- R-BTN-126: the `ticket` and `resource` blocked ends, `LegError`, `baton leg release --blocked`,
+  `max_blocked` with its `blocked-exhausted` hold, and `baton.blocked-ends`. A `released:blocked`
+  end names a `capability` and nothing else.
+- §6.6: rule 13, the `trusted` rule and the `wip-bound` flag.
+- R-BTN-99: all three views
+  ([data model and API proposal](../proposals/data-model-and-api.md)).
+- R-BTN-100: `prefer` and `rationale`.
+- `requires.attestations` ([security proposal](../proposals/security.md)).
+
 ### 6.1 Prerequisites
 
 - **R-BTN-120 / R-BTN-132 (a leg's prerequisites, one way in for each kind).** A leg can start
@@ -19,7 +35,6 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
   | `capability` | the leg's `requires.capabilities`; the ticket's posted `requires` clause (every leg) | the runner declares each and is granted it (rule 4, R-BTN-174) | the capability | `no-live-runner`; with `runner=me`, `not-declared` or `not-granted`; `full`, with the claims holding the seats where the asker may see them (R-BTN-178) |
   | `resource` | R-BTN-76 | a usable instance is not `unavailable` | the resource; `until` the first instance back | `unavailable`, with `until` |
   | `retry` | the leg's `retry` policy (R-BTN-122) | `retry_after` has passed | the leg; `until` = `retry_after` | `backing-off`, with `until` and `attempt: <n> of <max>` |
-  | `attestation` | the leg's `requires.attestations` (R-BTN-181) | R-BTN-181 | the requirement's `type` | R-BTN-181's |
   | time | `not_before` (R-BTN-89) | Baton's clock passes it | no block: a stored `waiting` state | `time`, with `not_before`, under `other` |
 
   ```json
@@ -80,11 +95,11 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
   - **What a row refuses.** Every row refuses a claim and an advance into its leg, and a
     whole-ticket row every leg (rule 1), with three differences: a `capability` row refuses only
     each runner lacking the capability (rule 4); a `retry` row refuses as `backing-off` (rule
-    10); a `resource` or `attestation` row bound as advice refuses nothing (R-BTN-181).
+    10); a `resource` row is advice and refuses nothing (R-BTN-76).
   - **When rows are written.** A `ticket` row is rewritten when a referenced ticket's station or
     path, or an entry's selection, changes (index `ticket_dependents`); a `capability` row when
     the fleet count crosses zero (below); a `retry` row by a failed attempt (R-BTN-122); a
-    `resource` row as R-BTN-76 says; an `attestation` row as R-BTN-181 says.
+    `resource` row as R-BTN-76 says.
   - **Held and blocked.** A ticket is **held** while it has an active claim, a completed claim
     not yet confirmed, or a fence-pending reap (rule 3's claim checks; R-BTN-79 uses the same
     definition). It is **blocked** when not held and it has a whole-ticket row or a row on its
@@ -186,13 +201,11 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
 - **R-BTN-76 / R-BTN-101 / R-BTN-151 (external resources, their instances and readings).** A
   resource is anything outside Baton that a course reads the state of: a provider's capacity, an
   API's rate limit, disk on a shared server. A **reading** is an attestation about one of its
-  instances: R-BTN-181 owns its writers, authentication, supersession, requirements, binding and
-  `missing`, and this rule adds what is particular to resources. A reading's `type` is its
-  resource's schema id and its value is `{available?, until?, detail}`. Readings are stored once
-  per tenant; a repository reads only those its policy's `readings` entry admits (R-BTN-188). For
-  a requirement on an instance (R-BTN-181), each admitted writer's latest observed reading in
-  force on each usable instance, of either kind, is one attestation, whatever the instance's
-  state, and `count` counts distinct writers' keys unless `distinct` names another field.
+  instances: R-BTN-181 owns its writers and authentication, and this rule adds what is particular
+  to resources. A reading's `type` is its resource's schema id and its value is `{available?,
+  until?, detail}`. Readings are stored once per tenant; a repository reads only those its
+  policy's `readings` entry admits (R-BTN-188). A requirement over an instance's readings is
+  proposed in the [security proposal](../proposals/security.md).
   - **Registered** by an administrator: `baton admin resource add <name> --scope
     account|service --schema <file>` (R-BTN-127), `name` matching `^[a-z][a-z0-9:._/-]{0,79}$`,
     the schema (R-BTN-108's subset) its readings' `detail` must satisfy. The schema may name a
@@ -241,7 +254,7 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
       ticket's rows in the same transaction. An instance `unknown` 24 hours while a posted leg
       needs it raises `baton.resource-unknown`.
     - **Advice.** A row is advice: recommendations leave its leg out, and a claim against it is
-      accepted. It gates only where its requirement binds `gate` (R-BTN-181).
+      accepted.
     - **A lost answer is not an unblocking.** A `resource` row that goes because the repository
       has no live granted runner or no usable instance left clears `blocked_since` silently, and
       so does a transition whose cleared rows include such a lost row on the queued leg; a lost
@@ -367,8 +380,8 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | `person` | The leg is not a person's (R-BTN-116) | claim, advance | `person` |
   | `floor` | Every guarantee a floor names holds on every repository the ticket reaches: its home and each `repos:` entry with reach (R-BTN-140, R-BTN-189); the protection checker is exempt | claim, advance | `floor-broken` |
 
-  Rules `chain` (R-BTN-106), `entry` (R-BTN-109), `not-queued` (R-BTN-72), `check-runner`
-  (R-BTN-114) and `trusted` (R-BTN-182) are gates too. `isEligible`, in the vendored decision
+  Rules `chain` (R-BTN-106), `isolation` (R-BTN-107), `entry` (R-BTN-109) and `not-queued`
+  (R-BTN-72) are gates too; `trusted` is proposed (R-BTN-182). `isEligible`, in the vendored decision
   library (R-BTN-37), is the reference for every rule; the SQL is tested against it (G-BTN-40).
 
 - **Matching** reads only `tickets` and Baton's tables (R-BTN-33). Candidates are one row per
@@ -394,7 +407,8 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
 ### 6.7 What a runner ranks from
 
-- **R-BTN-99 (the views a runner ranks from).** Read-only, signed by a machine key alone (no
+- **R-BTN-99 (the views a runner ranks from).** Not built: Baton serves none of the three routes.
+  Read-only, signed by a machine key alone (no
   runner secret). Each answers with an `ETag`, so an unchanged poll costs a `304`. The tag
   changes with every write a view shows (a `measure` reading at most once a minute per
   instance), with each lapse and bar start or end, with the key's grant set, and each UTC hour.
@@ -423,13 +437,9 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   `rank_launch` schema ids (R-BTN-108), dropped when it names none; on any failure, Baton's order.
 
 - **R-BTN-100 (a claim names its preferences).** `POST /v1/runner/claim`
-  takes `request_id` and at most one of `ticket_id` (recommended or not) or `prefer: [{ticket_id, leg?}]` (at most 50 known tickets: Baton claims, in one
-  transaction, the first passing every gate, else answers `no-eligible-ticket` with `refusals:
-  [{ticket_id, code, rule?}]`). With neither, Baton claims its first recommendation; with both,
-  `invalid-params`. It also takes:
-  - `rationale`: opaque JSON ≤ 4 KB, kept in the claim's `advice_json` and history row and
-    exported with it (R-BTN-88); Baton never reads it, the fleet view omits it, the dashboard
-    shows it as escaped text, and §12.3's free-text rules do not apply to it.
+  takes `request_id` and an optional `ticket_id` (recommended or not). With no `ticket_id`, Baton
+  claims its first recommendation. A `prefer` list and a `rationale` are proposed in the
+  [data model and API proposal](../proposals/data-model-and-api.md).
 
   A claim against Baton's advice (a resource block, the expedite bound, `max_queue`) records
   `advice-overridden`; against the course's ranking, nothing.
@@ -459,7 +469,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     Baton's traversal record (R-BTN-63) stays with the claims. A ticket re-filed under a new id
     is a new ticket and carries no hold (only a renumbering at the same path does, R-BTN-147).
     The dashboard's course screens (§11.4) list every closed or dropped ticket that keeps a
-    hold, with its reason, beside the new ticket, and a drop raises `baton.ticket-dropped`.
+    hold, with its reason, beside the new ticket.
 
 ### 6.9 Messages
 

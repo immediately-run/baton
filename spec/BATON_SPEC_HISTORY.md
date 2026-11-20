@@ -5949,6 +5949,12 @@ so in its last sentence; several entries here may stand behind one line there.
   the code with them. The Decisions entries about the mirror, the cutover and the adoption
   appendix left with ruling 4, and the entries that recorded choices of the dashboard V2 project
   and of the reference deployment left as project choices, not spec decisions; all are above.
+- **Chose a runner-side queue of the host user's orders, run without a claim only while Baton is
+  unreachable and reported through an ordinary claim on its return, with a warning that another
+  runner may be running the same leg, over a git lock beside it or runners idle through an
+  outage** (2026-11-19; R-BTN-202, R-BTN-193, R-BTN-72): a git lock is a second place to read who
+  holds a ticket, and the gates in force on return judge the result (R-BTN-202, R-BTN-193,
+  R-BTN-72).
 
 ## Lineage moved out of the spec, 2026-11-19
 

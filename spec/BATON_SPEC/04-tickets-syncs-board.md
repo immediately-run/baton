@@ -19,17 +19,14 @@ numbers.
   .baton/
     baton.json          # baton_url; courses: [{id, version, min_runner_version, skill?, step_kinds,
                         #   branch_pattern, previous_branch_pattern?,
-                        #   protocol_files, source?, facts?}]; imports?;
-                        #   conditions? (bindings, R-BTN-161);
-                        #   legs: {<course>: {<leg>: {agent_command?, executor?}}} (R-BTN-131,
-                        #   R-BTN-107); executor_schema (R-BTN-107);
+                        #   protocol_files, source?, facts?}];
                         #   and the CLI's settings (R-BTN-74): items, default_course, repos,
                         #   agent_command, agent_wrapper, check, ticket_prefix, legacy_ids,
                         #   prefixes, project, tags, projects
     tickets.mjs         # optional ticket source; absent, the CLI's markdown source (R-BTN-74)
-    courses/<course>/   # an own course; a sourced course's directory holds only overrides (R-BTN-134)
+    courses/<course>/   # an own course; a sourced course's course.json is its source's (R-BTN-134)
       course.json       # the course file (R-BTN-69)
-      sync.mjs          # the station function (R-BTN-74); required
+      sync.mjs          # the station function (R-BTN-74); an own course's; a standard course has a default (R-BTN-134)
       rank.mjs          # optional ranking code (R-BTN-98)
       legs/<leg>.<ext>      # one per leg; ext mjs, js, cjs, mts, ts or cts (R-BTN-133)
       legs/<leg>.run.<ext>  # optional run override (R-BTN-131)
@@ -37,10 +34,11 @@ numbers.
     package.json        # optional, with its lockfile: the legs' dependencies; never the root's (R-BTN-133)
   ```
 
-  A sourced entry's fields default from its source's `entry.json` (R-BTN-134).
   - `course.json` is the course's whole state machine; `baton.json` names courses and
-    settings, and of a leg only the home's settings for how it runs (`legs`), never its
-    stations, edges or contract.
+    settings, never a leg's stations, edges or contract. Per-leg settings, `imports`,
+    `executor_schema` and condition bindings in `baton.json` are proposed
+    ([courses](../proposals/courses.md), [checks and executors](../proposals/checks-and-executors.md),
+    [conditions](../proposals/conditions.md)).
   - `branch_pattern` (default `claude/{ticket}-*`; grammar in R-BTN-141) maps a pushed branch
     to the course's tickets for the branch-holder query (§9) and finds an earlier attempt's
     branch (R-BTN-25). Without `{repository}`, a branch may map to tickets of two repositories,
@@ -118,7 +116,6 @@ numbers.
     | `depends_on` | `depends_at: {ticket, done: true, leg: <the course's start_leg>}` per id (R-BTN-120); a qualified id (§3.1) is posted as written |
     | `repos` | forge paths, short names resolved through the `repos` setting (`owner/name` stands) |
     | `order` | `rank` (by `order`, then id) |
-    | `conditions` | the ticket's bindings (R-BTN-161) |
     | `prs`, `answer` | never posted: the ticket's sync-local `fields` (R-BTN-33); its `course` is `{}` |
 
     Other fields are ignored. Two files with one `id`, a `repos` name with no mapping, or an
@@ -288,6 +285,8 @@ The fingerprint stores no ticket content and is an optimization, never authority
   a snapshot only when `parent_sha` equals its head (a refresh: both equal the head) and its
   observation is newer, then moves the head. A first snapshot is accepted with `parent_sha:
   null` only while no head exists. A lost race is `head-moved`; the sync re-reads and retries.
+  A post marked `force` — neither its commit nor the head descends from the other — is refused
+  `snapshot-rejected` and held for the owner; the head stands.
   Ordering never depends on a clock. An administrator's adoption of a rewritten default branch
   (a forced Resync) is proposed in [tickets and sources](../proposals/tickets-and-sources.md).
 
@@ -335,7 +334,6 @@ The fingerprint stores no ticket content and is an optimization, never authority
   read_sha?,                                                      -- the commit the tickets were read at (§4.3)
   source: { kind: 'markdown' | 'custom', versions?, cli },         -- R-BTN-74
   contains?: [<sha>],                                            -- the provisional commits (R-BTN-126) this post contains
-  bindings?: { <type prefix>: <course> | { course, replaces } },   -- the repository's scope, from `.baton/baton.json` (R-BTN-161)
   registry: [{ id, version, min_runner_version, skill?,
                course: <course.json with its schemas>,           -- R-BTN-69, R-BTN-108
                step_kinds, branch_pattern, previous_branch_pattern? }],
@@ -344,7 +342,6 @@ The fingerprint stores no ticket content and is an optimization, never authority
                requires[], expedite, repos[], rank?,             -- requires expanded; repos are forge paths
                parent?, not_before?,                             -- R-BTN-86, R-BTN-89
                depends_at?: [{ ticket, at | reached | done, leg? }],   -- R-BTN-120
-               conditions?: { <type prefix>: <course> | { course, replaces } },  -- bindings, R-BTN-161
                check?: { sha, head_repo_id, head_ref },          -- check tickets, R-BTN-153
                display: { status?, group?, project? },           -- shown; core reads project and status only (R-BTN-33)
                handoff_url?,                                     -- R-BTN-24
@@ -381,7 +378,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
 - A check ticket whose `check.head_repo_id` is not the repository's `forge_repo_id` is dropped
   (R-BTN-153).
 - **Dependencies.** A `depends_on` entry is a local id or another repository's qualified id
-  (§3.1, which reads this repository's own id spelled qualified as the local id); `blocked_by`
+  (§3.1); this repository's own id spelled qualified is read as the local id. `blocked_by`
   and `parent` stay local. Judged in the transaction that accepts the post, before anything is
   written, each refusal `invalid-params` naming the id or the cycle:
   - a qualified entry's repository must be live-registered (R-BTN-47) and its ticket live or
@@ -464,15 +461,13 @@ The fingerprint stores no ticket content and is an optimization, never authority
   - **Spawning.** A leg writes child tickets to the ticket source first, each naming
     `parent: <local id>` of the same repository and each taking its id from R-BTN-199; Baton
     stores the qualified id. A child is an ordinary ticket on any
-    course; parent and children may be held at once. Handler tickets (R-BTN-161) and a call's
-    children (R-BTN-165) are children. A leg that waits for its children is a call leg
-    (R-BTN-165); any other spawning leg does not wait, and its `spawns` declaration (R-BTN-111)
-    may give its children `"lifetime": "parent" | "station"` (R-BTN-168).
+    course; parent and children may be held at once. A spawning leg does not wait for its
+    children; its `spawns` declaration is R-BTN-111's.
   - **The `spawned` report.** The end that follows a spawning leg carries `spawned: [<local
     id>]`, with `suspended:<station>` or a `released:` end; `done` with `spawned` is
     `invalid-params`, and `advance` takes none. Baton validates the list before any write: at
     most 50 ids, each by the ticket-id rule (§12.3), none the parent's own. Baton records them as
-    the run's children (a call's completion range, R-BTN-165) until the first accepted snapshot
+    the run's children until the first accepted snapshot
     observed after the end; a reported child that snapshot does not post is dropped with discrepancy
     `spawned-unposted` (R-BTN-85).
   - **Core keeps the relation, not the policy.** `tickets.parent`, and `closed_tickets.parent`
@@ -482,8 +477,6 @@ The fingerprint stores no ticket content and is an optimization, never authority
     closes a cycle or lies more than 4 generations below a root (R-BTN-149) is stored as none and
     logged `parent-invalid` with the reason; one naming no known ticket is stored and drawn
     orphaned. No snapshot is refused for a parent.
-  - Closing or withdrawing a parent supersedes its open children whose lifetime is `parent`
-    (R-BTN-168); other children live on.
 
 ### 4.7 History and discrepancies
 
@@ -492,8 +485,7 @@ The fingerprint stores no ticket content and is an optimization, never authority
   version, contract version, position, run number, `run_id` (R-BTN-63), `snapshot_sha`, `head_sha`); a position
   confirmed; a fact arrival, and an arrival not applied (R-BTN-39); an adoption; a re-route; a
   block or unblocking; a condition opened or closed; a person leg's question posted, answered or
-  expired (R-BTN-116); a call settled; a supersession; an outbox entry queued, delivered or
-  confirmed (R-BTN-171); inputs given and outputs reported (an `inputs` row names its
+  expired (R-BTN-116); inputs given and outputs reported (an `inputs` row names its
   `leg_run_inputs` rows); `spawned`; a held ticket's version changed (`ticket-changed`,
   R-BTN-198); `discrepancy`.
   - Rows hold names, ids, versions, pointers and digests only (R-BTN-33); `detail_json` at most
@@ -545,9 +537,8 @@ The fingerprint stores no ticket content and is an optimization, never authority
     tickets' position rows of `ticket_history` and their `claim_legs`, `closed_tickets`,
     `external_resources`,
     `resource_instances`, `instance_serves`, `capability_capacity`, `check_runners`, `mcp_keys` (hashes only), `instance_settings`, unexpired
-    `registration_tokens` (hashes only), open `conditions`, `ticket_timers`, git-kind `outbox`
-    entries not `confirmed`, every `repository_policies` version (R-BTN-188, R-BTN-189).
-  - **Not exported**: claims and their `claim_seats`, events, `forge-check` outbox entries,
+    `registration_tokens` (hashes only), open `conditions`, `ticket_timers`, every `repository_policies` version (R-BTN-188, R-BTN-189).
+  - **Not exported**: claims and their `claim_seats`, events,
     readings (R-BTN-76), sync wants; and, unless `--with-history`, the history, `leg_outputs`
     and `leg_run_inputs`, which an import without them loses.
   - **Import** (`POST /v1/admin/import`): one transaction, into an **empty** Baton only (no

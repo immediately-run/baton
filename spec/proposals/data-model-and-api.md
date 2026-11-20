@@ -80,6 +80,9 @@ Design: BATON_SPEC §7's proposal page (B-55), and the `cancel` leg
   `GET /v1/repositories/{repository}/conditions` rows carry `handler?`.
 - `messages.kind` also holds `handled`; the heartbeat response carries
   `handled?: [{condition_id, handler, restart, reason, answered_by?}]`.
+- The claim response carries `resume?`, the chosen restart (R-BTN-162, proposed).
+- `events.kind` also holds `call-settled` and `superseded`, each also a `ticket_history` row
+  ([conditions](conditions.md)).
 - Cancellation (R-BTN-168, proposed): `claims.superseded_at`; `ticket_overrides.cancelling_at`
   (set by a cancellation, cleared at the close, never in `kept_json`); a ticket marked
   `cancelling` keeps its board rows until Baton closes it, and is counted in a queue;
@@ -142,6 +145,18 @@ Design: BATON_SPEC §10's check courses and check-runners (B-5).
 |---|---|---|---|---|
 | `POST /v1/owner/{repository}/check-runners`, `…/check-runners/{fingerprint}/revoke` | owner | `{public_key, name, capabilities?, max_tier?}`; revoke `{confirm: true}` | `{ok: true}` | R-BTN-114 |
 
+## The executor's run record and leg logs
+
+Design: [the declaration and the run's record](checks-and-executors.md#26-the-declaration-and-the-runs-record)
+(R-BTN-107, proposed) and [leg logs](checks-and-executors.md#10-leg-logs-r-btn-128-proposed).
+
+- `claim_legs` gains `executor_digest`, `environment` and `instance`, each opaque, 1–256
+  characters of printable ASCII.
+- `POST /v1/runner/claims/{id}/advance` also takes `executor_digest?`, `environment?` and
+  `instance?` on the advance that starts a run, and answers `leg_log?: {dir}`.
+- `GET /v1/repositories/{repository}/tickets/{ticket}/legs/{leg}/runs` rows carry
+  `executor_digest?`, `environment?` and `instance?`.
+
 ## Registration tokens
 
 Design: registration tokens beside keys (R-BTN-117, R-BTN-157; B-8). `credentials` gains
@@ -180,7 +195,7 @@ Design: BATON_SPEC §12.8's unbuilt parts (B-136, B-146, B-147).
 
 Design: the views a runner ranks from (R-BTN-99, proposed) and the doorbell (R-BTN-91, proposed).
 
-- `baton_settings` gains the key `instances_version`.
+- `baton_settings` gains the key `instances_version`; `board_head` gains `fleet_version`.
 - The heartbeat body carries `reports?: [{claim_id?, key?, payload}]`.
 
 | Table | Key | Columns | Purpose |
@@ -219,8 +234,18 @@ Design: R-BTN-140's consent (proposed). `POST /v1/admin/repositories` also takes
 
 ## Sync wants, sync keys and Resync
 
-Design: [tickets and sources](tickets-and-sources.md) (the lapse bar, §3; the forced Resync, §5),
-and R-BTN-94 and R-BTN-105's wants.
+Design: [tickets and sources](tickets-and-sources.md) (the source's writer, §1; renewal and the
+lapse bar, §3; the founded head and the lagging fetch, §4; the forced Resync, §5), and R-BTN-94
+and R-BTN-105's wants.
+
+- `board_head` gains `observation_holder` and `observation_renewed_at` (§3), `behind_since`
+  (§4; the alarm reads it for `baton.head-behind`), `reset_at` (§5: set by a forced Resync until
+  the next accepted post) and `source_writes` (§1: the writer exports the last accepted post
+  declared).
+- `POST /v1/sync/observation` also takes `{renew?}`, and `behind?` and `unfounded?` beside
+  `release`.
+- `POST /v1/forges/{repository}/notify` (R-BTN-95) verifies a GitLab or Gitea notification
+  against `BATON_FORGE_SECRETS`, answers `204` and records a want.
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
@@ -235,11 +260,42 @@ and R-BTN-94 and R-BTN-105's wants.
 | `POST /v1/admin/repositories/{repository}/resync` | admin | `{force: true, sha, confirm: true}` | `{ok: true}`; the head reset to `sha` | R-BTN-11 |
 | `POST /v1/ui/resync` | session; `force` an admin session | `{repository, force?, sha?}` (`sha` with `force`) | `{ok: true}`; dispatches the sync; with `force`, the head is reset to `sha` | R-BTN-35, R-BTN-11 |
 
+## Admission limits
+
+Design: [admission limits within a tenant](multi-tenancy.md#admission-limits-within-a-tenant)
+(R-BTN-149, proposed).
+
+| Table | Key | Columns | Purpose |
+|---|---|---|---|
+| `write_budgets` | `(credential_id, repository_id, day)` | `writes` | Non-upkeep row writes per UTC day (R-BTN-149) |
+
+## The policy's dry run
+
+Design: [the policy's dry run](security.md#1-the-policys-dry-run-r-btn-188-proposed).
+`PUT /v1/owner/{repository}/policy` also takes `dry_run?` beside `policy` or `preset`, and with
+it answers `{changed[], guarantees, stops: {grants[], legs[], tickets[], runners[], unreached[]}}`
+and writes nothing.
+
+## A control path changed outside a course
+
+Design: [the `out-of-course` finding](security.md#12-a-control-path-changed-outside-a-course-129-proposed).
+
+- `scope_findings.kind` also holds `out-of-course`: `ticket_id` NULL, `target` the head commit,
+  one row per target, open or closed. `push_deliveries` is what the check reads.
+- `events.kind` also holds `out-of-course`.
+- `POST /v1/ui/scope/{id}/resolve` also answers `not-found` for an `out-of-course` finding not
+  yet listed.
+
 ## Other reads and owner routes
 
 Routes §14 named that Baton does not serve. The owner's route and adopt are B-38's and
 [the owner's ticket adopt](ticket-adopt.md) (B-120); the others are the owner-key and reader
 surfaces of actions the dashboard or the heartbeat serves today.
+
+- `events.kind` also holds `history-adopted`, also a `ticket_history` row
+  ([the owner's ticket adopt](ticket-adopt.md)).
+- The claim response also carries `previous_attempts_total`, the count of earlier ended claims
+  beside the newest ten listed in `previous_attempts`.
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
@@ -250,3 +306,37 @@ surfaces of actions the dashboard or the heartbeat serves today.
 | `POST /v1/owner/{repository}/tickets/{ticket}/release` | owner | `{reason: "requested", confirm: true}` | `{ok: true}` | R-BTN-119 |
 | `POST /v1/owner/{repository}/overrides/{ticket}` | owner | `{expedite}`, `{hold}` or `{cancel: true, confirm: true}` | `{ok: true}` | §6, R-BTN-186 |
 | `POST /v1/owner/{repository}/bars/follow` | owner | `{course}` | `{ok: true}` | R-BTN-142 |
+
+## A claim's preference list and rationale (R-BTN-100, proposed)
+
+Moved from BATON_SPEC §6.7. The built claim takes `request_id` and an optional `ticket_id`.
+
+- `POST /v1/runner/claim` takes at most one of `ticket_id` or `prefer: [{ticket_id, leg?}]`: at
+  most 50 known tickets, of which Baton claims, in one transaction, the first passing every gate,
+  else answers `no-eligible-ticket` with `refusals: [{ticket_id, code, rule?}]`. With both,
+  `invalid-params`.
+- `rationale`: opaque JSON of at most 4 KB, kept in the claim's `advice_json` and history row and
+  exported with it (R-BTN-88). Baton never reads it, the fleet view omits it, the dashboard shows
+  it as escaped text, and §12.3's free-text rules do not apply to it.
+
+## Riders on §3: retirement's further steps and code-repository consent (R-BTN-47, R-BTN-140, proposed)
+
+- **Retirement (R-BTN-47).** Each store that is not built adds its step to the transaction that
+  retires a repository, with the ticket that builds it. Baton then also:
+  - removes the repository from every owner session's reach, ending a session left with none
+    (R-BTN-155);
+  - revokes every MCP key on it, OAuth grants included, with their tokens, and every pending
+    OAuth request and unredeemed code naming it (R-BTN-130);
+  - exhausts its registration tokens; the credentials those tokens registered are not revoked
+    (R-BTN-117);
+  - drops its `queued`, `claimed` and `delivered` outbox entries, logging each; a deliverer's
+    later mark of one is ignored (R-BTN-171);
+  - deletes its sync wants, its ticket timers and every consent row it gave or was given
+    (R-BTN-94, R-BTN-167, R-BTN-140).
+- **Consent (R-BTN-140).** A `code_repos` entry whose `{host, repo_id}` is a registered
+  repository B of the tenant (a retired one's entry never has reach) needs B's consent, a
+  `code_repo_consents` row judged by id at every use and never written by the listing repository
+  A's settings: `POST /v1/owner/{B}/code-repo-consents {repository: A, confirm: true}` signed by
+  B's owner, or an administrator's `code_repo_consents_add`; `withdraw: true` withdraws it.
+  Without consent the entry has no reach and raises `baton.code-repo-unconsented`.
+  `POST /v1/sync/observation` then hands the sync only consented entries.

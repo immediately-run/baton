@@ -19,7 +19,9 @@ repository's policy, the grants and the owners' bars. The ticket source — git 
 holds every ticket and its body, and git the work's evidence. Baton does not do, verify or confine the work. Its permissions cover
 its own state, its gates protect the lock, and it advises on everything else. A repository can opt
 into one exception through its policy: Baton's trusted runners decide what lands, and the forge
-lets only them and a human land it ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
+lets only them and a human land it ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)). The policy
+can declare this today; the trusted runners that enforce it are
+[proposed, not built](../../spec/proposals/security.md).
 
 ## The problem
 
@@ -77,7 +79,7 @@ on which refs, who approves what, and whose attestations count (BATON_SPEC [R-BT
   live view, for runners that cooperate. At this end, owner bars and positions are a
   coordination record, not a boundary, and no guarantee is required.
 - **The strict end.** The `protected` and `protected-hardware` presets turn the same state into a
-  boundary. Trusted runners land only what the policy's attestations allow. Reviews count only
+  boundary. Trusted runners (proposed, not built) land only what the policy's attestations allow. Reviews count only
   from independent domains, and human gates are satisfied only by a human-only key. A deployment
   that depends on Baton requires named **guarantees**, such as `no-runner-lands`,
   `independent-review`, `tickets-approved` and `human-gates`, and lists them as **floors**. Baton
@@ -106,7 +108,7 @@ to see at a glance what the team is doing and what it needs from a person.
   capability, `human-operator` included, is the runner's own statement, which Baton records and
   matches but never grants or checks. A threat that needs a runner stopped belongs to the
   sandbox, the forge or the credential proxy. The one exception is the trusted-runner merge a
-  policy opts into. A repository chooses to adopt Baton; once it has, Baton's refusals bind every
+  policy opts into (proposed, not built). A repository chooses to adopt Baton; once it has, Baton's refusals bind every
   runner that uses it, and a runner that ignores them is outside the factory, not stopped by it
   (the owner, 2026-10-22).
 - **Not a workflow engine.** A course says where a ticket may go next; runners decide how to run

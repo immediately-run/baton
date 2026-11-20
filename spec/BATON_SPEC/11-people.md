@@ -154,12 +154,14 @@ contents are not built; their design is
     top-level verbs are `help` and `version`. Under `owner` and `admin`, a verb that acts on a
     kind of thing is two words, `<thing> <act>`, the thing singular (`owner policy apply`,
     `admin repo add`), plural only where the act replaces or ends the whole set (`admin keys
-    set`, `owner settings set`, `admin sessions revoke`); a verb on the whole instance or on
-    the caller's own session is one word (`admin freeze`, `owner open`). `baton-sidecar` (§8.1)
+    set`, `owner settings set`); a verb on the whole instance or on
+    the caller's own session is one word (`admin freeze`, `admin open`). The sidecar (§8.1)
     and `baton-activity` (§9.9) are separate binaries, not commands of this tree.
   - **Every command is in the table below.** A rule that names a command cites this one. A
     command calls the action of its name (`owner grant add` calls `owner.grant.add`) unless its
-    row names another, and signs as the first of that action's callers it has a key for.
+    row names another, and signs as the first of that action's callers it has a key for. A
+    row or a verb marked *proposed* is a command of a design that is not built; the page it
+    links holds the design.
   - **Keys.** The key is the one `-i <file>` names, else the one `keys.json` (R-BTN-137) maps
     to the role for the origin called. A human-only key is mapped only where its custody allows
     (R-BTN-185), else given as `-i`. A command whose caller is an approver list tries the roles
@@ -200,27 +202,27 @@ contents are not built; their design is
   | `leg runs <ticket> [<leg>]` | a leg's runs | R-BTN-128 |
   | `leg replay <ticket> <leg> [--run <n>] [--against <sha>]` | `leg.runs`, then replays locally | R-BTN-84 |
   | `leg stop <ticket>` | stops the running leg | R-BTN-119 |
-  | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise`, `await`, `events`, `ticket` | the local channel, inside a leg | R-BTN-106, R-BTN-160, R-BTN-162, R-BTN-198 |
+  | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise` | the local channel, inside a leg; `leg await`, `events` and `ticket` are proposed ([conditions](../proposals/conditions.md)) | R-BTN-106, R-BTN-160 |
   | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | a ticket's or the repository's blocks (`repo.blocked`) | R-BTN-75 |
   | `ticket history <ticket>` | a ticket's history | R-BTN-81 |
   | `ticket hold <ticket>`, `ticket unhold <ticket>`, `ticket expedite <ticket> [--clear]`, `ticket cancel <ticket>` | the overrides | R-BTN-12, R-BTN-186 |
   | `ticket route <ticket> <leg> \| --clear` | queues or clears a leg | R-BTN-83 |
-  | `ticket adopt <ticket> [--at <station>] [--next <leg>] [--ran <leg>,…]` | places a ticket on its course | R-BTN-39 |
+  | `ticket adopt <ticket> [--at <station>] [--next <leg>] [--ran <leg>,…]` | places a ticket on its course (proposed: [ticket adopt](../proposals/ticket-adopt.md)) | R-BTN-39 |
   | `ticket resolve <ticket> <restart> [--condition <id>]` | resolves a condition | R-BTN-163 |
   | `ticket new`, `ticket claim <id>`, `ticket set <id> <status>`, `ticket done <id>`, `ticket check`, `ticket request "<one sentence>" --course <course>` | local: the ticket source in git | R-BTN-74, R-BTN-131 |
   | `decision list [--all] [--watch]` | `condition.list`: what waits for a person | R-BTN-163 |
   | `decision answer <ticket> <option>` | `attestation.add`: a person leg's answer | R-BTN-116, R-BTN-181 |
-  | `attestation add <repository> --type <type> --subject <json> --value <json> [--lapses <duration>]`, `attestation revoke <repository> <id>` | writes or revokes an attestation | R-BTN-181 |
-  | `human-key add <pub>`, `human-key revoke <fingerprint>` | registers or revokes a human-only key | R-BTN-185 |
+  | `attestation add <repository> --type <type> --subject <json> --value <json> [--lapses <duration>]`, `attestation revoke <repository> <id>` | writes or revokes an attestation (proposed: [security](../proposals/security.md)) | R-BTN-181 |
+  | `human-key add <pub>`, `human-key revoke <fingerprint>` | registers or revokes a human-only key: `POST /v1/human-keys` is built, the command is proposed | R-BTN-185 |
   | `repo board <repository>` | the board | R-BTN-179 |
   | `repo policy <repository>` | the policy | R-BTN-189 |
-  | `repo protect --print <forge> \| --check <forge>` | `repo.policy`, then local | R-BTN-180 |
+  | `repo protect --print <forge> \| --check <forge>` | `repo.policy`, then local (proposed: [security](../proposals/security.md)) | R-BTN-180 |
   | `repo init` | local: writes the repository's files | R-BTN-134 |
   | `repo sync [--if-wanted] [--defaults-only]`, `repo mirror [--if-wanted]` | runs a sync, or the mirror | R-BTN-93, R-BTN-102 |
   | `repo spool <repository>` | local | R-BTN-105 |
   | `course test <root> <course> [--base <ref>] [--board <file>]` | local: tests a course | R-BTN-69 |
   | `runner start [--delivers git,forge-check,source]` | runs a runner | R-BTN-72, R-BTN-171 |
-  | `runner register --token <t> --name <name> [--key ssh\|api]` | registers with a token | R-BTN-117 |
+  | `runner register --token <t> --name <name> [--key ssh\|api]` | registers with a token (proposed: [checks and executors](../proposals/checks-and-executors.md)) | R-BTN-117 |
   | `runner accept-grant <repository> [--confirm]`, `runner decline-grant <repository>` | accepts or declines a grant | R-BTN-146 |
   | `key create <file>` | local: makes an API key | R-BTN-159 |
   | `home list`, `home use <name>`, `home add [<name>] --repository <id> [--origin <url>] [--checkout <path>]`, `home remove <name>`, `home show` | local: the homes file | R-BTN-127 |
@@ -228,20 +230,20 @@ contents are not built; their design is
   | `owner grant list <repository>` | owners, grants, settings and bars | R-BTN-179, R-BTN-146 |
   | `owner grant add <repository> --key <pub> --capabilities <a,b> [--hostname <h>] [--label <l>] [--max-tier <t>] [--max-claims <n>] [--confirm-span]`, or `--api-key --name <name>` | grants a runner key | R-BTN-58, R-BTN-146, R-BTN-159 |
   | `owner grant revoke <repository> <fingerprint>` | revokes a grant | R-BTN-58 |
-  | `owner grant role <repository> <fingerprint> --role runner\|trusted-runner [--checker]` | sets a grant's role | R-BTN-180 |
+  | `owner grant role <repository> <fingerprint> --role runner\|trusted-runner [--domain <label>] [--checker]` | sets a grant's role, domain and checker mark (proposed: [security](../proposals/security.md)) | R-BTN-180 |
   | `owner grant flags <repository> <fingerprint> --sync\|--no-sync` | sets a grant's `sync` flag | R-BTN-146 |
   | `owner owner add <repository> <pub>`, `owner owner remove <repository> <fingerprint>` | adds or removes an owner | R-BTN-58 |
   | `owner bar add <repository> --course <c> --tag <t>`, `owner bar lift <repository> <id>`, `owner bar follow <repository> <course>` | the owner's bars | R-BTN-67, R-BTN-142 |
   | `owner settings show <repository>`, `owner settings set <repository>` | reads (`owner.grant.list`) or sets the owner settings | R-BTN-66, R-BTN-140 |
-  | `owner policy show <repository>`, `owner policy diff <repository> [<version>]`, `owner policy log <repository>`, `owner policy set <repository> <file> [--dry-run]`, `owner policy apply <repository> <preset> [--dry-run]` | reads (`repo.policy`, `owner.policy.log`) or sets the policy | R-BTN-188 |
-  | `owner consent add <repository> <home>`, `owner consent withdraw <repository> <home>` | a `code_repos` consent | R-BTN-140 |
+  | `owner policy show <repository>`, `owner policy diff <repository> [<version>]`, `owner policy log <repository>`, `owner policy set <repository> <file>`, `owner policy apply <repository> <preset>` | reads (`repo.policy`, `owner.policy.log`) or sets the policy | R-BTN-188 |
+  | `owner consent add <repository> <home>`, `owner consent withdraw <repository> <home>` | a `code_repos` consent (proposed: [data model and API](../proposals/data-model-and-api.md)) | R-BTN-140 |
   | `owner sync-key add <repository> <pub> --role sync\|mirror`, `owner sync-key revoke <repository> <fingerprint>` | sync and mirror keys | R-BTN-93 |
   | `owner sync want <repository>` | records a sync want | R-BTN-105 |
-  | `owner token create <repository> --role runner [--capabilities …] [--max-tier <t>] [--ttl <d>] [--uses <n>]`, `owner token revoke <repository> <id>` | registration tokens | R-BTN-117 |
-  | `owner check-runner add <repository> <pub> --name <hostname> [--capabilities …] [--max-tier <t>]`, `owner check-runner revoke <repository> <fingerprint>` | check-runners | R-BTN-114 |
+  | `owner token create <repository> --role runner [--capabilities …] [--max-tier <t>] [--ttl <d>] [--uses <n>]`, `owner token revoke <repository> <id>` | registration tokens (proposed: [checks and executors](../proposals/checks-and-executors.md)) | R-BTN-117 |
+  | `owner check-runner add <repository> <pub> --name <hostname> [--capabilities …] [--max-tier <t>]`, `owner check-runner revoke <repository> <fingerprint>` | check-runners (proposed: [checks and executors](../proposals/checks-and-executors.md)) | R-BTN-114 |
   | `admin repo list` | the registry | R-BTN-179 |
   | `admin repo add <forge path> --owner-key <pub>`, `admin repo set <id>`, `admin repo retire <id>` | registers, changes or retires a repository | R-BTN-47, R-BTN-138 |
-  | `admin repo resync <repository> --force [<sha>]` | forces a resync | R-BTN-11 |
+  | `admin repo resync <repository> --force [<sha>]` | forces a resync (proposed: [tickets and sources](../proposals/tickets-and-sources.md)) | R-BTN-11 |
   | `admin grant add <repository> --key <pub> --capabilities <a,b> [--max-claims <n>]` | grants a runner key | R-BTN-57, R-BTN-188 |
   | `admin key revoke <fingerprint>`, `admin key hostname <fingerprint> <hostname>` | revokes a key; changes its hostname | R-BTN-57 |
   | `admin keys set --file <path>`, `admin forge-secrets set --file <path>` | local: the secret sink | R-BTN-136 |
@@ -251,8 +253,9 @@ contents are not built; their design is
   | `admin settings set [--link-hosts …] [--session-hosts …] [--check-app-id <id>] [--recommended-client <version>]` | the instance settings | R-BTN-112, R-BTN-113, R-BTN-197, §12.7 |
   | `admin freeze`, `admin unfreeze`, `admin seal`, `admin export [--with-history]`, `admin import <file>` | freeze, seal, export, import | R-BTN-88 |
   | `admin state` | the state in one request | R-BTN-57, R-BTN-179 |
-  | `admin open`, `owner open`, `admin confirm <code>`, `owner confirm <code>`, `admin sessions revoke --all`, `owner sessions revoke` | dashboard sign-in, confirmations and sessions | R-BTN-155 |
-  | `owner mcp-key create <repository> --name <name> [--actions read \| <id>,…] [--ttl <days>]`, `owner mcp-key revoke <repository> <name>` | MCP keys | R-BTN-130 |
+  | `admin open` | an administrator's dashboard sign-in | R-BTN-155 |
+  | `owner open`, `admin confirm <code>`, `owner confirm <code>`, `admin sessions revoke --all`, `owner sessions revoke` | owners' sign-in, confirmations and session revocation (proposed: [people and dashboard](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) | R-BTN-155 |
+  | `owner mcp-key create <repository> --name <name> [--actions read \| <id>,…] [--ttl <days>]`, `owner mcp-key revoke <repository> <name>` | MCP keys (proposed: [people and dashboard](../proposals/people-and-dashboard.md#2-mcp)) | R-BTN-130 |
 
 - **R-BTN-197 (Baton states the client versions it serves).**
   - **The client says what it is.** Every request the CLI sends carries `Baton-Client:
@@ -297,6 +300,11 @@ contents are not built; their design is
     soon as the key leaves `BATON_ADMIN_KEYS`, checked on every request. It calls `/v1/ui/*`
     (§14); a destructive action carries `confirm: true` (§12.2). Link tokens and session values
     are stored as hashes (§12.1).
+  - **Cloudflare Access, with no administrator key.** While `BATON_ADMIN_KEYS` names no key, a
+    request to `/v1/ui/*` is authenticated by a verified Cloudflare Access
+    assertion alone (`Cf-Access-Jwt-Assertion`, checked against the team's keys and the
+    application's audience, for an email in `OWNER_EMAILS`). Once an administrator key is
+    configured, only a session authenticates `/v1/ui/*` (R-BTN-16).
   - **Not built:** sign-in by a code the key holder confirms, owners' sessions, session
     revocation and confirmation codes
     ([the proposal, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions);

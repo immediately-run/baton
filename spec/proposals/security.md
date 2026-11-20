@@ -6,8 +6,9 @@ description: "Unbuilt designs moved out of BATON_SPEC §12.8 and §12.9: the pol
 
 Each part names the rule of [BATON_SPEC §12](../BATON_SPEC/12-security.md) it would extend. The
 rule ids stay defined there and are written here as `R-BTN-n (proposed)`. What is built is the
-policy document with its approvers, guarantees and floors, a grant's role, domain and checker
-mark, the protection report, human-only keys, and a person's answer as an attestation; the
+policy document with its approvers, guarantees and floors, the protection report, human-only
+keys, and a person's answer as an attestation (no route sets a grant's role, domain or checker
+mark); the
 policy's knobs are stored and computed over, and what enforces `merge.*`, `paths.*`,
 `tickets.created: proposed` and the `std:` types below is this page.
 
@@ -392,3 +393,12 @@ resolves it.
 The runner's audit report (§12.9) would carry two more kinds, `pr` (opened or commented on) and
 `egress` (a host reached). The runner has no source for either, and no host scope is defined;
 each arrives with its source and the scope for it.
+
+## 13. Readings counted for a requirement (R-BTN-76, proposed)
+
+Moved from BATON_SPEC §6.3; it joins §4's prerequisite kind. For a requirement on an instance,
+each admitted writer's latest observed reading in force on each usable instance, of either kind,
+is one attestation, whatever the instance's state, and `count` counts distinct writers' keys
+unless `distinct` names another field. A `resource` row gates only where its requirement binds
+`gate`, and R-BTN-181's supersession, binding and `missing` apply to a reading as to any
+attestation.

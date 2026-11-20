@@ -41,10 +41,12 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   decides who holds something or which number is next.
   - Nothing new uses git as a lock or a counter. A ticket or amendment proposing one is a change
     to Baton, not in it, and goes to the owner.
-  - The git-based ones that remain — the git-lock ticket commands (R-BTN-74) and the next-free
-    scans of git — are marked legacy where they are specified, are never extended, and leave with
-    the work that retires each (B-176, B-178). A collision one still produces is caught by the
-    sync's duplicate-id refusal (R-BTN-74, R-BTN-147) or at merge.
+  - **Legacy, removed with its code.** What remains of coordinating through git is marked legacy
+    where it is specified, is never extended, and leaves with the work that retires each (B-176,
+    B-178): the git-lock ticket commands (R-BTN-74); the next-free scans of git; the cutover and
+    the mirror, which serve a repository that coordinated its claims through git before Baton
+    (§16); and every passage elsewhere that serves only one of these. A collision one still produces is caught by the sync's duplicate-id
+    refusal (R-BTN-74, R-BTN-147) or at merge.
 
 - **R-BTN-33 (Baton holds filter fields, never content).** Per live ticket Baton stores what
   matching (§6) and the dashboard's lists read (the `tickets` columns, §13), the position it holds
@@ -64,7 +66,8 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   owns each ticket's course history and position (R-BTN-39), claims and leases, attestations
   (R-BTN-181) and owner state (R-BTN-66). Every other ticket fact it holds (existence, filter
   fields, version, closure) is a cache of what the source last posted, which Baton never edits:
-  the next accepted snapshot overwrites it, and **Resync** forces one. Where git states a value
+  the next accepted snapshot overwrites it (a **Resync** that forces one is
+  [proposed](../proposals/tickets-and-sources.md)). Where git states a value
   Baton also holds, Baton adopts it and logs the discrepancy (R-BTN-85). A runner acts on the
   ticket as its source has it (R-BTN-5, R-BTN-34).
   - **Staleness.** A snapshot observed after a claim's latest claim or `advance` (R-BTN-62) that
@@ -86,17 +89,18 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     (R-BTN-88), placed in the transaction that accepts the post, before that post's attestations
     are judged.
   - **Who moves a ticket.** Only these, each along an edge of the course file from Baton's current
-    station: an accepted `std:arrival@1` (R-BTN-191) — the holder's, carried by its `advance` or
-    end (R-BTN-63, R-BTN-71, R-BTN-83), or a fact arrival; Baton's own settlements and the legs it
-    queues (R-BTN-116, R-BTN-122, §7); and the owner's route (R-BTN-83).
+    station: the holder's arrival, carried by its `advance` or end (R-BTN-63, R-BTN-71,
+    R-BTN-83); a fact arrival; and Baton's own settlements and the legs it queues (R-BTN-116,
+    R-BTN-122, §7). The owner's route (R-BTN-83) is not built.
   - **The station function** (R-BTN-74) is handed each live ticket's position as Baton holds it
     and never sets one. A station its facts imply is shown on the ticket's view and never compared
     with Baton's position.
-  - **A fact arrival** is an arrival on a leg no claim runs: a leg whose course-file entry declares
-    `arrives: {fact: <kind>}` (R-BTN-69, R-BTN-192), attested as `std:arrival@1` with the `ref` of
-    the fact, or a person's leg, from its answer (R-BTN-116). Baton applies it in the transaction
-    that accepts the attestation when all hold: the policy admits its writer for the type
-    (R-BTN-191); the leg leaves Baton's current station, queued or not; `reached` is one of its
+  - **A fact arrival** is an arrival on a leg no claim runs. The one Baton applies is a person's
+    leg's, from its answer, a `std:decision@1` (R-BTN-116); a leg declaring `arrives: {fact:
+    <kind>}`, attested as `std:arrival@1`, is [proposed](../proposals/security.md) (R-BTN-191,
+    R-BTN-192), and such an attestation is kept as evidence, as below. Baton applies an arrival
+    in the transaction that accepts the attestation when all hold: the policy admits its writer
+    for the type (R-BTN-191); the leg leaves Baton's current station, queued or not; `reached` is one of its
     outcomes; no claim is active on the ticket; and Baton holds the ticket for nothing else (§7).
     Its `next` is the attestation's, else the first leg the course file lists leaving `reached`
     with runs left (R-BTN-63). Baton logs a `fact-arrival` history row and keeps the `ref`.
@@ -105,7 +109,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
       its `ref` and applied when the hold ends, if it still meets every other condition.
     - Any other arrival is kept as evidence: Baton logs an `arrival-unapplied` history row with
       the attestation and its own position, shown on the ticket's view (§11), and raises nothing.
-      The owner settles the disagreement with a route.
+      The owner's commands that would settle the disagreement, a route and adopt, are not built.
   - **Adopt**, the owner's command that sets a position for legs done outside Baton, is not built
     (B-120): [the ticket-adopt proposal](../proposals/ticket-adopt.md).
 - **R-BTN-8 (git first).** For every `completed` end, `suspended:` included, the runner pushes
@@ -181,17 +185,8 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
 - **R-BTN-98 (Baton runs no repository code; runners rank).** Baton calls and stores no course
   code. It decides every gate and its default order (§6), merged across groups (R-BTN-61);
   every judgement that needs a leg's or profile's meaning runs on the runner.
-  - A course may ship `rank.mjs` in its course directory. A runner loads it from the remote
-    default branch's head through a verified tree (R-BTN-133, R-BTN-134) and runs it through its
-    executor in a `rank` session (R-BTN-107), with the leg's environment (R-BTN-144). Its default
-    export `rank(view)` makes no Baton request and may make any other.
-  - `view = {runner: {tags, profile, harness} | null, candidates, fleet, instances, now}`:
-    `candidates` this course's entries of `GET /v1/runner/recommendations?all=1` (of
-    `launch-candidates` when `runner` is `null`), `fleet` and `instances` R-BTN-99's views. It
-    returns `{order: [{ticket_id, leg, score?, reasons?, skip?}], advice?: {<ticket_id>:
-    <opaque>}, launch?: <opaque>}`, checked as R-BTN-152 says; on failure, Baton's order.
-  - The runner orders each group by its course's ranking and keeps R-BTN-61's merge between
-    groups; without `rank.mjs`, Baton's order. Ranking is advice; a course needing every runner
-    to rank alike lists `rank.mjs` in `protocol_files` (R-BTN-65).
+  - A course's own ranking — `rank.mjs` in its course directory, run by the runner over Baton's
+    recommendations and views — is not built, and no runner runs one:
+    [the proposal](../proposals/courses.md).
   - Estimates stay on the runner; Baton stores no estimate or forecast.
 

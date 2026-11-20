@@ -76,12 +76,11 @@ checked in the transaction that adds or first accepts a key (§12.1).
 | `grant_capabilities` | `(credential_id, repository_id, capability_pattern)` | — | A grant's capabilities as rows, derived from `runner_grants.capabilities` in the statement that writes it (§6.6 rule 4) |
 | `sync_keys` | `fingerprint` | `repository_id`, `role`, `public_key` (unique), `added_by`, `added_at`, `revoked_at` | Sync keys, one repository each (R-BTN-93) |
 | `repository_policies` | `(repository_id, version)` | `policy_json` (its `floors` list a field), `hash`, `previous_hash`, `changed_by`, `approver`, `preset`, `at` | Each policy version, append-only (R-BTN-188, R-BTN-189) |
-| `dashboard_sessions` | `id` (of `bds_<id>_<secret>`) | `secret_hash`, `role` (`administrator`\|`owner`), `key_fingerprint`, `repositories` JSON (an owner's: those its key owned at binding), `created_at`, `expires_at`, `revoked_at` | A dashboard session (R-BTN-155) |
+| `dashboard_sessions` | `id` (of `bds_<id>_<secret>`) | `secret_hash`, `key_fingerprint`, `created_at`, `expires_at`, `revoked_at` | A dashboard session (R-BTN-155) |
 | `request_nonces` | `(key_fingerprint, nonce)` | `seen_at` | Replay cache for every signed request (R-BTN-13) |
 | `webhook_deliveries` | `delivery_id` | `received_at` | Deliveries seen (R-BTN-73) |
-| `push_deliveries` | `delivery_id` | `repository` (forge path, lowercase), `ref` (`refs/heads/<branch>`), `before_sha`, `after_sha`, `sender_id` (NULL when none came), `sender_login`, `commits_json` `[{sha, paths}]`, `truncated` | A push delivery's record (R-BTN-73), read by R-BTN-194's provenance and §12.9's `out-of-course` check |
+| `push_deliveries` | `delivery_id` | `repository` (forge path, lowercase), `ref` (`refs/heads/<branch>`), `before_sha`, `after_sha`, `sender_id` (NULL when none came), `sender_login`, `commits_json` `[{sha, paths}]`, `truncated` | A push delivery's record (R-BTN-73), read by R-BTN-194's provenance |
 | `webhook_syncs` | `(repository_id, workflow)` | `last_dispatch_at`, `window_until`, `trailing_wanted` | When the webhook path last dispatched the workflow, and its coalescing window (R-BTN-73, R-BTN-94) |
-| `write_budgets` | `(credential_id, repository_id, day)` | `writes` | Row writes per UTC day (R-BTN-149) |
 
 ### 13.3 Runners
 
@@ -98,7 +97,7 @@ checked in the transaction that adds or first accepts a key (§12.1).
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
 | `board_snapshots` | `(repository_id, sha)` | `parent_sha`, `received_at`, `ticket_count`, `posted_by` | Accepted posts (R-BTN-11, R-BTN-102) |
-| `board_head` | `repository_id` | `sha`, `observation`, `last_handed_out`, `observation_holder`, `observation_issued_at`, `observation_renewed_at`, `behind_since`, `reset_at`, `fleet_version`, `stations_observation` (the latest accepted snapshot to post stations), `source_kind`, `source_versions`, `source_writes` (the last accepted post's ticket-source declaration) | The head and the observation counter (R-BTN-11, R-BTN-62, R-BTN-70, R-BTN-74, R-BTN-147, R-BTN-150) |
+| `board_head` | `repository_id` | `sha`, `observation`, `last_handed_out`, `observation_issued_at`, `stations_observation` (the latest accepted snapshot to post stations), `source_kind`, `source_versions` (the last accepted post's ticket-source declaration) | The head and the observation counter (R-BTN-11, R-BTN-62, R-BTN-70, R-BTN-74, R-BTN-150) |
 | `sync_fingerprints` | `repository_id` | `digest`, `scheduling_v` | The last accepted snapshot's fingerprint and the scheduling version it was materialized at (§4.3, R-BTN-196); derived, and moves no version |
 | `sequences` | `(repository_id, kind)` | `last_number` | The identifier sequences; `kind` is opaque to core (R-BTN-199) |
 | `tickets` | `id` | `repository_id` (home), `local_id`, `course_id`, `course_json` (opaque), `path`, `title`, `display_json`, `tier`, `expedite`, `parent`, `repos` JSON, `rank`, `snapshot_sha`, `row_hash`, `blocked_since`, `answer_lost` JSON, `version` (`''` when the source posts none), `key` (default the `path`), `last_written_by` JSON `{pusher, pusher_id?, commit, at, human}` | Filter fields of each live ticket; an accepted snapshot rewrites only rows whose `row_hash` changed. `version` and `key` are inputs of `row_hash`; `last_written_by` is Baton's own record and is not (R-BTN-33, R-BTN-77, R-BTN-86, R-BTN-194) |
@@ -115,14 +114,14 @@ checked in the transaction that adds or first accepts a key (§12.1).
 | `leg_queue_members` | `ticket_id` | `repository_id`, `course_id`, `leg` | The one queue a ticket is counted in (R-BTN-79) |
 | `unblocked_dispatch` | `repository_id` | `last_sent_at`, `pending_json`, `due_at` | The unblocked trigger's coalescing window (R-BTN-94) |
 | `pending_owner_state` | `(repository_id, ticket_id, kind, key)` | `kind` (`override`\|`condition`\|`timer`\|`outbox`\|`station`\|`history`\|`run`), `key` (`''`, or the row's own id within its kind), `row_json` | Imported ticket-scoped rows awaiting their ticket's first snapshot (R-BTN-88) |
-| `scope_findings` | `id`; one open row per `(repository_id, COALESCE(ticket_id,''), kind, target)`, and for `out-of-course` one row per target, open or closed | `ticket_id` (NULL for `unclaimed-write` and `out-of-course`), `claim_id`, `kind` (`scope-exceeded`\|`unclaimed-write`\|`out-of-course`), `target` (for `out-of-course`, the head commit), `detail_json` (identifiers only), `raised_at`, `updated_at`, `resolved_at`, `resolved_by` (the owner's credential, or `baton`) | Scope findings (§12.9) |
+| `scope_findings` | `id`; one open row per `(repository_id, COALESCE(ticket_id,''), kind, target)` | `ticket_id` (NULL for `unclaimed-write`), `claim_id`, `kind` (`scope-exceeded`\|`unclaimed-write`), `target`, `detail_json` (identifiers only), `raised_at`, `updated_at`, `resolved_at`, `resolved_by` (the owner's credential, or `baton`) | Scope findings (§12.9) |
 
 ### 13.5 Claims and leg runs
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
 | `claims` | `id`; one `active` row per ticket; `request_id` unique per `runner_id` | `ticket_id`, `runner_id`, `request_id`, `nonce` (public), `snapshot_sha`, `station`, `leg`, `start_path` JSON, `claim_observation`, `end_observation`, `claimed_at`, `status` (`active`\|`completed`\|`released`\|`reaped`), `ended_at`, `end_reason`, `end_detail`, `ended_at_sha`, `error_type`, `blocked_kind`, `blocked_ref`, `confirmed_at`, `fence_pending`, `fence_incarnation`, `fence_deadline`, `failed_attempt`, `resume_json`, `deadline_at`, `advice_json` (the claim's `rationale`, opaque) | The lease. `status = 'active'` exactly when `ended_at` is NULL; `confirmed_at` only on `completed` (R-BTN-4, R-BTN-10, R-BTN-19, R-BTN-90, R-BTN-100, R-BTN-126) |
-| `claim_legs` | `id`; `run_id` unique | `repository_id`, `ticket_id`, `claim_id` (NULL for a run an adoption added; not exported), `seq` (per claim; NULL with the claim), `run_id`, `domain` (the grant's domain at the run's start), `leg`, `from_station`, `to_station`, `next_leg`, `head_sha`, `bars` JSON, `session_url`, `leg_log_dir`, `executor_digest`, `environment`, `instance`, `started_at`, `finished_at`, `abandoned_at`, `evidence` | The legs a claim started, on the holder's word, and the runs an adoption added: a ticket's run counts (R-BTN-39, R-BTN-63, R-BTN-84, R-BTN-107, R-BTN-113, R-BTN-128) |
+| `claim_legs` | `id`; `run_id` unique | `repository_id`, `ticket_id`, `claim_id` (NULL for a run an adoption added; not exported), `seq` (per claim; NULL with the claim), `run_id`, `domain` (the grant's domain at the run's start), `leg`, `from_station`, `to_station`, `next_leg`, `head_sha`, `bars` JSON, `session_url`, `leg_log_dir`, `started_at`, `finished_at`, `abandoned_at`, `evidence` | The legs a claim started, on the holder's word, and the runs an adoption added: a ticket's run counts (R-BTN-39, R-BTN-63, R-BTN-84, R-BTN-113, R-BTN-128) |
 | `leg_outputs` | `(ticket_id, leg, run, name)` | `schema`, `uri`, `digest`, `value_json`, `course_version`, `leg_version`, `claim_id`, `source` (`holder`\|`sync`), `confirmed`, `recorded_at` | Output envelopes, by pointer or bounded inline value (R-BTN-82, R-BTN-108) |
 | `leg_run_inputs` | `(claim_id, seq, name)` | `ticket_id`, `from_leg`, `from_run`, `uri`, `digest`, `value_json`, `leg_version` | What each leg run was given; replay reads it (R-BTN-82, R-BTN-84) |
 | `transcripts` | `id`; unique `(runner_id, repo, path, claim_id)` | `runner_id`, `claim_id`, `repo`, `path`, `role` (`session`\|`subagent`), `activity_id`, `first_seen_at`, `last_pushed_at` | Archived transcript pointers (R-BTN-20) |
@@ -173,11 +172,11 @@ Timers are not built: `ticket_timers` is in
 `snapshot-accepted`, `snapshot-rejected`, `advice-overridden`, `bars-mismatch`, `resource`,
 `question-dropped`, `answer-invalid`, `course-closed`, `course-opened`, `capacity`,
 `parent-invalid`, `not-before-invalid`, `output-unclaimed`, `reading-refused`, `invalid-pointer`,
-`scope-exceeded`, `unclaimed-write`, `out-of-course`, `scope-invalid`, `scope-resolved`,
+`scope-exceeded`, `unclaimed-write`, `scope-invalid`, `scope-resolved`,
 `admin` (its act in `detail.action`), `frozen`, `unfrozen`, `sealed`, `imported`, `sequence`
-(R-BTN-199); and these, each also a `ticket_history` row: `arrival-unapplied`, `history-adopted`,
-`blocked`, `unblocked`, `question-posted`, `question-answered`, `question-expired`, `condition`,
-`call-settled`, `superseded`, `discrepancy` (its sub in `detail_json`, R-BTN-85).
+(R-BTN-199); and these, each also a `ticket_history` row: `arrival-unapplied`, `blocked`,
+`unblocked`, `question-posted`, `question-answered`, `question-expired`, `condition`,
+`discrepancy` (its sub in `detail_json`, R-BTN-85).
 
 The outbox is not built: its table is in
 [the proposal](../proposals/data-model-and-api.md#the-outbox).

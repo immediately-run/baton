@@ -29,12 +29,12 @@ stated once, in the rule it cites.
 | Forge notification | `POST /v1/forges/{repository}/notify` | the forge's verifier under `BATON_FORGE_SECRETS` (R-BTN-95) | record a sync want for its own repository (R-BTN-156) |
 | GitHub App webhook | `POST /v1/github/webhook` | `X-Hub-Signature-256` by the App's webhook secret (R-BTN-73) | trigger a sync dispatch; Baton reads only R-BTN-73's fields |
 | Instrument (probe) | `/v1/probe/*` | SSH-signed | post readings of any registered instance (R-BTN-101) |
-| Registration token | `POST /v1/register` | `Authorization: Baton-Token <token>` | register one credential within its scope (R-BTN-117, R-BTN-157) |
+| Registration token (proposed, R-BTN-117) | `POST /v1/register` | `Authorization: Baton-Token <token>` | register one credential within its scope (R-BTN-117, R-BTN-157) |
 | Administrator | `/v1/admin/*`; any claim's leg runs | a `BATON_ADMIN_KEYS` line, SSH-signed or API key | R-BTN-57 |
-| Dashboard session | `/`, every §11.4 screen path, `/v1/ui/*`, the repository and owner reads §14 lists `session` on, and an owner's `POST …/attestations` (R-BTN-116) | the session cookie (R-BTN-155) | as `session` with its minting key's role (R-BTN-129): an administrator's, every action listed for it, under R-BTN-155's confirmations; an owner's, those listed for it on the repositories its key still owns, under the same confirmations, never an administrator's |
+| Dashboard session | `/v1/ui/*` | the session cookie (R-BTN-155) | as `session` (R-BTN-129), an administrator's session: every action §14 lists `session` on. Owners' sessions, a session's calls outside `/v1/ui/*` and confirmation codes are proposed ([people and dashboard, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)) |
 | Repository owner | `/v1/owner/{repository}/*`; the repository's reads and leg runs | an owner key, SSH-signed or API key | R-BTN-58 |
 | Human-only key | `POST /v1/human-keys`; `POST`, `DELETE …/attestations` as writer `human`; as an owner, or as a break-glass line on every repository it satisfies (R-BTN-188), the owner's routes | an SSH key registered `human_only` (R-BTN-185), on an owner key or a key of no other role | open human gates (R-BTN-185), `human-key.add` and `human-key.revoke` among them; as an owner, R-BTN-58; never through a session, which is `owner` |
-| MCP key (a delegated key) | `POST /v1/mcp` only | bearer `bmcp_…` | as `owner` on one repository, narrowed to the ids listed at minting: R-BTN-186, R-BTN-130 |
+| MCP key (a delegated key; proposed, [people and dashboard, §2](../proposals/people-and-dashboard.md#2-mcp)) | `POST /v1/mcp` only | bearer `bmcp_…` | as `owner` on one repository, narrowed to the ids listed at minting: R-BTN-186, R-BTN-130 |
 | Public | `POST /v1/login`, the dashboard shell's three assets — its page, its one script, its one stylesheet | none | start a sign-in |
 
 The repository reads (`GET /v1/repositories/{repository}/…`) are open to any key granted on the
@@ -66,26 +66,35 @@ repository, its owners and administrators, except where a route's rule narrows t
   that loads one anyway treats it as no administrator and raises `baton.admin-key-conflict`. Administrator and owner
   keys are never machine keys. The rule holds within a tenant; another tenant may hold the same
   public key (R-BTN-137).
-- **Bearer secrets** — API keys (`bak_`), registration tokens (`brt_`), MCP keys (`bmcp_`),
-  pending sign-ins (`bps_`) and dashboard sessions (`bds_`) — are stored only as hashes, are
-  valid in one tenant, and are compared over their full digests in constant time; so is every
-  forge and webhook MAC.
+- **Bearer secrets.** API keys (`bak_`) are stored only as hashes, are valid in one tenant, and
+  are compared over their full digests in constant time; so is every forge and webhook MAC. A
+  one-time sign-in link's token and a dashboard session's value (64 hexadecimal characters
+  each, no prefix; R-BTN-155) are stored only as hashes and found by their hash. The prefixed
+  secrets of designs not built — registration tokens (`brt_`), MCP keys (`bmcp_`), pending
+  sign-ins (`bps_`) and prefixed sessions (`bds_`) — are proposed
+  ([people and dashboard](../proposals/people-and-dashboard.md),
+  [checks and executors](../proposals/checks-and-executors.md)).
 
 ### 12.2 Destructive actions
 
 These actions take `confirm: true` in the body, or are refused `confirm-required`; the CLI asks
-or takes `--yes`, and the dashboard's dialogs send it. Over MCP `confirm` is only a schema check
-(R-BTN-130).
+or takes `--yes`, and the dashboard's dialogs send it.
 
 - `ticket.cancel`, `leg.stop`, `claim.force-reap`, `claim.fence-clear`;
-- `owner.owner.remove`, `owner.grant.revoke`,
-  `owner.check-runner.revoke`, `owner.sync-key.revoke`, `owner.token.revoke`,
-  `owner.mcp-key.revoke`, `owner.sessions.revoke`, `attestation.revoke`, `human-key.revoke`;
-- `admin.key.revoke`, `admin.repo.retire`, `admin.repo.resync`, `admin.sessions.revoke`.
+- `owner.owner.remove`, `owner.grant.revoke`, `owner.sync-key.revoke`, `human-key.revoke`;
+- `admin.key.revoke`, `admin.repo.retire`.
 
 Two further changes take `confirm: true`: a repository's path (R-BTN-138) and a `code_repos`
-consent (R-BTN-140). A dashboard session's authority-changing actions also need a
-confirmation code (R-BTN-155).
+consent (R-BTN-140).
+
+Proposed, each with the design that brings its action: `owner.check-runner.revoke` and
+`owner.token.revoke` ([checks and executors](../proposals/checks-and-executors.md)),
+`attestation.revoke` ([security](../proposals/security.md)), `admin.repo.resync`
+([tickets and sources](../proposals/tickets-and-sources.md)), `owner.mcp-key.revoke` and
+`confirm` over MCP as a schema check only ([people and dashboard, §2](../proposals/people-and-dashboard.md#2-mcp)),
+`owner.sessions.revoke`, `admin.sessions.revoke` and the confirmation code a dashboard
+session's authority-changing actions also need
+([people and dashboard, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)).
 
 ### 12.3 Untrusted text
 
@@ -154,29 +163,30 @@ Every value below is validated on write; a value over its cap is refused `invali
 
 - **R-BTN-16 (same-site with the product).** A Baton may share its registrable domain with
   origins that run untrusted code. So, on every host:
-  - **Cookies.** Baton sets two cookies and reads no other: the dashboard session
-    `__Host-baton_session` (at most 4 hours) and the pending sign-in `__Host-baton_pending` (2
-    minutes), both `__Host-` prefixed, host-only, `Secure`, `HttpOnly` and `SameSite=Strict`, so
-    no other origin on the domain can set or shadow them (R-BTN-155).
+  - **Cookies.** Baton sets one cookie and reads no other: the dashboard session
+    `__Host-baton_session` (12 hours, R-BTN-155), `__Host-` prefixed, host-only, `Secure`,
+    `HttpOnly` and `SameSite=Strict`, so no other origin on the domain can set or shadow it. A
+    second cookie, for a pending sign-in by code, is proposed
+    ([people and dashboard, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)).
   - **Headers.** Every response carries `Content-Security-Policy: default-src 'self';
     frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'`,
     `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`
     and `Cross-Origin-Resource-Policy: same-origin`; every response to a request a credential
-    or a dashboard session authorizes, and every response that sets a cookie or carries a
-    sign-in code (`POST /v1/login`, R-BTN-155), also carries `Cache-Control: no-store`.
-  - **Writes.** A state-changing request a dashboard session authorizes, under `/v1/ui/*` or
-    not (`POST …/attestations`, R-BTN-116), and `POST /v1/login` must carry
-    `Content-Type: application/json` and an `Origin` equal to the tenant's origin
+    or a dashboard session authorizes, and every response that sets a cookie (`POST /v1/login`,
+    R-BTN-155), also carries `Cache-Control: no-store`.
+  - **Writes.** A state-changing request a dashboard session authorizes and `POST /v1/login`
+    must carry `Content-Type: application/json` and an `Origin` equal to the tenant's origin
     (`BATON_ORIGIN`; locally `--origin`), else `forbidden`.
   - **Every session request.** Any request a dashboard session authorizes, reads included,
     carries an `Origin` equal to the origin when it carries one, and `Sec-Fetch-Site:
     same-origin` when it carries that header, else `forbidden`.
-  - **Sessions.** `/v1/ui/*` requires a dashboard session minted from an administrator or owner key
-    (R-BTN-155). A session's reads outside `/v1/ui/*` — the entity reads its screens poll (§14's
-    `session` rows) — are authenticated by Baton alone, the cookie and nothing in front of it.
+  - **Sessions.** `/v1/ui/*` requires a dashboard session minted from an administrator key
+    (R-BTN-155), and a session authenticates no route outside `/v1/ui/*`.
     Cloudflare Access may stand in front of the dashboard; Baton never requires it and never reads
-    its cookie. Where it stands, it covers only the dashboard's pages (`/`, `/login`, every §11.4
-    screen path, `/conditions/{condition}` (R-BTN-163), `/oauth/authorize`), `POST /v1/login` and
+    its cookie. Baton verifies the assertion Access forwards, and that assertion alone
+    authenticates `/v1/ui/*` only while no administrator key is configured (R-BTN-155). Where
+    Access stands, it covers only the dashboard's pages (`/`, `/login`, every §11.4
+    screen path, `/conditions/{condition}` (R-BTN-163)), `POST /v1/login` and
     `/v1/ui/*`; every other route authenticates each request itself or is public, and is called
     without an Access cookie.
 
@@ -199,7 +209,8 @@ Every value below is validated on write; a value over its cap is refused `invali
       `baton.bearer-over-http`. One that does not verify is only refused and counted in §2.3's
       failure buckets: an id or fingerprint alone, which is public, revokes nothing.
   - **The trusted proxy.** `--trusted-proxy <address>` names the one front whose forwarded
-    client address Baton reads, for the sign-in limits (R-BTN-155).
+    client address Baton reads, for the sign-in limits
+    ([proposed](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions)).
   - **File modes.** At start the local host exits 2 on a group- or world-writable `--db`, secret
     file or directory, or a group- or world-readable secret file. It creates the database `0600`
     in a `0700` directory.
@@ -254,8 +265,16 @@ read from git. What a policy guarantees is computed from its values (R-BTN-189);
 that depends on Baton requires guarantees by name and lists them as the policy's floors, which
 Baton enforces.
 
-Built: the policy document, its approvers, guarantees and floors, a grant's role, domain and
-checker mark, the protection report, human-only keys, and a person's answer as an attestation.
+Built: one versioned policy document per repository, changed by compare-and-set under
+`approvers.policy` and logged (R-BTN-188); the approver lists, the refusal of a list no live
+credential can satisfy, and break-glass; the guarantees computed over each version and
+answered by the policy read, and floors, with `floor-violated` and the stop of a repository
+whose floor is broken (R-BTN-189); the store of a protection checker's report, its lapse and
+`baton.unprotected` (R-BTN-180); human-only keys (`POST /v1/human-keys`, R-BTN-185); and a
+person's answer as a `std:decision@1` attestation (R-BTN-181). The built document's knob
+names, presets and guarantee names are those of `src/core/policy.ts`, which the tables below
+do not match everywhere. Not built: any route that sets a grant's role, domain or checker
+mark (R-BTN-180), so no grant is the protection checker and no protection report counts.
 Proposed, in [the security proposal](../proposals/security.md) (B-136, B-137, B-140, B-141,
 B-146, B-147): what enforces `merge.*`, `paths.*` and `tickets.created: proposed` — trusted
 runners, the merge runner, the fact reader and attestations of every other type. Until those are
@@ -431,12 +450,14 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
   - **Every grant has a role and a domain.** The role is `runner` or `trusted-runner` (R-BTN-182),
     and a `trusted-runner` grant may further be marked the repository's protection checker
     (`checker`); the domain is a label (1–128 characters of `[A-Za-z0-9_.:-]`). The role, the
-    mark and the label are set by the `approvers.roles` approver (`PUT
-    /v1/owner/{repository}/grants/{fingerprint}/role`), `trusted-runner` refused for an API-key
-    credential (`invalid-params`; a trusted runner signs, R-BTN-159); a grant nobody marked is a
-    `runner` with no domain. Baton compares domains as labels and verifies nothing about them.
-  - **How runs compare.** A run is attributed the domain its grant had when the run started
-    (`claim_legs.domain`). Two runs count as **different domains** when their domains differ and
+    mark and the label are set by the `approvers.roles` approver, `trusted-runner` refused for
+    an API-key credential (`invalid-params`; a trusted runner signs, R-BTN-159); a grant nobody
+    marked is a `runner` with no domain. Baton compares domains as labels and verifies nothing
+    about them. The route that sets them (`PUT /v1/owner/{repository}/grants/{fingerprint}/role`)
+    is not built ([proposed](../proposals/data-model-and-api.md)): every grant is a `runner`
+    with no domain.
+  - **How runs compare** (proposed with the role route). A run is attributed the domain its
+    grant had when the run started (`claim_legs.domain`). Two runs count as **different domains** when their domains differ and
     their runner keys differ; every other pair counts as the same, so no grant becomes
     independent of itself by being re-domained. A grant with a null domain counts toward no
     `merge.reviews` and is never a trusted runner.
@@ -446,7 +467,8 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     `baton-legs/*` is open to `runner`, `trusted-runner` and `human` (R-BTN-190). The forge
     enforces the classes; Baton states them.
   - **Only the protection checker's report counts.** The **protection checker** is a
-    `trusted-runner` grant that the `approvers.roles` approver marks as the repository's checker.
+    `trusted-runner` grant that the `approvers.roles` approver marks as the repository's checker
+    (the marking and its refusals are proposed with the role route).
     A marked grant is offered no leg and admitted to no `outbox` class, and Baton refuses to mark
     a grant whose domain is null or carried by another grant of the repository, that has claimed
     a trusted leg, or that delivers a class (`invalid-params`). It reports `{matched,
