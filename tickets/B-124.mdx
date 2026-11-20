@@ -27,8 +27,8 @@ its only writes add a hold and stop a leg"), whose closed list decides by channe
 owner lists, MCP never reaches a write beyond `ticket.hold` and `leg.stop`. The implementing PR
 amends the spec first, citing this ruling, and records the retired rule in the Decisions.
 
-**Spec:** §11.3 R-BTN-129 (one registry; every surface derived from it) and R-BTN-130 /
-R-BTN-154 (MCP); §12.1 (principals); R-BTN-66 (what owners hold against agents); R-BTN-155
+**Spec:** §11.3 R-BTN-129 (one registry; every surface derived from it) and R-BTN-130
+(MCP; R-BTN-154, the second id on its heading, is retired); §12.1 (principals); R-BTN-66 (what owners hold against agents); R-BTN-155
 (dashboard confirmations); §12.2 (destructive actions).
 **Depends on:** none.
 
@@ -92,3 +92,7 @@ _(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may 
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) writes R-BTN-186's one rule for a delegated key (B-156: tighten, and undo its own) and renames `trusted_identities` to `pushers` in its list (B-163); the registry's MCP entries follow in part 3.)_
 
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): written into the spec: R-BTN-130 / R-BTN-154 derive from R-BTN-186 through the registry's `delegated` marks, the closed list, the italic note and the `mcp: true` flag gone; `confirm` over MCP stays a schema check (item 4's first branch); `check:actions` keeps the marks and R-BTN-186 equal (item 5). B-25's code item builds it.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) retired R-BTN-154, the second id on R-BTN-130's heading: the spec line says so, and "R-BTN-130 / R-BTN-154" in the brief and the first exit criterion, which the note of 2026-11-02 records as written, reads R-BTN-130. The MCP endpoint and its delegated keys are unbuilt and their design is part 2 of [the people-and-dashboard proposal](../spec/proposals/people-and-dashboard.md); B-25, which builds it, moves it back into the section file.)_
+
+_(2026-11-20: rules re-read: R-BTN-154, R-BTN-130)_

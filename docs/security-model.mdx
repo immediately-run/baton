@@ -57,7 +57,8 @@ is that an unauthorised change never lands, not that it lands and is ignored.
 1. **Runners propose, trusted runners land.** Runners write only their own branches. Only trusted
    runners (the merge runner first) and the human-only identity update the default branch and
    tags. The specification is [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) (baton#134), which supersedes this page where they
-   differ.
+   differ; trusted runners and the merge runner are designed there and not built
+   ([the security proposal](../spec/proposals/security.md)).
 2. **No runner change to Baton's state lands without a human.**
    - **Courses and leg logic** (`.baton/**`, agent configuration, `.github/workflows/**`): for
      now, changed outside Baton. A human pushes to the default branch or merges the PR by hand,
@@ -353,8 +354,8 @@ the human-only identity (B-136), and `.github/CODEOWNERS` is itself under code-o
 **Retired.** The spec verifies no commit signature (`spec/BATON_SPEC_HISTORY.md`, 2026-11-19).
 Where no leg holds a forge credential, every forge write passes a host-side gate that refuses
 `.github/**` on every ref, and control paths land only by a human ([BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8), the deployment's), the signature guarded only an
-agent session on a human's forge credential, which the owner ruled break-glass: Baton makes such
-a change visible as an `out-of-course` finding ([§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9)) and refuses nothing. Under `cooperative`
+agent session on a human's forge credential, which the owner ruled break-glass: Baton is to make such
+a change visible as an `out-of-course` finding (proposed, not built: [the security proposal](../spec/proposals/security.md), [§12](../spec/BATON_SPEC/12-security.md#sec-12); [§12.9](../spec/BATON_SPEC/12-security.md#sec-12-9)) and refuses nothing. Under `cooperative`
 nothing protects a control path. The code stays until B-263 removes it. What follows is the
 mitigation as it was specified and built.
 

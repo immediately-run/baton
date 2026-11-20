@@ -47,7 +47,7 @@ immediately-run/baton#150; the restructure, B-166, writes them into the spec):
 
 1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
    every rule restating the same fact changed with it.
-2. One rule for what a delegated key may do, cited by R-BTN-130, R-BTN-154, R-BTN-163,
+2. One rule for what a delegated key may do, cited by R-BTN-130 (R-BTN-154, the second id on its heading, is retired), R-BTN-163,
    §12.2, §14 and G-BTN-144.
 3. The action registry's MCP entries (R-BTN-129) generated from that rule.
 
@@ -66,3 +66,9 @@ immediately-run/baton#150; the restructure, B-166, writes them into the spec):
 - 2026-11-02: part 3's review round one took `park` out of the delegated set: every restart of `ticket.resolve` lifts a hold another set or routes, so a delegated key resolves no condition (R-BTN-186, R-BTN-130, R-BTN-163); the registry's `delegated` marks are `true` for owner reads, `ticket.hold`, `ticket.cancel`, `leg.stop`, `owner.bar.add`, `own` for `ticket.unhold` and `owner.bar.lift`, `false` for the rest.
 - 2026-11-02: part 3's review round two corrected the ground: resolving a condition closes what Baton or a leg raised (a block, another's hold, a route, or a `parked` hold the key's own test never matches), so it is neither a tightening the key could undo nor the undoing of its own (R-BTN-186). Round three: the `own` test is on the key's immutable `id` (`set_by: mcp:<id>`), names being reusable (R-BTN-130, §13).
 - 2026-11-02: the owner took the recommendations on part 3's open items: a delegated key writes no attestation and resolves no condition, and the registry's mark is `delegated: true | own | false`; the code item (B-25) builds it.
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) retired R-BTN-154, the second id on R-BTN-130's heading; item 2 says so, and the earlier notes' "R-BTN-130 / R-BTN-154" reads R-BTN-130. R-BTN-130 itself now says that no MCP endpoint is built: the registry's `delegated` marks and the MCP design that item 3 and B-25 build are parts 1 and 2 of [the people-and-dashboard proposal](../spec/proposals/people-and-dashboard.md).)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved scenarios this ticket names out of the verification section, with the unbuilt designs they test. G-BTN-165 is no longer a row of the verification section: it is in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The repository policy's enforcement". The pull request that makes one pass moves its row back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15) in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
+
+_(2026-11-20: rules re-read: R-BTN-154, R-BTN-130)_

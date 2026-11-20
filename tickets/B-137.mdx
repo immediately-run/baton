@@ -27,7 +27,8 @@ no control change, and names an older commit as the one runners load. A key can 
 board by holding observation numbers. None of this needs a push.
 
 **Spec:** R-BTN-102, R-BTN-105, R-BTN-62 (observations), R-BTN-139, R-BTN-73 (push deliveries),
-R-BTN-97; B-126, B-127; `docs/security-model.mdx` (reach 7, reach 8).
+B-126, B-127 (R-BTN-97, a sync off a CI sandbox, is retired: the operator's duty on a host Baton
+cannot observe, and no rule); `docs/security-model.mdx` (reach 7, reach 8).
 **Depends on:** none.
 
 ### What to build
@@ -64,3 +65,9 @@ _(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may 
 _(2026-11-01: `inputs.answers` is retired (immediately-run/baton#150, R-BTN-191): what it decided is now the policy's `attestations` entries — `sync` not admitted for `std:decision@1` or `std:arrival@1` is the old `inputs.answers: attestation`. Read the references above that way.)_
 
 _(2026-11-19: rules re-read: R-BTN-66, R-BTN-133, R-BTN-194. Signed control is retired — BATON_SPEC verifies no commit signature (`spec/BATON_SPEC_HISTORY.md`, that date). Item 2's signature sentence is struck; nothing replaces it. Its first sentence stands: control-path changes computed server-side from the push deliveries are what §12.9's `out-of-course` finding reads (B-264).)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) retired R-BTN-97 with nothing in its place; the spec line says so, and no item of the plan rests on it.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: per-key limits on the board are part 11 of [the security proposal](../spec/proposals/security.md). S-BTN-187 is no longer a row of the verification section: it is in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The repository policy's enforcement". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
+
+_(2026-11-20: rules re-read: R-BTN-97)_

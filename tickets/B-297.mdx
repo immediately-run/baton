@@ -1,0 +1,146 @@
+---
+title: "B-297 — §13 and §14 match the schema and the routes: each undocumented table and route is documented or its dead code removed, and a check keeps them equal"
+id: B-297
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1297
+tier: judgement
+description: "Twenty-one tables the migrations create have no row in section 13, three section-13 tables do not exist in the schema, and a dozen routes the server answers have no row in section 14. Go through them one by one: a built mechanism gets its row, a retired one is removed by the ticket that owns it, and a new check compares the table and route names so the two cannot drift again before B-25 generates section 14."
+topics:
+  - baton
+  - spec
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the data model and the API in the spec are not the ones in the code. Checked on
+2026-11-20 against `src/migrations/` and the route chains of `src/core/baton.ts` and
+`admin.ts`:
+
+- **Tables created and never named in §13** (21; `login_links` got its row in PR #299's fix
+  round): `couriers`, `runner_couriers`, `notices`,
+  `decision_answers`, `ticket_decisions`, `policy_pins`, `policy_floors`, `policy_conditions`,
+  `protection_reports`, `human_keys`, `signed_control`, `spawned_children`,
+  `held_snapshots`, `adoptions`, `reviewer_agents`, `deprecated_fields`, `dependency_consents`,
+  `pending_transcripts`, `course_refusals`, `webhook_dispatch`, `code_repos` (§13 names
+  `code_repos` only as a JSON column of `repositories`).
+- **§13 tables no migration creates** (3): `leg_attempts`, `leg_outputs`, `ticket_depends`
+  (`write_budgets` moved to the proposal in the fix round). `leg_attempts` is R-BTN-122's per-leg count, which the code keeps per ticket
+  (B-11).
+- **§13 columns and kinds that differ** (added 2026-11-20 from the fix round's lists, each
+  read in the code):
+  - `board_head.observation_issued_at`: the column is `handed_out_at`
+    (`src/migrations/0008_observations.sql:13`).
+  - `runner_grants.checker`, `.domain` and `.set_by`: the columns are `trust_level`,
+    `trust_domain`, `role` and `trust_set_by` (`ALTER TABLE worker_grants ADD COLUMN …`; no
+    migration adds `checker`). `claim_legs.domain`: no migration adds it. These follow
+    B-293's and B-147's ruling on what a grant carries; the row is written after it.
+  - Event kinds: §13.8 lists `invalid-pointer`, `not-before-invalid`, `output-unclaimed` and
+    `reading-refused`, which the `events` CHECK does not admit
+    (`src/migrations/0064_children_owner_state.sql:53-75`); the CHECK admits
+    `dependency-consent`, `deprecated-field`, `off-graph`, `queue-over`, `regressed`,
+    `renumbered`, `reviewer-substituted` and `suspension`, which §13.8 lacks, and the legacy
+    `adopted`, `cutover`, `foreign-claim` and `shadow-conflict` (B-288) and `unsigned-control`
+    (B-263).
+- **§14 shapes that differ** (added the same day):
+  - `POST /v1/sync/observation`: a release answers `{released: <number>}`, not `{ok: true}`
+    (`src/core/baton.ts:616-620`).
+  - `POST /v1/runner/claims/{id}/advance`: the reply is `{ok, station, next, run_id, seq,
+    session_url_dropped?}` (`src/core/claims.ts:1493`); §14 lists `flags[]` and `inputs[]`,
+    which nothing returns (inputs are B-39's), and omits `seq`.
+  - `GET /v1/repositories/{repository}/policy`: the reply also carries `tenant`,
+    `guarantees_hash`, `floors_hash`, `valid_until`, `kid` and `signature`
+    (`src/core/baton.ts:869-893`); §14 lists none of them and §12.8 says Baton signs no
+    policy read. B-160 item 3 removes the signature and the hashes; until it does the row is
+    wrong, and this ticket's allowlist names B-160 for it.
+- **Routes answered and absent from §14**: `/v1/courier/*`, `GET /v1/sync/head`, `POST
+  /v1/sync/dependencies`, `POST /v1/sync/foreign-claim`, `GET /v1/ui/session`, `POST
+  /v1/ui/board/accept`, `POST /v1/ui/claims/{id}/resolve`, and under
+  `/v1/owner/{repository}/`: `GET signing-keys`, `POST dependency-consents`, the `couriers`
+  routes, `POST policy/floors`; and `GET /v1/admin/capacities` (§14 has the `PUT` only).
+
+The spec simplification found the gap and did not close it
+([the review](../docs/review/spec-simplification-review-2026-11-19.mdx), section 6 and *Where
+the spec and the code disagree*).
+
+**Spec:** [BATON_SPEC §13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) ([R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3)), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15)).
+
+## Plan
+
+1. **Make the list mechanical.** Add `scripts/check-schema.mjs` (run by `npm run check:spec`):
+   it reads the final set of table names from `src/migrations/*.sql` (creates, renames and
+   drops applied in order) and the table names heading §13's rows, reads the route literals
+   from `src/core/baton.ts` and `admin.ts` and the method-and-path cells of §14, and fails on a
+   name on one side only. It starts with an allowlist holding today's differences, each entry
+   naming the ticket that removes it; the allowlist only shrinks. Its first run replaces the
+   hand-made lists above in this ticket's PR.
+2. **Sort every entry into one of three piles**, in a table in the PR, and act on two of them:
+   - **Built and kept: write the row.** Expected here: `policy_floors`, `policy_conditions`,
+     `protection_reports`, `human_keys`, `login_links`, `spawned_children`,
+     `dependency_consents`, `pending_transcripts`, `course_refusals`, `webhook_dispatch`,
+     `code_repos`, and `held_snapshots`, which is live and not dead: a forced post is held in it
+     and accepted after 24 hours (`src/core/baton.ts:1672-1699`, `src/core/claims.ts:2594`;
+     its rule is B-302's); `sync/head`, `sync/dependencies`, `sync/foreign-claim`, `ui/session`,
+     `ui/board/accept`, `ui/claims/{id}/resolve`, `dependency-consents`, `policy/floors`, `GET
+     admin/capacities`; and the columns, kinds and reply shapes listed above, each corrected to the
+     code or left on the allowlist with its ticket. A row cites the rule that owns
+     each number or refusal and restates none (`docs/context/spec-writing.mdx`). A route whose
+     behaviour no rule states gets its rule in the owning section first, in the same PR; a
+     route nobody can name a rule for goes to the third pile.
+   - **Retired, with an owner: leave it on the allowlist, naming the ticket.** `couriers`,
+     `runner_couriers`, `notices`, `reviewer_agents` and the courier routes are B-285's and
+     B-67's; `signed_control` and `signing-keys` are B-263's; `adoptions` is B-288's;
+     `policy_pins` is B-293's; `ticket_decisions` and `decision_answers` go with B-56 and
+     B-161; `leg_attempts` arrives with B-11. Add a dated note to each of those tickets naming
+     the table or route, so its PR removes the allowlist entry.
+   - **Dead, with no owner: remove it here.** A table nothing in `src/` reads or writes, or a
+     route no caller in `cli/`, `src/runner/`, `src/defaults/` or the dashboard calls, is
+     removed in this PR: the route and its handler deleted, the table dropped in one new
+     migration (number from `node cli/baton.mjs tickets next migration --for B-297`).
+     Candidates to check: none known. `deprecated_fields` is written (`src/core/deprecated.ts:27`)
+     and gets a row. `leg_outputs`,
+     `ticket_depends` and `write_budgets` are §13 rows to delete, or to move to
+     `spec/proposals/data-model-and-api.md` with the design that would create them.
+3. **Spec, same PR.** §13 and §14 as sorted; history entry (`Rules changed:` naming any rule
+   that gained a sentence in step 2, else `none.`); `npm run spec:index`.
+4. **Relation to B-25.** The action registry will generate the router and §14's table. This
+   ticket does not wait for it: the check of step 1 reads route literals today and is replaced
+   by `check:actions` when B-25 lands, a sentence B-25 gains in its Status.
+5. **Tests.** A unit test for `check-schema.mjs` with a fixture of two migrations and a
+   two-row spec table: an undocumented table fails, a dropped table does not count, an
+   allowlisted name passes, and an allowlist entry whose difference is gone fails ("remove
+   me"). For each removed route, the existing suite's 404 for an unknown path covers it; for a
+   dropped table, a migration test that a populated old database migrates.
+
+### Trust
+
+No new input to Baton: a documentation and dead-code ticket. Removing a route removes an input;
+each removal in the third pile is listed in the PR with the principal that could call it and
+the evidence that nothing does, because an unlisted route is exactly where an unreviewed
+authority check hides. Writing a row for a route (the first pile) includes its caller column:
+the PR states, per route, which principal the code admits and where it validates the body
+(`src/core/validate.ts`), and a route found to admit more than its rule says is a finding filed
+as its own ticket, not documented as intended. The new script reads repository files only.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-33](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): filter fields only. Every table documented in step 2 is checked against
+  it; a table found to hold a body, a note or a PR list is a finding, not a row.
+- BATON_SPEC [R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3): every action has one authorisation. Documenting a route does not
+  change who may call it; removing one removes it for every principal.
+- BATON_SPEC [R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15): a behaviour change names its scenario. Removing a dead route is named in
+  the scenario that covered it, if any; the PR lists those.
+- Migrations are append-only: tables are dropped by a new file.
+- One home per statement: a §13 or §14 cell cites the rule that owns a number.
+
+## Status
+
+_filed 2026-11-20._ From the spec simplification review of 2026-11-19, section 6 and *Where
+the spec and the code disagree* (PR #299). Related: B-25 (generates §14), B-285, B-67, B-263,
+B-288, B-293, B-11, B-56, B-161, B-160, B-147, B-39, B-302.

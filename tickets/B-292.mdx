@@ -1,0 +1,110 @@
+---
+title: "B-292 — Fieldhouse follows Baton's simplified spec: drop executor.builtin, repoint its anchors to the section files, rename the trusted executor, and mark the Baton rules that are now proposals"
+id: B-292
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - fieldhouse
+tags:
+  - roadmap-item
+order: 1292
+tier: routine
+description: "Fieldhouse's spec cites Baton as it stood before the 2026-11-19 simplification: a knob Baton removed (executor.builtin: refused), four anchors and a Reads-first line pointing at spec/BATON_SPEC.md, which is now only an index, the name trusted executor for what Baton called a check-runner, and R-BTN-182, 183 and 184 cited as built rules where Baton now holds them as proposals. One pull request in fieldhouse; nothing changes in baton."
+topics:
+  - baton
+  - fieldhouse
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** `fieldhouse/spec/FIELDHOUSE_SPEC.md` (read at fieldhouse's `main` on 2026-11-20)
+still reads Baton's spec as it was before [PR #299](https://github.com/immediately-run/baton/pull/299).
+Line 54 sets `executor.builtin: refused`, a knob Baton's §12.8 no longer has. Lines 458–461 anchor
+four assumptions at `baton/spec/BATON_SPEC.md`, and line 5 names the same file; that file is the
+generated index and contains none of the four grep tokens, which are in the section files. Seven
+lines call a role the "trusted executor" (118, 120, 543, 551, 555, 888, 977), which collides
+with Baton's executor (the runner's module, R-BTN-107) and its `trusted-runner` role. Seventeen
+lines cite R-BTN-182, R-BTN-183 or R-BTN-184 for behaviour Baton now states only on
+`spec/proposals/security.md`. The findings are in
+[the review](../docs/review/spec-simplification-review-2026-11-19.mdx), section 5 and *Left for
+tickets*, item 5. Fieldhouse's spec does not cite R-BTN-192; the review's list was wrong on that
+one.
+
+**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-182](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-183](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-184](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3)), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)
+([R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-53](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [§6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) ([R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)). Fieldhouse's rules are its own: R-FH-3,
+R-FH-70, R-FH-72, R-FH-91, R-FH-95.
+
+## Plan
+
+The work is one pull request in `immediately-run/fieldhouse`, by that repository's own rules
+(its `CLAUDE.md`, its spec history, `npm run check:wiki` there). Nothing in `baton` changes
+except this ticket's status.
+
+1. **`executor.builtin`.** In R-FH-3's *Two knobs no guarantee holds* (lines 53–57 and the
+   sentence that follows on what the second knob refuses), keep `repos.unlisted: none` and
+   delete `executor.builtin: refused` with its explanation; the heading becomes one knob.
+   Fieldhouse's history entries that mention the knob (`FIELDHOUSE_SPEC_HISTORY.md` lines 367,
+   432, 499) stay as history; the new entry says Baton removed it.
+2. **Anchors.** In §3's *Depends-on-today* table, change the anchor of each row to the section
+   file that holds its token:
+
+   | Token | New anchor |
+   |---|---|
+   | `R-BTN-50 (core acts only on its own vocabulary)` | `baton/spec/BATON_SPEC/01-what-baton-is.md` |
+   | `R-BTN-53 (instruments hold the secrets` | `baton/spec/BATON_SPEC/01-what-baton-is.md` |
+   | `/v1/probe/readings` | `baton/spec/BATON_SPEC/14-api.md` |
+   | `R-BTN-99 (the views a runner ranks from)` | `baton/spec/BATON_SPEC/06-prerequisites-blocks-advice.md` |
+
+   Line 5's *Reads first* names `spec/BATON_SPEC/` (the section files) and the index as the way
+   in. Re-run the grep for each token against baton's `main` when the PR is opened: a token
+   that a later Baton change reworded is fixed there, not guessed.
+3. **Rename "trusted executor".** Choose one name that uses neither of Baton's words, and use
+   it on the seven lines above and in FLDH-41, FLDH-42 and FLDH-54 where the tickets are still
+   live. The proposal: "the check host" for the machine, "the check leg" for what runs there.
+   The name is Fieldhouse's owner's to confirm in the PR. An eighth place is Fieldhouse's own
+   `docs/context/product.mdx`, line 182 ("tests in a trusted executor"), renamed in the same
+   PR. *(Corrected 2026-11-20: this step first placed that line in baton. Baton's
+   `docs/context/product.mdx` is 117 lines and does not use the term; the only uses in baton
+   are in tickets B-141 and B-155 and one test comment,
+   `test/integration/S-BTN-189.repository-policy.test.ts:285`, which follow in a baton PR once
+   the name is chosen.)*
+4. **Rules that are proposals in Baton.** Where Fieldhouse cites R-BTN-182, R-BTN-183 or
+   R-BTN-184 for what the merge runner checks, the protected-path floor or its glob grammar
+   (lines 10, 124, 705, 829, 888, 908, 920, 928, 932, 943–961, 1162), cite the proposal page
+   (`baton/spec/proposals/security.md`) beside the id, and say in R-FH-3 that these parts of
+   the contract are designed, not built (B-140). Do not restate the design in Fieldhouse.
+5. **Lines that depend on Baton tickets not yet done.** List them in the PR and leave them, each
+   with the Baton ticket it waits on: line 762's "whether it is a check leg (BATON_SPEC
+   [R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10))" and line 975's `forge-check` sentence wait on B-290, which retires [R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10) and
+   decides where `std:checks@1` comes from; line 444's `requires.resources` and its "block on
+   them (BATON_SPEC [R-BTN-76](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3))" wait on B-291.
+
+### Trust
+
+This ticket's `repos:` names `fieldhouse` alone, and the work is a spec edit there. It changes
+no credential, grant, owner setting, CI workflow or deploy in either repository. Fieldhouse's
+spec is standing guidance that agents read (reach 3), so the change lands only through a pull
+request its owner merges. The line numbers and quotations above were read from a local checkout
+and are claims: the leg re-reads the file at fieldhouse's head before editing. Step 4 must not
+loosen anything: it marks Baton behaviour as unbuilt, which makes Fieldhouse's own enforcement
+(R-FH-91's forge gate, its weekly audit) the only enforcement, and the PR says so in each place.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): Baton's core names no deployment. The rename and the anchors are edits
+  to Fieldhouse's text; no Fieldhouse word enters Baton's spec.
+- BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8): the knobs Fieldhouse sets are knobs Baton has. After step 1 every knob
+  in R-FH-3 is a row of [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)'s table.
+- Fieldhouse's one-home rule (its `check:homes`): no Baton rule's text is copied into
+  Fieldhouse; each citation is an id and a file.
+- Fieldhouse's R-FH-3 guarantees are not weakened: the PR's body lists each guarantee and the
+  enforcement it keeps after step 4.
+
+## Status
+
+_filed 2026-11-20._ From the spec simplification review of 2026-11-19, *Left for tickets*,
+item 5 (PR #299). Filed as a baton ticket with `repos: [fieldhouse]`, as B-131 and B-136 name
+that repository; Fieldhouse keeps its own tickets (`FLDH-n`), and its owner may prefer to
+re-file this there.

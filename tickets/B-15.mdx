@@ -83,4 +83,6 @@ _(2026-10-20: rescoped to the current-state spec, PR #71 — item 3 declares `in
 types with `retryable` and throws `LegError(type, …)`; `error_types` is gone.)_
 - 2026-11-02: the spec restructure's part 4 (B-166, B-165's review default): the owners' `required_independence` setting is gone — the course file's `no_chain_from` alone says which legs may not chain (R-BTN-106; B-168). docs' reference course gives `review` its `no_chain_from` and needs no owner setting.
 
-_2026-11-08: R-BTN-106's `no_chain_from` now refuses a credential `domains.per_run` lists only within one claim or against its unlabelled runs (baton#197, B-187); for every other credential it is unchanged. Re-read R-BTN-106 and R-BTN-180 before building on it._
+~~_2026-11-08: R-BTN-106's `no_chain_from` now refuses a credential `domains.per_run` lists only within one claim or against its unlabelled runs (baton#197, B-187); for every other credential it is unchanged. Re-read R-BTN-106 and R-BTN-180 before building on it._~~
+
+_(2026-11-20: the note of 2026-11-08 is struck. The spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) removed per-run domains (`domains.per_run`, run labels) on the owner's ruling, and B-187 is superseded: `no_chain_from` refuses, for every grant, the credential that ran a named leg on the ticket, in this claim or another.)_

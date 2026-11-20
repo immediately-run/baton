@@ -24,7 +24,7 @@ depends_on:
 **Brief:** the owner, 2026-10-20: close the open question "OAuth for MCP clients (R-BTN-130)" so
 Claude's clients (claude.ai custom connectors, the desktop app, Claude Code) connect to Baton's
 MCP endpoint through the standard MCP authorization flow instead of a pasted `bmcp_` key.
-**Spec:** `spec/BATON_MCP_OAUTH_SPEC.md` (all of it); BATON_SPEC [R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3) / [R-BTN-154](../spec/BATON_SPEC/11-people.md#sec-11-3)
+**Spec:** `spec/BATON_MCP_OAUTH_SPEC.md` (all of it); BATON_SPEC [R-BTN-130](../spec/BATON_SPEC/11-people.md#sec-11-3) (R-BTN-154, the second id on its heading, is retired)
 and [R-BTN-129](../spec/BATON_SPEC/11-people.md#sec-11-3) ([§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3)), [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4) (owner sessions and confirmed actions) and [R-BTN-159](../spec/BATON_SPEC/11-people.md#sec-11-1) ([§11](../spec/BATON_SPEC/11-people.md#sec-11)),
 [R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4) (cookies, same-origin writes, the Access bypass list) and [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1)'s bearer rule ([§12](../spec/BATON_SPEC/12-security.md#sec-12)),
 [R-BTN-135](../spec/BATON_SPEC/02-deployments.md#sec-2-2) and [R-BTN-137](../spec/BATON_SPEC/02-deployments.md#sec-2-2) ([§2.2](../spec/BATON_SPEC/02-deployments.md#sec-2-2)), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3)'s admission and failure buckets, [R-BTN-149](../spec/BATON_SPEC/02-deployments.md#sec-2-3)'s write budgets,
@@ -179,3 +179,9 @@ _(2026-11-02, part 3's review rounds two and three: the consent test is on the s
 _(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — OAuth: retirement revokes the repository's grants with their tokens and its pending requests and unredeemed codes, and the token exchange refuses a code for a retired repository `invalid_grant` (`BATON_MCP_OAUTH_SPEC` §5, §7, §9). Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_
 
 _(2026-11-09: the staging deployment is retired — B-224, the owner: a home repository binds to one Baton, and every registered one binds to production, so staging held nothing and tested nothing. The connector test runs against a local host and then production.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) retired R-BTN-154, the second id on R-BTN-130's heading; the spec line says so.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the MCP endpoint and its delegated keys, which the OAuth flow issues, are part 2 of [the people-and-dashboard proposal](../spec/proposals/people-and-dashboard.md), with their tables and routes under "The action registry and MCP" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md); `spec/BATON_MCP_OAUTH_SPEC.md` stays where it is. Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
+
+_(2026-11-20: rules re-read: R-BTN-154, R-BTN-130)_

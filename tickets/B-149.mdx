@@ -88,7 +88,8 @@ The five marker courses cannot run on a home whose default branch is protected.
      (as `create-pr`'s `implement` does);
    - never pushes the default branch (`src/defaults/ticket-state.ts`);
    - validates against `item.schema.json` read from the default branch.
-2. **The course files** (`src/defaults/courses.ts`), as R-BTN-131's table gives them:
+2. **The course files** (`src/defaults/courses.ts`), as the course table gives them (once R-BTN-131's; now part 4 of
+   [the courses proposal](../spec/proposals/courses.md)):
    - `merged-by-hand` on each PR course;
    - the send-back edge with `max_runs` 3 on each last writing leg;
    - `decision`'s `answer`, its `carried` (settled) route and its re-ask route;
@@ -176,3 +177,5 @@ S-BTN-104, S-BTN-107 and S-BTN-194, every case in their rows, and each row of it
 - 2026-11-01: round three of #154 (the last) closed in the spec; B-154 added as a dependency.
 
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) renames the `protected-signed` preset `protected-hardware` (B-164); the note above reads so.)_
+
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the standard courses as PR record courses, with the course table, are part 4 of [the courses proposal](../spec/proposals/courses.md); the shipped courses' contract is `docs/standard-courses.mdx`, which the building change also updates. S-BTN-194 is no longer a row of the verification section: it is in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The standard courses as PR record courses, and the leg-state branch". Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_

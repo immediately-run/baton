@@ -1,0 +1,120 @@
+---
+title: "B-298 — The proposal pages: spec/proposals/ holds unbuilt designs, the ticket that builds one moves its rules and scenarios back in the same PR, and a check keeps each page's ticket list true"
+id: B-298
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1298
+tier: routine
+description: "Tracking ticket for the eleven pages of spec/proposals/ that the 2026-11-19 simplification created. Write the convention where agents read it (spec-writing.mdx, CLAUDE.md, the babysit skill), add a check that a page's named tickets are live and that a scenario with a test is not left on the proposals page, and close the gaps found on filing: designs with no ticket, and pages naming done or superseded tickets as their builders."
+topics:
+  - baton
+  - spec
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** ruling 1 of the spec simplification moved every unbuilt design out of
+`spec/BATON_SPEC/` into `spec/proposals/`, eleven pages and 281 KB
+([the review](../docs/review/spec-simplification-review-2026-11-19.mdx), *Applied on this
+branch*). Each page's `**Status:**` line says where its text returns and which tickets build
+it, and the front page names the folder, but the rule that a building ticket moves the text
+back is written nowhere an agent reads before work: not in `CLAUDE.md`, not in
+`docs/context/spec-writing.mdx`, not in the babysit skill, and no check reads the pages. On
+filing, the lists were already partly wrong: `conditions.md` named B-63 (superseded),
+`courses.md` named B-28 and B-29 (done and archived) as builders of text that is still a
+proposal, and two designs (the `branch` course, the ticket source's writer exports) have no
+ticket. The Status lines that named a dead ticket or missed a live builder (four pages) were corrected in PR #299 on
+2026-11-20 (the table below is as corrected); the rest of step 3 stands.
+
+**Spec:** BATON_SPEC front matter (*Companions*), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15), [R-BTN-30](../spec/BATON_SPEC/15-verification.md#sec-15)).
+
+## The pages
+
+Read from each page's Status line and a grep of ticket ids on 2026-11-20, after that day's
+correction of four Status lines. "Live" means a file
+in `tickets/` that is not `superseded`.
+
+| Page | Returns to | Live tickets named | Gap |
+|---|---|---|---|
+| `branch-course.md` | §5 or `docs/standard-courses.mdx` | none | no ticket: file one or delete the page |
+| `checks-and-executors.md` | §8, §9, §10 | B-184, B-186, B-12, B-8, B-46, B-47 | the check-runner parts are cut (B-290 deletes them). Line 279 cites B-109 (done) as a message's origin, not as a builder |
+| `conditions.md` | §7, §6 | B-55, B-57, B-58, B-59, B-61, B-62, B-65, B-260 | Status line corrected: B-63 (superseded) out, B-58 (bindings, R-BTN-161) and B-59 (suspend, R-BTN-162) in. `R3-1205.c3` at line 73 is an example id, not a builder |
+| `courses.md` | §5 | B-40, B-62, B-65, B-149, B-154 | Status line corrected: B-28 and B-29 (done) out; B-62 (call legs, R-BTN-165), B-65 (the `cancel` leg) and B-149 in. Still open: whether the text B-28 and B-29 were named for is built and returns to §5; line 276 cites B-99 (done) for `spec-to-tickets`; line 142 says the validator refuses a leg's `isolation`, while `src/core/course.ts:294` accepts `"session"` (B-70) |
+| `data-model-and-api.md` | §13, §14 | B-8, B-25, B-38, B-55, B-61, B-64, B-73, B-120, B-136, B-146, B-147, B-206 | Status line corrected: B-5 out (superseded 2026-11-20); its rows go with B-290 |
+| `multi-tenancy.md` | §2 | B-45, B-46 | the owner has not ruled whether this stays specified before B-45 (the review, *Left for tickets*, item 7) |
+| `people-and-dashboard.md` | §11 | B-25, B-124, B-192, B-204, B-206, B-207, B-208, B-221, B-73 | none on the Status line. Line 282 cites B-242 (done) as a reason, not as a builder |
+| `scenarios.md` | §15 | named per group | the Status line names no ticket. Checked 2026-11-20: `B-1` at line 71 is an example ticket id inside S-BTN-193's text, not a builder; the group lines are to be checked by step 2's script, which reads only tickets named as builders |
+| `security.md` | §12 | B-136, B-137, B-140, B-141, B-146, B-147, B-263, B-264, B-268 | B-264's `executor.builtin` half is cut |
+| `ticket-adopt.md` | §1 (R-BTN-39) | B-120 | none found |
+| `tickets-and-sources.md` | §4 | B-77, B-46, R3-1263 | no ticket builds the writer exports; R-BTN-200 is listed as retired by the review and still described here. Line 113 cites B-89 (done) as an origin. Status line corrected: R3-1263 in, for the sync wants the fix round moved here |
+
+## Plan
+
+1. **Write the convention once, and point at it.** In `docs/context/spec-writing.mdx`, a
+   section *Proposals*: `spec/proposals/` holds designs that are not built and bind nothing; a
+   rule id whose design is there keeps its id and one line in its section with a link to the
+   page; the PR that builds a design moves its rule text into the section file and its
+   scenario and gate rows into §15, deletes them from the page, and deletes a page left empty;
+   a new design starts on a proposal page, by PR, and a ticket that needs a ruling still gets
+   it in the spec first (the babysit skill's *Decide in the spec*). `CLAUDE.md`'s first
+   paragraph and the babysit skill's *Spec PRs* each gain one sentence citing that section.
+   These are standing guidance: they land through the owner's review of the PR.
+2. **A check, in `npm run check:spec`.** For each page of `spec/proposals/`: it has a
+   `**Status:**` line; every ticket id on that line is a live ticket (a done, archived or
+   superseded one fails, naming it), or the line says `tickets: none yet`, which is listed and
+   never fails; every `S-BTN-n` on `scenarios.md` has no test file under `test/` (one with a
+   test belongs in §15, by R-BTN-31); and no rule id is defined (`**R-BTN-n (`) on a page,
+   since ids are defined in section files only. `npm run check:tickets` lists, without
+   failing, a live ticket whose Spec line cites a rule that is one line and a proposal link in
+   its section, so a claimant knows the design it builds is on a page.
+3. **Close the gaps in the table**, in the same PR or in tickets it files: keep each Status
+   line to live tickets (four were corrected on 2026-11-20; the check of step 2 tells a
+   builder named on a Status line or a group line from a done ticket cited in the text for
+   where a fact came from, which is history and stays); for B-28, B-29 and B-99's text in `courses.md`, read the code and
+   either move the built part back to §5 or name the ticket that builds the rest; for
+   `branch-course.md` and the writer exports, ask the owner whether to file a ticket or delete
+   the design, and do that; remove R-BTN-200's design from `tickets-and-sources.md` if the
+   rule is retired. This step changes spec pages: history entry with `Rules changed:` (`none.`
+   when only proposal pages and Status lines change).
+4. **A note on each building ticket.** Every live ticket in the table gains one dated line
+   under its `## Status`: "its design is on `spec/proposals/<page>`; the PR that builds it
+   moves the rules and scenarios back (B-298)". For a ticket another session holds, the note
+   only, as the babysit skill says.
+5. **This ticket stays open as the list.** It is done when the folder is empty or the owner
+   closes it; until then the table above is regenerated by the check's listing, and a page
+   added or removed updates it in the PR that does so.
+
+### Trust
+
+No new input to Baton. The inputs are files in this repository: the proposal pages, which
+anyone who can push writes, and which bind nothing by their own first line. The risk the
+convention must not create is the reverse of that line: text on a proposal page read as a rule.
+The check's "no rule id is defined on a page" and the section files' one-line stubs keep the
+normative text in one place, and a ticket citing only a proposal page for its authority is
+building a design, not a ruling, until its spec PR is merged by the owner. The edits to
+`CLAUDE.md`, the skill and the context page are instructions to agents (reach 3) and go
+through the owner's review. The check reads repository files and runs no code from them.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15): scenarios are part of drafting, and every behaviour change names its
+  scenario. A scenario moves to [§15](../spec/BATON_SPEC/15-verification.md#sec-15) in the change that makes its test pass, and the check
+  fails a tested scenario left on the proposals page.
+- BATON_SPEC [R-BTN-30](../spec/BATON_SPEC/15-verification.md#sec-15) and the front matter: scenarios are named, and ids are stable. Moving a row keeps its id; the
+  check fails an id that appears both in [§15](../spec/BATON_SPEC/15-verification.md#sec-15) and on `scenarios.md`.
+- One home per statement (`docs/context/spec-writing.mdx`): a design's text is on its page or
+  in its section, never both.
+- Tickets are tasks, not authority (CLAUDE.md): the notes of step 4 describe where a design
+  is; they give no ticket leave to build what the owner has not ruled.
+
+## Status
+
+_filed 2026-11-20._ From the spec simplification review of 2026-11-19, ruling 1 and *Applied on
+this branch* (PR #299). No earlier ticket or page states the convention; each proposal page
+states its own half in its Status line.
