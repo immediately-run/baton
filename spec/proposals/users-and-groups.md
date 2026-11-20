@@ -1,20 +1,21 @@
 ---
-title: "Proposal: users, groups, answerers and contacts"
-description: "A tenant's directory of users and groups, each repository's acceptance of the keys and members that count for it, a policy knob naming who may answer a person leg, sealed contacts that only a repository's notifier can read, and a directory attestation from the forge."
+title: "Proposal: users, groups, answerers and the notifier"
+description: "A tenant's directory of users and groups, each repository's acceptance of the keys and members that count for it, a policy knob naming who may answer a person leg, what Baton hands a notifier, and a directory attestation from the forge."
 ---
-**Status:** proposal — not built, no ticket filed; moves into BATON_SPEC §3, §7, §11, §12 and §13 when built. Reviewed adversarially on 2026-11-20 ([the review](../../docs/review/users-and-groups-2026-11-20.mdx)); this text is the revision.
+**Status:** proposal — not built, no ticket filed; moves into BATON_SPEC §3, §7, §11, §12 and §13 when built. Reviewed adversarially on 2026-11-20 ([the review](../../docs/review/users-and-groups-2026-11-20.mdx)); this text is the revision, with the owner's rulings of the same day.
 
 BATON_SPEC knows credentials, not people: an owner is a key ([R-BTN-58](../BATON_SPEC/11-people.md#sec-11-2)),
 a human is a `human_only` key ([R-BTN-185](../BATON_SPEC/12-security.md#sec-12-8)), and a person
 leg's `asks` label ([R-BTN-116](../BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4)) binds
 to nobody. This page adds the record that ties a person's keys, forge identity, groups and
-contacts together, and says where each piece is held.
+notification channels together, and says where each piece is held.
 
 It rests on one principle. **The tenant's directory says who a person is; each repository says
 which of that person's keys count for it.** A user or group entry in a repository's lists admits
 a key only once that repository's own `approvers.members` approver has accepted the key for the
-person, so [R-BTN-188](../BATON_SPEC/12-security.md#sec-12-8)'s rule stands unchanged: a key
-becomes an owner of a repository only by that repository's `approvers.members` action.
+person, so [R-BTN-188](../BATON_SPEC/12-security.md#sec-12-8)'s rule stands: a key becomes an
+owner of a repository only by that repository's `approvers.members` action. A repository may
+instead choose, in its policy, to take the tenant's directory or the forge's word whole (§2, §6).
 
 A rule this page changes is written `R-BTN-n (proposed)` and stays defined, as built, in its
 section; §8 lists every such rule. A rule this page adds is labelled `U-n` until Baton's
@@ -26,11 +27,10 @@ alone is this page's section.
 - U-1 (proposed) — a user is the tenant's record of one person; a key stays the credential.
   - **The record.** A user has an `id` and a `display_name` (free text, §12.3). User and group
     ids match `^[a-z][a-z0-9-]{0,31}$`, share one namespace in the tenant and are never reused.
-    Baton holds no email address, telephone number or channel address of a user that it can
-    read (§5).
+    Baton holds no email address, telephone number or channel address of a user (§5).
   - **Who writes the directory.** Creating and retiring a user or a group, and changing a
     group's members, are the administrator's (R-BTN-57). A user's own keys, forge identities and
-    contacts are also the user's to write, as the bullets below and §5 and §6 say. Nothing an
+    channels are also the user's to write, as the bullets below and §5 and §6 say. Nothing an
     owner key or a runner does writes the directory, and nothing in it is read from git.
   - **Keys.** An owner key, or a key that holds no role yet, may be attached to at most one
     user; a machine key, a sync or mirror key, an instrument key and an administrator's key
@@ -47,7 +47,7 @@ alone is this page's section.
   - **`human_only` is the key's, never the user's.** The mark is set only by R-BTN-185's
     registration, before the key is attached: `POST /v1/human-keys` refuses a key attached to a
     user (`conflict`), and attaching never sets the mark.
-  - **Retiring a user** detaches its keys and deletes its contacts, memberships and
+  - **Retiring a user** detaches its keys and deletes its channels, memberships and
     acceptances. It is refused `unsatisfiable-approvers` where R-BTN-188 would refuse the
     detaches.
 - U-2 (proposed) — a group is a named set of users.
@@ -60,7 +60,7 @@ alone is this page's section.
   `/v1/users/{user}/…`; on a repository it acts as `owner`, or not at all.
 - **Reading the directory.** An administrator reads all of it. An owner key reads every user
   and group — ids, display names, each user's key fingerprints with `attached_by`, forge
-  identities and contact channels — so that an approver sees what it accepts. A key granted on a
+  identities and channels — so that an approver sees what it accepts. A key granted on a
   repository reads only the user ids that repository's Needs-you entries name (§4). Nobody reads
   which other repositories name a user or group.
 
@@ -88,6 +88,12 @@ alone is this page's section.
     only a human does.
   - **Every repository decides alone.** No act needs two repositories' approvers, and nothing a
     repository's approver does changes what counts on another (R-BTN-58).
+  - **Or the repository takes the tenant's directory whole.** Under `members.source: tenant`
+    (§3) a repository asks for no acceptance: every key attached to a user counts for that user,
+    and every member of a `baton` group counts as one, as the directory stands. Whoever writes
+    the directory then decides who matches the repository's entries — the administrator, and
+    each user for their own keys — so the repository's `approvers.members` no longer gates
+    them. It suits a tenant whose administrator and owners are the same people.
 
 ## 3. People in owner sets and approver lists
 
@@ -116,9 +122,12 @@ alone is this page's section.
   it on R, and refuses a detach, a removal, a retirement, a dropped acceptance and a policy
   change that would leave a list with none (`unsatisfiable-approvers`). A `forge` group entry
   never counts toward it: a list must be satisfiable without one.
-- **`members.source`** is a new policy knob, enforced by Baton: `baton` or `forge`, `baton` in
-  every preset, and a stored version naming none reads `baton`. It decides how a `forge` group
-  matches (§6). The guarantee `human-gates` (R-BTN-189) holds only under `baton`.
+- **`members.source`** is a new policy knob, enforced by Baton, saying whose word on membership
+  the repository takes: `repository` (its own acceptances, §2), `tenant` (the directory whole,
+  §2) or `forge` (acceptances, and the forge for `forge` groups, §6). It is `repository` in
+  every preset, and a stored version naming none reads `repository`. A change of it is a policy
+  change like any other, held to *No gate without a key to open it*. The guarantee `human-gates`
+  (R-BTN-189) holds only under `repository`.
 
 ## 4. Who may answer a person leg
 
@@ -149,61 +158,59 @@ alone is this page's section.
   - **Needs you** (R-BTN-163) lists each queued person leg with its label and the ids of the
     users with a key that could answer it now.
 
-## 5. Contacts and the notifier
+## 5. Reaching people: channels and the notifier
 
 How a person learns of an entry stays a delivery runner's, outside core (R-BTN-163): Baton
-sends nothing, names no channel and records no delivery. A **notifier** is such a delivery
-runner. This section adds where each person's contacts are kept, so that no reader of Baton's
-API learns them, and what Baton hands a notifier.
+sends nothing, names no channel's protocol and holds no address. A **notifier** is such a
+delivery runner: a runner, or a process with a key granted on the repository, with nothing
+added to its key. Reaching a person is a capability of its host, not a key role (R-BTN-161).
+This section adds what Baton tells it about people.
 
-- U-4 (proposed) — a contact is a channel name in the clear and an address only the notifier
-  can open.
-  - **A contact** is `{channel, sealed?}`, in the user's order of preference, at most 8 per
-    user. `channel` matches `^[a-z][a-z0-9-]{0,31}$` and is opaque to core (`ntfy`, `email`,
-    `whatsapp`). `sealed` maps a notifier's **recipient** — its age X25519 public key — to the
-    JSON `{origin, user, channel, address, created}` encrypted to it, at most 2 KB each. A
-    contact with no `sealed` says the notifier's own host holds the address, keyed by the
-    user's id. Baton stores a sealed value and cannot open it; it is no secret of Baton's
-    (R-BTN-53).
-  - **Who writes it.** The user (`baton user-contact set`), with a `human_only` key when one is
-    attached to them, else with any attached key. The CLI seals locally, to the recipients
-    Baton lists for the user. It keeps the recipients it has sealed to and asks before sealing
-    to a new one, naming the repository and the credential that granted it.
-  - **A notifier is a granted machine key with the `notify` flag.** The flag is a grant's, set
-    and cleared by an `approvers.members` action like the `sync` flag (R-BTN-146), with the
-    notifier's recipient; an API-key runner never holds it. No key role exists for it. One
-    process may hold the flag on every repository of a tenant.
-  - **What a notifier reads.** `GET /v1/runner/notify?after=<cursor>` answers the Needs-you
-    entries (R-BTN-163) opened or closed since the cursor on the repositories where the caller
-    holds the flag: for each, the repository, ticket, leg, label, `url`, severity, times, and
-    `recipients`, the ids of the users §4 or the owner set resolves it to, each with its
-    contacts sealed to the caller's recipient. No other route answers a sealed value, to an
-    administrator or to anyone. An entry of a repository that binds a `deliver` course for it
-    (R-BTN-169) is marked `handled`, and the notifier skips it.
-  - **Who is told, and when.** An entry goes to its recipients at once, each by their first
-    contact that sends. The owner setting `escalations` (R-BTN-66), `{<label> | "*": [{after_s,
-    notify: [<entry>, …]}]}`, at most 8 steps, adds the people a step names once the entry is
-    that old and still open. Baton resolves a step and drops everyone who could neither answer
-    the entry nor read the repository as an owner, so no step tells a stranger. Core times
-    nothing: the notifier applies the steps, and a person leg's `expires` (R-BTN-116) still
-    bounds the wait. An owner key attached to no user reaches nobody, and the entry counts such
-    keys as `unreached`.
-  - **It runs no repository code.** `baton notifier start` is the CLI's own loop with the
-    channel senders its host configures. It sends the ticket, the leg and the `url`, and
-    nothing a leg wrote; it drops a sealed value whose `origin`, `user` or `channel` is not its
-    contact's. It keeps its cursor and what it has sent in a local file; started without one, it
-    begins at the present and sends nothing older.
-  - **A silent or replaced notifier is a condition.** Baton stamps each `notify` grant's last
-    read. A repository with open entries and no read for 15 minutes raises
-    `baton.notifier-silent`. Setting or replacing a `notify` flag raises `baton.notifier-changed`
-    on the repository until every reached user's contacts are sealed to the new recipient or
-    hold no sealed value; the old grant's sealed values are deleted when its flag is cleared.
+- U-4 (proposed) — Baton says who to tell and in what order; the notifier knows how.
+  - **Channels.** A user keeps an ordered list of at most 8 channel names (`baton user-channel
+    set`), each matching `^[a-z][a-z0-9-]{0,31}$` and opaque to core (`ntfy`, `email`,
+    `whatsapp`): the order in which that person wants to be reached. Any key attached to the
+    user writes it.
+  - **Addresses are the notifier's.** Baton stores no address, sealed or not. A notifier finds
+    a user's address for a channel by the user's id, in whatever store its host uses, until
+    Baton and Fieldhouse have one way to hold secrets (§9). A channel a user lists and the
+    notifier has no address for is skipped.
+  - **Who an entry is for.** Each Needs-you entry (R-BTN-163) carries `recipients`: the ids of
+    the users who could answer it now (§4), or, for a condition with no person leg, of the
+    users with a key that is an owner of the repository. An owner key attached to no user
+    reaches nobody, and the entry counts such keys as `unreached`.
+  - **Escalation.** The owner setting `escalations` (R-BTN-66) is `{<label> | "*": [{after_s,
+    notify: [<entry>, …]}]}`, at most 8 steps, `notify` built of §3's user and group forms. An
+    entry carries its steps resolved to user ids, each with the instant it falls due. Baton
+    drops from a step everyone who could neither answer the entry nor read the repository as an
+    owner, so no step tells a stranger. Core times nothing: the notifier applies the steps, and
+    a person leg's `expires` (R-BTN-116) still bounds the wait.
+  - **One read.** `GET /v1/runner/needs-you?after=<cursor>` answers the entries opened, changed
+    or closed since the cursor on every repository the caller's key is granted on, so a notifier
+    serving a tenant asks once a minute, not once per repository. An entry of a ticket on a
+    delivery course of its own (`deliver`, R-BTN-169) is marked `handled`, and the notifier
+    skips it.
+  - **The notifier keeps its place in Baton, as a reading.** A notifier is an instrument of a
+    resource instance the administrator registers for it (R-BTN-76), whose `detail` schema is
+    `std:notifier@1`: `{cursor, sent_through}`. It posts a `state` reading with `valid_for` 15
+    minutes as it works, and at start takes its place from the latest reading in force. Core
+    stores the reading as it stores any, and reads none of it: it is the notifier's word, not a
+    record of delivery. A notifier that finds no reading begins at the present and sends
+    nothing older.
+  - **A silent notifier is a condition.** The owner setting `notifier` names that instance.
+    While it is set, the repository has an open entry and the instance's state is `unknown`,
+    Baton raises `baton.notifier-silent`.
+  - **`baton notifier start`** is the CLI's own loop, with the channel senders and the address
+    store its host configures. It runs no repository code, and sends the ticket, the leg and the
+    `url`, and nothing a leg wrote.
 
-A channel whose address alone lets a stranger read or post — an ntfy.sh topic is one — is
-better used with the channel's own access tokens. Sealing keeps an address from Baton's store
-and its readers. It does not keep it from whoever may grant a notifier on a repository that
-reaches the user: that approver can ask every such user to seal to a new recipient, and the
-CLI's question is the user's one check.
+**Two paths, one floor.** A repository that binds `ask` (R-BTN-169) reaches people through
+`deliver` tickets, whose place is their station and whose state is their legs' typed outputs:
+that path has no cursor at all. The notifier is for everything that has no ticket of its own —
+a person leg a course asks directly, a `baton.*` condition, an interaction request. A cursor
+cannot be a leg's output there: an output is recorded through git and the sync (R-BTN-82), an
+input resolves within one ticket, and no ticket may loop without a `max_runs` (R-BTN-69). A
+reading is the same typed envelope (R-BTN-108) without those three.
 
 ## 6. The directory attestation
 
@@ -225,8 +232,8 @@ CLI's question is the user's one check.
     notification only.
   - **A `forge` group, for notification.** On R its members are the users whose linked account
     R's attestation lists in the group's team.
-  - **A `forge` group, for authority.** Under `members.source: baton` a `forge` group matches
-    no owner entry, approver entry or `answerers` entry. Under `forge`, a key matches
+  - **A `forge` group, for authority.** Under `members.source: repository` or `tenant` a `forge` group
+    matches no owner entry, approver entry or `answerers` entry. Under `forge`, a key matches
     `group:<id>` on R when R's attestation lists the key's fingerprint under an account in the
     group's team: the forge says both who is in the team and which keys are theirs, and no
     acceptance is asked. `members.source: forge` is refused `invalid-params` unless the policy
@@ -253,9 +260,7 @@ naming a user, group or key the export does not hold.
 | `group_members` | `(group_id, user_id)` | `added_by`, `added_at` | A `baton` group's members (U-2) |
 | `repository_owner_entries` | `(repository_id, entry)` | `added_by`, `added_at`, `removed_at` | `user:` and `group:` owner entries (R-BTN-58) |
 | `acceptances` | `(repository_id, kind, user_id, ref)`; `kind` `key` with `ref` a fingerprint, or `member` with `ref` a group id | `accepted_by`, `accepted_at` | What counts on a repository (U-3) |
-| `user_contacts` | `(user_id, position)` | `channel`, `set_by`, `set_at` | A user's contacts (U-4) |
-| `contact_seals` | `(user_id, position, recipient)` | `sealed`, `set_at` | A contact's address, sealed to one notifier (U-4) |
-| `runner_grants` | as built | also `notify` (0/1), `notify_recipient`, `notify_read_at` | The notifier's flag (U-4) |
+| `user_channels` | `(user_id, position)` | `channel`, `set_by`, `set_at` | The order in which a user wants to be reached (U-4) |
 | `human_keys` | as built | also `fido_attestation`, read wherever `human_key` is checked for a key no owner row holds | R-BTN-185 |
 | `attestations` (R-BTN-181) | as proposed | a `std:directory@1` is kept as the repository's latest alone | U-5 |
 
@@ -265,13 +270,11 @@ naming a user, group or key the export does not hold.
 | `PUT /v1/admin/groups/{group}/members` | administrator | `{add?: [], remove?: [], accept?: [<repository>]}` | `{ok: true, accepted: [], refused: []}`; `unsatisfiable-approvers` | U-2, U-3 |
 | `GET /v1/users`, `GET /v1/users/{user}` | administrator, owner, user | `?cursor=`, 100 per page | users and groups as §1's read allows the caller | U-1 |
 | `POST /v1/users/{user}/keys` | user; administrator | `{public_key, signature?, accept?: [<repository>]}`; `{fingerprint, detach: true, confirm: true}` | `{ok: true, accepted: [], refused: []}`; `conflict`; `forbidden`; `unsatisfiable-approvers` | U-1, U-3 |
-| `PUT /v1/users/{user}/contacts` | user | `{contacts: [{channel, sealed?: {<recipient>: <ciphertext>}}]}` | `{ok: true}`; `conflict` for a recipient that serves no repository reaching the user | U-4 |
-| `GET /v1/users/{user}/recipients` | user | — | `{recipients: [{recipient, repository, granted_by, granted_at}]}` | U-4 |
+| `PUT /v1/users/{user}/channels` | user | `{channels: [<name>, …]}` | `{ok: true}` | U-4 |
 | `POST /v1/users/{user}/identities` | user; administrator | `{host, user_id}`; `{host, user_id, unlink: true}` | `{ok: true}`; `conflict`; `forbidden` | U-5 |
 | `GET`, `POST /v1/owner/{repository}/acceptances` | owner | `{user, keys: []}` or `{group, members: []}`; `{…, drop: true, confirm: true}`; `{…, decline: true}` | pending and accepted rows; `{ok: true}`; `conflict`; `unsatisfiable-approvers` | U-3 |
 | `POST /v1/owner/{repository}/owners` | owner | as built, and `{entry}` to add; `{entry, remove: true, confirm: true}` | as built; `invalid-params` | R-BTN-58 |
-| `PUT /v1/owner/{repository}/grants/{fingerprint}/flags` | owner | as built, and `notify`, `notify_recipient` | as built | U-4, R-BTN-146 |
-| `GET /v1/runner/notify` | a runner holding a `notify` flag | `?after=<cursor>`, 100 per page | `{entries: [{repository, kind, id, ticket, leg?, label?, url?, severity, opened_at, closed_at?, handled?, unreached, recipients: [{user, contacts: [{channel, sealed?}]}], steps?}], cursor}` | U-4 |
+| `GET /v1/runner/needs-you` | a runner, or any key granted on a repository | `?after=<cursor>`, 100 per page | `{entries: [{repository, kind, id, ticket, leg?, label?, url?, severity, opened_at, closed_at?, handled?, unreached, recipients: [{user, channels: []}], steps: [{due_at, recipients: []}]}], cursor}` | U-4 |
 | `GET /v1/repositories/{repository}/directory/wanted` | whoever may write `std:directory@1` there | — | `{host, org_id, teams: [], accounts: []}` | U-5 |
 
 A `std:directory@1` from a `service:` key is posted on the attestations route (R-BTN-181); the
@@ -283,13 +286,12 @@ sync's rides in its board post (R-BTN-191). The new `confirm: true` actions join
 | `admin group add <id> [--forge-team <host>/<org>/<team>]`, `admin group retire <id>`, `admin group-member add <group> <user>`, `admin group-member remove <group> <user>` | creates or retires a group; changes its members | U-2 |
 | `user list`, `user show [<id>]` | reads the directory | U-1 |
 | `user-key add <pub> [--accept <repository>,…]`, `user-key remove <fingerprint>` | attaches or detaches one of the caller's own keys | U-1, U-3 |
-| `user-contact set <channel> [--address <a>] [--position <n>]`, `user-contact remove <channel>`, `user-contact reseal` | seals and sets the caller's contacts | U-4 |
+| `user-channel set <channel> [--position <n>]`, `user-channel remove <channel>` | sets the order in which the caller wants to be reached | U-4 |
 | `user-identity link <host>`, `user-identity unlink <host>` | links the caller's forge account | U-5 |
 | `owner owner add <repository> --user <id> \| --group <id>` | adds a user or group to the owner set | R-BTN-58 |
 | `owner acceptance list <repository>`, `owner acceptance add <repository> --user <id> [--key <fingerprint>…] \| --group <id> [--member <id>…]`, `owner acceptance drop …`, `owner acceptance decline …` | reads, writes or declines acceptances; `add` prints each key with who attached it and asks | U-3 |
-| `owner grant flags <repository> <fingerprint> --notify <age recipient> \| --no-notify` | sets a grant's `notify` flag | U-4 |
-| `owner settings set <repository>` | as built, and `escalations` | U-4 |
-| `notifier start --config <file>` | runs a notifier | U-4 |
+| `owner settings set <repository>` | as built, and `escalations` and `notifier` | U-4 |
+| `notifier start --config <file> --instance <name>` | runs a notifier | U-4 |
 
 Each scenario takes its `S-BTN-n` from Baton's sequence (R-BTN-199) with the ticket that builds
 it.
@@ -303,10 +305,11 @@ it.
 | a `human:` entry needs a human-only key | `approvers.members: [human:group:g]`; a member's owner key, then its `human_only` key; a break-glass key; `POST /v1/human-keys` naming an attached key | `forbidden`; accepted, the list human-only; accepted; `conflict` |
 | unknown, retired and reused ids | an entry naming an unknown id; retiring a group a list names; creating a user under a retired group's id | `invalid-params`; `conflict`; `conflict` |
 | a person leg is answered by its label's holders | `answerers: {release: [group:g]}`; an owner outside `g`; an accepted non-owner member's `human_only` key; an answer in git; a course asking an unnamed label; a version with no `answerers` | `forbidden`; applied, `answered_by` naming key and user; `arrival-unapplied` and `baton.answer-unadmitted`; snapshot refused; R-BTN-181 alone decides |
-| only a repository's notifier reads a sealed contact | a user seals to A's notifier; an owner, an administrator and a plain runner read the directory; A's notifier and B's read `notify` | `channel` alone; A's gets the ciphertext for entries of A, B's none |
-| a notifier's entries and steps | a person leg queued for `release`; an `escalations` step naming a holder, an owner and a stranger; a bound `deliver` | `recipients` the holders; the step lists the first two; `handled` |
-| a silent or replaced notifier is seen | no read for 15 minutes with an entry open; the flag moved to another key | `baton.notifier-silent`; `baton.notifier-changed` until contacts are resealed, the old seals deleted |
-| a forge group counts only where the policy says | a `forge` group in `approvers.policy`; `members.source: baton`; `forge` with `sync` admitted for `std:directory@1`; `forge` with a `service:` key, its attestation listing a key; the attestation 25 hours old; A's attestation naming B's team | `unsatisfiable-approvers` unless another entry is satisfiable; no key matches; `invalid-params`; the key matches; no match and `baton.directory-stale`; B unchanged |
+| a repository may take the tenant's directory whole | B under `members.source: tenant`, owner set `[group:g]`; the administrator adds a member with a key; the member attaches a second key; B under `repository` again | both keys owners of B with no acceptance, `human-gates` broken; only accepted keys match, the change refused `unsatisfiable-approvers` if none does |
+| Baton holds no address | a user sets channels `[ntfy, email]`; every reader reads the directory and an entry | channel names alone, on every route |
+| a notifier's entries and steps | a person leg queued for `release`; an `escalations` step naming a holder, an owner and a stranger; a key granted on A alone reads `needs-you`; a bound `deliver` | `recipients` the holders, each with their channels; the step lists the first two with its `due_at`; A's entries alone; `handled` |
+| a notifier keeps its place and is missed when silent | a notifier posts `std:notifier@1` readings, stops, and a second starts on another host; the reading lapses with an entry open; no reading at all | the second resumes from the cursor; `baton.notifier-silent`, closed by the next reading; it begins at the present |
+| a forge group counts only where the policy says | a `forge` group in `approvers.policy`; `members.source: repository`; `forge` with `sync` admitted for `std:directory@1`; `forge` with a `service:` key, its attestation listing a key; the attestation 25 hours old; A's attestation naming B's team | `unsatisfiable-approvers` unless another entry is satisfiable; no key matches; `invalid-params`; the key matches; no match and `baton.directory-stale`; B unchanged |
 
 ## 8. Rules of BATON_SPEC this changes
 
@@ -315,47 +318,43 @@ Each is amended in place, in its own section, by the change that builds the part
 | Rule | What changes |
 |---|---|
 | R-BTN-58 | the owner set's entries, and when a key stops being an owner (§3) |
-| R-BTN-188 | the entry forms, break-glass and the `human:` forms, *No gate without a key*, and the knobs `members.source` and `answerers` (§3, §4) |
-| R-BTN-189 | `human-gates` requires `members.source: baton` (§3) |
+| R-BTN-188 | the entry forms, break-glass and the `human:` forms, *No gate without a key*, and the knobs `members.source` and `answerers` (§2 to §4) |
+| R-BTN-189 | `human-gates` requires `members.source: repository` (§3) |
 | R-BTN-116, R-BTN-181, R-BTN-191 | who may answer a person leg, when the sync's answer counts, `answered_by`, and `std:directory@1` with an organisation as its subject (§4, §6) |
 | R-BTN-185 | registration refuses an attached key; `fido_attestation` is the key's (§1, §7) |
-| R-BTN-163 | what a Needs-you entry lists; the notifier's read and its three conditions (§4, §5) |
-| R-BTN-146, R-BTN-102 | the `notify` flag (§5) |
-| R-BTN-66 | the owner setting `escalations` (§5) |
+| R-BTN-163 | what a Needs-you entry lists, the one read across repositories, and the new `baton.*` conditions (§2, §4 to §6) |
+| R-BTN-76, R-BTN-110 | the notifier as an instrument, and `std:notifier@1` (§5) |
+| R-BTN-66 | the owner settings `escalations` and `notifier` (§5) |
 | R-BTN-129, §12.1 | the principal `user`; an attached key under the one-role rule (§1) |
 | R-BTN-155, R-BTN-130 | a session and a delegated key end when their key stops being an owner (§3) |
-| R-BTN-57 | the administrator's directory actions, and that it reads no sealed value (§1, §5) |
+| R-BTN-57 | the administrator's directory actions (§1) |
 | R-BTN-88, R-BTN-179 | the new owner-state sections and what the state read holds (§7) |
 | R-BTN-127, §12.2 | the commands and the destructive actions (§7) |
-| R-BTN-50, the vocabulary page | user, group, acceptance, answerer, contact, notifier, directory attestation |
+| R-BTN-50, the vocabulary page | user, group, acceptance, answerer, channel, notifier, directory attestation |
 
 `human_identity`, `pushers` and `runner_pushers` are untouched: a linked forge identity confers
 none of them.
 
 ## 9. Decided, and still open
 
-Decided in the design discussion of 2026-11-20:
+Decided by the owner, 2026-11-20:
 
 - Users and groups carry authority beside keys; a key stays the only credential.
-- The notifier runs no repository code, and addresses are sealed to it or held on its host.
-- Forge membership serves notification by default; it counts for authority only where a
-  repository's policy says so.
 - Users and groups are the tenant's; what they may do is bound per repository.
-
-Taken while answering the review, for the owner to confirm or change:
-
-- **Acceptance per repository** (§2), over one approval spanning every repository or groups
-  that belong to one repository.
-- **Under `members.source: forge` a named `service:` key attests the directory** (§6), over
-  Baton reading the forge itself or trusting the sync; and it lapses after 24 hours.
-- **The notifier is a flagged grant per repository that keeps its own cursor** (§5), over a
-  tenant-wide role or a cursor held in Baton.
-- **Sealed addresses stay** (§5), over addresses held only on the notifier's host; an approver
-  who may grant a notifier can still ask users to seal to it.
-- **Only the administrator writes the directory** (§1), over owners editing groups.
+- A repository admits a key or a member by its own acceptance, and may instead take the
+  tenant's directory whole (§2).
+- Only the administrator writes the directory (§1).
+- Forge membership serves notification by default. It counts for authority only where a
+  repository's policy says so, and then only as a named `service:` key attests it, lapsing
+  after 24 hours (§6).
+- Baton stores no address of anyone, sealed or not: finding one is the notifier's job (§5).
+- The notifier runs no repository code, and keeps its place in Baton as a typed value (§5).
 
 Open:
 
+- **Secrets.** Baton and Fieldhouse have no shared way to hold and hand out a secret. Until
+  they do, each notifier's host keeps the addresses and the channel credentials, and a person
+  cannot set their own address through Baton.
 - **An answerer who is neither an owner nor a human-only key holder** cannot answer: R-BTN-181
   admits no such credential. Admitting one needs a new writer class.
 - **Tenant and runner conditions** (`baton.*` on no repository) reach no notifier, since

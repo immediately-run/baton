@@ -53,7 +53,18 @@ Three faults were found independently by two or all three reviewers.
 | Rules amended without saying so | major | §8 lists every rule the proposal changes |
 | Scenarios that could not run, and rules with none | minor | §7's scenarios rewritten |
 
-## Left for the owner
+## The owner's rulings, 2026-11-20
 
-The proposal's §9 lists the five choices the revision made that the owner did not rule on, and
-three questions it leaves open.
+The revision made five choices the owner had not ruled on. The owner's answers, and what the
+proposal now says:
+
+| Choice | Ruling | In the proposal |
+|---|---|---|
+| Acceptance per repository | "OK (could we also do per tenant?)" | Kept; `members.source: tenant` lets a repository take the tenant's directory whole, with no acceptance (§2, §3) |
+| A named `service:` key attests the forge directory, lapsing after 24 hours | "OK" | Kept (§6) |
+| The notifier keeps its cursor in a local file | "Baton may store the typed input and output JSON of legs - could the cursor not be persisted as such?" | The notifier keeps its place in Baton as a `std:notifier@1` reading, the same typed envelope as a leg output; §5 says why a leg output itself does not fit a poller |
+| Sealed addresses stored in Baton | "Don't store addresses in Baton. We need an overall secret management strategy in baton; currently missing. It's the notifier's job to know where to find these for now" | Sealed contacts, recipients and the `notify` grant flag are gone; Baton keeps channel names only, and the missing secret strategy is the first open question (§5, §9) |
+| Only the administrator writes the directory | "Ok" | Kept (§1) |
+
+The rows above that speak of sealed contacts and a `notify` flag describe the revision as
+reviewed, before these rulings.
