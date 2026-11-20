@@ -1,0 +1,117 @@
+---
+title: "B-305 — answerers: the repository policy names who may answer each person-leg label"
+id: B-305
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1305
+tier: critical
+description: "A person leg's asks label binds to nobody: any owner key, or any human-only key of the tenant, answers. Add the policy knob answerers, mapping a label to owner, human and user or group entries; accept a std:decision@1 only from a credential that matches the leg's label; judge a deferred answer again when it applies; say when an answer in git counts; refuse a course asking a label the knob does not name. Requires: none."
+topics:
+  - baton
+  - security
+  - people
+  - policy
+owns: {}
+prs: []
+depends_on:
+  - B-304
+---
+
+**Brief:** the owner, 2026-11-20, asked "Where should the information of who should be able to
+eg: approve a particular leg of a course be persisted?" and took the recommendation: the course
+names a label, the repository's policy says who holds it. This is §4 of [the users and groups proposal](../spec/proposals/users-and-groups.md).
+
+**Spec:** the proposal, §4, and its scenarios in §7. [BATON_SPEC §6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4) ([R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4)), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)
+([R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-191](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-184](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-185](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) ([R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2)
+([R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2)), [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3)), [§4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)).
+
+**Depends on:** B-304.
+
+**Used by:** B-306 (an entry's recipients are its label's holders).
+
+### Decision needed
+
+- **Who answers where no label is named.** As built, `POST …/attestations` takes a
+  `std:decision@1` from an owner key of the repository **or any human-only key of the tenant**
+  (`src/core/baton.ts`, the attestations route; R-BTN-181). So a human who owns only repository
+  A may answer a person leg on B. The proposal leaves this as built and lists it as open.
+  **(a)** leave it, and document that a repository narrows by naming its answerers *(default)*;
+  **(b)** with no entry, a human-only key must also be an owner of the repository or a
+  break-glass key. (b) changes built behaviour for every repository on upgrade.
+
+### What to build
+
+1. **The knob** `answerers` in the policy document: `{<label>: [<entry>, …]}`, entries `owner`,
+   `human` and B-304's four forms; validated, logged in a change's `changed[]`, kept by a
+   preset's apply, written by no preset.
+2. **The answer.** In `src/core/questions.ts` and the attestations route: after R-BTN-181's
+   check as built, where the leg's label has an entry the credential must match it on the
+   repository through B-304's match, owner or not; else `forbidden`. `answered_by` carries the
+   key and, when attached, the user.
+3. **A deferred answer** (R-BTN-39) is judged again when it applies; one whose credential no
+   longer matches is `arrival-unapplied`.
+4. **An answer in git** (the sync's, R-BTN-191): counts for a label with no entry or whose
+   entry holds `owner`; otherwise `arrival-unapplied` and `baton.answer-unadmitted`.
+5. **Refusals:** a policy giving a label an entry without `owner` while `std:decision@1`
+   admits only `sync`; a policy change that sets the knob without naming every label a current
+   course asks; a snapshot posting a course whose person leg asks an unnamed label once the
+   knob is present (the previous course version stays in force); an entry no live key matches.
+6. **The dashboard's Needs-you entry** offers its answer control only to a session whose key
+   matches the label.
+
+### Trust
+
+- The `answerers` knob: an `approvers.policy` approver's request, as every knob.
+- The `asks` label: the course file, which is git's (R-BTN-66), so anyone who can land a course
+  can change a leg's label, drop the leg or add an `expires`. The proposal's *What the entry
+  promises* says so, and the ticket must not present the knob as a boundary against a pusher:
+  it is one only together with `paths.control`, and against an owner only where
+  `approvers.policy` is no wider than the label.
+- An answer: the credential that posted it, as built. A sync's answer names no credential and
+  is never attributed to a person.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8): whose attestations count is the policy's to say, never the course's.
+  The label's holders come from the policy alone.
+- BATON_SPEC [R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4): a leg waits only on an effect, and an answer is applied as an arrival
+  under [R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)'s rules. This ticket narrows who may write the answer and changes nothing
+  about how it applies.
+- BATON_SPEC [R-BTN-186](../spec/BATON_SPEC/12-security.md#sec-12-8): a delegated key never answers a person's leg.
+- BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8): a stored policy version with no `answerers` narrows nothing, so no
+  in-flight person leg changes hands at upgrade.
+- BATON_SPEC [R-BTN-64](../spec/BATON_SPEC/05-courses.md#sec-5-7): an in-flight ticket survives a course change; a refused snapshot leaves
+  the previous course version in force.
+
+### Tests
+
+The scenario *a person leg is answered by its label's holders*, both hosts, and *applying a
+preset keeps who was named* (for `answerers`). Unit tests for each refusal of step 5.
+
+### Exit criteria
+
+- With `answerers: {release: [group:g]}`, an owner outside `g` is refused and an accepted
+  member answers; the history's `question-answered` names the user.
+- A member who answered while a claim was active and was then removed does not have the answer
+  applied.
+- A repository that never sets the knob answers person legs exactly as today.
+- BATON_SPEC holds the amended [R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4), [R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8) and [R-BTN-191](../spec/BATON_SPEC/12-security.md#sec-12-8).
+
+The change that builds a part moves that part of the proposal into BATON_SPEC, in the section
+that owns each rule (`docs/context/spec-writing.mdx`): new rules and scenarios take their ids
+from Baton's sequence (BATON_SPEC [R-BTN-199](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)), the rows of the proposal's [§7](../spec/BATON_SPEC/07-conditions.md#sec-7) move into [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) and
+[§14](../spec/BATON_SPEC/14-api.md#sec-14), the proposal's [§8](../spec/BATON_SPEC/08-runners.md#sec-8) says which existing rules are amended in place, the new words land on
+`docs/context/vocabulary.mdx` and in [R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)'s table, and `spec/BATON_SPEC_HISTORY.md` gets
+its dated entry. What stays unbuilt stays on the proposal page.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-20._ From [the users and groups proposal](../spec/proposals/users-and-groups.md) (pull request immediately-run/baton#300). The id is the next free
+number in `tickets/`.

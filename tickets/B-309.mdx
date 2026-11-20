@@ -1,0 +1,105 @@
+---
+title: "B-309 — A secret strategy for Baton and Fieldhouse: where a secret is held, who may read it, and how a leg or a notifier is handed one"
+id: B-309
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+  - fieldhouse
+tags:
+  - roadmap-item
+order: 1309
+tier: judgement
+description: "Baton has no stated way to hold and hand out a secret. Runners keep credentials in their environment, deliverers on their hosts, and now each notifier keeps people's addresses in a file. Write the decision: what counts as a secret, where one is held, who may read it, how a leg, a deliverer and a notifier get one, and what Baton itself may ever store. A specification ticket; it builds nothing. Requires: none."
+topics:
+  - baton
+  - security
+  - spec
+  - fieldhouse
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-20, ruling on [the users and groups proposal](../spec/proposals/users-and-groups.md): "Don't store addresses in Baton. We need an
+overall secret management strategy in baton; currently missing. It's the notifier's job to know
+where to find these for now until we have a standard secret access solution for all of
+Baton/Fieldhouse." This ticket is that strategy, as a proposal page for the owner to rule on.
+
+**Spec:** [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-53](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): instruments hold the secrets; [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4): a
+leg's environment and what is masked; [R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-4)), [§2](../spec/BATON_SPEC/02-deployments.md#sec-2) ([R-BTN-136](../spec/BATON_SPEC/02-deployments.md#sec-2-2): the secret sink for the host's
+own secrets), [§12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) (the server is trusted, and its compromise is recovered, not resisted),
+[§5.6](../spec/BATON_SPEC/05-courses.md#sec-5-6) ([R-BTN-121](../spec/BATON_SPEC/05-courses.md#sec-5-6): `credential:<NAME>` capabilities). The conditions proposal [§8](../spec/BATON_SPEC/08-runners.md#sec-8) ([R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8): a
+deliverer's credential "lives only on the deliverer's host, never in Baton"). The users and
+groups proposal [§5](../spec/BATON_SPEC/05-courses.md#sec-5) and [§9](../spec/BATON_SPEC/09-claims.md#sec-9) (*Secrets*). Fieldhouse's spec for where runners and their
+credentials live (FLDH-52), in `immediately-run/fieldhouse`.
+
+**Depends on:** none.
+
+**Used by:** B-307 (its address store is the interim; this decides what replaces it).
+
+### What to build
+
+A proposal page, `spec/proposals/secrets.md`, and nothing in `src/`. It answers, with options
+and a recommendation for each:
+
+1. **What is a secret here.** At least: the host's own (`BATON_ADMIN_KEYS`, the App key, forge
+   secrets), a runner's Baton credential, a leg's `credential:` variables, a deliverer's forge
+   or tracker token, a notifier's channel credentials, and a person's addresses. Which of them
+   one mechanism should cover, and which stay as they are.
+2. **Where one is held.** In Baton encrypted to a reader's key, in a store the deployment runs
+   (a cloud secret manager, a vault), on each host, or split by kind. For each: who can read it
+   if Baton is compromised, if a runner is, if an administrator is curious.
+3. **Who may write one,** and whether a person can set their own (their address, their
+   provider key) without touching a host.
+4. **How it is handed over** to a leg, a deliverer and a notifier: by name at claim time, by
+   the runner's host, by a short-lived grant. What Baton's record shows of it (a name and a
+   digest, never a value: R-BTN-33).
+5. **What Baton itself may store.** The owner ruled against sealed addresses for now. Say
+   whether ciphertext Baton cannot open is ever acceptable, and under what rule, so the
+   question is not reopened case by case.
+6. **Rotation, revocation and loss** for each kind.
+7. **The boundary with Fieldhouse:** which half each project owns, as one interface.
+8. **What changes for the notifier** (B-307's `address(user, channel)` interface) and for
+   `deliver`'s `credential:SMTP_URL` once the strategy lands.
+
+The page ends with the questions only the owner can answer, each with its options and a
+default. An adversarial review of the page follows the babysit skill's *Spec PRs*, before any
+build ticket is filed from it.
+
+### Trust
+
+This ticket adds no input to Baton: it writes a page. The page itself is standing guidance
+once merged, and takes effect only through an owner-approved pull request. Reading Fieldhouse's
+spec is reading another repository listed in this ticket's `repos:`; nothing is written there.
+
+### Invariants
+
+- BATON_SPEC [R-BTN-53](../spec/BATON_SPEC/01-what-baton-is.md#sec-1): secrets never enter Baton. The page either keeps this as it stands or
+  proposes its amendment by name; it does not work around it.
+- [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8): Baton's server is trusted and its compromise is recovered, not resisted. A
+  design that needs Baton to resist its own compromise says so as a change to that decision.
+- Values 4: Baton runs no repository code. No option has Baton execute a provider's SDK or a
+  repository's hook to fetch a secret.
+- Values 11: what Fieldhouse needs from Baton lands as a general mechanism any deployment
+  could use.
+- The owner's ruling, 2026-11-20: until this is decided, Baton stores no address.
+
+### Tests
+
+`npm run check:spec` and `npm run check:wiki` pass with the page. No code changes.
+
+### Exit criteria
+
+- `spec/proposals/secrets.md` exists, covers the eight points, and has been through an
+  adversarial review whose record is in `docs/review/`.
+- The owner has ruled on its open questions, and the rulings are on the page.
+- Build tickets are filed from it, and B-307's address store names the one that replaces it.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-20._ From the owner's ruling on [the users and groups proposal](../spec/proposals/users-and-groups.md) (pull request immediately-run/baton#300).
+The id is the next free number in `tickets/`.

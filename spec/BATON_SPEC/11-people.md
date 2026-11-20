@@ -8,7 +8,10 @@ Two kinds of people hold authority in a tenant: its **administrators** and each 
 **owners**. They act through the CLI and the dashboard. What every principal may do is in the
 principal table (§12.1). The action registry, MCP, owners' dashboard sessions and the screens'
 contents are not built; their design is
-[the people and dashboard proposal](../proposals/people-and-dashboard.md).
+[the people and dashboard proposal](../proposals/people-and-dashboard.md). Users and groups — a
+person's keys, forge identity and notification channels as one record, and people named in owner
+sets and approver lists — are not built either:
+[the users and groups proposal](../proposals/users-and-groups.md).
 
 ### 11.1 Keys
 

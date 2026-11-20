@@ -1,0 +1,141 @@
+---
+title: "B-308 — The directory attestation: forge teams as groups, linked forge accounts, and members.source: forge"
+id: B-308
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1308
+tier: critical
+description: "Baton's groups do not follow the forge's teams. Add std:directory@1, a per-repository attestation of who is in each forge team a repository's groups name; forge-sourced groups; forge accounts linked to users by the administrator; and members.source: forge, under which a forge group counts for authority only from a service key no push controls, lapsing after 24 hours. The forge says who is in a team and nothing else. Requires: none."
+topics:
+  - baton
+  - security
+  - people
+  - forges
+owns: {}
+prs: []
+depends_on:
+  - B-304
+  - B-146
+---
+
+**Brief:** the owner, 2026-11-20, asked "How can the user concepts within baton stay in sync
+with the users available in the git forge?" and "How should we track users in plain git repos?",
+and ruled that forge membership serves notification by default and counts for authority only
+where a repository's policy says so, attested by a named `service:` key and lapsing after 24
+hours. This is §6 of [the users and groups proposal](../spec/proposals/users-and-groups.md). Both review rounds found ways for a board poster or a forge-published
+key to become authority; [its review](../docs/review/users-and-groups-2026-11-20.mdx) lists them. The rule that came out: the forge says who is in a
+team, and which keys and which account are a person's stay Baton's.
+
+**Spec:** the proposal, §6 (U-5), §3 (`members.source`, *A key stops being an owner*), §2 (an
+`identity` acceptance), and their rows in §7. [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-181](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8),
+[R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-191](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-192](../spec/BATON_SPEC/12-security.md#sec-12-8)), [§3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) ([R-BTN-138](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1), [R-BTN-92](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1)), [§3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) ([R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2)), [§3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) ([R-BTN-73](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3)),
+[§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-96](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)), [§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7), [§8.2](../spec/BATON_SPEC/08-runners.md#sec-8-2) ([R-BTN-102](../spec/BATON_SPEC/08-runners.md#sec-8-2)), [§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5) ([R-BTN-110](../spec/BATON_SPEC/05-courses.md#sec-5-5)).
+
+**Depends on:** B-304, B-146.
+
+**Used by:** none.
+
+### Decision needed
+
+- **Who links a forge account.** The proposal's §9 took: only the administrator, in place of a
+  proof by a key the attestation lists. **(a)** as written *(default)*; **(b)** self-service
+  proof, admitted only from a `service:`-written attestation.
+- **What the forge decides.** **(a)** team membership alone; keys and links are accepted like
+  any other *(default; recommended)*; **(b)** the forge's published keys count too, which makes
+  a runner's machine key an owner wherever it sits on a member's forge account, unless every
+  such key is screened.
+
+### What to build
+
+1. **Links:** `user_identities`, `POST /v1/admin/users/{user}/identities`, one user per
+   account; the `identity` kind of acceptance on B-304's route.
+2. **Forge groups:** `admin group add --forge-team <host>:<org id>:<team id>`, the team named
+   by its immutable ids (R-BTN-138's kind).
+3. **`std:directory@1`**, about the organisation holding the repository:
+   `{host, org_id, teams: [{team_id, members}]}`, at most 64 KB, the latest kept per
+   repository and writer. From a `service:` key on the attestations route, or from the sync in
+   its board post, as the policy's `attestations` entry admits. It joins the standard library.
+4. **`GET /v1/repositories/{repository}/directory/wanted`**: the team ids the repository's
+   entries' forge groups name, to whoever may write the type there.
+5. **For notification:** on R a forge group's members are the users whose linked account R's
+   attestation lists in the team; B-306's steps resolve through it.
+6. **For authority:** `members.source: forge`. A key matches a forge group on R when it
+   matches `user:<u>` on R, `u`'s link is accepted on R, and R's newest attestation under 24
+   hours old lists the account in the team. Refused `invalid-params` unless the policy admits
+   only `service:` keys for the type, none a key the repository's `inputs.board` admits or a
+   machine key granted on it. A forge group never counts toward *No gate without a key*.
+7. **Lapse and change:** an attestation over 24 hours old counts for nothing and raises
+   `baton.directory-stale`; a newer one that drops an account ends the match at once, and with
+   it the key's session where the group was its only way to own.
+8. **A GitHub reader,** `baton directory attest <repository>`: reads `wanted`, asks GitHub for
+   those teams' members with a token its own host holds, and posts the attestation. Baton's App
+   key is not used and §12.7's permissions do not change.
+9. **Plain git:** nothing to build beyond a sentence in the repository documentation: `baton`
+   groups alone, and a deployment may post `std:directory@1` from its git server's key map.
+
+### Trust
+
+- `std:directory@1` is a statement by whoever posted it. Under `repository` and `tenant` it
+  only shapes who is told, and Baton still drops strangers from every step (B-306). Under
+  `forge` it decides who may act, so its writer must be a key no push controls: not the sync's
+  key, not a CI identity, not a machine key granted on the repository. `docs/security-model.mdx`
+  reaches 2 and 3 can write a board post; they must not be able to write this.
+- The forge itself, and whoever administers its teams, becomes a root of trust for a
+  repository that chooses `forge`. `human-gates` reads broken there, and a floor naming it
+  refuses the change.
+- A link is the administrator's word and counts on a repository only once that repository
+  accepts it, so an administrator cannot move a person's team seat to another user on a
+  `repository` or `forge` repository.
+- The reader's forge token lives on the reader's host. It needs to read organisation teams and
+  nothing else.
+
+### Invariants
+
+- [BATON_SPEC §12](../spec/BATON_SPEC/12-security.md#sec-12), "No push changes the state Baton holds for authority": under `forge` the
+  type admits only `service:` keys outside `inputs.board`.
+- BATON_SPEC [R-BTN-58](../spec/BATON_SPEC/11-people.md#sec-11-2): no repository reads another's attestation; the scenario's "A's
+  attestation names B's team" holds it.
+- BATON_SPEC [R-BTN-102](../spec/BATON_SPEC/08-runners.md#sec-8-2) and [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1): no machine key becomes an owner. The match goes through
+  B-304's, which refuses a key of another role; no forge-published key is read.
+- BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), *No gate without a key*: a list must be satisfiable without a forge
+  group, so a lapse or an emptied team never strands a gate.
+- BATON_SPEC [R-BTN-73](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3): a forge notification only triggers.
+- BATON_SPEC values 8: Baton runs without GitHub. Every rule here holds on a `git` repository
+  with no adapter.
+- Lost state fails closed (values 1): an import drops attestations, and a forge group matches
+  nothing until the next one.
+
+### Tests
+
+The scenarios *a forge group counts only where the policy says* and *the forge's word lapses
+and is each repository's own*, both hosts, with `setClock`. Unit tests for the policy
+validation of step 6 against each `inputs.board` value.
+
+### Exit criteria
+
+- A person added to a GitHub team is, at the next attestation, a recipient of that
+  repository's entries; removed from it, they stop being one.
+- Under `members.source: forge`, a person whose key and link the repository accepted is an
+  approver while the team lists them, and stops at the attestation that drops them or 24 hours
+  after the last one.
+- A board post carrying a `directory` field under `forge` changes nothing.
+- BATON_SPEC holds U-5 and the `forge` value of `members.source`.
+
+The change that builds a part moves that part of the proposal into BATON_SPEC, in the section
+that owns each rule (`docs/context/spec-writing.mdx`): new rules and scenarios take their ids
+from Baton's sequence (BATON_SPEC [R-BTN-199](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)), the rows of the proposal's [§7](../spec/BATON_SPEC/07-conditions.md#sec-7) move into [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) and
+[§14](../spec/BATON_SPEC/14-api.md#sec-14), the proposal's [§8](../spec/BATON_SPEC/08-runners.md#sec-8) says which existing rules are amended in place, the new words land on
+`docs/context/vocabulary.mdx` and in [R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)'s table, and `spec/BATON_SPEC_HISTORY.md` gets
+its dated entry. What stays unbuilt stays on the proposal page.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-20._ From [the users and groups proposal](../spec/proposals/users-and-groups.md) (pull request immediately-run/baton#300). The id is the next free
+number in `tickets/`.

@@ -1,0 +1,111 @@
+---
+title: "B-307 — baton notifier start: the CLI's own delivery loop, with ntfy and email senders and addresses kept on its host"
+id: B-307
+project: baton
+status: available
+updated: 2026-11-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1307
+tier: judgement
+description: "Nothing reaches a person today unless they open the dashboard or run baton decision list. Add baton notifier start: a loop in the CLI that reads what is due from Baton, finds each recipient's address in a store on its own host, sends through the channel senders that host configures (ntfy and SMTP first), and attests what it did. It runs no repository code and Baton never sees an address. Requires: none."
+topics:
+  - baton
+  - people
+  - cli
+owns: {}
+prs: []
+depends_on:
+  - B-306
+---
+
+**Brief:** the owner, 2026-11-20: "How will a runner executing the legs of a notification
+course be able to post to eg: a ntfy.sh topic without leaking each users' topics to anyone with
+API access to the baton server?", answered by the rulings that the notifier runs no repository
+code and that "It's the notifier's job to know where to find these for now until we have a
+standard secret access solution for all of Baton/Fieldhouse". This is the notifier of §5 of
+[the users and groups proposal](../spec/proposals/users-and-groups.md).
+
+**Spec:** the proposal, §5 (*Addresses are the notifier's*, *One read, no cursor*, *`baton
+notifier start`*). [BATON_SPEC §7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3)), [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4), [R-BTN-143](../spec/BATON_SPEC/08-runners.md#sec-8-4), [R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-4)), [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3)
+([R-BTN-127](../spec/BATON_SPEC/11-people.md#sec-11-3)), [§11.1](../spec/BATON_SPEC/11-people.md#sec-11-1) ([R-BTN-13](../spec/BATON_SPEC/11-people.md#sec-11-1)), [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3). The conditions proposal [§2](../spec/BATON_SPEC/02-deployments.md#sec-2) ([R-BTN-161](../spec/BATON_SPEC/07-conditions.md#sec-7-2): reaching a person
+is a runner with a capability, not a key role).
+
+**Depends on:** B-306.
+
+**Waits on:** B-309 for where addresses will live in the long run; this ticket ships the
+interim store and must make it replaceable.
+
+### What to build
+
+1. **The command** `baton notifier start --config <file>` (R-BTN-127): the CLI's own loop, a
+   separate entry from `runner start`. It signs as a key the repository policy names for
+   `std:notified@1`. Once a minute it reads `GET /v1/needs-you?due=1`, and for each due step
+   sends to each recipient by their channels in order, then posts `std:notified@1` with whom
+   it told and whom it could not reach.
+2. **The address store** is one module behind an interface: `address(user, channel)`. The
+   first implementation reads a file on the notifier's host, mode 0600, mapping user id and
+   channel to an address; the loop refuses to start on a file readable by group or other. No
+   address is logged, printed, sent to Baton or written to a transcript.
+3. **Senders** behind one interface, `send(channel, address, message)`: `ntfy` (HTTPS POST to
+   a topic URL, with an optional access token from the host's configuration) and `email`
+   (SMTP, from `SMTP_URL`). A channel the host has no sender for, or a recipient with no
+   address, is `unreachable`.
+4. **The message** is built by the CLI from the entry: the repository, the ticket id, the leg
+   or condition type, the severity and the `url`, as plain text. Nothing a leg wrote, and no
+   field the entry does not carry.
+5. **Failure.** A send that fails is retried on the next read, since the step stays due. The
+   loop attests a step only after trying every recipient, and lists as `unreachable` only
+   those it has no way to reach, not those whose send failed in transit.
+6. **Documentation:** a page under `docs/` on running a notifier: the key, the policy entry,
+   the address file, ntfy with access tokens (a bare ntfy.sh topic name lets anyone who learns
+   it read and post), and what `baton.notifier-silent` means.
+
+### Trust
+
+- The notifier's inputs from Baton are entries: identifiers, a severity and a `url` that
+  passed R-BTN-92's link rule. They are data. The loop never executes, fetches or follows
+  anything in them, and builds its message from fixed text and those fields.
+- The address file and the channel credentials are the host's, written by whoever operates
+  it. They are the only secrets in this design, and they never leave the host: masked in the
+  loop's own log by exact value, as R-BTN-144 masks a leg's.
+- The loop loads no file from any repository checkout and takes no code path through the
+  wrapper (R-BTN-133): a course, a ticket or a pushed file cannot change what it sends or to
+  whom.
+- A compromised notifier host leaks its address file and can stop telling people. It can
+  write nothing to Baton but `std:notified@1` for the repositories whose policy names its key.
+
+### Invariants
+
+- The owner's ruling, 2026-11-20: Baton stores no address. A test greps every request the
+  loop sends for each address in its fixture and finds none.
+- BATON_SPEC [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3): the entry stays in Needs you whatever the notifier does.
+- BATON_SPEC [R-BTN-143](../spec/BATON_SPEC/08-runners.md#sec-8-4) and values 4: the notifier runs no repository code.
+- BATON_SPEC [R-BTN-13](../spec/BATON_SPEC/11-people.md#sec-11-1): the key signs through `ssh-agent` or its file and is never written to a
+  log.
+- BATON_SPEC [R-BTN-197](../spec/BATON_SPEC/11-people.md#sec-11-3): the loop sends `Baton-Client` and stops on `client-too-old`.
+
+### Tests
+
+Against the local host: a due step is sent once and attested; a recipient with no address is
+`unreachable` and the others are still told; a sender that throws leaves the step due; a
+restart with an empty state directory sends nothing already attested; two loops with two
+admitted keys send a step at most twice and usually once. A fake sender records messages; no
+test calls ntfy.sh or an SMTP server.
+
+### Exit criteria
+
+- On a local Baton with one repository, a queued person leg produces one ntfy POST and one
+  email to its label's holders within a minute, and none on the next read.
+- Stopping the loop for 15 minutes with a step due raises `baton.notifier-silent`; starting it
+  on another host with the same address file clears it and re-sends nothing.
+- No address appears in Baton's store, its logs, the loop's log or any request body.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-20._ From [the users and groups proposal](../spec/proposals/users-and-groups.md) (pull request immediately-run/baton#300). The id is the next free
+number in `tickets/`.
