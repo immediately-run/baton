@@ -315,7 +315,8 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   executor (R-BTN-107) may report the session's link or a runner-hosted leg page that leads to it.
   - **A session link may carry a bearer capability.** The read dispatcher (R-BTN-129) discloses
     it only to authorized owner and administrator dashboard sessions (R-BTN-155) and to the
-    runner whose claim reported it. Other readers get `session_url: null` and `session_link: true`
+    runner session whose claim reported it, verified by its key and runner secret (R-BTN-14).
+    Other readers get `session_url: null` and `session_link: true`
     when a link exists (`false` when absent). An `interact` condition uses `url` for the same
     field and also discloses it in its delivery (R-BTN-163).
   - The link never goes into events, ticket history, logs, error messages or the admin state

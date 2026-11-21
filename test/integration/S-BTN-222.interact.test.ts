@@ -65,9 +65,8 @@ beforeEach(async () => {
   reader = await makeKey('ssh-ed25519', 'docs-reader');
   await setAdminKeys(admin);
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
-  // R-BTN-163: the delivery runner's key — granted on docs, its tags barred, delivery courses
-  // alone. The read needs the grant alone; nothing else is asked of it here.
-  expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: reader.publicKey, hostname: 'docs-deliver', capabilities: ['agent-venue'] })).status).toBe(200);
+  // R-BTN-163: explicitly authorize delivery on docs; the courier need not register a session.
+  expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: reader.publicKey, hostname: 'docs-deliver', capabilities: ['agent-venue'], deliver_interactions: true })).status).toBe(200);
   git = new Git().add('A');
   git.registry = [course(3, 3, { course: INTERACT })];
   expect((await git.post()).status).toBe(200);

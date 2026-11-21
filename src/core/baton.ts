@@ -2298,6 +2298,7 @@ export class BatonCore {
       grants: limits.grants.filter((g) => g.repository_id === repo).map((g) => ({
         credential_id: g.credential_id, hostname: g.hostname, label: g.label, repository_id: g.repository_id,
         capabilities: g.capabilities, max_tier: g.max_tier, max_claims: g.max_claims, granted_by: g.granted_by, granted_at: g.granted_at,
+        deliver_interactions: g.deliver_interactions,
         other_repositories: limits.grants.filter((o) => o.credential_id === g.credential_id && o.repository_id !== repo).map((o) => o.repository_id).sort(),
       })),
       settings: limits.settings.find((s) => s.repository_id === repo) ?? null,

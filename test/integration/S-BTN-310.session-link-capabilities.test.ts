@@ -1,5 +1,5 @@
 // S-BTN-310 session-link capabilities (BATON_SPEC §15, R-BTN-33, R-BTN-113, R-BTN-195), both hosts.
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { course, keyCall, rows, sessionCall, withCore } from '../helpers';
 import { claimAndStart, fleet, grantedRunner, heartbeat, signed, type Fleet, type Granted, type Json } from '../lib/runnerFleet';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
@@ -30,6 +30,8 @@ beforeEach(async () => {
   expect((await heartbeat(reporter.key, reporter.hostname, reporter.secret, { session_url: LINK })).status).toBe(200);
 });
 
+afterEach(() => vi.restoreAllMocks());
+
 async function raiseInteraction() {
   const result = await signed(reporter.key, `/v1/runner/claims/${claim}/conditions`, { type: 'interact.review' }, reporter.secret);
   expect(result.status).toBe(200);
@@ -37,9 +39,14 @@ async function raiseInteraction() {
 }
 
 describe('S-BTN-310 session-link capabilities', () => {
-  it('projects each claim link for the dashboard and its reporting runner, not other keys', async () => {
+  it('projects links for the dashboard and verified reporter, not bare keys or another session on the same key', async () => {
+    const siblingSecret = 'synthetic-sibling-runner-secret';
+    const sibling = await heartbeat(reporter.key, reporter.hostname, siblingSecret, { session_name: 's-sibling' }, true);
+    expect(sibling.status).toBe(200);
+    expect(sibling.json.runner_id).not.toBe(reporter.id);
     const surfaces: [string, (body: Json) => unknown[]][] = [
       [`${BASE}/board`, (b) => [b.holders[0]]],
+      [`${BASE}/tickets?state=running`, (b) => [b.tickets[0].detail]],
       [TICKET, (b) => [b.claim]],
       [`${BASE}/runners`, (b) => { const r = b.runners.find((r: Json) => r.runner_id === reporter.id); return [r.claim, ...r.claims]; }],
       [`${BASE}/runners/${reporter.id}`, (b) => [b.runner.claim, ...b.runner.claims, b.window.claims[0], ...b.window.claims[0].runs]],
@@ -48,12 +55,15 @@ describe('S-BTN-310 session-link capabilities', () => {
     for (const [path, links] of surfaces) {
       const reader = await signed(other.key, path);
       const owner = await signed(f.docsOwner, path);
-      const own = await signed(reporter.key, path);
+      const bare = await signed(reporter.key, path);
+      const own = await signed(reporter.key, path, undefined, reporter.secret);
+      const sameKey = await signed(reporter.key, path, undefined, siblingSecret);
       const res = await sessionCall(f.cookie, path);
-      expect([path, reader.status, owner.status, own.status, res.status]).toEqual([path, 200, 200, 200, 200]);
+      expect([path, reader.status, owner.status, bare.status, own.status, sameKey.status, res.status]).toEqual([path, 200, 200, 200, 200, 200, 200]);
       expect(res.headers.get('Referrer-Policy')).toBe('no-referrer');
       expect(own.res.headers.get('Cache-Control')).toContain('no-store');
-      const cases = [[reader.json, hidden], [owner.json, hidden], [own.json, visible], [await res.json() as Json, visible]] as const;
+      expect(own.res.headers.get('ETag')).not.toBe(sameKey.res.headers.get('ETag'));
+      const cases = [[reader.json, hidden], [owner.json, hidden], [bare.json, hidden], [sameKey.json, hidden], [own.json, visible], [await res.json() as Json, visible]] as const;
       for (const [body, expected] of cases) {
         if (expected === hidden) expect(JSON.stringify(body)).not.toContain(TOKEN);
         const projected = links(body);
@@ -69,6 +79,14 @@ describe('S-BTN-310 session-link capabilities', () => {
   it('delivers open interactions without leaking them to general condition reads or exports', async () => {
     const id = await raiseInteraction();
     const poll = `${BASE}/conditions?open=1&type=interact`;
+    const grantPath = '/v1/owner/docs/grants';
+    const grant = { public_key: other.key.publicKey, capabilities: ['agent-venue'] };
+    const before = await signed(other.key, poll, undefined, other.secret);
+    expect(before.status).toBe(200);
+    expect(before.json.conditions).toEqual([expect.objectContaining({ condition_id: id, url: null, session_link: true })]);
+    expect(JSON.stringify(before.json)).not.toContain(TOKEN);
+    expect((await keyCall(f.docsOwner, grantPath, { ...grant, deliver_interactions: 'true' })).status).toBe(400);
+    expect((await keyCall(f.docsOwner, grantPath, { ...grant, deliver_interactions: true })).status).toBe(200);
     const delivery = await signed(other.key, poll);
     expect(delivery.status).toBe(200);
     expect(delivery.json.conditions).toEqual([expect.objectContaining({ condition_id: id, url: LINK, session_link: true })]);
@@ -84,9 +102,16 @@ describe('S-BTN-310 session-link capabilities', () => {
     expect(state.status).toBe(200);
     expect(JSON.stringify(state.json)).not.toContain(TOKEN);
     expect(state.json.needs_you.conditions[0]).toMatchObject({ url: null, session_link: true });
+    expect((await keyCall(f.docsOwner, grantPath, { ...grant, deliver_interactions: false })).status).toBe(200);
+    expect((await signed(other.key, poll)).json.conditions).toEqual([expect.objectContaining({ condition_id: id, url: null, session_link: true })]);
   });
 
   it('keeps tokens out of drop replies, event logs and history when reporting and finishing runs', async () => {
+    const logs: unknown[][] = [];
+    for (const level of ['debug', 'log', 'info', 'warn', 'error'] as const) {
+      vi.spyOn(console, level).mockImplementation((...args: unknown[]) => { logs.push(args); });
+    }
+    expect((await heartbeat(reporter.key, reporter.hostname, reporter.secret, { session_url: LINK })).status).toBe(200);
     await raiseInteraction();
     const dropped = `https://${TOKEN}.invalid/${TOKEN}`;
     const advancePath = `/v1/runner/claims/${claim}/advance`;
@@ -107,6 +132,7 @@ describe('S-BTN-310 session-link capabilities', () => {
     expect(history.status).toBe(200);
     expect(JSON.stringify(history.json)).not.toContain(TOKEN);
     expect((await signed(other.key, `${BASE}/conditions?open=1&type=interact`)).json.conditions).toEqual([]);
+    expect(JSON.stringify(logs, (_key, value) => value instanceof Error ? String(value.stack ?? value) : value)).not.toContain(TOKEN);
   });
 
   it('scrubs historical audit copies without deleting normal condition URLs or evidence', async () => {

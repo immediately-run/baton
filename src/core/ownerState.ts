@@ -265,6 +265,7 @@ export class OwnerState {
       if (!str(r.credential_id) || !creds.has(r.credential_id)) bad('runner_grants row', `${JSON.stringify(r.credential_id)} is not an imported credential`);
       if (!str(r.repository_id) || !repoIds.has(r.repository_id)) bad('runner_grants row', `${JSON.stringify(r.repository_id)} is not an imported repository`);
       if (r.role != null && !['runner', 'trusted-runner'].includes(String(r.role))) bad('runner_grants row', `${r.credential_id}: role is unknown`);
+      if ('deliver_interactions' in r && r.deliver_interactions !== 0 && r.deliver_interactions !== 1) bad('runner_grants row', 'deliver_interactions must be 0 or 1');
     }
     for (const r of sections.couriers ?? []) {
       if (!str(r.credential_id) || !creds.has(r.credential_id)) bad('couriers row', `${JSON.stringify(r.credential_id)} is not an imported credential`);

@@ -118,14 +118,14 @@ const list = (json: unknown): string[] => {
 
 type Held = {
   id: number; ticket_id: string; runner_id: number; status: string; claimed_at: number; ended_at: number | null; hostname: string; session_name: string;
-  kind: string; last_seen_at: number; last_activity_at: number | null; lease_timeout_ms: number; leg: string | null;
+  kind: string; last_seen_at: number; last_activity_at: number | null; lease_timeout_ms: number; leg: string | null; session_url: string | null;
 };
 
 /** Every row of the repository, in the list's order: the ready ones in Baton's matching order
  *  (R-BTN-61 — the board read's own `ORDER BY`), then the others by state precedence and id,
  *  the tickets closed in the last 24 hours last. No `eligible_runners` yet: `withEligible` adds
  *  them to the rows a page serves. */
-export function ticketRows(cx: TicketsCtx, repo: string): TicketRow[] {
+export function ticketRows(cx: TicketsCtx, repo: string, sessionLink?: SessionLinkView): TicketRow[] {
   const now = cx.now();
   const lo = `${repo}:`;
   const hi = `${repo};`;
@@ -152,8 +152,10 @@ export function ticketRows(cx: TicketsCtx, repo: string): TicketRow[] {
   const claims = new Map<string, { active?: Held; unconfirmed?: Held }>();
   for (const c of cx.sql<Held>(
     `SELECT c.id, c.ticket_id, c.runner_id, c.status, c.claimed_at, c.ended_at, w.hostname, w.session_name, w.kind, w.last_seen_at, w.last_activity_at, w.lease_timeout_ms,
-            COALESCE((SELECT l.leg FROM claim_legs l WHERE l.claim_id = c.id AND l.finished_at IS NULL AND l.abandoned_at IS NULL ORDER BY l.seq DESC LIMIT 1), c.offered_leg) AS leg
+            COALESCE(l.leg, c.offered_leg) AS leg, ${sessionLink ? 'l.session_url' : 'NULL'} AS session_url
      FROM claims c JOIN runners w ON w.id = c.runner_id
+     LEFT JOIN claim_legs l ON l.claim_id = c.id AND l.seq = (SELECT MAX(seq) FROM claim_legs
+       WHERE claim_id = c.id AND finished_at IS NULL AND abandoned_at IS NULL)
      WHERE (c.status = 'active' OR (c.status = 'completed' AND c.confirmed_at IS NULL)) AND c.ticket_id >= ? AND c.ticket_id < ? ORDER BY c.id`, lo, hi)) {
     const e = claims.get(c.ticket_id) ?? {};
     if (c.status === 'active') e.active = c;
@@ -186,6 +188,7 @@ export function ticketRows(cx: TicketsCtx, repo: string): TicketRow[] {
     const alive = c.kind !== 'legacy' && now - c.last_seen_at < c.lease_timeout_ms;
     return {
       claim_id: c.id, runner_id: c.runner_id, hostname: c.hostname, session_name: c.session_name, leg: c.leg, since: c.claimed_at,
+      ...sessionLink?.(c.session_url, c.runner_id),
       lease_ends_at: c.kind === 'legacy' ? null : c.last_seen_at + c.lease_timeout_ms,
       last_activity_at: c.last_activity_at, alive,
       // §11.4: alive, and no activity for 2 hours (the claim's own age where none was reported).

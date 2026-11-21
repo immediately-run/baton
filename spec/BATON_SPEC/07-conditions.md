@@ -193,9 +193,14 @@ Not built either, each a design its rule below still states:
     a process with a key granted on the repository, that polls the list and sends each entry it
     has not yet sent by whatever channel it has, outside Baton. An `interact` entry is sent as its
     ticket, leg and `url`, and nothing the leg wrote. Core names no channel and records no
-    delivery. The delivery poll for session capabilities (R-BTN-113) is the granted runner's
-    `GET …/conditions?open=1&type=interact`, which includes open interaction subtypes. A
-    repository with no delivery runner has the dashboard and the CLI.
+    delivery. The delivery poll for session capabilities (R-BTN-113) is
+    `GET …/conditions?open=1&type=interact`, which includes open interaction subtypes. Only a
+    runner key explicitly authorized for delivery on that repository by its grant approver
+    (R-BTN-188) gets the capabilities in this poll. Set `deliver_interactions: true` when
+    writing the grant (`--deliver-interactions` in the CLI); omitted or `false` means no
+    delivery authority, including on existing grants at upgrade. General reader access and
+    runner-declared capabilities never authorize delivery. A repository with no delivery
+    runner has the dashboard and the CLI.
   - **Reading the list.** `GET /v1/repositories/{repository}/conditions` lists the repository's
     conditions, filtered by `open=1`, a `type` prefix and `ticket`, 100 per page with a cursor.
     Any key granted on the repository, an owner of it or an administrator may read it. The
