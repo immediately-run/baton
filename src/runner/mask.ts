@@ -85,6 +85,16 @@ export function holdLiteralTail(text: string, literals: readonly string[]): { he
   return { head: text, tail: '' };
 }
 
+function completeLiterals(text: string, literals: readonly string[]) {
+  const matches: { start: number; end: number }[] = [];
+  for (const literal of literals) {
+    for (let start = text.indexOf(literal); start !== -1; start = text.indexOf(literal, start + 1)) {
+      matches.push({ start, end: start + literal.length });
+    }
+  }
+  return matches.sort((a, b) => a.start - b.start || b.end - a.end);
+}
+
 /** R-BTN-144 across a stream, which a line-at-a-time sink cannot do. Class 6's key block is
  *  `src/shared/mask.mjs`'s stream (`createMasker`: a block's lines are held until its `END` line
  *  or `KEY_HOLD` bytes, and classes 5 and 6 are masked on every line as it leaves) — each line
@@ -107,6 +117,30 @@ export function createLegMasker(secrets: readonly string[]) {
   const literals = [...new Set(secrets.map((secret) => secret.replace(/\r\n/g, '\n').replace(/\r?\n$/, '')).filter((secret) => secret !== ''))];
   const block = createMasker();
   let held = '';
+  let heldMasked = 0;
+  const scan = (text: string) => ({ text, limit: holdLiteralTail(text, literals).head.length, matches: completeLiterals(text, literals) });
+  const release = ({ text, limit, matches }: ReturnType<typeof scan>, skip: number, pending: number) => {
+    let cursor = skip;
+    let output = '';
+    let maskEnd = -1;
+    // Find complete matches before cutting the tail. A match may cover bytes past the cut;
+    // keep those bytes for the next match, but never emit them again.
+    if (skip < Math.min(limit, pending)) {
+      // If a different match won, the previously held fragment is still not safe to print.
+      cursor = maskEnd = Math.min(limit, pending);
+      output = '***';
+    }
+    for (const { start, end } of matches) {
+      if (start >= limit) break;
+      if (end <= cursor) continue;
+      if (start >= maskEnd) output += text.slice(cursor, Math.max(cursor, start)) + '***';
+      cursor = maskEnd = end;
+    }
+    output += text.slice(cursor, Math.max(cursor, limit));
+    held = text.slice(limit);
+    heldMasked = Math.max(0, cursor - limit);
+    return block.push(output);
+  };
   return {
     push(line: string): string {
       const said: string[] = [];
@@ -116,29 +150,22 @@ export function createLegMasker(secrets: readonly string[]) {
         // (`heldline` — the value wrapped across the line). The candidate that completes a
         // literal wins; else the one that keeps one open the longest; else the hold was never a
         // literal's start, and its bytes leave masked — never verbatim.
-        const joined = [held + line, `${held}\n${line}`].map((text) => ({ text, split: holdLiteralTail(text, literals) }));
-        const completes = joined.filter((j) => literals.some((literal) => j.text.includes(literal)));
-        const opens = joined.filter((j) => j.split.tail !== '').sort((a, b) => b.split.tail.length - a.split.tail.length);
+        const joined = [held + line, `${held}\n${line}`].map(scan);
+        const completes = joined.filter((j) => j.matches.some(({ start, end }) => start < held.length && end > held.length));
+        const opens = joined.filter((j) => j.limit < held.length).sort((a, b) => (b.text.length - b.limit) - (a.text.length - a.limit));
         const best = completes[0] ?? opens[0];
-        if (best) {
-          said.push(block.push(maskLiterals(best.split.head, literals)));
-          held = best.split.tail;
-          return said.filter(Boolean).join('\n');
-        }
-        said.push(block.push('***'));
-        held = '';
+        if (best) return release(best, heldMasked, held.length);
+        if (heldMasked < held.length) said.push(block.push('***'));
       }
-      const { head, tail } = holdLiteralTail(line, literals);
-      said.push(block.push(maskLiterals(head, literals)));
-      held = tail;
+      said.push(release(scan(line), 0, 0));
       return said.filter(Boolean).join('\n');
     },
     flush(): string {
       const said: string[] = [];
       if (held !== '') {
-        held = '';
         // The stream ended inside what may be a literal: those bytes leave masked, not verbatim.
-        said.push(block.push('***'));
+        if (heldMasked < held.length) said.push(block.push('***'));
+        held = '';
       }
       said.push(block.flush());
       return said.filter(Boolean).join('\n');
