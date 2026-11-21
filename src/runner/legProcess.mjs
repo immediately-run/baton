@@ -27,7 +27,7 @@ const stop = new AbortController();
 if (process.env.BATON_REPLAY === '1') delete process.env.__CF_USER_TEXT_ENCODING;
 
 const finish = (out, code) => {
-  writeSync(1, `\n${JSON.stringify(out)}\n`);
+  writeSync(process.argv[4] === '--outcome-fd' ? 3 : 1, `\n${JSON.stringify(out)}\n`);
   process.exit(code);
 };
 

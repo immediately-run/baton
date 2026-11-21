@@ -154,6 +154,8 @@ export interface Ports {
   humanKeys?: HumanKeys;
   /** Absent on Cloudflare, where the input gate needs nothing. */
   gate?: Gate;
+  /** Only the local host accepts file: log roots (R-BTN-128). */
+  local?: boolean;
   clock?: Clock;
   /** The core's random source (B-185: a run id's random half); tests replace it as they
    *  replace the clock. Absent, the system's. */

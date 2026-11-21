@@ -60,12 +60,13 @@ export interface ApiOptions {
  * B-97: the `IR_BATON_*` spellings of the transition are gone — the release dropped them. A
  * runner handed one reads no credential and stops at the error below, naming the names it
  * reads; the variables are simply unknown, never silently honoured. */
-export function envAuth(env: NodeJS.ProcessEnv, keyWriter?: (material: string) => string): Auth {
+export function envAuth(env: NodeJS.ProcessEnv, keyWriter?: (material: string) => string, keepForMask?: (material: string) => void): Auth {
   const keyFile = env.BATON_KEY_FILE;
   const key = env.BATON_KEY;
   // R-BTN-159: an API key, in BATON_KEY or the key file, goes as a bearer in place of a
   // signature; the runner secret joins it as it joins a signature.
   const material = keyFile ? readFileSync(keyFile, 'utf8').trim() : key?.trim();
+  for (const value of [key, material, env.BATON_TOKEN]) if (value) keepForMask?.(value);
   if (material && API_KEY.test(material)) {
     return (_method, _url, _body, secret) => ({ Authorization: `Bearer ${material}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) });
   }

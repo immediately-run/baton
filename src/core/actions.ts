@@ -200,6 +200,16 @@ export const ACTIONS: Action[] = [
     callers: REPOSITORY_READERS, input: NONE,
   },
   {
+    id: 'leg.ticket-find', summary: 'Find the qualified matches for a local ticket id.',
+    effect: 'read', http: { method: 'GET', path: '/v1/ticket-matches/{local}' },
+    callers: [OWNER, ADMIN], input: NONE,
+  },
+  {
+    id: 'leg.release-request', summary: 'Request release of the ticket’s active claim.',
+    effect: 'write', http: { method: 'POST', path: '/v1/owner/{repository}/tickets/{ticket}/release' },
+    callers: [OWNER], input: NONE,
+  },
+  {
     id: 'leg.runs', summary: 'One leg’s runs of a ticket, with the inputs a replay reads.',
     effect: 'read', http: { method: 'GET', path: '/v1/repositories/{repository}/tickets/{ticket}/legs/{leg}/runs' },
     callers: OWNER_READERS, input: NONE,

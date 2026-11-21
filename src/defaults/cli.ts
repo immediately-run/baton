@@ -7,7 +7,7 @@
 // with a CI identity token, or — `--sync-key FILE`, or `BATON_SYNC_KEY` — with a registered sync
 // key's signature, its no-CI path.
 // Course code in the CLI, never core (§2b). Reached through the esbuild bundle
-// (scripts/baton-cli.mjs), the way `baton run` reaches src/runner.
+// (scripts/baton-cli.mjs), the way `baton runner start` reaches src/runner.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -1407,9 +1407,9 @@ async function standard(ctx) {
   const show = (rel) => gitRun('git', ['-C', ctx.checkout, 'show', settingsSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} });
   const settings = JSON.parse(show('.baton/baton.json'));
   // B-83: the snapshot's settings stay authoritative; BATON_AGENT_COMMAND — the harness command
-  // \`baton run --harness\` chose — fills their absence, never overrides their choice.
+  // \`baton runner start --harness\` chose — fills their absence, never overrides their choice.
   const settingsCommand = typeof settings.agent_command === 'string' && settings.agent_command !== '' ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? '';
-  if (settingsCommand === '') throw new Error('.baton/baton.json names no agent_command — run \`baton repo init --agent opencode\` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none');
+  if (settingsCommand === '') throw new Error('.baton/baton.json names no agent_command — run \`baton repo init --agent opencode\` (or --agent claude-code, or --agent-command <cmd>); baton runner start --harness <harness> runs its command when the settings name none');
   // §6.10 (R-BTN-131, B-167): the course's choice of model is the repository's own — the
   // words \`agent_command\` carries, run exactly as written. Baton delivers no advice and core
   // resolves no route; a repository that picks its model at run time writes a leg override

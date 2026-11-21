@@ -192,7 +192,7 @@ done
 [ -d "$HOME_DIR/.git" ] || [ -f "$HOME_DIR/.git" ] || die "$HOME_DIR is not a git checkout"
 GIT_DIR="$(git -C "$HOME_DIR" rev-parse --absolute-git-dir)"
 
-# The settings the runner will read (B-83: the no-op echo is refused by baton run itself).
+# The settings the runner will read (B-83: the no-op echo is refused by baton runner start itself).
 SETTINGS="$HOME_DIR/.baton/baton.json"
 [ -f "$SETTINGS" ] || die "$HOME_DIR has no .baton/baton.json — run: npx --yes @immediately-run/baton@<version> repo init"
 AGENT_COMMAND="$(node -e 'const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(typeof s.agent_command === "string" && s.agent_command !== "" ? s.agent_command : "echo")' "$SETTINGS")"
@@ -232,7 +232,7 @@ if [ -n "$FOR" ]; then
 fi
 
 # ---- start -----------------------------------------------------------------
-RUN_ARGS=(run --harness "$HARNESS" --home "$HOME_DIR" --session "$SESSION")
+RUN_ARGS=(runner start --harness "$HARNESS" --home "$HOME_DIR" --session "$SESSION")
 [ -n "${VERBOSE:-}" ] && RUN_ARGS+=(--verbose)
 [ -n "$URL" ] && RUN_ARGS+=(--url "$URL")
 [ -n "$CAPABILITIES" ] && RUN_ARGS+=(--capabilities "$CAPABILITIES")

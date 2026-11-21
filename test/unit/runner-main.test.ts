@@ -1,4 +1,4 @@
-// runner-main.test.ts — `baton run`'s pure half (BATON_SPEC §6.13; R3-1245): the flag parser,
+// runner-main.test.ts — `baton runner start`'s pure half (BATON_SPEC §6.13; R3-1245): the flag parser,
 // the course declarations a heartbeat needs (rule 9), the credential the environment names and
 // the runner secret's shape. Node only: it writes temp checkouts and runs ssh-keygen.
 import { describe, it, expect, vi } from 'vitest';
@@ -37,7 +37,7 @@ describe('parseRunArgs', () => {
   it('takes its flags, refusing the unknown and the malformed', () => {
     const a = parseRunArgs(['--harness', 'claude-code', '--home', '/x', '--url', 'https://u', '--session', 's2', '--repository', 'ops', '--tier', 'routine', '--capabilities', 'a,b', '--beat-every', '5000'], {});
     expect(a).toMatchObject({ harness: 'claude-code', home: '/x', url: 'https://u', session: 's2', repository: 'ops', tier: 'routine', capabilities: ['a', 'b'], beatEvery: 5000 });
-    expect(() => parseRunArgs(['--nope'], {})).toThrow('not a flag of baton run');
+    expect(() => parseRunArgs(['--nope'], {})).toThrow('not a flag of baton runner start');
     expect(() => parseRunArgs(['--harness', 'vim'], {})).toThrow('opencode or claude-code');
     expect(() => parseRunArgs(['--beat-every', '10'], {})).toThrow('at least 50 ms');
     expect(() => parseRunArgs(['--home'], {})).toThrow('needs a value');
@@ -113,7 +113,7 @@ describe('the agent_command a runner runs (B-83)', () => {
     try {
       expect(await runMain(['--help'], { log: (l) => lines.push(l) })).toBe(0);
       const said = lines.join('\n');
-      expect(said).toContain('usage: baton run');
+      expect(said).toContain('usage: baton runner start');
       expect(said).toContain('[--capabilities a,b]');
       // What-to-build 2: the flag narrows, never enables; absent it the grant speaks.
       expect(said).toContain('narrows what the grant allows; it never enables what the grant does not');
@@ -1220,11 +1220,11 @@ describe('advanceHome — legs start from the claim\'s snapshot (B-228, R-BTN-34
   });
 });
 
-// B-121: `baton run --home <name|path>` — a name resolves to its home's checkout (refused,
+// B-121: `baton runner start --home <name|path>` — a name resolves to its home's checkout (refused,
 // naming the home, when the home has none); a path keeps R-BTN-131's meaning. The proof a name
 // reached its checkout is the checkout's own settings: the named home declares the no-op `echo`
 // agent_command, which the runner refuses only when it reads that file.
-describe('baton run --home: a name resolves to its checkout (B-121)', () => {
+describe('baton runner start --home: a name resolves to its checkout (B-121)', () => {
   const ENV = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE', 'XDG_CONFIG_HOME'];
   const clear = (): Record<string, string | undefined> => {
     const saved: Record<string, string | undefined> = {};
@@ -1264,7 +1264,7 @@ describe('baton run --home: a name resolves to its checkout (B-121)', () => {
       expect(err.mock.calls.map((c) => String(c[0])).join('')).toContain('names agent_command "echo"');
       // A home with no checkout refuses naming the home, before any credential; an unknown name
       // lists the homes.
-      await expect(runMain(['--home', 'bare'])).rejects.toThrow('the home bare names no checkout — baton run works a checkout');
+      await expect(runMain(['--home', 'bare'])).rejects.toThrow('the home bare names no checkout — baton runner start works a checkout');
       await expect(runMain(['--home', 'nope'])).rejects.toThrow('--home names no home nope — homes: relay, bare (baton home list, B-121)');
     } finally {
       err.mockRestore();

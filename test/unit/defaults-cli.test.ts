@@ -1010,7 +1010,7 @@ describe('baton repo init, through the built CLI', () => {
     }
   });
 
-  it('the stub runs BATON_AGENT_COMMAND — what baton run --harness chose — when the snapshot’s settings name no agent_command; the settings win; neither names the fix (B-83)', async () => {
+  it('the stub runs BATON_AGENT_COMMAND — what baton runner start --harness chose — when the snapshot’s settings name no agent_command; the settings win; neither names the fix (B-83)', async () => {
     const agent = join(root, 'agent.sh');
     writeFileSync(agent, '#!/bin/sh\necho "$1 $2 $3" > "$(dirname "$0")/agent.args"\n');
     chmodSync(agent, 0o755);
@@ -2384,7 +2384,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
 
   it('the course test kit passes on each scaffolded course: its file, its stubs, one generic run to its end', () => {
     for (const c of ['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision', 'spec-to-tickets']) {
-      expect(baton(root, 'test-course', root, c, '--base', 'none'), c).toContain('✓ no violations');
+      expect(baton(root, 'course', 'test', root, c, '--base', 'none'), c).toContain('✓ no violations');
     }
   }, 240_000);
 
@@ -2632,7 +2632,7 @@ export async function run(ctx, standard) {
   }, 120_000);
 
   it('the course test kit passes a course with an override, and fails one that exports no run or overrides no leg', () => {
-    expect(baton(root, 'test-course', root, 'create-pr', '--base', 'none')).toContain('✓ no violations');
+    expect(baton(root, 'course', 'test', root, 'create-pr', '--base', 'none')).toContain('✓ no violations');
     const extra = join(legs(), 'deploy.run.mjs');
     const override = join(legs(), 'review.run.mjs');
     const before = readFileSync(override, 'utf8');
@@ -2641,7 +2641,7 @@ export async function run(ctx, standard) {
       writeFileSync(extra, 'export async function run(ctx, standard) { return standard(ctx); }\n');
       let out = '';
       try {
-        baton(root, 'test-course', root, 'create-pr', '--base', 'none');
+        baton(root, 'course', 'test', root, 'create-pr', '--base', 'none');
       } catch (e) {
         out = String((e as { stdout?: unknown }).stdout);
       }
@@ -2662,7 +2662,7 @@ export async function run(ctx, standard) {
       writeFileSync(script, 'export async function run() { return { reached: "pr-open", next: "review" }; }\nexport async function handoff() { return null; }\nexport const close = () => "";\n');
       let out = '';
       try {
-        baton(root, 'test-course', root, 'create-pr', '--base', 'none');
+        baton(root, 'course', 'test', root, 'create-pr', '--base', 'none');
       } catch (e) {
         out = String((e as { stdout?: unknown }).stdout);
       }

@@ -136,7 +136,7 @@ describe('B-168 the settings: the unblocked trigger is a loosening, and the dash
     const settings = state.limits.settings.find((s) => s.repository_id === 'docs')!;
     // B-182's forge, web_base, code_repos and pushers and B-127's require_signed_control beside
     // them; required_independence is not among them.
-    expect(Object.keys(settings).sort()).toEqual(['code_repos', 'forge', 'pushers', 'remind_after', 'repository_id', 'require_signed_control', 'required_bars', 'retry', 'runner_pushers', 'scope_policy',
+    expect(Object.keys(settings).sort()).toEqual(['code_repos', 'forge', 'leg_log_root', 'pushers', 'remind_after', 'repository_id', 'require_signed_control', 'required_bars', 'retry', 'runner_pushers', 'scope_policy',
       'transcript_repos', 'unblocked_trigger', 'web_base']);
   });
 });

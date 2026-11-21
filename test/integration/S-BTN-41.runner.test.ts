@@ -1,4 +1,4 @@
-// S-BTN-41 the runner (BATON_SPEC §15 S-BTN-41, §8.3 R-BTN-72; R3-1245): `baton run` on a VM
+// S-BTN-41 the runner (BATON_SPEC §15 S-BTN-41, §8.3 R-BTN-72; R3-1245): `baton runner start` on a VM
 // with a home repository's `.baton/` — stub leg scripts that push evidence into git, `close`
 // writing the closing marker as a commit — claims a ticket and follows its results. Must hold:
 // the runner holds the claim through a `ci` wait and goes on; it takes the leg each result names
@@ -805,8 +805,8 @@ describe('S-BTN-41 the runner', () => {
   }, 30_000);
 
   it('a leg session never claims: the runner refuses to nest under BATON_PARENT', async () => {
-    // Through the real CLI entry (the bundle `baton run` runs), as a leg session would.
-    const r = spawnSync(process.execPath, [resolve('cli/baton.mjs'), 'run'], {
+    // Through the real CLI entry (the bundle `baton runner start` runs), as a leg session would.
+    const r = spawnSync(process.execPath, [resolve('cli/baton.mjs'), 'runner', 'start'], {
       cwd: resolve('.'),
       env: { ...process.env, BATON_PARENT: '7' },
       encoding: 'utf8',
@@ -815,7 +815,7 @@ describe('S-BTN-41 the runner', () => {
     expect(r.stderr).toMatch(/BATON_PARENT=7: a leg session never claims/);
     // B-97: the transition's spelling is not read — a hermetic HOME keeps it from parsing a real
     // settings file, and with no credential it stops there instead of refusing to nest.
-    const legacy = spawnSync(process.execPath, [resolve('cli/baton.mjs'), 'run'], {
+    const legacy = spawnSync(process.execPath, [resolve('cli/baton.mjs'), 'runner', 'start'], {
       cwd: resolve('.'),
       env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('BATON_'))), HOME: mkdtempSync(join(tmpdir(), 'baton-legacy-')), IR_BATON_PARENT: '7' },
       encoding: 'utf8',
@@ -1286,7 +1286,7 @@ describe('S-BTN-41 the runner', () => {
       const runner = makeRunner({ log: (l: string) => lines.push(l), now: () => Date.now() });
       home.commit();
       await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
-      // work() runs the heartbeat interval, so beats land while the leg runs — as `baton run`
+      // work() runs the heartbeat interval, so beats land while the leg runs — as `baton runner start`
       // does; runOnce alone beats only between claims. The runner is stopped only once the
       // claim has completed: a `stop()` while a leg still runs is a hard stop, which kills the
       // leg's group at once and ends the claim `released:lease-lost` (R-BTN-24's designed path,

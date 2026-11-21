@@ -128,8 +128,8 @@ run "$BATON repo sync --root '$WORK/home' --sync-key '$WORK/keys/drill_sync'"
 run "$BATON board -i '$WORK/keys/drill_owner' home"
 
 # The drill's stand-in runners: heartbeats, claims and ends signed with each machine key, the
-# way baton run signs them (cli/sign.mjs's SSHSIG, the one verifier shape). Worker 1 is the
-# compromised machine (no tags — as baton run declares none today); worker 2 is the fleet
+# way baton runner start signs them (cli/sign.mjs's SSHSIG, the one verifier shape). Worker 1 is the
+# compromised machine (no tags — as baton runner start declares none today); worker 2 is the fleet
 # (one tag, the runbook's TAG); worker 3 is the re-minted machine of step 5.
 cat > "$WORK/worker.mjs" <<'EOF'
 // worker.mjs — the drill's stand-in runner: one signed call at a time, its JSON on stdout.

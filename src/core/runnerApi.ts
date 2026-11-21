@@ -670,6 +670,14 @@ export class RunnerApi {
     return out.map((m) => ({ id: m.id, kind: m.kind, payload: m.payload_json ? JSON.parse(m.payload_json) : null, sent_at: m.sent_at }));
   }
 
+  /** S-BTN-99: the signed owner route targets the current holder, not a caller-supplied runner. */
+  requestRelease(owner: string, ticket: string) {
+    const holder = this.rows<{ runner_id: number }>(
+      "SELECT runner_id FROM claims WHERE ticket_id = ? AND status = 'active'", ticket)[0];
+    if (!holder) throw new BatonError('not-found', 'no active claim for this ticket');
+    return this.sendMessage(owner, { to_runner_id: holder.runner_id, kind: 'release', payload: { ticket_id: ticket, reason: 'requested' } });
+  }
+
   /** `POST /v1/ui/messages`: a release (`requested`, `owner-cancel`, `provider-suspended`), a
    *  status request, or a wind-down (B-109: the runner drains — its current leg completes, then
    *  it exits without claiming again), from the owner to one runner. */

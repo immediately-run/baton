@@ -73,6 +73,7 @@ export interface Ctx {
   /** B-4 (R-BTN-113): the instance's session-host allowlist, `instance_settings` first, else the
    *  deploy's BATON_SESSION_HOSTS. Absent, the default (claude.ai) — a unit test's Claims. */
   sessionHosts?: () => string[];
+  logHost?: string;
   /** The retired-fields window's one writer (B-168): a claim's `bills`. */
   deprecated: Deprecated;
 }
@@ -1367,7 +1368,9 @@ export class Claims {
     // the signatures against keys the post did not choose.
     const briefRow = this.rows<{ brief: string | null }>('SELECT brief FROM tickets WHERE id = ?', c.ticket_id)[0];
     const brief = briefRow?.brief ? JSON.parse(briefRow.brief) as { signed: boolean; signer?: string; commit: string } : null;
+    const logDir = this.runningLeg(id)?.leg_log_dir;
     return {
+      ...(logDir ? { leg_log: { dir: logDir } } : {}),
       claim_id: c.id, ticket_id: c.ticket_id, course_id: c.course_id, course_version: courseVersion,
       ...(legState ? { leg_state: legState } : {}),
       ...(brief ? { brief } : {}),
@@ -1402,14 +1405,18 @@ export class Claims {
    *  reported, and the run's recorded inputs (the ticket's version and its read's digest among
    *  them, `leg_run_inputs`). `end` is the claim's end reason once the claim ended. */
   runsOf(ticketId: string, leg: string) {
-    const runs = this.rows<{ claim_id: number; seq: number; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; session_url: string | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; runner_id: number }>(
-      `SELECT l.claim_id, l.seq, l.run_id, l.head_sha, l.from_station, l.started_at, l.finished_at, l.abandoned_at, l.session_url,
+    const runs = this.rows<{ claim_id: number; seq: number; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; session_url: string | null; leg_log_dir: string | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; runner_id: number }>(
+      `SELECT l.claim_id, l.seq, l.run_id, l.head_sha, l.from_station, l.started_at, l.finished_at, l.abandoned_at, l.session_url, l.leg_log_dir,
               c.snapshot_sha, c.course_id, c.status, c.end_reason, c.ended_at, c.runner_id
        FROM claim_legs l JOIN claims c ON c.id = l.claim_id
        WHERE c.ticket_id = ? AND l.leg = ? ORDER BY l.claim_id, l.seq`, ticketId, leg);
     const inputs = this.rows<{ claim_id: number; seq: number; name: string; from_leg: string | null; from_run: number | null; uri: string | null; digest: string | null; value_json: string | null; leg_version: number | null; ticket_version: string | null; read_digest: string | null }>(
       'SELECT claim_id, seq, name, from_leg, from_run, uri, digest, value_json, leg_version, ticket_version, read_digest FROM leg_run_inputs WHERE ticket_id = ? ORDER BY claim_id, seq, name', ticketId);
     const defaultBranch = this.rows<{ default_branch: string }>('SELECT default_branch FROM repositories WHERE id = ?', repositoryOf(ticketId))[0]?.default_branch ?? null;
+    const transcripts = this.rows<{ claim_id: number; repo: string; path: string; pushed_at: number | null }>(
+      // These reports are claim-scoped. Only attribute them to a run when it is unambiguous.
+      `SELECT t.claim_id, t.repo, t.path, t.last_pushed_at AS pushed_at FROM transcripts t JOIN claims c ON c.id = t.claim_id
+       WHERE c.ticket_id = ? AND (SELECT COUNT(*) FROM claim_legs l WHERE l.claim_id = c.id) = 1 ORDER BY t.id`, ticketId);
     const courseVersion = (run: typeof runs[number]): number | null => run.course_id
       ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(ticketId), run.course_id)[0]?.version ?? null
       : null;
@@ -1426,7 +1433,8 @@ export class Claims {
           end: r.status === 'active' ? null : r.end_reason,
           snapshot_sha: r.snapshot_sha, head_sha: r.head_sha,
           // R-BTN-113 (B-4): the run's session link, as the run list draws it (§11.4).
-          session_url: r.session_url,
+          session_url: r.session_url, log_dir: r.leg_log_dir,
+          transcripts: transcripts.filter((t) => t.claim_id === r.claim_id).map(({ repo, path, pushed_at }) => ({ repo, path, pushed_at })),
           course: r.course_id, course_version: courseVersion(r),
           ...(ticket?.ticket_version != null || ticket?.read_digest != null
             ? { ticket: { ...(ticket.ticket_version != null ? { version: ticket.ticket_version } : {}), ...(ticket.read_digest != null ? { read_digest: ticket.read_digest } : {}) } }
@@ -1443,8 +1451,8 @@ export class Claims {
 
   /** The claim's running leg, if any: its last started leg not yet finished or given up. */
   private runningLeg(claimId: number) {
-    return this.rows<{ seq: number; leg: string; from_station: string; run_id: string | null }>(
-      'SELECT seq, leg, from_station, run_id FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
+    return this.rows<{ seq: number; leg: string; from_station: string; run_id: string | null; leg_log_dir: string | null }>(
+      'SELECT seq, leg, from_station, run_id, leg_log_dir FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
   }
 
   /** B-4 (R-BTN-113): the instance's session-host allowlist, as the runner calls' shared rule
@@ -1585,11 +1593,17 @@ export class Claims {
     // R-BTN-63 (B-185): the run's id, minted here; a collision with an existing id is refused by
     // the column's unique index and a new one minted.
     let runId = '';
+    const root = this.rows<{ leg_log_root: string | null }>('SELECT leg_log_root FROM repositories WHERE id = ?', repo)[0]?.leg_log_root;
+    let logDir: string | null = null;
     for (let tries = 0; ; tries++) {
       runId = mintRunId(now, this.c.random);
+      if (root && this.c.logHost) {
+        const parts = [this.c.logHost, repo, c.ticket_id.slice(repo.length + 1), leg, runId];
+        logDir = `${root.replace(/\/$/, '')}/${parts.map(encodeURIComponent).join('/')}/`;
+      }
       try {
-        this.exec(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation, head_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          claimId, seq, runId, leg, at, JSON.stringify(b.bars), now, n, b.head_sha);
+        this.exec(`INSERT INTO claim_legs (claim_id, seq, run_id, leg, from_station, bars, started_at, started_observation, head_sha, leg_log_dir) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          claimId, seq, runId, leg, at, JSON.stringify(b.bars), now, n, b.head_sha, logDir);
         break;
       } catch (e) {
         if (!isUniqueViolation(e) || !/run_id/.test(String(e)) || tries >= 8) throw e;
@@ -1627,7 +1641,7 @@ export class Claims {
     // R-BTN-90: the answer also names the run's `claim_legs.seq` — the runner's `leg_finished`
     // heartbeat (§7.5's finishing half) carries it when the run's script returns. R-BTN-113: a
     // dropped link says so, as a beat's answer does.
-    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId, seq, ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
+    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId, seq, ...(logDir ? { leg_log: { dir: logDir } } : {}), ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */

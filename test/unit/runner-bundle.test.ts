@@ -32,7 +32,7 @@ function runLegVia(bundle: string): unknown {
 
 describe('S-BTN-41 the runner from its bundle (R-BTN-72)', () => {
   it("a checkout's .local bundle runs a leg", () => {
-    // Importing it bundles, as `baton run` from a checkout does.
+    // Importing it bundles, as `baton runner start` from a checkout does.
     execFileSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(join(ROOT, 'scripts', 'baton-run.mjs'))})`], { cwd: ROOT });
     expect(runLegVia(join(ROOT, '.local', 'baton-run.mjs'))).toEqual({ ok: true, result: { echoed: 'implement' } });
   });

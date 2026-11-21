@@ -6,7 +6,7 @@ description: Host a Baton process-mode runner in this Claude Code cloud session 
 # Hosting the Baton cloud runner
 
 This session is a Claude Code cloud container; Baton calls that a `cloud` host (BATON_SPEC §8.1).
-It can host a process-mode runner: a plain `baton run` process whose legs are headless
+It can host a process-mode runner: a plain `baton runner start` process whose legs are headless
 `claude -p` children, like any process-mode runner. The session's own part is only **hosting** —
 starting it, keeping watch under the harness's 2-hour background-task cap, and stopping it. The
 deterministic half (the preflight and the detached start) is the package's script:
@@ -32,7 +32,7 @@ An operator links this skill into the repository once:
 1. Run the script once with `--check`. It probes the key, `claude -p`, `gh`, a dry-run push and
    the checkout, and prints what it would start. Any failure exits non-zero naming itself —
    report the line and stop; a check that fails is not a thing to work around.
-2. Then run it without `--check`. It starts `baton run --harness claude-code` **detached**
+2. Then run it without `--check`. It starts `baton runner start --harness claude-code` **detached**
    (its own session, `setsid nohup`), writes the runner's pid and log under
    `~/.cache/immediately-run/baton/cloud-runner/` (`runner.pid`, `runner.log`) and returns.
 3. Start the watcher below as a **background task** — never in the foreground, and never the

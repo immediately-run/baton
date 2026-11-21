@@ -182,7 +182,7 @@ export class BatonCore {
     this.queues = new Queues({ store, now: () => this.now(), held: (ticket) => this.blocks.isHeld(ticket),
       graph: (repo, course) => this.stations.graph(repo, course), notices: this.notices });
     this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks, deprecated: this.deprecated });
-    this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(), origin: ports.config.BATON_ORIGIN,
+    this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(), origin: ports.config.BATON_ORIGIN, local: ports.local,
       dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices,
       policies: this.policies, humanBreakGlass: () => this.humanBreakGlass(), reapForRetire: (repository, actor) => this.claims.retireReaps(repository, actor),
       conditionsForRetire: (repository) => this.conditions.retired(repository) });
@@ -203,7 +203,7 @@ export class BatonCore {
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
       policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated,
-      conditions: this.conditions, sessionHosts: () => this.instance.sessionHosts() });
+      conditions: this.conditions, logHost: new URL(ports.config.BATON_ORIGIN).host, sessionHosts: () => this.instance.sessionHosts() });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
@@ -1248,6 +1248,13 @@ export class BatonCore {
     if (m === 'POST' && rest === 'bars') return json(this.admin.setBar(actor, repo, await body()));
     const lift = /^bars\/(\d+)\/lift$/.exec(rest);
     if (m === 'POST' && lift) return json(this.admin.liftBar(actor, repo, Number(lift[1])));
+    const release = /^tickets\/([^/]+)\/release$/.exec(rest);
+    if (m === 'POST' && release) {
+      const raw = seg(release[1]);
+      const id = raw.includes(':') ? raw : qualify(repo, raw);
+      if (!TICKET_ID.test(id) || repositoryOf(id) !== repo) throw new BatonError('invalid-params', `ticket: must be a ticket of ${repo}`);
+      return json(this.store.transaction(() => this.runners.requestRelease(fp, id)));
+    }
     if (m === 'PUT' && rest === 'settings') return json(await this.admin.setSettings(actor, repo, await body()));
     if (m === 'POST' && rest === 'couriers') return json(await this.admin.couriers(actor, repo, await body()));
     // §12.8 (B-145): the repository policy's routes (R-BTN-188, R-BTN-189). A change is one

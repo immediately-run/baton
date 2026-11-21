@@ -29,7 +29,7 @@ async function read(key: TestKey, path: string) {
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 
-/** A granted key's heartbeat (its registration, as `baton run` starts it). */
+/** A granted key's heartbeat (its registration, as `baton runner start` starts it). */
 async function heartbeat(key: TestKey, hostname: string, over: Record<string, unknown> = {}) {
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
   const body = hbBody('vm-a', { hostname, session_name: hostname, secret_hash: await sha256('secret-reads'), ...over });

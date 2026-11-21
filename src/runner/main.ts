@@ -1,4 +1,4 @@
-// main.ts — `baton run`'s entry (BATON_SPEC §6.13): parses the flags, refuses to nest (a session
+// main.ts — `baton runner start`'s entry (BATON_SPEC §6.13): parses the flags, refuses to nest (a session
 // that carries BATON_PARENT is a leg session — it never claims, advances or ends: the runner
 // that started it does), refuses the no-op `echo` agent_command (B-83: a stub for tests, behind
 // --test-harness) and hands the legs the `--harness` flag's command when the settings name none,
@@ -63,7 +63,7 @@ export interface RunArgs {
   concurrency: number;
 }
 
-/** `baton run [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]
+/** `baton runner start [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]
  * [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b] [--beat-every <ms>]
  * [--course <id>] [--lock <capability>=<path>]… [--test-harness] [--verbose]`.
  * Unknown flags are refused, never dropped. `--capabilities` narrows the grant: without it the
@@ -119,18 +119,18 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       const n = Number(value());
       if (!Number.isInteger(n) || n < 50) throw new Error('--beat-every: an integer of at least 50 ms');
       out.beatEvery = n;
-    } else throw new Error(`${a}: not a flag of baton run`);
+    } else throw new Error(`${a}: not a flag of baton runner start`);
   }
   return out;
 }
 
-/** B-86: `baton run --help` (and `-h`) — the usage `parseRunArgs` reads, and what the ticket's
+/** B-86: `baton runner start --help` (and `-h`) — the usage `parseRunArgs` reads, and what the ticket's
  * What-to-build 2 asks the runner to say: `--capabilities` narrows the grant, it never enables
  * what the grant does not allow, and absent it the runner declares the grant; `--course` narrows
  * the courses served, and absent it the runner serves every course its home declares (B-103).
  * Printed before any credential or network work, and the exit is 0. */
 export const RUN_USAGE = [
-  'usage: baton run [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]',
+  'usage: baton runner start [--harness opencode|claude-code] [--home <checkout|home name>] [--url <url>] [--session <id>]',
   '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
   '                 [--beat-every <ms>] [--course <id>] [--executor <source>] [--concurrency <k>]',
   '                 [--test-harness] [--verbose]',
@@ -314,7 +314,7 @@ export const syncLogStamped = (verbose: boolean, l: string): void => syncLog(ver
 let exitHookFn: ((code: number | undefined) => void) | null = null;
 
 export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void; transport?: (req: Request) => Promise<Response>; env?: NodeJS.ProcessEnv } = {}): Promise<number> {
-  // §6.13: a leg session never claims — the runner that started it does. A nested `baton run`
+  // §6.13: a leg session never claims — the runner that started it does. A nested `baton runner start`
   // is exactly that session trying, so it is refused before anything else. BATON_PARENT is the
   // runner's name for it (B-97: the transition's IR_BATON_PARENT is gone).
   const parent = process.env.BATON_PARENT;
@@ -355,13 +355,15 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // `profile.cli`: reported, never a refusal.
   const cli = readCliPin(fileURLToPath(import.meta.url));
   for (const line of cliPinLines(cli)) say(line);
+  const credentialLiterals: string[] = [];
   const auth = envAuth(process.env, (material) => {
     const file = join(cacheDir(), 'key');
     const text = `${material.replace(/\r\n/g, '\n').trim()}\n`;
     if (!existsSync(file) || readFileSync(file, 'utf8') !== text) writeFileSync(file, text, { mode: 0o600 });
     chmodSync(file, 0o600);
     return file;
-  });
+  }, (material) => credentialLiterals.push(material));
+  for (const name of ['BATON_KEY', 'BATON_KEY_FILE', 'BATON_TOKEN']) delete process.env[name];
   // Every course the home declares, or the one `--course` narrows to (B-103): refused at startup,
   // loudly, when the flag names one the home does not declare — not per claim.
   const courses = servedCourses(home, a.course);
@@ -446,7 +448,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   const executor = await loadExecutor(a.executor, { log: say, wrapper: LEG_WRAPPER, node: process.execPath });
   if (a.executor !== 'builtin') say(`baton: executor ${executor.source}${executor.digest ? ` sha256:${executor.digest}` : ''}${executor.provides.length ? `, provides ${executor.provides.join(', ')}` : ''}`);
   runner = new Runner({
-    executor,
+    executor, credentialLiterals,
     api: new BatonApi({ url: a.url, transport, auth }, say),
     // B-229: the earlier sessions' claims are ended through an API of their own runner's.
     apiFor: (secret: string) => { const other = new BatonApi({ url: a.url, transport, auth }, say); other.setSecret(secret); return other; },
