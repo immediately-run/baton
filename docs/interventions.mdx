@@ -510,8 +510,10 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   baton-cli `fc765417` (#303, migration 0061's fix — main moved while they were stopped). The
   same edit is still due in the fieldhouse repository's copy of the fence, or a reinstall
   brings the drop back (fieldhouse #40). After the restart nothing was claimable for the
-  runners: 31 tickets held, the rest refused `awaiting-sync` (their last end is newer than the
-  last snapshot, 06:29) or `above-tier-ceiling`. The holds are the owner's to lift. The API
+  runners: 31 tickets held, the other 39 ready ones refused `awaiting-sync` (rule 1, §6.7: their
+  last end is newer than the last snapshot, 06:29), which no runner can clear — only the next
+  sync. (The ticket read showed `above-tier-ceiling` on 23 of them: its `failed_rule` is the
+  furthest any live runner reaches, likely another host's.) The holds are the owner's to lift. The API
   outage itself was not diagnosed here.
 - **Autonomous handling:** a runner whose executor refuses a leg for an unreachable gateway
   should treat it as its own capability failing, not the ticket's — stop claiming legs that
