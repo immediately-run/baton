@@ -362,3 +362,28 @@ kept it from production for six hours ([interventions](interventions.mdx), 2026-
 - **The rule that deploy configuration needs the owner lives in CLAUDE.md, which binds an agent
   only as far as it reads it; nothing in create-pr enforces it.** What changed: nothing yet
   (B-135, B-140). *Still true.*
+
+## 2026-11-21 — migration 0061 could not commit on a database in use, and Baton served nothing for two days
+
+From the deploy of `a96ea4ac` (2026-11-19 12:44Z) every request to `baton.immediately.run` failed:
+each start of the Durable Object ran migration 0061 (B-68's worker → runner rename), the request's
+commit failed with `Durable Object was reset and rolled back … FOREIGN KEY constraint failed`, and
+the object went back to 0060 to try again on the next request. Syncs in both repositories read
+`failed:internal … observation: internal` (the last good one was
+[44526772973](https://github.com/immediately-run/baton/actions/runs/44526772973)), and the retries
+spent Workers Free's 100,000 rows written on 2026-11-20, which hid the cause behind a quota error
+until the owner moved to Workers Paid. 0061 rebuilt `credentials` for its CHECK under
+`PRAGMA defer_foreign_keys = ON` by creating `credentials_0061`, dropping `credentials` and renaming
+the copy into place. The DROP counts every runner, grant and notice that names a credential as a
+deferred violation; only an INSERT of the parent row takes that count back off, never a RENAME, so
+the commit fails whenever a credential is in use — and passes on every test database, which held
+none, or ran with foreign keys off (the rewind's `PRAGMA foreign_keys = OFF` stays off for the
+rest of that request).
+
+- **A table rebuild under deferred foreign keys must insert the rows back into a table created
+  under the parent's own name; a migration test must run it on rows that reference the table,
+  in a request of its own with foreign keys on.** What changed: 0061 rebuilds that way, and
+  `test/unit/migrations-0061.test.ts` runs it on a runner and a grant naming a credential, then
+  reads the result in a later request. 0061 was edited in place, against append-only: it had
+  never committed on a populated database, and the fixed one reaches the same schema.
+  *Status: fixed by this entry's PR; deployed when it merges.*
