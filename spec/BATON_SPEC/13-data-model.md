@@ -76,7 +76,7 @@ checked in the transaction that adds or first accepts a key (§12.1).
 | `grant_capabilities` | `(credential_id, repository_id, capability_pattern)` | — | A grant's capabilities as rows, derived from `runner_grants.capabilities` in the statement that writes it (§6.6 rule 4) |
 | `sync_keys` | `fingerprint` | `repository_id`, `role`, `public_key` (unique), `added_by`, `added_at`, `revoked_at` | Sync keys, one repository each (R-BTN-93) |
 | `repository_policies` | `(repository_id, version)` | `policy_json` (its `floors` list a field), `hash`, `previous_hash`, `changed_by`, `approver`, `preset`, `at` | Each policy version, append-only (R-BTN-188, R-BTN-189) |
-| `dashboard_sessions` | `id_hash` (SHA-256 of the cookie value) | `admin_key`, `created_at`, `expires_at`, `revoked_at` | A dashboard session (R-BTN-155) |
+| `dashboard_sessions` | `id_hash` (SHA-256 of the cookie value) | `admin_key`, `access_email_hash` (SHA-256 of the Access email; NULL for a link's session), `created_at`, `expires_at`, `revoked_at` | A dashboard session (R-BTN-155) |
 | `login_links` | `token_hash` (SHA-256 of the link's token) | `admin_key`, `expires_at`, `used_at` | A one-time sign-in link (R-BTN-155) |
 | `request_nonces` | `(key_fingerprint, nonce)` | `seen_at` | Replay cache for every signed request (R-BTN-13) |
 | `webhook_deliveries` | `delivery_id` | `received_at` | Deliveries seen (R-BTN-73) |

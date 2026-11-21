@@ -121,6 +121,7 @@ For irfldhv1's homes (`fieldhouse`, `docs`, `baton`, `hq`), as of 2026-10-27:
 | Claude Code sessions | host (`local`) or below (`cloud`) | the owner's account, or the Claude GitHub App. That puts human-level credentials in sessions below the human level: a credential crossing downward under Axiom 6, and the root of reach 3 (B-136) |
 | GitHub Actions workflows | the workflow's | `GITHUB_TOKEN` and the repository's secrets |
 | Any other org member or installed App with `write` | theirs | their grant |
+| Whoever can make Cloudflare Access assert an email `ACCESS_IDENTITIES` binds | theirs | not push, but the bound administrator key's dashboard session (R-BTN-155): reach 3 |
 | Any runner's Baton machine key | VM | not push, but a board post (R-BTN-102, the `cooperative` policy's `inputs.board` admits `machine`): reach 7 |
 
 Every VM shares one GitHub identity, so a push cannot be traced to a slot from git alone,
@@ -247,6 +248,20 @@ or rulesets. Tickets also carry authority by convention: a `**Brief:** the owner
 verbatim:` line reads as the owner's instruction, and a runner can write that line as easily
 as any other. **Rated critical.** And because the injected session holds the owner's
 credentials, it passes every owner gate on this page (*The decision*), signing included.
+
+**Sign-in through Cloudflare Access widens this reach to the dashboard** (R-BTN-155; the owner
+accepted it on 2026-11-21, choosing an explicit click over freshness or factor rules). An email
+`ACCESS_IDENTITIES` binds to an administrator key opens that key's session with no key in hand.
+So an injected session that can drive a browser already signed in to Access (Claude in Chrome
+acts in the person's own Chrome) clicks "Sign in with Cloudflare Access" and holds an
+administrator's session for its lifetime. An assertion is also a bearer until it expires: Baton
+checks neither its age nor how the person authenticated, so a copied assertion opens sessions
+too. And whoever can make Access assert the email (its administrators, every identity provider
+the application admits, the email's mailbox if a one-time code is the factor) holds the same
+power: a second root of trust beside the deployment (R-BTN-57). The deployment narrows this, out
+of Baton's sight: an Access application covering Baton's hostname alone, a short session
+duration, and a factor no agent session holds (a hardware key that needs a touch; never the
+forge account the sessions carry, nor a mailbox an agent reads). **Rated high, accepted.**
 
 **The message of the day (B-123) is this reach at fleet scale**: one injected owner session, or
 a compromised server, instructs every leg of a repository for up to seven days.

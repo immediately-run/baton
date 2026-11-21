@@ -132,8 +132,9 @@ named `<noun>.<verb>`, with the principals that may call it; the API, the CLI, t
 MCP are generated from it and checked by one `authorize`. The CLI is `baton <noun> <verb>`, and
 its help comes from the registry (R-BTN-127, R-BTN-129).
 
-**Session.** A dashboard sign-in, minted by an administrator's or owner's key through a code the
-key holder confirms; one principal, carrying its key's role, an owner's reaching only the
+**Session.** A dashboard sign-in of an administrator's or owner's key, opened by its link or a
+code its holder confirms, or by an email Cloudflare Access verified that `ACCESS_IDENTITIES`
+binds to the key; one principal, carrying its key's role, an owner's reaching only the
 repositories the key still owns (R-BTN-155).
 
 **Screen.** One entity's page of the dashboard — sign in, pick a repository, one entity per

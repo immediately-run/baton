@@ -2,7 +2,8 @@
   "start": "filed",
   "start_leg": "implement",
   "end": [
-    "merged"
+    "merged",
+    "confirmed"
   ],
   "short_waits": [
     "ci"
@@ -26,6 +27,12 @@
     },
     "merged": {
       "label": "Merged"
+    },
+    "delivered": {
+      "label": "Found already delivered"
+    },
+    "confirmed": {
+      "label": "Already delivered, confirmed by a person"
     }
   },
   "legs": {
@@ -33,8 +40,11 @@
       "from": [
         "filed"
       ],
-      "to": "pr-open",
-      "label": "Implement it and open the PR"
+      "to": [
+        "pr-open",
+        "delivered"
+      ],
+      "label": "Implement it and open the PR, or find it delivered"
     },
     "run-tests": {
       "from": [
@@ -82,6 +92,19 @@
       ],
       "to": "merged",
       "label": "Merge and close the ticket"
+    },
+    "confirm": {
+      "from": [
+        "delivered"
+      ],
+      "to": [
+        "confirmed",
+        "filed"
+      ],
+      "kind": "person",
+      "asks": "owner",
+      "max_runs": 3,
+      "label": "A person confirms it was already delivered"
     }
   }
 }

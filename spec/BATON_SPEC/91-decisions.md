@@ -146,7 +146,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a leg that waits on an effect git or the forge shows over waiting on "sent" (R-BTN-116).
 - Chose check courses whose verdict is a command's exit status, the forge's own check runs being enough for `merge.checks: required` (R-BTN-114, R-BTN-153, R-BTN-183).
 - Chose either an SSH key or an API key for every administrator, owner and runner, over one kind per role (R-BTN-13, R-BTN-159).
-- Chose administrator keys anchored in the deployment's secret and owner and runner keys in SQLite behind a signed API, over keys in git or Cloudflare Access as identity (R-BTN-57).
+- Chose administrator keys anchored in the deployment's secret and owner and runner keys in SQLite behind a signed API, over keys in git or Cloudflare Access as identity; Access only binds an email to a key's session (R-BTN-57, R-BTN-155).
 - Chose dashboard sessions as one `session` principal carrying its key's role, scoped to what that key still owns, over an administrator-only dashboard (R-BTN-155, R-BTN-129).
 - Chose to keep a ticket's holds, cancel, attempts and backoff when it leaves the board and to restore them if its id returns (R-BTN-12).
 - Chose capabilities on each repository's grant over capabilities on the key (R-BTN-58).
@@ -193,3 +193,4 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a launcher outside Baton that ranks `launch-candidates` and starts sessions by its host's own means, over launches queued in Baton's outbox (R-BTN-201, R-BTN-45, R-BTN-98, R-BTN-107).
 - Chose a runner-side queue of the host user's orders, run without a claim only while Baton is unreachable and reported through an ordinary claim on its return, over a git lock beside it or runners idle through an outage (R-BTN-202, R-BTN-193, R-BTN-72).
 - Chose proposal pages for unbuilt designs, the course's own pages for a shipped course's contract, and this specification for the reference runner and the CLI ([the simplification review](../../docs/review/spec-simplification-review-2026-11-19.mdx)).
+- Chose a Cloudflare Access sign-in by an explicit click, bound per email to a key by the deployment's secret, over a terminal-minted link for every sign-in, accepting the Access configuration as a second root of trust and the risk of an agent driving a signed-in browser (R-BTN-155, R-BTN-57).
