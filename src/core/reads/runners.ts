@@ -15,7 +15,7 @@
 // answer says so in `not_built` instead of inventing them. A run's `log_dir` is the column as
 // stored (`claim_legs.leg_log_dir`), which nothing writes yet (B-23).
 import { BatonError } from '../http';
-import { transcriptUrl } from '../links';
+import { transcriptUrl, type SessionLinkView } from '../links';
 import { graphOf, type Graph } from '../graph';
 import { grantedKeySql } from '../validate';
 import { queryOf, type ReadCall, type ReadCtx, type ReadRoute } from './kit';
@@ -50,6 +50,7 @@ export type RunnerClaim = {
   max_runs: number | null;
   next_backoff_until: number | null;
   session_url: string | null;
+  session_link: boolean;
   log_dir: string | null;
   activity: { kind: string; label: string | null; started_at: number } | null;
 };
@@ -123,7 +124,7 @@ function rawRows(cx: ReadCtx, repo: string, only: number | null): Raw[] {
 }
 
 /** The rows as the reads serve them. */
-export function runnerRows(cx: ReadCtx, repo: string, only: number | null = null): { rows: RunnerRow[]; profiles: Map<number, unknown> } {
+export function runnerRows(cx: ReadCtx, repo: string, sessionLink: SessionLinkView, only: number | null = null): { rows: RunnerRow[]; profiles: Map<number, unknown> } {
   const now = cx.now();
   const raw = rawRows(cx, repo, only);
   // The detail reads cover the runners a reader can still act on or learn from: not reaped,
@@ -215,7 +216,7 @@ export function runnerRows(cx: ReadCtx, repo: string, only: number | null = null
         attempt: c.leg == null ? null : c.attempt,
         max_runs: c.leg != null && c.course_id != null ? graphs.get(c.course_id)?.legs.get(c.leg)?.maxRuns ?? null : null,
         next_backoff_until: c.retry_after != null && c.retry_after > now ? c.retry_after : null,
-        session_url: c.session_url, log_dir: c.leg_log_dir,
+        ...sessionLink(c.session_url, c.runner_id), log_dir: c.leg_log_dir,
         activity: a ? { kind: a.kind, label: a.label, started_at: a.started_at } : null,
       };
     });
@@ -259,7 +260,7 @@ function showRunner(cx: ReadCtx, call: ReadCall) {
   const now = cx.now();
   const since = sinceOf(q.since, now);
   const id = runnerId(call);
-  const { rows, profiles } = runnerRows(cx, repo, id);
+  const { rows, profiles } = runnerRows(cx, repo, call.sessionLink, id);
   const row = rows[0];
   // A runner with no grant on the repository is `not-found`, the same as none (B-196).
   if (!row) throw new BatonError('not-found', 'no such runner');
@@ -285,14 +286,14 @@ function showRunner(cx: ReadCtx, call: ReadCall) {
      WHERE runner_id = ? AND substr(ticket_id, 1, length(?)) = ? AND (ended_at IS NULL OR ended_at >= ?)
      ORDER BY claimed_at, id`, id, prefix, prefix, since);
   const claimIds = JSON.stringify(claims.map((c) => c.id));
-  const runs = new Map<number, { leg: string; run_id: string | null; started_at: number; ended_at: number | null; reached: string | null; session_url: string | null; log_dir: string | null }[]>();
+  const runs = new Map<number, { leg: string; run_id: string | null; started_at: number; ended_at: number | null; reached: string | null; session_url: string | null; session_link: boolean; log_dir: string | null }[]>();
   const activities = new Map<number, Record<string, unknown>[]>();
   if (claims.length) {
     for (const r of cx.sql<{ claim_id: number; leg: string; run_id: string | null; started_at: number; finished_at: number | null; abandoned_at: number | null; to_station: string | null; session_url: string | null; leg_log_dir: string | null }>(
       `SELECT claim_id, leg, run_id, started_at, finished_at, abandoned_at, to_station, session_url, leg_log_dir FROM claim_legs
        WHERE claim_id IN (SELECT value FROM json_each(?)) ORDER BY claim_id, seq`, claimIds)) {
       runs.set(r.claim_id, [...(runs.get(r.claim_id) ?? []), { leg: r.leg, run_id: r.run_id, started_at: r.started_at, ended_at: r.finished_at ?? r.abandoned_at ?? null,
-        reached: r.to_station, session_url: r.session_url, log_dir: r.leg_log_dir }]);
+        reached: r.to_station, ...call.sessionLink(r.session_url, id), log_dir: r.leg_log_dir }]);
     }
     for (const a of cx.sql<{ claim_id: number; id: string; parent_id: string | null; kind: string; label: string | null; source: string; started_at: number; ended_at: number | null; outcome: string | null; detail_json: string | null }>(
       `SELECT claim_id, id, parent_id, kind, label, source, started_at, ended_at, outcome, detail_json FROM activities
@@ -312,7 +313,7 @@ function showRunner(cx: ReadCtx, call: ReadCall) {
         return {
           claim_id: c.id, ticket_id: c.ticket_id, leg: last?.leg ?? null, started_at: c.claimed_at, ended_at: c.ended_at,
           end: claimEnd(c.status, c.end_reason), end_reason: c.end_reason, detail: c.end_detail,
-          session_url: last?.session_url ?? null, log_dir: last?.log_dir ?? null,
+          session_url: last?.session_url ?? null, session_link: last?.session_link ?? false, log_dir: last?.log_dir ?? null,
           runs: legs,
           activities: activities.get(c.id) ?? [],
         };
@@ -330,7 +331,7 @@ export const RUNNER_READS: ReadRoute[] = [
     clock: true,
     run(cx, call) {
       queryOf(call);
-      return { runners: runnerRows(cx, call.repository!).rows, not_built: RUNNERS_NOT_BUILT, server_time: cx.now() };
+      return { runners: runnerRows(cx, call.repository!, call.sessionLink).rows, not_built: RUNNERS_NOT_BUILT, server_time: cx.now() };
     },
   },
   { action: 'runner.show', clock: true, run: showRunner },

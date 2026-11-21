@@ -23,7 +23,8 @@
 // for a list, the convention `{<items>: [...], next_cursor?, counts?}` with `cursorOf` and
 // `pageOf` (./kit.ts), timestamps as epoch milliseconds; filter fields only (R-BTN-33). A read
 // writes nothing.
-import { BatonError, json } from '../http';
+import { hiddenSessionLink, type SessionLinkView } from '../links';
+import { BatonError, json, noStore } from '../http';
 import { matchActions } from '../actions';
 import { clockBucket, ifNoneMatch, stateEtag } from '../stateVersion';
 import { checkRepositoryId } from '../validate';
@@ -93,12 +94,28 @@ export async function dispatchRead(cx: ReadCtx, req: Request, url: URL): Promise
     repository = checkRepositoryId(params.repository);
     authorizeRepository(cx, who.principal, repository);
   }
-  const call: ReadCall = { action: hit.action, principal: who.principal, caller, repository, params, url, req: who.req };
+  const principal = who.principal;
+  // R-BTN-113: resolve reporting runners lazily, at most once per read, not once per row.
+  let ownRunners: Set<number> | undefined;
+  const sessionLink: SessionLinkView = (link, runnerId) => {
+    if (link === null) return hiddenSessionLink(link, runnerId);
+    if (principal.kind === 'session') return { session_url: link, session_link: true };
+    if (principal.role === 'runner') {
+      ownRunners ??= new Set(cx.sql<{ id: number }>('SELECT id FROM runners WHERE credential_id = ?', principal.cred).map((r) => r.id));
+      if (ownRunners.has(runnerId)) return { session_url: link, session_link: true };
+    }
+    return hiddenSessionLink(link, runnerId);
+  };
+  const open = url.searchParams.get('open');
+  const deliverInteractions = hit.action.id === 'repo.conditions' && principal.kind === 'key' && principal.role === 'runner'
+    && (open === '1' || open === 'true') && url.searchParams.get('type') === 'interact';
+  const call: ReadCall = { action: hit.action, principal, caller, repository, params, url, req: who.req, sessionLink, showInteractionLinks: principal.kind === 'session' || deliverInteractions };
   const conditional = route.etag === undefined ? true : route.etag === false ? false : route.etag(call);
   const etag = conditional ? etagOf(cx, call, route) : null;
-  if (etag && ifNoneMatch(req, etag)) return new Response(null, { status: 304, headers: { ETag: etag } });
+  if (etag && ifNoneMatch(req, etag)) return noStore(new Response(null, { status: 304, headers: { ETag: etag } }));
   const out = await route.run(cx, call);
   const res = out instanceof Response ? out : json(out);
   if (etag && res.ok) res.headers.set('ETag', etag);
-  return req.method === 'HEAD' ? new Response(null, { status: res.status, headers: res.headers }) : res;
+  const reply = noStore(res);
+  return req.method === 'HEAD' ? new Response(null, { status: reply.status, headers: reply.headers }) : reply;
 }

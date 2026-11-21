@@ -5,6 +5,7 @@
 // R-BTN-39, blocks R-BTN-75, overrides R-BTN-12, claims R-BTN-10, questions R-BTN-116), and
 // `ticketDetail` adds what one ticket's page draws. Filter fields only (R-BTN-33): no body, note
 // or exit criterion is read. Nothing here writes, and the clock is the caller's `now`.
+import type { SessionLinkView } from './links';
 import { ATTEMPTS_HOLD_AT } from './attempts';
 import { STALLED_MS } from './claims';
 import { fileUrl, type Forge } from './links';
@@ -282,7 +283,7 @@ export function withEligible(cx: TicketsCtx, rows: readonly TicketRow[]): Ticket
 /** What a ticket's page draws beyond its list row (B-218): the live claim, the earlier failed
  *  attempts, the overrides, the open conditions and scope findings, a pending fence, the resume
  *  record and the forge link. `repo` is the ticket's own, already checked. */
-export function ticketDetail(cx: TicketsCtx, repo: string, id: string, path: string | null) {
+export function ticketDetail(cx: TicketsCtx, repo: string, id: string, path: string | null, sessionLink: SessionLinkView) {
   const now = cx.now();
   const retryMax = cx.core.admin.retry(repo)?.max_failed ?? ATTEMPTS_HOLD_AT;
   const failed = cx.core.claims.failedAttempts(id);
@@ -305,7 +306,7 @@ export function ticketDetail(cx: TicketsCtx, repo: string, id: string, path: str
     // §7.4: the attempt this claim is, against the failed attempts that hold the ticket.
     attempt: failed.length + 1, max_runs: retryMax, next_backoff_until: override?.retry_after ?? null,
     // R-BTN-113: stored only where the session-host rule passed it; R-BTN-128: a directory, as text.
-    session_url: leg?.session_url ?? null, log_dir: leg?.leg_log_dir ?? null,
+    ...sessionLink(leg?.session_url ?? null, live.runner_id), log_dir: leg?.leg_log_dir ?? null,
     last_activity_at: live.last_activity_at, alive, stalled: alive && now - (live.last_activity_at ?? live.claimed_at) > STALLED_MS,
   } : null;
   const attempts = cx.sql<{ id: number; runner_id: number; hostname: string; claimed_at: number; ended_at: number | null; end_reason: string | null; end_detail: string | null }>(

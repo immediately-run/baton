@@ -95,9 +95,9 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
       ['interact', LINK, 'open', 'high'], // the stored link, not the runner's; no subject or body anywhere
     ]);
 
-    // Needs you lists it with its link (R-BTN-163), and the delivery runner reads the list
+    // The export’s Needs you flags the link, and the delivery runner reads the list
     // (R-BTN-195): the entry carries the ticket, the leg and the url, and no leg text.
-    expect(await needsYou()).toEqual([expect.objectContaining({ ticket_id: 'docs:A', leg: 'implement', type: 'interact', url: LINK, run_id: a.json.run_id })]);
+    expect(await needsYou()).toEqual([expect.objectContaining({ ticket_id: 'docs:A', leg: 'implement', type: 'interact', url: null, session_link: true, run_id: a.json.run_id })]);
     const list = await readAs(reader, '/v1/repositories/docs/conditions?open=1&type=interact');
     expect(list.status).toBe(200);
     expect(list.json.conditions).toEqual([expect.objectContaining({ ticket_id: 'docs:A', leg: 'implement', url: LINK })]);
@@ -134,7 +134,7 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     // default) is dropped and logged — the beat answers 200 and says so.
     const dropped = await beat('vm-a', w.secret, { session_url: 'https://sessions.example/not-allowed' });
     expect(dropped.status).toBe(200);
-    expect(dropped.json.session_url_dropped).toContain('sessions.example');
+    expect(dropped.json.session_url_dropped).toContain('session_hosts');
     expect(await rows<{ session_url: string | null }>('SELECT session_url FROM claim_legs WHERE claim_id = ?', c.claim_id)).toEqual([{ session_url: null }]);
     expect((await rows(`SELECT 1 FROM events WHERE kind = 'discrepancy' AND json_extract(detail_json, '$.sub') = 'session-url'`)).length).toBe(1);
     // A link over the bound is dropped the same way, never refused.

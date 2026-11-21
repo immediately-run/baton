@@ -129,7 +129,7 @@ function ConditionRow({ condition, repository }: { condition: Condition; reposit
       </div>
       <div className="needs-act">
         {/* R-BTN-195: the session link Baton holds for the run, a link only on an allowed host. */}
-        {interact && condition.url ? <ExtLink href={condition.url} kind="session" showHost>Open session</ExtLink> : null}
+        {interact && condition.url ? <ExtLink href={condition.url} kind="session" showHost /> : null}
         <Controls
           view="repository/conditions/{condition}"
           allowed={condition.allowed ?? []}
