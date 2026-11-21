@@ -79,7 +79,8 @@ async function aLiveRepository(): Promise<void> {
   // The rows retirement deletes: a stale webhook stamp, a pending trailing dispatch, a pending
   // unblocked dispatch, and an account instance listing the repository (R-BTN-73, R-BTN-77, R-BTN-76).
   await rows(`INSERT INTO webhook_syncs (repository_id, last_dispatch_at) VALUES ('ops', ?)`, T0 - 11 * 60_000);
-  await rows(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES ('ops', ?, ?)`, T0 - 60_000, T0 + 30_000);
+  await rows(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES ('ops', ?, ?)
+    ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at, trailing_at = excluded.trailing_at`, T0 - 60_000, T0 + 30_000);
   await rows(`INSERT INTO unblocked_dispatch (repository_id, pending_json, due_at) VALUES ('ops', ?, ?)`, JSON.stringify([{ ticket: 'ops:T-1', cleared: [] }]), T0 + 30_000);
   await rows(`INSERT INTO external_resources (name, scope, detail_schema) VALUES ('acme', 'account', '{}')`);
   await rows(`INSERT INTO resource_instances (name, repositories) VALUES ('acme', ?)`, JSON.stringify(['ops', 'docs']));

@@ -4,7 +4,7 @@
 // gate is what runs one request at a time between awaits (§3).
 import { DurableObject } from 'cloudflare:workers';
 import { BatonCore } from '../core/baton';
-import { dispatchWorkflow } from '../core/mirror';
+import { sendForgeDispatch } from '../core/dispatch';
 import { parseAdminKeys } from '../core/auth';
 import type { Cursor, Row, SqlValue, Store } from '../core/ports';
 
@@ -26,7 +26,7 @@ export class Baton extends DurableObject<Env> {
       store: durableStore(ctx.storage),
       scheduler: { get: () => ctx.storage.getAlarm(), set: (at) => ctx.storage.setAlarm(at) },
       config: env,
-      dispatch: { send: (target) => dispatchWorkflow(env.GITHUB_DISPATCH_TOKEN, target), defer: (work) => ctx.waitUntil(work) },
+      dispatch: { send: (target) => sendForgeDispatch(env, target, this.core.now()), defer: (work) => ctx.waitUntil(work) },
       adminKeys: { list: () => parseAdminKeys(env.BATON_ADMIN_KEYS ?? '') },
     });
     // The object refuses to serve until every migration is applied (§3), and keeps one alarm.

@@ -1,5 +1,7 @@
 // The numbered schema migrations, applied in order before the object serves (BATON_SPEC §3).
 // A migration is never edited once merged: a change is a new file and a new entry here.
+import backfillPostedHead from './0068_backfill_posted_head.sql';
+import postedHead from './0066_posted_head.sql';
 import init from './0001_init.sql';
 import workers from './0002_workers.sql';
 import claims from './0003_claims.sql';
@@ -206,4 +208,6 @@ export const MIGRATIONS: Migration[] = [
   // `frozen`, `unfrozen`, `sealed`, `imported` event kinds).
   { id: 64, sql: childrenOwnerState },
   { id: 65, sql: readEfficiency },
+  { id: 66, sql: postedHead },
+  { id: 68, sql: backfillPostedHead },
 ];

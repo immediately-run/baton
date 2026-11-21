@@ -17,7 +17,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { sessionCall, setClock } from '../helpers';
 import { claimAndStart, claimElsewhere, fleet, grantedRunner, heartbeat, signed, type Fleet, type Granted, type Json } from '../lib/runnerFleet';
 
-const T0 = Date.parse('2026-11-20T12:00:00Z');
+// Drive time explicitly; do not let a real workerd alarm race a simulated clock jump.
+const T0 = Date.parse('2030-11-20T12:00:00Z');
 const H = 3_600_000;
 const PROFILE = { cli: { version: '1.2.3' }, note: '<b>mine</b>' };
 

@@ -8,9 +8,12 @@
 // own table to that list in its PR (conditions B-55, `ticket_timers` B-61/B-63, the outbox
 // B-64, check runners B-5, MCP keys B-25, registration tokens and instance settings B-8/B-46).
 import { BatonError } from './http';
+import { HAS_MIRROR } from './syncWants';
 import { sha256HexSync } from './policy';
 import { logEvent } from './db';
-import { REPOSITORY_ID, TICKET_ID } from './validate';
+import { REPOSITORY_ID, TICKET_ID, checkUnblockedTrigger } from './validate';
+import { checkRegisteredDispatch } from './registry';
+import type { Forge } from './links';
 import type { Store } from './ports';
 
 export const OWNER_STATE_FORMAT = 'baton.owner-state/v1';
@@ -86,6 +89,8 @@ function canonical(v: unknown): string {
   return JSON.stringify(v);
 }
 
+const SYNC_WANT_COLUMNS = new Set(['sync_wanted_at', 'sync_wanted_after']);
+
 export class OwnerState {
   constructor(private readonly c: {
     store: Store;
@@ -150,16 +155,13 @@ export class OwnerState {
     const claims = this.rows<{ id: number; ticket_id: string; status: string; fence_pending: number }>(
       `SELECT id, ticket_id, status, fence_pending FROM claims WHERE status = 'active' OR (fence_pending = 1 AND status = 'reaped') ORDER BY id`);
     const last = this.rows<{ n: number }>('SELECT COALESCE(MAX(seq), 0) AS n FROM events')[0].n;
-    const lagging = this.rows<{ id: string }>(
-      `SELECT r.id FROM repositories r
-       WHERE r.retired_at IS NULL AND r.mirror_acked_seq < ?
-         AND (r.mirror_workflow IS NOT NULL OR EXISTS (SELECT 1 FROM sync_keys k WHERE k.repository_id = r.id AND k.role = 'mirror' AND k.revoked_at IS NULL))
-       ORDER BY r.id`, last);
+    const lagging = this.rows<{ repository_id: string }>(`SELECT r.id AS repository_id FROM repositories r
+      WHERE r.retired_at IS NULL AND r.mirror_acked_seq < ? AND ${HAS_MIRROR} ORDER BY r.id`, last);
     if (claims.length || lagging.length) {
-      for (const m of lagging) this.c.dispatchMirror?.(m.id);
-      throw new BatonError('conflict', `the seal waits: ${claims.length ? `claims ${claims.map((c) => `${c.id} (${c.ticket_id}${c.fence_pending ? ', fence pending' : ''})`).join(', ')}` : ''}${claims.length && lagging.length ? '; ' : ''}${lagging.length ? `mirrors lagging on ${lagging.map((m) => m.id).join(', ')}` : ''}`.trim(), {
+      for (const m of lagging) this.c.dispatchMirror?.(m.repository_id);
+      throw new BatonError('conflict', `the seal waits: ${claims.length ? `claims ${claims.map((c) => `${c.id} (${c.ticket_id}${c.fence_pending ? ', fence pending' : ''})`).join(', ')}` : ''}${claims.length && lagging.length ? '; ' : ''}${lagging.length ? `mirrors lagging on ${lagging.map((m) => m.repository_id).join(', ')}` : ''}`.trim(), {
         claims: claims.map((c) => ({ id: c.id, ticket_id: c.ticket_id, status: c.status, fence_pending: c.fence_pending === 1 })),
-        lagging_mirrors: lagging.map((m) => m.id),
+        lagging_mirrors: lagging.map((m) => m.repository_id),
       });
     }
     const at = this.c.now();
@@ -175,7 +177,7 @@ export class OwnerState {
   }
 
   private sectionRows(table: string, order: string): Record<string, unknown>[] {
-    const cols = this.columns(table);
+    const cols = this.columns(table).filter((c) => table !== 'repositories' || !SYNC_WANT_COLUMNS.has(c));
     if (!cols.length) throw new BatonError('internal', `the export finds no table ${table}`);
     return this.rows<Record<string, unknown>>(`SELECT ${cols.map((c) => `"${c}"`).join(', ')} FROM ${table} ORDER BY ${order}`);
   }
@@ -225,6 +227,17 @@ export class OwnerState {
       if (r.retired_at == null && !str(r.github)) bad('repositories row', `${r.id}: a live row names its forge path`);
       if (r.retired_at != null && !(str(r.github) && r.github.startsWith('~retired/'))) bad('repositories row', `${r.id}: a retired row is tombstoned`);
       if (!str(r.forge) || !['github', 'gitlab', 'gitea', 'git'].includes(r.forge)) bad('repositories row', `${r.id}: forge is unknown`);
+      if (r.dispatch != null || r.unblocked_trigger != null) {
+        if (r.retired_at != null) bad('repositories row', `${r.id}: a retired row cannot dispatch`);
+        const parseTarget = (field: string) => {
+          if (r[field] == null) return null;
+          if (typeof r[field] !== 'string') return bad(field, 'must be stored as JSON text');
+          try { return JSON.parse(r[field]); } catch { return bad(field, 'must be valid JSON'); }
+        };
+        const forge = r.forge as Forge;
+        const dispatch = r.dispatch == null ? null : checkRegisteredDispatch(parseTarget('dispatch'), 'dispatch', forge, r.github, r.web_base, r.default_branch);
+        if (r.unblocked_trigger != null) checkUnblockedTrigger(parseTarget('unblocked_trigger'), forge, String(r.default_branch), dispatch);
+      }
     }
     const repoIds = new Set((sections.repositories ?? []).map((r) => r.id));
     for (const r of sections.repository_owners ?? []) {
@@ -327,7 +340,8 @@ export class OwnerState {
     if (Object.keys(awaiting).length) this.setSetting('pending_first_snapshot', JSON.stringify(Object.keys(awaiting).sort()));
     for (const s of SECTIONS) {
       if (s.ticketScoped) continue;
-      const rows = (b.sections?.[s.table] ?? []).map((r) => (s.table === 'runners' ? { ...r, last_seen_at: 0, last_activity_at: 0 } : r));
+      const rows = (b.sections?.[s.table] ?? []).map((r) => (s.table === 'runners' ? { ...r, last_seen_at: 0, last_activity_at: 0 }
+        : s.table === 'repositories' ? { ...r, sync_wanted_at: null, sync_wanted_after: null } : r));
       importOne(s.table, rows);
     }
     for (const s of HISTORY_SECTIONS) importOne(s.table, b.sections?.[s.table] ?? []);

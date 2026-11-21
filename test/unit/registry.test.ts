@@ -2,12 +2,12 @@
 // registration is checked before it is written and is insert-only; the BATON_REPOSITORIES seed
 // never changes a repository Baton knows; a sync token binds to exactly one repository's
 // workflow on its default branch; a dispatch names that repository's workflow. S-BTN-26.
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { checkRegistration } from '../../src/core/registry';
 import { branchMatches } from '../../src/core/claims';
 import { checkRegistry } from '../../src/core/courses';
 import type { DispatchTarget } from '../../src/core/ports';
-import { dispatchWorkflow } from '../../src/core/mirror';
+
 import { rows, withCore } from '../helpers';
 
 const OPS = { id: 'ops', github: 'immediately-run/ops', default_branch: 'trunk', sync_workflow: '.github/workflows/sync.yml' };
@@ -20,7 +20,7 @@ describe('checkRegistration', () => {
       ...OPS, mirror_workflow: null, weight: 100, tiers: ['routine', 'judgement', 'critical'], transcript_repos: [], cut_over: false,
       // R-BTN-92/93 (R3-1262): a GitHub repository's forge fields and CI identity default from its path.
       forge: 'github', remote: 'https://github.com/immediately-run/ops.git', web_base: 'https://github.com/immediately-run/ops',
-      ci_identity: { kind: 'github-actions' }, sync_keys: [],
+      ci_identity: { kind: 'github-actions' }, sync_keys: [], dispatch: { kind: 'github-app' },
     });
   });
 
@@ -97,6 +97,8 @@ describe('the registry', () => {
       c.registry.register(OPS);
       const got: DispatchTarget[] = [];
       (c as unknown as { ports: { dispatch: { send: (t: DispatchTarget) => Promise<boolean> } } }).ports.dispatch = { send: async (t) => (got.push(t), true) };
+      c.syncWants.request('ops');
+      c.store.exec(`INSERT INTO events (repository_id, at, kind, actor) VALUES ('docs', 1, 'claimed', 'baton')`);
       expect(await c.dispatcher({ repository: 'ops', kind: 'sync' })).toBe(true);
       expect(await c.dispatcher({ repository: 'docs', kind: 'mirror' })).toBe(true);
       expect(await c.dispatcher({ repository: 'ops', kind: 'mirror' })).toBe(false);
@@ -104,8 +106,8 @@ describe('the registry', () => {
       return got;
     });
     expect(sent).toEqual([
-      { github: 'immediately-run/ops', workflow: 'sync.yml', ref: 'trunk' },
-      { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' }]);
+      expect.objectContaining({ github: 'immediately-run/ops', workflow: 'sync.yml', ref: 'trunk' }),
+      expect.objectContaining({ github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })]);
   });
 
   it('an unblocked dispatch sends the owners’ workflow with one `tickets` input; a trigger it cannot send is false (R-BTN-77)', async () => {
@@ -123,27 +125,10 @@ describe('the registry', () => {
       expect(await c.dispatcher({ repository: 'ops', kind: 'unblocked', tickets })).toBe(false);
       return got;
     });
-    expect(sent).toEqual([{ github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: JSON.stringify(tickets) } }]);
+    expect(sent).toEqual([expect.objectContaining({ github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: JSON.stringify(tickets) } })]);
   });
 
-  it('dispatchWorkflow posts `inputs` only when the target has them', async () => {
-    const bodies: unknown[] = [];
-    const urls: string[] = [];
-    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
-      urls.push(url);
-      bodies.push(JSON.parse(init.body as string));
-      return new Response(null, { status: 204 });
-    });
-    try {
-      expect(await dispatchWorkflow('tok', { github: 'immediately-run/docs', workflow: 'baton-unblocked.yml', ref: 'main', inputs: { tickets: '[]' } })).toBe(true);
-      expect(await dispatchWorkflow('tok', { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })).toBe(true);
-      expect(await dispatchWorkflow(undefined, { github: 'immediately-run/docs', workflow: 'baton-mirror.yml', ref: 'main' })).toBe(false);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-    expect(urls).toEqual(['https://api.github.com/repos/immediately-run/docs/actions/workflows/baton-unblocked.yml/dispatches', 'https://api.github.com/repos/immediately-run/docs/actions/workflows/baton-mirror.yml/dispatches']);
-    expect(bodies).toEqual([{ ref: 'main', inputs: { tickets: '[]' } }, { ref: 'main' }]);
-  });
+
 });
 
 describe('branch patterns (R-BTN-51, §6.3)', () => {

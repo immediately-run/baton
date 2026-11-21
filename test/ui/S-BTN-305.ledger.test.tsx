@@ -28,7 +28,7 @@ describe('S-BTN-305 each home in the ledger is a screen that draws it (B-203)', 
   it('Conditions names every repository listing the ledger homes there', () => {
     const named = new Set(LISTINGS.map((l) => l.key));
     const listed = homes.filter((h) => h.screen === 'repository/conditions' && h.field.startsWith('listings.')).map((h) => h.field.slice('listings.'.length));
-    expect(listed.length).toBe(16);
+    expect(listed.length).toBe(19);
     for (const key of listed) expect([key, named.has(key)]).toEqual([key, true]);
     // And nothing the screen names is a listing the ledger forgot.
     expect([...named].sort()).toEqual([...listed].sort());

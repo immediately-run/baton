@@ -66,8 +66,14 @@ export interface Workflow {
   own?: boolean;
   tickets?: unknown[];
 }
+export type ForgeDispatch = { kind: 'github-app' } | { kind: 'gitlab-trigger'; project_id: number; ref: string }
+  | { kind: 'gitea'; workflow: string; ref: string };
+
 export interface DispatchTarget {
   github: string;
+  repository?: string;
+  origin?: string;
+  adapter?: ForgeDispatch;
   /** The workflow file's name, as `actions/workflows/{workflow}/dispatches` takes it. */
   workflow: string;
   ref: string;
@@ -106,12 +112,9 @@ export interface Config {
    *  allowed_capabilities}` — `key` an OpenSSH public key line, `name` the one hostname it may
    *  register. Seeded into `credentials` at start until R3-1240's owner grants replace it. */
   BATON_KEYS?: string;
-  /** §10.3: a fine-grained token, Actions: write on docs only, for workflow_dispatch. Absent,
-   *  the two workflows run on their 15-minute schedules. */
-  GITHUB_DISPATCH_TOKEN?: string;
-  /** R-BTN-94: per repository, `{forge, gitlab_issuer?, webhook?, dispatch?}` as JSON — what the
-   *  Runner knows of each repository's forge before the object, and its forge secrets (R3-1262
-   *  reads `gitlab_issuer`; R3-1263 and R3-1264 the rest). */
+  BATON_GITHUB_APP_ID?: string;
+  BATON_GITHUB_APP_KEY?: string;
+  /** R-BTN-94: per repository, `{forge, gitlab_issuer?, webhook?, trigger_token?}` as JSON. */
   BATON_FORGE_SECRETS?: string;
   /** R-BTN-73: the GitHub App's webhook secret. Absent, every delivery is refused. */
   BATON_GITHUB_WEBHOOK_SECRET?: string;
