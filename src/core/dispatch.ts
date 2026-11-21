@@ -31,7 +31,7 @@ function pkcs8(pem: string) {
 }
 
 async function installationToken(config: Config, path: string, now: number) {
-  if (!config.BATON_GITHUB_APP_ID || !config.BATON_GITHUB_APP_KEY) return config.GITHUB_DISPATCH_TOKEN;
+  if (!config.BATON_GITHUB_APP_ID?.trim() || !config.BATON_GITHUB_APP_KEY?.trim()) return null;
   let jwt: string;
   try {
     const key = await importPKCS8(pkcs8(config.BATON_GITHUB_APP_KEY.trim()), 'RS256');

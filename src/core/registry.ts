@@ -19,6 +19,15 @@ const WORKFLOW = DISPATCH_WORKFLOW;
 const TIER = TIER_NAME;
 const DEFAULT_TIERS = ['routine', 'judgement', 'critical'];
 
+export function checkRegisteredDispatch(value: unknown, field: string, forge: Forge, path: unknown, webBase: unknown, branch: unknown) {
+  if (typeof path !== 'string' || !isForgePath(forge, path) || typeof webBase !== 'string' || !isWebBase(forge, webBase, path)) {
+    return bad(field, 'needs the registered repository web base');
+  }
+  if (typeof branch !== 'string' || !BRANCH.test(branch)) return bad(field, 'needs the registered default branch');
+  const onGithubCom = webBase.toLowerCase() === `https://github.com/${path.toLowerCase()}`;
+  return checkForgeDispatch(value, field, forge === 'github' && !onGithubCom ? 'git' : forge, branch);
+}
+
 /** How a repository's sync proves itself besides a sync key (R-BTN-93): GitHub Actions OIDC from its
  *  sync and mirror workflows, or a GitLab CI `id_tokens` JWT from its issuer. */
 export type CiIdentity = { kind: 'github-actions' } | { kind: 'gitlab-ci'; issuer: string; mirror: boolean };
@@ -146,7 +155,7 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
   if (!ci && !keys.some((k) => k.role === 'sync')) bad(at, 'a repository needs a CI identity or a sync key for its sync (R-BTN-93)');
   const branch = str('default_branch', BRANCH);
   const dispatch = r.dispatch === undefined ? (onGithubCom ? { kind: 'github-app' } as const : null)
-    : r.dispatch === null ? null : checkForgeDispatch(r.dispatch, `${at}.dispatch`, onGithubCom || forge !== 'github' ? forge : 'git', branch);
+    : r.dispatch === null ? null : checkRegisteredDispatch(r.dispatch, `${at}.dispatch`, forge, github, webBase, branch);
   return {
     id: str('id', REPOSITORY_ID),
     github,

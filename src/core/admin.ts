@@ -9,7 +9,7 @@ import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, verifyNamespacedSignature, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkForgeDispatch, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkUnblockedTrigger, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
@@ -1075,10 +1075,7 @@ export class Admin {
     if (b.unblocked_trigger !== undefined) {
       const repo = this.c.registry.live(repository)!;
       const dispatch = this.dispatchSetting(repository);
-      const trigger = b.unblocked_trigger === null ? null : checkForgeDispatch(b.unblocked_trigger, 'unblocked_trigger', repo.forge, repo.default_branch, true);
-      if (trigger && (trigger.kind !== dispatch?.kind || (trigger.kind === 'gitlab-trigger' && dispatch.kind === 'gitlab-trigger' && trigger.project_id !== dispatch.project_id))) {
-        bad('unblocked_trigger', 'must use the repository’s own dispatch target');
-      }
+      const trigger = b.unblocked_trigger === null ? null : checkUnblockedTrigger(b.unblocked_trigger, repo.forge, repo.default_branch, dispatch);
       sets.push(['unblocked_trigger', trigger === null ? null : JSON.stringify(trigger)]);
     }
     if (b.remind_after !== undefined) {

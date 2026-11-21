@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { adminSession, claimItem, cutover, endClaim, Git, keyCall, makeApiKey, mirrorCall, placed, register, rows, setAdminKeys, setClock, sessionCall, tick, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
+import { sha256HexSync } from '../../src/core/policy';
 import { SECTIONS } from '../../src/core/ownerState';
 
 const T0 = Date.parse('2026-11-18T12:00:00Z');
@@ -77,6 +78,18 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     expect((await adminPost('/v1/admin/seal')).status).toBe(200);
   });
 
+  it('lets a pull-only mirror reach the seal even when no local mirror-written events are pending', async () => {
+    await rows("UPDATE repositories SET dispatch = NULL WHERE id = 'docs'");
+    expect(await (await mirrorCall('/v1/sync/wanted')).json()).toMatchObject({ wanted: false });
+    expect((await adminPost('/v1/admin/freeze')).status).toBe(200);
+    expect(await (await mirrorCall('/v1/sync/wanted')).json()).toMatchObject({ wanted: true });
+    expect((await adminPost('/v1/admin/seal')).json.lagging_mirrors).toEqual(['docs']);
+    const { next } = await (await mirrorCall('/v1/sync/events')).json() as { next: number };
+    await mirrorCall(`/v1/sync/events?after=${next}`);
+    expect(await (await mirrorCall('/v1/sync/wanted')).json()).toMatchObject({ wanted: false });
+    expect((await adminPost('/v1/admin/seal')).status).toBe(200);
+  });
+
   it('the export is identical over exactly the owner state; the source serves nothing but an administrator\'s read; a tampered and a second import are refused', async () => {
     // Owner state worth keeping: a grant with a role and a domain, a bar, a hold, a reading.
     const granted = await makeKey('ssh-ed25519', 'granted');
@@ -112,7 +125,21 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     await wipe();
     await setClock(T0 + 5 * 60_000);
     expect((await adminPost('/v1/admin/import', { ...first, digest: '0'.repeat(64) })).json.code).toBe('invalid-params');
+    const canonical = (v: unknown): string => Array.isArray(v) ? `[${v.map(canonical).join(',')}]`
+      : v && typeof v === 'object' ? `{${Object.entries(v).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+        .map(([k, val]) => `${JSON.stringify(k)}:${canonical(val)}`).join(',')}}` : JSON.stringify(v);
+    for (const overrides of [
+      { dispatch: JSON.stringify({ kind: 'github-app', token: 'not-runtime-config' }) },
+      { unblocked_trigger: JSON.stringify({ kind: 'gitlab-trigger', project_id: 99, ref: 'main' }) },
+    ]) {
+      const { digest: _digest, ...changed } = structuredClone(first);
+      Object.assign(changed.sections.repositories.find((r: { id: string }) => r.id === 'docs'), overrides);
+      const refused = await adminPost('/v1/admin/import', { ...changed, digest: sha256HexSync(canonical(changed)) });
+      expect(refused.json).toMatchObject({ code: 'invalid-params', message: expect.stringMatching(/dispatch|unblocked_trigger/) });
+      expect(await rows('SELECT id FROM repositories')).toEqual([]);
+    }
     expect((await adminPost('/v1/admin/import', first)).status).toBe(200);
+    expect(await rows(`SELECT sync_wanted_at, sync_wanted_after FROM repositories WHERE id = 'docs'`)).toEqual([{ sync_wanted_at: null, sync_wanted_after: null }]);
     expect((await adminPost('/v1/admin/import', first)).json.code).toBe('conflict');
     // The state stands: the grant with its expanded capabilities, the bar, the reading, the repository.
     expect((await rows<{ capabilities: string }>('SELECT capabilities FROM runner_grants')).map((r) => JSON.parse(r.capabilities) as string[])).toContainEqual(expect.arrayContaining(['create-pr', 'llm-call']));
@@ -124,7 +151,6 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     git = new Git().add('A', {}, placed('filed', [], [['implement', 'ready']]));
     expect((await git.post()).status).toBe(200);
     expect((await rows<{ hold: number }>('SELECT hold FROM ticket_overrides WHERE ticket_id = ?', 'docs:A'))[0].hold).toBe(1);
-    expect(await rows(`SELECT sync_wanted_at, sync_wanted_after FROM repositories WHERE id = 'docs'`)).toEqual([{ sync_wanted_at: null, sync_wanted_after: null }]);
     // The event sequence continues from the export's floor.
     expect((await rows<{ n: number }>('SELECT MAX(seq) AS n FROM events'))[0].n).toBeGreaterThanOrEqual(first.events_seq);
     // The runner resumes unkeyed and re-heartbeats with its secret.

@@ -42,9 +42,12 @@ export class SyncWants {
     const mirrors = this.c.store.exec<{ id: string; mirror_acked_seq: number }>(`SELECT r.id, r.mirror_acked_seq FROM repositories r
       WHERE r.retired_at IS NULL AND ${HAS_MIRROR} ${repository === undefined ? '' : 'AND r.id = ?'} ORDER BY r.id`,
       ...(repository === undefined ? [] : [repository])).toArray();
-    return mirrors.flatMap(({ id, mirror_acked_seq }) => this.c.store.exec<{ wanted_at: number }>(
+    const frozen = this.c.store.exec(`SELECT 1 FROM baton_settings WHERE key = 'frozen_at' AND value IS NOT NULL`).toArray().length > 0;
+    return mirrors.flatMap(({ id, mirror_acked_seq }) => (frozen
+      ? this.c.store.exec<{ wanted_at: number }>(`SELECT at AS wanted_at FROM events WHERE seq > ? ORDER BY seq LIMIT 1`, mirror_acked_seq)
+      : this.c.store.exec<{ wanted_at: number }>(
       `SELECT e.at AS wanted_at FROM events e INDEXED BY events_mirror_pending WHERE e.repository_id = ? AND e.seq > ?
-        AND (${MIRRORED}) ORDER BY e.seq LIMIT 1`, id, mirror_acked_seq).toArray().map((row) => ({ repository_id: id, ...row })));
+        AND (${MIRRORED}) ORDER BY e.seq LIMIT 1`, id, mirror_acked_seq)).toArray().map((row) => ({ repository_id: id, ...row })));
   }
 
   needsYou(now: number, repository?: string) {

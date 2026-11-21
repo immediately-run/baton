@@ -9,6 +9,7 @@
 //      waits for it, so its events go first (step 1).
 // Every step finds its rows through an index (0053) and reads a row or two when there is nothing
 // to delete: the retention must not cost more than it saves (B-238).
+import { HAS_MIRROR } from './syncWants';
 import { HELD_CLAIMS_SQL } from './blocks';
 import type { Store } from './ports';
 
@@ -66,8 +67,7 @@ export class Retention {
   private mirrorBound(): number | null {
     return this.rows<{ b: number | null }>(
       `SELECT MIN(r.mirror_acked_seq) AS b FROM repositories r WHERE r.retired_at IS NULL
-         AND (r.mirror_workflow IS NOT NULL
-              OR EXISTS (SELECT 1 FROM sync_keys k WHERE k.repository_id = r.id AND k.role = 'mirror' AND k.revoked_at IS NULL))`)[0]?.b ?? null;
+         AND ${HAS_MIRROR}`)[0]?.b ?? null;
   }
 
   /** Step 1, through `events_retention`. The oldest old event is read first: none, or one a

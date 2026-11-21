@@ -11,7 +11,9 @@ import { BatonError } from './http';
 import { HAS_MIRROR } from './syncWants';
 import { sha256HexSync } from './policy';
 import { logEvent } from './db';
-import { REPOSITORY_ID, TICKET_ID } from './validate';
+import { REPOSITORY_ID, TICKET_ID, checkUnblockedTrigger } from './validate';
+import { checkRegisteredDispatch } from './registry';
+import type { Forge } from './links';
 import type { Store } from './ports';
 
 export const OWNER_STATE_FORMAT = 'baton.owner-state/v1';
@@ -225,6 +227,17 @@ export class OwnerState {
       if (r.retired_at == null && !str(r.github)) bad('repositories row', `${r.id}: a live row names its forge path`);
       if (r.retired_at != null && !(str(r.github) && r.github.startsWith('~retired/'))) bad('repositories row', `${r.id}: a retired row is tombstoned`);
       if (!str(r.forge) || !['github', 'gitlab', 'gitea', 'git'].includes(r.forge)) bad('repositories row', `${r.id}: forge is unknown`);
+      if (r.dispatch != null || r.unblocked_trigger != null) {
+        if (r.retired_at != null) bad('repositories row', `${r.id}: a retired row cannot dispatch`);
+        const parseTarget = (field: string) => {
+          if (r[field] == null) return null;
+          if (typeof r[field] !== 'string') return bad(field, 'must be stored as JSON text');
+          try { return JSON.parse(r[field]); } catch { return bad(field, 'must be valid JSON'); }
+        };
+        const forge = r.forge as Forge;
+        const dispatch = r.dispatch == null ? null : checkRegisteredDispatch(parseTarget('dispatch'), 'dispatch', forge, r.github, r.web_base, r.default_branch);
+        if (r.unblocked_trigger != null) checkUnblockedTrigger(parseTarget('unblocked_trigger'), forge, String(r.default_branch), dispatch);
+      }
     }
     const repoIds = new Set((sections.repositories ?? []).map((r) => r.id));
     for (const r of sections.repository_owners ?? []) {

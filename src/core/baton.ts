@@ -128,6 +128,7 @@ export class BatonCore {
   /** §12: workflows to dispatch once the current request or alarm has committed, one per
    *  repository and kind. */
   private pendingDispatch = new Map<string, Workflow>();
+  private syncTrailingQueued = false;
   /** The dispatch call; tests replace it (as they replace `now`) to see what would be sent. */
   dispatcher: (workflow: Workflow) => Promise<unknown>;
   /** §3: a signature check (R3-1239) or a hook call (R3-1236) is awaited through this, so
@@ -160,12 +161,15 @@ export class BatonCore {
     // B-134: the scope audit, before the webhooks and the claims it serves — its hold callback
     // reaches the claims, built later, through the closure.
     this.scope = new Scope({ store, now: () => this.now(), hold: (ticket, claimId) => this.claims.holdForScope(ticket, claimId) });
-    this.webhooks = new Webhooks({ store, now: () => this.now(), scope: this.scope });
+    this.webhooks = new Webhooks({ store, now: () => this.now(), scope: this.scope, want: (repository) => this.syncWants.request(repository) });
     // R-BTN-47 (B-173): a want is recorded only for a live repository — the one predicate
     // (Registry.live) every rule that counts registered repositories reads.
     const want = (wf: Workflow) => {
       if (!this.registry.live(wf.repository)) return;
-      if (wf.kind === 'sync') this.syncWants.request(wf.repository);
+      if (wf.kind === 'sync') {
+        this.queueSync(wf);
+        return;
+      }
       this.pendingDispatch.set(`${wf.repository}:${wf.kind}`, wf);
     };
     // R-BTN-75: the blocks are written with their causes; `fits` is the claim gates' (R-BTN-77).
@@ -186,7 +190,7 @@ export class BatonCore {
         opened: (ticket, ids) => { this.notices.opened(ticket, ids); decisionRows(ticket, ids, 'decision-opened'); },
         closed: (ticket, ids) => { this.notices.closed(ticket, ids); decisionRows(ticket, ids, 'decision-answered'); },
       },
-      queued: (ticket) => this.queues.touch(ticket) });
+      queued: (ticket) => this.queues.touch(ticket), syncWanted: (repository) => this.syncWants.request(repository) });
     // R-BTN-79: each leg's queue, counted where membership changes; a leg over its bound warns.
     this.queues = new Queues({ store, now: () => this.now(), held: (ticket) => this.blocks.isHeld(ticket),
       graph: (repo, course) => this.stations.graph(repo, course), notices: this.notices });
@@ -348,7 +352,7 @@ export class BatonCore {
       const absent = (use: string) => ({ repository_id: r.id, kind: 'baton.forge-secret-missing', use });
       const issues = [];
       if (adapter && (adapter.kind === 'github-app'
-        ? (r.sync_workflow || r.mirror_workflow || r.unblocked_trigger) && !(config.GITHUB_DISPATCH_TOKEN || (config.BATON_GITHUB_APP_ID && config.BATON_GITHUB_APP_KEY))
+        ? (r.sync_workflow || r.mirror_workflow || r.unblocked_trigger) && !(config.BATON_GITHUB_APP_ID?.trim() && config.BATON_GITHUB_APP_KEY?.trim())
         : !dispatchToken(config, r.id, adapter))) issues.push(absent('dispatch'));
       const entry = secrets[r.id];
       if ((entry && Object.hasOwn(entry, 'webhook') && (entry.forge !== r.forge || typeof entry.webhook !== 'string' || !entry.webhook.trim()))
@@ -401,13 +405,7 @@ export class BatonCore {
   private async delivery(req: Request) {
     const raw = req.headers.get('X-Baton-Webhook');
     if (!raw) throw new BatonError('unauthenticated', 'no webhook principal');
-    const out = this.store.transaction(() => {
-      const result = this.webhooks.receive(JSON.parse(raw) as Delivery);
-      if (result.outcome === 'dispatched') {
-        for (const repository of [...result.now, ...result.trailing]) this.syncWants.request(repository);
-      }
-      return result;
-    });
+    const out = this.store.transaction(() => this.webhooks.receive(JSON.parse(raw) as Delivery));
     if (out.outcome === 'dispatched') {
       // B-92's live run: the delivery's row is what proves it arrived, on either side of the
       // cutover. The dispatch itself goes to every repository the path named, whatever its mode
@@ -423,15 +421,17 @@ export class BatonCore {
     return out;
   }
 
-  /** Dispatch these repositories' syncs after the response; a failure waits for the webhook
-   *  path's own backstop or the schedule (R-BTN-73: never retried more than once). B-89: a
-   *  dispatch from this path — a merge, the alarm after one, another repository's delivery — is
-   *  sent whatever the repository's mode (`own`). A failure is not silently dropped: the stamp
-   *  `receive`/`dueSync` wrote stands, and the alarm's `nextDue()` sends it again at
-   *  `last_dispatch_at + SYNC_STALE_MS` (§7.1, round 4 finding 3). */
+  private queueSync(wf: Workflow) {
+    this.syncWants.request(wf.repository);
+    const key = `${wf.repository}:sync`;
+    if (this.pendingDispatch.has(key) || (!wf.own && this.cutover.cutoverAt(wf.repository) == null)) return;
+    const decision = this.webhooks.queueSync(wf.repository);
+    if (decision === 'now') this.pendingDispatch.set(key, wf);
+    if (decision === 'trailing') this.syncTrailingQueued = true;
+  }
+
   private requestSync(repository: string) {
-    this.store.transaction(() => this.syncWants.request(repository));
-    this.syncNow([repository]);
+    this.store.transaction(() => this.queueSync({ repository, kind: 'sync', own: true }));
   }
 
   private syncNow(repositories: string[]) {
@@ -471,16 +471,13 @@ export class BatonCore {
       await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
       return;
     }
+    this.syncTrailingQueued = false;
     // Re-armed first, so one failing tick never ends the cycle.
     await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
     // B-89: the webhook path's own backstop, beside R-BTN-73's trailing dispatches — the App's
     // delivery reached Baton, and a merge's sync never went. Armed at the instant the earliest
     // stamp goes stale, so a tick that lands late does not make the send up to a minute later.
-    const stale = this.store.transaction(() => {
-      const due = this.webhooks.dueSync();
-      for (const repository of due) this.syncWants.request(repository);
-      return due;
-    });
+    const stale = this.store.transaction(() => this.webhooks.dueSync());
     this.syncNow(stale);
     this.syncNow(this.store.transaction(() => this.webhooks.dueTrailing())
       .filter((repository) => this.syncWants.wanted(repository, 'sync').wanted));
@@ -499,6 +496,7 @@ export class BatonCore {
       throw new Error(`the alarm's reaper failed: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
     }
     this.flushDispatch();
+    this.flushPollUsage();
     let stage = 'runners';
     try {
       this.store.transaction(() => {
@@ -556,6 +554,8 @@ export class BatonCore {
     }
     this.flushDispatch();
     await this.armBy(lapse);
+    const trailing = this.syncTrailingQueued ? this.webhooks.nextTrailing() : null;
+    await this.armBy(trailing);
     await this.armBy(this.blocks.nextDue());
     // R-BTN-116: the earliest person expiry still pending, so the alarm wakes at the instant.
     await this.armBy(this.questions.nextDue());
@@ -601,6 +601,8 @@ export class BatonCore {
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     this.pendingDispatch.clear();
+    this.syncTrailingQueued = false;
+    const polling = req.method === 'GET' && url.pathname === '/v1/sync/wanted';
     // R-BTN-87 (R3-1258): every request the object handles counts, for the envelope's rates and
     // the day's usage (R-BTN-2).
     this.requests.count(this.now());
@@ -608,16 +610,18 @@ export class BatonCore {
     try {
       const res = await this.route(req, url);
       // An error answer means its transaction rolled back: nothing changed to mirror.
-      if (res.ok && !(req.method === 'GET' && url.pathname === '/v1/sync/wanted')) {
+      if (res.ok && !polling) {
         // R-BTN-77: the unblocked dispatches this request made due, coalesced per window.
         this.store.transaction(() => this.takeUnblocked());
         this.flushDispatch();
+        const trailing = this.syncTrailingQueued ? this.webhooks.nextTrailing() : null;
         await this.armBy(this.blocks.nextDue());
+        await this.armBy(trailing);
         await this.armBy(this.resources.nextLapse());
       } else this.pendingDispatch.clear();
       // R-BTN-2 (R3-1258): the rows this request's transactions wrote, counted into the day's
       // usage — after the response is built, in a quiet write that never counts itself.
-      this.recordUsage();
+      this.recordUsage(polling);
       // R-BTN-197 (B-254): the versions this instance serves, on every response under /v1 — the
       // code's `min` (never a setting's) and the recommended as this instance serves it, an
       // administrator's raise (instance_settings) included, clamped at or above `min`. The front
@@ -627,18 +631,29 @@ export class BatonCore {
         : res;
     } catch (e) {
       this.pendingDispatch.clear(); // the transaction rolled back: nothing changed to mirror
-      this.recordUsage();
+      this.recordUsage(polling);
       throw e;
     }
   }
 
   /** R-BTN-2 (R3-1258): one request handled and the rows it wrote, into the one `baton_settings`
    *  counter that resets at 00:00 UTC. Quiet, so the counter's own row is never usage. */
-  private recordUsage(): void {
+  private pollUsage = { requests: 0, rows: 0 };
+
+  private flushPollUsage(requests = 0, rows = 0): void {
+    const polls = this.pollUsage;
+    if (requests + polls.requests === 0) return;
+    this.store.liveness(() => this.capacity.count(requests + polls.requests, rows + polls.rows));
+    this.pollUsage = { requests: 0, rows: 0 };
+  }
+
+  private recordUsage(polling: boolean): void {
     const rows = this.store.takeWritten();
-    this.store.liveness(() => {
-      this.capacity.count(1, rows);
-    });
+    // A poll persists only its nonce. Roll the accounting into the next request or alarm.
+    if (polling) {
+      this.pollUsage.requests++;
+      this.pollUsage.rows += rows;
+    } else this.flushPollUsage(1, rows);
   }
 
   /** R-BTN-87 (R3-1258): the figures the envelope judges — the store's counts beside the ring's
@@ -1235,10 +1250,9 @@ export class BatonCore {
             `SELECT at FROM events WHERE kind = 'admin' AND at > ? AND repository_id = ? AND json_extract(detail_json, '$.act') = 'resync' ORDER BY at DESC, seq DESC LIMIT 1`,
             now - RESYNC_WINDOW_MS, repository)[0];
           if (last) throw new BatonError('conflict', `a resync of ${repository} was asked for under ${RESYNC_WINDOW_MS / 1000} seconds ago`);
-          this.syncWants.request(repository);
+          this.queueSync({ repository, kind: 'sync', own: true });
           logEvent(this.store, now, 'admin', `owner:${owner}`, { act: 'resync' }, null, null, repository);
         });
-        this.syncNow([repository]);
         return json({ ok: true });
       }
     }

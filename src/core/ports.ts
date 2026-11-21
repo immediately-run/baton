@@ -112,9 +112,6 @@ export interface Config {
    *  allowed_capabilities}` — `key` an OpenSSH public key line, `name` the one hostname it may
    *  register. Seeded into `credentials` at start until R3-1240's owner grants replace it. */
   BATON_KEYS?: string;
-  /** §10.3: a fine-grained token, Actions: write on docs only, for workflow_dispatch. Absent,
-   *  the two workflows run on their 15-minute schedules. */
-  GITHUB_DISPATCH_TOKEN?: string;
   BATON_GITHUB_APP_ID?: string;
   BATON_GITHUB_APP_KEY?: string;
   /** R-BTN-94: per repository, `{forge, gitlab_issuer?, webhook?, trigger_token?}` as JSON. */

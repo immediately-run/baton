@@ -65,6 +65,7 @@ export interface Ctx {
   /** R-BTN-79: whatever is re-evaluated here — the queued leg, the course, the hold — is what
    *  moves a ticket between leg queues, in the same transaction (Queues.touch). */
   queued?: (ticketId: string) => void;
+  syncWanted?: (repository: string) => void;
 }
 
 /** R-BTN-78: the decisions Baton raises itself, each `asks: owner` on the whole ticket, answered in
@@ -616,6 +617,7 @@ export class Blocks {
   // ── unblocking wakes work (R-BTN-77) ──────────────────────────────────────────────────────
 
   private unblocked(repo: string, ticket: string, cleared: Cleared[]) {
+    this.c.syncWanted?.(repo);
     const now = this.c.now();
     const entry = { ticket_id: ticket, cleared };
     // One pending `unblocked` message per alive, idle runner granted on the repository that the

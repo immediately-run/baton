@@ -75,7 +75,7 @@ describe('a delivery whose fields are not Latin-1 (round 3, 3-A-0)', () => {
 
 describe('the one parser (R-BTN-73)', () => {
   // Each event's own paths (round 2, 2-A-0): a push's fields are never read from a review.
-  const COMMON = ['repository', 'repository.full_name'];
+  const COMMON = ['repository', 'repository.full_name', 'repository.id'];
   const ALLOWED: Record<string, Set<string>> = {
     pull_request: new Set([...COMMON, 'pull_request', 'pull_request.merged']),
     pull_request_review: new Set(COMMON),
@@ -198,12 +198,12 @@ describe('the one parser (R-BTN-73)', () => {
     const closed = delivered({ number: 108, merged: false, state: 'closed', merge_commit_sha: null, merged_at: null, head: { sha: 'h' }, base: { ref: 'main' } });
     // An opened or synchronised pull_request: `merged` null, `merged_at` null.
     const opened = { ...delivered({ number: 109, merged: null, state: 'open', merge_commit_sha: null, merged_at: null }), action: 'opened' };
-    expect(pickDelivery('pull_request', 'b-92-1', merged)).toEqual({ event: 'pull_request', id: 'b-92-1', repository: 'immediately-run/baton', merged: true });
-    expect(pickDelivery('pull_request', 'b-92-2', closed)).toEqual({ event: 'pull_request', id: 'b-92-2', repository: 'immediately-run/baton', merged: false });
-    expect(pickDelivery('pull_request', 'b-92-3', opened)).toEqual({ event: 'pull_request', id: 'b-92-3', repository: 'immediately-run/baton', merged: false });
+    expect(pickDelivery('pull_request', 'b-92-1', merged)).toEqual({ event: 'pull_request', id: 'b-92-1', repository: 'immediately-run/baton', repository_id: '1', merged: true });
+    expect(pickDelivery('pull_request', 'b-92-2', closed)).toEqual({ event: 'pull_request', id: 'b-92-2', repository: 'immediately-run/baton', repository_id: '1', merged: false });
+    expect(pickDelivery('pull_request', 'b-92-3', opened)).toEqual({ event: 'pull_request', id: 'b-92-3', repository: 'immediately-run/baton', repository_id: '1', merged: false });
     // The real push delivery B-92 smokes: no `merged` field at all, and a head commit.
     const push = { ref: 'refs/heads/probe', repository: { full_name: 'immediately-run/baton', id: 1 }, pusher: { name: 'dev' }, head_commit: { id: 'abc', author: { email: 'd@x', name: 'd' } } };
-    expect(pickDelivery('push', 'b-92-4', push)).toEqual({ event: 'push', id: 'b-92-4', repository: 'immediately-run/baton', pusher: 'dev', author_email: 'd@x' });
+    expect(pickDelivery('push', 'b-92-4', push)).toEqual({ event: 'push', id: 'b-92-4', repository: 'immediately-run/baton', repository_id: '1', pusher: 'dev', author_email: 'd@x' });
   });
 });
 

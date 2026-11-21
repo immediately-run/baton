@@ -42,12 +42,24 @@ it('mints a repository-scoped GitHub App installation token before dispatch', as
     return new Response(null, { status: 204 });
   });
   expect(await sendForgeDispatch({ ...base, BATON_GITHUB_APP_ID: '123', BATON_GITHUB_APP_KEY: key }, target, 1_000_000)).toBe(true);
-  expect(requests.map((r) => r.url)).toEqual([
+  expect(await sendForgeDispatch({ ...base, BATON_GITHUB_APP_ID: '123', BATON_GITHUB_APP_KEY: key },
+    { ...target, inputs: undefined }, 1_000_000)).toBe(true);
+  expect(requests.map((r) => r.url).slice(0, 3)).toEqual([
     'https://api.github.com/repos/owner/sample/installation',
     'https://api.github.com/app/installations/42/access_tokens',
     'https://api.github.com/repos/owner/sample/actions/workflows/sync.yml/dispatches',
   ]);
   expect(decodeJwt(new Headers(requests[0].init.headers).get('Authorization')!.slice(7))).toMatchObject({ iss: '123', iat: 940, exp: 1480 });
   expect(JSON.parse(requests[1].init.body as string)).toEqual({ repositories: ['sample'], permissions: { actions: 'write' } });
+  expect(JSON.parse(requests[2].init.body as string)).toEqual({ ref: 'main', inputs: { tickets: '[]' } });
+  expect(JSON.parse(requests[5].init.body as string)).toEqual({ ref: 'main' });
   expect(new Headers(requests[2].init.headers).get('Authorization')).toBe('Bearer fake-installation');
+});
+
+it('does not dispatch with partial App configuration or a legacy token', async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal('fetch', fetch);
+  const partial = { ...base, BATON_GITHUB_APP_ID: '123', GITHUB_DISPATCH_TOKEN: 'legacy-fixture' };
+  expect(await sendForgeDispatch(partial, target, 0)).toBeNull();
+  expect(fetch).not.toHaveBeenCalled();
 });

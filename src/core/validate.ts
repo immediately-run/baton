@@ -12,6 +12,14 @@ import type { ForgeDispatch } from './ports';
 export const DISPATCH_WORKFLOW = /^\.github\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;
 const GITEA_DISPATCH_WORKFLOW = /^\.gitea\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml$/;
 
+export function checkUnblockedTrigger(value: unknown, forge: string, branch: string, dispatch: ForgeDispatch | null) {
+  const trigger = checkForgeDispatch(value, 'unblocked_trigger', forge, branch, true);
+  if (trigger.kind !== dispatch?.kind || (trigger.kind === 'gitlab-trigger' && dispatch.kind === 'gitlab-trigger' && trigger.project_id !== dispatch.project_id)) {
+    bad('unblocked_trigger', 'must use the repository’s own dispatch target');
+  }
+  return trigger;
+}
+
 /** Only target metadata is accepted. Credentials are host configuration, never a field here. */
 export function checkForgeDispatch(value: unknown, field: string, forge: string, branch: string, unblocked = false): ForgeDispatch & { workflow?: string } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return bad(field, 'must be a dispatch target');

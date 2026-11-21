@@ -57,7 +57,11 @@ export class Mirror {
       return { seq: e.seq, at: e.at, kind: e.kind, ticket_id: e.ticket_id, claim_id: e.claim_id, actor: actorKind(e.actor), detail: kept, claim: e.claim_id ? this.claim(e.claim_id) : null };
     });
     const at = this.rows<{ cutover_at: number | null }>('SELECT cutover_at FROM repositories WHERE id = ?', repo)[0]?.cutover_at ?? null;
-    return { events, next: events.at(-1)?.seq ?? after, cutover_at: at };
+    // During a move, once the repository's page is exhausted, give the mirror a cursor
+    // through the global head. The next read acknowledges it without exposing other events.
+    const moveHead = rows.length < n ? this.rows<{ seq: number }>(`SELECT MAX(seq) AS seq FROM events
+      WHERE EXISTS (SELECT 1 FROM baton_settings WHERE key = 'frozen_at' AND value IS NOT NULL)`)[0]?.seq : null;
+    return { events, next: Math.max(events.at(-1)?.seq ?? after, moveHead ?? 0), cutover_at: at };
   }
 
   /**

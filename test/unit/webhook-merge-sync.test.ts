@@ -143,7 +143,8 @@ describe('S-BTN-167 a merge dispatches the sync', () => {
       expect(at(B + 60_001).dueSync()).toEqual([]);
     });
     await withCore(async (c) => {
-      // A fresh instance: its own baton row, ten minutes old at B.
+      // Reset the preceding assertions' dispatch window as well as the webhook stamp.
+      c.store.exec(`DELETE FROM webhook_dispatch WHERE repository_id = 'baton'`);
       c.store.exec(`UPDATE webhook_syncs SET last_dispatch_at = ${B - SYNC_STALE_MS} WHERE repository_id = 'baton'`);
       const sent = await captureDispatches();
       // Armed for the stale instant, not for a minute later: the tick at ten minutes exactly
