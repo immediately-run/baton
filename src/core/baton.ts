@@ -184,6 +184,7 @@ export class BatonCore {
     this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks, deprecated: this.deprecated });
     this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(), origin: ports.config.BATON_ORIGIN,
       dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices,
+      dependencyVisibilityChanged: () => this.blocks.refreshPrerequisiteVisibility(),
       policies: this.policies, humanBreakGlass: () => this.humanBreakGlass(), reapForRetire: (repository, actor) => this.claims.retireReaps(repository, actor),
       conditionsForRetire: (repository) => this.conditions.retired(repository) });
     this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo), history: this.history });
@@ -407,7 +408,7 @@ export class BatonCore {
 
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
-  // @model alarmLive sha256:6f9056ae3a4b
+  // @model alarmLive sha256:ad6417e16a6f
   async alarm(): Promise<void> {
     // R-BTN-88 (§4.8, R3-1258): a sealed Baton's alarm idles — it logs nothing and touches
     // nothing; the next period is kept armed (B-229), so the instance that imports this state
@@ -1244,7 +1245,7 @@ export class BatonCore {
     // B-113 (R-BTN-140's precedent): the repository's owners' consent to another repository's
     // tickets depending on theirs — the consent a dependency on a less visible repository needs
     // (§3.1). Given here, never by the dependent's own settings; `{withdraw: true}` takes it back.
-    if (m === 'POST' && rest === 'dependency-consents') return json(consentRoute(this.store, () => this.now(), repo, actor, await body()));
+    if (m === 'POST' && rest === 'dependency-consents') return json(consentRoute(this.store, () => this.now(), repo, actor, await body(), () => this.blocks.refreshPrerequisiteVisibility()));
     if (m === 'POST' && rest === 'bars') return json(this.admin.setBar(actor, repo, await body()));
     const lift = /^bars\/(\d+)\/lift$/.exec(rest);
     if (m === 'POST' && lift) return json(this.admin.liftBar(actor, repo, Number(lift[1])));
@@ -1566,7 +1567,7 @@ export class BatonCore {
    * a rewind to a once-accepted history included — is a fresh hold with a fresh row. The 0001
    * schema's "written once" and "the first force post" describe that one hold.
    */
-  // @model syncPost sha256:231806fa206f
+  // @model syncPost sha256:b3e27c5a6599
   async board(repo: Repository, p: BoardPayload) {
     // Course graphs are read per post: a registry applied, or a post refused after applying one,
     // must not leave another request reading a graph that is not in force.
@@ -1712,6 +1713,7 @@ export class BatonCore {
           // 1 finding 3) — the same per-ticket check the new-head path runs, without applying the
           // registry the body carries (an older one would roll a course back, above).
           this.requireCoursesInForce(r, refreshed.map(({ row }) => row.course_id));
+          this.checkPrerequisiteLegs(r, p);
           wrote = this.materialize(r, refreshed, p.sha, at, new Set((p.closed ?? []).map((c) => c.id)));
           // A live ticket is not closed (stations.ts, R-BTN-12): a refresh that re-adds a
           // withdrawn ticket clears its closure row, as a new head does (round 1, finding 4) —
@@ -1750,6 +1752,7 @@ export class BatonCore {
       // The course registry first (R-BTN-48, R-BTN-69): every ticket must name a course in
       // force, and a refused file with none to keep refuses the whole post.
       const refused = this.applyRegistry(r, p, rows.map(({ row }) => row.course_id), at);
+      this.checkPrerequisiteLegs(r, p);
       if (refused.length) changed.courses_refused = refused;
       const legsBefore = this.queuedLegs(r);
       // The repository's own tickets, keyed by their local ids (R-BTN-47) — upserts by
@@ -2205,6 +2208,18 @@ export class BatonCore {
   private requireCoursesInForce(r: string, ticketCourses: string[]): void {
     for (const c of new Set(ticketCourses)) {
       if (!this.courses.get(r, c)) throw new BatonError('invalid-params', `a ticket's course ${c} is not in ${r}'s registry`);
+    }
+  }
+
+  private checkPrerequisiteLegs(repo: string, p: BoardPayload) {
+    const legs = new Map<string, Set<string>>();
+    for (const t of p.tickets ?? []) {
+      if (!t.depends_at?.some((d) => d.leg)) continue;
+      if (!legs.has(t.course_id)) legs.set(t.course_id, new Set(this.sql<{ leg: string }>(
+        'SELECT leg FROM course_legs WHERE repository_id = ? AND course_id = ?', repo, t.course_id).map((r) => r.leg)));
+      for (const d of t.depends_at) if (d.leg && !legs.get(t.course_id)!.has(d.leg)) {
+        throw new BatonError('invalid-params', `${t.id}.depends_at: ${d.leg} is not a leg of ${t.course_id}`);
+      }
     }
   }
 

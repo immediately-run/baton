@@ -110,6 +110,15 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(rules(c)).toEqual(['shape capability_roles.deployer.0', 'shape capability_roles.deployer.1']);
   });
 
+  it('S-BTN-73 enforces an explicit credential value pattern over the built-in type', () => {
+    const c = copy();
+    c.capability_types = { credential: { description: 'Deployment credential', values: '^DEPLOY_TOKEN$' } };
+    c.legs.review.requires = { capabilities: ['credential:OTHER_TOKEN'] };
+    expect(rules(c)).toEqual(['shape legs.review.requires.capabilities.0']);
+    c.legs.review.requires = { capabilities: ['credential:DEPLOY_TOKEN'] };
+    expect(rules(c)).toEqual([]);
+  });
+
   it('a capability role naming a role holds the file (R-BTN-121, R-BTN-157)', () => {
     const c = copy();
     // A role expands once, to capabilities: one naming a vocabulary role — or the built-in

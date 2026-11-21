@@ -416,9 +416,15 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   for (const c of courses) {
     const courseFile = join(root, '.baton', 'courses', c.id, 'course.json');
     if (!existsSync(courseFile)) throw new Error(`.baton/courses/${c.id}/course.json is missing — run \`baton repo init --course ${c.id}\``);
-    const course = JSON.parse(readFileSync(courseFile, 'utf8')) as { legs?: Record<string, unknown> };
+    const course = JSON.parse(readFileSync(courseFile, 'utf8')) as { start_leg?: string; legs?: Record<string, unknown> };
+    const tickets = result.tickets.filter((t) => t.course_id === c.id);
+    const start = course.start_leg;
+    if (sourceKind === 'markdown' && start) for (const t of tickets) {
+      t.depends_at = [...new Set(t.depends_on)].filter((id) => !doneIds.has(id))
+        .map((ticket) => ({ ticket, done: true, leg: start }));
+    }
     const branchPatterns = [c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])];
-    const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, branchPatterns, graph: course, ...(record ? { baton: record } : {}) };
+    const fnCtx = { ...ctx, course: c.id, repository, tickets, closed: closedIds, done: doneIds, facts, branchPatterns, graph: course, ...(record ? { baton: record } : {}) };
     const syncMjs = syncMjsOf(c.id);
     if (c.source) checkSource(c, readFileSync(courseFile, 'utf8'), existsSync(syncMjs));
     const standard = builtIn(c.id);
@@ -487,7 +493,8 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     // that posts — beside its tickets, each stamped with its `version` and `key` above.
     payload: {
       source: { kind: sourceKind, ...(sourceVersions ? { versions: sourceVersions } : {}), cli: cliVersion() },
-      registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...controlField,
+      registry, tickets: result.tickets.map((t) => sourceKind === 'markdown' && t.depends_at ? { ...t, depends_on: [] } : t),
+      closed: result.closed, stations, markers, course_data: courseData, ...controlField,
     },
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };

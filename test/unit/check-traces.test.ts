@@ -15,7 +15,7 @@ const dir = mkdtempSync(join(tmpdir(), 'baton-check-traces-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 const T = 'docs:T-1';
-const base = (): Projection => ({ counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: { 1: [] }, required: [], courseFile: null, liveness: { 1: { lastSeen: 0, lease: 900_000 } } });
+const base = (): Projection => ({ counter: 0, lastAccepted: 0, outstanding: false, tickets: {}, claims: {}, held: {}, ownerBars: [], runners: { 1: [] }, required: [], courseFile: null, dependencies: {}, liveness: { 1: { lastSeen: 0, lease: 900_000 } } });
 const claim = (over: Partial<ClaimView> = {}): ClaimView => ({
   ticket: T, runner: 1, status: 'active', endReason: null, station: 'filed', leg: '', finished: [], legBars: [], startPath: [], claimObs: 1, endObs: -1,
   regressed: false, endedRegressed: false, confirmed: false, fencePending: false, ...over,

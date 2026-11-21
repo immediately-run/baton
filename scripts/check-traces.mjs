@@ -170,6 +170,8 @@ export function translate(trace) {
   // ids the model hands out.
   const env = {
     git: Object.fromEntries(T.map((t) => [t, []])),
+    deps: Object.fromEntries(T.map((t) => [t, []])),
+    checkedDeps: Object.fromEntries(T.map((t) => [t, new Map()])),
     withdrawn: Object.fromEntries(T.map((t) => [t, false])),
     posted: Object.fromEntries(T.map((t) => [t, []])),
     gone: Object.fromEntries(T.map((t) => [t, false])),
@@ -411,6 +413,21 @@ function applyPost(Q, env, k) {
     env.posted[t] = g;
     env.gone[t] = env.withdrawn[t];
     if (v?.present) env.seen[t] = true;
+    const deps = (Q.dependencies?.[t]?.entries ?? []).map((e) => {
+      const mode = ['at', 'reached', 'done', 'withdrawn', 'closed'].find((m) => m in e);
+      const other = e.ticket.includes(':') ? e.ticket : `docs:${e.ticket}`;
+      if (!Q.tickets[other]) return null; // visibility, consent and unknown targets are not modelled
+      const stations = [...new Set(Array.isArray(e[mode]) ? e[mode] : [])].sort();
+      const leg = e.leg ?? '';
+      const ref = `${other}@${mode}${stations.length ? `:${stations.join(',')}` : ''}`;
+      return { leg, ref, expr: `{ leg: ${q(leg)}, other: ${q(other)}, mode: ${q(mode)}, stations: ${qSet(stations)} }` };
+    }).filter(Boolean);
+    const old = new Set(env.deps[t].map((d) => d.expr));
+    const next = new Set(deps.map((d) => d.expr));
+    for (const d of old) if (!next.has(d)) acts.push(`gitDepends(${q(t)}, ${d}, false)`);
+    for (const d of next) if (!old.has(d)) acts.push(`gitDepends(${q(t)}, ${d}, true)`);
+    env.deps[t] = deps;
+    for (const d of deps) env.checkedDeps[t].set(d.expr, d);
   }
   return { acts };
 }
@@ -434,6 +451,10 @@ function expectations(Q, env, T, W) {
     e.push([`postedBars ${t}`, `st.postedBars.get(${q(t)}) == ${qSet(env.bars[t])}`]);
     if (env.queued[t] != null) e.push([`queued ${t}`, `st.queued.get(${q(t)}) == ${q(env.queued[t])}`]);
     e.push([`held ${t}`, `st.held.get(${q(t)}) == ${!!Q.held[t]}`]);
+    for (const d of env.checkedDeps[t].values()) {
+      const blocked = (Q.dependencies?.[t]?.blocks ?? []).some((b) => b.ref === d.ref && b.leg === d.leg);
+      e.push([`ticket block ${t} ${d.leg} ${d.ref}`, `ticketRowsIn(st, ${q(t)}).contains(${d.expr}) == ${blocked}`]);
+    }
   }
   const bars = [...new Set(Q.ownerBars.map((b) => `{ tag: ${q(b.tag)}, applies: ${q(b.applies)} }`))];
   e.push(['ownerBars', bars.length ? `st.ownerBars == Set(${bars.join(', ')})` : 'st.ownerBars.size() == 0']);

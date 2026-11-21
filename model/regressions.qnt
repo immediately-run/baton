@@ -407,14 +407,14 @@ module regressions {
       .expect(st.retryRows.get("t1") == Set() and not(st.blocked.get("t1")) and ticketClaimable("t1")
               and st.lastEvent.get("t1") == "unblocked" and not(st.unpairedUnblock))
 
-  // §6.6, R-BTN-75: a `ticket` row refuses a claim, never a holder's advance — a dependency that
-  // opens mid-claim lets the holder advance, with no gate violation (round 3, 3-r3-2).
-  run ticketRowBindsNoAdvanceTest =
+  // R-BTN-75: a dependency on the next leg also binds an advance under a live claim.
+  run ticketRowBindsAdvanceTest =
     start.then(claim("w1", "t1")).then(leg("w1", "implement"))
       .then(gitDepends("t1", T2_DONE, true)).then(sync1)
-      .expect(st.postedDeps.get("t1") != Set())
-      .then(advance("w1", "review", NONE))
-      .expect(c1.leg == "review" and not(c1.gateViolation))
+      .expect(advanceRowsIn(st, "t1", "review"))
+      .then(gitDepends("t1", T2_DONE, false)).then(sync1)
+      .expect(not(advanceRowsIn(st, "t1", "review")))
+      .then(advance("w1", "review", NONE)).expect(c1.leg == "review" and not(c1.gateViolation))
 
   // ... and lifting that hold resets the count, so the next blocked end does not hold again.
   run liftResetsBlockedEndsTest =

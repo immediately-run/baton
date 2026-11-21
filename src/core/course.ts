@@ -453,7 +453,7 @@ export function validateCourse(json: unknown): CourseViolation[] {
         const colon = x.indexOf(':');
         const type = x.slice(0, colon);
         const value = x.slice(colon + 1);
-        if (x !== 'human-operator' && !(colon > 0 && (type === 'runner' || type === 'credential' || valueMatches.get(type)?.(value)))) {
+        if (x !== 'human-operator' && !(colon > 0 && (type === 'runner' || (valueMatches.get(type)?.(value) ?? type === 'credential')))) {
           add('shape', `${path}.${i}`, `"${x}" is not a capability of a declared or built-in type (R-BTN-121)`);
         }
       }

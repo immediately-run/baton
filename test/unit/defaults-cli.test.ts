@@ -2718,9 +2718,10 @@ describe('readBoard resolves qualified dependencies against their boards (B-113)
   };
   /** A transport answering the sync's four calls, remembering the dependencies asked for and the
    *  stations posted; `done` decides the dependency's standing on its own board. */
-  const answering = (done: boolean): { transport: Transport; asked: string[][]; stations: () => Record<string, { next: { leg: string; state: string; waiting_on?: string }[] }> } => {
+  const answering = (done: boolean): { transport: Transport; asked: string[][]; tickets: () => Record<string, unknown>[]; stations: () => Record<string, { next: { leg: string; state: string; waiting_on?: string }[] }> } => {
     const asked: string[][] = [];
     let posted: Record<string, { next: { leg: string; state: string; waiting_on?: string }[] }> = {};
+    let tickets: Record<string, unknown>[] = [];
     let observation = 0;
     const transport: Transport = async (req) => {
       const path = new URL(req.url).pathname;
@@ -2731,15 +2732,18 @@ describe('readBoard resolves qualified dependencies against their boards (B-113)
         : path === '/v1/sync/dependencies' ? { dependencies: (body.ids as string[]).map((t) => ({ ticket: t, done })) }
         : { ok: true, upserted: 1, deleted: 0, confirmed: 0, stale_released: 0 };
       if (path === '/v1/sync/dependencies') asked.push(body.ids as string[]);
-      if (path === '/v1/sync/board') posted = (body as { stations: typeof posted }).stations;
+      if (path === '/v1/sync/board') {
+        posted = (body as { stations: typeof posted }).stations;
+        tickets = body.tickets as typeof tickets;
+      }
       return new Response(JSON.stringify(answer), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
-    return { transport, asked, stations: () => posted };
+    return { transport, asked, tickets: () => tickets, stations: () => posted };
   };
   let dir: string;
   afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = undefined as unknown as string; });
 
-  it('a dependency not done on its board leaves the leg waiting on dependencies; done there readies it here', async () => {
+  it('S-BTN-72: the Markdown source posts only open dependencies bound to the start leg', async () => {
     dir = await scaffold();
     const waiting = answering(false);
     const facts = join(dir, 'facts.json');
@@ -2747,10 +2751,12 @@ describe('readBoard resolves qualified dependencies against their boards (B-113)
     const args = parseSyncArgs(['--root', dir, '--url', 'https://baton.test', '--facts', facts, '--token', 't1'], {});
     expect(await syncMain({ ...args, transport: waiting.transport, log: () => {} })).toBe(0);
     expect(waiting.asked).toEqual([['baton:T-9']]);
-    expect(waiting.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'waiting', waiting_on: 'dependencies' }]);
-    // Ready, the waiting_on field is posted as null (stationOf fills it), never left out.
+    expect(waiting.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
+    expect(waiting.tickets()).toMatchObject([{ id: 'T-1', depends_on: [], depends_at: [{ ticket: 'baton:T-9', leg: 'implement', done: true }] }]);
+    // The source stops posting the edge once the target is done.
     const ready = answering(true);
     expect(await syncMain({ ...args, transport: ready.transport, log: () => {} })).toBe(0);
+    expect(ready.tickets()).toMatchObject([{ id: 'T-1', depends_at: [] }]);
     expect(ready.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
   }, 30_000);
 
@@ -2793,7 +2799,8 @@ describe('readBoard resolves qualified dependencies against their boards (B-113)
     const open = answering(false);
     expect(await syncMain({ ...args, transport: open.transport, log: () => {} })).toBe(0);
     expect(open.asked).toEqual([]);
-    expect(open.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'waiting', waiting_on: 'dependencies' }]);
+    expect(open.tickets()).toContainEqual(expect.objectContaining({ id: 'T-1', depends_at: [{ ticket: 'docs:T-9', leg: 'implement', done: true }] }));
+    expect(open.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
     // T-9 closed done in this checkout's own reading: its qualified spelling is done here — the
     // read's answer (still not done, one post behind) is never asked for.
     writeFileSync(join(dir, 'tickets', 'T-9.mdx'), '---\nid: T-9\ntitle: Nine\nstatus: done\n---\n');

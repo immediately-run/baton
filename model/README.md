@@ -191,14 +191,15 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   R-BTN-78's `retry` does), sets
   and lifts owner bars, force-reaps, and resolves flagged completions (§5.6, R-BTN-67, §9.6).
 - **A leg's prerequisites** (R-BTN-120): the sync posts each ticket's `depends_at` entries —
-  another ticket `at` a station now, having `reached` one, or closed `done`, on one leg or the
-  whole ticket — and its open decisions (R-BTN-78), as git holds them; Baton evaluates the
-  entries from the stations and paths it stores (a withdrawn ticket meets none), and moves a
+  another ticket `at` a station now, having `reached` one, `done`, `withdrawn`, or `closed`, on
+  one leg or the whole ticket — and its open decisions (R-BTN-78), as git holds them. Cyclic
+  edges remain unmet even if their predicate holds. Baton evaluates the entries from the
+  stations and paths it stores and moves a
   decision on a leg that is not a posted next leg onto the whole ticket. Each unmet prerequisite,
   open decision and backoff is a row on its leg or the ticket; any of them, or a provisional row,
-  refuses a claim into its leg, and all but an unmet prerequisite refuse an advance into it too —
-  a `ticket` row binds a claim only (§6.6, R-BTN-75; `ticketRowBindsNoAdvanceTest`). Only `select: posted` entries are modelled:
-  `children` and `parent` select the same tickets' stations another way.
+  refuses a claim or advance into its leg (§6.6, R-BTN-75; `ticketRowBindsAdvanceTest`). Replay
+  compares the stored block refs for direct `depends_at` entries on known tickets in the model
+  repository and course; course selectors, visibility and consent are not modelled.
 - **Blocks** (R-BTN-75, R-BTN-77): `blocked_since` is set when the ticket is not held (an active
   claim, an unconfirmed completion, a fence-pending reap), has a queued leg, and a confirmed row
   on it or the ticket, re-evaluated in every transaction that changes one of those. A claim's
