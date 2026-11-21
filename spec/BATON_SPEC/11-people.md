@@ -77,7 +77,11 @@ contents are not built; their design is
 
 - **R-BTN-57 (administrators: whoever controls the deployment).**
   - **The root of trust.** Whoever can deploy a Baton or set its secrets can replace its code,
-    so that control is the root of trust (R-BTN-136) and Baton adds no second one. A tenant's
+    so that control is the root of trust (R-BTN-136). Where `ACCESS_IDENTITIES` binds an email
+    (R-BTN-155), whoever can make the deployment's Cloudflare Access application assert that
+    email — its administrators, the identity providers it admits and the factors they accept —
+    holds the bound key's session too: a second root, which the deployment configures and Baton
+    cannot see. Baton adds no other. A tenant's
     administrators are the lines of its `BATON_ADMIN_KEYS` secret, each an SSH public key or an
     API key's public line (R-BTN-159), written through the secret sink (R-BTN-136); locally, the
     file `--admin-keys` names. An administrator's powers end at its tenant.
@@ -296,15 +300,34 @@ contents are not built; their design is
     key for a one-time link, `<origin>/login#<token>`, valid 5 minutes and used once. The page
     sends `POST /v1/login {token}`, which answers the session cookie `__Host-baton_session`
     (R-BTN-16) only while the minting key is an administrator's.
-  - **Sessions.** A session is its minting administrator key's. It lives 12 hours and ends as
+  - **Sessions.** A session is its key's: the administrator key whose link opened it, or the
+    one its Access line names. It lives 12 hours and ends as
     soon as the key leaves `BATON_ADMIN_KEYS`, checked on every request. It calls `/v1/ui/*`
     and reads the `GET`s §14 lists a session on (§14, R-BTN-16); a destructive action carries `confirm: true` (§12.2). Link tokens and session values
     are stored as hashes (§12.1).
+  - **Sign-in through Cloudflare Access.** Behind Cloudflare Access a person signs in with no
+    terminal, by one explicit act: `/login` offers "Sign in with Cloudflare Access", and only that
+    click sends `POST /v1/login {access: true}`. The page never sends it by itself, after a
+    logout or a session's end included. Baton verifies the request's `Cf-Access-Jwt-Assertion`
+    against the team's keys and the application's audience and reads its `email` claim. The
+    secret `ACCESS_IDENTITIES` binds emails to keys: one `<email> <fingerprint>` line each,
+    emails ASCII and compared ASCII-lowercased, at most one line per email, several emails to
+    one key allowed. Whoever controls the deployment sets it (R-BTN-57). An email bound to an
+    administrator key gets a session of that key, as its link would open it; that session's key
+    is the line's. An absent, unverified or expired assertion, one with no or a non-ASCII email,
+    and an email bound to no key in `BATON_ADMIN_KEYS` are `unauthenticated` and set no cookie;
+    an unreadable key set is `unavailable`. A value of `ACCESS_IDENTITIES` with a malformed or
+    duplicated line binds nothing: every Access sign-in is `unavailable` until it is fixed, and
+    nothing else is affected. Each sign-in is recorded as an event of its key,
+    `{act: "login", via: "access"}`, with the email's SHA-256, never the email. Each request
+    a session so opened authorizes also checks its line: the session ends as soon as the email
+    leaves `ACCESS_IDENTITIES` or its line names another key. Baton reads no assertion after
+    the sign-in, so ending the Access session does not end Baton's.
   - **Cloudflare Access, with no administrator key.** While `BATON_ADMIN_KEYS` names no key, a
     request to `/v1/ui/*` is authenticated by a verified Cloudflare Access
-    assertion alone (`Cf-Access-Jwt-Assertion`, checked against the team's keys and the
-    application's audience, for an email in `OWNER_EMAILS`). Once an administrator key is
-    configured, only a session authenticates `/v1/ui/*` (R-BTN-16).
+    assertion alone (verified as above, for an email in `OWNER_EMAILS`; `ACCESS_IDENTITIES` plays
+    no part). Once an administrator key is configured, only a session authenticates `/v1/ui/*`
+    (R-BTN-16).
   - **Not built:** sign-in by a code the key holder confirms, owners' sessions, session
     revocation and confirmation codes
     ([the proposal, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions);
