@@ -32,6 +32,9 @@ import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './pro
 import { StateFile, leaseLostFrom, type PersistedClaim, type RunnerState } from './state';
 import { bareTicketId } from '../defaults/ticket-state';
 import { digestOfRead, MARKDOWN_SOURCE } from '../defaults/ticket-versions';
+import { checkLegOutputs, readLegInputs } from './contracts';
+import type { ResolvedInput } from '../core/contracts';
+import type { PointerReach } from '../core/contractPointers';
 
 const LEG_PROCESS = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
@@ -2224,6 +2227,8 @@ export class Runner {
     let legName = (reattached?.leg ?? claim.legs?.[0] ?? null) as string | null;
     let at = (reattached?.at ?? claim.station) as string;
     let nextLegs = (claim.next ?? []) as NextLegs;
+    const pointerReach: PointerReach = claim.pointer_reach ?? { git: [], web: [], buckets: [] };
+    let resolvedInputs: ResolvedInput[] = [];
     // R-BTN-72 (B-188): a reattached leg is already running — its first pass waits for it.
     let resuming = reattached;
     try {
@@ -2248,6 +2253,7 @@ export class Runner {
         at = firstAnswer.station ?? at;
         nextLegs = (firstAnswer.next ?? nextLegs) as NextLegs;
         advice = firstAnswer.advice ?? advice;
+        resolvedInputs = firstAnswer.inputs ?? [];
         // R-BTN-63 (B-185): the run's id, minted by Baton at the advance that started it.
         runId = typeof firstAnswer.run_id === 'string' ? firstAnswer.run_id : null;
         // §7.5 R-BTN-90 (B-234): the run's `claim_legs.seq`, likewise — the finishing
@@ -2300,7 +2306,15 @@ export class Runner {
         this.legLineAt = null;
         const run = resuming && typeof resuming.ctx.run === 'number' ? resuming.ctx.run : runNumber(course.graph, gitPath, legName, own);
         own.push(legName);
+        let inputs;
+        try {
+          inputs = resuming ? resuming.ctx.inputs : await readLegInputs(this.checkout, course, resolvedInputs, pointerReach);
+        } catch (e) {
+          const detail = failureDetail(msg(e), this.legSecrets);
+          return await this.finish(claimId, { end_reason: 'released:cannot-finish:contract-input', reached: at, next: legName, ...(detail ? { detail } : {}) }, null);
+        }
         const ctx: Record<string, unknown> = resuming ? resuming.ctx : {
+          inputs,
           ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}), ...(ticketFile != null ? { file: ticketFile } : {}) },
           claim: { id: claimId, nonce: claim.nonce, station: at },
           leg: legName, run, ...(runId ? { run_id: runId } : {}),
@@ -2375,7 +2389,12 @@ export class Runner {
           let closed: string | null | undefined = null;
           if (abort.signal === 'release' && outcome.kind === 'ok') {
             const verdict = decide(outcome.result, course.graph, legName, at);
-            if (!('bug' in verdict)) closed = await this.callClose(script, ctx, outcome.result);
+            if (!('bug' in verdict)) {
+              try {
+                if (verdict.reached !== at || verdict.kind === 'advance') await checkLegOutputs(this.checkout, course, legName, verdict.reached, (outcome.result as { outputs?: unknown }).outputs, pointerReach);
+                closed = await this.callClose(script, ctx, outcome.result);
+              } catch { /* A delivered release still stands, but invalid results do not close. */ }
+            }
             if (closed != null && !('bug' in verdict)) {
               reached = verdict.reached;
               // A leg that finished queues a leg leaving where it rests — the script's own word
@@ -2407,6 +2426,12 @@ export class Runner {
         }
         // R-BTN-83: `close` writes the closing marker from the validated result before anything
         // is reported; a suspension or release follows with `handoff`, so it can cite the position.
+        try {
+          if (verdict.reached !== at || verdict.kind === 'advance') await checkLegOutputs(this.checkout, course, legName, verdict.reached, (result as { outputs?: unknown }).outputs, pointerReach);
+        } catch (e) {
+          const detail = failureDetail(msg(e), this.legSecrets);
+          return await this.finish(claimId, { end_reason: 'released:cannot-finish:contract-output', reached: at, next: legName, ...(detail ? { detail } : {}) }, await this.callHandoff(script, ctx));
+        }
         const closed = usePre ? pre.closed : await this.callClose(script, ctx, result);
         if (closed === undefined) {
           return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: at, next: legName }, await this.callHandoff(script, ctx));
@@ -2436,7 +2461,7 @@ export class Runner {
         // is sent; one this runner cannot take suspends the claim rather than sending it, the
         // finished leg's evidence already in git (R-BTN-121, R-BTN-71).
         if (!(await this.ensureLegLocks(verdict.leg, course))) {
-          return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg }, await this.callHandoff(script, ctx) ?? handoffUrl);
+          return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg, outputs: verdict.outputs, ...(closed ? { ended_at_sha: closed } : {}) }, await this.callHandoff(script, ctx) ?? handoffUrl);
         }
         this.auditLeg();
         // R-BTN-113 (B-4): the advance that finishes the leg carries its session link beside the
@@ -2460,6 +2485,7 @@ export class Runner {
         at = answer.station ?? verdict.reached;
         nextLegs = (answer.next ?? nextLegs) as NextLegs;
         advice = answer.advice ?? advice;
+        resolvedInputs = answer.inputs ?? [];
         runId = typeof answer.run_id === 'string' ? answer.run_id : null;
         // §7.5 R-BTN-90 (B-234): the next run's seq, as the first advance's above.
         this.legSeq = typeof answer.seq === 'number' ? answer.seq : null;
@@ -2498,7 +2524,7 @@ export class Runner {
   /** One `advance`, its refusal settled by §6.13: off-graph ends `released:course-changed`; an
    * `entry` refusal (R-BTN-109) ends `released:cannot-finish:contract-output`; every other
    * refusal suspends at the station the claim reached, never releasing. */
-  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number } | { settle: Record<string, unknown> }> {
+  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number; inputs?: ResolvedInput[] } | { settle: Record<string, unknown> }> {
     // R-BTN-202 (B-248): the advance that finishes a leg run under a local order says who gave
     // it — once; a refused advance's settling end carries it instead (`finish`).
     if (this.cur.localOrder && body.reached) {
@@ -2507,7 +2533,7 @@ export class Runner {
     try {
       const answer = await this.o.api.advance(claimId, body);
       if (body.local_order) this.cur.localOrder = null;
-      return answer as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number };
+      return answer as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number; inputs?: ResolvedInput[] };
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
       const kind = refusalKind(e.ruleCode);
@@ -2518,7 +2544,7 @@ export class Runner {
       if (kind === 'contract-output') return { settle: { end_reason: 'released:cannot-finish:contract-output' } };
       // The suspension arrives where the advance would have (R-BTN-109): its outputs go with it,
       // so a refusal for any other reason still suspends rather than failing the entry (3-r3-2).
-      return { settle: { end_reason: `suspended:${body.reached ?? fallbackStation}`, reached: body.reached ?? fallbackStation, next: body.leg, ...(body.outputs ? { outputs: body.outputs } : {}) } };
+      return { settle: { end_reason: `suspended:${body.reached ?? fallbackStation}`, reached: body.reached ?? fallbackStation, next: body.leg, ...(body.outputs ? { outputs: body.outputs } : {}), ...(body.evidence ? { ended_at_sha: body.evidence } : {}) } };
     }
   }
 

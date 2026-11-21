@@ -69,7 +69,7 @@ export interface Ctx {
 
 /** R-BTN-78: the decisions Baton raises itself, each `asks: owner` on the whole ticket, answered in
  *  Baton (`resolve`). `baton:contract` arrives with B-39. */
-export const BATON_DECISIONS = ['baton:retries', 'baton:stalled'] as const;
+export const BATON_DECISIONS = ['baton:retries', 'baton:stalled', 'baton.contract'] as const;
 export type BatonDecision = (typeof BATON_DECISIONS)[number];
 
 /** B-133 (OWASP ASI09): the exact action each option of a decision takes, computed — what
@@ -80,12 +80,12 @@ export type BatonDecision = (typeof BATON_DECISIONS)[number];
  *  of a leg on this ticket, never a credential. Pure, so every surface prints the same action
  *  for the same answer. */
 export function decisionOptionActions(decision: string, options: readonly { id: string; grants?: { leg: string; runs: number } }[] | null): { id: string; action: string }[] {
-  if (decision === 'baton:retries' || decision === 'baton:stalled') {
+  if ((BATON_DECISIONS as readonly string[]).includes(decision)) {
     return [
-      { id: 'retry', action: decision === 'baton:retries'
+      { id: 'retry', action: decision !== 'baton:stalled'
         ? 'lifts the hold and clears its backoff — the failed-attempt count starts again and the ticket becomes claimable'
         : 'closes this decision and restarts the queued leg’s 72-hour stall clock from now' },
-      { id: 'park', action: decision === 'baton:retries'
+      { id: 'park', action: decision !== 'baton:stalled'
         ? 'keeps the hold — the ticket stays parked until an owner lifts the hold'
         : 'holds the ticket (parked) until an owner lifts the hold' },
     ];
@@ -555,7 +555,7 @@ export class Blocks {
       const answered = new Set((answeredAll.get(id) ?? []).map((r) => r.decision_id));
       const decisions = (st?.decisions ?? []).filter((d) => {
         if (answered.has(d.id)) return false;
-        if (!d.id.startsWith('baton:')) return true;
+        if (!d.id.startsWith('baton:') && d.id !== 'baton.contract') return true;
         dropped.push(`${id}:decision:${d.id}`);
         return false;
       }).map((d) => ({

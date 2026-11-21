@@ -46,7 +46,7 @@ export interface PrFact {
  * `markers` is empty and its `course_data` an empty object. */
 export interface StationsResult {
   stations: Record<string, PostedStation>;
-  markers: { ticket: string; leg: string; ref: string; claim_nonce: string | null }[];
+  markers: { ticket: string; leg: string; ref: string; claim_nonce: string | null; outputs?: string }[];
   course_data: Record<string, unknown>;
 }
 

@@ -198,6 +198,45 @@ async function replay(args: string[], env: Record<string, string> = {}): Promise
 }
 
 describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
+  it.each([false, true])('checks a producer artifact before close (invalid=%s)', async (invalid) => {
+    repo = new Repo(false);
+    repos.push(repo);
+    await repo.setup();
+    const dir = join(repo.dir, '.baton', 'courses', 'create-pr');
+    const configPath = join(repo.dir, '.baton', 'baton.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+    delete config.courses[0].source;
+    writeFileSync(configPath, JSON.stringify(config));
+    writeFileSync(join(repo.dir, 'plan.json'), JSON.stringify(invalid ? { wrong: true } : { url: 'https://example.test' }));
+    const artifact = repo.commit('plan artifact');
+    writeFileSync(join(dir, 'course.json'), JSON.stringify({ start: 'filed', start_leg: 'implement', end: ['done'], stations: { filed: {}, planned: {}, done: {} }, legs: {
+      implement: { from: ['filed'], to: 'planned', outputs: { plan: { schema: 'std:url@1' } } },
+      apply: { from: ['planned'], to: 'done', inputs: { plan: { from: 'implement.plan' } } },
+    } }));
+    writeFileSync(join(dir, 'legs', 'implement.mjs'), `import { writeFileSync } from 'node:fs';
+export function run() { return { reached: 'planned', next: 'apply', outputs: [{ name: 'plan', schema: 'std:url@1', uri: 'git:immediately-run/docs@${artifact}:plan.json' }] }; }
+export function close(ctx) { writeFileSync(ctx.checkout + '/producer-closed', 'yes'); return null; }
+export function handoff() { return null; }
+`);
+    writeFileSync(join(dir, 'legs', 'apply.mjs'), `import { writeFileSync } from 'node:fs';
+export function run(ctx) { writeFileSync(ctx.checkout + '/consumer-value', ctx.inputs[0].value.url); return { end: 'done', reached: 'done' }; }
+export function close() { return null; }
+export function handoff() { return null; }
+`);
+    repo.commit('contract course');
+    await repo.sync();
+    const outcome = await repo.runner(`s48-contract-${process.pid}-${invalid}`).runOnce();
+    if (invalid) {
+      expect(outcome).toMatchObject({ end_reason: 'released:cannot-finish:contract-output' });
+      expect(await rows('SELECT failed_attempt FROM claims')).toEqual([{ failed_attempt: 1 }]);
+      expect(await rows('SELECT * FROM leg_outputs')).toEqual([]);
+      expect(() => readFileSync(join(repo.dir, 'producer-closed'))).toThrow();
+    } else {
+      expect(outcome).toMatchObject({ end_reason: 'done' });
+      expect(readFileSync(join(repo.dir, 'consumer-value'), 'utf8')).toBe('https://example.test');
+      expect(await rows("SELECT schema, value_json FROM leg_run_inputs WHERE name = 'plan'")).toEqual([{ schema: 'std:url@1', value_json: null }]);
+    }
+  });
   it('the runner records each run\'s inputs — the ticket\'s version, its read\'s digest and the head — and replay runs the run writing nothing to Baton', async () => {
     repo = new Repo(false);
     repos.push(repo);

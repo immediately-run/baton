@@ -1021,13 +1021,21 @@ export class Admin {
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'scope_policy', 'runner_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'artifact_buckets', 'unblocked_trigger', 'remind_after', 'scope_policy', 'runner_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     // R-BTN-114: a check's conclusion decides what branch protection sees, so the map is the
     // owners', not an agent's — refused here, before the approver question, whichever it changes.
     const delegated = this.delegated(actor);
     if (b.checks !== undefined && delegated) throw new BatonError('forbidden', 'a delegated key changes no checks map: the conclusions are the owners’ (R-BTN-114)');
     const sets: [string, string | null][] = [];
+    if (b.artifact_buckets !== undefined) {
+      if (delegated) throw new BatonError('forbidden', 'a delegated key does not change artifact buckets');
+      const buckets = b.artifact_buckets;
+      if (!Array.isArray(buckets) || buckets.length > 20 || !buckets.every((x) => typeof x === 'string' && /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(x))) {
+        bad('artifact_buckets', 'must be at most 20 S3 bucket names');
+      }
+      sets.push(['artifact_buckets', JSON.stringify([...new Set(buckets as string[])].sort())]);
+    }
     // B-182 (R-BTN-140): the home's code repositories, each naming its own forge and host. The
     // list is stored in its own table; `codeRepos` holds it validated, `web_base` derived.
     let codeRepos: CodeRepo[] | null = null;
@@ -1144,11 +1152,11 @@ export class Admin {
       if (towardSuccess) return true;
       if (Object.keys(was).some((course) => !Object.hasOwn(next, course))) return true;
     }
-    const flat = ['retry', 'transcript_repos'];
+    const flat = ['retry', 'transcript_repos', 'artifact_buckets'];
     for (const [k, v] of sets) {
       if (flat.includes(k)) {
         const old = k === 'retry' ? this.retry(repository) : null;
-        const before = k === 'transcript_repos' ? JSON.parse(this.rows<{ v: string | null }>('SELECT transcript_repos AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? 'null') : old;
+        const before = k === 'transcript_repos' || k === 'artifact_buckets' ? JSON.parse(this.rows<{ v: string | null }>(`SELECT ${k} AS v FROM repositories WHERE id = ?`, repository)[0]?.v ?? 'null') : old;
         if (JSON.stringify(before ?? null) !== (v ?? 'null')) return true;
       }
       // B-127: requiring signed control tightens (any owner may turn it on); turning it off
