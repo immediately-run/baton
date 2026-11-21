@@ -147,7 +147,7 @@ script: setups, values and refusal codes are there and in the rules, not here. A
 | S-BTN-220 ticket provenance | `last_written_by` names the forge's pusher of a ticket's last change, never the commit author, and rides every read of the ticket; `human` is true only for the policy's `human_identity` as it stood at the push; an untraced or truncated push reads `pusher-unknown`; nothing is raised or held. | R-BTN-194 |
 | S-BTN-167 a merge dispatches the sync | A merged pull request's delivery dispatches its repository's sync once, repeats inside R-BTN-73's window folding into the trailing dispatch; an unmerged or malformed delivery dispatches nothing; the alarm dispatches once more for a repository whose last webhook dispatch is older than R-BTN-73's backstop. | R-BTN-73, R-BTN-94 |
 | **§7** | | |
-| S-BTN-222 an interaction request | An `interact` raise from a leg with a deadline and a session link is listed under Needs you with the stored link, files no handler and ignores bindings; a second raise supersedes the first; a raise from an autonomous leg, a leg with no deadline or a run with no link is refused on the channel; an autonomous leg that needs a person ends held; a posted result ends the leg, and an unjoined leg ends `leg-timeout`. | R-BTN-195, R-BTN-160 |
+| S-BTN-222 an interaction request | An `interact` raise from a leg with a deadline and a session link is listed under Needs you with the stored link, files no handler and ignores bindings; a second raise supersedes the first; a raise from an autonomous leg, a leg with no deadline or a run with no link is refused on the channel; an autonomous leg that needs a person ends held; a posted result ends the leg, and an unjoined leg ends `leg-timeout`. See also the unbound condition cases below. | R-BTN-195, R-BTN-160 |
 | S-BTN-244 retention | Old events are pruned only below the mirror's cursor, in bounded batches, and never the tenant's; only the head's snapshot is kept; a runner silent past the retention bound loses its declaration rows and keeps its row; a closed ticket's ended claims go once its events have. | R-BTN-149, R-BTN-81 |
 | S-BTN-5 retried with backoff | A `cannot-finish:transient` end backs the ticket off by the owners' default, jittered (R-BTN-122); the next claim gets the earlier claims' resume records and reuses the branch and PR. | R-BTN-122, R-BTN-24 |
 | S-BTN-6 poisoned ticket | Failed attempts up to R-BTN-122's bound hold the ticket `attempts-exhausted` with `baton.retries`; lifting the hold resets them; a looped leg's count resets each time it reaches an outcome. | R-BTN-122, R-BTN-12 |
@@ -253,9 +253,18 @@ script: setups, values and refusal codes are there and in the rules, not here. A
 | **§16** | | |
 | S-BTN-16 cutover | Legacy, removed with its code (R-BTN-193): at cutover an in-flight git claim is imported as a legacy claim, adopted only after an administrator confirms and by one requester; a checkout that saw the cutover takes no git claim; a silent legacy runner is not reaped early. | R-BTN-28 |
 
+**Unbound condition cases (B-55).** S-BTN-130: a leg that narrows away an otherwise allowed
+type gets a channel refusal before any report. S-BTN-134: a course file with `error_types` is
+refused, naming the field. For S-BTN-131, a leg's `baton.*` raise is refused both on the channel
+and at the report route. The remaining binding and timer cases are in the proposals.
+
 ### Gates
 
 Each gate is an invariant, the rule that owns it, and the scenarios or tests that prove it.
+
+**G-BTN-146 (unbound raises).** The runner checks and reports before effect. Baton does not
+store the subject or body and refuses a leg's `baton` or `baton.*` (R-BTN-160). Proved by
+S-BTN-130, S-BTN-131 and S-BTN-222; the handler case remains proposed.
 
 | Gate | Must hold | Proved by |
 |---|---|---|

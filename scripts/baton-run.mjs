@@ -16,6 +16,7 @@ mkdirSync(OUT, { recursive: true });
 // The runner spawns each leg through legProcess.mjs by path, beside its own module
 // (src/runner/runner.ts LEG_PROCESS): without this copy every leg crashed, writing no result.
 copyFileSync(join(ROOT, 'src/runner/legProcess.mjs'), join(OUT, 'legProcess.mjs'));
+copyFileSync(join(ROOT, 'src/runner/legClient.mjs'), join(OUT, 'legClient.mjs'));
 
 // `baton run`'s bundle keeps its fixed name (test/unit/runner-bundle.test.ts runs a leg through
 // it); the replay bundle is this process's own, so two `baton` processes never rewrite each
