@@ -3,6 +3,7 @@
 // SSH-signed requests (R-BTN-13 as amended, below). Nothing but a verified JWT or signature is
 // trusted: no header, cookie or query parameter stands in for one.
 import { createLocalJWKSet, createRemoteJWKSet, decodeJwt, errors, jwtVerify, type JWTVerifyGetKey } from 'jose';
+import { forgeSecrets } from './forgeSecrets';
 import { BatonError } from './http';
 import type { Config } from './ports';
 import type { SyncClaims } from './registry';
@@ -82,12 +83,7 @@ export type SyncCredential =
 /** The GitLab issuers the deployment names (R-BTN-94's `BATON_FORGE_SECRETS`, `gitlab_issuer`): the
  *  Worker fetches a key set for these only, never for a token's own `iss`. */
 export function gitlabIssuers(env: Config): string[] {
-  let entries: Record<string, { forge?: unknown; gitlab_issuer?: unknown }> = {};
-  try {
-    entries = JSON.parse(env.BATON_FORGE_SECRETS ?? '{}');
-  } catch {
-    throw new BatonError('unavailable', 'the forge secrets are unreadable');
-  }
+  const entries = forgeSecrets(env);
   return [...new Set(Object.values(entries ?? {}).filter((e) => e && e.forge === 'gitlab' && typeof e.gitlab_issuer === 'string').map((e) => e.gitlab_issuer as string))];
 }
 

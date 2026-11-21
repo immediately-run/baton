@@ -57,6 +57,8 @@ export function localConfig(file: Record<string, unknown>, origin: string): Conf
     BATON_KEYS: opt('BATON_KEYS'),
     BATON_SESSION_HOSTS: opt('BATON_SESSION_HOSTS'),
     BATON_GITHUB_WEBHOOK_SECRET: opt('BATON_GITHUB_WEBHOOK_SECRET'),
+    BATON_GITHUB_APP_ID: opt('BATON_GITHUB_APP_ID'),
+    BATON_GITHUB_APP_KEY: opt('BATON_GITHUB_APP_KEY'),
     BATON_FORGE_SECRETS: opt('BATON_FORGE_SECRETS'),
     BATON_SIGNING_KEY: opt('BATON_SIGNING_KEY'),
     GITHUB_DISPATCH_TOKEN: opt('GITHUB_DISPATCH_TOKEN'),
@@ -72,6 +74,9 @@ export async function main(argv: string[]) {
       host: { type: 'string', default: '127.0.0.1' },
       origin: { type: 'string' },
       'admin-keys': { type: 'string' },
+      'forge-secrets': { type: 'string' },
+      'github-app-id': { type: 'string' },
+      'github-app-key': { type: 'string' },
       'github-webhook-secret': { type: 'string' },
       'signing-key': { type: 'string' },
       config: { type: 'string' },
@@ -102,6 +107,9 @@ export async function main(argv: string[]) {
   const config = localConfig(file, origin);
   // R-BTN-55: the GitHub App's webhook secret, from the file `--github-webhook-secret` names
   // (a file, so the secret is in no process list); it wins over a --config value.
+  if (values['forge-secrets']) config.BATON_FORGE_SECRETS = readFileSync(values['forge-secrets'], 'utf8');
+  if (values['github-app-id']) config.BATON_GITHUB_APP_ID = values['github-app-id'];
+  if (values['github-app-key']) config.BATON_GITHUB_APP_KEY = readFileSync(values['github-app-key'], 'utf8');
   if (values['github-webhook-secret']) config.BATON_GITHUB_WEBHOOK_SECRET = readFileSync(values['github-webhook-secret'], 'utf8').trim();
   // R-BTN-114's SigningKey (R-BTN-171, R-BTN-189): the tenant's Ed25519 key from the file
   // `--signing-key` names (§3's table: a key file locally, a secret on Cloudflare) — the JWK

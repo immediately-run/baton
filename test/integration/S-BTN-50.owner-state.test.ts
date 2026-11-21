@@ -92,6 +92,9 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     await mirrorCall('/v1/sync/events?after=1000000');
     expect((await adminPost('/v1/admin/seal')).status).toBe(200);
     const first = (await keyCall(admin, '/v1/admin/export')).json;
+    const exportedRepo = first.sections.repositories.find((r: { id: string }) => r.id === 'docs');
+    expect(exportedRepo).not.toHaveProperty('sync_wanted_at');
+    expect(exportedRepo).not.toHaveProperty('sync_wanted_after');
     const second = (await keyCall(admin, '/v1/admin/export?with_history=1')).json;
     expect(second).not.toEqual(first); // --with-history adds the history sections
     const again = (await keyCall(admin, '/v1/admin/export')).json;
@@ -121,6 +124,7 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     git = new Git().add('A', {}, placed('filed', [], [['implement', 'ready']]));
     expect((await git.post()).status).toBe(200);
     expect((await rows<{ hold: number }>('SELECT hold FROM ticket_overrides WHERE ticket_id = ?', 'docs:A'))[0].hold).toBe(1);
+    expect(await rows(`SELECT sync_wanted_at, sync_wanted_after FROM repositories WHERE id = 'docs'`)).toEqual([{ sync_wanted_at: null, sync_wanted_after: null }]);
     // The event sequence continues from the export's floor.
     expect((await rows<{ n: number }>('SELECT MAX(seq) AS n FROM events'))[0].n).toBeGreaterThanOrEqual(first.events_seq);
     // The runner resumes unkeyed and re-heartbeats with its secret.

@@ -6,7 +6,7 @@ import { TICKET_ID } from './validate';
 import { logEvent } from './db';
 import { importLegacyClaim } from './cutover';
 
-import type { DispatchTarget, Row, SqlValue, Store, Workflow } from './ports';
+import type { Row, SqlValue, Store, Workflow } from './ports';
 const MAX_PAGE = 200;
 const NONCE = /^[0-9a-f]{6}$/;
 const GIT_SHA = /^[0-9a-f]{40}$/;
@@ -133,22 +133,3 @@ export class Mirror {
 
 /** §10.3: the workflows Baton dispatches. */
 export type { Workflow };
-
-/**
- * Dispatch a repository's workflow on its default branch with the Actions-write token (§10.3).
- * Fire and forget: a missing or revoked token, or a failed call, leaves the workflow to its
- * 15-minute schedule. (R3-1247 moves this to the GitHub App's installation tokens.)
- */
-export async function dispatchWorkflow(token: string | undefined, target: DispatchTarget): Promise<boolean> {
-  if (!token) return false;
-  try {
-    const res = await fetch(`https://api.github.com/repos/${target.github}/actions/workflows/${target.workflow}/dispatches`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton', 'Content-Type': 'application/json' },
-      body: JSON.stringify(target.inputs ? { ref: target.ref, inputs: target.inputs } : { ref: target.ref }),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
