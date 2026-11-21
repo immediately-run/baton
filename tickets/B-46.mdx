@@ -15,6 +15,7 @@ owns: {}
 prs: []
 depends_on:
   - B-45
+  - B-310
 ---
 
 **Spec:** BATON_SPEC [R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) to [R-BTN-158](../spec/BATON_SPEC/12-security.md#sec-12-5) and the rules they amend, placed by rule: [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3) ([R-BTN-149](../spec/BATON_SPEC/02-deployments.md#sec-2-3)), [§3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) and
@@ -162,14 +163,14 @@ Split into reviewed PRs along four parts. Each is independent.
      verifies is revoked (a cookie's session ended) and raises `baton.bearer-over-http`. One that
      does not verify is refused `unauthenticated` and counted in §2.3's failure buckets: an id
      or fingerprint alone, which is public, revokes nothing.
-   - **Access is never read** (R-BTN-16, adv-4 m5). Remove `verifyOwner` and every
-     `Cf-Access-Jwt-Assertion` read from `src/core/auth.ts` and `src/core/front.ts`, the
-     `X-Baton-Owner` principal from `src/core/baton.ts`, and the `ACCESS_TEAM_DOMAIN`,
-     `ACCESS_AUD`, `OWNER_EMAILS` and `TEST_ACCESS_JWKS` bindings (`src/core/ports.ts`,
-     `src/local/main.ts`, `src/local/testCourse.ts`, the test bindings). A dashboard request is
-     authorized by Baton's own session alone. R3-1208 narrows the Access policy itself. The
-     release notes say that a deployment signing in through Access alone needs an administrator
-     key first.
+   - **Access opens a session; it never authorizes a request** (R-BTN-16, R-BTN-155, adv-4 m5;
+     amended 2026-11-21 when the owner approved sign-in through Access). Keep B-310's
+     `verifyAccess` and its sign-in route. Remove the Access-alone path: `verifyOwner`, the
+     `X-Baton-Owner` principal from `src/core/baton.ts`, and `OWNER_EMAILS`, so a dashboard
+     request is authorized by Baton's own session alone, whichever way it was opened. Retire
+     R-BTN-155's *Cloudflare Access, with no administrator key* clause in the same PR. The
+     release notes say that a deployment signing in through Access alone needs an
+     administrator key and an `ACCESS_IDENTITIES` line first.
 
 ### Architecture
 
@@ -198,14 +199,14 @@ adapter's trust and fork mapping from real payload shapes. Item 7's cases, on bo
   role. Its `admin.key.revoke` case is B-76's.
 - Unit: `claude/T-12-1-impl` maps to `T-12-1`, never `T-12`, in every caller of the matcher, and
   to `T-12` while `T-12-1` is unposted; `accept` without `confirm_span` listing the repositories;
-  no `Cf-Access-Jwt-Assertion` header changes any principal.
+  no `Cf-Access-Jwt-Assertion` header changes any principal outside `POST /v1/login {access: true}`.
 
 ### Exit criteria
 
 - `npm test` and `npm run typecheck` green, with S-BTN-115 to S-BTN-125 and G-BTN-135 to
   G-BTN-145 passing, item 7's cases among them; G-BTN-57's pending-grant clause and G-BTN-59's
   open-world clause hold.
-- No code under `src/` reads Cloudflare Access's cookie or JWT.
+- No code under `src/` reads Cloudflare Access's cookie or JWT outside B-310's sign-in route.
 - On a scratch public GitHub repository, an outsider's fork PR and approve comment move
   nothing.
 - A real GitLab `id_tokens` JWT from a merge-request pipeline is refused.

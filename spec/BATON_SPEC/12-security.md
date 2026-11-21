@@ -35,7 +35,7 @@ stated once, in the rule it cites.
 | Repository owner | `/v1/owner/{repository}/*`; the repository's reads and leg runs | an owner key, SSH-signed or API key | R-BTN-58 |
 | Human-only key | `POST /v1/human-keys`; `POST`, `DELETE …/attestations` as writer `human`; as an owner, or as a break-glass line on every repository it satisfies (R-BTN-188), the owner's routes | an SSH key registered `human_only` (R-BTN-185), on an owner key or a key of no other role | open human gates (R-BTN-185), `human-key.add` and `human-key.revoke` among them; as an owner, R-BTN-58; never through a session, which is `owner` |
 | MCP key (a delegated key; proposed, [people and dashboard, §2](../proposals/people-and-dashboard.md#2-mcp)) | `POST /v1/mcp` only | bearer `bmcp_…` | as `owner` on one repository, narrowed to the ids listed at minting: R-BTN-186, R-BTN-130 |
-| Public | `POST /v1/login`, the dashboard shell's three assets — its page, its one script, its one stylesheet | none | start a sign-in |
+| Public | `POST /v1/login`, the dashboard shell's three assets — its page, its one script, its one stylesheet | none, or on `POST /v1/login` a verified Cloudflare Access assertion (R-BTN-155) | start a sign-in |
 
 The repository reads (`GET /v1/repositories/{repository}/…`) are open to any key granted on the
 repository, its owners and administrators, except where a route's rule narrows them.
@@ -180,8 +180,7 @@ Every value below is validated on write; a value over its cap is refused `invali
   - **Every session request.** Any request a dashboard session authorizes, reads included,
     carries an `Origin` equal to the origin when it carries one, and `Sec-Fetch-Site:
     same-origin` when it carries that header, else `forbidden`.
-  - **Sessions.** `/v1/ui/*` requires a dashboard session of an administrator key, minted by
-    its link or bound through Cloudflare Access (R-BTN-155). Outside `/v1/ui/*` a session authenticates only the `GET`s §14 lists it on —
+  - **Sessions.** `/v1/ui/*` requires a dashboard session of an administrator key (R-BTN-155). Outside `/v1/ui/*` a session authenticates only the `GET`s §14 lists it on —
     the reads it shares with the keys — and no write.
     Cloudflare Access may stand in front of the dashboard; Baton never requires it and never reads
     its cookie. Baton verifies the assertion Access forwards, and that assertion alone
@@ -381,7 +380,7 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
       matches an `owner` entry on every repository and no other;
     - `human`: any `human_only` key that is an owner of the repository and meets `human_key`
       (R-BTN-185);
-    - `key:<fingerprint>`: that one key, and a dashboard session it minted when the key is not
+    - `key:<fingerprint>`: that one key, and a dashboard session of that key (R-BTN-155) when the key is not
       `human_only`, while it is an owner of the repository, and meeting `human_key` when it is a
       `human_only` key.
 
@@ -572,7 +571,7 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     human-only list is a custody promise: Baton cannot tell a key an agent session can use, so
     no guarantee claims it as a human gate (`human-gates`, R-BTN-189).
   - **The owner's agent** is a principal (§12.1): an owner key not `human_only`. It acts as
-    `owner`, never as `human`. A dashboard session minted by a `human_only` key is an owner's
+    `owner`, never as `human`. A dashboard session of a `human_only` key is an owner's
     session too: no session, and no OAuth approval by one, satisfies a human-only `approvers.*`
     list.
 - **R-BTN-186 (authority by credential, not channel).** An action is available on every surface (the

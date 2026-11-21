@@ -167,7 +167,7 @@ here; every other cause is its rule's.
 | `GET /v1/admin/export` | admin | `?with_history=1` | `baton.owner-state/v1` | R-BTN-88 |
 | `POST /v1/admin/import` | admin | an export | `{ok: true}`; `conflict`, `invalid-params` | R-BTN-88, R-BTN-158 |
 | **Dashboard** | | | | |
-| `POST /v1/login` | none | `{token}` | `{ok: true}` and the session cookie | R-BTN-155 |
+| `POST /v1/login` | none, or a verified Cloudflare Access assertion | `{token}` or `{access: true}`, exactly one (else `invalid-params`) | `{ok: true}` and the session cookie; else `unauthenticated` (or `unavailable`) and no cookie | R-BTN-155 |
 | `POST /v1/ui/logout` | session | `{}` | `{ok: true}` and the session cookie cleared; the caller's own session ends (`ui.logout`) | R-BTN-155 |
 | `POST /v1/ui/messages` | session | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold; any other kind `invalid-params` | §6, R-BTN-119 |
 | `POST /v1/ui/overrides/{ticket}` | session | `{expedite}` or `{hold}` | `{ok: true}` | §6 |

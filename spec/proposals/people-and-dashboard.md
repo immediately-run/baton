@@ -172,10 +172,6 @@ BATON_SPEC's sections are named with a rule or as `§11.3`, `§12.2`.
        carrying the bound row's pending cookie gets the session cookie `__Host-baton_session`
        (value `bds_<id>_<secret>`), and the row is marked used.
 
-    An `ACCESS_IDENTITIES` line naming an owner key signs that owner in the same way, with no
-    code (R-BTN-155's sign-in through Cloudflare Access): the session is the owner key's, as a
-    confirmed code would bind it.
-
     An owner's code never becomes an administrator's session. A `not-found` at either step is
     not a failed verification (the request verified); the per-credential limit (§2.3) bounds a
     key that guesses codes.
