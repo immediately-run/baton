@@ -14,7 +14,8 @@ description: "The review's finding 1: as written, protected stops ordinary work 
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/317
 depends_on:
   - B-166
 ---
@@ -86,3 +87,5 @@ _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC
 _(2026-11-20: the owner cut the check-runner and the forge-check deliverer on 2026-11-19 (`docs/review/spec-simplification-review-2026-11-19.mdx`, ruling 5): item 2's check-runner is struck, and the optional `std:checks@1` "a check-runner the owner names posts" in the note of 2026-11-02 has no writer. B-290 removes what is built of the checks and settles what a merge leg's `std:checks@1` comes from.)_
 
 _(2026-11-20: rules re-read: R-BTN-169, R-BTN-39)_
+
+- 2026-11-21: PR #317 adds the policy dry run for effects Baton can currently evaluate: changed knobs, projected guarantees, cleared trust settings and newly stale runner pins. The report explicitly names unbuilt gates for which it cannot yet identify stopped tickets or legs. The PR also tests the existing human-only person-leg answer under `protected`; it does not add the proposed `ask` course. Course rename migration was already built (S-BTN-37); the checks design remains with B-290.
