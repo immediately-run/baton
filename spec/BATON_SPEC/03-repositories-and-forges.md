@@ -316,11 +316,12 @@ route, with the events and fields the table lists for it, is
 - **R-BTN-96 (course facts come from an adapter per forge).** For a course whose `entry.json`
   declares `facts: ["prs"]` (R-BTN-134) the CLI reads PR facts through a **fact adapter** chosen
   by the forge of the repository it reads — the home's by the home's, each code repository's by
-  its own (R-BTN-140) — mapped to one set of facts: a PR's head branch, state, head checks and
-  verdicts on the head. Each fact carries `repository`, fork-ness and `pusher` (R-BTN-139). The
+  its own (R-BTN-140) — mapped to one set of facts: a PR's head branch, state, head checks,
+  verdicts on the head, its merge commit, and its title and body (read for R-BTN-203's evidence,
+  never posted). Each fact carries `repository`, fork-ness and `pusher` (R-BTN-139). The
   verdict line `<!-- baton:verdict approve|changes -->` works on every forge.
-  - The adapter reads the home repository and every repository with reach (R-BTN-140) that a
-    live ticket on a PR-reading course names (deduplicated, case-insensitive), under one request
+  - The adapter reads, for every course (R-BTN-203 reads any course's tickets), the home
+    repository and every repository with reach (R-BTN-140) that a live ticket names (deduplicated, case-insensitive), under one request
     budget **per host**. A `git` home is read by no adapter; its code repositories are read on
     their own forges. An unreadable or missing repository, or an answer carrying errors, fails
     the sync, naming the tickets; a partial reading is never posted.

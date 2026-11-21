@@ -22,7 +22,7 @@ numbers.
                         #   protocol_files, source?, facts?}];
                         #   and the CLI's settings (R-BTN-74): items, default_course, repos,
                         #   agent_command, agent_wrapper, check, ticket_prefix, legacy_ids,
-                        #   prefixes, project, tags, projects
+                        #   prefixes, project, tags, projects, reconcile_course (R-BTN-203)
     tickets.mjs         # optional ticket source; absent, the CLI's markdown source (R-BTN-74)
     courses/<course>/   # an own course; a sourced course's course.json is its source's (R-BTN-134)
       course.json       # the course file (R-BTN-69)
@@ -116,7 +116,7 @@ numbers.
     | `depends_on` | `depends_at: {ticket, done: true, leg: <the course's start_leg>}` per id (R-BTN-120); a qualified id (§3.1) is posted as written |
     | `repos` | forge paths, short names resolved through the `repos` setting (`owner/name` stands) |
     | `order` | `rank` (by `order`, then id) |
-    | `prs`, `answer`, `reconciled` | never posted: the ticket's sync-local `fields` (R-BTN-33); its `course` is `{}` |
+    | `prs`, `answer` | never posted: the ticket's sync-local `fields` (R-BTN-33); its `course` is `{}` |
 
     Other fields are ignored. Two files with one `id`, a `repos` name with no mapping, or an
     `order` that is not a number fail the sync: nothing is posted and the run names the file.
@@ -220,42 +220,48 @@ numbers.
     anything else, or no line, an error.
 
 - **R-BTN-203 (work done outside Baton).** Baton works where only part of an organization uses
-  it: any of a ticket's legs may be done by people and sessions that never claim it — the
-  change built, reviewed, fixed or merged by hand, or the ticket closed. The sync (the CLI's
-  markdown source, fact adapter and standard station functions, never the server) reads the
-  evidence and posts what it finds. Only a ticket with no active claim is judged, at whatever
-  station Baton holds it; a claimed ticket is its holder's.
-  - **One leg done outside: a fact arrival.** A leg whose course file declares
-    `arrives: {fact: <kind>}` (R-BTN-69) arrives when the sync finds that fact for the ticket.
-    The kinds are `pr-opened` (a PR of the ticket's, open), `pr-verdict` (a pusher's verdict on
-    its PR's head that no claim of the ticket wrote, R-BTN-139), `pr-pushed` (a push to its PR
-    after the leg began waiting) and `pr-merged` (its PRs merged by a merge no `merge` leg
-    reported), each read for the ticket's PRs as R-BTN-131's courses map them. The sync posts an
-    `std:arrival@1` per fact found, `ref` naming it (the PR's URL, the review's URL, the head sha,
-    the merge commit), as writer `sync`, and R-BTN-39 applies it along the leg's edge. Where the
-    policy admits no `sync` writer for the type, the arrival is R-BTN-192's.
-  - **The ticket done outside: strong evidence closes.** From any station, the source posts the
-    ticket `closed` as done when its file is under `archive/` or its `status` is `done` (the
-    table above), or when every PR its `prs:` names — in the home or a repository its `repos:`
-    reaches (R-BTN-140) — is merged, none is open, and at least one is named. The closure's
-    `display.status` is `done (outside Baton: <PR or commit>)`; `baton ticket check` reports
-    each such file not yet archived, never as a finding.
-  - **Weak evidence reconciles.** A pusher's merged PR or a commit reaching the default branch
-    since the last accepted head that names the ticket's id as a whole word in its title or
-    message, but is no PR the ticket's `prs:` or a fact arrival accounts for, is weak evidence.
-    It never closes and never moves a ticket. While any piece is unacknowledged, the source
-    posts the ticket under the repository's reconciliation course instead of its own:
-    `.baton/baton.json` `reconcile_course`, default `reconcile` (R-BTN-131), with the evidence
-    and Baton's position in its sync-local `fields`; `reconcile_course: null` turns weak evidence
-    off. The course weighs the evidence against the legs still ahead of that position and
-    records in the ticket's file each piece it weighed (`reconciled:`, a list of PR URLs and
-    commit shas); evidence listed there is acknowledged. When none is left, the ticket is posted
-    under its own course again, at the position Baton held (R-BTN-64).
-  - **What the sync reads.** The home's commits between the last accepted head and the posted
-    one (`ctx.head`, §4.3), and the fact adapter's PRs (R-BTN-96) for the home and the
-    repositories live tickets' `repos:` reach, merged ones in the same window. A first snapshot
-    has no window and reads no weak evidence. A repository the adapter cannot read fails the
-    sync, as R-BTN-96 says.
+  it: any of a ticket's legs may be done by people and sessions that never claim it. The sync
+  (the CLI's fact adapter and standard station functions, never the server) finds that work and
+  attests it; Baton applies it by its own rules (R-BTN-39).
+  - **A leg done by hand is a fact leg.** A course names, as legs of their own, the hand acts it
+    accepts: each a leg with `arrives: {fact: <kind>}` (R-BTN-69), one outcome, and its own
+    `from`, so the course file says exactly where a hand act may move a ticket. The kinds, each
+    read for the ticket's PRs as R-BTN-131's courses map them (its `prs:` and its branch
+    pattern):
+
+    | Kind | The fact | `ref` |
+    |---|---|---|
+    | `pr-opened` | a PR of the ticket's, open | the PR's URL |
+    | `pr-verdict` | a verdict on the PR's head by a pusher (R-BTN-139) who is none of the repository's `runner_pushers`, written by no claim of the ticket | the review's or comment's URL |
+    | `pr-pushed` | a push to the PR after its latest changes verdict that changes more than the base merged in | the head sha |
+    | `pr-merged` | every PR of the ticket's merged, none open, by merges no `merge` leg reported | the last merge commit |
+
+    The sync posts one `std:arrival@1` per fact a fact leg leaving Baton's station waits on, as
+    writer `sync`, with that `ref` and the `next` the course file's leg names for the fact (a
+    course may name a `next` per verdict). A fact for which no fact leg leaves Baton's station is
+    evidence (below), never an arrival.
+  - **Other evidence reconciles.** The sync also posts an `std:evidence@1` (`{ref, kind}`) per
+    piece of evidence that a ticket may have been done outside Baton but that no fact leg can
+    take:
+    - `merged-early`: a `pr-merged` fact while no fact leg leaves Baton's station;
+    - `mention`: a pusher's merged PR (title or body) or a first-parent commit reaching the
+      default branch since the last accepted head (commit message) that names the ticket's id
+      as a whole word. Not counted: commits that change only the ticket paths or `.baton/`; a
+      commit or PR carrying a claim's trailer (R-BTN-8) or on a branch any course of the ticket
+      maps (its own PRs and their merges); the commit that filed the ticket; a commit or PR
+      naming more than three ids; and a ticket at an end station.
+
+    Only `ref` and `kind` are posted: titles and messages never are (R-BTN-33). Baton keeps each
+    piece and moves the ticket onto its repository's reconciliation course (R-BTN-39's
+    reconciliation move); `.baton/baton.json` `reconcile_course` names it (default `reconcile`,
+    R-BTN-131), and `null` posts no evidence.
+  - **What the sync reads.** The adapter's PR facts (R-BTN-96) and the home's first-parent
+    commits from the last accepted head to the observation's head (§4.3). A first snapshot has
+    no window and reads no `mention`. A repository the adapter cannot read fails the sync, as
+    R-BTN-96 says.
+  - **Closure is unchanged.** An archived file or `status: done` closes a ticket as the table
+    above says, claimed or not. A hand merge closes one only through a fact leg the course lets
+    reach an end.
 
 ### 4.3 The sync run and the head
 

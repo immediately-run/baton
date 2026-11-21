@@ -27,6 +27,7 @@ rely on it.
 | `create-spec` | designs a specification in conversation with the owner, reviews it adversarially, addresses blocking findings in a second conversation, adjudicates what three rounds leave open, merges | converse, review, address, adjudicate, merge | `merged` |
 | `reconcile` | weighs work done outside Baton that may have delivered a ticket — a merged PR or commit naming it (BATON_SPEC [R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)) — against the ticket's exit criteria, records what it weighed, and closes the ticket on a person's word or sends it back to its own course | weigh, the person leg confirm, record | `closed`, `returned` |
 | `spec-to-tickets` | takes a merged specification a one-sentence request names, decomposes it into child tickets — one per section, each with tests and exit criteria from the spec's words — checks the set against the spec's coverage, and files the children under the request | decompose, check, file | `filed` |
+| `reconcile` | weighs evidence of work done outside Baton that no fact leg could take (BATON_SPEC [R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)) against the ticket's exit criteria; closes it on a person's word, or returns it to the position Baton kept | weigh, the person leg confirm | `delivered` (and `returned`, which is not an end) |
 
 `create-pr` is the default. It replaced the `pr` course, which a repository scaffolded before
 keeps until it switches.
@@ -95,58 +96,53 @@ archives it as for any ticket closed by hand.
 ## Work done outside Baton
 
 Any leg may be done by someone who never claims the ticket (BATON_SPEC
-[R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)). Each standard course's
-course file says which of its legs can arrive that way, and by which fact:
+[R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)). Each standard course names the
+hand acts it accepts as **fact legs**: legs no runner claims, each with one outcome, arriving when
+the sync finds its fact. Their `from` lists are the whole of what a hand act can do:
 
-| course | leg | arrives on | so that |
-|---|---|---|---|
-| `create-pr` | `implement` | `pr-opened` | a PR a person opened on the ticket's branch, or named in `prs:`, is the implement leg done |
-| `create-pr` | `review` | `pr-verdict` | a pusher's approving or changes-requested review is that round |
-| `create-pr` | `fix` | `pr-pushed` | a push after a changes verdict is the fix |
-| `create-pr` | `merge` | `pr-merged` | a merge by hand ends the course at `merged` |
-| `review-pr` | `review` | `pr-verdict` | a pusher's review is a round |
-| `create-spec` | `merge` | `pr-merged` | as `create-pr`'s |
+| course | fact leg | from → to | fact | next |
+|---|---|---|---|---|
+| `create-pr` | `opened-by-hand` | `filed` → `pr-open` | `pr-opened` | `run-tests` |
+| `create-pr` | `reviewed-by-hand` | `pr-open`, `fixed` → `reviewed` | `pr-verdict`, on a head the test gate passed | `merge` on approve, `fix` on changes |
+| `create-pr` | `fixed-by-hand` | `reviewed` → `fixed` | `pr-pushed` | `run-tests` |
+| `create-pr` | `merged-by-hand` | `reviewed`, `adjudicated` → `merged` | `pr-merged` | — (an end) |
+| `review-pr` | `reviewed-by-hand` | `requested`, `changes-requested` → `approved` | `pr-verdict` (approve) | — (an end) |
+| `create-spec` | `merged-by-hand` | `reviewed`, `adjudicated` → `merged` | `pr-merged` | — (an end) |
 
-`run-tests` has no such fact: its gate counts only the test runs Baton recorded, on purpose. A
-change merged by hand closes the ticket anyway, from any station, when every PR its `prs:` names
-has merged. The legs that write to the default branch (`bug-report`, `draft-ticket`, `decision`,
-`build-app`) arrive by their marker lines, as they always have. A person who writes a marker line
-by hand has done that leg. A repository changes which legs arrive by which fact in its own course
-file. Evidence weaker than these facts goes to `reconcile`, below.
+- **The test gate stays.** A person's review counts on a head the gate has passed, and a hand
+  merge closes the ticket only from where `merge` itself would. A PR merged earlier, at `pr-open`
+  or `fixed`, is evidence for `reconcile`, so nothing closes on untested code and no dependent
+  unblocks.
+- **A runner's verdict is never a hand act.** Verdicts by the repository's `runner_pushers`
+  logins, and verdicts any claim of the ticket wrote, don't count.
+- **A hand verdict, push or merge counts as a run** of the leg it stands for, toward `max_runs`
+  as a runner's would.
+- **Courses that commit to the default branch** (`bug-report`, `draft-ticket`, `decision`,
+  `build-app`) arrive by their marker lines, as they always have: a person who writes a marker
+  line by hand has done that leg.
+
+A repository changes which hand acts its course accepts in its own course file.
 
 ## The reconciliation course, `reconcile`
 
-Baton must work where only part of an organization uses it. The sync closes a ticket on strong
-evidence (archived, `status: done`, or every PR its `prs:` names merged; BATON_SPEC
-[R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)). Weak evidence is a merged PR
-or default-branch commit that names the ticket's id without being in its `prs:`. It posts the
-ticket on `reconcile`, or on the course `reconcile_course` in `.baton/baton.json` names,
-instead of its own. The evidence rides in the ticket's sync-local fields.
+When the sync finds evidence of outside work that no fact leg can take (a `merged-early` PR, or
+a pusher's merged PR or commit naming the ticket), Baton keeps the evidence and the ticket's
+position. It then moves the ticket onto `reconcile`, or the course `.baton/baton.json`
+`reconcile_course` names (BATON_SPEC [R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)'s reconciliation move). The ticket's own course
+stays its `course_id` throughout.
 
-1. **`weigh`** (an agent leg, read-only). It reads the ticket, its exit criteria, the position
-   Baton held and the legs still ahead of it, and each piece of evidence: the PR's diff and
-   description, the commit. It runs the checks the exit criteria name at the default branch's
-   head. Its last line is one of:
-   - `delivered <sha|PR,…> <what it ran and what it showed>`: every exit criterion holds. The
-     stub checks that each named commit or PR is on the default branch, as `create-pr`'s
-     `delivered` answer does.
-   - `partial <sha|PR,…> <what remains>`: some of it is delivered.
-   - `unrelated <reason>`: the evidence only names the id.
-2. **`confirm`** (the person leg, under Needs you), after `delivered`: `confirmed` goes on to
-   `record` as closed, and `refused` goes on to `record` as returned. A repository may override
-   `confirm` (a `legs/confirm.run.*` that answers `confirmed` itself) to close on the agent's
-   word. That is the repository's choice, made in its own files.
-3. **`record`** (a ticket-only change). It writes the ticket file: every piece of evidence it
-   weighed into `reconciled:`, the PRs into `prs:`, and for `partial` the remainder as a dated
-   line in `## Status`. A `closed` ticket is also moved to `archive/` with `status: done`, as
-   `baton tickets done` does. It lands as one commit under the ticket paths, so the next sync sees
-   the evidence acknowledged. The ticket then closes, or goes back to its own course at the
-   position Baton held when the evidence appeared.
+| leg | from → to | what it does |
+|---|---|---|
+| `weigh` (agent) | `weighing` → `delivered-claimed` \| `returned` | Reads the ticket, its exit criteria, the position Baton recorded and the legs still ahead of it, and each piece of evidence the claim answer carries (`evidence: [{ref, kind}]`). Runs the exit criteria's checks in its own checkout and writes nothing. Its last line is `delivered <sha\|PR,…> <evidence>` (each named commit or PR is checked to be on the default branch, as `create-pr`'s `delivered` is), `partial <what remains>` or `unrelated <reason>`. The last two reach `returned`, with the line kept as the end's detail. |
+| `confirm` (person) | `delivered-claimed` → `delivered` \| `returned` | A person reads the evidence under Needs you and answers `delivered` or `returned`. |
 
-Its ends are `closed` and `returned`. A leg that cannot decide fails like any other, and the
-ticket stays on `reconcile` until a runner or a person settles it. Overriding `weigh`, `confirm`
-or `record`, or replacing the whole course with `reconcile_course`, works as for every standard
-course (*Overriding a leg* and *Changing one*, below).
+- **Ends:** `delivered`, which is done. Archive the ticket file with `baton tickets done`;
+  `baton ticket check` reports a ticket done on the board whose file is live.
+- **`returned`** is a station, not an end. There Baton marks the evidence weighed and puts the
+  ticket back where it was. No leg writes to the default branch.
+- **To close on the agent's word**, a repository names its own course in `reconcile_course`, one
+  whose `weigh` reaches an end directly. A person leg is never claimed, so overriding `confirm`
+  cannot do it.
 
 ## Starting a course from one sentence
 

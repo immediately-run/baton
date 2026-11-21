@@ -18,22 +18,24 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
-- **2026-11-21 — Work done outside Baton (R-BTN-203, R-BTN-39, R-BTN-131, R-BTN-74, S-BTN-309).**
-  Rules changed: R-BTN-39, R-BTN-74, R-BTN-131; R-BTN-203 new. The owner, 2026-11-21: "baton *must* work
-  well in a setup where only a portion of the organization is using baton", and outside work is
-  to be detected by the sync's code, not the server. B-166 had been delivered by four PRs on
-  2026-11-02 by sessions that never claimed it, stayed `available`, and spent a runner's leg
-  on 2026-11-21. The owner ruled: strong evidence (archive, `status: done`, every named PR
-  merged) closes; weak evidence (a merged PR or commit naming the id) starts a reconciliation
-  course Baton manages, configurable and replaceable like any course, rather than a flag for a
-  person. The owner added that implementing is not the only leg done outside Baton: a review,
-  a fix or a merge may be too. So each leg's outside completion is a fact arrival, the sync's
-  `std:arrival@1` under a policy admitting `sync` for it (built here; the fact reader for other
-  policies stays R-BTN-192's proposal), using the four kinds the security proposal had defined;
-  strong evidence closes from any station, and reconciliation returns a ticket to the position
-  Baton held. Rejected: closing on any mention, which closes a ticket that needs several PRs at the
-  first; the server inferring closure from forge events, against R-BTN-35's split of who owns
-  which facts.
+- **2026-11-21 — Work done outside Baton (R-BTN-203, R-BTN-39, R-BTN-69, R-BTN-96, R-BTN-131, S-BTN-309).**
+  Rules changed: R-BTN-39, R-BTN-69, R-BTN-74, R-BTN-96, R-BTN-131, R-BTN-188, R-BTN-191; R-BTN-203
+  new. The owner, 2026-11-21: "baton *must* work well in a setup where only a portion of the
+  organization is using baton"; outside work is found by the sync's code, not the server; "the
+  codegen leg is not the only leg which may be completed outside baton"; and weak evidence starts a
+  reconciliation course Baton manages, configurable like any course. B-166 had been delivered by
+  four PRs on 2026-11-02 by sessions that never claimed it, and cost a runner's leg. Two
+  adversarial reviewers with fresh context read the first draft and found it not buildable:
+  evidence that lasted one sync and never reached the leg, a course switch the sync could not
+  make (R-BTN-39), `returned` as an end that marked work done, `record` writing `prs:` and so
+  closing partial work, a bare-id match that fires on most of this repository's commits, a hand
+  merge closing from any station past the test gate, `arrives` undefined in R-BTN-69, and runners
+  counting as reviewers. The owner then chose (2026-11-21): hand acts as separate fact legs the
+  course file places (the courses proposal's design, over `arrives` on runner legs); mentions
+  filtered rather than an explicit trailer; and a hand merge closing only where the course allows.
+  So Baton keeps the evidence (`ticket_evidence`) and the position it leaves (`reconcile_holds`),
+  enters and leaves the reconciliation course itself, and `returned` is no end. Rejected: the
+  server inferring closure from forge events (against R-BTN-35); closing on any mention.
 
 - **2026-11-20 — A session's reads outside `/v1/ui/*`, the strip's ready count, V1's paged lists (R-BTN-16, R-BTN-155, S-BTN-243, S-BTN-254).**
   Rules changed: R-BTN-16, R-BTN-155.
