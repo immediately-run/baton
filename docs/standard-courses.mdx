@@ -104,19 +104,19 @@ its fact. Its `from` list is the whole of what that hand act can do:
 | course | fact leg | from → to | fact | next | `max_runs` |
 |---|---|---|---|---|---|
 | `create-pr` | `opened-by-hand` | `filed` → `pr-open` | `pr-opened` | `run-tests` | — |
-| `create-pr` | `reviewed-by-hand` | `pr-open`, `fixed` → `reviewed` | `pr-verdict`, on a head the test gate passed | `merge` on approve, `fix` on changes | 3 |
-| `create-pr` | `fixed-by-hand` | `reviewed` → `fixed` | `pr-pushed` | `run-tests` | 3 |
-| `create-pr` | `merged-by-hand` | `reviewed`, `adjudicated` → `merged` | `pr-merged` | — (an end) | — |
+| `create-pr` | `reviewed-by-hand` | `pr-open`, `fixed`, `reviewed` → `reviewed` | `pr-verdict` | `merge` on approve, `fix` on changes | 3 |
+| `create-pr` | `fixed-by-hand` | `pr-open`, `reviewed`, `fixed` → `fixed` | `pr-pushed` | `run-tests` | 3 |
+| `create-pr` | `merged-by-hand` | `filed`, `pr-open`, `fixed`, `reviewed`, `adjudicated` → `merged` | `pr-merged` | — (an end) | — |
 | `review-pr` | `approved-by-hand` | `requested`, `changes-requested` → `approved` | `pr-verdict`, `verdict: approve` | — (an end) | — |
 | `create-spec` | `opened-by-hand` | `requested` → `spec-open` | `pr-opened` | `review` | — |
 | `create-spec` | `pushed-by-hand` | `reviewed` → `spec-open` | `pr-pushed` | `review` | 3 |
-| `create-spec` | `merged-by-hand` | `reviewed`, `adjudicated` → `merged` | `pr-merged` | — (an end) | — |
+| `create-spec` | `merged-by-hand` | `requested`, `spec-open`, `reviewed`, `adjudicated` → `merged` | `pr-merged` | — (an end) | — |
 
-- **The test gate stays for reviews.** A person's review counts only on a head the gate has
-  passed. A hand merge closes the ticket only from where `merge` itself would. It does so
-  whatever the verdict on the merged head, because the person who merged took that call. A PR
-  merged earlier, at `pr-open` or `fixed`, is `merged-early` evidence for the reconcile leg, so
-  nothing closes on a head the gate never saw.
+- **Open world.** These legs are broad on purpose: a person can review, push or merge at almost
+  any point, and Baton can't stop them (values, #13). A merge from any station ends the ticket at
+  `merged`, whatever the verdict and whether the test gate ran. A factory that needs the gate and
+  the review enforced gates the merge at the forge (branch protection, a required check on Baton's
+  state, Fieldhouse's forge gate) or narrows these `from` lists in its own course file.
 - **A runner's verdict is never a hand act.** No `pr-verdict` counts while the repository's
   `runner_pushers` is unset. Once it's set, verdicts by those logins, by the PR's author, by a
   pusher of its head, and any verdict a claim of the ticket posted don't count.
@@ -128,9 +128,10 @@ A repository changes which hand acts its course accepts in its own course file.
 
 ## The reconcile leg
 
-Some evidence of outside work fits no fact leg: a PR merged before the test gate (`merged-early`),
-a pusher's merged PR or commit that names the ticket (`mention`), or, where the policy refuses the
-sync's arrivals, a hand act no fact leg could take (`fact`). Baton keeps it, and the course's
+Some evidence of outside work fits no fact leg: a pusher's merged PR or commit that names the
+ticket (`mention`), a PR merged where a repository's own course has no `merged-by-hand`
+(`merged-early`), or, where the policy refuses the sync's arrivals, a hand act no fact leg could
+take (`fact`). Baton keeps it, and the course's
 **reconcile leg** (`reconciles`) weighs it. Baton queues that leg in place of the queued one
 (BATON_SPEC [R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)), never in place of a
 person leg, a suspended leg, or a leg an owner's route, a retry or an expiry placed. The leg's
@@ -138,28 +139,31 @@ person leg, a suspended leg, or a leg an owner's route, a retry or an expiry pla
 
 | course | reconcile leg | from | may conclude (→ next) | `max_runs` |
 |---|---|---|---|---|
-| `create-pr` | `reconcile` | `filed`, `pr-open`, `fixed`, `reviewed`, `adjudicated` | `pr-open` → `run-tests`; `fixed` → `run-tests`; `delivered` → `confirm` | 3 |
-| `review-pr` | `reconcile` | `requested`, `changes-requested` | (only `unchanged`) | 3 |
-| `create-spec` | `reconcile` | `requested`, `spec-open`, `reviewed`, `adjudicated` | `spec-open` → `review` | 3 |
+| `create-pr` | `reconcile` | `filed`, `pr-open`, `fixed`, `reviewed`, `adjudicated` | `pr-open` → `run-tests`; `fixed` → `run-tests`; `reviewed` → `merge`; `merged` (an end); `delivered` → `confirm` | 3 |
+| `review-pr` | `reconcile` | `requested`, `changes-requested` | `changes-requested` → `review`; `approved`, `concluded` (ends) | 3 |
+| `create-spec` | `reconcile` | `requested`, `spec-open`, `reviewed`, `adjudicated` | `spec-open` → `review`; `reviewed` → `merge`; `merged` (an end) | 3 |
 
 - **What the agent reads.** The ticket, its exit criteria, Baton's position, the leg it displaced,
   and each piece of evidence its claim carries (`evidence: [{ref, kind}]`). It runs the exit
   criteria's checks in its own checkout and writes nothing.
 - **Its answer is its last line:**
   - `unchanged <reason>`: the ticket stays where it is, and the displaced leg is queued again.
-  - `at <station> <evidence>`: one of the stations in its table row, with that row's next leg.
+  - `at <station> <evidence>`: one of the stations in its table row, with that row's next leg. A
+    station from a verdict or a merge names the review or merge it found.
   - On `create-pr`, `delivered <sha|PR,…> <evidence>`: each named commit or PR must be on the
     default branch, as the implement leg's `delivered` answer is. `confirm` follows, where a person
     closes the ticket or sends it back to `implement`.
-- **What it may not decide.** No reconcile leg can conclude `reviewed`, `adjudicated` or `merged`.
-  Those take a verdict or a merge, through their own legs. It closes a ticket only through a
-  person's `confirm`.
+- **What it decides.** Where the evidence shows the ticket really is: reviewed and approved
+  outside Baton, merged, or delivered by commits without a PR. It answers from the evidence, not
+  from what the course would have preferred (values, #13). `delivered` without a PR still goes
+  through a person's `confirm`, because no merge shows it; a merge it finds ends the ticket at
+  `merged`. A repository that wants a person to confirm every reconciled close drops `merged`
+  from its reconcile leg's `reconciles.to`.
 - **Runs.** A reconcile leg has three runs per ticket. After that, new evidence waits on the
   ticket's page for a person. Evidence counts as weighed only when the leg finishes with an
   answer; a released or failed run leaves it to be weighed again.
 - **Configuring it.** It's a leg like any other: a repository edits its instructions, overrides
-  its `run` (*Overriding a leg*, below), or changes its `reconciles.to` in the course file. A
-  repository that wants evidence to close a ticket without a person maps a station to an end.
+  its `run` (*Overriding a leg*, below), or changes its `reconciles.to` in the course file.
 - **The other standard courses** (`bug-report`, `draft-ticket`, `decision`, `build-app`,
   `spec-to-tickets`) have no reconcile leg yet. Evidence for their tickets waits on the ticket's
   page until one is added.

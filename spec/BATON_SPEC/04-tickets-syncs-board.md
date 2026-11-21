@@ -220,8 +220,11 @@ numbers.
     `confirmed` a notice; `held`, `busy` or `busy:again` a warning that nothing was posted;
     anything else, or no line, an error.
 
-- **R-BTN-203 (work done outside Baton).** Baton works where only part of an organization uses
-  it: any of a ticket's legs may be done by people and sessions that never claim it. The sync
+- **R-BTN-203 (work done outside Baton).** Baton works in an open world: where only part of an
+  organization uses it, any of a ticket's legs may be done by people and sessions that never
+  claim it, and Baton cannot prevent it — it gates only its own state (R-BTN-35). Its job is to
+  detect such moves and place the ticket accordingly; a deployment that needs a course followed
+  strictly gates the outside events at the forge or disables them. The sync
   (the CLI, for every ticket whatever its course's station function, never the server) finds that
   work and attests it; Baton applies it by its own rules (R-BTN-39). Only a board posted with a
   sync key or the registered CI identity (R-BTN-93) carries these attestations; one a runner's
@@ -264,8 +267,8 @@ numbers.
     widens one run's window to that date.
   - **Closure is unchanged.** An archived file or `status: done` closes a ticket as the table
     above says, claimed or not. A hand merge closes one through a fact leg or a reconcile leg the
-    course lets reach an end, whatever the verdict on the merged head: the person who merged it
-    took that call.
+    course lets reach an end, whatever station it is merged from and whatever the verdict on the
+    merged head: Baton records what happened, and preventing it is the forge's job.
 
 ### 4.3 The sync run and the head
 

@@ -37,6 +37,9 @@ After two adversarial reviews, the owner chose:
 The case that started it: B-166 was delivered on 2026-11-02 by PRs #158, #159, #163 and #164, never
 claimed or closed, and cost a runner's implement leg on 2026-11-21.
 
+- The open-world stance: Baton cannot prevent moves outside it, only detect them and place the
+  ticket; a factory that needs strictness gates the forge (values #13, the owner, 2026-11-21).
+
 **Spec:** [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)); [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)'s fact arrival, and evidence and the reconcile
 leg); [§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2)'s `arrives` and `reconciles`; `std:evidence@1`); [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-96](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), [R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4));
 [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`ticket_evidence`, `reconcile_displaced`); [§14](../spec/BATON_SPEC/14-api.md#sec-14) (the claim answer); [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8)'s `attestations`
@@ -100,7 +103,7 @@ outside Baton* and *The reconcile leg*.
    machine-key sync posts none.
    - `pr-verdict`: none while `runner_pushers` is NULL or `[]`. Otherwise ignore those logins, the
      PR's author, the head's pushers, and the verdict URLs Baton served. Honour
-     `arrives.verdict`. On `create-pr`, count only on a head the gate passed.
+     `arrives.verdict`. No condition on the test gate (open world, values #13).
    - `pr-pushed` comes after the latest changes verdict and changes more than the merged-in base.
    - `pr-merged` means every PR of the ticket merged, by no `merge` leg.
 7. **Evidence.**
@@ -135,10 +138,12 @@ outside Baton* and *The reconcile leg*.
     - B-166's shape as a fixture: four merged PRs naming it in titles, none in `prs:`. It gets
       `mention` evidence and its `reconcile` leg is queued at `filed`; `delivered` leads to
       `confirm`, and `unchanged` re-queues `implement`.
-    - A `create-pr` ticket at `pr-open` whose PR is merged by hand gets `merged-early`, not
-      closure, and its reconcile leg is queued.
+    - A `create-pr` ticket at `pr-open` whose PR is merged by hand arrives at `merged` by
+      `merged-by-hand` (open world: no gate or review required).
     - The same ticket at `reviewed`, with a person's approval and then a hand merge, ends at
       `merged`.
+    - A repository whose course narrows `merged-by-hand` to `reviewed` gets `merged-early`
+      evidence for a merge at `pr-open`, and its reconcile leg is queued.
 
 ### Trust
 

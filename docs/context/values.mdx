@@ -55,11 +55,16 @@ by a review.</Lede>
     into through its policy: Baton's trusted runners decide what lands, from attestations, and the
     forge enforces that only they and a human may ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 
-13. **Every way a ticket moves belongs in its course, inside Baton or outside.** Baton's strategy
-    is to model explicitly, as a coarse graph, processes that were always implicit; that works
-    only if the moves made outside Baton are modelled too (the owner, 2026-11-21). So a course's
-    graph holds the hand acts it recognises as fact legs and the evidence it must weigh as a
-    reconcile leg, beside the legs runners run, and Baton works where only part of an
-    organization uses it ([BATON_SPEC §4.2](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2),
-    [R-BTN-203](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)). The PR courses do this; the courses that commit to the default branch do not
-    yet. Closing a ticket in git (archiving it, `status: done`) stays outside any graph.
+13. **An open world: Baton detects outside moves, it does not prevent them.** Baton orchestrates
+    work that processes outside it also touch: PRs are opened, reviewed and merged, ticket files
+    created and updated, by actors independent of Baton. It cannot gate what happens in a ticket
+    store, version control, CI or deployment; the only thing it gates is updates to its own state
+    (#12). So its default stance, and Fieldhouse's, is that almost any transition between a
+    course's stations may take place outside Baton, and Baton's job is to detect it and place the
+    ticket in the course graph accordingly (the owner, 2026-11-21). A course models those moves as
+    edges of its own graph: fact legs for the hand acts it recognises, a reconcile leg for the
+    evidence it must weigh ([BATON_SPEC §4.2](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2),
+    R-BTN-203). A factory that needs a course followed strictly gates the outside events
+    themselves — PR merges, workflow triggers — on Baton's state at the forge, or disables those
+    avenues so that only Baton's runners move tickets; it never asks Baton to stop them. The PR
+    courses model outside moves; the courses that commit to the default branch do not yet.

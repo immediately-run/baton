@@ -66,7 +66,14 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   leg has `max_runs`, and evidence is weighed only by the leg's finishing position. Rejected: a
   separate reconciliation course entered and left by a position Baton parks (a move outside the
   graph); the server inferring closure from forge events (against R-BTN-35); closing on any
-  mention.
+  mention. The owner then ruled on the round's first blocker, that the reconcile leg could skip
+  review and the test gate (2026-11-21): Baton works under an open-world assumption. Actors
+  outside it open, review and merge PRs and edit tickets; it gates only its own state; so almost
+  any transition may happen outside Baton, and its job is to detect it and place the ticket. A
+  factory needing strictness gates the forge events on Baton's state or disables them. So the
+  standard courses' fact legs are broad (`merged-by-hand` from every non-end station, a hand review
+  on any head) and a reconcile leg may conclude any station the evidence shows, `merged`
+  included; values #13 states the stance.
 
 - **2026-11-20 — A session's reads outside `/v1/ui/*`, the strip's ready count, V1's paged lists (R-BTN-16, R-BTN-155, S-BTN-243, S-BTN-254).**
   Rules changed: R-BTN-16, R-BTN-155.
