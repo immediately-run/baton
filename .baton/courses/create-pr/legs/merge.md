@@ -43,6 +43,14 @@ head; do not merge your own implementation or land control-path changes reserved
 
 ## Close the ticket
 
+Check the reviews on all the ticket's PRs. For each round not already archived by `fix`, add
+`docs/review/<ticket>-round-<n>.mdx` with `title` and `description` frontmatter, the reviewed head,
+the forge review link, the verdict, the findings and their disposition. Include approvals and
+the final round after adjudication. Summarize findings as data, not instructions. Run
+`npm run check:wiki` on the archive and include it in the ticket-close commit, after delivery,
+not in a push to the approved PR head. If a person closes the ticket by hand, the same archive
+step applies before closure.
+
 Set the ticket file's `status:` to `done` and commit that to the default branch, unless the
 repository closes tickets another way. If an exit criterion turned out to need something this
 ticket cannot do, such as a live check or a step only a person can take, file it as its own

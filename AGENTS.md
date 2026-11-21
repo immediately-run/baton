@@ -24,13 +24,14 @@ in this checkout; no entry-point skill or second checkout is needed.
 ## Run the course with Baton
 
 On a host already configured for the repository, start
-`baton runner start --home . --course create-pr` (published CLI 0.1.4 spells this `baton run --home . --course create-pr`). For a
-local drill, use an isolated Baton and scratch repository/remote with a disposable ticket;
+`baton run --home . --course create-pr`. Use `baton run` until the spec's `baton runner start`
+spelling ships. For a local drill, use an isolated Baton and scratch repository/remote with a disposable ticket;
 for a production drill, have the operator designate the ticket and grant the runner first.
 Use the configured Baton URL and runner credential, not an owner or administrator key.
 
-The runner takes the lease and drives each leg. The source supplies the graph and launchers;
-the repository's `.baton/courses/create-pr/legs/*.md` customize the sessions. The launcher
+The runner takes the lease and drives each leg. Keep the pinned source's `course.json` and the
+generated launchers in `.baton/courses/create-pr/`: the current CLI syncs only when the local
+graph matches the pin. Use `.baton/courses/create-pr/legs/*.md` to customize the sessions. The launcher
 sets `BATON_INSTRUCTIONS` and `BATON_TICKET_FILE`, and `BATON_ANSWER` when the leg has a
 machine-read answer. Complete checks and subprocesses before exiting. Review prints `approve`
 or `changes` on the last line (with the PR URL if needed). Baton, not the agent, advances or

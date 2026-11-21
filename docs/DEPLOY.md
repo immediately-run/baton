@@ -64,8 +64,14 @@ DNS record, Worker route, or wrong account.
 Register the repository and its owners with `baton admin repo add` if it was not seeded.
 Configure `baton repo sync` to post from that repository using its registered workflow's GitHub
 Actions OIDC token (the audience must equal `BATON_ORIGIN`), or register an SSH sync key and use
-`--sync-key FILE`. Check that the board's head matches the repository's default branch. Grant a
-separate runner key with the required course capabilities. From a runner host, follow
+`--sync-key FILE`. Check that the board's head matches the repository's default branch.
+On releases that still have shadow mode, registration and sync leave a new repository in shadow.
+With the repository owner's authorization, an instance administrator opens the repository's
+**Sync** screen and confirms **Cut over** while the board snapshot is less than 15 minutes old.
+This is a one-way switch to Baton as the claim allocator; finish or account for any in-flight git
+claims first. Verify the screen shows that Baton allocates work before trying to claim a ticket.
+
+Grant a separate runner key with the required course capabilities. From a runner host, follow
 [AGENTS.md](../AGENTS.md) with a designated trial ticket; watch the board and confirm the final
 station after the merge and sync. A home binds to one Baton: use a disposable repository for a
 local rehearsal rather than pointing an existing production home at a second service.
