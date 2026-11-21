@@ -134,6 +134,17 @@ describe('the course file\'s new fields (R-BTN-69, R-BTN-160, R-BTN-195)', () =>
     expect(faults(file({}, { 'ask.owner': { disposition: 'suspend', wait_s: 901 } }))).toContain('conditions.ask.owner.wait_s: bound');
   });
 
+  it('S-BTN-134: refuses error_types by name', () => {
+    expect(faults({ ...file({}), error_types: {} })).toContain('error_types: unknown-key');
+  });
+
+  it('inherits disposition from the nearest declaration or standard type, regardless of order', () => {
+    const f = file({}, { 'warning.parent.child': { description: 'child' }, 'warning.parent': { disposition: 'interrupt' }, 'warning.other': {} });
+    expect(faults(f)).toEqual([]);
+    expect(graphOf(f).conditionTypes.get('warning.parent.child')?.disposition).toBe('interrupt');
+    expect(graphOf(f).conditionTypes.get('warning.other')?.disposition).toBe('notify');
+  });
+
   it('autonomous sits on no kind: person leg, and never beside a conditions list naming what it bars', () => {
     expect(faults(file({ person: { from: ['filed'], to: 'done', kind: 'person', asks: 'owner', autonomous: true } })))
       .toContain('legs.person.autonomous: autonomous');

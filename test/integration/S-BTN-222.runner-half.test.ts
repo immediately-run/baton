@@ -300,6 +300,10 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       expect(await conditionRows('docs:B')).toEqual([
         { type: 'error.needs-person', disposition: 'interrupt', outcome: 'recorded', url: null, closed_how: 'raised' },
       ]);
+      expect(await rows(`SELECT json_extract(detail_json, '$.error.type') AS type,
+                                json_extract(detail_json, '$.error.message') AS message
+                         FROM events WHERE kind = 'released' AND ticket_id = ?`, 'docs:B'))
+        .toEqual([{ type: 'error.needs-person', message: 'The leg raised error.needs-person.' }]);
       // A non-retryable class holds the ticket (R-BTN-122): the owner's to clear.
       expect(await rows<{ hold: number; hold_reason: string | null }>('SELECT hold, hold_reason FROM ticket_overrides WHERE ticket_id = ?', 'docs:B'))
         .toEqual([{ hold: 1, hold_reason: 'non-retryable:spec' }]);
@@ -358,12 +362,16 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
       (r as unknown as { inflight: unknown }).inflight = { claimId: 1, ticket: 'docs:X', course: null, leg: 'implement', legAt: 0, child: null, waiters: [] };
       const course = { course: 'roadmap-pr', graph: graphOf(COURSE), scripts: new Map(), scratch: home };
       const ctx = { ticket: { id: 'docs:X' }, claim: { id: 1 } };
-      const ask = (req: Record<string, unknown>) => (r as unknown as { onChannel(req: unknown, course: unknown, leg: string, ctx: unknown): Promise<{ ok: boolean; error?: string }> }).onChannel(req, course, 'implement', ctx);
+      const ask = (req: Record<string, unknown>, at = course) => (r as unknown as { onChannel(req: unknown, course: unknown, leg: string, ctx: unknown): Promise<{ ok: boolean; error?: string }> }).onChannel(req, at, 'implement', ctx);
 
       expect(await ask({ op: 'raise', type: 'interact', subject: 'join' })).toMatchObject({ ok: false, error: expect.stringContaining('session link') });
       expect(await ask({ op: 'raise', type: 'baton.retries', subject: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining("core's alone") });
       expect(await ask({ op: 'raise', type: 'unheard-of', subject: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('declares') });
       expect(await ask({ op: 'raise', type: 'warning', subject: 'x', severity: 'loud' })).toMatchObject({ ok: false, error: expect.stringContaining('severity') });
+      const narrowed = { ...course, graph: graphOf({ ...COURSE, legs: { ...roadmapPr.legs, implement: { ...roadmapPr.legs.implement, conditions: [] } } }) };
+      expect(await ask({ op: 'raise', type: 'warning', subject: 'x' }, narrowed)).toMatchObject({ ok: false, error: expect.stringContaining('narrow') }); // S-BTN-130
+      expect(await ask({ op: 'raise', type: 'ask.owner', subject: 'x', restarts: { park: 'park' } })).toMatchObject({ ok: false, error: expect.stringContaining('subset') });
+      expect(await ask({ op: 'raise', type: 'ask.owner', subject: 'x', default: 'park' })).toMatchObject({ ok: false, error: expect.stringContaining('default') });
       expect(reported).toBe(0); // nothing reached Baton
       expect(await ask({ op: 'raise', type: 'warning', subject: 'a note' })).toMatchObject({ ok: true, condition_id: 1 });
       expect(reported).toBe(1);

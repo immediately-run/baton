@@ -20,7 +20,7 @@ import { type LocalOrder, type LocalQueue, type WorkedLeg } from './queue';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { verifySignedCommit, nodeKeygen } from '../shared/commitSign.mjs';
 import { controlGroupsOf, groupUnchangedAt } from '../defaults/signed-control';
-import { checkRaise, dispositionOf, errorClassOf, SEVERITIES, type ConditionDeclaration } from '../core/conditionTypes';
+import { checkRaise, dispositionOf, errorClassOf, raiseRestarts, SEVERITIES, type ConditionDeclaration } from '../core/conditionTypes';
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal, batonUnreachable } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
@@ -277,6 +277,7 @@ export function declarationFrom(held: string[]): string[] {
 interface PendingAbort {
   signal: 'release' | 'regressed' | 'course-changed';
   reason?: string;
+  error?: { type: string; message: string };
 }
 
 /** The claim the loop is running, as the beat and a death line read it. */
@@ -1104,17 +1105,17 @@ export class Runner {
    * signal is recorded whether or not a leg process is running — a release that lands in a
    * short wait or between legs is honoured just the same, never dropped. The claim-level end it
    * turns into is remembered for when the runner next settles. */
-  private signalLeg(signal: PendingAbort['signal'], reason?: string): void {
-    this.signalSlot(this.cur, signal, reason);
+  private signalLeg(signal: PendingAbort['signal'], reason?: string, error?: PendingAbort['error']): void {
+    this.signalSlot(this.cur, signal, reason, error);
   }
 
   /** `signalLeg` for a named claim — the beat's, which belongs to no claim (B-188). */
-  private signalSlot(x: Slot, signal: PendingAbort['signal'], reason?: string): void {
+  private signalSlot(x: Slot, signal: PendingAbort['signal'], reason?: string, error?: PendingAbort['error']): void {
     if (!x.inflight) return;
     // A release is the strongest signal: it overrides a regression or a course change that
     // landed first, so its message is never acknowledged away (§6.13, §9).
     if (x.pendingAbort && !(signal === 'release' && x.pendingAbort.signal !== 'release')) return;
-    x.pendingAbort = { signal, reason };
+    x.pendingAbort = { signal, reason, error };
     // The wire carries §6.13's closed reason set: a course change stops the leg the way a
     // release does — at its next safe point — so that is the signal it gets.
     const child = x.inflight.child;
@@ -2373,7 +2374,7 @@ export class Runner {
           let reached = at;
           let next: string | null = legName; // a give-up queues the leg itself (R-BTN-83)
           let closed: string | null | undefined = null;
-          if (abort.signal === 'release' && outcome.kind === 'ok') {
+          if (abort.signal === 'release' && abort.error == null && outcome.kind === 'ok') {
             const verdict = decide(outcome.result, course.graph, legName, at);
             if (!('bug' in verdict)) closed = await this.callClose(script, ctx, outcome.result);
             if (closed != null && !('bug' in verdict)) {
@@ -2385,7 +2386,7 @@ export class Runner {
           }
           const reason = abort.reason ?? `suspended:${at}`;
           // A released end points at no evidence (§6.5); the marker close wrote is in git.
-          return await this.finish(claimId, { end_reason: reason, reached, ...(next != null ? { next } : {}) }, await this.callHandoff(script, ctx));
+          return await this.finish(claimId, { end_reason: reason, reached, ...(next != null ? { next } : {}), ...(abort.error ? { error: abort.error } : {}) }, await this.callHandoff(script, ctx));
         }
         if (outcome.kind === 'crashed') {
           // R-BTN-144 (B-170): the leg's own error text leaves masked — a provider-auth message
@@ -2395,7 +2396,7 @@ export class Runner {
           // output — masked the same way and bounded to §9.4's detail, so Baton's record of a leg
           // that exited 0 with nothing done says what the agent said, after the sandbox is gone.
           const detail = failureDetail(outcome.error, this.legSecrets);
-          return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: at, next: legName, ...(detail != null ? { detail } : {}) }, await this.callHandoff(script, ctx));
+          return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: at, next: legName, error: { type: 'error.transient', message: detail ?? 'The leg failed.' }, ...(detail != null ? { detail } : {}) }, await this.callHandoff(script, ctx));
         }
         const result = outcome.result;
         session = typeof (result as { session?: unknown } | null)?.session === 'string'
@@ -2858,13 +2859,8 @@ export class Runner {
     const severity = req.severity === undefined || req.severity === null ? 'normal'
       : SEVERITIES.includes(req.severity as never) ? req.severity : null;
     if (severity == null) return { ok: false, error: `severity must be one of ${SEVERITIES.join(', ')} (R-BTN-125)` };
-    const restarts = req.restarts != null && typeof req.restarts === 'object' && !Array.isArray(req.restarts)
-      ? req.restarts as Record<string, string> : undefined;
-    if (restarts != null) {
-      for (const [id, text] of Object.entries(restarts)) {
-        if (typeof text !== 'string') return { ok: false, error: `restarts.${id}: a description is text (R-BTN-160)` };
-      }
-    }
+    const options = raiseRestarts(type, declared, req.restarts, req.default);
+    if (!options.ok) return { ok: false, error: options.reason };
     const body = typeof req.body === 'string' ? req.body : null;
     // R-BTN-33: the subject and body stay here — the runner's log, masked of the leg's own
     // secrets — and nothing of them is reported. The raise's line is what an operator reads.
@@ -2875,8 +2871,8 @@ export class Runner {
       answer = await this.o.api.conditions(claimId, {
         type,
         disposition,
-        ...(restarts != null ? { restarts } : {}),
-        ...(typeof req.default === 'string' ? { default: req.default } : {}),
+        restarts: options.restarts,
+        ...(options.defaultRestart != null ? { default: options.defaultRestart } : {}),
         ...(severity !== 'normal' ? { severity } : {}),
       });
     } catch (e) {
@@ -2891,7 +2887,7 @@ export class Runner {
     // leg goes on (R-BTN-116: nothing waits on it). A `suspend` records and returns too: its
     // wait (R-BTN-162) is not built.
     const end = disposition === 'interrupt' ? `released:cannot-finish:${errorClassOf(type, declared)}` : null;
-    if (end != null) this.signalLeg('release', end);
+    if (end != null) this.signalLeg('release', end, { type, message: `The leg raised ${type}.` });
     return { ok: true, condition_id: answer.condition_id, disposition: answer.disposition ?? disposition, ...(severity !== 'normal' ? { severity } : {}), ...(end != null ? { end } : {}) };
   }
 

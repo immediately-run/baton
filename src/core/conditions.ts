@@ -12,7 +12,7 @@
 import { BatonError } from './http';
 import { logEvent } from './db';
 import { checkConditionReport, repositoryOf, type ConditionReport } from './validate';
-import { dispositionOf, isCoreOnly, type ConditionDeclaration } from './conditionTypes';
+import { dispositionOf, type ConditionDeclaration } from './conditionTypes';
 import type { Graph } from './graph';
 import type { History } from './history';
 import type { Store } from './ports';
@@ -101,7 +101,6 @@ export class Conditions {
     if (!run?.run_id) throw new BatonError('invalid-params', 'the claim is running no leg: a condition is raised from a run');
     // R-BTN-160: Baton's own vocabulary decides the disposition — the standard table, else the
     // course's declaration at the registry's file; core reads no course meaning (R-BTN-50).
-    if (isCoreOnly(b.type)) throw new BatonError('invalid-params', `${b.type} is core's alone: a leg raises no baton condition (R-BTN-160)`);
     const g = c.course_id ? this.c.graph(repo, c.course_id) : null;
     const declared: Map<string, ConditionDeclaration> = g?.conditionTypes ?? new Map();
     const disposition = dispositionOf(b.type, declared);

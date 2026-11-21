@@ -143,6 +143,10 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     // The runner-check refusals the core holds too: baton is core's alone; an unknown type is
     // neither standard nor declared.
     expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'baton.retries', disposition: 'notify' })).json.code).toBe('invalid-params');
+    expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'baton', disposition: 'notify' })).json.code).toBe('invalid-params');
+    for (const forbidden of [{ subject: 'not a filter field' }, { body: 'not a filter field' }, { extra: true }]) {
+      expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'warning', disposition: 'notify', ...forbidden })).json.code).toBe('invalid-params');
+    }
     expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'unheard-of', disposition: 'notify' })).json.code).toBe('invalid-params');
     // The heartbeat carried a good link meanwhile: hitl records open (unbound: the debugger's,
     // R-BTN-163), an unbound notify only records, and a suspend's url is kept only under
@@ -300,6 +304,23 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     expect(past.json.code).toBe('quota');
     // Needs you orders by severity, then age (R-BTN-163): the critical ask first.
     expect((await needsYou()).map((x) => x.severity)).toEqual(['critical', ...Array<string>(19).fill('normal')]);
+  });
+
+  it('counts closed raises against the daily ticket quota and pages the list', async () => {
+    const w = await register('vm-a');
+    const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
+    expect((await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
+    for (let i = 0; i < 200; i++) {
+      expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'warning.quota', disposition: 'notify', restarts: {} })).status).toBe(200);
+    }
+    expect((await raise1('vm-a', w.secret, c.claim_id, { type: 'warning', disposition: 'notify' })).json.code).toBe('quota');
+    const path = '/v1/repositories/docs/conditions?type=warning&ticket=docs%3AA';
+    const first = await readAs(reader, path);
+    expect(first.json.conditions).toHaveLength(100);
+    expect(first.json.cursor).toBeTruthy();
+    const second = await readAs(reader, `${path}&cursor=${first.json.cursor}`);
+    expect(second.json.conditions).toHaveLength(100);
+    expect(second.json.conditions[0].condition_id).not.toBe(first.json.conditions[0].condition_id);
   });
 
   it('a course file with autonomous beside a conditions list naming hitl.x is refused naming the leg', async () => {

@@ -49,9 +49,9 @@ Not built either, each a design its rule below still states:
   - **Declaring.** A course declares its own types in the course file (R-BTN-69):
     `"conditions": {<type>: {"disposition": "interrupt" | "suspend" | "notify",
     "restarts": {<id>: <description>}, "default": <id>, "wait_s": <n>, "retryable": <bool>, "description":
-    …}}`. Only `disposition` is required. A restart id matches §12.3's decision-id pattern, and
-    `wait_s` is 0 to 900. A subtype inherits the disposition of its nearest declared or standard
-    ancestor unless it states its own.
+    …}}`. Only `disposition` is required, and a subtype may instead inherit it from its nearest
+    declared or standard ancestor. A restart id matches §12.3's decision-id pattern, and
+    `wait_s` is 0 to 900.
   - **Error types are `interrupt` conditions.**
     - `retryable` decides whether the retry policy retries the type, for every leg; no policy
       overrides it (R-BTN-122).
@@ -67,7 +67,10 @@ Not built either, each a design its rule below still states:
     reason:
     - the type is well formed, standard or declared, and allowed to the leg;
     - the leg's `autonomous` and the `interact` checks pass (R-BTN-195);
-    - `restarts` map ids to descriptions, and `default` is one of them;
+    - `restarts` map ids to descriptions. The raise takes the declared restarts (from the nearest
+      declaration), or supplies a subset. A standard type or subtype with no declared restarts
+      may supply its own. `default` names an offered restart; an omitted default takes the
+      declaration's default if it is offered;
     - `severity` is valid (R-BTN-125).
   - **Dispositions.**
 
