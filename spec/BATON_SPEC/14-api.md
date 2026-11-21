@@ -138,7 +138,7 @@ here; every other cause is its rule's.
 | `POST /v1/owner/{repository}/bars` | owner | `{course, tag, legs?, applies, starts_at?, ends_at?, release_holders?, reason}` | `{id}` | R-BTN-67 |
 | `POST /v1/owner/{repository}/bars/{id}/lift` | owner | — | `{ok: true}` | R-BTN-67, R-BTN-186 |
 | `PUT /v1/owner/{repository}/settings` | owner | any owner setting (§13.1); `code_repos` as `[{path}]` | `{ok: true}` | R-BTN-66, R-BTN-140, R-BTN-186 |
-| `PUT /v1/owner/{repository}/policy` | owner | `{base_version, policy}` or `{base_version, preset}` | `{version, hash, changed[], guarantees}`; `conflict` when stale, `forbidden`, `floor-violated` | R-BTN-188, R-BTN-189 |
+| `PUT /v1/owner/{repository}/policy` | owner | `{base_version, policy, dry_run?}` or `{base_version, preset, dry_run?}` (`dry_run` is boolean) | `{version, hash, changed[], guarantees}` or, with `dry_run: true`, `{changed[], guarantees, trust_cleared[], stops: {legs[], tickets[]}, not_evaluated[]}`; `conflict` when stale, `forbidden`, `floor-violated` | R-BTN-188, R-BTN-189 |
 | `GET /v1/owner/{repository}/policy/log` | owner | `?after=<version>` | `{versions: [{version, hash, previous_hash, changed_by, approver, preset?, at, changed[]}]}` | R-BTN-188 |
 | `POST /v1/human-keys` | a `human_only` key | `{public_key, signature}`, `signature` the new key's SSHSIG over its own public line; or `{fingerprint, revoke: true, confirm: true}` | `{ok: true}`; `conflict`; `unsatisfiable-approvers` | R-BTN-185, R-BTN-188 |
 | **Sync and forges** | | | | |

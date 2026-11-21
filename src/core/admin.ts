@@ -212,6 +212,17 @@ export class Admin {
     return this.rows<{ public_key: string }>('SELECT public_key FROM human_keys WHERE fingerprint = ? AND revoked_at IS NULL', fingerprint)[0]?.public_key ?? null;
   }
 
+  decisionKeyLine(fingerprint: string): string | null {
+    return this.ownerKey(fingerprint) ?? this.humanKeyLine(fingerprint);
+  }
+
+  /** Match the decision route's human mark, live key lookup and administrator exclusion. */
+  hasHumanDecisionWriter(breakGlass: ReadonlySet<string>, admins: ReadonlyMap<string, string>): boolean {
+    const registered = this.rows<{ fingerprint: string }>('SELECT fingerprint FROM human_keys WHERE revoked_at IS NULL');
+    return registered.some(({ fingerprint }) => !admins.has(fingerprint)) ||
+      [...breakGlass].some((fp) => !admins.has(fp) && this.decisionKeyLine(fp) != null);
+  }
+
   /** R-BTN-185: whether the fingerprint counts as a human-only key — registered here, or a
    *  break-glass line of the host's. */
   async isHumanKey(fingerprint: string): Promise<boolean> {
