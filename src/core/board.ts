@@ -1,3 +1,4 @@
+import { boundedJson } from './validate';
 // board.ts — what a board snapshot becomes in the `tickets` cache (BATON_SPEC §4, §7.1,
 // R-BTN-33/35). Pure: the core does the SQL, on either host. Only filter fields survive — an item's
 // body, Status notes, exit criteria and PR list never reach Baton; the dashboard links each
@@ -41,10 +42,11 @@ export interface StateItem {
 export const DEFAULT_COURSE = 'roadmap-pr';
 
 /** A ticket of §7.1's normative post. Only the generic fields are read; `course` (opaque, for the
- *  course's hook, R3-1236) and `not_before` (R3-1259) are accepted unread. */
+ *  course, R-BTN-99) and `not_before` (R3-1259) are accepted unread. */
 export interface PostedTicket {
   id: string;
   course_id: string;
+  course?: unknown;
   /** The ticket's file, when it has one: a `custom` source with `versions: "current"` may post a
    *  ticket with no path at all (§4.4, B-183) — its `key` then names it. */
   path?: string;
@@ -146,6 +148,7 @@ export interface BoardPayload {
   closed?: { id: string; as: 'done' | 'withdrawn' }[];
   stations?: Record<string, PostedStation>;
   confirmations?: unknown[];
+  course_data?: Record<string, unknown>;
   /** B-142: `prices` and `providers` are gone with the model tables the route choice stratum
    *  never read (§6.3's readings are an unavailable provider's replacement, R-BTN-76). A sync
    *  that still posts either is not refused for it — accepted with the field ignored, as
@@ -209,6 +212,7 @@ export interface PostedAttestation {
 
 /** A `tickets` row (§4) plus its expanded requirements (`ticket_requires`). */
 export interface TicketRow {
+  course_fields?: string;
   id: string;
   path: string;
   /** B-183: the ticket's opaque version ('' when the source posts none) and stable key (its
@@ -294,8 +298,8 @@ export function retiredBoardFields(body: unknown): string[] {
  *  the one-board cycle graph (§3.1, B-113 round 1); a caller that names none — a test kit —
  *  leaves every qualified edge to the cross-board walk, as before. */
 export function checkPayload(body: unknown, repo?: string): BoardPayload {
-  const p = body as BoardPayload;
-  if (!p || typeof p !== 'object') throw new BatonError('invalid-params', 'a JSON object is required');
+  if (!body || typeof body !== 'object') throw new BatonError('invalid-params', 'a JSON object is required');
+  const { hooks: _hooks, ...p } = body as BoardPayload & { hooks?: unknown };
   if (typeof p.sha !== 'string' || !SHA.test(p.sha)) throw new BatonError('invalid-params', 'sha must be a 40-hex commit');
   if (p.parent_sha !== null && (typeof p.parent_sha !== 'string' || !SHA.test(p.parent_sha))) throw new BatonError('invalid-params', 'parent_sha must be a 40-hex commit or null');
   if (p.read_sha !== undefined && p.read_sha !== null && (typeof p.read_sha !== 'string' || !SHA.test(p.read_sha))) throw new BatonError('invalid-params', 'read_sha must be a 40-hex commit or null (the commit the tickets were read at, B-183)');
@@ -311,9 +315,14 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
     if (s.cli !== undefined && s.cli !== null && (typeof s.cli !== 'string' || s.cli.length > 200)) throw new BatonError('invalid-params', 'source.cli must be a short string naming the posting CLI');
     for (const k of Object.keys(s)) if (!['kind', 'versions', 'cli'].includes(k)) throw new BatonError('invalid-params', `source.${k} is not a source field`);
   }
+  if (p.course_data !== undefined) {
+    if (!isObj(p.course_data)) throw new BatonError('invalid-params', 'course_data must be keyed by course');
+    boundedJson(p.course_data, 'course_data', 65_536);
+  }
   if (p.tickets !== undefined) {
     if (p.state !== undefined || p.ready !== undefined) throw new BatonError('invalid-params', 'a post is either the normative tickets or the interim state.items, not both');
     checkNormative(p, repo);
+    for (const t of p.tickets) if (t.course !== undefined) boundedJson(t.course, 'ticket.course');
   } else {
     checkInterim(p, repo);
   }
@@ -844,6 +853,7 @@ export function rowForTicket(t: PostedTicket): TicketRow {
     ord: null,
     rank: t.rank ?? null,
     course_id: t.course_id,
+    ...(t.course === undefined ? {} : { course_fields: JSON.stringify(t.course) }),
     parent: t.parent ?? null,
     requires: [...capabilitiesOf(names)].sort(),
     since: null,

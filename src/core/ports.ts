@@ -49,12 +49,6 @@ export interface AdminKeys {
  *  replaces the administrators'. */
 export type HumanKeys = AdminKeys;
 
-/** A hook call (R-BTN-52, R-BTN-59): a Dynamic Worker on Cloudflare, a local `workerd`
- *  process locally — the same module format, input, output and limits. R3-1236 builds both. */
-export interface HookRunner {
-  run(hook: { module: string; entry: string }, input: unknown, limits: { timeout_ms: number }): Promise<unknown>;
-}
-
 /** §10.3: a workflow Baton dispatches after a committed transition: one repository's sync or
  *  mirror, resolved by the core to the GitHub repository and the workflow file. */
 export interface Workflow {
@@ -147,8 +141,7 @@ export interface Config {
   TEST_GITLAB_JWKS?: string;
 }
 
-/** §3: the two awaits at which another request may run — a signed request's signature check
- *  (R3-1239) and a hook call (R3-1236); their callers await through this. The Durable Object's
+/** §3: a signed request's signature check (R3-1239) may let another request run. The Durable Object's
  *  input gate opens there by itself; the local queue is released. */
 export interface Gate {
   outside<T>(work: () => Promise<T>): Promise<T>;
@@ -163,8 +156,6 @@ export interface Ports {
   adminKeys: AdminKeys;
   /** R-BTN-185 (B-145): the host's human-only keys; absent, `BATON_HUMAN_KEYS` in the config. */
   humanKeys?: HumanKeys;
-  /** Absent until R3-1236; a test injects a fake. */
-  hooks?: HookRunner;
   /** Absent on Cloudflare, where the input gate needs nothing. */
   gate?: Gate;
   clock?: Clock;

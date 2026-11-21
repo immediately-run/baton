@@ -1,10 +1,10 @@
 // host.ts — Baton as a local Node process (BATON_SPEC §3a R-BTN-55): the core over `node:sqlite`,
 // every request and alarm tick through one queue, a timer as the alarm, and the same front as
-// the Worker. For development and CI, where the repositories and their hooks are trusted.
+// the Worker. For development and CI, using the same core as the Worker.
 import { BatonCore } from '../core/baton';
 import { front } from '../core/front';
 import { dispatchWorkflow } from '../core/mirror';
-import type { AdminKeys, Config, HookRunner, Scheduler, Store } from '../core/ports';
+import type { AdminKeys, Config, Scheduler, Store } from '../core/ports';
 import { RequestQueue } from './queue';
 
 export interface LocalOptions {
@@ -12,7 +12,6 @@ export interface LocalOptions {
   config: Config;
   adminKeys?: AdminKeys;
   /** R3-1236's local `workerd` runner; until it lands, tests inject a fake. */
-  hooks?: HookRunner;
   /** `timer` fires the alarm by the clock; `manual` only records it (a test ticks it). */
   alarm?: 'timer' | 'manual';
 }
@@ -66,7 +65,6 @@ export class LocalHost {
         },
       },
       adminKeys: opts.adminKeys ?? { list: () => [] },
-      hooks: opts.hooks,
       gate: { outside: (work) => this.queue.outside(work) },
     });
   }

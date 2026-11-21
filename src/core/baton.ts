@@ -7,6 +7,7 @@
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
 import { MIGRATIONS } from '../migrations';
 import { versionedStore, clockBucket, ifNoneMatch, nonScheduling, schedulingVersion, type VersionedStore } from './stateVersion';
+import { runnerViewResponse, requireFleetScope } from './runnerViews';
 import { BatonError, CLIENT_HEADER, errorResponse, json, servedClientVersions, withClientVersions } from './http';
 import { checkPayload, DEFAULT_COURSE, resolveParents, retiredBoardFields, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { Stations, type Seen } from './stations';
@@ -127,7 +128,7 @@ export class BatonCore {
   private pendingDispatch = new Map<string, Workflow>();
   /** The dispatch call; tests replace it (as they replace `now`) to see what would be sent. */
   dispatcher: (workflow: Workflow) => Promise<unknown>;
-  /** §3: a signature check (R3-1239) or a hook call (R3-1236) is awaited through this, so
+  /** §3: a signature check (R3-1239) is awaited through this, so
    *  another request may run meanwhile on both hosts alike (R-BTN-55). */
   readonly outside: <T>(work: () => Promise<T>) => Promise<T>;
 
@@ -973,6 +974,17 @@ export class BatonCore {
         // The hashing is async; the writes happen in one transaction after it (§3: atomic).
         return json(await this.runners.heartbeat(cred, secret, body, client, legacyName));
       }
+      const view = p.slice('/v1/runner/'.length);
+      if (m === 'GET' && (view === 'fleet' || view === 'instances' || view === 'launch-candidates')) {
+        const credential = this.runners.credential(cred);
+        if (credential.kind !== 'runner' || !req.headers.has('X-Baton-Signed')) throw new BatonError('forbidden', 'the view requires a machine key');
+        const scope = this.claims.viewScope(cred);
+        const repository = view === 'fleet' ? checkRepositoryId(url.searchParams.get('repository')) : null;
+        if (repository) requireFleetScope(repository, scope);
+        return runnerViewResponse(this.store, this.now(), req, scope, view, repository, () =>
+          repository ? this.claims.fleetView(repository, scope, this.queues.all(repository))
+            : view === 'instances' ? this.claims.instanceView(scope, this.resources) : this.claims.launchCandidates(scope));
+      }
       if (m === 'GET' && p === '/v1/runner/mode') {
         await this.runners.authRunner(cred, secret, client, legacyName);
         // §11: `?repository=` — each repository cuts over on its own (R-BTN-28). R-BTN-47
@@ -1036,7 +1048,7 @@ export class BatonCore {
         const raw = url.searchParams.get('limit');
         const limit = raw == null ? 10 : Number(raw);
         if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new BatonError('invalid-params', 'limit: must be an integer from 1 to 50');
-        return json(this.claims.recommendations(runnerId, limit));
+        return json(this.claims.recommendations(runnerId, limit, url.searchParams.get('all') === '1'));
       }
       const advance = /^\/v1\/runner\/claims\/(\d+)\/advance$/.exec(p);
       if (m === 'POST' && advance) {
@@ -2047,8 +2059,8 @@ export class BatonCore {
       const id = qualify(r, row.id);
       this.store.exec(
         `INSERT INTO tickets (id, repository_id, local_id, path, title, project, status, node, queue, tags, tier, requires_clause, operator_only,
-           depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, tier_position, expedite, display, version, key, brief, parent)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           depends_on, blocked_by, repos, ord, rank, snapshot_sha, row_hash, since, holder, course_id, tier_position, expedite, display, version, key, brief, parent, course_fields_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET path = excluded.path, title = excluded.title, project = excluded.project,
            status = excluded.status, node = excluded.node, queue = excluded.queue, tags = excluded.tags,
            tier = excluded.tier, requires_clause = excluded.requires_clause, operator_only = excluded.operator_only,
@@ -2056,10 +2068,10 @@ export class BatonCore {
            ord = excluded.ord, rank = excluded.rank, snapshot_sha = excluded.snapshot_sha, row_hash = excluded.row_hash,
            since = excluded.since, holder = excluded.holder, course_id = excluded.course_id, tier_position = excluded.tier_position,
            expedite = excluded.expedite, display = excluded.display, version = excluded.version, key = excluded.key, brief = excluded.brief,
-           parent = excluded.parent`,
+           parent = excluded.parent, course_fields_json = excluded.course_fields_json`,
         id, r, row.id, row.path, row.title, row.project, row.status, row.node, row.queue, row.tags, row.tier,
         row.requires_clause, row.operator_only, row.depends_on, row.blocked_by, row.repos, row.ord, row.rank, sha, hash, row.since, row.holder, row.course_id,
-        row.tier_position, row.expedite, row.display, row.version, row.key, row.brief ?? null, parent);
+        row.tier_position, row.expedite, row.display, row.version, row.key, row.brief ?? null, parent, row.course_fields ?? null);
       this.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
       for (const name of row.requires) this.store.exec('INSERT INTO ticket_requires (ticket_id, name) VALUES (?, ?)', id, name);
       upserted.push(id);
@@ -2121,6 +2133,7 @@ export class BatonCore {
    *  answer (§4.5: the runner re-verifies by the source's own way of reading). A post that
    *  declares none keeps what stood — an older CLI's post undeclares nothing. */
   private rememberSource(r: string, p: BoardPayload): void {
+    if (p.course_data !== undefined) this.store.exec('UPDATE board_head SET course_data = ? WHERE repository_id = ?', JSON.stringify(p.course_data), r);
     if (!p.source) return;
     this.store.exec('UPDATE board_head SET source_kind = ?, source_versions = ? WHERE repository_id = ?', p.source.kind, p.source.versions ?? null, r);
   }

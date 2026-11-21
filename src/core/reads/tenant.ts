@@ -65,12 +65,10 @@ function parsed(raw: string | null): unknown {
 function instances(cx: ReadCtx): { instances: InstanceRow[]; server_time: number } {
   const now = cx.now();
   const readings = new Map<string, ReadingRow[]>();
-  for (const r of cx.sql<{ instance: string; source: string; writer: string | null; kind: 'state' | 'measure'; available: number | null; until: number | null; observed_at: number; lapses_at: number; detail: string | null }>(
-    'SELECT instance, source, writer, kind, available, until, observed_at, lapses_at, detail FROM instance_readings ORDER BY instance, observed_at DESC, rowid DESC')) {
-    const list = readings.get(r.instance) ?? [];
-    list.push({ source: r.source, writer: r.writer, kind: r.kind, available: r.available == null ? null : !!r.available, until: r.until,
-      observed_at: r.observed_at, lapses_at: r.lapses_at, detail: parsed(r.detail), stale: r.lapses_at <= now });
-    readings.set(r.instance, list);
+  for (const { instance, ...r } of cx.core.resources.readings(now)) {
+    const list = readings.get(instance) ?? [];
+    list.push(r);
+    readings.set(instance, list);
   }
   return {
     instances: cx.core.resources.view(now).instances.map((i) => ({ ...i, readings: readings.get(i.name) ?? [] })),

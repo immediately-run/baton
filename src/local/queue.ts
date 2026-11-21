@@ -1,8 +1,7 @@
 // queue.ts — the local host's only concurrency control (BATON_SPEC §3, §3a R-BTN-55). Every
 // request, alarm tick and start-up runs through it, one at a time, as the Durable Object's
 // input gate runs them. The holder lets another in only through `outside` — the Gate port,
-// for the two awaits §3 names: a signed request's signature check (R3-1239) and a hook call
-// (R3-1236).
+// for a signed request's signature check (R3-1239).
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 /** One `run`'s hold on the queue. */
@@ -38,7 +37,7 @@ export class RequestQueue {
   /**
    * Await `work` with the queue released, then wait for it again. Only the holder may call
    * it: from anywhere else it throws, so it can never let a second request run beside the
-   * holder. Overlapping calls by one holder (two hook calls under `Promise.all`) release
+   * holder. Overlapping calls by one holder release
    * once and re-acquire once.
    */
   async outside<T>(work: () => Promise<T>): Promise<T> {
