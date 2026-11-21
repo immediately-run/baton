@@ -483,6 +483,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     process.off('SIGHUP', onSignal);
     // The loop ended through its safe point: the hard stop's ten seconds never fire.
     if (hardStop != null) clearTimeout(hardStop);
+    await runner.drainLogArchives();
     // B-94: every way out of the loop leaves a line — a normal end, a thrown error on its way
     // out (the CLI prints it), and an `exit` from anywhere once a claim could have been held.
     // The lines and the hook write synchronously: nothing pending is lost to `process.exit`.

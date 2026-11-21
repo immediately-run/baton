@@ -1560,6 +1560,15 @@ describe('baton repo init, through the built CLI', () => {
       wrote.length = 0;
       expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'run-tests' });
       expect(wrote.join('')).not.toContain('line one');
+      const stdout: string[] = [];
+      const out = vi.spyOn(process.stdout, 'write').mockImplementation((c) => { stdout.push(String(c)); return true; });
+      try {
+        wrote.length = 0;
+        expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, stream_output: true }))
+          .toEqual({ reached: 'fixed', next: 'run-tests' });
+        expect(stdout.join('')).toBe('line one\nline two\ndone\n');
+        expect(wrote.join('')).toBe('to stderr\n');
+      } finally { out.mockRestore(); }
       // A failing agent's last stderr line names why it died.
       writeFileSync(agent, '#!/bin/sh\necho "boom: no quota left" >&2\nexit 3\n');
       const fail = { sha: commitAll(root) };

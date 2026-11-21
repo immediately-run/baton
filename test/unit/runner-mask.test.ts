@@ -176,7 +176,7 @@ describe('leg log archive', () => {
     try {
       const store = await logStore(pathToFileURL(dir).href);
       const failures: string[] = [];
-      const log = new LegLog(store.create, ['my-secret-value', 'first-part\r\nsecond-part'], () => failures.push('failed'));
+      const log = new LegLog(store.create, ['my-secret-value', 'first-part\r\nsecond-part'], () => { failures.push('failed'); });
       log.push('stdout', Buffer.from('good my-secret-'));
       log.push('stderr', Buffer.from('stderr line\n'));
       log.push('stdout', Buffer.from('value and bak_'));
@@ -188,29 +188,33 @@ describe('leg log archive', () => {
       await log.finish({ claim: 1, leg: 'implement', run: 1, run_id: 'r_test' });
       expect(failures).toEqual([]);
       const body = (await store.read('000000.jsonl'))!;
-      expect(body.trim().split('\n').map((line) => JSON.parse(line))).toMatchObject([
-        { seq: 0, stream: 'stderr', text: 'stderr line\n' },
-        { seq: 1, stream: 'stdout', text: 'good *** and ***\n' },
-        { seq: 2, stream: 'stderr', text: '***\n' },
-        { seq: 3, stream: 'stdout', text: '***\n' },
-      ]);
-      expect(JSON.parse((await store.read('end.json'))!)).toMatchObject({ chunks: 1, frames: 4, gaps: 0 });
+      const frames = body.trim().split('\n').map((line) => JSON.parse(line));
+      const text = (stream: string) => frames.filter((frame) => frame.stream === stream).map((frame) => frame.text).join('');
+      expect(text('stdout')).toBe('good *** and ***\n***\r\n');
+      expect(text('stderr')).toBe('stderr line\n***\n');
+      expect(frames.map((frame) => frame.seq)).toEqual(frames.map((_, i) => i));
+      expect(JSON.parse((await store.read('end.json'))!)).toMatchObject({ chunks: 1, frames: frames.length, gaps: 0 });
       await expect(store.create('000000.jsonl', 'overwrite')).rejects.toMatchObject({ code: 'EEXIST' });
       expect(await store.read('000000.jsonl')).toBe(body);
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
 
-  it('fails closed with a gap on an overlong unbroken line', async () => {
+  it('streams unbroken output and masks overlapping literals across writes', async () => {
     const { LegLog } = await import('../../src/runner/legLog');
     const chunks = new Map<string, string>();
-    const log = new LegLog(async (name, data) => { chunks.set(name, data); }, [], () => {});
-    log.push('stdout', Buffer.from('visible\n'));
-    log.push('stdout', Buffer.from('bak_' + 'a'.repeat(256 * 1024)));
-    log.push('stdout', Buffer.from('\nnever written\n'));
+    const log = new LegLog(async (name, data) => { chunks.set(name, data); }, ['abcdefgh', 'efghijkl'], () => {});
+    log.push('stdout', Buffer.from('progress abcdefgh'));
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(chunks.get('000000.jsonl')).toContain('progress ');
+    expect(chunks.get('000000.jsonl')).not.toMatch(/abcd|efgh/);
+    log.push('stdout', Buffer.from('ijkl bak_' + 'a'.repeat(300 * 1024)));
+    const long = '.'.repeat(300 * 1024);
+    log.push('stdout', Buffer.from(' ' + long + ' still visible'));
     await log.finish({ claim: 1, leg: 'implement', run: 1, run_id: 'r_test' });
-    expect(chunks.get('000000.jsonl')).toContain('visible');
-    expect(chunks.get('000001.jsonl')).toBe('{"gap":1}\n');
-    expect(JSON.parse(chunks.get('end.json')!)).toMatchObject({ chunks: 2, frames: 1, truncated: true });
+    const text = [...chunks].filter(([name]) => name.endsWith('.jsonl')).flatMap(([, body]) =>
+      body.trim().split('\n').map((line) => JSON.parse(line).text)).join('');
+    expect(text).toBe(`progress *** *** ${long} still visible`);
+    expect(JSON.parse(chunks.get('end.json')!)).toMatchObject({ gaps: 0, truncated: false });
   });
 });
 

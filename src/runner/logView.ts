@@ -10,9 +10,9 @@ import { parseTranscriptRepo, transcriptUrl } from '../core/links';
 import { chunkName } from './legLog';
 import { logStore } from './logStore';
 
-export const logRoles = (action: 'leg.runs' | 'leg.release-request'): string[] =>
+export const logRoles = (action: 'leg.runs' | 'leg.release-request' | 'ticket.blocks'): string[] =>
   ACTIONS.find((a) => a.id === action)!.callers.flatMap(({ principal }) =>
-    principal === 'owner' || principal === 'administrator' ? [principal] : []);
+    principal === 'runner' || principal === 'owner' || principal === 'administrator' ? [principal] : []);
 
 export const terminalText = (s: string) => stripVTControlCharacters(s)
   .replace(/[\x1b\x90\x98\x9d\x9e\x9f][^\n]*(?:\n|$)/g, '')

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { advance, beat, claimItem, cutover, Git, HOST, keyCall, ORIGIN, register, setAdminKeys, setClock } from '../helpers';
+import { advance, beat, claimItem, cutover, endClaim, Git, HOST, keyCall, ORIGIN, register, rows, runnerCall, setAdminKeys, setClock } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 let owner: TestKey;
@@ -8,9 +8,10 @@ let admin: TestKey;
 const settings = '/v1/owner/docs/settings';
 const runs = '/v1/repositories/docs/tickets/T-1/legs/implement/runs';
 const release = '/v1/owner/docs/tickets/T-1/release';
+const now = Date.parse('2026-11-09T12:00:00Z');
 
 beforeEach(async () => {
-  await setClock(Date.parse('2026-11-09T12:00:00Z'));
+  await setClock(now);
   admin = await makeKey('ssh-ed25519', 'admin');
   owner = await makeKey('ssh-ed25519', 'owner');
   other = await makeKey('ssh-ed25519', 'other owner');
@@ -59,5 +60,34 @@ describe('S-BTN-98 and S-BTN-99: run locations and release', () => {
     expect(off.status).toBe(200);
     expect(off.json).not.toHaveProperty('leg_log');
     expect((await keyCall(owner, runs)).json).toMatchObject({ runs: [{ log_dir: dir }] });
+  });
+
+  it('keeps the first run transcript when another leg starts and records late archive failures', async () => {
+    await keyCall(owner, settings, { leg_log_root: 's3://test-bucket/team/' }, 'PUT');
+    const { secret } = await register('vm-a');
+    const { json: { claim_id } } = await claimItem('vm-a', secret, { ticket_id: 'docs:T-1' });
+    const first = await advance('vm-a', secret, claim_id, { leg: 'implement' });
+    expect(first.status).toBe(200);
+    const repo = 'immediately-run/claude-sessions';
+    const pointer = (path: string) => ({ repo, path });
+    expect((await beat('vm-a', secret, { transcripts: [pointer('cc/first.jsonl')] })).status).toBe(200);
+    await setClock(now + 100);
+    const second = await advance('vm-a', secret, claim_id, { reached: 'pr-open', leg: 'review' });
+    expect(second.status).toBe(200);
+    expect((await beat('vm-a', secret, { transcripts: [pointer('cc/first.jsonl'), pointer('cc/second.jsonl')] })).status).toBe(200);
+    expect((await keyCall(owner, runs)).json).toMatchObject({ runs: [{ transcripts: [pointer('cc/first.jsonl')] }] });
+    expect((await keyCall(owner, runs.replace('/implement/', '/review/'))).json).toMatchObject({ runs: [{ transcripts: [pointer('cc/second.jsonl')] }] });
+    expect((await endClaim('vm-a', secret, claim_id, { end_reason: 'released:requested' })).status).toBe(200);
+    const report = { claim_id, source: 'hook', kind: 'other', label: 'leg-log-write-failed', started_at: now + 100, ended_at: now + 100, outcome: 'failed' };
+    const valid = `${first.json.run_id}:log`;
+    const invalid = 'missing-run:log';
+    const response = await runnerCall('/v1/runner/activities', { secret, cred: 'vm-a', body: { activities: [
+      { ...report, id: valid }, { ...report, id: invalid },
+    ] } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ refused: [{ id: invalid, code: 'claim-ended' }] });
+    expect(await rows('SELECT id, label, outcome FROM activities WHERE claim_id = ?', claim_id)).toEqual([
+      { id: valid, label: 'leg-log-write-failed', outcome: 'failed' },
+    ]);
   });
 });

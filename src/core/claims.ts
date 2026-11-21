@@ -1413,10 +1413,14 @@ export class Claims {
     const inputs = this.rows<{ claim_id: number; seq: number; name: string; from_leg: string | null; from_run: number | null; uri: string | null; digest: string | null; value_json: string | null; leg_version: number | null; ticket_version: string | null; read_digest: string | null }>(
       'SELECT claim_id, seq, name, from_leg, from_run, uri, digest, value_json, leg_version, ticket_version, read_digest FROM leg_run_inputs WHERE ticket_id = ? ORDER BY claim_id, seq, name', ticketId);
     const defaultBranch = this.rows<{ default_branch: string }>('SELECT default_branch FROM repositories WHERE id = ?', repositoryOf(ticketId))[0]?.default_branch ?? null;
-    const transcripts = this.rows<{ claim_id: number; repo: string; path: string; pushed_at: number | null }>(
-      // These reports are claim-scoped. Only attribute them to a run when it is unambiguous.
-      `SELECT t.claim_id, t.repo, t.path, t.last_pushed_at AS pushed_at FROM transcripts t JOIN claims c ON c.id = t.claim_id
-       WHERE c.ticket_id = ? AND (SELECT COUNT(*) FROM claim_legs l WHERE l.claim_id = c.id) = 1 ORDER BY t.id`, ticketId);
+    const transcripts = this.rows<{ claim_id: number; seq: number; repo: string; path: string; pushed_at: number | null }>(
+      // Claim-scoped pointers belong to the run current at first receipt, not last push.
+      // Pending pointers linked at claim time (before any run) belong to its first run.
+      `SELECT t.claim_id, t.repo, t.path, t.last_pushed_at AS pushed_at,
+              COALESCE((SELECT MIN(l.seq) FROM claim_legs l WHERE l.claim_id = t.claim_id AND l.started_at =
+                (SELECT MAX(p.started_at) FROM claim_legs p WHERE p.claim_id = t.claim_id AND p.started_at <= t.first_seen_at)),
+                (SELECT MIN(l.seq) FROM claim_legs l WHERE l.claim_id = t.claim_id)) AS seq
+       FROM transcripts t JOIN claims c ON c.id = t.claim_id WHERE c.ticket_id = ? ORDER BY t.id`, ticketId);
     const courseVersion = (run: typeof runs[number]): number | null => run.course_id
       ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(ticketId), run.course_id)[0]?.version ?? null
       : null;
@@ -1434,7 +1438,7 @@ export class Claims {
           snapshot_sha: r.snapshot_sha, head_sha: r.head_sha,
           // R-BTN-113 (B-4): the run's session link, as the run list draws it (§11.4).
           session_url: r.session_url, log_dir: r.leg_log_dir,
-          transcripts: transcripts.filter((t) => t.claim_id === r.claim_id).map(({ repo, path, pushed_at }) => ({ repo, path, pushed_at })),
+          transcripts: transcripts.filter((t) => t.claim_id === r.claim_id && t.seq === r.seq).map(({ repo, path, pushed_at }) => ({ repo, path, pushed_at })),
           course: r.course_id, course_version: courseVersion(r),
           ...(ticket?.ticket_version != null || ticket?.read_digest != null
             ? { ticket: { ...(ticket.ticket_version != null ? { version: ticket.ticket_version } : {}), ...(ticket.read_digest != null ? { read_digest: ticket.read_digest } : {}) } }

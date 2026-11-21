@@ -12,17 +12,20 @@
 // session's claim is refused, since it carries BATON_PARENT, and leg sessions register no
 // runner of their own; an `unblocked` message is acknowledged. Node only: it spawns the legs'
 // child processes and runs git.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createApiKey, main as baton } from '../../cli/baton.mjs';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { Runner, legActivity, newestWrite } from '../../src/runner/runner';
 import { legNeeds, readHead } from '../../src/runner/home';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
-import { course, cutover, ORIGIN, ownerCall, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import { course, cutover, keyCall, ORIGIN, ownerCall, placed, rows, setAdminKeys, setClock, syncCall, ticket, TOKENS } from '../helpers';
+import { makeKey } from '../lib/sshKeys';
 import relay from '../fixtures/courses/relay/course.json';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
@@ -84,10 +87,10 @@ class Home {
     execFileSync('git', ['-C', this.dir, 'commit', '--no-gpg-sign', '-q', '-m', 'legs'], { stdio: 'ignore' });
     return this.sha();
   }
-  async post(stations: Record<string, unknown>, tickets: unknown[] = [ticket('T-1', { course_id: 'relay' })], registryOver: Record<string, unknown> = {}): Promise<void> {
+  async post(stations: Record<string, unknown>, tickets: unknown[] = [ticket('T-1', { course_id: 'relay' })], registryOver: Record<string, unknown> = {}, graph: unknown = relay): Promise<void> {
     const sha = this.sha();
     const res = await syncCall('/v1/sync/board', {
-      registry: [course(3, 3, { id: 'relay', course: relay as unknown as Record<string, unknown>, ...registryOver })],
+      registry: [course(3, 3, { id: 'relay', course: graph as Record<string, unknown>, ...registryOver })],
       sha, parent_sha: this.head, tickets, closed: [], stations,
     });
     if (res.status !== 200) throw new Error(`board post: ${res.status} ${await res.text()}`);
@@ -168,6 +171,64 @@ afterEach(async () => {
   for (const r of runners.splice(0)) r.stop();
   rmSync(home.dir, { recursive: true, force: true });
 });
+
+it('S-BTN-98/99 archives real runner pipes, follows with the CLI, and honors a synced opt-out', async () => {
+  const admin = await makeKey('ssh-ed25519', 'admin');
+  const role = await makeKey('ssh-ed25519', 'owner');
+  await setAdminKeys(admin);
+  expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [role.publicKey] })).status).toBe(200);
+  const identity = join(home.dir, 'owner.key');
+  const publicKey = createApiKey(identity);
+  const added = await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [publicKey] });
+  expect(added.status).toBe(200);
+  const root = pathToFileURL(join(home.dir, 'archives')).href;
+  expect((await keyCall(role, '/v1/owner/docs/settings', { leg_log_root: root }, 'PUT')).status).toBe(200);
+  const graph = { ...relay, legs: { ...relay.legs, check: { ...relay.legs.check, stream: false } } };
+  home.write('.baton/courses/relay/course.json', JSON.stringify(graph));
+  const gate = join(home.dir, 'finish-leg');
+  home.leg('build', `process.stdout.write('visible \\x1b[31mprogress\\x1b[0m ' + 'abcdefgh');
+  process.stderr.write('stderr-only\\n');
+  while (!existsSync(${JSON.stringify(gate)})) await new Promise((r) => setTimeout(r, 10));
+  process.stdout.write('ijkl ' + '.'.repeat(512 * 1024) + ' tail\\n');
+  return { reached: 'built', next: 'check' };`);
+  home.leg('check', `process.stdout.write('not archived'); return { reached: 'checked', next: 'merge' };`);
+  home.leg('merge', `return { reached: 'merged' };`);
+  home.commit();
+  await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, undefined, {}, graph);
+  const runner = makeRunner({ credentialLiterals: ['abcdefgh', 'efghijkl'] });
+  const running = runner.runOnce();
+  let following: Promise<number> | undefined;
+  const output: string[] = [];
+  let stdout: ReturnType<typeof vi.spyOn> | undefined;
+  const fetch = globalThis.fetch;
+  try {
+    const [run] = await until(async () => (await rows<{ leg_log_dir: string }>('SELECT leg_log_dir FROM claim_legs WHERE leg = ?', 'build'))
+      .filter(({ leg_log_dir }) => existsSync(join(fileURLToPath(leg_log_dir), '000000.jsonl')))) as { leg_log_dir: string }[];
+    expect(existsSync(join(fileURLToPath(run.leg_log_dir), 'end.json'))).toBe(false);
+    globalThis.fetch = (async (url, init) => hostCall(new Request(url, init))) as typeof globalThis.fetch;
+    stdout = vi.spyOn(process.stdout, 'write').mockImplementation((s) => { output.push(String(s)); return true; });
+    following = baton(['leg', 'log', '--dev', '--url', ORIGIN, '-i', identity, 'docs:T-1', 'build', '-f']);
+    await until(() => output.some((s) => s.includes('visible progress')) ? [true] : []);
+    writeFileSync(gate, 'done');
+    expect(await running).toMatchObject({ end_reason: 'done', reached: 'merged' });
+    await runner.drainLogArchives();
+    expect(await following).toBe(0);
+    const text = output.join('');
+    expect(text).toContain('stderr-only');
+    expect(text).toContain('.'.repeat(512 * 1024) + ' tail');
+    expect(text).not.toMatch(/abcdefgh|efghijkl|\x1b/);
+    expect(JSON.parse(readFileSync(join(fileURLToPath(run.leg_log_dir), 'end.json'), 'utf8'))).toMatchObject({ truncated: false, gaps: 0 });
+    const [off] = await rows<{ leg_log_dir: string | null }>('SELECT leg_log_dir FROM claim_legs WHERE leg = ?', 'check');
+    if (off.leg_log_dir) expect(existsSync(fileURLToPath(off.leg_log_dir))).toBe(false);
+    expect(text).not.toContain('not archived');
+  } finally {
+    writeFileSync(gate, 'done');
+    await Promise.allSettled([running, following]);
+    await runner.drainLogArchives();
+    stdout?.mockRestore();
+    globalThis.fetch = fetch;
+  }
+}, 45_000);
 
 describe('S-BTN-41 the runner', () => {
   it('claims a ticket and takes the leg each result names, never inferring one', async () => {

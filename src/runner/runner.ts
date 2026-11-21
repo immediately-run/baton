@@ -417,6 +417,12 @@ export class Runner {
   /** The ends Baton never answered (the network went with the lease), by claim: retried on
    *  every beat. */
   private pendingEnds = new Map<number, Record<string, unknown>>();
+  private readonly logArchives = new Set<Promise<void>>();
+
+  /** S-BTN-98: archive I/O is independent of each claim, but not of graceful CLI exit. */
+  async drainLogArchives(): Promise<void> {
+    while (this.logArchives.size) await Promise.all([...this.logArchives]);
+  }
   /** B-86: the capabilities the beats declare — null until the grant is known; a restart reads
    *  what the last process settled (state.ts's `declared`) rather than asking again. */
   private declared: string[] | null;
@@ -1202,7 +1208,7 @@ export class Runner {
       // R-BTN-144: what a leg's stderr carries leaves masked — class 5 and class 6 by the shared
       // pattern, the leg's own class 7 set with it while its run streams, and by the drain after.
       // B-108: a drained line is leg activity either way — the beat's liveness line counts it.
-      onStderr: leg ? (l: string) => { this.legLineAt = Date.now(); leg.onStderr(l); } : this.verbose ? (l: string) => { this.legLineAt = Date.now(); this.log(maskLegOutput(`baton: ${call}: ${l}`, this.legSecrets)); } : undefined,
+      onStderr: onOutput ? undefined : leg ? (l: string) => { this.legLineAt = Date.now(); leg.onStderr(l); } : this.verbose ? (l: string) => { this.legLineAt = Date.now(); this.log(maskLegOutput(`baton: ${call}: ${l}`, this.legSecrets)); } : undefined,
     });
   }
 
@@ -2679,14 +2685,17 @@ export class Runner {
       && course.graph?.legs.get(leg)?.stream !== false;
     const archive = archiveEnabled ? (() => {
       let store: ReturnType<typeof logStore> | undefined;
-      return new LegLog(async (name, body) => (await (store ??= logStore(logDir))).create(name, body), legSecrets, () => {
+      return new LegLog(async (name, body) => (await (store ??= logStore(logDir))).create(name, body), legSecrets, async () => {
         this.log(`baton: ${leg}: leg-log-write-failed (R-BTN-128)`);
         const at = this.now();
-        void this.postActivities([{ id: `${runId}:log`, claim_id: claimId, source: 'hook', kind: 'other',
+        // Archive retries can outlive the claim. Baton admits only this terminal diagnostic
+        // for the owner's run after the claim ends, not arbitrary late activities.
+        const leftover = await this.postActivities([{ id: `${runId}:log`, claim_id: claimId, source: 'hook', kind: 'other',
           label: 'leg-log-write-failed', started_at: at, ended_at: at, outcome: 'failed' }]);
-      });
+        if (leftover.length) appendFileSync(this.state.spool, leftover.map((row) => JSON.stringify(row)).join('\n') + '\n');
+      }, (stream, text) => { if (stream === 'stderr' || this.verbose) this.log(text.replace(/\n$/, '')); });
     })() : null;
-    const running = this.wrapperCall(handle, 'run', script, [ctx], undefined, () => sink,
+    const running = this.wrapperCall(handle, 'run', script, [archive ? { ...ctx, stream_output: true } : ctx], undefined, () => sink,
       archive ? (stream, data) => { this.legLineAt = Date.now(); archive.push(stream, data); } : undefined);
     const inflight = this.inflight!;
     inflight.child = { running };
@@ -2696,7 +2705,12 @@ export class Runner {
       if (released) return;
       released = true;
       sink.release();
-      if (archive && typeof runId === 'string') void archive.finish({ claim: claimId, leg, run: Number(ctx.run), run_id: runId });
+      if (archive && typeof runId === 'string') {
+        const pending = archive.finish({ claim: claimId, leg, run: Number(ctx.run), run_id: runId })
+          .catch(() => this.log(`baton: ${leg}: could not record leg-log-write-failed activity`));
+        this.logArchives.add(pending);
+        void pending.then(() => this.logArchives.delete(pending));
+      }
     };
     let done = false;
     const exited = running.result.then((r) => {
@@ -2743,6 +2757,7 @@ export class Runner {
       // session; what the agent left in git is its own evidence, checked as any result is.
       await this.executor.end(handle).catch((e) => this.log(`baton: the executor's end failed (${msg(e)})`));
       await this.stopSession('leg-result');
+      if (archive) await exited;
       inflight.child = null;
       release();
       this.log(`baton: ${inflight.ticket}'s ${leg} ended at the result posted on its channel — the session is stopped (R-BTN-195)`);
@@ -2755,6 +2770,7 @@ export class Runner {
       const signal = this.abortSignal()!;
       this.killGroup(inflight.child);
       await this.stopSession(`signal:${signal.signal}`);
+      if (archive) await exited;
       inflight.child = null;
       release();
       return { kind: 'crashed', error: `the leg's session was asked to stop (${signal.reason ?? signal.signal}) and neither exited nor posted its result` };
@@ -2764,8 +2780,10 @@ export class Runner {
       // record covers it (R-BTN-24) — and stop its session.
       this.killGroup(inflight.child);
       inflight.child = null;
-      release();
+      if (!archive) release();
       await this.stopSession('lease-lost');
+      if (archive) await exited;
+      release();
       return { kind: 'lease-lost' };
     }
     // A leg's end is its whole group's end whatever ended it (R-BTN-72, S-BTN-200): the

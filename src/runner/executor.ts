@@ -169,7 +169,7 @@ export function builtinExecutor(): Executor {
       child.stderr!.on('data', (d) => {
         o.onOutput?.('stderr', d);
         const text = d.toString('utf8');
-        stderr += text;
+        stderr = o.onOutput ? (stderr + text).slice(-8192) : stderr + text;
         if (!o.onStderr) return;
         partial += text;
         let at;

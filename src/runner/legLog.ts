@@ -1,8 +1,7 @@
 // S-BTN-98: a bounded, best-effort archive, independent of the claim's completion.
 import { StringDecoder } from 'node:string_decoder';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { KEY_BEGIN, KEY_END } from '../shared/mask.mjs';
-import { createLegMasker } from './mask';
+import { logMask } from './logMask';
 import type { LogWriter } from './logStore';
 
 type Stream = 'stdout' | 'stderr';
@@ -29,41 +28,20 @@ export class LegLog {
   private truncated = false;
   private readonly streams;
 
-  constructor(private readonly create: LogWriter, secrets: readonly string[], private readonly failure: () => void) {
-    const stream = () => ({ decoder: new StringDecoder('utf8'), tail: '', key: false, masker: createLegMasker(secrets) });
+  constructor(private readonly create: LogWriter, secrets: readonly string[], private readonly failure: () => void | Promise<void>,
+    private readonly observe?: (stream: Stream, text: string) => void) {
+    const stream = () => ({ decoder: new StringDecoder('utf8'), mask: logMask(secrets) });
     this.streams = { stdout: stream(), stderr: stream() };
   }
 
   push(stream: Stream, data: Buffer): void {
     if (this.failed || this.truncated || this.ended) return;
     const s = this.streams[stream];
-    const lines = (s.tail + s.decoder.write(data)).split('\n');
-    s.tail = lines.pop()!;
-    // Do not frame an incomplete token or key. An overlong unbroken line fails closed.
-    for (const line of lines) {
-      if (Buffer.byteLength(line) > CHUNK) { this.truncate(); return; }
-      this.line(stream, line.replace(/\r$/, ''), '\n');
-    }
-    if (Buffer.byteLength(s.tail) > CHUNK) this.truncate();
-  }
-
-  private line(stream: Stream, line: string, newline: string): void {
-    const s = this.streams[stream];
-    // Discard key bodies without buffering them or releasing later lines at a size limit.
-    if (s.key) {
-      if (KEY_END.test(line)) s.key = false;
-      return;
-    }
-    const begin = line.search(KEY_BEGIN);
-    if (begin >= 0) {
-      s.key = !KEY_END.test(line.slice(begin));
-      line = `${line.slice(0, begin)}***`;
-    }
-    const masked = s.masker.push(line);
-    if (masked || line === '') this.frame(stream, masked + newline);
+    this.frame(stream, s.mask(s.decoder.write(data)));
   }
 
   private frame(stream: Stream, text: string): void {
+    if (text) this.observe?.(stream, text);
     let part = '';
     let size = 0;
     for (const cp of text) {
@@ -114,7 +92,7 @@ export class LegLog {
 
   private kick(): void {
     if (this.failed || this.finalized || this.work) return;
-    this.work = this.write().catch(() => { this.failed = true; this.pending = []; this.failure(); }).finally(() => {
+    this.work = this.write().catch(async () => { this.failed = true; this.pending = []; await this.failure(); }).finally(() => {
       this.work = null;
       if (this.pending.length || this.dropped || (this.ended && !this.finalized)) this.kick();
     });
@@ -158,8 +136,7 @@ export class LegLog {
     if (!this.failed && !this.truncated) {
       for (const stream of ['stdout', 'stderr'] as const) {
         const s = this.streams[stream];
-        this.line(stream, s.tail + s.decoder.end(), '');
-        this.frame(stream, s.masker.flush());
+        this.frame(stream, s.mask(s.decoder.end(), true));
       }
     }
     this.ended = JSON.stringify({ ...run, ended_at: new Date().toISOString() });

@@ -1122,11 +1122,12 @@ const LOG_USAGE = {
   log: 'baton leg log <ticket> [<leg>] [--run <n>] [-f] [--transcripts] [--json]',
   runs: 'baton leg runs <ticket> [<leg>] [--json]',
   stop: 'baton leg stop <ticket>',
+  why: 'baton leg why <ticket> [<leg>] [--json]',
 };
 
 async function logCommand(verb, argv) {
   if (argv.includes('--help')) { process.stdout.write(`${LOG_USAGE[verb]}\n`); return 0; }
-  const booleans = verb === 'log' ? ['follow', 'transcripts', 'json'] : verb === 'runs' ? ['json'] : [];
+  const booleans = verb === 'log' ? ['follow', 'transcripts', 'json'] : verb === 'stop' ? [] : ['json'];
   const { flags, positional } = parseArgs(argv.map((arg) => arg === '-f' ? '--follow' : arg), booleans,
     ['identity', 'url', 'home', ...(verb === 'log' ? ['run'] : [])], verb === 'stop' ? 1 : 2);
   const raw = need(positional[0], 'the ticket id');
@@ -1140,7 +1141,8 @@ async function logCommand(verb, argv) {
     const keyPath = join(dirname(homesPath()), 'keys.json');
     if (existsSync(keyPath)) keys = JSON.parse(readFileSync(keyPath, 'utf8'));
   }
-  const key = firstHeldKey(logRoles(verb === 'stop' ? 'leg.release-request' : 'leg.runs'), flags.identity, keys[new URL(url).origin]);
+  const action = verb === 'stop' ? 'leg.release-request' : verb === 'why' ? 'ticket.blocks' : 'leg.runs';
+  const key = firstHeldKey(logRoles(action), flags.identity, keys[new URL(url).origin]);
   const request = (path, method = 'GET') => send(url, { path, method }, key);
   const ok = ({ status, json }) => status >= 200 && status < 300 && json != null;
   const refusal = (res) => { process.stderr.write(`${terminalText(JSON.stringify(res.json ?? { error: res.status }))}\n`); return 1; };
@@ -1167,6 +1169,16 @@ async function logCommand(verb, argv) {
     return 0;
   }
   const base = `/v1/repositories/${r}/tickets/${t}`;
+  if (verb === 'why') {
+    const res = await request(`${base}/blocks`);
+    if (!ok(res)) return refusal(res);
+    const target = positional[1];
+    const report = target == null ? res.json : { ...res.json,
+      blocks: res.json.blocks.filter((row) => !row.leg || row.leg === target),
+      other: res.json.other.filter((row) => !row.detail?.leg || row.detail.leg === target) };
+    process.stdout.write(`${JSON.stringify(report)}\n`);
+    return 0;
+  }
   let leg = positional[1];
   if (leg == null) {
     const show = await request(base);
@@ -1218,6 +1230,17 @@ export async function main(argv) {
     register: 'runner register', start: 'server start' };
   if (Object.hasOwn(renamed, argv[0])) { process.stderr.write(`renamed: baton ${renamed[argv[0]]}\n`); return 2; }
   if (argv[0] === 'course' && argv[1] === 'test') return testCourse(argv.slice(2));
+  if (argv[0] === 'server' && argv[1] === 'start') {
+    if (argv.includes('--help')) {
+      process.stdout.write('baton server start --db <file> --admin-keys <file> [--host <host>] [--port <n>] [--origin <url>] [--config <file>]\n');
+      return 0;
+    }
+    const { bundleLocal } = await import('../scripts/bundle.mjs');
+    const { main: start } = await bundleLocal('src/local/main.ts', 'baton-server.mjs');
+    await start(argv.slice(2));
+    // The server's listener owns the lifetime of the process.
+    return undefined;
+  }
   if (argv[0] === 'ticket' && argv[1] === 'blocked') argv = ['blocked', ...argv.slice(2)];
   if (argv[0] === 'key') {
     if (argv[1] !== 'create' || !argv[2]) throw new Error('baton key create FILE [--comment TEXT]');
@@ -1467,7 +1490,7 @@ function exitDrained(code) {
 
 // argv[1] may be npx's link to this file: compare real paths.
 if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
-  main(process.argv.slice(2)).then(exitDrained, (e) => {
+  main(process.argv.slice(2)).then((code) => { if (code !== undefined) exitDrained(code); }, (e) => {
     process.stderr.write(`baton: ${e.message}\n`);
     exitDrained(2);
   });

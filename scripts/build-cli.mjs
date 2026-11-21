@@ -26,7 +26,8 @@ export { replayMain } from ${src('src/runner/replay.ts')};`,
 export { ticketsMain } from ${src('src/defaults/tickets.ts')};
 export { requestMain } from ${src('src/defaults/request.ts')};
 export { homeMain, resolveHomes } from ${src('src/defaults/homes.ts')};`,
-  'bundle.mjs': `const ENTRIES = { 'src/local/testCourse.ts': () => import(${src('src/local/testCourse.ts')}) };
+  'bundle.mjs': `const ENTRIES = { 'src/local/testCourse.ts': () => import(${src('src/local/testCourse.ts')}),
+    'src/local/main.ts': () => import(${src('src/local/main.ts')}) };
 export async function bundleLocal(entry) {
   const load = ENTRIES[entry];
   if (!load) throw new Error(\`build-cli: \${entry} is not prebuilt — add it to scripts/build-cli.mjs\`);

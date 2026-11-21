@@ -1479,9 +1479,8 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // here at the claim's snapshot, and the wrapper in front of it when one is named.
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': agent_command: ' + agentCommand + (wrapper != null ? '; wrapper: ' + wrapper : '') + '; argv: ' + argv.join(' ') + '\\n');
   // B-108's streaming half (2026-10-24): the agent runs under spawn — its stdout accumulated
-  // here for the answer protocol, and when the runner asked (BATON_VERBOSE) both streams
-  // mirrored to this stub's stderr, which the runner pipes and drains into its log: a live
-  // leg is watchable line by line instead of silence until the exit. The bound execFile kept
+  // here for the answer protocol. For an archive also forward the raw pipes separately;
+  // without an archive keep the existing verbose diagnostic echo. The bound execFile kept
   // is kept too: an agent whose output outgrows the cap is killed and refused.
   // B-108's bounds (the owner, 2026-10-22): the wait below ends at the earliest of the agent's
   // exit, AGENT_IDLE_MS and LEG_CEILING_MS — an agent's completion is its exit or its silence,
@@ -1515,6 +1514,7 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
   // exited non-zero or exited 0 and the checks after it failed.
   const lastOutput = (so, se) => (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
   const received = await new Promise((resolve, reject) => {
+    const archive = ctx.stream_output === true;
     const echo = process.env.BATON_VERBOSE === '1';
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout, stdio: ['ignore', 'pipe', 'pipe'],
@@ -1531,9 +1531,10 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
       lastOut = Date.now();
       so += c;
       if (so.length > ${AGENT_OUTPUT_MAX}) { if (watch != null) clearInterval(watch); child.kill('SIGKILL'); reject(new Error('the agent printed more than ${AGENT_OUTPUT_MAX} bytes')); return; }
-      if (echo) process.stderr.write(c);
+      if (archive) process.stdout.write(c);
+      else if (echo) process.stderr.write(c);
     });
-    child.stderr.on('data', (c) => { if (se.length < 2048) se = (se + String(c)).slice(-2048); if (echo) process.stderr.write(c); });
+    child.stderr.on('data', (c) => { if (se.length < 2048) se = (se + String(c)).slice(-2048); if (archive || echo) process.stderr.write(c); });
     child.on('error', (e) => { if (watch != null) clearInterval(watch); reject(e); });
     // B-227: a release (the runner's abort line, \`ctx.signal\`) stops the agent at once — its
     // TERM, then KILL after a grace — so the leg reaches its safe point inside the runner's

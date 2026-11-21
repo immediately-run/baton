@@ -451,6 +451,7 @@ async function standard(ctx) {
   }
   const lastOutput = (so, se) => (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
   const received = await new Promise((resolve, reject) => {
+    const archive = ctx.stream_output === true;
     const echo = process.env.BATON_VERBOSE === "1";
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout,
@@ -476,11 +477,13 @@ async function standard(ctx) {
         reject(new Error("the agent printed more than 67108864 bytes"));
         return;
       }
-      if (echo) process.stderr.write(c);
+      if (archive) process.stdout.write(c);
+      else if (echo) process.stderr.write(c);
     });
     child.stderr.on("data", (c) => {
       if (se.length < 2048) se = (se + String(c)).slice(-2048);
-      if (echo) process.stderr.write(c);
+      if (archive) process.stdout.write(c);
+      else if (echo) process.stderr.write(c);
     });
     child.on("error", (e) => {
       if (watch != null) clearInterval(watch);

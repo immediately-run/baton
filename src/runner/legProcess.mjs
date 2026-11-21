@@ -26,7 +26,12 @@ const stop = new AbortController();
 // repository module loads. It is absent on Linux, and ordinary non-replay legs are unchanged.
 if (process.env.BATON_REPLAY === '1') delete process.env.__CF_USER_TEXT_ENCODING;
 
-const finish = (out, code) => {
+const finish = async (out, code) => {
+  // Drain writes before the result and forced exit (repository code can leave live handles).
+  await Promise.all([process.stdout, process.stderr].map((stream) => new Promise((resolve) => {
+    if (stream.destroyed) resolve();
+    else stream.write('', resolve);
+  })));
   writeSync(process.argv[4] === '--outcome-fd' ? 3 : 1, `\n${JSON.stringify(out)}\n`);
   process.exit(code);
 };
@@ -74,14 +79,14 @@ try {
   // `describe`: what a ticket source declares (§4.2) — its `versions`, and whether it reads.
   if (call === 'describe') {
     const src = holder ?? mod;
-    finish({ ok: true, result: { versions: typeof src.versions === 'string' ? src.versions : null, read: typeof src.read === 'function' } }, 0);
+    await finish({ ok: true, result: { versions: typeof src.versions === 'string' ? src.versions : null, read: typeof src.read === 'function' } }, 0);
   }
   const owner = typeof mod[call] === 'function' ? mod : holder != null && typeof holder[call] === 'function' ? holder : null;
   const fn = owner != null ? owner[call] : call === 'run' && typeof mod.default === 'function' ? mod.default : undefined;
   if (typeof fn !== 'function') throw new Error(`the script exports no ${call}()`);
   if (call === 'run') args[0] = { ...args[0], signal: stop.signal };
   const result = await fn.apply(owner, args);
-  finish({ ok: true, result: result === undefined ? null : result }, 0);
+  await finish({ ok: true, result: result === undefined ? null : result }, 0);
 } catch (e) {
-  finish({ ok: false, error: e instanceof Error ? e.message : String(e), aborted: stop.signal.reason === undefined ? null : String(stop.signal.reason) }, stop.signal.reason === undefined ? 4 : 5);
+  await finish({ ok: false, error: e instanceof Error ? e.message : String(e), aborted: stop.signal.reason === undefined ? null : String(stop.signal.reason) }, stop.signal.reason === undefined ? 4 : 5);
 }

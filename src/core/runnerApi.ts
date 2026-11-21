@@ -759,10 +759,13 @@ export class RunnerApi {
         'SELECT runner_id, status, ended_at FROM claims WHERE id = ?', a.claim_id)[0];
       if (!claim || claim.runner_id !== runnerId) throw new BatonError('not-holder', `claim ${a.claim_id} is not this runner's`);
       if (claim.status !== 'active') {
-        // §6.9: for 10 minutes after the end, an update that only closes an open activity is
-        // accepted; anything else, and every later update, is claim-ended.
+        // §6.9: ordinary updates can only close an open activity. S-BTN-98 archive retries
+        // deliberately don't wait before ending the claim; allow one fixed diagnostic per run.
         const closesOpen = existing && existing.ended_at == null && a.ended_at !== undefined;
-        if (!closesOpen || now - (claim.ended_at ?? 0) > CLOSE_GRACE_MS) throw new BatonError('claim-ended', `claim ${a.claim_id} has ended`);
+        const archiveFailed = !existing && a.kind === 'other' && a.source === 'hook' && a.label === 'leg-log-write-failed'
+          && a.outcome === 'failed' && a.started_at === a.ended_at && !a.detail && !a.parent_id && !a.call_id && a.seq === undefined
+          && a.id.endsWith(':log') && this.rows('SELECT 1 FROM claim_legs WHERE claim_id = ? AND run_id = ? AND leg_log_dir IS NOT NULL', a.claim_id, a.id.slice(0, -4)).length > 0;
+        if ((!closesOpen && !archiveFailed) || now - (claim.ended_at ?? 0) > CLOSE_GRACE_MS) throw new BatonError('claim-ended', `claim ${a.claim_id} has ended`);
       }
     }
     let parent = a.parent_id ?? existing?.parent_id ?? null;

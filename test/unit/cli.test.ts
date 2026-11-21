@@ -1037,4 +1037,57 @@ describe('S-BTN-97: key selection and the original renames', () => {
     const out = spawnSync('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'run', '--help'], { encoding: 'utf8' });
     expect([out.status, out.stdout, out.stderr]).toEqual([2, '', 'renamed: baton runner start\n']);
   });
+
+  it('signs the runs route with the first held role for the target origin', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-log-roles-'));
+    const sent: (string | undefined)[] = [];
+    const server = http.createServer((req, res) => {
+      sent.push(req.headers['signature-input'] as string | undefined);
+      if (req.url !== '/v1/repositories/docs/tickets/T-1/legs/build/runs') res.statusCode = 404;
+      res.end('{"runs":[]}');
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const config = join(dir, 'baton');
+    mkdirSync(config);
+    const key = (role: string) => {
+      const path = join(dir, role);
+      expect(spawnSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', path]).status).toBe(0);
+      const fingerprint = spawnSync('ssh-keygen', ['-lf', `${path}.pub`], { encoding: 'utf8' }).stdout.split(' ')[1];
+      return { path, fingerprint };
+    };
+    const run = () => new Promise<{ code: number | null; stderr: string }>((done, reject) => {
+      const child = spawn(process.execPath, [join(import.meta.dirname, '../../cli/baton.mjs'), 'leg', 'runs', '--dev', '--url', url, 'docs:T-1', 'build'],
+        { env: { ...process.env, BATON_HOME: undefined, XDG_CONFIG_HOME: dir }, stdio: ['ignore', 'ignore', 'pipe'] });
+      let stderr = '';
+      child.stderr.on('data', (d) => { stderr += d; });
+      child.once('error', reject);
+      child.once('close', (code) => done({ code, stderr }));
+    });
+    try {
+      const owner = key('owner');
+      const admin = key('admin');
+      const use = (keys: object) => writeFileSync(join(config, 'keys.json'), JSON.stringify({ [url]: keys }));
+      use({ administrator: admin.path, owner: owner.path });
+      expect(await run()).toMatchObject({ code: 0 });
+      expect(sent[0]).toContain(owner.fingerprint);
+      use({ administrator: admin.path });
+      expect(await run()).toMatchObject({ code: 0 });
+      expect(sent[1]).toContain(admin.fingerprint);
+      use({});
+      expect(await run()).toMatchObject({ code: 2, stderr: expect.stringContaining('no key for owner') });
+      expect(sent).toHaveLength(2);
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('dispatches the built replacements for why and start', () => {
+    for (const [noun, verb] of [['leg', 'why'], ['server', 'start']]) {
+      const out = spawnSync(process.execPath, [join(import.meta.dirname, '../../cli/baton.mjs'), noun, verb, '--help'], { encoding: 'utf8' });
+      expect(out.status).toBe(0);
+      expect(out.stdout).toContain(`baton ${noun} ${verb}`);
+    }
+  });
 });
