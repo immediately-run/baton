@@ -35,7 +35,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   make the identity provider the only authority); signing in automatically when an assertion is
   present (logout would undo itself and any agent that opens the page would be signed in).
 - **2026-11-21 — Work done outside Baton, modelled in each course (R-BTN-203, R-BTN-39, R-BTN-69, R-BTN-96, S-BTN-309).**
-  Rules changed: R-BTN-39, R-BTN-69, R-BTN-96, R-BTN-188, R-BTN-191; R-BTN-203
+  Rules changed: R-BTN-39, R-BTN-69, R-BTN-74, R-BTN-96, R-BTN-110, R-BTN-188, R-BTN-191; R-BTN-203
   new. The owner, 2026-11-21: "baton *must* work well in a setup where only a portion of the
   organization is using baton"; outside work is found by the sync's code, not the server; "the
   codegen leg is not the only leg which may be completed outside baton"; and weak evidence starts a
@@ -55,9 +55,18 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   need to be part of the course." So there is no reconciliation course: each course carries a
   reconcile leg (`reconciles: true`) whose edges say where evidence may move a ticket, which Baton
   queues in place of the queued leg while evidence waits (`ticket_evidence`,
-  `reconcile_displaced`). Rejected: a separate reconciliation course entered and left by a
-  position Baton parks (a move outside the graph); the server inferring closure from forge events
-  (against R-BTN-35); closing on any mention.
+  `reconcile_displaced`). A second review round found the reconcile leg could conclude a review,
+  had no `max_runs` (so the standard courses failed R-BTN-69's cycle rule), lost the displaced leg
+  when queued twice, and weighed evidence on a mere release; that runner verdicts still counted
+  with `runner_pushers` unset; that a runner's machine key could forge arrivals; and that under
+  `protected` the B-166 failure returned. The owner chose (2026-11-21): arrivals and evidence only
+  from the sync key or the CI identity; no hand review while runner identities are unknown; a hand
+  merge from `reviewed` closes whatever the verdict; a refused arrival becomes evidence. So
+  `reconciles` maps each station it may conclude to its next leg, every reconcile and cyclic fact
+  leg has `max_runs`, and evidence is weighed only by the leg's finishing position. Rejected: a
+  separate reconciliation course entered and left by a position Baton parks (a move outside the
+  graph); the server inferring closure from forge events (against R-BTN-35); closing on any
+  mention.
 
 - **2026-11-20 — A session's reads outside `/v1/ui/*`, the strip's ready count, V1's paged lists (R-BTN-16, R-BTN-155, S-BTN-243, S-BTN-254).**
   Rules changed: R-BTN-16, R-BTN-155.

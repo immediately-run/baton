@@ -93,7 +93,8 @@ numbers.
     source's, R-BTN-134), default-exports `stations(ctx)` → `stations` (per ticket: readiness,
     fact arrivals, implied station, outputs, bars, the queued person leg's question,
     `not_before`) and that course's opaque `course_data`, from git, the fact adapter's PR facts
-    (R-BTN-96) and `ctx.positions` (§4.3). It never returns a position (R-BTN-39). The sync
+    (R-BTN-96) and `ctx.positions` (§4.3). It never returns a position (R-BTN-39). The CLI adds
+    R-BTN-203's arrivals and evidence for every ticket itself, whatever the station function. The sync
     posts bars, the question and `not_before` with the ticket, the rest as its attestations
     (R-BTN-191), and `course_data` keyed by course id.
   - **CLI default ticket sources** (`src/defaults/`), used when the repository has no
@@ -221,47 +222,50 @@ numbers.
 
 - **R-BTN-203 (work done outside Baton).** Baton works where only part of an organization uses
   it: any of a ticket's legs may be done by people and sessions that never claim it. The sync
-  (the CLI's fact adapter and standard station functions, never the server) finds that work and
-  attests it; Baton applies it by its own rules (R-BTN-39).
+  (the CLI, for every ticket whatever its course's station function, never the server) finds that
+  work and attests it; Baton applies it by its own rules (R-BTN-39). Only a board posted with a
+  sync key or the registered CI identity (R-BTN-93) carries these attestations; one a runner's
+  machine key posts carries none, and Baton refuses any it carries.
   - **A leg done by hand is a fact leg.** A course names, as legs of their own, the hand acts it
-    accepts: each a leg with `arrives: {fact: <kind>}` (R-BTN-69), one outcome, and its own
-    `from`, so the course file says exactly where a hand act may move a ticket. The kinds, each
-    read for the ticket's PRs as R-BTN-131's courses map them (its `prs:` and its branch
-    pattern):
+    accepts: each a leg with `arrives` (R-BTN-69), one outcome, and its own `from`, so the course
+    file says exactly where a hand act may move a ticket. The kinds, each read for the ticket's
+    PRs as R-BTN-131's courses map them (its `prs:` and its branch pattern):
 
     | Kind | The fact | `ref` |
     |---|---|---|
     | `pr-opened` | a PR of the ticket's, open | the PR's URL |
-    | `pr-verdict` | a verdict on the PR's head by a pusher (R-BTN-139) who is none of the repository's `runner_pushers`, written by no claim of the ticket | the review's or comment's URL |
+    | `pr-verdict` | a verdict on the PR's head — of the kind `arrives.verdict` names, if it names one — by a pusher (R-BTN-139) who is none of the repository's `runner_pushers`, not the PR's author and not a pusher of its head, on a comment or review no claim of the ticket posted (Baton serves the URLs its review legs reported) | the review's or comment's URL |
     | `pr-pushed` | a push to the PR after its latest changes verdict that changes more than the base merged in | the head sha |
-    | `pr-merged` | every PR of the ticket's merged, none open, by merges no `merge` leg reported | the last merge commit |
+    | `pr-merged` | every PR of the ticket's merged, none open, none by a `merge` leg | the last merge commit |
 
-    The sync posts one `std:arrival@1` per fact a fact leg leaving Baton's station waits on, as
-    writer `sync`, with that `ref` and the `next` the course file's leg names for the fact (a
-    course may name a `next` per verdict). A fact for which no fact leg leaves Baton's station is
-    evidence (below), never an arrival.
+    While `runner_pushers` is NULL or `[]`, no `pr-verdict` is found: a runner's verdict cannot be
+    told from a person's (Baton serves the logins with `positions`, §4.3). The sync posts one
+    `std:arrival@1` as writer `sync` per fact that a fact leg leaving Baton's station takes, with
+    that `ref` and the leg's `next` for it. A `pr-merged` no fact leg leaving the station takes is
+    `merged-early` evidence (below); any other fact no fact leg takes is posted as nothing.
   - **Other evidence is weighed by the course's reconcile leg.** The sync also posts an
     `std:evidence@1` (`{ref, kind}`) per piece of evidence that a ticket may have moved outside
-    Baton in a way no fact leg can take:
-    - `merged-early`: a `pr-merged` fact while no fact leg leaves Baton's station;
-    - `mention`: a pusher's merged PR (title or body) or a first-parent commit reaching the
-      default branch since the last accepted head (commit message) that names the ticket's id
-      as a whole word. Not counted: commits that change only the ticket paths or `.baton/`; a
-      commit or PR carrying a claim's trailer (R-BTN-8) or on a branch any course of the ticket
-      maps (its own PRs and their merges); the commit that filed the ticket; a commit or PR
-      naming more than three ids; and a ticket at an end station.
+    Baton in a way no fact leg takes:
+    - `merged-early`: as above;
+    - `mention`: the ticket's id as a whole word in the title or body of a pusher's PR merged, or
+      the message of a first-parent commit reaching the default branch, between the last accepted
+      head and the observation's head (§4.3). Not counted: a commit that changes only the ticket
+      paths or `.baton/`; a commit or PR carrying a claim's trailer (R-BTN-8) or on a branch any
+      course of the ticket maps (its own PRs and their merges); the commit that filed the ticket;
+      a commit or PR naming more than three ids. Not posted for a ticket at an end station.
 
     Only `ref` and `kind` are posted: titles and messages never are (R-BTN-33). Baton keeps each
-    piece, and the course's reconcile leg weighs it where one leaves the ticket's station
-    (R-BTN-39, R-BTN-69). A course models every way its tickets move, inside Baton or outside:
-    fact legs for the hand acts it can recognise, a reconcile leg for the rest.
+    piece and hands it to the course's reconcile leg (R-BTN-39). A course models the ways its
+    tickets move outside Baton as edges of its own graph: fact legs for the hand acts it
+    recognises, a reconcile leg for the rest.
   - **What the sync reads.** The adapter's PR facts (R-BTN-96) and the home's first-parent
-    commits from the last accepted head to the observation's head (§4.3). A first snapshot has
-    no window and reads no `mention`. A repository the adapter cannot read fails the sync, as
-    R-BTN-96 says.
+    commits in the window above. A first snapshot has no window and reads no `mention`; outside
+    work merged before it is found only by `baton repo sync --backfill-mentions <since>`, which
+    widens one run's window to that date.
   - **Closure is unchanged.** An archived file or `status: done` closes a ticket as the table
-    above says, claimed or not. A hand merge closes one only through a fact leg the course lets
-    reach an end.
+    above says, claimed or not. A hand merge closes one through a fact leg or a reconcile leg the
+    course lets reach an end, whatever the verdict on the merged head: the person who merged it
+    took that call.
 
 ### 4.3 The sync run and the head
 

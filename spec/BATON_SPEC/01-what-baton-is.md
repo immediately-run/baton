@@ -103,7 +103,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     for the type (R-BTN-191); the leg leaves Baton's current station, queued or not; `reached` is one of its
     outcomes; no claim is active on the ticket; and Baton holds the ticket for nothing else (§7).
     Its `next` is the attestation's, else the first leg the course file lists leaving `reached`
-    with runs left (R-BTN-63). Baton logs a `fact-arrival` history row and keeps the `ref`.
+    with runs left (R-BTN-63) that is neither a fact leg nor a reconcile leg. Baton logs a `fact-arrival` history row and keeps the `ref`.
     - An arrival whose `ref` Baton has applied for this ticket is accepted and moves nothing.
     - An arrival that fails only because a claim is active or Baton holds the ticket is kept with
       its `ref` and applied when the hold ends, if it still meets every other condition.
@@ -111,16 +111,21 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
       the attestation and its own position, shown on the ticket's view (§11), and raises nothing.
       The owner's commands that would settle the disagreement, a route and adopt, are not built.
   - **Evidence and the reconcile leg.** Baton keeps each `std:evidence@1` the policy admits
-    (R-BTN-203) as a piece of the ticket's evidence, once per `ref`. While a ticket has evidence
-    not yet weighed, no active claim and no hold, and a reconcile leg (`reconciles`, R-BTN-69)
-    leaves its station, Baton queues that leg in place of the queued one, in the transaction that
-    accepts the evidence or ends the claim or hold, and records the leg it displaced; history row
-    `reconcile-queued`. The reconcile leg is claimed and run like any leg, and its position is an
-    edge as any leg's is (R-BTN-83): the station it concludes the ticket reached, and the next
-    leg. Reaching the station it left, with no `next` of its own, re-queues the displaced leg.
-    When it ends, the evidence its claim carried (§14) is weighed. Evidence at a station no
-    reconcile leg leaves, or on a ticket at an end, is kept, unweighed, and listed on the
-    ticket's view (§11); it is weighed once a reconcile leg leaves the ticket's station.
+    (R-BTN-203) as a piece of the ticket's evidence, once per `ref`. A sync `std:arrival@1` refused
+    only because the policy admits no `sync` writer for it is kept the same way, as `merged-early`
+    when it is a `pr-merged`, else as a `fact` piece naming its leg. In every transaction that
+    changes a ticket's station, queued leg, claim, hold or evidence, Baton queues the reconcile leg
+    (`reconciles`, R-BTN-69) leaving the ticket's station when all hold: evidence is unweighed; no
+    claim is active and nothing holds the ticket; the leg has runs left (R-BTN-63); and the queued
+    leg is not a person leg, a suspended leg, nor one an owner's route, a retry's `exhausted` leg
+    or an expiry placed (R-BTN-83). It replaces the queued leg, whose name Baton records once
+    (a reconcile leg already queued keeps the first record and only gains the evidence); history
+    row `reconcile-queued`. The reconcile leg runs like any leg. Its finishing position is an
+    edge it may take (R-BTN-69); concluding at the station it left, its `next` is the displaced
+    leg, which the claim carries (§9.1), and no other. Only that finishing position marks the
+    evidence its claim carried as weighed and clears the record; a claim ending any other way
+    leaves both. Evidence that cannot be handed to a reconcile leg waits, unweighed, on the ticket
+    read (§14).
   - **Adopt**, the owner's command that sets a position for legs done outside Baton, is not built
     (B-120): [the ticket-adopt proposal](../proposals/ticket-adopt.md).
 - **R-BTN-8 (git first).** For every `completed` end, `suspended:` included, the runner pushes

@@ -313,8 +313,9 @@ route, with the events and fields the table lists for it, is
 
 ### 3.4 Reading the forge
 
-- **R-BTN-96 (course facts come from an adapter per forge).** For a course whose `entry.json`
-  declares `facts: ["prs"]` (R-BTN-134) the CLI reads PR facts through a **fact adapter** chosen
+- **R-BTN-96 (course facts come from an adapter per forge).** For every course — a course whose
+  `entry.json` declares `facts: ["prs"]` (R-BTN-134) reads them too — the CLI reads PR facts
+  through a **fact adapter** chosen
   by the forge of the repository it reads — the home's by the home's, each code repository's by
   its own (R-BTN-140) — mapped to one set of facts: a PR's head branch, state, head checks,
   verdicts on the head, its merge commit, and its title and body (read for R-BTN-203's evidence,

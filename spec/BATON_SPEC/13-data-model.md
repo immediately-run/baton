@@ -131,7 +131,7 @@ checked in the transaction that adds or first accepts a key (§12.1).
 | `ticket_history` | `id` | `repository_id`, `ticket_id`, `at`, `kind`, `claim_id`, `runner_id`, `leg`, `reached`, `next_leg`, `run`, `run_id`, `snapshot_sha`, `head_sha`, `course_version`, `leg_version`, `detail_json` | The ticket's running record and course history (R-BTN-39, R-BTN-81) |
 
 `ticket_history.kind` is one of `leg-started`, `leg-finished`, `leg-abandoned`,
-`position-confirmed`, `fact-arrival`, `re-routed`, `inputs`, `outputs`, `spawned`,
+`position-confirmed`, `fact-arrival`, `reconcile-queued`, `re-routed`, `inputs`, `outputs`, `spawned`,
 or one of the event kinds §13.8 marks as history rows.
 
 ### 13.6 Prerequisites, overrides, conditions and timers
@@ -142,8 +142,8 @@ or one of the event kinds §13.8 marks as history rows.
 | `leg_needs` | `(ticket_id, leg, resource)` | `repository_id`, `source` (`posted`\|`end`), `added_at`, `found_at` | Resources a next leg needs (R-BTN-76, R-BTN-126) |
 | `leg_attempts` | `(ticket_id, leg)` | `repository_id`, `attempts`, `retry_after`, `last_error_type` | Retry state per ticket and leg (R-BTN-122) |
 | `ticket_overrides` | `ticket_id` | `expedite`, `hold`, `hold_reason`, `route_leg`, `route_station`, `override_kind` (`owner`\|`baton`), `set_by`, `set_at` | Expedite and hold (§6), and the queued leg Baton or the owner chose, held until the station changes (R-BTN-12, R-BTN-83, R-BTN-116, R-BTN-122) |
-| `ticket_evidence` | `(ticket_id, ref)` | `kind`, `found_at`, `claim_id` (the reconcile leg's claim that carried it), `weighed_at` (NULL until that leg ends) | Evidence of work done outside Baton (R-BTN-203, R-BTN-39) |
-| `reconcile_displaced` | `ticket_id` | `leg`, `queued_at` | The leg a queued reconcile leg displaced, re-queued when it concludes no move (R-BTN-39) |
+| `ticket_evidence` | `(ticket_id, ref)` | `kind` (`merged-early`, `mention`, `fact`), `leg` (for `fact`), `found_at`, `claim_id` (the reconcile leg's claim that carried it), `weighed_at` (NULL until that leg's finishing position) | Evidence of work done outside Baton (R-BTN-203, R-BTN-39) |
+| `reconcile_displaced` | `ticket_id` | `leg`, `queued_at` | The leg a queued reconcile leg displaced; cleared by its finishing position (R-BTN-39) |
 | `owner_bars` | `id` | `repository_id`, `course` (an id or `*`), `tag`, `legs` JSON, `applies` (`claim`\|`claim+advance`), `starts_at`, `ends_at`, `release_holders`, `reason`, `set_by`, `lifted_at` | R-BTN-67 |
 | `conditions` | `id`; an open core condition is unique on `(repository_id, type, ticket_id, ref)` | `repository_id`, `ticket_id` (NULL for a repository's), `ref` (what a core condition is about), `claim_id`, `leg`, `run`, `type`, `disposition`, `restarts` JSON, `default`, `severity`, `url`, `detail` JSON (a core condition's identifiers and numbers), `raised_at`, `closed_at`, `outcome`, `restart`, `reason`, `answered_by` | Raised conditions, filter fields only (R-BTN-160, R-BTN-163, R-BTN-195) |
 
