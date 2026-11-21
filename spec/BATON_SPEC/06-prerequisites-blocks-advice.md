@@ -417,7 +417,8 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     force or scheduled; each course's `course_data` (§4). Peers granted on a repository read
     each other's claims, profiles and reports. A heartbeat posts up to 16 reports, each at most
     4 KB of opaque JSON. Baton retains the newest 16 keys per runner and claim or repository,
-    for six hours from receipt; a claim report can be posted only by its current holder.
+    keeping repository reports for six hours from receipt and claim reports until six hours after
+    the claim ends. A claim report can be posted only by its current holder.
   - **`GET /v1/runner/instances`**: every `service` instance, every account instance listing
     a granted repository, with state, every reading in force (source, `observed_at`,
     `lapses_at`, `kind`, `detail`); and every capability with a capacity (R-BTN-178), with the
@@ -443,7 +444,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
   `rationale` is optional opaque JSON of at most 4 KB. Baton stores it in the claim's
   `advice_json` and ticket history (including exports with history), never ranks on it and
-  never includes it in the fleet view. A claim against Baton's advice (such as a resource
+  never includes it in the fleet view. The dashboard shows it as escaped text. A claim against Baton's advice (such as a resource
   block or the expedite bound) records `advice-overridden`; changing the order does not.
 
 ### 6.8 Owner overrides: expedite and hold

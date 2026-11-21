@@ -20,7 +20,7 @@ import { legStateOf } from './policy';
 import { briefMark, writtenBy, type LastWrittenBy } from './provenance';
 import type { Row, SqlValue, Store } from './ports';
 import { schedulingVersion } from './stateVersion';
-import { fleetSummary, instanceView, opaque, requireFleetScope, type ViewScope } from './runnerViews';
+import { fleetSummary, instanceView, opaque, REPORT_AGE_FROM, REPORTS_FROM, requireFleetScope, type ViewScope } from './runnerViews';
 import type { Resources } from './resources';
 import { REPORT_HORIZON_MS } from './validate';
 import type { Blocks } from './blocks';
@@ -746,7 +746,7 @@ export class Claims {
    * The projection contains runner-independent facts; all runner gates remain authoritative.
    * JSON parameters below are small request-local sets, expanded once, never stored documents
    * expanded for every candidate. Page cursors live only for this synchronous decision. */
-  candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null): Candidate[] {
+  candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null, skipExpedited?: ReadonlySet<string>): Candidate[] {
     if (this.reference) return this.referenceCandidates(w, page, rule9);
     const groups = this.rows<{ repository_id: string; course_id: string; weight: number; min_runner_version: number; observation: number; tiers: string }>(
       `SELECT k.repository_id, k.id AS course_id, p.weight, k.min_runner_version, h.observation, p.tiers
@@ -785,7 +785,7 @@ export class Claims {
              WHERE b.ticket_id = q.ticket_id AND b.leg = q.leg AND t.runner_id = ?)
            AND NOT EXISTS (SELECT 1 FROM ticket_requires r WHERE r.ticket_id = q.ticket_id
              AND r.name NOT IN (SELECT value FROM json_each(?)))
-           ${after}
+           ${skipExpedited?.has(key) ? 'AND -q.expedite = 0' : ''} ${after}
          ORDER BY -q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id
          LIMIT 50${page > 0 && !prior ? ' OFFSET ?' : ''}`,
         g.repository_id, g.course_id, g.observation, this.c.now(), tiers.length - 1, ceiling,
@@ -832,14 +832,21 @@ export class Claims {
     const full = this.expediteActive() >= EXPEDITE_BOUND;
     const lazy = !this.reference;
     for (let page = 0; all || page < 4; page++) {
-      const wanted = page === 0 ? null : [...groups].filter(([, g]) => !g.done && (all || (!g.cut && g.rows.length < limit))).map(([k]) => k);
+      const wanted = page === 0 ? null : [...groups].filter(([, g]) => !g.done && (all
+        ? !lazy || g.passed[0] < limit
+        : !g.cut && g.rows.length < limit)).map(([k]) => k);
       if (wanted && !wanted.length) break;
       let read: Candidate[];
       if (page === 0 && lazy) {
         const all = this.candidates(w, 0, false);
         if (out) out.page0 = all;
         read = all.filter((r) => r.r9);
-      } else read = this.candidates(w, page, false, wanted);
+      } else {
+        // With the lane full, expedited rows are the first sorted run. Once it cannot
+        // contribute more to the merged prefix, page only the unexpedited run.
+        const skipExpedited = all && full && lazy ? new Set(wanted?.filter((k) => groups.get(k)!.passed[1] >= limit)) : undefined;
+        read = this.candidates(w, page, false, wanted, skipExpedited);
+      }
       const counts = new Map<string, number>();
       for (const c of read) {
         const key = `${c.repository_id}\u0000${c.course_id}`;
@@ -1107,8 +1114,9 @@ export class Claims {
     requireFleetScope(repo, scope);
     const now = this.c.now();
     const reports = this.rows<{ runner_id: number; claim_id: number; key: string; received_at: number; payload: string }>(`
-      SELECT runner_id, claim_id, key, received_at, payload FROM runner_reports
-      WHERE repository_id = ? AND received_at > ? ORDER BY runner_id, claim_id, key`,
+      SELECT rr.runner_id, rr.claim_id, rr.key, rr.received_at, rr.payload FROM ${REPORTS_FROM}
+      WHERE rr.repository_id = ? AND ((${REPORT_AGE_FROM}) IS NULL OR (${REPORT_AGE_FROM}) > ?)
+      ORDER BY rr.runner_id, rr.claim_id, rr.key`,
       repo, now - REPORT_HORIZON_MS).map((r) => ({ ...r, payload: opaque(r.payload) }));
     const byClaim = groupBy(reports, 'claim_id');
     const claims = this.rows<{ claim_id: number; ticket_id: string; station: string; leg: string | null; claimed_at: number; course_id: string; course_fields_json: string | null; course_advance_json: string | null; runner_id: number; hostname: string; profile_json: string | null }>(`
@@ -1141,6 +1149,7 @@ export class Claims {
   }
 
   launchCandidates(scope: ViewScope) {
+    if (this.frozenAt() != null) return { repositories: scope.repositories.map((repository) => ({ repository, candidates: [] })) };
     return this.cached(() => {
       const unsigned = this.unsignedControlBlocked();
       const full = this.expediteActive() >= EXPEDITE_BOUND;

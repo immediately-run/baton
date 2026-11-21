@@ -23,6 +23,7 @@ import type { Policies } from './policy';
 
 import type { Config, Row, SqlValue, Store } from './ports';
 import { liveness } from './stateVersion';
+import { REPORT_AGE_FROM, REPORTS_FROM } from './runnerViews';
 
 const CLOSE_GRACE_MS = 10 * 60_000; // §6.9: closing updates are accepted 10 minutes after a claim ends
 
@@ -808,8 +809,9 @@ export class RunnerApi {
 
   /** The expiry of a reaped runner's open messages (§9). R3-1212 adds reaping. */
   alarm() {
-    this.exec('DELETE FROM runner_reports WHERE received_at <= ?', this.c.now() - REPORT_HORIZON_MS);
     const now = this.c.now();
+    this.exec(`DELETE FROM runner_reports WHERE rowid IN (
+      SELECT rr.rowid FROM ${REPORTS_FROM} WHERE (${REPORT_AGE_FROM}) <= ?)`, now - REPORT_HORIZON_MS);
     // B-236: driven from the open messages (`messages_by_status`), each runner read by its key —
     // never from the reaped runners, whose rows are kept forever (R-BTN-3).
     this.exec(`UPDATE messages SET status = 'expired' WHERE status IN ('pending','delivered')

@@ -14,6 +14,10 @@ export type ViewScope = { key: string; repositories: string[]; grants: unknown }
 type View = 'fleet' | 'instances' | 'launch-candidates';
 const HOUR = 3_600_000;
 
+// NULL means the claim still holds the report, regardless of when it was sent.
+export const REPORTS_FROM = 'runner_reports rr LEFT JOIN claims c ON c.id = rr.claim_id';
+export const REPORT_AGE_FROM = `CASE WHEN c.status = 'active' THEN NULL ELSE coalesce(c.ended_at, rr.received_at) END`;
+
 /** Test the validator before building the view. The clock edges cover reads before the alarm. */
 export function runnerViewResponse(store: Store, now: number, req: Request, scope: ViewScope,
   view: View, repository: string | null, read: () => unknown): Response {
@@ -21,13 +25,17 @@ export function runnerViewResponse(store: Store, now: number, req: Request, scop
   const heads = view === 'instances' ? [] : store.exec(`SELECT repository_id, fleet_version FROM board_head
     WHERE repository_id IN (SELECT value FROM json_each(?)) ORDER BY repository_id`, repos).toArray();
   const instances = view === 'fleet' ? [] : store.exec("SELECT value FROM baton_settings WHERE key = 'instances_version'").toArray();
+  // Count the reports in the body, not the expired rows the alarm may already have removed.
   const clock = view === 'fleet' ? store.exec(`SELECT
-    (SELECT max(received_at) FROM runner_reports WHERE repository_id = ? AND received_at <= ?) AS expired_report,
+    (SELECT count(*) FROM ${REPORTS_FROM} WHERE rr.repository_id = ? AND
+      ((${REPORT_AGE_FROM}) IS NULL OR (${REPORT_AGE_FROM}) > ?)) AS visible_reports,
     (SELECT count(*) FROM owner_bars WHERE repository_id = ? AND lifted_at IS NULL AND starts_at <= ?) AS started,
     (SELECT count(*) FROM owner_bars WHERE repository_id = ? AND lifted_at IS NULL AND ends_at <= ?) AS ended`,
     repository, now - REPORT_HORIZON_MS, repository, now, repository, now).one()
     : view === 'instances' ? store.exec('SELECT max(lapses_at) AS expired FROM instance_readings WHERE lapses_at <= ?', now).one()
-    : [schedulingVersion(store), store.exec(`SELECT count(*) AS backing_off FROM ready_tickets WHERE retry_after > ?
+    : [schedulingVersion(store), store.exec(`SELECT
+      EXISTS (SELECT 1 FROM baton_settings WHERE key = 'frozen_at') AS frozen,
+      count(*) AS backing_off FROM ready_tickets WHERE retry_after > ?
       AND repository_id IN (SELECT value FROM json_each(?))`, now, repos).one()];
   const etag = `"${sha256HexSync(JSON.stringify([view, repository, scope, Math.floor(now / HOUR), heads, instances, clock]))}"`;
   if (ifNoneMatch(req, etag)) return new Response(null, { status: 304, headers: { ETag: etag } });

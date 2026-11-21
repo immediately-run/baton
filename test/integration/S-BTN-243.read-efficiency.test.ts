@@ -54,6 +54,28 @@ async function busyBoard() {
 }
 
 describe('S-BTN-243 bounded reads without changing matching', { timeout: 120_000 }, () => {
+  it('S-BTN-57: stops paging saturated runs in all-mode, even when the full lane merges two runs', async () => {
+    const git = new Git().add('HOLD-1', { expedite: true }).add('HOLD-2', { expedite: true });
+    for (let i = 1; i <= 650; i++) {
+      git.add(`E-${i}`, { expedite: true, rank: 2 * i - 1 });
+      git.add(`N-${i}`, { rank: 2 * i });
+    }
+    expect((await git.post()).status).toBe(200);
+    await cutover();
+    const runner = await register();
+    for (const [cred, id] of [['vm-b', 'HOLD-1'], ['mac', 'HOLD-2']] as const) {
+      const holder = await register(cred);
+      expect(await claimItem(cred, holder.secret, { ticket_id: `docs:${id}` })).toMatchObject({ status: 200 });
+    }
+    const { value, log } = await measure(() => runnerCall('/v1/runner/recommendations?all=1', { secret: runner.secret }));
+    expect(value.status).toBe(200);
+    const body = await value.json() as { recommendations: { ticket_id: string }[]; truncated: boolean };
+    expect(body.truncated).toBe(true);
+    expect(body.recommendations.map((r) => r.ticket_id)).toEqual(Array.from({ length: 250 }, (_, i) => [`docs:E-${i + 1}`, `docs:N-${i + 1}`]).flat());
+    // At most eleven pages per run to establish the first 501 passing entries.
+    expect(log.filter((e) => e.sql.includes('FROM ready_tickets q INDEXED BY')).length).toBeLessThanOrEqual(22);
+  });
+
   it('keeps an idle answer across busy activities and identical snapshots, and measures cold and warm reads', async () => {
     const { git, idle, busy, held } = await busyBoard();
     const cold = await measure(() => claimItem('vm-a', idle.secret));
