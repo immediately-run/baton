@@ -177,15 +177,26 @@ export function builtinExecutor(): Executor {
       const timer = o.timeout_s ? setTimeout(kill, o.timeout_s * 1000) : null;
       timer?.unref?.();
       const result = new Promise<ExecResult>((resolveResult) => {
-        child.on('error', (e) => {
+        let drainTimer: ReturnType<typeof setTimeout> | undefined;
+        child.once('error', (e) => {
           if (timer) clearTimeout(timer);
           resolveResult({ status: null, stdout, stderr: stderr + String(e) });
         });
-        child.on('exit', (code) => {
+        child.once('exit', () => {
           if (timer) clearTimeout(timer);
           // A call's end is its whole group's end (R-BTN-72, R-BTN-145): what the call left
           // behind goes with it.
           kill();
+          // A process outside the group may still hold a pipe open. Bound the drain in that case.
+          drainTimer = setTimeout(() => {
+            child.stdout!.destroy();
+            child.stderr!.destroy();
+          }, 5_000);
+          drainTimer.unref();
+        });
+        child.once('close', (code) => {
+          if (drainTimer) clearTimeout(drainTimer);
+          // S-BTN-48: the wrapper's last stdout line can arrive after exit, but before close.
           if (partial && o.onStderr) o.onStderr(partial);
           resolveResult({ status: code, stdout, stderr });
         });
