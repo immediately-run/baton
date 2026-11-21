@@ -8,7 +8,7 @@ repos:
   - immediately-run/baton
 tags:
   - roadmap-item
-description: "Owner, 2026-10-18, after the security review: build BATON_SPEC R-BTN-139 to R-BTN-158 (placed by rule across §2.3, §3–§6, §8 and §10–§12), which close the holes inside one tenant that the tenancy rules (§2.2) do not touch — outsiders' PRs and verdicts, off-branch leg code, runner secrets in legs and logs, multi-repository machine keys, unfounded heads, open-world gates, missing caps, forged merge checks, MCP lifting holds, the login link, CI-token events, tokens, and the local host. The grant's one flag is sync: no courier flag, delivery flag or courier asks scope (personal couriers are retired). Extended after the adversarial review: the author and posted-state gates at an open-world settlement, consents in `code_repo_consents`, the longest id winning a branch, `base_sha` ancestry, `accept {confirm_span?}` and pending grants holding no role, the per-credential declaration budget, revocation only of a fully verifying bearer over `http`, and no read of Cloudflare Access's JWT. S-BTN-115 to S-BTN-125, S-BTN-32's pending-grant case, G-BTN-135 to G-BTN-145, G-BTN-57's pending-grant clause, G-BTN-59's open-world clause. Requires: a public GitHub repository and a GitLab project for two exit criteria."
+description: "Owner, 2026-10-18, after the security review: build BATON_SPEC R-BTN-139 to R-BTN-158 (placed by rule across §2.3, §3–§6, §8 and §10–§12), which close the holes inside one tenant that the tenancy rules (§2.2) do not touch — outsiders' PRs and verdicts, off-branch leg code, runner secrets in legs and logs, multi-repository machine keys, unfounded heads, open-world gates, missing caps, forged merge checks, MCP lifting holds, the login link, CI-token events, tokens, and the local host. The grant's one flag is sync: no courier flag, delivery flag or courier asks scope (personal couriers are retired). Extended after the adversarial review: the author and posted-state gates at an open-world settlement, consents in `code_repo_consents`, the longest id winning a branch, `accept {confirm_span?}` and pending grants holding no role, the per-credential declaration budget, revocation only of a fully verifying bearer over `http`, and no read of Cloudflare Access's JWT. S-BTN-115 to S-BTN-125, S-BTN-32's pending-grant case, G-BTN-135 to G-BTN-145, G-BTN-57's pending-grant clause, G-BTN-59's open-world clause. Requires: a public GitHub repository and a GitLab project for two exit criteria."
 topics:
   - baton
 owns: {}
@@ -144,11 +144,8 @@ Split into reviewed PRs along four parts. Each is independent.
      `src/defaults/course-markers.ts`), the runner's local branch check and `branchHolder` in
      `src/core/claims.ts`: a branch maps to a ticket only when no longer id of the same repository
      also matches it. Until a child's first snapshot, its branch maps to its parent.
-   - **No roll-back** (R-BTN-143, adv-3 F4). The claim response names `base_sha`
-     (`board_snapshots.parent_sha`; null for a repository's first snapshot and for a held post
-     accepted per R-BTN-11). The runner (`src/runner/home.ts`) checks that it is an ancestor of
-     `snapshot_sha` too, and a failure is handled as an off-branch sha. The held machine-key
-     post that may name such a sha is B-77's.
+   - **Default-branch membership** (R-BTN-143). The runner checks `snapshot_sha` against its
+     own fetched default branch. The claim has no `base_sha` ancestry check (B-160).
    - **Accepting a grant** (R-BTN-146, §12.1, §14; adv-4 m2, m4).
      - `POST /v1/runner/grants/{repository}/accept` takes `{confirm_span?}`; an acceptance that
        raises the span without it is `conflict`, listing the repositories that would lose sync.
@@ -191,8 +188,8 @@ adapter's trust and fork mapping from real payload shapes. Item 7's cases, on bo
   `stream` cases are B-77's.
 - S-BTN-122: heartbeats flipping declarations past the budget keep their leases and drop the
   declarations (`declarations: 'quota'`).
-- S-BTN-123: a post naming an older default-branch sha gives `released:off-branch`, because
-  `base_sha` is not its ancestor.
+- S-BTN-123: Baton refuses an already-accepted older head as `head-moved` (R-BTN-11);
+  off-branch claim code is still refused by the runner (R-BTN-143).
 - S-BTN-124: an unverifying bearer naming an administrator's `bak_<id>` over `http` is refused
   and nothing is revoked.
 - S-BTN-32: a pending grant on a key later added as an owner gives `conflict` without naming the

@@ -9,6 +9,35 @@ import type { Store } from '../../src/core/ports';
 
 import { dropDerivedSchema } from '../lib/migrationRewind';
 
+describe('migration 0070: retire policy pins (B-160, S-BTN-190)', () => {
+  it('drops deployed pins and their conditions without removing protection conditions', async () => {
+    const stub = env.BATON.get(env.BATON.idFromName('migrations-0070'));
+    await runInDurableObject(stub, (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      dropDerivedSchema(sql);
+      for (const o of sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").toArray()) sql.exec(`DROP TABLE "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id < 70)) sql.exec(m.sql);
+    });
+    await runInDurableObject(stub, (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = ON');
+      sql.exec("INSERT INTO repositories (id, github, default_branch, sync_workflow) VALUES ('docs', 'o/docs', 'main', 'sync.yml')");
+      sql.exec("INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('key', 'host', '[]', 'runner')");
+      sql.exec(`INSERT INTO runners (id, hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+                VALUES (7, 'host', 's', 'hash', 'key', 'opencode', 'vm', 'critical', 900000, '', 1, 2)`);
+      sql.exec("INSERT INTO policy_pins (runner_id, repository_id, hash, at) VALUES (7, 'docs', 'old', 1)");
+      sql.exec(`INSERT INTO policy_conditions (repository_id, type, ref, raised_at) VALUES
+                ('docs', 'baton.policy-unpinned', 'runner:7', 1), ('docs', 'baton.unprotected', '', 1)`);
+      sql.exec(MIGRATIONS.find((m) => m.id === 70)!.sql);
+
+      expect(sql.exec("SELECT name FROM sqlite_master WHERE name = 'policy_pins'").toArray()).toEqual([]);
+      expect(sql.exec('SELECT type, closed_at FROM policy_conditions').toArray()).toEqual([{ type: 'baton.unprotected', closed_at: null }]);
+      expect(sql.exec('PRAGMA foreign_key_check').toArray()).toEqual([]);
+    });
+  });
+});
+
 describe('migration 0005: work items become tickets (R3-1230)', () => {
   it('keeps every row under the new names', async () => {
     const id = env.BATON.idFromName('migrations-0005');

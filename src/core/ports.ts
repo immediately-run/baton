@@ -117,10 +117,6 @@ export interface Config {
    *  a comma- or JSON-separated list. An administrator's setting, as the human keys are; the
    *  default is `claude.ai` alone. */
   BATON_SESSION_HOSTS?: string;
-  /** R-BTN-114's `SigningKey` (R-BTN-171, R-BTN-189): the tenant's Ed25519 signing key, as the
-   *  JWK of its private half — `{"kty":"OKP","crv":"Ed25519","d":…,"x":…}`. A secret on
-   *  Cloudflare, a key file locally; Baton never generates or stores one. */
-  BATON_SIGNING_KEY?: string;
   /** R-BTN-2 (§2.1, R3-1258): the plan's daily limits, `{"requests": <n>, "rows_written": <n>}`,
    *  a Worker var on Cloudflare and `--plan-limits` locally — the default is Workers Free's
    *  100,000 each. The dashboard draws the day's usage against them; nothing is refused at a

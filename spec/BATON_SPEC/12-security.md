@@ -253,7 +253,7 @@ Every value below is validated on write; a value over its cap is refused `invali
   other permission; its private key is written to `--key-out` on the delivering runner's host,
   never to the secret sink, and its App id to the instance setting `check_app_id` (`PUT
   /v1/admin/settings`, §13.1), one per tenant as the App is, which the sync is handed with its
-  observation, the policy read answers, and R-BTN-115's read-back and `baton repo protect --print`
+  observation, and R-BTN-115's read-back and `baton repo protect --print`
   read. An organisation owner installs it on each repository whose `checks` setting names a course,
   never on "All repositories" (R-BTN-115). Branch protection names it,
   never the dispatch App (R-BTN-115).

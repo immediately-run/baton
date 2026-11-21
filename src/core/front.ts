@@ -209,7 +209,7 @@ async function route(req: Request, env: Config, to: Forward): Promise<Answer> {
   // The repository reads (§11): a course's record, its blocks and a ticket's history — any key
   // granted on it; the blocks and the history also an owner's or an administrator's, whose keys
   // sign, as every key does. B-90: the board of one repository, read the same three ways — and
-  // §12.8 (B-145): its signed policy read, for the same principals (R-BTN-189). R-BTN-181 (B-7's
+  // §12.8 (B-145): its policy read, for the same principals (R-BTN-189). R-BTN-181 (B-7's
   // slice): the attestation write signs the same way — the core checks the writer it names.
   // B-126 (R-BTN-194): a ticket itself, `GET …/tickets/{ticket}`, read like its blocks.
   // B-190 (R-BTN-84): one leg's runs, `GET …/legs/{leg}/runs`, read the same three ways — the

@@ -992,11 +992,9 @@ export function policyDiff(oldDoc, newDoc) {
   return POLICY_KNOBS.filter((k) => canonical(knobOf(oldDoc, k)) !== canonical(knobOf(newDoc, k)));
 }
 
-/** `baton owner policy …`: show and diff read the signed policy read (R-BTN-189 — a deployment
- *  verifies its signature against the tenant key it pinned; the CLI shows the fields and the
- *  signature beside them), set and apply compare-and-set on the `--base` version the operator
- *  READ (never a version the CLI fetches itself: a fresh fetch would overwrite a concurrent
- *  change sight unseen, defeating the compare-and-set — round 1, finding 9; `show` names the
+/** `baton owner policy …`: show and diff read the policy, set and apply compare-and-set
+ *  on the `--base` version the operator READ (never a version the CLI fetches itself: a fresh
+ *  fetch would overwrite a concurrent change sight unseen — round 1, finding 9; `show` names the
  *  version), and the floor commands register and remove a deployment's floors. */
 async function policyMain(argv) {
   // `-i KEY` and `--url URL` may sit before the subcommand — `baton owner -i KEY policy show
@@ -1019,7 +1017,6 @@ async function policyMain(argv) {
     const out = await request('GET', `/v1/repositories/${encodeURIComponent(repo)}/policy`);
     if (out.status !== 200) return write(arrived(out.text)), 1;
     write(JSON.stringify(out.json));
-    process.stderr.write(`baton: verify ${out.json.repository}@${out.json.version} against your pinned tenant key (${out.json.kid}); the read lives until ${new Date(out.json.valid_until).toISOString()}\n`);
     return 0;
   }
   if (sub === 'diff') {

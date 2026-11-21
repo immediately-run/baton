@@ -94,11 +94,8 @@ branch).
    executor (B-184), with the computed diff as its only input ~~and a fixed time~~, and returns
    `{refuse, reasons}` from a closed list ~~; where no sandbox is available it is refused, not run~~
    (R-BTN-182).
-5. **Pins** (R-BTN-182, R-BTN-189): its own configuration pins the `human_only` public keys, Baton's
-   attestation key, the tenant signing keys, and the hashes of the policy and its floors. It reports
-   its pins in each heartbeat and acts on nothing in the repository while one differs from Baton's
-   (`baton.policy-unpinned`); it verifies signed policy reads against its pinned keys, checking
-   `repository` and `tenant`.
+5. **Policy and attestations** (R-BTN-182, R-BTN-189): the trusted runner uses Baton's record
+   as served. It keeps no pins and verifies no signature on a policy read or attestation (B-160).
 6. **`baton repo protect`** (R-BTN-180): `--print <forge>` derives the forge setting from the
    policy's `refs.*` and `paths.control`:
    - GitHub (an organisation): branch and tag rulesets whose only bypass actors are the trusted

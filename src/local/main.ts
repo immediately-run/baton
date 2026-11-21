@@ -1,11 +1,10 @@
 // main.ts — `npm run start:local -- --db <path> --port <n>` (BATON_SPEC §3a R-BTN-55, R-BTN-57).
 // Options, never a `.dev.vars` file: `--origin` (default `http://127.0.0.1:<port>`), `--admin-keys
 // <file>` (one OpenSSH public key per line), `--github-webhook-secret <file>` (R-BTN-73),
-// `--signing-key <file>` (R-BTN-114's SigningKey, the tenant's Ed25519 JWK; R-BTN-171, R-BTN-189)
 // and `--config <file>`, a JSON object of the
 // Runner's other variables and secrets (OIDC_ISSUER, OIDC_JWKS_URL, BATON_REPOSITORIES — the
 // repositories to register, as a JSON string —, ACCESS_*, OWNER_EMAILS, TOKEN_HASHES,
-// CREDENTIALS, BATON_KEYS, BATON_GITHUB_WEBHOOK_SECRET, BATON_FORGE_SECRETS, BATON_SIGNING_KEY,
+// CREDENTIALS, BATON_KEYS, BATON_GITHUB_WEBHOOK_SECRET, BATON_FORGE_SECRETS,
 // BATON_SESSION_HOSTS — the hosts whose session links the instance accepts, R-BTN-113 —,
 // GITHUB_DISPATCH_TOKEN). The test
 // bindings are refused: only the test harness, in-process, may set them.
@@ -58,7 +57,6 @@ export function localConfig(file: Record<string, unknown>, origin: string): Conf
     BATON_SESSION_HOSTS: opt('BATON_SESSION_HOSTS'),
     BATON_GITHUB_WEBHOOK_SECRET: opt('BATON_GITHUB_WEBHOOK_SECRET'),
     BATON_FORGE_SECRETS: opt('BATON_FORGE_SECRETS'),
-    BATON_SIGNING_KEY: opt('BATON_SIGNING_KEY'),
     GITHUB_DISPATCH_TOKEN: opt('GITHUB_DISPATCH_TOKEN'),
   };
 }
@@ -73,7 +71,6 @@ export async function main(argv: string[]) {
       origin: { type: 'string' },
       'admin-keys': { type: 'string' },
       'github-webhook-secret': { type: 'string' },
-      'signing-key': { type: 'string' },
       config: { type: 'string' },
     },
   });
@@ -103,11 +100,6 @@ export async function main(argv: string[]) {
   // R-BTN-55: the GitHub App's webhook secret, from the file `--github-webhook-secret` names
   // (a file, so the secret is in no process list); it wins over a --config value.
   if (values['github-webhook-secret']) config.BATON_GITHUB_WEBHOOK_SECRET = readFileSync(values['github-webhook-secret'], 'utf8').trim();
-  // R-BTN-114's SigningKey (R-BTN-171, R-BTN-189): the tenant's Ed25519 key from the file
-  // `--signing-key` names (§3's table: a key file locally, a secret on Cloudflare) — the JWK
-  // of the private half; it wins over a --config value. Read once at start: the key rotates by
-  // restarting with a new file, never by Baton writing one.
-  if (values['signing-key']) config.BATON_SIGNING_KEY = readFileSync(values['signing-key'], 'utf8').trim();
   const host = new LocalHost({ store, config, adminKeys: adminKeysFrom(values['admin-keys']) });
   await host.start();
   const server = serve(host, origin);
