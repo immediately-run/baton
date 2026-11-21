@@ -18,6 +18,18 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-21 — Work done outside Baton (R-BTN-203, R-BTN-131, R-BTN-74, S-BTN-309).**
+  Rules changed: R-BTN-74, R-BTN-131; R-BTN-203 new. The owner, 2026-11-21: "baton *must* work
+  well in a setup where only a portion of the organization is using baton", and outside work is
+  to be detected by the sync's code, not the server. B-166 had been delivered by four PRs on
+  2026-11-02 by sessions that never claimed it, stayed `available`, and spent a runner's leg
+  on 2026-11-21. The owner ruled: strong evidence (archive, `status: done`, every named PR
+  merged) closes; weak evidence (a merged PR or commit naming the id) starts a reconciliation
+  course Baton manages, configurable and replaceable like any course, rather than a flag for a
+  person. Rejected: closing on any mention, which closes a ticket that needs several PRs at the
+  first; the server inferring closure from forge events, against R-BTN-35's split of who owns
+  which facts.
+
 - **2026-11-20 — A session's reads outside `/v1/ui/*`, the strip's ready count, V1's paged lists (R-BTN-16, R-BTN-155, S-BTN-243, S-BTN-254).**
   Rules changed: R-BTN-16, R-BTN-155.
   The V2 dashboard (BATON-UI-V2, merged 2026-11-20) reads the repository and tenant `GET`s §14

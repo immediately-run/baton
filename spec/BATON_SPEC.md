@@ -32,7 +32,7 @@ is stale. Never edit it by hand.
 | | 3.4 Reading the forge | R-BTN-96, R-BTN-139, R-BTN-140, R-BTN-141 |
 | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) | **4. Tickets, syncs and the board** | — |
 | | 4.1 The `.baton/` folder and the registry | R-BTN-51, R-BTN-48 |
-| | 4.2 What a sync runs | R-BTN-74 |
+| | 4.2 What a sync runs | R-BTN-74, R-BTN-203 |
 | | 4.3 The sync run and the head | R-BTN-62, R-BTN-150, R-BTN-11, R-BTN-147, R-BTN-199 |
 | | 4.4 The board post | R-BTN-194 |
 | | 4.5 Reading the ticket | R-BTN-5, R-BTN-34 |
@@ -304,6 +304,7 @@ is stale. Never edit it by hand.
 | R-BTN-199 | Baton hands out every identifier that concurrent branches write to git | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 | R-BTN-201 | a launcher starts sessions; Baton reserves nothing for them | [`08-runners.md`](BATON_SPEC/08-runners.md) |
 | R-BTN-202 | a runner's local queue; local orders while Baton is unreachable | [`08-runners.md`](BATON_SPEC/08-runners.md) |
+| R-BTN-203 | work done outside Baton | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 
 ## Scenarios
 
@@ -488,6 +489,7 @@ is stale. Never edit it by hand.
 | S-BTN-305 | no listing lost | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-306 | the cutover's retired routes | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-307 | a screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-309 | work done outside Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

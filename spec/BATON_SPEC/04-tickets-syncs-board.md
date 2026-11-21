@@ -116,7 +116,7 @@ numbers.
     | `depends_on` | `depends_at: {ticket, done: true, leg: <the course's start_leg>}` per id (R-BTN-120); a qualified id (§3.1) is posted as written |
     | `repos` | forge paths, short names resolved through the `repos` setting (`owner/name` stands) |
     | `order` | `rank` (by `order`, then id) |
-    | `prs`, `answer` | never posted: the ticket's sync-local `fields` (R-BTN-33); its `course` is `{}` |
+    | `prs`, `answer`, `reconciled` | never posted: the ticket's sync-local `fields` (R-BTN-33); its `course` is `{}` |
 
     Other fields are ignored. Two files with one `id`, a `repos` name with no mapping, or an
     `order` that is not a number fail the sync: nothing is posted and the run names the file.
@@ -218,6 +218,33 @@ numbers.
     workflow annotates each run from its last `baton: <outcome> at <sha>` line: `advanced` or
     `confirmed` a notice; `held`, `busy` or `busy:again` a warning that nothing was posted;
     anything else, or no line, an error.
+
+- **R-BTN-203 (work done outside Baton).** Baton works where only part of an organization uses
+  it: a ticket may be built, merged or closed by people and sessions that never claim it. The
+  sync — the CLI's markdown source and standard station functions, never the server — reads the
+  evidence and posts the board accordingly. Only a ticket Baton holds at its course's start (no
+  claim, no position past `start` in `ctx.positions`) is judged: a ticket Baton is working is
+  its course's.
+  - **Strong evidence closes.** The source posts the ticket `closed` as done when its file is
+    under `archive/` or its `status` is `done` (the table above), or when every PR its `prs:`
+    names — in the home or a repository its `repos:` reaches (R-BTN-140) — is merged, none is
+    open, and at least one is named. Such a closure carries `display.status`
+    `done (outside Baton: <PR or commit>)`; `baton ticket check` reports each one whose file is
+    not yet archived, never as a finding.
+  - **Weak evidence reconciles.** A merged PR or a commit reaching the default branch since the
+    last accepted head that names the ticket's id as a whole word in its title or message, but is
+    not one its `prs:` names, is weak evidence. Only pushers' PRs and commits count (R-BTN-139).
+    Weak evidence never closes. While any piece of it is unacknowledged, the source posts the
+    ticket under the repository's reconciliation course instead of its own: `.baton/baton.json`
+    `reconcile_course`, default `reconcile` (R-BTN-131), with the evidence in its sync-local
+    `fields`; `reconcile_course: null` turns weak evidence off. The course decides, and records
+    in the ticket's file each piece of evidence it weighed (`reconciled:`, a list of PR URLs and
+    commit shas); evidence listed there is acknowledged. When none is left the ticket is posted
+    under its own course again (R-BTN-64).
+  - **What the sync reads.** The home's commits between the last accepted head and the posted
+    one (`ctx.head`, §4.3), and the fact adapter's merged PRs in the same window (R-BTN-96) for
+    the home and the repositories live tickets' `repos:` reach. A first snapshot has no window and
+    reads no weak evidence. A repository the adapter cannot read fails the sync, as R-BTN-96 says.
 
 ### 4.3 The sync run and the head
 

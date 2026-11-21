@@ -1,13 +1,13 @@
 ---
 title: The standard courses
-description: The eight courses Baton's CLI ships — create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec and spec-to-tickets — what each does, and how a repository adopts and changes one.
+description: The nine courses Baton's CLI ships — create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec, spec-to-tickets and reconcile — what each does, and how a repository adopts and changes one.
 tags: [concepts]
 order: 15
 ---
 
 A course is the route a ticket takes: its stations, and the legs an agent runs between them. A
 repository can write its own, as the docs repository did with `roadmap-pr`, but most need one of
-a handful of routes. Baton's CLI ships eight, and a repository adopts each with one command.
+a handful of routes. Baton's CLI ships nine, and a repository adopts each with one command.
 BATON_SPEC [R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8) says what a standard course is
 and what binds every course; this page and each course's own files are the courses' contract.
 Each course's stations and edges are its course file: `.baton/courses/<course>/course.json` once
@@ -25,6 +25,7 @@ rely on it.
 | `decision` | turns a question only the owner can settle into a one-letter packet, then carries the answer out | prepare, carry-out | `decided` |
 | `build-app` | takes a one-line request to a verified application: a product definition, a design with mock-ups, an architecture and a plan, each approved by the owner, then the plan's tickets on `create-pr`, and a verification against the definition | define, design, architect, plan, file, verify | `shipped` |
 | `create-spec` | designs a specification in conversation with the owner, reviews it adversarially, addresses blocking findings in a second conversation, adjudicates what three rounds leave open, merges | converse, review, address, adjudicate, merge | `merged` |
+| `reconcile` | weighs work done outside Baton that may have delivered a ticket — a merged PR or commit naming it (BATON_SPEC [R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)) — against the ticket's exit criteria, records what it weighed, and closes the ticket on a person's word or sends it back to its own course | weigh, the person leg confirm, record | `closed`, `returned` |
 | `spec-to-tickets` | takes a merged specification a one-sentence request names, decomposes it into child tickets — one per section, each with tests and exit criteria from the spec's words — checks the set against the spec's coverage, and files the children under the request | decompose, check, file | `filed` |
 
 `create-pr` is the default. It replaced the `pr` course, which a repository scaffolded before
@@ -90,6 +91,38 @@ evidence and the line as its detail, shown on the ticket's history. There the pe
 it at the end station `confirmed`; `filed` sends it back to `implement`. The agent's word alone
 never closes a ticket. The ticket's file still says what it said; `baton tickets done <ticket>`
 archives it as for any ticket closed by hand.
+
+## Work done outside Baton: `reconcile`
+
+Baton must work where only part of an organization uses it. The sync closes a ticket on strong
+evidence (archived, `status: done`, or every PR its `prs:` names merged; BATON_SPEC
+[R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)). Weak evidence is a merged PR
+or default-branch commit that names the ticket's id without being in its `prs:`. It posts the
+ticket on `reconcile`, or on the course `reconcile_course` in `.baton/baton.json` names,
+instead of its own. The evidence rides in the ticket's sync-local fields.
+
+1. **`weigh`** (an agent leg, read-only). It reads the ticket, its exit criteria and each piece
+   of evidence: the PR's diff and description, the commit. It runs the checks the exit criteria
+   name at the default branch's head. Its last line is one of:
+   - `delivered <sha|PR,…> <what it ran and what it showed>`: every exit criterion holds. The
+     stub checks that each named commit or PR is on the default branch, as `create-pr`'s
+     `delivered` answer does.
+   - `partial <sha|PR,…> <what remains>`: some of it is delivered.
+   - `unrelated <reason>`: the evidence only names the id.
+2. **`confirm`** (the person leg, under Needs you), after `delivered`: `confirmed` goes on to
+   `record` as closed, and `refused` goes on to `record` as returned. A repository may override
+   `confirm` (a `legs/confirm.run.*` that answers `confirmed` itself) to close on the agent's
+   word. That is the repository's choice, made in its own files.
+3. **`record`** (a ticket-only change). It writes the ticket file: every piece of evidence it
+   weighed into `reconciled:`, the PRs into `prs:`, and for `partial` the remainder as a dated
+   line in `## Status`. A `closed` ticket is also moved to `archive/` with `status: done`, as
+   `baton tickets done` does. It lands as one commit under the ticket paths, so the next sync sees
+   the evidence acknowledged. The ticket then closes, or goes back to its own course at its start.
+
+Its ends are `closed` and `returned`. A leg that cannot decide fails like any other, and the
+ticket stays on `reconcile` until a runner or a person settles it. Overriding `weigh`, `confirm`
+or `record`, or replacing the whole course with `reconcile_course`, works as for every standard
+course (*Overriding a leg* and *Changing one*, below).
 
 ## Starting a course from one sentence
 
