@@ -30,6 +30,7 @@ DROP TABLE conditions;
 ALTER TABLE conditions_next RENAME TO conditions;
 CREATE INDEX conditions_open ON conditions(repository_id, type, raised_at) WHERE outcome = 'open';
 CREATE INDEX conditions_by_ticket ON conditions(ticket_id, raised_at);
+CREATE INDEX conditions_by_claim ON conditions(claim_id);
 CREATE INDEX conditions_by_run ON conditions(run_id);
 CREATE INDEX conditions_by_handler ON conditions(handler) WHERE outcome = 'open' AND handler IS NOT NULL;
 -- SQLite treats NULLs as distinct in unique indexes; repository-wide conditions also deduplicate.

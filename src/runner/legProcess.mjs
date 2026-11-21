@@ -15,6 +15,7 @@
 // carries. The outcome is stdout's LAST line: `{"ok": true, "result": …}` or `{"ok": false,
 // "error": …, "aborted": …}`, written synchronously before the process exits.
 import { writeSync } from 'node:fs';
+import { register } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { legErrorType, raise } from './legClient.mjs';
 
@@ -70,6 +71,16 @@ const args = await new Promise((resolveArgs, rejectArgs) => {
 
 try {
   if (!Array.isArray(args)) throw new Error('legProcess: the arguments are not a JSON array');
+  if (call === 'run') {
+    // Extracted scripts have no node_modules. Bind only Baton's public leg API to this wrapper's
+    // client, without changing how any other import resolves. `register` also works on Node 22.13.
+    const client = new URL('./legClient.mjs', import.meta.url).href;
+    const hook = `export function resolve(name, context, next) {
+      if (name === '@immediately-run/baton/leg') return { url: ${JSON.stringify(client)}, shortCircuit: true };
+      return next(name, context);
+    }`;
+    register(`data:text/javascript,${encodeURIComponent(hook)}`);
+  }
   const mod = await import(pathToFileURL(script).href);
   const holder = mod.default != null && typeof mod.default === 'object' ? mod.default : null;
   // `describe`: what a ticket source declares (§4.2) — its `versions`, and whether it reads.

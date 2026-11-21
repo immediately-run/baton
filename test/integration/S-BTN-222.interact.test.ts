@@ -320,6 +320,10 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     });
   });
 
+  it('S-BTN-222: keeps the claim index for condition quotas and retention', async () => {
+    expect(await rows("SELECT name FROM pragma_index_info('conditions_by_claim')")).toEqual([{ name: 'claim_id' }]);
+  });
+
   it('G-BTN-146: records an unbound warning, its activity and history on the same run, without private text', async () => {
     const w = await register('vm-a');
     const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });

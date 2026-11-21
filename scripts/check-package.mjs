@@ -35,12 +35,13 @@ try {
   const app = join(dir, 'app');
   execFileSync('mkdir', [app]);
   writeFileSync(join(app, 'package.json'), JSON.stringify({ name: 'consumer', private: true }));
-  execFileSync('npm', ['install', '--no-audit', '--no-fund', '--silent', join(dir, packed.filename)], { cwd: app, stdio: ['ignore', 'ignore', 'inherit'] });
+  execFileSync('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--silent', join(dir, packed.filename)], { cwd: app, stdio: ['ignore', 'ignore', 'inherit'] });
 
   // The runner bundle and its leg wrapper load: `run` reaches its credential check (§6.4) and
   // stops there, so nothing contacts a Baton. The environment is cleared of any real credential.
   const env = { PATH: process.env.PATH, HOME: dir };
-  const script = join(app, 'leg.mjs');
+  // Match loadCourse: the leg is outside the consumer's node_modules ancestry.
+  const script = join(mkdtempSync(join(dir, 'baton-legs-')), 'leg.mjs');
   writeFileSync(script, "import { LegError } from '@immediately-run/baton/leg';\nexport function run(ctx) { if (typeof ctx.raise === 'function') throw new LegError('error.spec', 'test'); }\n");
   const leg = spawnSync(process.execPath, [join(app, 'node_modules', pkg.name, 'dist', 'legProcess.mjs'), 'run', script], { cwd: app, env, input: '[{}]\n', encoding: 'utf8' });
   if (leg.status !== 4 || !leg.stdout.includes('"errorType":"error.spec"')) fail(`the installed leg wrapper lost the typed error:\n${leg.stdout}${leg.stderr}`);

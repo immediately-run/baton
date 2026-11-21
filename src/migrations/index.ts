@@ -47,7 +47,6 @@ import checkConclusions from './0045_check_conclusions.sql';
 import ticketProvenance from './0046_ticket_provenance.sql';
 import legRunInputs from './0047_leg_run_inputs.sql';
 import conditions from './0048_conditions.sql';
-import conditionRecords from './0069_condition_records.sql';
 import eventLookups from './0049_event_lookups.sql';
 import alarmIndexes from './0052_alarm_indexes.sql';
 import retention from './0053_retention.sql';
@@ -66,6 +65,7 @@ import childrenOwnerState from './0064_children_owner_state.sql';
 import readEfficiency from './0065_read_efficiency.sql';
 import runnerViews from './0066_runner_views.sql';
 import retirePolicyPins from './0070_retire_policy_pins.sql';
+import conditionRecords from './0071_condition_records.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -210,6 +210,6 @@ export const MIGRATIONS: Migration[] = [
   { id: 64, sql: childrenOwnerState },
   { id: 65, sql: readEfficiency },
   { id: 66, sql: runnerViews },
-  { id: 69, sql: conditionRecords },
   { id: 70, sql: retirePolicyPins },
+  { id: 71, sql: conditionRecords },
 ];

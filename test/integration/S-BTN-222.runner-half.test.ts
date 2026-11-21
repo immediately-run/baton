@@ -14,7 +14,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { course as courseEntry, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, syncCall, tick, ticket, TOKENS } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
@@ -353,9 +353,8 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
     { thrown: `new LegError('error.spec', 'declared failure')`, type: 'error.spec', cls: 'spec', message: 'declared failure' },
     { thrown: `new Error('plain failure')`, type: 'error.transient', cls: 'transient', message: 'plain failure' },
   ])('G-BTN-146: ctx.raise and a script that throws $type', async ({ thrown, type, cls, message }) => {
-    const client = pathToFileURL(join(ROOT, 'src/runner/legClient.mjs')).href;
     const { home, sha } = writeHome({ implement: `
-      import { LegError } from ${JSON.stringify(client)};
+      import { LegError } from '@immediately-run/baton/leg';
       export async function run(ctx) {
         await ctx.raise('warning', { subject: 'private subject', body: 'private body' });
         throw ${thrown};
