@@ -49,12 +49,6 @@ export interface AdminKeys {
  *  replaces the administrators'. */
 export type HumanKeys = AdminKeys;
 
-/** A hook call (R-BTN-52, R-BTN-59): a Dynamic Worker on Cloudflare, a local `workerd`
- *  process locally — the same module format, input, output and limits. R3-1236 builds both. */
-export interface HookRunner {
-  run(hook: { module: string; entry: string }, input: unknown, limits: { timeout_ms: number }): Promise<unknown>;
-}
-
 /** §10.3: a workflow Baton dispatches after a committed transition: one repository's sync or
  *  mirror, resolved by the core to the GitHub repository and the workflow file. */
 export interface Workflow {
@@ -123,10 +117,6 @@ export interface Config {
    *  a comma- or JSON-separated list. An administrator's setting, as the human keys are; the
    *  default is `claude.ai` alone. */
   BATON_SESSION_HOSTS?: string;
-  /** R-BTN-114's `SigningKey` (R-BTN-171, R-BTN-189): the tenant's Ed25519 signing key, as the
-   *  JWK of its private half — `{"kty":"OKP","crv":"Ed25519","d":…,"x":…}`. A secret on
-   *  Cloudflare, a key file locally; Baton never generates or stores one. */
-  BATON_SIGNING_KEY?: string;
   /** R-BTN-2 (§2.1, R3-1258): the plan's daily limits, `{"requests": <n>, "rows_written": <n>}`,
    *  a Worker var on Cloudflare and `--plan-limits` locally — the default is Workers Free's
    *  100,000 each. The dashboard draws the day's usage against them; nothing is refused at a
@@ -147,8 +137,7 @@ export interface Config {
   TEST_GITLAB_JWKS?: string;
 }
 
-/** §3: the two awaits at which another request may run — a signed request's signature check
- *  (R3-1239) and a hook call (R3-1236); their callers await through this. The Durable Object's
+/** §3: a signed request's signature check (R3-1239) may let another request run. The Durable Object's
  *  input gate opens there by itself; the local queue is released. */
 export interface Gate {
   outside<T>(work: () => Promise<T>): Promise<T>;
@@ -163,8 +152,6 @@ export interface Ports {
   adminKeys: AdminKeys;
   /** R-BTN-185 (B-145): the host's human-only keys; absent, `BATON_HUMAN_KEYS` in the config. */
   humanKeys?: HumanKeys;
-  /** Absent until R3-1236; a test injects a fake. */
-  hooks?: HookRunner;
   /** Absent on Cloudflare, where the input gate needs nothing. */
   gate?: Gate;
   clock?: Clock;

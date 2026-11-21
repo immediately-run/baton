@@ -1,8 +1,8 @@
 // policy.ts — the repository policy (BATON_SPEC §12.8 R-BTN-188, R-BTN-189, B-145): the knobs,
 // their schemas, the presets, the guarantees computed over a version, the approver lists, the
 // floors, and the store side — the append-only `repository_policies` log, `policy_floors`, the
-// protection reports that feed `no-runner-lands` (R-BTN-180) and the policy pins trusted
-// runners report (R-BTN-182). Pure first: the knob table, `validatePolicyDocument`, `diff`,
+// protection reports that feed `no-runner-lands` (R-BTN-180). Pure first: the knob table,
+// `validatePolicyDocument`, `diff`,
 // the presets and `guaranteesOf` hold no I/O, no clock and no store, so both hosts and the
 // tests can check them alone; the `Policies` class beside them is the store's side, the way
 // registry.ts splits its checks from its store. Nothing compares a preset name outside the
@@ -11,7 +11,6 @@
 import { BatonError } from './http';
 import { logEvent } from './db';
 import { KEY_FINGERPRINT } from './auth';
-import { REPOSITORY_ID } from './validate';
 import { crossHostEntries } from './codeRepos';
 import type { Store } from './ports';
 import type { Forge } from './links';
@@ -537,8 +536,6 @@ export interface FloorRow {
 
 /** What a heartbeat's protection report says (R-BTN-180). */
 export interface ProtectionReport { repository: string; matched: boolean; reading_hash: string; legs?: { count: number; tickets: number } }
-/** What a heartbeat's policy pins say (R-BTN-189). */
-export interface PolicyPin { repository: string; hash: string; floors_hash?: string }
 
 /** A repository's live owners, and the human-only keys among them — everything the approver
  *  checks read. `humans` is every fingerprint a `human` entry counts when ACTING: the
@@ -560,10 +557,6 @@ export interface ApproverFacts {
 const FLOOR_NAME = /^[a-z][a-z0-9-]{0,39}$/;
 /** A protection report feeds `no-runner-lands` this long (R-BTN-180). */
 export const PROTECTION_WINDOW_MS = 24 * 3_600_000;
-
-function pinMismatch(pin: { hash: string; floors_hash?: string | null }, hash: string, floorsHash: string | null): boolean {
-  return pin.hash !== hash || (pin.floors_hash != null && pin.floors_hash !== floorsHash);
-}
 
 export class Policies {
   /** Baton's own callback: a floored guarantee broke on `repository`, and every running claim
@@ -625,16 +618,6 @@ export class Policies {
       .map((f) => ({ ...f, guarantees: JSON.parse(f.guarantees) as string[] }));
   }
 
-  /** The SHA-256 over the canonical floors list — a claim response and a trusted runner's pin. */
-  floorsHashOf(floors: FloorRow[]): string {
-    return sha256HexSync(canonicalJson(floors.map(({ name, guarantees, remove_by }) => ({ guarantees: [...guarantees].sort(), name, remove_by })).sort((a, b) => (a.name < b.name ? -1 : 1))));
-  }
-
-  /** The SHA-256 over the canonical guarantees map. */
-  guaranteesHashOf(guarantees: Record<GuaranteeName, boolean>): string {
-    return sha256HexSync(canonicalJson(Object.fromEntries(GUARANTEE_NAMES.map((n) => [n, guarantees[n]]))));
-  }
-
   /** Whether the protection checker's latest report feeds `no-runner-lands`: one within 24
    *  hours that matched, with no open `baton.unprotected` (a report that did not match or
    *  differed from the previous reading, R-BTN-180). */
@@ -645,17 +628,9 @@ export class Policies {
   }
 
   /** The guarantees over the current version, the protection report applied. */
-  guaranteesFor(repository: string): { guarantees: Record<GuaranteeName, boolean>; guarantees_hash: string } {
+  guaranteesFor(repository: string): Record<GuaranteeName, boolean> {
     const cur = this.current(repository);
-    const guarantees = guaranteesOf(cur?.policy ?? COOPERATIVE, { protection: this.protectionOk(repository), humanKeys: this.facts(repository).humans });
-    return { guarantees, guarantees_hash: this.guaranteesHashOf(guarantees) };
-  }
-
-  /** The policy facts a claim response and a heartbeat carry (R-BTN-189). */
-  hashesFor(repository: string): { version: number; policy_hash: string; guarantees_hash: string; floors_hash: string } | null {
-    const cur = this.current(repository);
-    if (!cur) return null;
-    return { version: cur.version, policy_hash: cur.hash, ...this.guaranteesFor(repository), floors_hash: this.floorsHashOf(this.floors(repository)) };
+    return guaranteesOf(cur?.policy ?? COOPERATIVE, { protection: this.protectionOk(repository), humanKeys: this.facts(repository).humans });
   }
 
   // ── approvers (R-BTN-188) ──────────────────────────────────────────────────────────────
@@ -745,20 +720,6 @@ export class Policies {
     return !humanOnlyList(before.approvers.trust, facts.humans) && humanOnlyList(after.approvers.trust, facts.humans)
       ? { grants: ids('runner_grants'), couriers: [...new Set(ids('couriers'))] }
       : { grants: [], couriers: [] };
-  }
-
-  private newlyUnpinned(repository: string, before: { hash: string; policy: PolicyDocument }, after: { hash: string; policy: PolicyDocument }, demoted: ReadonlySet<string>): number[] {
-    const floorsHash = this.floorsHashOf(this.floors(repository));
-    return this.rows<{ runner_id: number; credential_id: string; hash: string; floors_hash: string | null; trust_level: string | null; role: string | null }>(
-      `SELECT p.runner_id, r.credential_id, p.hash, p.floors_hash, g.trust_level, g.role FROM policy_pins p
-       JOIN runners r ON r.id = p.runner_id JOIN runner_grants g ON g.credential_id = r.credential_id AND g.repository_id = p.repository_id
-       WHERE p.repository_id = ? AND g.revoked_at IS NULL ORDER BY p.runner_id`, repository)
-      .filter((p) => {
-        if (demoted.has(p.credential_id) || p.role === 'protection-checker') return false;
-        const stopped = (version: typeof before) => (p.trust_level ?? version.policy.grants.default_trust) === 'trusted' && pinMismatch(p, version.hash, floorsHash);
-        return !stopped(before) && stopped(after);
-      })
-      .map((p) => p.runner_id);
   }
 
   /** `PUT /v1/owner/{repository}/policy {base_version, policy | preset, dry_run?}` — in the caller's one
@@ -861,11 +822,10 @@ export class Policies {
     const changed = diffPolicies(cur.policy, doc);
     const guarantees = guaranteesOf(doc, { protection: this.protectionOk(repository), humanKeys: factsNow.humans });
     if (body.dry_run === true) {
-      const runners = this.newlyUnpinned(repository, cur, { hash, policy: doc }, new Set(trust.grants));
       // Core cannot predict effects of gates it doesn't enforce. Name those gaps rather than
       // guessing which legs merge by their names or whether external checks would pass.
       return {
-        changed, guarantees, stops: { grants: cleared, runners, legs: [], tickets: [], unreached: [] },
+        changed, guarantees, trust_cleared: cleared, stops: { legs: [], tickets: [] },
         not_evaluated: ['outbox-delivery', 'leg-attestation-requirements', 'trusted-merge', 'repos.unlisted'],
       };
     }
@@ -1047,53 +1007,8 @@ export class Policies {
     return true;
   }
 
-  /** A trusted runner's policy pins, as its heartbeat reports them (R-BTN-189): stored, and a
-   *  pin that differs from the current version — the policy document's hash, and the floors'
-   *  when the runner pins it — holds `baton.policy-unpinned` open for that runner; one that
-   *  matches closes it. R-BTN-189 names trusted runners: a pin from a grant not trusted on the
-   *  repository is recorded nowhere and drives nothing (an untrusted runner shares its sandbox
-   *  with the code it builds, so its pin proves nothing). Returns the repositories whose pin
-   *  differed. */
-  recordPins(runnerId: number, credential: string, pins: PolicyPin[], granted: ReadonlySet<string>): string[] {
-    const differed: string[] = [];
-    for (const pin of pins) {
-      if (!REPOSITORY_ID.test(pin.repository) || !granted.has(pin.repository)) continue;
-      const cur = this.current(pin.repository);
-      const trusted = this.rows<{ trust_level: string | null }>(
-        'SELECT trust_level FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', credential, pin.repository)[0];
-      const policy = cur?.policy;
-      const isTrusted = trusted != null && (trusted.trust_level ?? policy?.grants.default_trust ?? 'untrusted') === 'trusted';
-      if (!isTrusted) continue;
-      this.exec('INSERT INTO policy_pins (runner_id, repository_id, hash, floors_hash, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (runner_id, repository_id) DO UPDATE SET hash = excluded.hash, floors_hash = excluded.floors_hash, at = excluded.at',
-        runnerId, pin.repository, pin.hash, pin.floors_hash ?? null, this.c.now());
-      const floorsHash = cur ? this.floorsHashOf(this.floors(pin.repository)) : null;
-      if (cur && pinMismatch(pin, cur.hash, floorsHash)) {
-        differed.push(pin.repository);
-        this.openCondition(pin.repository, 'baton.policy-unpinned', `runner:${runnerId}`, { pinned: pin.hash, current: cur.hash, ...(pin.floors_hash != null && pin.floors_hash !== floorsHash ? { pinned_floors: pin.floors_hash, current_floors: floorsHash } : {}) });
-      } else {
-        this.closeCondition(pin.repository, 'baton.policy-unpinned', `runner:${runnerId}`);
-      }
-    }
-    return differed;
-  }
-
-  /** Whether the runner's pins on `repository` differ from the current version — while one
-   *  does, the runner acts on nothing in the repository (R-BTN-189; a trusted runner's pins
-   *  alone are stored, so only a trusted grant can differ). A pin left behind by a demoted
-   *  grant drives nothing: the trust that made it matter is gone (round 2, finding N1). */
-  pinDiffers(runnerId: number, repository: string): boolean {
-    const pin = this.rows<{ hash: string; floors_hash: string | null }>('SELECT hash, floors_hash FROM policy_pins WHERE runner_id = ? AND repository_id = ?', runnerId, repository)[0];
-    if (!pin) return false;
-    const cur = this.current(repository);
-    if (cur == null) return false;
-    const trusted = this.rows<{ trust_level: string | null }>(
-      'SELECT trust_level FROM runner_grants WHERE credential_id = (SELECT credential_id FROM runners WHERE id = ?) AND repository_id = ? AND revoked_at IS NULL', runnerId, repository)[0];
-    if (!(trusted != null && (trusted.trust_level ?? cur.policy?.grants.default_trust ?? 'untrusted') === 'trusted')) return false;
-    return pinMismatch(pin, cur.hash, this.floorsHashOf(this.floors(repository)));
-  }
-
   /** Whether the runner's credential is the repository's protection checker — the one claimant
-   *  exempt from a broken floor and a differing pin (R-BTN-180, R-BTN-189). */
+   *  exempt from a broken floor (R-BTN-180, R-BTN-189). */
   isProtectionChecker(credential: string, repository: string): boolean {
     return this.rows('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL AND role = ?', credential, repository, 'protection-checker').length > 0;
   }

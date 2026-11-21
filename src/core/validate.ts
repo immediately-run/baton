@@ -155,8 +155,6 @@ export interface Heartbeat {
   /** §12.8 (B-145, R-BTN-180): the protection checker's reports, one per repository; the core
    *  checks the caller is each repository's checker and refuses the rest per entry. */
   protection: { repository: string; matched: boolean; reading_hash: string }[];
-  /** §12.8 (B-145, R-BTN-189): the policy hash pins a trusted runner reports per repository. */
-  policy_pins: { repository: string; hash: string }[];
   /** R-BTN-113 (B-234): the running leg's session link, as the runner holds it. Shape-checked
    *  here only as a bounded string; the heartbeat drops one that fails the link rule (https, no
    *  userinfo, an allowlisted host) and logs it, never refusing the beat. */
@@ -175,6 +173,26 @@ export interface Heartbeat {
    *  pinning. Opaque to Baton beyond its size: shape-checked here, stored as received, and
    *  gated on by nothing. */
   profile?: Record<string, unknown>;
+  reports: RunnerReport[];
+}
+
+export const REPORT_HORIZON_MS = 6 * 3_600_000;
+export const REPORT_KEYS_MAX = 16;
+export type RunnerReport = { key: string; payload: string } & ({ claim_id: number } | { repository: string });
+
+function checkReports(raw: unknown): RunnerReport[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.length > REPORT_KEYS_MAX) bad('reports', `must be a list of at most ${REPORT_KEYS_MAX} reports`);
+  return (raw as unknown[]).map((value, i) => {
+    const at = `reports[${i}]`;
+    if (!isObj(value)) bad(at, 'must be an object');
+    const r = value as Record<string, unknown>;
+    const key = r.key === undefined ? '' : matches(SESSION_NAME, `${at}.key`)(r.key);
+    const payload = boundedJson(r.payload, `${at}.payload`);
+    if (r.claim_id === undefined) return { key, payload, repository: checkRepositoryId(r.repository, `${at}.repository`) };
+    if (!Number.isSafeInteger(r.claim_id) || Number(r.claim_id) < 1 || r.repository !== undefined) bad(at, 'must name a claim_id or repository, not both');
+    return { key, payload, claim_id: Number(r.claim_id) };
+  });
 }
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number; claim_id?: number }
@@ -272,7 +290,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     fenced: checkFenced(b.fenced),
     couriers: checkCouriers(b.couriers),
     protection: checkProtection(b.protection),
-    policy_pins: checkPolicyPins(b.policy_pins),
     session_url,
     session_urls,
     concurrency: clampConcurrency(b.concurrency),
@@ -282,6 +299,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
         && isInt((e as Record<string, unknown>).seq) && ((e as Record<string, unknown>).seq as number) > 0)
       .map((e) => ({ claim_id: e.claim_id, seq: e.seq })),
     profile,
+    reports: checkReports(b.reports),
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live runner reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
@@ -479,13 +497,37 @@ export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:tra
 /** A claim's request (§6.2). `bills` is retired (B-168: a `prefer` entry bills no account once
  *  route choices are gone, R-BTN-100): a request carrying one is read as if it did not, the
  *  caller logging `deprecated-field` while the history's Migrations entry lasts. */
-export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null; retired: string[] } {
+export function boundedJson(value: unknown, field: string, limit = 4096): string {
+  let json: string | undefined;
+  try { json = JSON.stringify(value); } catch { /* not JSON */ }
+  if (json === undefined || new TextEncoder().encode(json).length > limit) bad(field, `must be JSON of at most ${limit} bytes`);
+  return json!;
+}
+
+export interface ClaimPreference { ticket_id: string; leg?: string }
+
+export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null; prefer: ClaimPreference[] | null; rationale: string | null; retired: string[] } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
+  const retired = new Set<string>();
+  if (b.bills !== undefined) retired.add('bills');
+  let prefer: ClaimPreference[] | null = null;
+  if (b.prefer !== undefined) {
+    if (b.ticket_id != null) bad('prefer', 'cannot be combined with ticket_id');
+    if (!Array.isArray(b.prefer) || b.prefer.length > 50) bad('prefer', 'must be a list of at most 50 entries');
+    prefer = (b.prefer as unknown[]).map((entry, i) => {
+      const at = `prefer[${i}]`;
+      if (!isObj(entry)) bad(at, 'must be a JSON object');
+      const e = entry as Record<string, unknown>;
+      if (e.bills !== undefined) retired.add('prefer.bills');
+      return { ticket_id: matches(TICKET_ID, `${at}.ticket_id`)(e.ticket_id), leg: optional(e.leg, matches(COURSE_ID, `${at}.leg`)) };
+    });
+  }
+  const rationale = b.rationale === undefined ? null : boundedJson(b.rationale, 'rationale');
   return {
     request_id: matches(REQUEST_ID, 'request_id')(b.request_id),
     ticket_id: optional(b.ticket_id, matches(TICKET_ID, 'ticket_id')) ?? null,
-    retired: b.bills !== undefined ? ['bills'] : [],
+    prefer, rationale, retired: [...retired],
   };
 }
 
@@ -762,6 +804,7 @@ function checkLocalOrder(v: unknown): LocalOrder | null {
 }
 
 export interface Advance {
+  course: string | null;
   leg: string;
   reached: string | null;
   evidence: string | null;
@@ -920,7 +963,7 @@ const carriedSessionUrl = (v: unknown): string | null =>
 
 /** `POST /v1/runner/claims/{id}/advance` (R-BTN-63, §11): the leg to start; `reached`, the
  *  outcome the running leg reached; a pointer to its evidence; the tags the holder bars from the
- *  new leg. `course` is opaque data for the course's hook (R3-1236): accepted, bounded, unread. */
+ *  new leg. `course` is opaque fleet data (R-BTN-99). */
 export function checkAdvance(body: unknown): Advance {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
@@ -932,9 +975,9 @@ export function checkAdvance(body: unknown): Advance {
   const raw = b.bars ?? [];
   if (!Array.isArray(raw) || raw.length > TAGS_MAX || !raw.every((t) => typeof t === 'string' && TAG.test(t))) bad('bars', `must be a list of at most ${TAGS_MAX} tags`);
   const head_sha = optional(b.head_sha, matches(GIT_SHA, 'head_sha')) ?? null;
-  if (b.course !== undefined && JSON.stringify(b.course).length > 4096) bad('course', 'must be at most 4 KB');
+  const course = b.course === undefined ? null : boundedJson(b.course, 'course');
   retiredFields(b);
-  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs), session_url: carriedSessionUrl(b.session_url), exit_status: optional(b.exit_status, exitStatus) ?? null, local_order: checkLocalOrder(b.local_order) };
+  return { leg, reached, evidence, course, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), scope_exceeded: checkScopeReport(b.scope_exceeded), head_sha, run_inputs: checkRunInputs(b.run_inputs), session_url: carriedSessionUrl(b.session_url), exit_status: optional(b.exit_status, exitStatus) ?? null, local_order: checkLocalOrder(b.local_order) };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */
@@ -1306,22 +1349,6 @@ export function checkProtection(v: unknown): { repository: string; matched: bool
       legs = { count: l.count as number, tickets: l.tickets as number };
     }
     return { repository: checkRepositoryId(e.repository, `protection[${i}].repository`), matched: e.matched as boolean, reading_hash: e.reading_hash as string, ...(legs ? { legs } : {}) };
-  });
-}
-
-/** §12.8 (B-145, R-BTN-189): the heartbeat's policy pins — `{repository, hash, floors_hash?}`:
- * the whole policy document's hash, and the floors' when the runner pins it (R-BTN-189 says a
- * trusted runner pins both). */
-export function checkPolicyPins(v: unknown): { repository: string; hash: string; floors_hash?: string }[] {
-  if (v === undefined) return [];
-  if (!Array.isArray(v) || v.length > 64) bad('policy_pins', 'must be a list of at most 64 pins');
-  return (v as unknown[]).map((x, i) => {
-    if (!isObj(x)) bad(`policy_pins[${i}]`, 'must be an object');
-    const e = x as Record<string, unknown>;
-    for (const k of Object.keys(e)) if (k !== 'repository' && k !== 'hash' && k !== 'floors_hash') bad(`policy_pins[${i}].${k}`, 'unknown field');
-    if (typeof e.hash !== 'string' || !/^[0-9a-f]{16,128}$/.test(e.hash)) bad(`policy_pins[${i}].hash`, 'must be the policy document’s SHA-256');
-    if (e.floors_hash !== undefined && (typeof e.floors_hash !== 'string' || !/^[0-9a-f]{64}$/.test(e.floors_hash))) bad(`policy_pins[${i}].floors_hash`, 'must be the floors’ SHA-256');
-    return { repository: checkRepositoryId(e.repository, `policy_pins[${i}].repository`), hash: e.hash as string, ...(e.floors_hash !== undefined ? { floors_hash: e.floors_hash as string } : {}) };
   });
 }
 

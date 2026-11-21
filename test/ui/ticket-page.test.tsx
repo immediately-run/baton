@@ -51,7 +51,7 @@ const READS: Record<string, Route> = {
   [`${BASE}/blocks`]: { blocked: false, blocks: [{ kind: 'ticket', ref: 'docs:T-9', since: NOW - HOUR }, { kind: 'capability', ref: 'cap-x', leg: 'leg-b', since: NOW - HOUR, until: NOW + HOUR }], other: [{ kind: 'claimed', detail: { claim_id: 7 } }] },
   [`${BASE}/children`]: { children: [{ ticket_id: 'docs:T-2', station: 'station-a', blocked: true }, { ticket_id: 'docs:T-3', station: null, blocked: false, closed: { as: 'done', closed_at: NOW - HOUR } }] },
   [`${BASE}/history`]: { rows: [
-    { id: 9, at: NOW - HOUR, kind: 'leg-started', leg: 'leg-b', run: 2, run_id: 'r_01RUN', detail: null },
+    { id: 9, at: NOW - HOUR, kind: 'leg-started', leg: 'leg-b', run: 2, run_id: 'r_01RUN', detail: null, rationale: { ranking: HOSTILE } },
     { id: 8, at: NOW - 2 * HOUR, kind: 'leg-finished', leg: 'leg-a', run: 1, reached: 'station-b', next_leg: 'leg-b', detail: {
       inputs: [{ name: 'spec', uri: 'git:example-org/docs@abc:spec.md', digest: 'sha256:1111' }],
       outputs: [{ name: 'result', uri: 'https://github.com/example-org/docs/pull/9' }, { name: 'elsewhere', uri: 'https://evil.example/x' }, { name: 'blob', uri: 's3://bucket/key' }],
@@ -160,6 +160,8 @@ describe('the ticket page’s sections (B-210)', () => {
     const links = [...history.querySelectorAll('a')].map((a) => a.getAttribute('href'));
     expect(links).toEqual(['https://github.com/example-org/docs/pull/9']);
     expect(history.textContent).toContain('https://evil.example/x');
+    expect(history.querySelector('pre.json')?.textContent).toContain(`"ranking": "${HOSTILE}"`);
+    expect(history.querySelector('img')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Earlier' }));
     await waitFor(() => expect(history.querySelectorAll('tbody tr').length).toBe(3));
     expect(calls.some((c) => c.path === `${BASE}/history?before=8`)).toBe(true);

@@ -176,15 +176,10 @@ R-BTN-192 (proposed) — the fact reader: forge facts a trusted runner attests, 
 Where the policy admits no `sync` writer for `std:arrival@1` (R-BTN-191), a fact leg's arrival
 comes from the **fact reader**: a mode of the home's merge runner (R-BTN-182) that reads
 the forge through the CLI's own fact adapters (R-BTN-96) and runs no repository code.
-- **The kinds**, a closed set a fact leg names (`arrives: {fact: <kind>}`, R-BTN-69), each read
-  for the ticket's PRs as R-BTN-131 maps them:
-
-  | Kind | The fact | `ref` |
-  |---|---|---|
-  | `pr-merged` | a ticket's PR merged by a merge no `merge` leg of the ticket reported | the merge commit |
-  | `pr-verdict` | a verdict on the PR's head that no claim of the ticket wrote: a pusher's (R-BTN-139) where the policy admits `sync` for `std:arrival@1`; where it does not, the human-only identity's alone, the forge user the policy's `human_identity` names (R-BTN-188, R-BTN-185), since runners push their own branches | the review's or comment's URL |
-  | `pr-opened` | a PR on the ticket's branch pattern, open | the PR's URL |
-  | `pr-pushed` | a push to the ticket's PR after the leg began leaving the ticket's station | the head sha |
+- **The kinds** are R-BTN-203's, read the same way, except `pr-verdict`: under a policy that
+  admits no `sync` writer for `std:arrival@1`, only the human-only identity's verdict counts, the
+  forge user the policy's `human_identity` names (R-BTN-188, R-BTN-185), since runners push their
+  own branches.
 
 - **What it reads.** Baton tells it which tickets wait: `GET /v1/repositories/{repository}/
   fact-legs`, every live ticket with a leg leaving its station that declares `arrives`, with the

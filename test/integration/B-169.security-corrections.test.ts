@@ -12,7 +12,7 @@
 // test/unit/mask.test.ts. Runs on both hosts.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { call as hostCall } from '#host';
-import { adminSession, course, syncToken, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, setPolicySigningKey, sessionCall, syncCall, withCore } from '../helpers';
+import { adminSession, course, syncToken, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, sessionCall, syncCall, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
 import { MAX_DELIVERY } from '../../src/core/webhook';
 
@@ -48,7 +48,6 @@ beforeEach(async () => {
   human = await makeKey('ssh-ed25519', 'human');
   breakGlass = await makeKey('ssh-ed25519', 'break-glass');
   await setAdminKeys(admin);
-  await setPolicySigningKey();
   { const reg = await keyCall(admin, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', forge: 'github', remote: 'ssh://git@github.com/immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', sync_keys: [], owner_keys: [owner.publicKey] }); expect(reg.status).toBe(200); }
   // The check course's file rides a post's own registry (R-BTN-48); the owner's repository takes it.
   const withCheck = await syncCall('/v1/sync/board', payload(board.shas.A, null, { ...board.states.A, registry: [course(), { id: 'check', version: 1, min_runner_version: 1, skill: 'next-roadmap-item', course: CHECK_COURSE, step_kinds: ['implement'], branch_pattern: 'claude/{ticket}-*' }] }), await syncToken({ repository: 'immediately-run/ops', job_workflow_ref: 'immediately-run/ops/.github/workflows/baton-sync.yml@refs/heads/main' }));

@@ -221,6 +221,11 @@ describe('a local start', () => {
     }
   });
 
+  it('accepts the retired --signing-key option at argument parsing (B-160, S-BTN-31)', async () => {
+    await expect(main(['--db', ':memory:', '--signing-key', '/unused/key.jwk', '--port', '0']))
+      .rejects.toThrow(/--origin is required/);
+  });
+
   it('refuses the test bindings and non-string values', () => {
     expect(() => localConfig({ BATON_TEST_BINDINGS: 'true' }, 'http://127.0.0.1:8787')).toThrow(/test bindings/);
     expect(() => localConfig({ TEST_OIDC_JWKS: '{}' }, 'http://127.0.0.1:8787')).toThrow(/test bindings/);

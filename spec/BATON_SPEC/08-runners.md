@@ -54,7 +54,6 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   | `transcripts` | at most 50 transcript paths (R-BTN-20) |
   | `couriers` | the repositories and `asks` it delivers notices for |
   | `protection` | `[{repository, matched, reading_hash}]`, the protection checker's readings (R-BTN-180) |
-  | `policy_pins` | `[{repository, hash}]`, a trusted runner's policy pins (R-BTN-189) |
   | `test_harness` | R-BTN-32 |
 
   - A runner holding one claim may send `session_url`, `leg_finished` and one `fenced` object in
@@ -65,11 +64,10 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     reaped. A malformed `session_urls` or `legs_finished` entry is dropped unnamed. A malformed
     `protection` or `tier_ceilings`, or a tier not on a registered repository's ladder, is
     `invalid-params`, as is a `transcripts`, `couriers` or `protection` list over its bound and
-    a malformed `policy_pins` or `fenced`.
+    a malformed `fenced`.
   - **The answer** carries `runner_id`, `incarnation`, `lease_timeout_s` (as clamped),
     `grant: {capabilities}` (R-BTN-72), `claims`, `messages`, `bars` (the owner bars in force,
-    R-BTN-67), `stale_courses` (R-BTN-22), `policies` (per repository `{version, policy_hash,
-    guarantees_hash, floors_hash}`, R-BTN-189), `mode` (per repository `shadow` or `cut-over`;
+    R-BTN-67), `stale_courses` (R-BTN-22), `mode` (per repository `shadow` or `cut-over`;
     legacy, removed with its code, R-BTN-193) and `server_time`.
     - `claims` lists the runner's active claims, empty when it holds none — each with its id,
       ticket, station, leg, nonce, `deadline_at`, Baton's position (`station`, `path`,

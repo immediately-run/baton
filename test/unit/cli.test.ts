@@ -658,10 +658,9 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   const READ = {
-    repository: 'ops', tenant: 't1', version: 4, hash: 'a'.repeat(64),
+    repository: 'ops', version: 4, hash: 'a'.repeat(64),
     policy: { human_key: 'any', approvers: { members: ['owner'], trust: ['owner'], policy: ['owner'] } },
-    guarantees: {}, guarantees_hash: 'b'.repeat(64), floors: [], floors_hash: 'c'.repeat(64),
-    at: 1, valid_until: 601_000, kid: 'd'.repeat(16), signature: 'Zm9v',
+    guarantees: {}, floors: [], at: 1,
   };
 
   it('policyDiff lists the knobs a file would change, key order aside', () => {
