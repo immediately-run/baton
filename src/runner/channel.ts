@@ -4,12 +4,8 @@
 // the interface names an address, not a transport, so an executor may carry it however it
 // likes. JSON lines, wrapped by the CLI (`baton leg raise`, R-BTN-160; `baton leg done`).
 //
-// The verbs this build carries are the two R-BTN-195 needs — `raise` (checked by the runner,
-// answered on the channel, reported to Baton only when it passes: the subject and body stay in
-// the runner's log, R-BTN-33) and `done` (the posted ending of a joinable session, R-BTN-107:
-// a session that does not exit when its agent is done ends at the result posted on its
-// channel). Everything else is refused: the channel carries no raw `advance` or `end`, and no
-// `executor_digest`, `environment` or `instance` — the runner reports those itself.
+// The handler checks requests before an accepted ending resolves `posted`. There is no raw
+// advance or end: the runner owns the claim and decides what to report to Baton.
 import { createConnection, Server as SocketServer, type Socket } from 'node:net';
 import { chmodSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -24,7 +20,9 @@ export interface ChannelRequest {
 export type ChannelAnswer = { ok: true; [k: string]: unknown } | { ok: false; error: string };
 
 /** The requests this build carries; anything else is refused naming the channel's verbs. */
-const OPS = new Set(['raise', 'done']);
+const ENDINGS = new Set(['done', 'suspend', 'release']);
+const OPS = new Set(['raise', 'status', 'output', ...ENDINGS]);
+const MAX_REQUEST_BYTES = 128 * 1024;
 
 /**
  * The runner's half: one socket per leg run, served while the run's session is live. `posted`
@@ -49,18 +47,20 @@ export class LegChannel {
       // moot, never the runner's — answered or not, nothing is owed a dead caller.
       sock.on('error', () => { this.clients.delete(sock); });
       sock.on('close', () => this.clients.delete(sock));
-      // One line in, one line out, in order: a CLI call is a single request, and a session that
-      // opens one connection per call never interleaves.
+      sock.setEncoding('utf8');
+      // One request per connection, so there are no in-flight calls sharing a reply stream.
       let buf = '';
       sock.on('data', (d) => {
-        buf += d.toString('utf8');
-        let at;
-        while ((at = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, at);
-          buf = buf.slice(at + 1);
-          if (line.trim() === '') continue;
-          void this.answer(sock, line);
+        buf += d;
+        if (Buffer.byteLength(buf) > MAX_REQUEST_BYTES) {
+          sock.end(`${JSON.stringify({ ok: false, error: 'channel request too large' })}\n`);
+          sock.removeAllListeners('data');
+          return;
         }
+        const at = buf.indexOf('\n');
+        if (at < 0) return;
+        sock.removeAllListeners('data');
+        void this.answer(sock, buf.slice(0, at));
       });
     });
   }
@@ -76,7 +76,7 @@ export class LegChannel {
       channel.server.once('error', fail);
       channel.server.listen(path, () => {
         channel.server.off('error', fail);
-        try { chmodSync(path, 0o600); } catch { /* the directory's own mode governs */ }
+        try { chmodSync(path, 0o600); } catch (e) { channel.close(); reject(e); return; }
         resolve(channel);
       });
     });
@@ -88,7 +88,7 @@ export class LegChannel {
   }
 
   private async answer(sock: Socket, line: string): Promise<void> {
-    const send = (answer: ChannelAnswer) => { sock.write(`${JSON.stringify(answer)}\n`); };
+    const send = (answer: ChannelAnswer) => { if (!sock.destroyed) sock.end(`${JSON.stringify(answer)}\n`); };
     const fail = (error: string) => send({ ok: false, error });
     let req: ChannelRequest;
     try {
@@ -99,17 +99,19 @@ export class LegChannel {
       return fail('a channel request is one JSON line');
     }
     if (!OPS.has(req.op)) {
-      return fail(`the channel carries raise and done, nothing else: ${JSON.stringify(req.op)} is not a verb of it (R-BTN-106)`);
-    }
-    if (req.op === 'done') {
-      // The one ending: a second is refused, the first resolves the joinable wait.
-      if (this.postedResolve == null) return fail('the leg has already ended');
-      this.postedResolve({ result: req.result ?? null });
-      this.postedResolve = null;
-      return send({ ok: true });
+      return fail(`${JSON.stringify(req.op)} is not a verb of the leg channel (R-BTN-106)`);
     }
     try {
+      if (this.postedResolve == null) return fail('the leg has already ended');
       const out = await this.handler?.(req) ?? { ok: false as const, error: 'the runner serves no channel yet' };
+      if (out.ok && ENDINGS.has(req.op)) {
+        const resolve = this.postedResolve;
+        if (!resolve) return fail('the leg has already ended');
+        this.postedResolve = null;
+        send({ ok: true });
+        resolve({ result: out.result });
+        return;
+      }
       send(out);
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e));
@@ -145,6 +147,7 @@ export function callChannel(path: string, req: ChannelRequest, timeoutMs = 30_00
     const timer = setTimeout(() => finish(() => reject(new Error(`the runner's channel (${path}) did not answer within ${timeoutMs / 1000}s`))), timeoutMs);
     timer.unref?.();
     sock.on('error', (e) => finish(() => reject(new Error(`the runner's channel (${path}) is not serving: ${e.message}`))));
+    sock.on('end', () => finish(() => reject(new Error(`the runner's channel (${path}) closed without an answer`))));
     sock.on('data', (d) => {
       buf += d.toString('utf8');
       const at = buf.indexOf('\n');

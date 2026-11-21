@@ -17,7 +17,7 @@ const src = (path) => JSON.stringify(join(ROOT, path));
 const PREBUILT = {
   'baton-run.mjs': `export { runMain, queueCommand } from ${src('src/runner/main.ts')};
 export { replayMain } from ${src('src/runner/replay.ts')};`,
-  'baton-leg.mjs': `export { raiseMain } from ${src('src/runner/leg.ts')};`,
+  'baton-leg.mjs': `export { legMain } from ${src('src/runner/leg.ts')};`,
   // Every name cli/baton.mjs takes from ../scripts/baton-cli.mjs: one missing here is `… is not a
   // function` in the published package only, where the checkout's bundler exports it
   // (scripts/check-package.mjs compares the two lists).

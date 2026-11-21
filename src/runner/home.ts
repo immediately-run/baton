@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { graphOf, legCapabilities, type Graph } from '../core/graph';
+import { parseSchemaId, type Resolve, type Schema } from '../shared/schema.mjs';
+import { stdSchema } from '../shared/std.mjs';
 
 /** B-94: the bound on every git the runner itself runs. The heartbeat path reads the snapshot
  * here (`ensureSha`, `courseOf`, `loadCourse`), and a state file lock, a hook or a stalled
@@ -37,6 +39,8 @@ export interface CourseLoad {
   /** The extracted `legs/<leg>.mjs` of the snapshot, by leg name — file paths on disk. */
   scripts: Map<string, string>;
   scratch: string;
+  schema: Resolve;
+  outputSchema(leg: string, name: string): string | undefined;
 }
 
 /** The course id the home repository runs, from the snapshot's `.baton/baton.json`: the spec's
@@ -175,7 +179,8 @@ export async function prepareClone(home: string, dir: string, sha: string, branc
 export function loadCourse(home: string, sha: string, course: string): CourseLoad {
   const file = readAt(home, sha, `.baton/courses/${course}/course.json`);
   if (file == null) throw new Error(`the snapshot ${sha.slice(0, 10)} has no .baton/courses/${course}/course.json`);
-  const graph = graphOf(JSON.parse(file));
+  const raw = JSON.parse(file) as { legs: Record<string, { outputs?: Record<string, { schema: string }> }> };
+  const graph = graphOf(raw);
   const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
   const scripts = new Map<string, string>();
   let listing: string[];
@@ -195,7 +200,23 @@ export function loadCourse(home: string, sha: string, course: string): CourseLoa
     writeFileSync(to, bytes, { mode: 0o600 });
     scripts.set(leg, to);
   }
-  return { course, graph, scripts, scratch };
+  const schemas = new Map<string, Schema | null>();
+  return { course, graph, scripts, scratch,
+    schema(id) {
+      const parsed = parseSchemaId(id);
+      if (!parsed) return null;
+      if (parsed.prefix === 'std') return stdSchema(id);
+      if (!schemas.has(id)) {
+        const bytes = readAt(home, sha, `.baton/courses/${parsed.prefix}/schemas/${parsed.name}@${parsed.version}.json`);
+        schemas.set(id, bytes == null ? null : JSON.parse(bytes) as Schema);
+      }
+      return schemas.get(id) ?? null;
+    },
+    outputSchema(leg, name) {
+      const outputs = raw.legs[leg]?.outputs;
+      return outputs && Object.hasOwn(outputs, name) ? outputs[name].schema : undefined;
+    },
+  };
 }
 
 /** B-183 (§4.5, R-BTN-74): the repository's ticket source at the claim's snapshot — its
