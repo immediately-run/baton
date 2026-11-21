@@ -476,3 +476,34 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   the stated reset (or a check passes again), reports the account as limited, and leaves the
   ticket unmarked — B-247 (provider checks, the zai plan as an account instance), on B-245 and
   B-246.
+
+## 2026-11-21 06:36 — bering's legs cannot reach the Fieldhouse gateway; the runners stopped
+
+- **Host:** bering (both runners)
+- **Tickets:** B-279 (runner-1), B-278 (runner-2) — one failed implement each
+- **Why it was needed:** once Baton's API answered again (the 06:29 UTC sync was the first
+  success since 2026-11-19 12:44; heartbeats had failed `internal error` until then), both
+  runners claimed a ticket and the executor refused each leg before its session started: `the
+  leg cannot reach its model: the gateway at http://192.0.2.10:4000/v1 does not answer: The
+  operation was aborted due to timeout`. The executor's preflight (`gateway.mjs`) asks
+  `/models` from the host, and a host `curl` to 192.0.2.10:4000 times out too, although
+  `fieldhouse-gateway.service` is up since 2026-11-19 11:45 CET and the container's own
+  health check passes every 15 s. Cause: the fence's input rule `ip daddr 192.0.2.10 drop`
+  (`fieldhouse-gateway.nft`). A host connection to 192.0.2.10 is sourced from 192.0.2.10 and
+  DNATed to the container, so the container's reply, un-NATed, is delivered locally to
+  192.0.2.10 through the input hook, and the fence dropped it; sandbox traffic is forwarded and
+  never meets that hook. Every runner since the gateway's cutover met the API outage first, so
+  this path had never worked on bering.
+  Left running, the runners would have spent a failed attempt on each claimable ticket.
+- **Resolution:** at the owner's word, both runners stopped with Ctrl-C at 06:44 UTC (no claim,
+  no leg in flight). The owner added `ip daddr 192.0.2.10 ct state established,related accept`
+  before the drop in `/opt/fieldhouse-gateway/litellm/fieldhouse-gateway.nft` and restarted
+  `fieldhouse-gateway-net`; the host's `curl` answered 200 from 07:11 UTC (the first try right
+  after the restart still timed out, unexplained). The runners restarted at 07:13 UTC on
+  baton-cli `fc765417` (#303, migration 0061's fix — main moved while they were stopped). The
+  same edit is still due in the fieldhouse repository's copy of the fence, or a reinstall
+  brings the drop back. The API outage itself was not diagnosed here.
+- **Autonomous handling:** a runner whose executor refuses a leg for an unreachable gateway
+  should treat it as its own capability failing, not the ticket's — stop claiming legs that
+  need it until the check passes, as in the 2026-11-18 usage-limit entry — B-247. Also: the
+  executor's gateway check should run at start, before the first claim. *No ticket yet* for that.
