@@ -78,7 +78,7 @@ describe('the tickets cache', () => {
       // B-126: who last pushed the ticket's body (R-BTN-194).
       'last_written_by',
       // R-BTN-86 (R3-1258): the parent's qualified id — an id, never body text.
-      'parent', 'course_fields_json']);
+      'parent', 'course_fields_json', 'depends_at']);
   });
 });
 

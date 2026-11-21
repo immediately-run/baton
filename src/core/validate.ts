@@ -3,7 +3,7 @@
 // refused with `invalid-params` naming the field, never trimmed into shape.
 import { BatonError, RECOMMENDED_CLIENT } from './http';
 import { FREE_TEXT_MAX, isFreeText } from './text';
-import { COURSE_ID } from './course';
+import { COURSE_ID, RESOURCE_NAME } from './course';
 import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, SEVERITIES } from './conditionTypes';
 import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 import { CLIENT_VERSION_MAX, compareVersions, parseVersion } from '../shared/versions.mjs';
@@ -1150,7 +1150,7 @@ export const DECISION_TYPE_NAME = 'std:decision@1';
 // ── blocks, external resources and readings (§2g R-BTN-75–78, §2l R-BTN-101; R3-1251) ─────
 
 /** R-BTN-76: an external resource's name — opaque to core (`llm:<model>`, `github-api`). */
-export const RESOURCE_NAME = /^[a-z][a-z0-9:._/-]{0,79}$/;
+export { RESOURCE_NAME };
 /** An instance's name (`opencode-go:go_plus`, a `service` resource's own): the resource rule with
  *  `_` (spec-silent, recorded on R3-1251 — the scenarios' own instances carry it). */
 export const INSTANCE_NAME = /^[a-z][a-z0-9_:./-]{0,79}$/;

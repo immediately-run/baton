@@ -186,6 +186,12 @@ export const ACTIONS: Action[] = [
     input: { type: 'object', properties: { runner: { type: 'string', const: 'me', description: 'A runner session’s own answer; needs its secret.' } } },
   },
   {
+    id: 'leg.why', summary: 'Why a leg cannot start.',
+    effect: 'read', http: { method: 'GET', path: '/v1/repositories/{repository}/tickets/{ticket}/prerequisites' },
+    callers: REPOSITORY_READERS,
+    input: { type: 'object', properties: { leg: { type: 'string' }, runner: { type: 'string', const: 'me' } } },
+  },
+  {
     id: 'ticket.history', summary: 'One ticket’s history, newest first, with the ended claims’ branches and pull requests.',
     effect: 'read', http: { method: 'GET', path: '/v1/repositories/{repository}/tickets/{ticket}/history' },
     callers: REPOSITORY_READERS,

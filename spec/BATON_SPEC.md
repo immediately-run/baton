@@ -370,13 +370,16 @@ is stale. Never edit it by hand.
 | S-BTN-68 | the merge check | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-69 | registration and API keys | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-71 | stopping a leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-72 | tickets at stations | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-73 | capability types | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-74 | why a leg cannot start | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-75 | a bounded run | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-76 | hostile values rendered | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-77 | host allowlists | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-78 | the `session` executor | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-79 | schemas refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-80 | signatures and spawns | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-82 | cycles and closed tickets | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-91 | a resource fails mid-leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-92 | a capability fails mid-leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-93 | a ticket found mid-leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
@@ -574,12 +577,14 @@ is stale. Never edit it by hand.
 | G-BTN-93 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-94 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-96 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-97 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-98 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-99 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-100 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-101 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-102 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-103 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-104 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-107 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-111 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | G-BTN-112 | [`15-verification.md`](BATON_SPEC/15-verification.md) |

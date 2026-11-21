@@ -567,7 +567,8 @@ export class Claims {
       // they are left to those rules, whose refusals name the cause; they stay blocks for asking.
       blocks: this.rows<{ kind: string; leg: string }>(
         `SELECT b.kind, b.leg FROM ticket_blocks b WHERE b.ticket_id = ? AND b.kind IN ('ticket', 'decision')
-           AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))`, item.id),
+           AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))
+           AND (? = 'claim' OR b.kind <> 'ticket' OR instr(b.ref, '@') > 0)`, item.id, phase),
       // R-BTN-178: rule 11's fact — the seats claims other than the asking one hold (a claim's
       // own seat never counts against it, so an advance excludes the advancing claim here).
       seats: this.seatFacts(item, leg, opts.except ?? null),
@@ -674,7 +675,7 @@ export class Claims {
            AND NOT EXISTS (SELECT 1 FROM ticket_overrides o WHERE o.ticket_id = w.id
                            AND (o.hold = 1 OR o.retry_after > :now))                                          -- rules 3, 10
            AND NOT EXISTS (SELECT 1 FROM ticket_blocks k WHERE k.ticket_id = w.id
-                           AND (k.kind = 'ticket' OR (k.kind = 'decision' AND k.leg IN ('', a.leg))))         -- rule 1's blocks
+                           AND k.kind IN ('ticket', 'decision') AND k.leg IN ('', a.leg))                    -- rule 1's blocks
            AND (EXISTS (SELECT 1 FROM runner_grants g WHERE g.credential_id = :credential
                         AND g.repository_id = w.repository_id AND g.revoked_at IS NULL)                       -- rule 7
                 OR NOT EXISTS (SELECT 1 FROM runner_grants g2 WHERE g2.credential_id = :credential))          -- an interim credential reaches every repository (B-104, A1)

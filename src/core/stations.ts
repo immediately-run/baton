@@ -24,6 +24,8 @@ export interface Seen {
   bars: Record<string, string[]>;
 }
 
+export type ClosingPosition = { parent: string | null; course_id: string; station: string | null; path: string | null };
+
 /** A queued or next leg as `ticket_next_legs` holds it. */
 type NextRow = { leg: string; state: string; waiting_on: string | null; ready_since: number | null; waiting_since: number | null };
 
@@ -95,7 +97,7 @@ export class Stations {
    * path that neither extends the previous one by edges nor is shorter is stored (git wins) and
    * logs `off-graph`. Returns what each placed ticket showed, by qualified id.
    */
-  apply(repo: string, sha: string, observation: number, stations: Map<string, PostedStation>, closed: { id: string; as: 'done' | 'withdrawn' }[], at: number, closingParents?: ReadonlyMap<string, string | null>): Map<string, Seen> {
+  apply(repo: string, sha: string, observation: number, stations: Map<string, PostedStation>, closed: { id: string; as: 'done' | 'withdrawn' }[], at: number, closingPositions?: ReadonlyMap<string, ClosingPosition>): Map<string, Seen> {
     const seen = new Map<string, Seen>();
     // The reading that placed every station row before this one (R-BTN-62): a row this post
     // leaves unchanged keeps its own, older `observation`, so the repository's stands for it.
@@ -161,11 +163,16 @@ export class Stations {
       // R-BTN-86: the relation outlives the close — the parent the closing ticket's row held,
       // passed by the materialization that just dropped it (or read from the row a held
       // history's refresh still leaves standing).
-      const parent = closingParents?.get(c.id)
+      const closing = closingPositions?.get(c.id);
+      const parent = closing?.parent
         ?? this.rows<{ parent: string | null }>('SELECT parent FROM tickets WHERE id = ?', qualify(repo, c.id))[0]?.parent
         ?? null;
-      this.exec('INSERT INTO closed_tickets (ticket_id, closed_as, observation, closed_at, parent) VALUES (?, ?, ?, ?, ?) ON CONFLICT (ticket_id) DO NOTHING',
-        qualify(repo, c.id), c.as, observation, at, parent);
+      const id = qualify(repo, c.id);
+      const previous = stored.get(id);
+      const position = previous?.station;
+      this.exec(`INSERT INTO closed_tickets (ticket_id, closed_as, observation, closed_at, parent, final_station, final_path, course_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (ticket_id) DO NOTHING`,
+        id, c.as, observation, at, parent, closing?.station ?? position?.station ?? null, closing?.path ?? position?.path ?? null, closing?.course_id ?? previous?.course_id ?? null);
     }
     return seen;
   }

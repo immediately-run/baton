@@ -40,6 +40,7 @@
 //                B-254 R-BTN-197 — raiseable, never below the code's)
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
+//   baton leg why -i KEY TICKET [LEG]
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
 //                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
 //   baton admin -i KEY revoke FINGERPRINT                          baton admin -i KEY open
@@ -311,6 +312,12 @@ function devFlagPositions(argv) {
  */
 export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim()), readJson = (p) => readFileSync(p, 'utf8'), home = null) {
   const [cmd, ...rest] = argv;
+  if (role === 'leg' && cmd === 'why') {
+    const { positional } = parseArgs(rest, [], [], 2);
+    const { repository, local } = ticketArg(need(positional[0], 'the ticket, <repository>:<id>'), home);
+    const leg = positional[1] ? `?${new URLSearchParams({ leg: positional[1] })}` : '';
+    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(repository)}/tickets/${encodeURIComponent(local)}/prerequisites${leg}` };
+  }
   if (role === 'blocked') {
     // R-BTN-75: a GET any key granted on the repository, an owner of it or an administrator signs.
     const { flags, positional } = parseArgs(argv, ['transitive'], ['on', 'repository'], 1);
@@ -1127,6 +1134,7 @@ export async function main(argv) {
     }
   }
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
+  if (argv[0] === 'course' && argv[1] === 'test') return testCourse(argv.slice(2));
   if (argv[0] === 'key') {
     if (argv[1] !== 'create' || !argv[2]) throw new Error('baton key create FILE [--comment TEXT]');
     const { flags } = parseArgs(argv.slice(3), [], ['comment'], 0);
@@ -1237,11 +1245,11 @@ export async function main(argv) {
     const { homeMain } = await import('../scripts/baton-cli.mjs');
     return homeMain(argv.slice(1));
   }
-  if (argv[0] === 'run') {
+  if (argv[0] === 'run' || (argv[0] === 'runner' && argv[1] === 'start')) {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.
     const { runMain } = await import('../scripts/baton-run.mjs');
-    return runMain(argv.slice(1));
+    return runMain(argv.slice(argv[0] === 'run' ? 1 : 2));
   }
   if (argv[0] === 'queue') {
     // R-BTN-202 (B-248): this host's local work queue for the runners on one home — local
