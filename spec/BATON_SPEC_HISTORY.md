@@ -18,6 +18,22 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-21 — Sign-in through Cloudflare Access (R-BTN-155, R-BTN-57, S-BTN-308).**
+  Rules changed: R-BTN-155, R-BTN-57, R-BTN-16, R-BTN-149, R-BTN-185, R-BTN-188; G-BTN-144, S-BTN-124. The
+  owner approved it on 2026-11-21: a person Cloudflare Access has verified reaches a dashboard
+  session without minting a link in a terminal (the dashboard's UX rules, rule 1). Authority stays
+  with a key: `ACCESS_IDENTITIES` binds each email to one key, the deployment's to set, and the
+  session is that key's and ends with its key or its line. Two adversarial reviewers with fresh
+  context read the first draft. Both found that it contradicted R-BTN-57's single root of trust,
+  the Decisions entry choosing keys over Access as identity, and ticket B-46's removal of every
+  Access read; and that its one safeguard, an Access factor no agent session holds, is invisible to
+  Baton and does nothing against an agent driving a browser already signed in. The owner chose
+  (2026-11-21) to accept the Access configuration as a second root of trust and to require only an
+  explicit click, not an assertion-age or factor rule; `docs/security-model.mdx` (reach 3) records
+  the accepted risk. The draft's owner-key paragraph in the people-and-dashboard proposal was
+  dropped until owners' sessions are designed (B-76). Rejected: Access alone, with no key (it would
+  make the identity provider the only authority); signing in automatically when an assertion is
+  present (logout would undo itself and any agent that opens the page would be signed in).
 - **2026-11-21 — Work done outside Baton, modelled in each course (R-BTN-203, R-BTN-39, R-BTN-69, R-BTN-96, S-BTN-309).**
   Rules changed: R-BTN-39, R-BTN-69, R-BTN-96, R-BTN-188, R-BTN-191; R-BTN-203
   new. The owner, 2026-11-21: "baton *must* work well in a setup where only a portion of the
