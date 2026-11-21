@@ -1,4 +1,4 @@
-// ../../../../tmp/baton-bundle-Yp0D7G/entry.ts
+// ../../../../../baton-bundle-LKjTl4/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync as rmSync2, statSync, writeFileSync } from "node:fs";
@@ -313,6 +313,10 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
     return run2("gh", ["pr", "comment", ...typeof result?.pr === "string" ? [result.pr] : [], "--body", body], ctx.checkout);
   }
   if (typeof result?.reached !== "string" || result.reached === "") throw new Error(`the ${ctx.leg} leg returned no station reached`);
+  if (ctx.leg === "implement" && result.reached === "delivered") {
+    if (typeof result.delivered !== "string" || !/^[0-9a-f]{40}$/.test(result.delivered)) throw new Error(`the implement leg reached delivered naming no verified commit, got ${JSON.stringify(result.delivered)}`);
+    return result.delivered;
+  }
   if (!MARKER_LEGS.has(ctx.leg)) return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
@@ -377,7 +381,14 @@ function branchMatches(pattern, branch) {
 }
 var matchPatterns = (branchPatterns) => (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, "*"));
 
-// ../../../../tmp/baton-bundle-Yp0D7G/entry.ts
+// src/defaults/pr-verify.ts
+function ticketRepositories(text, reposMap) {
+  const fm = text == null ? null : parseFrontmatter(text);
+  const names = Array.isArray(fm?.repos) ? fm.repos : fm?.repos == null || fm.repos === "" ? [] : [fm.repos];
+  return names.map((r) => typeof r === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : reposMap?.[r]).filter((r) => typeof r === "string" && r !== "");
+}
+
+// ../../../../../baton-bundle-LKjTl4/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var AGENT_IDLE_MS = 9e5;
@@ -402,39 +413,16 @@ var newestWrite = (p, depth = 0) => {
   return best;
 };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
-function advisedCommand(words, settings, adviceFile) {
-  if (!adviceFile) return words;
-  let advice;
-  try {
-    advice = JSON.parse(readFileSync(adviceFile, "utf8"));
-  } catch {
-    return words;
-  }
-  const choices = advice && Array.isArray(advice.route_choices) ? advice.route_choices : [];
-  const map = settings && settings.agent_models && typeof settings.agent_models === "object" ? settings.agent_models : {};
-  const model = (rc) => Array.isArray(rc && rc.needs) ? rc.needs.find((n) => typeof n === "string" && n.startsWith("model:")) : void 0;
-  for (const rc of choices) {
-    if (!rc || typeof rc !== "object") continue;
-    const alt = rc.alternative ?? (Array.isArray(rc.ranked) && rc.ranked[0] ? rc.ranked[0].alternative : null);
-    if (alt == null) continue;
-    const ranked = Array.isArray(rc.ranked) ? rc.ranked.find((r) => r && r.alternative === alt) : null;
-    const mapped = map[rc.choice + "/" + alt] ?? map[model(ranked)];
-    if (typeof mapped !== "string" || mapped === "") continue;
-    const at = words.findIndex((w) => w === "--model");
-    if (at >= 0 && at + 1 < words.length && words[at + 1] !== mapped) words[at + 1] = mapped;
-    return words;
-  }
-  return words;
-}
 async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read its override at");
+  const readSha = typeof ctx.signed_control?.overrides === "string" && ctx.signed_control.overrides !== "" ? ctx.signed_control.overrides : sha;
   const rel = ".baton/courses/create-pr/legs/fix.run.mjs";
-  if (gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel]).trim() === "") return standard(ctx);
+  if (gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", readSha, "--", rel]).trim() === "") return standard(ctx);
   const dir = mkdtempSync(join2(tmpdir(), "baton-override-"));
   try {
     const file = join2(dir, "fix.run.mjs");
-    writeFileSync(file, gitRun("git", ["-C", ctx.checkout, "show", sha + ":" + rel], { maxBuffer: 67108864 }));
+    writeFileSync(file, gitRun("git", ["-C", ctx.checkout, "show", readSha + ":" + rel], { maxBuffer: 67108864 }));
     const mod = await import(pathToFileURL(file).href);
     if (typeof mod.run !== "function") throw new Error(rel + " exports no run(ctx, standard)");
     return await mod.run(ctx, standard);
@@ -445,11 +433,12 @@ async function run(ctx) {
 async function standard(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read .baton/baton.json at");
-  const show = (rel2) => gitRun("git", ["-C", ctx.checkout, "show", sha + ":" + rel2], { maxBuffer: 67108864 });
+  const settingsSha = typeof ctx.signed_control?.agent_command === "string" && ctx.signed_control.agent_command !== "" ? ctx.signed_control.agent_command : sha;
+  const show = (rel2) => gitRun("git", ["-C", ctx.checkout, "show", settingsSha + ":" + rel2], { maxBuffer: 67108864 });
   const settings = JSON.parse(show(".baton/baton.json"));
   const settingsCommand = typeof settings.agent_command === "string" && settings.agent_command !== "" ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? "";
   if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
-  const agentWords = advisedCommand(splitWords(settingsCommand), settings, process.env.BATON_ADVICE);
+  const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(" ");
   const redEdge = ctx.claim?.station === "pr-open" || ctx.claim?.station === "fixed";
   const prHeads = () => {
@@ -461,10 +450,18 @@ async function standard(ctx) {
       return r.startsWith("refs/heads/") && wanted.some((p) => branchMatches(p, r.slice("refs/heads/".length)));
     }).sort().join("\n");
   };
-  const headsBefore = redEdge ? prHeads() : "";
+  const pushTicket = (() => {
+    try {
+      return ctx.ticket?.file ? readFileSync(ctx.ticket.file, "utf8") : ctx.ticket?.path ? readFileSync(join2(ctx.checkout, ctx.ticket.path), "utf8") : null;
+    } catch {
+      return null;
+    }
+  })();
+  const headsBefore = redEdge && ticketRepositories(pushTicket, settings.repos).length === 0 ? prHeads() : "";
+  const courseSha = typeof ctx.signed_control?.course === "string" && ctx.signed_control.course !== "" ? ctx.signed_control.course : sha;
   const rel = ".baton/courses/create-pr/legs/fix.md";
-  const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel]).trim() !== "";
-  const text = present ? show(rel) : null;
+  const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", courseSha, "--", rel]).trim() !== "";
+  const text = present ? gitRun("git", ["-C", ctx.checkout, "show", courseSha + ":" + rel], { maxBuffer: 67108864 }) : null;
   const dir = text == null ? null : mkdtempSync(join2(tmpdir(), "baton-leg-"));
   const instructions = dir == null ? "" : join2(dir, "fix.md");
   if (dir != null) writeFileSync(instructions, text);
@@ -497,6 +494,7 @@ async function standard(ctx) {
       storePaths.push(join2(process.env.CLAUDE_CONFIG_DIR && process.env.CLAUDE_CONFIG_DIR !== "" ? process.env.CLAUDE_CONFIG_DIR : join2(homedir(), ".claude"), "projects", dashed));
     }
   }
+  const lastOutput = (so, se) => (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
   const received = await new Promise((resolve, reject) => {
     const echo = process.env.BATON_VERBOSE === "1";
     const child = spawn(argv[0], argv.slice(1), {
@@ -507,7 +505,7 @@ async function standard(ctx) {
         BATON_COURSE: "create-pr",
         BATON_LEG: "fix",
         BATON_INSTRUCTIONS: instructions,
-        BATON_TICKET_FILE: ctx.ticket.path ?? ""
+        BATON_TICKET_FILE: ctx.ticket.file ?? ctx.ticket.path ?? ""
       }
     });
     let so = "", se = "";
@@ -553,7 +551,7 @@ async function standard(ctx) {
       if (watch != null) clearInterval(watch);
       child.kill("SIGKILL");
       process.stderr.write("baton: create-pr/fix ticket " + ctx.ticket.id + ": the agent " + conclusion2.cause + (conclusion2.cause === "agent_concluded_idle" ? " \u2014 quiet past " + Math.round(AGENT_IDLE_MS / 6e4) + " minutes on " + conclusion2.quiet_signals.join(", ") : " \u2014 the leg's ceiling of " + Math.round(LEG_CEILING_MS / 6e4) + " minutes") + "; the stdout it received is its output\n");
-      resolve({ text: so, conclusion: conclusion2 });
+      resolve({ text: so, stderr: se, conclusion: conclusion2 });
     };
     watch = setInterval(() => {
       if (stopped != null || conclusion2 != null) return;
@@ -582,19 +580,20 @@ async function standard(ctx) {
       }
       if (conclusion2 != null) return;
       if (code === 0) {
-        resolve({ text: so, conclusion: null });
+        resolve({ text: so, stderr: se, conclusion: null });
         return;
       }
-      const tail = (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
-      reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + "; its last output:\n  " + tail));
+      reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + "; its last output:\n  " + lastOutput(so, se)));
     });
     child.stdin?.end();
   }).finally(() => {
     if (dir != null) rmSync2(dir, { recursive: true, force: true });
   });
-  const { text: out, conclusion } = received;
+  const { text: out, stderr: errOut, conclusion } = received;
+  const said = lastOutput(out, errOut);
+  const failed = (e) => new Error((e instanceof Error ? e.message : String(e)) + (said !== "" ? "; the agent's last output:\n  " + said : "; the agent printed nothing"));
   if (headsBefore !== "" && prHeads() === headsBefore) {
-    throw new Error("the fix leg pushed nothing: " + headsBefore.split("\n").map((l) => l.split("	")[1].slice("refs/heads/".length) + " at " + l.slice(0, 10)).join(", ") + " is the head the run-tests gate tested red, unchanged \u2014 no fix, no position (B-231)");
+    throw failed("the fix leg pushed nothing: " + headsBefore.split("\n").map((l) => l.split("	")[1].slice("refs/heads/".length) + " at " + l.slice(0, 10)).join(", ") + " is the head the run-tests gate tested red, unchanged \u2014 no fix, no position (B-231)");
   }
   void out;
   return { ...{ reached: "fixed", next: "run-tests" }, ...conclusion ? { conclusion } : {} };
