@@ -9,10 +9,13 @@ import { groupBy, isUniqueViolation, logEvent, mintRunId, randomHex, type Random
 import type { Deprecated } from './deprecated';
 import { fitsTier, capabilitiesOf, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
-import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
+import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOutputs, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
+import { declaredOutputFault, pointerReach, ticketInputs } from './contracts';
+import { pointerAllowed } from './contractPointers';
+import type { PostedAttestation } from './board';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
-import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
+import { extendsPath, graphOf, leaves, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
 import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from '../shared/schema.mjs';
 import type { Seen, Stations } from './stations';
 import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
@@ -1184,6 +1187,8 @@ export class Claims {
       throw e;
     }
     const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
+    this.exec(`UPDATE claims SET (contract_course_json, contract_course_version) =
+      (SELECT course_json, version FROM courses WHERE repository_id = ? AND id = ?) WHERE id = ?`, item.repository, item.course, id);
     this.event('claimed', `runner:${runnerId}`, { request_id: b.request_id, station: st.station, leg: st.next_leg }, item.id, id);
     // R-BTN-178: the claim's seats, for the leg it is for — the set as rule 4 matched it here,
     // rewritten at each advance that starts a leg.
@@ -1258,6 +1263,7 @@ export class Claims {
     // are the repository's owner signing keys, so a runner that trusts the record still checks
     // the signatures against keys the post did not choose.
     const briefRow = this.rows<{ brief: string | null }>('SELECT brief FROM tickets WHERE id = ?', c.ticket_id)[0];
+    const graph = c.course_id ? this.stations.graph(repo, c.course_id) : null;
     const brief = briefRow?.brief ? JSON.parse(briefRow.brief) as { signed: boolean; signer?: string; commit: string } : null;
     return {
       claim_id: c.id, ticket_id: c.ticket_id, course_id: c.course_id, course_version: courseVersion,
@@ -1268,6 +1274,8 @@ export class Claims {
       // B-134: the ticket's scope — its home and its `repos:` — as lowercased forge paths. The
       // runner audits each leg's pushes against this and reports what falls outside.
       ...(this.c.scope ? { scope: this.c.scope.scopeOf(c.ticket_id) } : {}),
+      ...(graph && (graph.entry.size || [...graph.legs.values()].some((l) => l.inputs || l.outputs))
+        ? { pointer_reach: pointerReach(this.c.store, repo, c.ticket_id) } : {}),
       ...(handoff ? { handoff_url: handoff } : {}), path, nonce: c.nonce, snapshot_sha: c.snapshot_sha,
       // B-183 (§4.5): the ticket's version and the source's reading of it — `version` is `''`
       // when the source posts none, and `ticket_source` is null when the board declared none.
@@ -1295,19 +1303,20 @@ export class Claims {
    *  reported, and the run's recorded inputs (the ticket's version and its read's digest among
    *  them, `leg_run_inputs`). `end` is the claim's end reason once the claim ended. */
   runsOf(ticketId: string, leg: string) {
-    const runs = this.rows<{ claim_id: number; seq: number; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; session_url: string | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; runner_id: number }>(
+    const runs = this.rows<{ claim_id: number; seq: number; run_id: string | null; head_sha: string | null; from_station: string; started_at: number; finished_at: number | null; abandoned_at: number | null; session_url: string | null; snapshot_sha: string; course_id: string | null; status: string; end_reason: string | null; ended_at: number | null; runner_id: number; contract_version: number | null; contract_course_version: number | null }>(
       `SELECT l.claim_id, l.seq, l.run_id, l.head_sha, l.from_station, l.started_at, l.finished_at, l.abandoned_at, l.session_url,
-              c.snapshot_sha, c.course_id, c.status, c.end_reason, c.ended_at, c.runner_id
+              c.snapshot_sha, c.course_id, c.status, c.end_reason, c.ended_at, c.runner_id, l.contract_version, l.contract_course_version
        FROM claim_legs l JOIN claims c ON c.id = l.claim_id
        WHERE c.ticket_id = ? AND l.leg = ? ORDER BY l.claim_id, l.seq`, ticketId, leg);
-    const inputs = this.rows<{ claim_id: number; seq: number; name: string; from_leg: string | null; from_run: number | null; uri: string | null; digest: string | null; value_json: string | null; leg_version: number | null; ticket_version: string | null; read_digest: string | null }>(
-      'SELECT claim_id, seq, name, from_leg, from_run, uri, digest, value_json, leg_version, ticket_version, read_digest FROM leg_run_inputs WHERE ticket_id = ? ORDER BY claim_id, seq, name', ticketId);
+    const inputs = this.rows<{ claim_id: number; seq: number; name: string; schema: string | null; from_leg: string | null; from_run: number | null; uri: string | null; digest: string | null; value_json: string | null; leg_version: number | null; ticket_version: string | null; read_digest: string | null }>(
+      'SELECT claim_id, seq, name, schema, from_leg, from_run, uri, digest, value_json, leg_version, ticket_version, read_digest FROM leg_run_inputs WHERE ticket_id = ? ORDER BY claim_id, seq, name', ticketId);
     const defaultBranch = this.rows<{ default_branch: string }>('SELECT default_branch FROM repositories WHERE id = ?', repositoryOf(ticketId))[0]?.default_branch ?? null;
     const courseVersion = (run: typeof runs[number]): number | null => run.course_id
       ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(ticketId), run.course_id)[0]?.version ?? null
       : null;
     return {
       ...(defaultBranch ? { default_branch: defaultBranch } : {}),
+      pointer_reach: pointerReach(this.c.store, repositoryOf(ticketId), ticketId),
       runs: runs.map((r, ordinal) => {
         const mine = inputs.filter((i) => i.claim_id === r.claim_id && i.seq === r.seq);
         const ticket = mine.find((i) => i.name === '');
@@ -1320,12 +1329,12 @@ export class Claims {
           snapshot_sha: r.snapshot_sha, head_sha: r.head_sha,
           // R-BTN-113 (B-4): the run's session link, as the run list draws it (§11.4).
           session_url: r.session_url,
-          course: r.course_id, course_version: courseVersion(r),
+          course: r.course_id, course_version: r.contract_course_version ?? courseVersion(r), leg_version: r.contract_version,
           ...(ticket?.ticket_version != null || ticket?.read_digest != null
             ? { ticket: { ...(ticket.ticket_version != null ? { version: ticket.ticket_version } : {}), ...(ticket.read_digest != null ? { read_digest: ticket.read_digest } : {}) } }
             : {}),
           inputs: mine.filter((i) => i.name !== '').map((i) => ({
-            name: i.name, ...(i.from_leg != null ? { from_leg: i.from_leg } : {}), ...(i.from_run != null ? { from_run: i.from_run } : {}),
+            name: i.name, ...(i.schema ? { schema: i.schema } : {}), ...(i.from_leg != null ? { from_leg: i.from_leg } : {}), ...(i.from_run != null ? { from_run: i.from_run } : {}),
             ...(i.uri != null ? { uri: i.uri } : {}), ...(i.digest != null ? { digest: i.digest } : {}),
             ...(i.value_json != null ? { value: JSON.parse(i.value_json) as unknown } : {}), ...(i.leg_version != null ? { leg_version: i.leg_version } : {}),
           })),
@@ -1338,6 +1347,13 @@ export class Claims {
   private runningLeg(claimId: number) {
     return this.rows<{ seq: number; leg: string; from_station: string; run_id: string | null }>(
       'SELECT seq, leg, from_station, run_id FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
+  }
+
+  private contract(claim: number, current: Graph) {
+    const pinned = this.rows<{ contract_course_json: string | null; contract_course_version: number | null }>(
+      'SELECT contract_course_json, contract_course_version FROM claims WHERE id = ?', claim)[0];
+    return { graph: pinned?.contract_course_json ? graphOf(JSON.parse(pinned.contract_course_json)) : current,
+      version: pinned?.contract_course_version };
   }
 
   /** B-4 (R-BTN-113): the instance's session-host allowlist, as the runner calls' shared rule
@@ -1434,9 +1450,18 @@ export class Claims {
     const advancing = this.runner(runnerId);
     const v = this.gate(advancing, item, leg, 'advance', { except: claimId, holderBars: b.bars });
     if (!v.ok) throw this.refusal(c.ticket_id, v, 'advance', advancing, claimId);
+    const contract = this.contract(claimId, g);
+    const scriptLeg = resolveLeg(contract.graph, b.leg);
+    if (!scriptLeg) throw offGraph(`${b.leg} is not in the claim's pinned snapshot`);
     // R-BTN-109: the finished leg arrives at `at` with what its entry asks; inline values in full.
-    if (run) this.checkEntry(repo, g, at, b.outputs);
-    else this.checkOutputValues(repo, b.outputs);
+    if (run) {
+      this.checkEntry(repo, g, at, b.outputs);
+      this.recordOutputs(c.ticket_id, claimId, run, contract.graph, b.outputs);
+    } else if (b.outputs.length) {
+      throw new BatonError('invalid-params', 'outputs: no producing leg is running');
+    }
+    const resolved = ticketInputs(this.c.store, c.ticket_id, contract.graph, scriptLeg);
+    if (resolved.wait) throw new BatonError('not-eligible', `${leg}: ${resolved.wait}`, { rule: 1, rule_code: resolved.wait });
     // R-BTN-76: an advance into a leg blocked on a resource is accepted — the holder may know better.
     const resources = this.resourceAdvice(runnerId, c.ticket_id, leg);
     if (resources.length) this.event('advice-overridden', `runner:${runnerId}`, { overridden: [{ advice: 'resource', leg, resources }] }, c.ticket_id, claimId);
@@ -1492,7 +1517,10 @@ export class Claims {
     // start — pointers and digests only (R-BTN-33), the ticket's version and its read's digest
     // on the row whose name is empty. Replay reads these rows; a retried advance that reached
     // this far never runs twice (its claim-legs insert above is the transaction's own).
-    for (const i of b.run_inputs.inputs) {
+    for (const i of contract.graph.legs.get(scriptLeg)?.inputs ? [] : b.run_inputs.inputs) {
+      if (i.hasValue || !pointerAllowed(i.uri, pointerReach(this.c.store, repo, c.ticket_id))) {
+        throw new BatonError('invalid-params', `run_inputs: ${i.name} must be a pointer within the ticket's reach`);
+      }
       this.exec(`INSERT INTO leg_run_inputs (claim_id, seq, name, ticket_id, from_leg, from_run, uri, digest, value_json, leg_version)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         claimId, seq, i.name, c.ticket_id, i.from_leg, i.from_run, i.hasValue ? null : i.uri, i.digest, i.hasValue ? JSON.stringify(i.value) : null, i.leg_version);
@@ -1502,6 +1530,17 @@ export class Claims {
         claimId, seq, c.ticket_id, b.run_inputs.ticket.version, b.run_inputs.ticket.read_digest);
     }
     const started = this.legFacts(claimId, leg, runId);
+    const contractVersion = contract.graph.legs.get(scriptLeg)!.version;
+    const courseVersion = contract.version ?? started.row.course_version;
+    this.exec('UPDATE claim_legs SET contract_version = ?, contract_course_version = ? WHERE claim_id = ? AND seq = ?',
+      contractVersion, courseVersion, claimId, seq);
+    for (const i of resolved.inputs) {
+      this.exec(`INSERT INTO leg_run_inputs (claim_id, seq, name, ticket_id, from_leg, from_run, uri, digest, value_json, leg_version, schema)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, claimId, seq, i.name, c.ticket_id, i.from_leg, i.from_run,
+        i.uri ?? null, i.digest ?? null, Object.hasOwn(i, 'value') ? JSON.stringify(i.value) : null, i.leg_version, i.schema);
+    }
+    if (resolved.inputs.length) this.c.history?.record(started.ticket, { kind: 'inputs', ...started.row, course_version: courseVersion, leg_version: contractVersion,
+      detail: { seq, names: resolved.inputs.map((i) => i.name) } });
     this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}) } });
     // R-BTN-62: only a reading numbered above the counter now can judge the claim stale.
     // R-BTN-90 (B-234): the advance that starts a run arms the claim's deadline when the leg
@@ -1520,7 +1559,7 @@ export class Claims {
     // R-BTN-90: the answer also names the run's `claim_legs.seq` — the runner's `leg_finished`
     // heartbeat (§7.5's finishing half) carries it when the run's script returns. R-BTN-113: a
     // dropped link says so, as a beat's answer does.
-    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId, seq, ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
+    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), run_id: runId, seq, inputs: resolved.inputs, ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}) };
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
@@ -1581,7 +1620,11 @@ export class Claims {
     // R-BTN-109: a completed end that finishes its leg arrives at `reached` and meets its entry. A
     // release is not checked: it is how the runner gives up a leg whose outputs fail (R-BTN-82).
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
-    if (e.status === 'completed' && finished && g) this.checkEntry(repositoryOf(c.ticket_id), g, reached, e.outputs);
+    if (e.status === 'completed' && finished && g) {
+      this.checkEntry(repositoryOf(c.ticket_id), g, reached, e.outputs);
+      const run = this.runningLeg(c.id);
+      if (run) this.recordOutputs(c.ticket_id, c.id, run, this.contract(c.id, g).graph, e.outputs);
+    }
     else if (e.status === 'completed') this.checkOutputValues(repositoryOf(c.ticket_id), e.outputs);
     // R-BTN-153 (B-175): a `done` end's `reached` is what the owners' conclusions map reads
     // (R-BTN-115), so a success-mapped one is the check command's alone. A suspension rests
@@ -1680,6 +1723,79 @@ export class Claims {
       if (!resolve(o.schema) || !baseChain(o.schema, resolve).includes(r.schema)) {
         throw new BatonError('not-eligible', `entry: ${r.output} is ${o.schema}, which is not ${r.schema} or a refinement of it`, { rule: 'entry', rule_code: 'entry' });
       }
+    }
+  }
+
+  private recordOutputs(ticket: string, claim: number, run: NonNullable<ReturnType<Claims['runningLeg']>>, graph: Graph, outputs: Output[], recoveredRun?: number) {
+    const repo = repositoryOf(ticket);
+    const leg = graph.legs.get(resolveLeg(graph, run.leg) ?? run.leg);
+    const fault = declaredOutputFault(leg, outputs);
+    if (fault) throw new BatonError('not-eligible', fault, { rule: 'entry', rule_code: 'output-invalid' });
+    if (!outputs.length) return;
+    const f = this.legFacts(claim, run.leg, run.run_id);
+    if (recoveredRun !== undefined) f.row.run = recoveredRun;
+    const versions = this.rows<{ contract_version: number | null; contract_course_version: number | null }>(
+      'SELECT contract_version, contract_course_version FROM claim_legs WHERE claim_id = ? AND seq = ?', claim, run.seq)[0];
+    const version = versions.contract_version ?? leg?.version ?? 0;
+    const courseVersion = versions.contract_course_version ?? f.row.course_version ?? 0;
+    const reach = outputs.some((o) => o.uri) ? pointerReach(this.c.store, repo, ticket) : null;
+    for (const o of outputs) if (o.uri && !pointerAllowed(o.uri, reach!)) {
+      throw new BatonError('not-eligible', `output ${o.name}: pointer has no repository or bucket reach`, { rule: 'entry', rule_code: 'output-invalid' });
+    }
+    for (const o of outputs) {
+      this.exec(`INSERT INTO leg_outputs (ticket_id, leg, run, name, schema, uri, digest, value_json, course_version, leg_version, claim_id, source, confirmed, recorded_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ticket, run.leg, f.row.run, o.name, o.schema,
+        o.uri ?? null, o.digest ?? null, Object.hasOwn(o, 'value') ? JSON.stringify(o.value) : null, courseVersion, version, claim,
+        recoveredRun === undefined ? 'holder' : 'sync', recoveredRun === undefined ? 0 : 1, this.c.now());
+    }
+    this.c.history?.record(ticket, { kind: 'outputs', ...f.row, course_version: courseVersion, leg_version: version, detail: { names: outputs.map((o) => o.name) } });
+  }
+
+  /** S-BTN-48: read attestations from the authenticated sync, never raw station markers.
+   * Confirm exact holder evidence; recover only for an identified, abandoned run. */
+  confirmOutputs(repo: string, attestations: PostedAttestation[]) {
+    for (const a of attestations) {
+      if (a.type !== 'std:git.output@1' || !a.ref || !a.value || typeof a.value !== 'object') continue;
+      const value = a.value as Record<string, unknown>;
+      if (typeof value.claim_nonce !== 'string' || typeof value.leg !== 'string') continue;
+      let outputs: Output[];
+      try { outputs = checkOutputs(value.outputs); } catch (e) {
+        if (e instanceof BatonError) continue;
+        throw e;
+      }
+      if (typeof value.run_id === 'string') this.recoverOutputs(repo, a.ticket, { nonce: value.claim_nonce, leg: value.leg, runId: value.run_id }, outputs);
+      for (const o of outputs) {
+        this.exec(`UPDATE leg_outputs SET confirmed = 1
+          WHERE ticket_id = ? AND leg = ? AND name = ? AND schema = ? AND uri IS ? AND digest IS ? AND value_json IS ? AND confirmed = 0
+            AND EXISTS (SELECT 1 FROM claims c JOIN claim_legs l ON l.claim_id = c.id
+              WHERE c.id = leg_outputs.claim_id AND c.ticket_id = leg_outputs.ticket_id AND c.nonce = ? AND l.leg = leg_outputs.leg AND l.evidence = ?
+                AND leg_outputs.run = (SELECT COUNT(*) FROM claim_legs p JOIN claims k ON k.id = p.claim_id
+                  WHERE k.ticket_id = c.ticket_id AND p.leg = l.leg AND (k.id < c.id OR (k.id = c.id AND p.seq <= l.seq))))`,
+          `${repo}:${a.ticket}`, value.leg, o.name, o.schema, o.uri ?? null, o.digest ?? null, Object.hasOwn(o, 'value') ? JSON.stringify(o.value) : null,
+          value.claim_nonce, a.ref);
+      }
+    }
+  }
+
+  private recoverOutputs(repo: string, local: string, evidence: { nonce: string; leg: string; runId: string }, outputs: Output[]) {
+    const ticket = `${repo}:${local}`;
+    const run = this.rows<{ claim_id: number; seq: number; leg: string; run_id: string; from_station: string; course_id: string }>(
+      `SELECT l.claim_id, l.seq, l.leg, l.run_id, l.from_station, c.course_id FROM claim_legs l JOIN claims c ON c.id = l.claim_id
+       JOIN tickets t ON t.id = c.ticket_id WHERE c.ticket_id = ? AND c.nonce = ? AND l.leg = ? AND l.run_id = ?
+       AND l.abandoned_at IS NOT NULL AND c.contract_course_json IS NOT NULL
+       AND c.end_reason NOT IN ('released:cannot-finish:contract-input', 'released:cannot-finish:contract-output')`,
+      ticket, evidence.nonce, evidence.leg, evidence.runId)[0];
+    if (!run || !outputs.length) return;
+    const graph = this.stations.graph(repo, run.course_id);
+    if (!graph) return;
+    const ordinal = this.rows<{ n: number }>(`SELECT COUNT(*) AS n FROM claim_legs p JOIN claims k ON k.id = p.claim_id
+      WHERE k.ticket_id = ? AND p.leg = ? AND (k.id < ? OR (k.id = ? AND p.seq <= ?))`, ticket, run.leg, run.claim_id, run.claim_id, run.seq)[0].n;
+    if (this.rows('SELECT 1 FROM leg_outputs WHERE ticket_id = ? AND leg = ? AND run = ? LIMIT 1', ticket, run.leg, ordinal).length) return;
+    try {
+      this.checkOutputValues(repo, outputs);
+      this.recordOutputs(ticket, run.claim_id, run, this.contract(run.claim_id, graph).graph, outputs, ordinal);
+    } catch (e) {
+      if (!(e instanceof BatonError)) throw e;
     }
   }
 
@@ -1799,7 +1915,10 @@ export class Claims {
     // started, a decision posted while held) logs `blocked`, which wakes no one.
     this.c.blocks?.held(ticketId, false);
     if (status === 'completed') this.confirmByClosure(claimId);
-    else this.applyRetryPolicy(claimId, ticketId, reason);
+    else if (reason === 'released:cannot-finish:contract-input') {
+      this.hold(ticketId, 'non-retryable:contract-input', 'baton', { claim_id: claimId, detail: opts.detail ?? null });
+      this.c.blocks?.raise(ticketId, 'baton.contract', opts.detail ?? null);
+    } else this.applyRetryPolicy(claimId, ticketId, reason);
   }
 
   // ── attempts, retries and holds (§6.10, §8; R3-1217) ────────────────────────────────────
@@ -1852,8 +1971,7 @@ export class Claims {
       const cls = nonRetryableClass(reason);
       if (cls) {
         this.hold(item, `non-retryable:${cls}`, 'baton', { claim_id: claimId, attempts: failed });
-        // R-BTN-78: the hold is put to the owner as Baton's own decision (a `contract-input`
-        // class, from B-39, raises `baton:contract` instead).
+        // R-BTN-78: the hold is put to the owner as Baton's own decision.
         this.c.blocks?.raise(item, 'baton:retries');
         return;
       }
@@ -1968,6 +2086,7 @@ export class Claims {
     this.upsertOverride(item, actor, { hold: 0, hold_reason: null, retry_after: null });
     this.event('override', actor, { hold: 0 }, item);
     this.c.blocks?.answer(item, 'baton:retries');
+    this.c.blocks?.answer(item, 'baton.contract');
   }
 
   /**
@@ -1995,7 +2114,7 @@ export class Claims {
       return { ok: true };
     }
     if (!this.c.blocks?.hasDecision(ticket, a.decision)) throw new BatonError('not-found', `${ticket} has no open ${a.decision} decision`);
-    if (a.decision === 'baton:retries') {
+    if (a.decision === 'baton:retries' || a.decision === 'baton.contract') {
       if (a.answer === 'retry') this.liftHold(ticket, actor);
       else this.c.blocks.answer(ticket, a.decision);
     } else {
@@ -2782,4 +2901,3 @@ export class Claims {
     };
   }
 }
-

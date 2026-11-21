@@ -487,6 +487,8 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     // that posts — beside its tickets, each stamped with its `version` and `key` above.
     payload: {
       source: { kind: sourceKind, ...(sourceVersions ? { versions: sourceVersions } : {}), cli: cliVersion() },
+      // R-BTN-139: station functions report observations, not forge authorship. None of
+      // their raw markers may be promoted to a std:git.output attestation here.
       registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...controlField,
     },
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),

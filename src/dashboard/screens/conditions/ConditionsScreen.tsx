@@ -33,6 +33,8 @@ export const LISTINGS: { key: string; label: string; hint: string; when?: string
   { key: 'regressed', label: 'Going backwards', hint: 'Git has shown the claim’s ticket behind where Baton holds it for half an hour.', when: 'regressed_since' },
   { key: 'policy', label: 'Waiting on a required bar', hint: 'The sync posts the leg without a bar the owners require.', when: 'waiting_since' },
   { key: 'course_changed', label: 'Course changed', hint: 'The ticket’s queued leg no longer leaves its station in the course now in force.', when: 'waiting_since' },
+  { key: 'input_missing', label: 'Missing contract input', hint: 'The queued leg needs an output its producer has not recorded.', when: 'waiting_since' },
+  { key: 'input_version', label: 'Incompatible contract input', hint: 'The queued leg does not accept the recorded producer version.', when: 'waiting_since' },
   { key: 'bars_mismatch', label: 'Bars read differently', hint: 'The holder and the sync read a leg’s bars differently; the sync’s reading binds.', when: 'at' },
   { key: 'stale_skills', label: 'Runner below a course’s version', hint: 'Restart the runner from a pulled checkout.' },
   { key: 'courses_refused', label: 'Course file refused', hint: 'The version in force stays; fix the file and push.', when: 'refused_at', tone: 'bad', glyph: '■' },

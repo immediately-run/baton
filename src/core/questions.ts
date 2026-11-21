@@ -324,7 +324,7 @@ export class Questions {
         stored?.posted_at ?? this.c.now(), leg, option.id, option.reached, who.by, who.ref ?? null, this.c.now());
       return { reached: option.reached, deferred: true };
     }
-    this.settle(repo, id, g, leg, { id: option.id, reached: option.reached }, { by: who.by, ref: who.ref ?? null, expired: false });
+    this.settle(repo, id, g, leg, { id: option.id, reached: option.reached }, { by: who.by, ref: who.ref ?? null, expired: false, question: given });
     return { reached: option.reached };
   }
 
@@ -422,10 +422,19 @@ export class Questions {
   // ── the arrival itself ───────────────────────────────────────────────────────────────────
 
   /** Move the ticket along its person leg and close its question. The caller's transaction. */
-  private settle(repo: string, id: string, g: Graph, leg: string, option: { id: string | null; reached: string }, meta: { by: string; ref: string | null; expired: boolean }) {
+  private settle(repo: string, id: string, g: Graph, leg: string, option: { id: string | null; reached: string }, meta: { by: string; ref: string | null; expired: boolean; question?: string }) {
     const now = this.c.now();
     const path = [...(JSON.parse(this.rows<{ path: string }>('SELECT path FROM ticket_stations WHERE ticket_id = ?', id)[0]?.path ?? '[]') as { leg: string; reached: string }[]),
       { leg, reached: option.reached }];
+    if (!meta.expired && option.id != null) {
+      const version = this.rows<{ version: number }>(`SELECT c.version FROM courses c JOIN tickets t
+        ON t.repository_id = c.repository_id AND t.course_id = c.id WHERE t.id = ?`, id)[0]?.version ?? 0;
+      const run = this.rows<{ run: number }>('SELECT COALESCE(MAX(run), 0) + 1 AS run FROM leg_outputs WHERE ticket_id = ? AND leg = ?', id, leg)[0].run;
+      const answer: DecisionValue = { id: meta.question ?? '', leg, option: option.id, reached: option.reached };
+      this.exec(`INSERT INTO leg_outputs (ticket_id, leg, run, name, schema, value_json, course_version, leg_version, source, confirmed, recorded_at)
+        VALUES (?, ?, ?, 'answer', ?, ?, ?, ?, 'sync', 1, ?)`, id, leg, run, DECISION_TYPE, JSON.stringify(answer), version, g.legs.get(leg)!.version, now);
+      this.c.history?.record(id, { kind: 'outputs', leg, run, course_version: version, leg_version: g.legs.get(leg)!.version, detail: { names: ['answer'] } });
+    }
     // The legs leaving the outcome it reached, in the file's order: the ticket waits at the
     // station, `next_source: baton` (R-BTN-83), and the next snapshot places it properly.
     const next = [...g.legs.entries()].filter(([, l]) => l.from.includes(option.reached)).map(([name]) => name);

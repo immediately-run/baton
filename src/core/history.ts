@@ -113,6 +113,7 @@ export class History {
       // R3-1258: each delete's own count (the cursor's `rowsWritten`) leaves the maintained
       // history figure (R-BTN-87) — a purge's rows are as many as the ticket held.
       purgedRows += this.c.store.exec('DELETE FROM ticket_history WHERE ticket_id = ?', t.ticket_id).rowsWritten ?? 1;
+      this.c.store.exec('DELETE FROM leg_outputs WHERE ticket_id = ?', t.ticket_id);
       // B-238 (R-BTN-149): the ticket's claims are due to go next (`Retention`).
       this.c.store.exec('UPDATE closed_tickets SET purged_at = ?, claims_due_at = ? WHERE ticket_id = ?', this.c.now(), this.c.now(), t.ticket_id);
     }

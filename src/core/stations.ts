@@ -14,6 +14,7 @@ import { qualify } from './validate';
 import { repositoryOf } from './registry';
 import type { History } from './history';
 import { BATON_WAITS } from './blocks';
+import { ticketInputs } from './contracts';
 
 /** What one snapshot showed of one ticket, against the previous accepted one. */
 export interface Seen {
@@ -265,7 +266,15 @@ export class Stations {
     return {
       course_changed: this.rows(`SELECT n.ticket_id, n.leg, n.waiting_since FROM ticket_next_legs n CROSS JOIN ticket_stations s ON n.ticket_id = s.ticket_id AND n.leg = s.next_leg
                                  WHERE n.state = 'waiting' AND n.waiting_on = 'course-changed' ORDER BY n.waiting_since, n.ticket_id`),
+      input_missing: this.contractWaits('input-missing'),
+      input_version: this.contractWaits('input-version'),
     };
+  }
+
+  private contractWaits(reason: 'input-missing' | 'input-version') {
+    return this.rows(`SELECT n.ticket_id, n.leg, n.waiting_since, 'baton.' || n.waiting_on AS type
+      FROM ticket_next_legs n JOIN ticket_stations s ON n.ticket_id = s.ticket_id AND n.leg = s.next_leg
+      WHERE n.state = 'waiting' AND n.waiting_on = ? ORDER BY n.waiting_since, n.ticket_id`, reason);
   }
 
   /** Leg `leg` of ticket `id` waits on `course-changed` since `since`; a wait on it already stored
@@ -320,7 +329,8 @@ export class Stations {
       // R-BTN-67: a leg a required bar covers whose posted bars hold no tag with its prefix is
       // stored waiting on `policy` — the board still moves — and listed under Needs you.
       const unmet = required.some((r) => requiredBarCovers(r, course, posted.leg, g) && !meetsRequiredBar(r, Object.hasOwn(st.bars, posted.leg) ? st.bars[posted.leg] : []));
-      const n = unmet ? { leg: posted.leg, state: 'waiting' as const, waiting_on: 'policy' } : posted;
+      const wait = unmet ? 'policy' : posted.state === 'ready' ? ticketInputs(this.c.store, id, g, posted.leg).wait : undefined;
+      const n = wait ? { leg: posted.leg, state: 'waiting' as const, waiting_on: wait } : posted;
       const b = before.get(n.leg);
       // Age (the default order's fourth key) runs from the first snapshot that showed the leg
       // ready, and an unbroken wait from the first that showed it waiting. A wait git posts never
@@ -347,6 +357,9 @@ export class Stations {
     for (const n of next.values()) {
       const b = before.get(n.leg);
       if (b && b.state === n.state && b.waiting_on === n.waiting_on && b.ready_since === n.ready_since && b.waiting_since === n.waiting_since) continue;
+      if (b?.waiting_on !== n.waiting_on && (n.waiting_on === 'input-missing' || n.waiting_on === 'input-version')) {
+        logEvent(this.c.store, at, 'condition', 'baton', { type: `baton.${n.waiting_on}`, leg: n.leg }, id);
+      }
       this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, ready_since, waiting_since) VALUES (?, ?, ?, ?, ?, ?)
                  ON CONFLICT (ticket_id, leg) DO UPDATE SET state = excluded.state, waiting_on = excluded.waiting_on,
                    ready_since = excluded.ready_since, waiting_since = excluded.waiting_since`,

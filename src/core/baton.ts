@@ -1802,6 +1802,7 @@ export class BatonCore {
       // import's pending ticket-scoped rows, applied to the tickets this post creates.
       this.settleSpawned(r, p, n, at);
       this.ownerState.applyPending(r, new Set(rows.map(({ row }) => row.id)), at);
+      this.claims.confirmOutputs(r, p.attestations ?? []);
       const seen = this.stations.apply(r, p.sha, n, stations, p.closed ?? [], at, wrote.closingParents);
       // R-BTN-116: the questions the post carries for its queued person legs (§4.4), then the
       // sync's attestations (R-BTN-191) — a person leg's answer, read from the ticket's
@@ -2178,6 +2179,7 @@ export class BatonCore {
     // 24 hours (R-BTN-62; round 2, 2-A-0). A plain refresh's own closures are applied as they
     // arrive (B-183): validation already refuses a post closing a ticket it also posts, and its
     // materialization dropped what it no longer names.
+    this.claims.confirmOutputs(r, p.attestations ?? []);
     const seen = this.stations.apply(r, p.sha, n, stations, (p.closed ?? []).filter((c) => held || !live.has(c.id)), at);
     // R-BTN-86: a refresh judges a `spawned` end's children as a new head does — it is a
     // reading too, numbered above the end's.
