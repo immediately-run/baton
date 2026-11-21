@@ -39,8 +39,8 @@ is `active` until it ends `completed`, `released` or `reaped`.
     hex, public: written in markers, R-BTN-17), `snapshot_sha`, `default_branch` (R-BTN-143),
     the ticket's `version`, `ticket_source?` and `last_written_by?` (R-BTN-194),
     `brief?` (R-BTN-194), `scope` (§12.9), the policy's `policy_hash`, `guarantees_hash` and
-    `floors_hash` (R-BTN-189), `leg_state?` (R-BTN-188), `handoff_url?` and `previous_attempts`
-    (R-BTN-24).
+    `floors_hash` (R-BTN-189), `leg_state?` (R-BTN-188), `handoff_url?`, `previous_attempts`
+    (R-BTN-24), and on a reconcile leg `evidence: [{ref, kind}]` and `displaced` (R-BTN-39).
   - The runner then reads the ticket from git and re-verifies it (R-BTN-34, R-BTN-5).
 - **One claim runs a run of legs** (unnumbered). A claim runs as many legs as it can. Each leg
   starts with `POST /v1/runner/claims/{id}/advance` naming it (R-BTN-63): Baton checks the edge

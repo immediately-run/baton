@@ -34,6 +34,53 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   dropped until owners' sessions are designed (B-76). Rejected: Access alone, with no key (it would
   make the identity provider the only authority); signing in automatically when an assertion is
   present (logout would undo itself and any agent that opens the page would be signed in).
+- **2026-11-21 — Work done outside Baton, modelled in each course (R-BTN-203, R-BTN-39, R-BTN-69, R-BTN-96, S-BTN-309).**
+  Rules changed: R-BTN-39, R-BTN-69, R-BTN-74, R-BTN-96, R-BTN-110, R-BTN-188, R-BTN-191; R-BTN-203
+  new. The owner, 2026-11-21: "baton *must* work well in a setup where only a portion of the
+  organization is using baton"; outside work is found by the sync's code, not the server; "the
+  codegen leg is not the only leg which may be completed outside baton"; and weak evidence starts a
+  reconciliation course Baton manages, configurable like any course. B-166 had been delivered by
+  four PRs on 2026-11-02 by sessions that never claimed it, and cost a runner's leg. Two
+  adversarial reviewers with fresh context read the first draft and found it not buildable:
+  evidence that lasted one sync and never reached the leg, a course switch the sync could not
+  make (R-BTN-39), `returned` as an end that marked work done, `record` writing `prs:` and so
+  closing partial work, a bare-id match that fires on most of this repository's commits, a hand
+  merge closing from any station past the test gate, `arrives` undefined in R-BTN-69, and runners
+  counting as reviewers. The owner then chose (2026-11-21): hand acts as separate fact legs the
+  course file places (the courses proposal's design, over `arrives` on runner legs); mentions
+  filtered rather than an explicit trailer; and a hand merge closing only where the course allows.
+  The owner then went further (2026-11-21): "Baton's whole strategy is explicitly modeling
+  processes that have been traditionally implicit via the coarse graph. This only works if
+  transitions between stations that happen outside Baton are also modeled. So the reconciler legs
+  need to be part of the course." So there is no reconciliation course: each course carries a
+  reconcile leg (`reconciles: true`) whose edges say where evidence may move a ticket, which Baton
+  queues in place of the queued leg while evidence waits (`ticket_evidence`,
+  `reconcile_displaced`). A second review round found the reconcile leg could conclude a review,
+  had no `max_runs` (so the standard courses failed R-BTN-69's cycle rule), lost the displaced leg
+  when queued twice, and weighed evidence on a mere release; that runner verdicts still counted
+  with `runner_pushers` unset; that a runner's machine key could forge arrivals; and that under
+  `protected` the B-166 failure returned. The owner chose (2026-11-21): arrivals and evidence only
+  from the sync key or the CI identity; no hand review while runner identities are unknown; a hand
+  merge from `reviewed` closes whatever the verdict; a refused arrival becomes evidence. So
+  `reconciles` maps each station it may conclude to its next leg, every reconcile and cyclic fact
+  leg has `max_runs`, and evidence is weighed only by the leg's finishing position. Rejected: a
+  separate reconciliation course entered and left by a position Baton parks (a move outside the
+  graph); the server inferring closure from forge events (against R-BTN-35); closing on any
+  mention. The owner then ruled on the round's first blocker, that the reconcile leg could skip
+  review and the test gate (2026-11-21): Baton works under an open-world assumption. Actors
+  outside it open, review and merge PRs and edit tickets; it gates only its own state; so almost
+  any transition may happen outside Baton, and its job is to detect it and place the ticket. A
+  factory needing strictness gates the forge events on Baton's state or disables them. So the
+  standard courses' fact legs are broad (`merged-by-hand` from every station but the ends and `delivered`, a hand review
+  on any head) and a reconcile leg may conclude any station the evidence shows, `merged`
+  included; values #13 states the stance. A third review round found runners' own pushes and PRs
+  counted as hand acts and deferred arrivals applied blind; a stale displaced-leg record after a
+  station change; `pr-merged` vacuous for a ticket with no PRs; the per-verdict `next` with no
+  shape in R-BTN-69; and unverified `at merged` conclusions. So runners' PRs and pushes are
+  excluded (none found while `runner_pushers` is unset), a sync arrival under a claim is dropped
+  and posted again by the next sync, the displaced record is cleared on any other station change,
+  `pr-merged` needs a PR, `arrives.next` takes one leg per verdict, a fact leg with no runs left
+  yields evidence, and a reconcile leg's merge or verdict is checked as the fact leg's would be.
 
 - **2026-11-20 — A session's reads outside `/v1/ui/*`, the strip's ready count, V1's paged lists (R-BTN-16, R-BTN-155, S-BTN-243, S-BTN-254).**
   Rules changed: R-BTN-16, R-BTN-155.

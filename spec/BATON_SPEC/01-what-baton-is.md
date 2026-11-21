@@ -91,25 +91,54 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   - **Who moves a ticket.** Only these, each along an edge of the course file from Baton's current
     station: the holder's arrival, carried by its `advance` or end (R-BTN-63, R-BTN-71,
     R-BTN-83); a fact arrival; and Baton's own settlements and the legs it queues (R-BTN-116,
-    R-BTN-122, §7). The owner's route (R-BTN-83) is not built.
+    R-BTN-122, §7), the reconcile leg it queues (below). The owner's route (R-BTN-83) is not built.
   - **The station function** (R-BTN-74) is handed each live ticket's position as Baton holds it
     and never sets one. A station its facts imply is shown on the ticket's view and never compared
     with Baton's position.
-  - **A fact arrival** is an arrival on a leg no claim runs. The one Baton applies is a person's
-    leg's, from its answer, a `std:decision@1` (R-BTN-116); a leg declaring `arrives: {fact:
-    <kind>}`, attested as `std:arrival@1`, is [proposed](../proposals/security.md) (R-BTN-191,
-    R-BTN-192), and such an attestation is kept as evidence, as below. Baton applies an arrival
+  - **A fact arrival** is an arrival on a leg no claim runs: a person's leg's, from its answer, a
+    `std:decision@1` (R-BTN-116); and a fact leg's (`arrives`, R-BTN-69), from the sync's
+    `std:arrival@1` (R-BTN-203). Where the policy admits no `sync` writer for that type, the
+    arrival comes from the fact reader, proposed (R-BTN-192). Baton applies an arrival
     in the transaction that accepts the attestation when all hold: the policy admits its writer
     for the type (R-BTN-191); the leg leaves Baton's current station, queued or not; `reached` is one of its
     outcomes; no claim is active on the ticket; and Baton holds the ticket for nothing else (§7).
     Its `next` is the attestation's, else the first leg the course file lists leaving `reached`
-    with runs left (R-BTN-63). Baton logs a `fact-arrival` history row and keeps the `ref`.
+    with runs left (R-BTN-63) that is neither a fact leg nor a reconcile leg. Baton logs a `fact-arrival` history row and keeps the `ref`.
     - An arrival whose `ref` Baton has applied for this ticket is accepted and moves nothing.
     - An arrival that fails only because a claim is active or Baton holds the ticket is kept with
-      its `ref` and applied when the hold ends, if it still meets every other condition.
-    - Any other arrival is kept as evidence: Baton logs an `arrival-unapplied` history row with
+      its `ref` and applied when the hold ends, if it still meets every other condition — except
+      the sync's `std:arrival@1` meeting an active claim, which is recorded `arrival-unapplied`
+      (once per `ref`) and not kept: the facts may change under a claim, so the next sync posts it
+      again if its fact still holds. One meeting only a hold is kept and applied as above.
+    - A sync `std:arrival@1` on a fact leg with no runs left (R-BTN-63) is kept as a piece of `fact`
+      evidence (below), not applied.
+    - Any other arrival is recorded for people, not as outside-work evidence: Baton logs an `arrival-unapplied` history row with
       the attestation and its own position, shown on the ticket's view (§11), and raises nothing.
       The owner's commands that would settle the disagreement, a route and adopt, are not built.
+  - **Evidence and the reconcile leg.** Baton keeps each `std:evidence@1` the policy admits
+    (R-BTN-203) as a piece of the ticket's evidence, once per `ref`. A sync `std:arrival@1` refused
+    only because the policy admits no `sync` writer for it is kept the same way, as `merged-early`
+    when it is a `pr-merged`, else as a `fact` piece naming its leg. In every transaction that
+    changes a ticket's station, queued leg, claim, hold or evidence, Baton queues the reconcile leg
+    (`reconciles`, R-BTN-69) leaving the ticket's station when all hold: evidence is unweighed; no
+    claim is active and nothing holds the ticket; the leg has runs left (R-BTN-63); and the queued
+    leg is not a person leg, a suspended leg, nor one an owner's route, a retry's `exhausted` leg
+    or an expiry placed (R-BTN-83). It replaces the queued leg, and Baton records the displaced leg
+    with the station it was queued at. A reconcile leg already queued at that station keeps the
+    record and only gains the evidence; any change of the ticket's station or queued leg that the
+    reconcile leg's own queueing or finish did not make (a fact arrival at the same station
+    included) clears the record, and the next queueing records afresh. A reconcile leg with no
+    runs left, or ended `exhausted` by its retries, puts the displaced leg back and clears the
+    record. History row `reconcile-queued`.
+    The reconcile leg runs like any leg. Its finishing position is one of its outcomes (R-BTN-69):
+    `unchanged` at the station it left, with the displaced leg as `next` and no other; or a station
+    of its `reconciles.to`, the one it left included, with that entry's `next`. A conclusion naming
+    a merge or a verdict is checked by its stub as the fact leg's fact would be (the PR is the
+    ticket's, merged, on the default branch; the verdict is on its head). Only that finishing
+    position marks the evidence its claim carried as weighed and clears the record; a claim ending
+    any other way leaves both. Evidence that cannot be handed to a reconcile leg waits, unweighed,
+    on the ticket read (§14). Nothing yet lets a person settle it by hand: the owner's route and
+    adopt are not built (R-BTN-83, B-120).
   - **Adopt**, the owner's command that sets a position for legs done outside Baton, is not built
     (B-120): [the ticket-adopt proposal](../proposals/ticket-adopt.md).
 - **R-BTN-8 (git first).** For every `completed` end, `suspended:` included, the runner pushes
