@@ -29,7 +29,7 @@ import { builtinExecutor, type Executor, type Handle, type Running, type Session
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
 import { MIN_SECRET_BYTES, createLegMasker, failureDetail, maskLegOutput, namesASecret, secretValues } from './mask';
 import { checkedOutputs, checkMoveOutputs, decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
-import type { Output } from '../core/validate';
+import { checkEnd, type Output } from '../core/validate';
 import { StateFile, leaseLostFrom, type PersistedClaim, type RunnerState } from './state';
 import { bareTicketId } from '../defaults/ticket-state';
 import { digestOfRead, MARKDOWN_SOURCE } from '../defaults/ticket-versions';
@@ -1363,6 +1363,16 @@ export class Runner {
     }
     // Draining (or stopped): every claim still running ends at its own boundary first.
     await Promise.allSettled([...this.tasks]);
+    if (this.pastRunDeadline() && this.pendingEnds.size) {
+      // --until stops dispatch, not delivery of completed work. Keep the sidecar alive
+      // for retries, but don't wait indefinitely if Baton stays unavailable.
+      const retryUntil = performance.now() + (this.state.get().lease_timeout_s ?? 900) * 1000;
+      while (!this.stopped && this.pendingEnds.size && performance.now() < retryUntil) {
+        await this.tick().catch((e) => this.log(`baton: the final heartbeat failed (${msg(e)})`));
+        if (this.pendingEnds.size) await sleep(Math.min(this.o.beatEvery, Math.max(0, retryUntil - performance.now())));
+      }
+      if (this.pendingEnds.size) throw new Error('Baton did not acknowledge the final claim ends');
+    }
   }
 
   /** B-188: a claim's run on its own task — a failure is the loop's line, never another claim's. */
@@ -1495,8 +1505,9 @@ export class Runner {
     // R-BTN-202 (B-248): the local queue first — a leg run offline whose result waits for Baton,
     // then the host user's oldest order, each claimed by name: Baton's claim decides, every gate
     // in force. Otherwise R-BTN-72 / B-287: an unnamed claim selects and claims atomically.
-    const q = this.o.bounds?.legs ? undefined : this.o.queue;
-    const queued = q?.read() ?? null;
+    const q = this.o.queue;
+    const legs = this.o.bounds?.legs;
+    const queued = legs ? null : q?.read() ?? null;
     const preworked = queued?.worked[0] ?? null;
     const order = preworked == null ? (queued?.orders[0] ?? null) : null;
     const wanted: string | undefined = preworked?.ticket_id ?? order?.ticket_id;
@@ -1505,7 +1516,6 @@ export class Runner {
     if (this.pastRunDeadline()) return null;
     this.claimsOut++;
     try {
-      const legs = this.o.bounds?.legs;
       claim = await this.o.api.claim({ request_id: requestId, ...(wanted ? { ticket_id: wanted } : legs ? { legs } : {}) });
     } catch (e) {
       // B-106 (R-BTN-178): a refused claim releases the locks it would have used — the machine's
@@ -1569,7 +1579,10 @@ export class Runner {
       // R-BTN-202 (B-248): whether this repository requires owner-signed control, as the last
       // claim answer said — what decides whether an order may run offline.
       q.setControlRequired(claim.control?.required === true);
-      if (preworked && ticket === preworked.ticket_id) slot.preworked = q.takeWorked(ticket);
+      // A leg filter still claims atomically, but a selected ticket may already have
+      // a saved offline result. The normal leg/station match decides whether to use it.
+      if (legs) slot.preworked = q.read().worked.find((worked) => worked.ticket_id === ticket) ?? null;
+      else if (preworked && ticket === preworked.ticket_id) slot.preworked = q.takeWorked(ticket);
       if (order && ticket === order.ticket_id) {
         q.dropOrder(ticket);
         this.log(`baton: claimed ${ticket} under ${order.by}'s order (R-BTN-202)`);
@@ -1677,6 +1690,7 @@ export class Runner {
           state: this.state.view, runner: this.state.get().runner_id,
         };
         const outcome = await this.runLeg(course, leg, ctx, scratch);
+        if (outcome.kind === 'past-deadline') return; // nothing started; keep the order
         if (outcome.kind !== 'ok') {
           const what = outcome.kind === 'crashed' ? `failed (${maskLegOutput(outcome.error, this.legSecrets)})` : outcome.kind === 'missing' ? `has no legs/${leg}.mjs at ${sha.slice(0, 10)}` : 'was stopped';
           q.dropOrder(ticket);
@@ -2342,13 +2356,14 @@ export class Runner {
         // git stays there for the leg that runs now.
         const pre = this.cur.preworked;
         this.cur.preworked = null;
+        if (pre != null && this.o.bounds?.legs) this.o.queue?.takeWorked(ticket);
         const usePre = pre != null && !resuming && pre.leg === legName && pre.at === at;
         if (pre != null && !usePre) this.log(`baton: ${ticket}'s ${pre.leg} ran offline from ${pre.at} under ${pre.by}'s order, but Baton offers ${legName} at ${at} — the offline result is not reported, and ${legName} runs as offered (what the offline leg pushed stays in git) (R-BTN-202)`);
         if (usePre) {
           this.cur.localOrder = { by: pre.by, ran_at: pre.ran_at };
           this.log(`baton: ${ticket}'s ${legName} ran offline at ${pre.ran_at} under ${pre.by}'s order — its result is reported now, gated as usual (R-BTN-202)`);
         }
-        const outcome = usePre ? { kind: 'ok' as const, result: pre.result } : resuming ? await this.reattachedLeg(course, legName, resuming.handle) : await this.runLeg(course, legName, ctx, scratch);
+        const outcome = usePre ? { kind: 'ok' as const, result: pre.result } : resuming ? await this.reattachedLeg(course, legName, resuming.handle, ctx) : await this.runLeg(course, legName, ctx, scratch);
         resuming = undefined;
         // R-BTN-72 (B-188): the run is over — nothing of it is left for a restart to reattach to.
         if (this.cur.place.handle) {
@@ -2356,6 +2371,12 @@ export class Runner {
           if (this.slots.has(this.cur)) this.writeClaims();
         }
         const script = course.scripts.get(legName) ?? null;
+        if (outcome.kind === 'past-deadline') {
+          if (this.claimLost()) return await this.finish(claimId, { end_reason: 'released:lease-lost', reached: at, next: legName }, null);
+          const abort = this.abortSignal();
+          return await this.finish(claimId, { end_reason: abort?.reason ?? `suspended:${at}`, reached: at, next: legName },
+            await this.callHandoff(ranScript, ranCtx ?? {}) ?? handoffUrl);
+        }
         if (outcome.kind !== 'lease-lost' && outcome.kind !== 'missing') {
           ranScript = script;
           ranCtx = ctx;
@@ -2448,20 +2469,17 @@ export class Runner {
         // joins the evidenced path only now — the next leg's run number counts what ran. Its
         // scope audit (B-134) reports here, on the advance that finishes it — read after the
         // close, above, so the evidence push is in the window too.
-        // B-106 (R-BTN-178): the lock of a leg the next one requires is taken before the advance
-        // is sent; one this runner cannot take suspends the claim rather than sending it, the
-        // finished leg's evidence already in git (R-BTN-121, R-BTN-71).
-        if (!(await this.ensureLegLocks(verdict.leg, course))) {
-          return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg }, await this.callHandoff(script, ctx) ?? handoffUrl);
-        }
         const bounds = this.o.bounds;
+        const suspendHere = () => this.callHandoff(script, ctx).then((url) => this.finish(claimId, {
+          end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg,
+          ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { ended_at_sha: closed } : {}),
+        }, url ?? handoffUrl));
+        // Never take an excluded leg's locks. Setup and the audit can cross the deadline.
         if (this.pastRunDeadline() || (bounds?.legs && !bounds.legs.includes(verdict.leg))
-          || Math.max(own.length, this.legSeq ?? 0) >= (bounds?.maxLegs ?? 8)) {
-          return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached,
-            next: verdict.leg, ...(verdict.outputs ? { outputs: verdict.outputs } : {}),
-            ...(closed ? { ended_at_sha: closed } : {}) }, await this.callHandoff(script, ctx) ?? handoffUrl);
-        }
+          || Math.max(own.length, this.legSeq ?? 0) >= (bounds?.maxLegs ?? 8)
+          || !(await this.ensureLegLocks(verdict.leg, course))) return await suspendHere();
         this.auditLeg();
+        if (this.pastRunDeadline()) return await suspendHere();
         // R-BTN-113 (B-4): the advance that finishes the leg carries its session link beside the
         // beats — the last word for the finished run, as the end's is for a claim's last one.
         const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}), ...(this.legSessionUrl != null ? { session_url: this.legSessionUrl } : {}), ...(this.pendingScope ? { scope_exceeded: { actions: this.pendingScope, dropped: this.scopeOverflow } } : {}), ...this.runInputsReport(versionCheck.read) }, verdict.reached);
@@ -2574,7 +2592,7 @@ export class Runner {
     }
   }
 
-  private async runLeg(course: CourseLoad, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'missing' } | { kind: 'lease-lost' }> {
+  private async runLeg(course: CourseLoad, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'missing' } | { kind: 'lease-lost' } | { kind: 'past-deadline' }> {
     const script = course.scripts.get(leg);
     if (script == null) return { kind: 'missing' };
     // R-BTN-202 (B-248): a leg run under a local order while Baton is unreachable has no lease.
@@ -2629,6 +2647,7 @@ export class Runner {
     // R-BTN-107 (B-184): the leg runs in a session of the executor the host chose, keyed by its
     // run id's first session; the previous leg's session goes first (its close and hand-off ran).
     await this.stopSession('next-leg');
+    if (this.pastRunDeadline()) return { kind: 'past-deadline' };
     const env = Object.fromEntries(Object.entries(childEnv).filter((e): e is [string, string] => typeof e[1] === 'string'));
     // R-BTN-144 class 7 (B-170): the leg's masked set is computed once, here, from the environment
     // the leg is given — every variable whose name says a secret, and every name `runner.json`
@@ -2682,6 +2701,10 @@ export class Runner {
     // the report would reach Baton only to be refused there (`invalid-params`), its reason
     // lost to the leg; the raise check refuses on the channel until the link has landed.
     if (this.legSessionUrl != null) await this.landSessionLink();
+    if (this.pastRunDeadline()) {
+      await this.stopSession('run-deadline');
+      return { kind: 'past-deadline' };
+    }
     if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} run ${basename(script)} (session ${sessionId}, executor ${this.executor.source})`);
     const running = this.wrapperCall(handle, 'run', script, [ctx], undefined, () => sink);
     const inflight = this.inflight!;
@@ -2794,18 +2817,19 @@ export class Runner {
    *  the session's posted or final result is the leg's, checked as any result is. A lost lease
    *  or claim stops it, no hand-off; a release stops it after the grace, as a leg that will not
    *  take its release is stopped. */
-  private async reattachedLeg(course: CourseLoad, leg: string, handle: Handle): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'lease-lost' }> {
+  private async reattachedLeg(course: CourseLoad, leg: string, handle: Handle, ctx: Record<string, unknown>): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'lease-lost' }> {
     let channel: LegChannel | null = null;
     try {
       channel = await LegChannel.serve(channelPath(this.o.stateFile, handle.session_id));
       const slot = this.cur;
-      channel.listen(this.channelHandler(slot, course, leg, slot.place.ctx ?? {}));
+      channel.listen(this.channelHandler(slot, course, leg, ctx));
       this.legChannel = channel;
     } catch (e) {
       this.log(`baton: the reattached leg's channel could not serve (${msg(e)}) — the leg runs on with no way to raise (R-BTN-106)`);
     }
     handle.posted = channel ? channel.posted : null;
     this.session = { handle, checkout: this.checkout };
+    this.persistPlace(handle, leg, ctx);
     if (typeof handle.link === 'string' && handle.link !== '') {
       this.legSessionUrl = handle.link;
       this.sessionLinkSeq++;
@@ -2882,6 +2906,12 @@ export class Runner {
       if ('bug' in move) return { ok: false, error: move.why };
       const outputs = checkedOutputs(result.outputs ?? [...staged.values()], course.schema, expected);
       checkMoveOutputs(outputs, course.graph, move, from, course.schema);
+      if (move.kind !== 'advance') {
+        checkEnd({ end_reason: move.kind === 'suspend' ? `suspended:${move.reached}` : move.kind === 'release' ? `released:${move.reason}` : 'done',
+          reached: move.reached, next: move.kind === 'done' ? null : move.next, detail: result.detail });
+      } else if (result.detail !== undefined) {
+        return { ok: false, error: 'detail is only available on an end' };
+      }
       return { ok: true, result: { ...result, ...(move.kind !== 'release' && outputs.length ? { outputs } : {}) } };
     });
   }

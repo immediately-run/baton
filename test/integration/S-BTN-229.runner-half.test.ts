@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { BatonApi } from '../../src/runner/api';
+import { callChannel, channelPath } from '../../src/runner/channel';
 import { Runner } from '../../src/runner/runner';
 import { builtinExecutor, type Executor, type Handle } from '../../src/runner/executor';
 import { call as hostCall } from '#host';
@@ -323,7 +324,12 @@ describe('S-BTN-229 (the runner half): a runner holds several claims (R-BTN-4, R
         return { ...h, reattached: true } as Handle;
       },
       async end(h) {
-        if (h.reattached) return { status: 'ended', result: { suspend: true, reached: 'checked' } };
+        if (h.reattached) {
+          const socket = channelPath(stateFile, h.session_id);
+          expect(await callChannel(socket, { op: 'status' })).toMatchObject({ ok: true, leg: 'check', station: 'built' });
+          expect(await callChannel(socket, { op: 'suspend', reached: 'checked' })).toEqual({ ok: true });
+          return { status: 'ended', result: (await h.posted!).result };
+        }
         return base.end(h);
       },
     };

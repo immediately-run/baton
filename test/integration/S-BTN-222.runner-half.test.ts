@@ -9,7 +9,7 @@
 // runner stops the session; a joinable session nobody joins ends `leg-timeout` at its
 // `deadline_s`, a failed attempt, its condition closing with it. The API side is
 // S-BTN-222.interact.test.ts, on both hosts.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { callChannel } from '../../src/runner/channel';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -191,13 +191,13 @@ beforeEach(async () => {
   stateFile = join(tmpdir(), `baton-222-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
 });
 
-const newRunner = (home: string, log: (l: string) => void, over: Record<string, unknown> = {}, onBeat?: (body: Record<string, any>) => void) => new Runner({
+const newRunner = (home: string, log: (l: string) => void, over: Record<string, unknown> = {}, onBeat?: (body: Record<string, any>) => void, transport = hostCall) => new Runner({
   api: new BatonApi({
     url: 'https://baton.test',
     transport: async (req) => {
       // §7.5 R-BTN-90 (B-234): the beats a run's finish went out on, for the assertions below.
       if (onBeat && new URL(req.url).pathname === '/v1/runner/heartbeat') onBeat(await req.clone().json() as Record<string, any>);
-      return hostCall(req);
+      return transport(req);
     },
     auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
   }),
@@ -220,7 +220,7 @@ describe('S-BTN-62 and S-BTN-75: channel results and bounded chains', () => {
   const scripts = {
     linger: 'export async function run() { return null; }',
     implement: `export async function run() { await new Promise((resolve) => setInterval(resolve, 60000)); }
-export async function close() { return null; }
+export async function close() { return 'https://example.test/evidence'; }
 export async function handoff() { return 'https://example.test/handoff'; }`,
     review: `export async function run() { return { suspend: true, reached: 'reviewed' }; }
 export async function close() { return null; }
@@ -246,6 +246,8 @@ export async function handoff() { return 'https://example.test/handoff'; }`,
       return handle;
     } };
     const runner = newRunner(home, () => {}, { executor, bounds: { legs: ['implement'] }, now: () => T0 });
+    const locks = vi.spyOn(runner as unknown as { ensureLegLocks(leg: string): Promise<boolean> }, 'ensureLegLocks')
+      .mockImplementation(async (leg) => leg !== 'review');
     const running = runner.runOnce();
     try {
       const { channel, brief } = await Promise.race([ready, running.then(() => { throw new Error('runner ended before serving'); })]);
@@ -261,8 +263,11 @@ export async function handoff() { return 'https://example.test/handoff'; }`,
       expect(await call('output', { name: 'effect', value: { kind: 'test' } })).toMatchObject({ ok: false, error: expect.stringContaining('fails std:effect@1') });
       expect(await rows('SELECT leg FROM claim_legs ORDER BY seq')).toEqual([{ leg: 'implement' }]);
       expect(await call('output', { name: 'effect', value: { kind: 'test', at: new Date(T0).toISOString() } })).toEqual({ ok: true });
+      expect(await call('done', { result: { suspend: true, reached: 'pr-open', next: 'review', detail: 'x'.repeat(201) } }))
+        .toMatchObject({ ok: false, error: expect.stringContaining('200 characters') });
       expect(await call('done', { reached: 'pr-open', next: 'review' })).toEqual({ ok: true });
-      expect(await running).toMatchObject({ ticket: 'docs:B', end_reason: 'suspended:pr-open', reached: 'pr-open' });
+      expect(await running).toMatchObject({ ticket: 'docs:B', end_reason: 'suspended:pr-open', reached: 'pr-open', handoff: 'https://example.test/handoff' });
+      expect(locks.mock.calls.map(([leg]) => leg)).toEqual(['implement']);
       expect(await rows('SELECT leg FROM claim_legs ORDER BY seq')).toEqual([{ leg: 'implement' }]);
       expect(await runner.runOnce()).toBeNull(); // the bounded claim does not take A's review
     } finally {
@@ -274,7 +279,8 @@ export async function handoff() { return 'https://example.test/handoff'; }`,
   });
 
   it('accepts a corrected post and advances to an allowed next leg', async () => {
-    const { home, sha } = writeHome(scripts);
+    git.registry = [courseEntry(3, 3)];
+    const { home, sha } = writeHome(scripts, roadmapPr);
     boardSha = sha;
     await postBoard([{ id: 'A' }], { A: placed('filed', [], [['implement', 'ready']]) });
     await register('vm-a');
@@ -302,9 +308,10 @@ export async function handoff() { return 'https://example.test/handoff'; }`,
   });
 
   it.each(['count', 'deadline'])('suspends at the completed leg when the %s bound is reached', async (bound) => {
+    git.registry = [courseEntry(3, 3)];
     const { home, sha } = writeHome({ ...scripts, implement: scripts.implement.replace(
       'await new Promise((resolve) => setInterval(resolve, 60000));', "return { reached: 'pr-open', next: 'review' };",
-    ) });
+    ) }, roadmapPr);
     boardSha = sha;
     await postBoard([{ id: 'A' }], { A: placed('filed', [], [['implement', 'ready']]) });
     await register('vm-a');
@@ -321,6 +328,49 @@ export async function handoff() { return 'https://example.test/handoff'; }`,
       expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:A', end_reason: 'suspended:pr-open' });
       expect(await rows('SELECT leg FROM claim_legs ORDER BY seq')).toEqual([{ leg: 'implement' }]);
       if (bound === 'deadline') expect(await runner.runOnce()).toBeNull();
+    } finally {
+      runner.stop();
+      cleanup(home);
+    }
+  });
+
+  it.each(['executor setup', 'link heartbeat'])('does not dispatch past the deadline during %s, and retries the final end', async (phase) => {
+    git.registry = [courseEntry(3, 3)];
+    const { home, sha } = writeHome(scripts, roadmapPr);
+    boardSha = sha;
+    await postBoard([{ id: 'A' }], { A: placed('filed', [], [['implement', 'ready']]) });
+    await register('vm-a');
+    let now = T0;
+    const calls: string[] = [];
+    const ends: unknown[] = [];
+    const base = builtinExecutor();
+    const executor: Executor = { ...base, async start(o) {
+      const h = await base.start(o);
+      if (o.brief.leg !== 'implement') return h;
+      if (phase === 'executor setup') now = T0 + 1000;
+      return { ...h, link: LINK };
+    }, exec(h, argv, opts) {
+      calls.push(argv[2]);
+      // If dispatch were incorrectly allowed, let the test reach its assertion promptly.
+      if (argv[2] === 'run') return { result: Promise.resolve({ status: 1, stdout: '', stderr: 'unexpected run' }), write() {}, kill() {} };
+      return base.exec(h, argv, opts);
+    } };
+    const runner = newRunner(home, () => {}, { executor, now: () => now, bounds: { until: T0 + 1000 } }, (body) => {
+      if (phase === 'link heartbeat' && body.session_url === LINK) now = T0 + 1000;
+    }, async (req) => {
+      if (new URL(req.url).pathname.endsWith('/end')) {
+        ends.push(await req.clone().json());
+        if (ends.length === 1) return Response.json({ code: 'unavailable' }, { status: 503 });
+      }
+      return hostCall(req);
+    });
+    try {
+      await runner.work();
+      expect(calls).not.toContain('run');
+      expect(ends).toHaveLength(2);
+      expect(ends[0]).toEqual(ends[1]);
+      expect(ends[1]).toMatchObject({ end_reason: 'suspended:filed', reached: 'filed', next: 'implement' });
+      expect(await rows('SELECT end_reason FROM claims')).toEqual([{ end_reason: 'suspended:filed' }]);
     } finally {
       runner.stop();
       cleanup(home);
