@@ -387,3 +387,17 @@ rest of that request).
   reads the result in a later request. 0061 was edited in place, against append-only: it had
   never committed on a populated database, and the fixed one reaches the same schema.
   *Status: fixed by this entry's PR; deployed when it merges.*
+
+## 2026-11-21 — the gateway's fence dropped the host's own replies
+
+Evidence: [interventions, 2026-11-21 06:36](interventions.mdx); runner logs
+`runner-run-20261121-064346-r1.log` and `-064345-r2.log` on bering.
+
+**A fence on a NATed address must let established replies in: a host-originated connection's
+reply comes back through the input hook addressed to the very address the fence drops.** The
+Fieldhouse gateway's `ip daddr 192.0.2.10 drop` kept new connections out as meant, but also
+dropped every reply to the executor's own gateway check, which runs on the host, so each leg
+failed `the gateway … does not answer` before its session started. The sandboxes' path (DNAT
+then forward) never showed it. What changed: on bering, an
+`ip daddr 192.0.2.10 ct state established,related accept` before the drop; the fieldhouse
+repository's copy still needs it.

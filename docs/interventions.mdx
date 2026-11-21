@@ -476,3 +476,46 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   the stated reset (or a check passes again), reports the account as limited, and leaves the
   ticket unmarked — B-247 (provider checks, the zai plan as an account instance), on B-245 and
   B-246.
+
+## 2026-11-21 06:36 — bering's legs cannot reach the Fieldhouse gateway; the runners stopped
+
+- **Host:** bering (both runners)
+- **Tickets:** 61 tickets got a failed implement each between 06:30 and 06:36 UTC — the
+  runners churned through the board before the supervisor looked (the first report named only
+  B-278 and B-279). For 31 of them it was the third failed attempt, and Baton held them
+  `attempts-exhausted`: B-8, B-10, B-23, B-27, B-30, B-39, B-40, B-42, B-45, B-47, B-48, B-55,
+  B-60, B-131, B-135, B-136, B-137, B-139, B-141, B-146, B-147, B-166, B-239, B-244, B-249,
+  B-251, B-258, B-259, R3-1263, R3-1268, R3-1269 (most had two from the 2026-11-18 usage limit).
+- **Why it was needed:** once Baton's API answered again (the 06:29 UTC sync was the first
+  success since 2026-11-19 12:44; heartbeats had failed `internal error` until then), both
+  runners claimed a ticket and the executor refused each leg before its session started: `the
+  leg cannot reach its model: the gateway at http://192.0.2.10:4000/v1 does not answer: The
+  operation was aborted due to timeout`. The executor's preflight (`gateway.mjs`) asks
+  `/models` from the host, and a host `curl` to 192.0.2.10:4000 times out too, although
+  `fieldhouse-gateway.service` is up since 2026-11-19 11:45 CET and the container's own
+  health check passes every 15 s. Cause: the fence's input rule `ip daddr 192.0.2.10 drop`
+  (`fieldhouse-gateway.nft`). A host connection to 192.0.2.10 is sourced from 192.0.2.10 and
+  DNATed to the container, so the container's reply, un-NATed, is delivered locally to
+  192.0.2.10 through the input hook, and the fence dropped it; sandbox traffic is forwarded and
+  never meets that hook. Every runner since the gateway's cutover met the API outage first, so
+  this path had never worked on bering.
+  Each refusal ended `released:cannot-finish:transient` in seconds and the runner claimed the
+  next ticket at once: the same churn as the 2026-11-18 usage-limit entry, from a fault of the
+  host, not of any ticket.
+- **Resolution:** at the owner's word, both runners stopped with Ctrl-C at 06:44 UTC (no claim,
+  no leg in flight). The owner added `ip daddr 192.0.2.10 ct state established,related accept`
+  before the drop in `/opt/fieldhouse-gateway/litellm/fieldhouse-gateway.nft` and restarted
+  `fieldhouse-gateway-net`; the host's `curl` answered 200 from 07:11 UTC (the first try right
+  after the restart still timed out, unexplained). The runners restarted at 07:13 UTC on
+  baton-cli `fc765417` (#303, migration 0061's fix — main moved while they were stopped). The
+  same edit is still due in the fieldhouse repository's copy of the fence, or a reinstall
+  brings the drop back (fieldhouse #40). After the restart nothing was claimable for the
+  runners: 31 tickets held, the other 39 ready ones refused `awaiting-sync` (rule 1, §6.7: their
+  last end is newer than the last snapshot, 06:29), which no runner can clear — only the next
+  sync. (The ticket read showed `above-tier-ceiling` on 23 of them: its `failed_rule` is the
+  furthest any live runner reaches, likely another host's.) The holds are the owner's to lift. The API
+  outage itself was not diagnosed here.
+- **Autonomous handling:** a runner whose executor refuses a leg for an unreachable gateway
+  should treat it as its own capability failing, not the ticket's — stop claiming legs that
+  need it until the check passes, as in the 2026-11-18 usage-limit entry — B-247. Also: the
+  executor's gateway check should run at start, before the first claim. *No ticket yet* for that.
