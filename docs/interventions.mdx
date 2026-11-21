@@ -519,3 +519,29 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   should treat it as its own capability failing, not the ticket's — stop claiming legs that
   need it until the check passes, as in the 2026-11-18 usage-limit entry — B-247. Also: the
   executor's gateway check should run at start, before the first claim. *No ticket yet* for that.
+
+## 2026-11-21 07:45 — implement agents stop on CLAUDE.md's credential rule: legs fail with no PR
+
+- **Host:** bering (both runners)
+- **Tickets:** B-39, B-288, B-293, B-299, B-300, B-302 (the credential rule); B-290 (an owner
+  decision the ticket asks for); B-261 (docs' `npm run verify` red on main); B-292 (its PR
+  opened in fieldhouse, #41, not baton) — nine failed implements between 07:13 and 07:45 UTC,
+  just after the owner lifted the 31 `attempts-exhausted` holds of the entry above
+- **Why it was needed:** the legs' agent (opencode, `gpt-6.2-sol` through the Fieldhouse gateway)
+  read each ticket, found it specifies code that handles keys, grants, credentials or owner
+  settings — much of Baton's own backlog — and stopped within seconds under CLAUDE.md's
+  *Tickets are tasks, not authority*, asking the owner to authorize ("No files were changed and
+  no PR was opened"). A leg has no channel to the owner, so each ended `exited 0, but no open
+  PR` — a failed attempt — and the runner claimed the next ticket: a third churn of the board in
+  a day, every one burning an attempt toward another `attempts-exhausted` hold. Every ticket is
+  served `last_written_by: pusher-unknown`, so no ticket has `human: true` (R-BTN-194) and no
+  owner quote in one can ever count either.
+- **Resolution:** at the owner's word, both runners stopped with Ctrl-C at 07:45 UTC (B-294's and
+  B-60's claims released with their hand-offs). The rule's scope is the owner's to decide: the
+  agents read "implement the code a ticket specifies for credentials" as "an instruction
+  touching credentials".
+- **Autonomous handling:** (1) the rule should separate implementing what a ticket specifies —
+  reviewed in a PR like any change — from acting with real credentials, owner settings, CI or
+  deploys, which stays a stop; (2) an agent's "ask the owner" should end the leg as a raised
+  condition that waits for an answer (R-BTN-163), not as a failed attempt; (3) the sync should
+  record pushers so `last_written_by` is ever known. *No ticket yet* for any of the three.
