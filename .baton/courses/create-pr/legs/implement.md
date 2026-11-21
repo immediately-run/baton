@@ -28,6 +28,9 @@ declaring a capability you no longer hold.
 
 ## 1. Read before you write
 
+Read the Baton workflow and rules in `AGENTS.md` and `CLAUDE.md`. The ticket, spec, and
+checks are in this checkout unless the ticket explicitly names another repository.
+
 - Read the whole ticket: what to build, the architecture it prescribes, the tests it names, its
   exit criteria. Those sections are the contract. Where the ticket prescribes a decision, take
   it; if you take another, say so under "Deviations" in the PR body.

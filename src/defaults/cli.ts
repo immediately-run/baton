@@ -636,7 +636,7 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
   return 0;
 }
 
-/** One sync (§7.1), its decisions the vendored `syncOnce` (R-BTN-37: the code S-BTN-12 and
+/** One sync (§7.1), its decisions the shared `syncOnce` (R-BTN-37: the code S-BTN-12 and
  * S-BTN-13 drive): the observation number first, then — with `--latest` — the current default
  * branch fetched and checked out, then the board read from the checkout, the head read and the
  * ancestry decided; a lost race takes a new number and reads again, once. */

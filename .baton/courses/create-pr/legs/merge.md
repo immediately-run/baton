@@ -20,6 +20,9 @@ the PR's change is on the default branch and the ticket is closed.
 
 ## Before merging
 
+Read `AGENTS.md` and `CLAUDE.md`. Recheck approval and required checks on the exact pushed
+head; do not merge your own implementation or land control-path changes reserved for a human.
+
 - **Never merge red.** Every required check on the PR's current head has concluded and passed. A
   check still running is not a pass; wait for it, or stop and say so.
 - No blocking finding is open on the PR.
