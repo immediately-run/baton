@@ -65,8 +65,10 @@ import childrenOwnerState from './0064_children_owner_state.sql';
 import readEfficiency from './0065_read_efficiency.sql';
 import runnerViews from './0066_runner_views.sql';
 import retirePolicyPins from './0070_retire_policy_pins.sql';
+import registrationTokens from './0071_registration_tokens.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
+import { DAY_MS } from '../core/validate';
 
 /** A migration: its SQL, and — when a step needs what SQL lacks, as a ULID needs the core's
  *  random source — a `backfill` run in the same transaction: after the SQL, or before it when
@@ -210,4 +212,9 @@ export const MIGRATIONS: Migration[] = [
   { id: 65, sql: readEfficiency },
   { id: 66, sql: runnerViews },
   { id: 70, sql: retirePolicyPins },
+  { id: 71, sql: registrationTokens, backfill: (store, _random, now) => {
+    const at = now();
+    store.exec(`UPDATE credentials SET expires_at = ?, last_used_at = ?
+      WHERE kind = 'runner' AND revoked_at IS NULL AND public_key GLOB 'bak_* sha256:*'`, at + 90 * DAY_MS, at);
+  } },
 ];

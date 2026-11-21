@@ -18,6 +18,8 @@ import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { clientVersionOf } from '../shared/versions.mjs';
 import { RunnerApi } from './runnerApi';
+import { RegistrationTokens } from './registrationTokens';
+import { requireRunnerKeyPolicy, runnerKeyAllowed } from './runnerKeyPolicy';
 import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
 import { Cutover } from './cutover';
@@ -600,8 +602,8 @@ export class BatonCore {
       // mirrors catch up before the seal. A person's attestation is an owner's write.
       if (this.ownerState.frozenAt() != null) {
         const ownerWrite = (req.method === 'POST' || req.method === 'PUT')
-          && (url.pathname.startsWith('/v1/owner/') || /^\/v1\/repositories\/[^/]+\/attestations$/.test(url.pathname));
-        if (ownerWrite) throw new BatonError('frozen', 'this Baton is frozen for a move: owner writes are refused until it is unfrozen or sealed (R-BTN-88)');
+          && (url.pathname === '/v1/register' || url.pathname.startsWith('/v1/owner/') || /^\/v1\/repositories\/[^/]+\/attestations$/.test(url.pathname));
+        if (ownerWrite) this.requireOwnerWrite();
       }
       if (url.pathname.startsWith('/v1/sync/')) {
         // R-BTN-15: the board's routes take only the repository's sync workflow, the feed's only
@@ -762,6 +764,15 @@ export class BatonCore {
       const sequence = await this.sequenceRoute(req, url);
       if (sequence) return sequence;
       if (url.pathname.startsWith('/v1/courier/')) return await this.courierRoute(req, url);
+      if (req.method === 'POST' && url.pathname === '/v1/register') {
+        const auth = req.headers.get('Authorization') ?? '';
+        const renewal = req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key');
+        const token = renewal ? req.headers.get('Baton-Registration-Token') : /^Baton-Token (.+)$/.exec(auth)?.[1];
+        if (!token) throw new BatonError('unauthenticated', 'a registration token is required');
+        const caller = renewal ? await this.authenticated(req) : { req, cred: null };
+        const body = await readJson(caller.req);
+        return json(await new RegistrationTokens(this.store, () => this.now()).register(token, body, caller.cred, await this.admin.registrationKeyInUse(), () => this.requireOwnerWrite()));
+      }
       if (req.method === 'POST' && url.pathname === '/v1/probe/readings') {
         // R-BTN-53, R-BTN-101: a probe key's readings, on any registered instance.
         if (!req.headers.has('X-Baton-Signed')) throw new BatonError('unauthenticated', 'sign with a probe key');
@@ -858,6 +869,7 @@ export class BatonCore {
     // Another request ran meanwhile: the key may have been revoked since it was read.
     if (!lookup(v.keyid)) throw new BatonError('unauthenticated', 'the key is not registered or is revoked');
     this.runners.acceptNonce(v.keyid, v.nonce, now);
+    this.runners.useCredential(v.keyid);
     return { req: withBody(req, v.body), cred: v.keyid };
   }
 
@@ -866,7 +878,11 @@ export class BatonCore {
   private async authenticated(req: Request, lookup?: (fp: string) => string | null): Promise<{ req: Request; cred: string }> {
     const apiKey = req.headers.get('X-Baton-Api-Key');
     if (apiKey == null) return this.verifySigned(req, lookup);
-    return { req, cred: await verifyApiKey(apiKey, lookup ?? ((fp) => this.runners.publicKey(fp))) };
+    const find = lookup ?? ((fp: string) => this.runners.publicKey(fp));
+    const cred = await verifyApiKey(apiKey, find);
+    if (!find(cred)) throw new BatonError('unauthenticated', 'the API key is not registered or is revoked');
+    this.runners.useCredential(cred);
+    return { req, cred };
   }
 
   /** B-192: who reads — the one resolution of a read's caller into a principal. A signed
@@ -930,7 +946,7 @@ export class BatonCore {
       const view = p.slice('/v1/runner/'.length);
       if (m === 'GET' && (view === 'fleet' || view === 'instances' || view === 'launch-candidates')) {
         const credential = this.runners.credential(cred);
-        if (credential.kind !== 'runner' || !req.headers.has('X-Baton-Signed')) throw new BatonError('forbidden', 'the view requires a machine key');
+        if (credential.kind !== 'runner' || !(req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key'))) throw new BatonError('forbidden', 'the view requires a machine key');
         const scope = this.claims.viewScope(cred);
         const repository = view === 'fleet' ? checkRepositoryId(url.searchParams.get('repository')) : null;
         if (repository) requireFleetScope(repository, scope);
@@ -944,6 +960,7 @@ export class BatonCore {
         // (B-173): a retired one is as one never registered.
         const repo = checkRepositoryId(url.searchParams.get('repository'));
         if (!this.registry.live(repo)) throw new BatonError('invalid-params', 'repository: must be a registered repository id');
+        this.requireRegistrationScope(cred, [repo]);
         return json(this.runners.mode(repo));
       }
       if (m === 'GET' && p === '/v1/runner/branch-holder') {
@@ -955,13 +972,16 @@ export class BatonCore {
         if (!GIT_REPO.test(gitRepo)) throw new BatonError('invalid-params', 'repo: must be owner/name');
         if (!GIT_BRANCH.test(branch)) throw new BatonError('invalid-params', 'branch: must be a branch name');
         const caller = secret ? await this.runners.authRunner(cred, secret, client, legacyName) : null;
-        return json(this.claims.branchHolder(caller, gitRepo, branch));
+        const holder = this.claims.branchHolder(caller, gitRepo, branch);
+        this.requireRegistrationScope(cred, holder.tickets.map(repositoryOf));
+        return json(holder);
       }
       const holder = /^\/v1\/runner\/tickets\/([^/]+)\/holder$/.exec(p);
       if (m === 'GET' && holder) {
         // R-BTN-7: callable with the token alone (the witness has no sidecar); with a secret, the
         // caller's own claim is not "another".
         const item = this.ticketParam(holder[1]);
+        this.requireRegistrationScope(cred, [repositoryOf(item)]);
         const caller = secret ? await this.runners.authRunner(cred, secret, client, legacyName) : null;
         return json(this.claims.holder(caller, item));
       }
@@ -982,6 +1002,7 @@ export class BatonCore {
           const a = this.claims.claim(runnerId, body);
           const ticket = String(a.ticket_id ?? '');
           if (ticket.includes(':')) {
+            requireRunnerKeyPolicy(this.store, cred, repositoryOf(ticket));
             const standing = this.sql<{ control_json: string }>('SELECT control_json FROM signed_control WHERE repository_id = ?', repositoryOf(ticket))[0];
             // Set once: a replay keeps the pairing the claim was made with, never the moved
             // board's (an empty string is the no-record shape, never NULL). Round 4: stored on
@@ -1006,15 +1027,19 @@ export class BatonCore {
       const advance = /^\/v1\/runner\/claims\/(\d+)\/advance$/.exec(p);
       if (m === 'POST' && advance) {
         const body = await readJson(req);
-        return json(tx(() => this.claims.advance(runnerId, Number(advance[1]), body)));
+        return json(tx(() => {
+          this.requireClaimKeyPolicy(cred, runnerId, Number(advance[1]));
+          return this.claims.advance(runnerId, Number(advance[1]), body);
+        }));
       }
       if (m === 'POST' && p === '/v1/runner/adopt') {
         const body = await readJson(req);
-        return json(tx(() => this.cutover.adopt(runnerId, body)));
+        return json(tx(() => this.cutover.adopt(runnerId, body, (repo) => this.requireRegistrationScope(cred, [repo]))));
       }
       const end = /^\/v1\/runner\/claims\/(\d+)\/end$/.exec(p);
       if (m === 'POST' && end) {
         const body = await readJson(req);
+        this.requireClaimKeyPolicy(cred, runnerId, Number(end[1]));
         // R-BTN-126 (round 1 B9, round 2 r2-5): a blocked end's ref must be a well-formed
         // capability the runner declares — judged before the request's transaction, so the
         // invalid end's recording (a failed attempt, ended transient) commits whether or not
@@ -1037,7 +1062,10 @@ export class BatonCore {
       const conditions = /^\/v1\/runner\/claims\/(\d+)\/conditions$/.exec(p);
       if (m === 'POST' && conditions) {
         const body = await readJson(req);
-        return json(tx(() => this.conditions.report(runnerId, Number(conditions[1]), body)));
+        return json(tx(() => {
+          this.requireClaimKeyPolicy(cred, runnerId, Number(conditions[1]));
+          return this.conditions.report(runnerId, Number(conditions[1]), body);
+        }));
       }
       if (m === 'POST' && p === '/v1/runner/readings') {
         // R-BTN-76, R-BTN-101: what a leg met — on its own runner instances and on any account
@@ -1231,6 +1259,26 @@ export class BatonCore {
     if (!this.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
     const actor = `owner:${fp}`;
     const rest = o[2];
+    if (m === 'POST' && rest === 'tokens') {
+      const b = await body();
+      const authorize = await this.admin.tokenAuthorizer(repo, fp);
+      return json(await new RegistrationTokens(this.store, () => this.now()).mint(repo, actor, b, () => {
+        this.requireOwnerWrite();
+        authorize();
+        const repository = this.registry.get(repo);
+        if (!repository || repository.retired_at != null) throw new BatonError('not-found', `no repository ${repo}`);
+        return repository.tiers;
+      }));
+    }
+    const token = /^tokens\/([^/]+)\/revoke$/.exec(rest);
+    if (m === 'POST' && token) {
+      const b = await body();
+      const authorize = await this.admin.tokenAuthorizer(repo, fp);
+      return json(new RegistrationTokens(this.store, () => this.now()).revoke(repo, seg(token[1]), actor, b, () => {
+        this.requireOwnerWrite();
+        authorize();
+      }));
+    }
     // B-90: the repository's grants and settings — and the policy's log below — are read in
     // src/core/reads/repository.ts (B-192: a session's reads too).
     // B-127: the repository's owner signing keys — public keys of its human-only owners — the
@@ -1326,7 +1374,27 @@ export class BatonCore {
    *  administrator granted — a bearer token or a seed key, which reaches every one. */
   private grantedRepos(cred: string): string[] | null {
     if (!this.runners.credential(cred).granted) return null;
-    return this.sql<{ repository_id: string }>('SELECT repository_id FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', cred).map((r) => r.repository_id);
+    return this.sql<{ repository_id: string }>('SELECT repository_id FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', cred)
+      .map((r) => r.repository_id).filter((repo) => runnerKeyAllowed(this.store, cred, repo));
+  }
+
+  private requireOwnerWrite(): void {
+    const sealedAt = this.ownerState.sealedAt();
+    if (sealedAt != null) throw new BatonError('sealed', `this Baton was sealed at ${new Date(sealedAt).toISOString()} for its move; an administrator's reads alone are served (R-BTN-88)`);
+    if (this.ownerState.frozenAt() != null) throw new BatonError('frozen', 'this Baton is frozen for a move: owner writes are refused until it is unfrozen or sealed (R-BTN-88)');
+  }
+
+  private requireRegistrationScope(cred: string, repositories: string[]): void {
+    for (const repo of repositories) requireRunnerKeyPolicy(this.store, cred, repo);
+    if (!this.sql('SELECT 1 FROM credentials WHERE id = ? AND registration_token_id IS NOT NULL', cred).length) return;
+    const grants = this.grantedRepos(cred) ?? [];
+    if (repositories.some((repo) => !grants.includes(repo))) throw new BatonError('forbidden', 'outside this registration grant');
+  }
+
+  private requireClaimKeyPolicy(cred: string, runner: number, claim: number): void {
+    if (!cred.startsWith('bak_')) return;
+    const row = this.sql<{ ticket_id: string }>('SELECT ticket_id FROM claims WHERE id = ? AND runner_id = ?', claim, runner)[0];
+    if (row) requireRunnerKeyPolicy(this.store, cred, repositoryOf(row.ticket_id));
   }
 
   /**
@@ -1517,6 +1585,7 @@ export class BatonCore {
       }
     }
     const take = checkSequenceTake(body);
+    if (runnerKey) requireRunnerKeyPolicy(this.store, cred, repo);
     return json(this.sequences.next(repo, kind, take.floor, actor, take.forTicket));
   }
 

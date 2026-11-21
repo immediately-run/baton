@@ -127,9 +127,21 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   holder's acceptance of a grant, and the per-repository sync opt-in of a key granted on several
   repositories (its span), are not built
   ([proposal](../proposals/checks-and-executors.md)).
-- **R-BTN-117 (registration tokens).** Not built. The design, an owner-minted token with which
-  a session that has no key registers one, is in
-  [the proposal page](../proposals/checks-and-executors.md).
+- **R-BTN-117 (registration tokens).** An owner on `approvers.members` (R-BTN-188) mints a
+  repository-scoped token in their tenant. Its only role is `runner`. It has at most 100 uses
+  (default 1), and a lifetime of at most 30 days (default 7). It is returned once as
+  `brt_<id>_<secret>` with a 256-bit secret; Baton keeps only its SHA-256 and scope.
+  - A registration creates an SSH or API-key runner (R-BTN-159). Its grant is accepted on
+    creation and takes its repository, capabilities and tier ceiling from the token; it never
+    includes `human-operator`. A name already held by a live credential is a conflict. A
+    holder authenticating with the current key can re-key its own name under the same token
+    without using another registration.
+  - The registered key expires after its `grant_ttl` (default: the token TTL), seven days
+    without an authenticated call, or revocation of the token, whichever comes first.
+    Retirement exhausts the repository's tokens without revoking the keys they registered
+    (R-BTN-47).
+  - Each registration is an `admin` event. The eleventh registration for a token within a
+    day records `baton.token-burst`.
 
 ### 8.3 The runner
 

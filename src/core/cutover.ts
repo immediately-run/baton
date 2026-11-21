@@ -118,9 +118,10 @@ export class Cutover {
    *  it — a runner whose session name is the legacy runner's (the claim note's holder). When the
    *  note named no holder (`item-<id>`), any session may ask; the owner's confirmation is the
    *  gate either way. The claim does not move here. */
-  adopt(runnerId: number, body: unknown) {
+  adopt(runnerId: number, body: unknown, authorize?: (repository: string) => void) {
     const item = (body as { ticket_id?: unknown } | null)?.ticket_id;
     if (typeof item !== 'string' || !TICKET_ID.test(item)) throw new BatonError('invalid-params', 'ticket_id: must be a ticket id, <repository>:<id>');
+    authorize?.(repositoryOf(item));
     if (this.cutoverAt(repositoryOf(item)) == null) throw new BatonError('not-cut-over', 'adoption follows the cutover import');
     const c = this.rows<{ id: number; nonce: string; session_name: string }>(
       `SELECT c.id, c.nonce, w.session_name FROM claims c JOIN runners w ON w.id = c.runner_id

@@ -35,6 +35,8 @@ export interface Section {
 export const SECTIONS: readonly Section[] = [
   { table: 'repositories', order: 'id' },
   { table: 'repository_owners', order: 'repository_id, fingerprint' },
+  { table: 'registration_tokens', order: 'id' },
+  { table: 'token_registrations', order: 'token_id, at' },
   { table: 'credentials', order: 'id' },
   { table: 'sync_keys', order: 'fingerprint' },
   { table: 'runner_grants', order: 'credential_id, repository_id' },
