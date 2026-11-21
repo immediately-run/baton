@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { answerPlan } from '../../cli/baton.mjs';
-import { claimItem, course, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, tick, withCore } from '../helpers';
+import { claimItem, course, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, setHumanKeys, tick, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-04T09:00:00Z');
@@ -95,6 +95,22 @@ it('the owner answers with baton decision answer: the same arrival through the a
   expect(res.json).toMatchObject({ ok: true, reached: 'adjudicated', option: 'ship' });
   expect(await station('C')).toEqual([{ station: 'adjudicated', next_leg: 'merge', next_source: 'baton' }]);
   expect(await answerRow('C')).toEqual([{ option: 'ship', answered_by: `owner:${owner.fingerprint}` }]);
+});
+
+it('under protected a human key can answer the person leg, but the sync and ordinary owner cannot', async () => {
+  atDecide('P');
+  expect((await git.post()).status).toBe(200);
+  const human = await makeKey('ssh-ed25519', 'human');
+  await setHumanKeys(human);
+  expect((await keyCall(owner, '/v1/owner/docs/owners', { public_key: human.publicKey })).status).toBe(200);
+  expect((await keyCall(owner, '/v1/owner/docs/policy', { base_version: 1, preset: 'protected' }, 'PUT')).status).toBe(200);
+
+  expect((await git.post({ attestations: [decision('P', 'ship', 'f'.padEnd(40, '1'))] })).status).toBe(200);
+  expect(await station('P')).toEqual([{ station: 'reviewed', next_leg: 'decide', next_source: 'marker' }]);
+  const p = answerPlan('docs:P', 'ship');
+  expect((await keyCall(owner, p.path, p.body)).json.code).toBe('forbidden');
+  expect((await keyCall(human, p.path, p.body)).json).toMatchObject({ ok: true, reached: 'adjudicated' });
+  expect(await answerRow('P')).toEqual([{ option: 'ship', answered_by: `human:${human.fingerprint}` }]);
 });
 
 it('an answer naming an option the question lacks: invalid-params from the CLI, dropped answer-invalid from the sync', async () => {

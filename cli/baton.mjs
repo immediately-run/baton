@@ -59,8 +59,8 @@
 //   baton owner -i KEY policy show REPO                     — the signed read (R-BTN-189), as JSON
 //   baton owner -i KEY policy diff REPO FILE                — the knobs FILE's document would change
 //   baton owner -i KEY policy log REPO [--after N]          — the append-only change log
-//   baton owner -i KEY policy set REPO FILE --base N        — a compare-and-set on the version you read
-//   baton owner -i KEY policy apply REPO PRESET --base N    — cooperative | protected | protected-signed | plain-git
+//   baton owner -i KEY policy set REPO FILE --base N [--dry-run] — compare-and-set on the version you read
+//   baton owner -i KEY policy apply REPO PRESET --base N [--dry-run] — preview policy effects without writing
 //   baton owner -i KEY policy floor add REPO NAME --guarantees a,b [--remove-by human|owner]
 //   baton owner -i KEY policy floor remove REPO NAME        (R-BTN-189: needs the floor's remove_by and approvers.policy)
 //   baton owner -i KEY bar REPO --course C|'*' --tag T [--legs a,b] --applies claim|claim+advance
@@ -1048,7 +1048,7 @@ async function policyMain(argv) {
     return 0;
   }
   if (sub === 'set' || sub === 'apply') {
-    const { flags, positional } = parseArgs(rest, [], ['base', 'identity', 'url'], 2);
+    const { flags, positional } = parseArgs(rest, ['dry-run'], ['base', 'identity', 'url'], 2);
     // B-121: with a home in force the repository may be omitted — one positional is the file or
     // preset, the named repository (two positionals) always winning over the home.
     const fromHome = home?.repository != null && positional.length === 1;
@@ -1059,6 +1059,7 @@ async function policyMain(argv) {
     // so a concurrent change is a `conflict` the operator sees, never one this overwrites.
     const base = need(baseOf(flags.base), '--base N (the version your change builds on — `baton owner policy show` names it; a stale one answers conflict)');
     const body = sub === 'apply' ? { base_version: base, preset: what } : { base_version: base, policy: JSON.parse(readFileSync(what, 'utf8')) };
+    if (flags['dry-run']) body.dry_run = true;
     const out = await request('PUT', `/v1/owner/${encodeURIComponent(repo)}/policy`, body);
     write(JSON.stringify(out.json));
     return out.status >= 200 && out.status < 300 ? 0 : 1;

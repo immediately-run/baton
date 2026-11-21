@@ -324,6 +324,25 @@ describe('S-BTN-190 guarantees and floors', () => {
     const claim = await claimAsRunner();
     expect(claim.json.ticket_id).toBe('ops:R3-9001');
   });
+
+  it('a dry run reports a newly stale trusted runner pin without invalidating it', async () => {
+    await protectedSigned();
+    const { version, hash, policy_json } = (await rows<{ version: number; hash: string; policy_json: string }>(
+      'SELECT version, hash, policy_json FROM repository_policies WHERE repository_id = ? ORDER BY version DESC LIMIT 1', 'ops'))[0];
+    await rows('UPDATE runner_grants SET trust_level = ? WHERE credential_id = ? AND repository_id = ?', 'trusted', runnerKey.fingerprint, 'ops');
+    await runnerBeat('runner-secret', { policy_pins: [{ repository: 'ops', hash }] });
+    const pins = await rows<{ runner_id: number }>('SELECT runner_id FROM policy_pins WHERE repository_id = ?', 'ops');
+    expect(pins).toHaveLength(1);
+    const path = '/v1/owner/ops/policy';
+    const current = JSON.parse(policy_json);
+    const candidate = { base_version: version, policy: { ...current, paths: { ...current.paths, protected: ['spec/**'] } } };
+    const dry = await as(human, path, { ...candidate, dry_run: true }, 'PUT');
+    expect(dry.status).toBe(200);
+    expect(dry.json.stops.runners).toEqual([pins[0].runner_id]);
+    expect(await withCore((c) => c.policies.pinDiffers(pins[0].runner_id, 'ops'))).toBe(false);
+    expect((await as(human, path, candidate, 'PUT')).status).toBe(200);
+    expect(await withCore((c) => c.policies.pinDiffers(pins[0].runner_id, 'ops'))).toBe(true);
+  });
 });
 
 /** The runner claims whatever ops offers. */

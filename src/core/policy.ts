@@ -561,6 +561,10 @@ const FLOOR_NAME = /^[a-z][a-z0-9-]{0,39}$/;
 /** A protection report feeds `no-runner-lands` this long (R-BTN-180). */
 export const PROTECTION_WINDOW_MS = 24 * 3_600_000;
 
+function pinMismatch(pin: { hash: string; floors_hash?: string | null }, hash: string, floorsHash: string | null): boolean {
+  return pin.hash !== hash || (pin.floors_hash != null && pin.floors_hash !== floorsHash);
+}
+
 export class Policies {
   /** Baton's own callback: a floored guarantee broke on `repository`, and every running claim
    *  on a ticket that reaches it is released `released:floor` (R-BTN-189) — the claims' half
@@ -732,14 +736,41 @@ export class Policies {
 
   // ── the change (R-BTN-188, R-BTN-189) ──────────────────────────────────────────────────
 
-  /** `PUT /v1/owner/{repository}/policy {base_version, policy | preset}` — in the caller's one
+  /** Compute the trust settings the change clears, without touching their rows. */
+  private trustToClear(repository: string, before: PolicyDocument, after: PolicyDocument, facts: ApproverFacts) {
+    const ids = (table: 'runner_grants' | 'couriers') => this.rows<{ credential_id: string; trust_set_by: string }>(
+      `SELECT DISTINCT credential_id, trust_set_by FROM ${table} WHERE repository_id = ? AND trust_set_by IS NOT NULL${table === 'runner_grants' ? ' AND revoked_at IS NULL' : ''} ORDER BY credential_id`, repository)
+      .filter((r) => !this.entryMatches(after.approvers.trust, ownerOfTrustSet(r.trust_set_by), facts, after.human_key))
+      .map((r) => r.credential_id);
+    return !humanOnlyList(before.approvers.trust, facts.humans) && humanOnlyList(after.approvers.trust, facts.humans)
+      ? { grants: ids('runner_grants'), couriers: [...new Set(ids('couriers'))] }
+      : { grants: [], couriers: [] };
+  }
+
+  private newlyUnpinned(repository: string, before: { hash: string; policy: PolicyDocument }, after: { hash: string; policy: PolicyDocument }, demoted: ReadonlySet<string>): number[] {
+    const floorsHash = this.floorsHashOf(this.floors(repository));
+    return this.rows<{ runner_id: number; credential_id: string; hash: string; floors_hash: string | null; trust_level: string | null; role: string | null }>(
+      `SELECT p.runner_id, r.credential_id, p.hash, p.floors_hash, g.trust_level, g.role FROM policy_pins p
+       JOIN runners r ON r.id = p.runner_id JOIN runner_grants g ON g.credential_id = r.credential_id AND g.repository_id = p.repository_id
+       WHERE p.repository_id = ? AND g.revoked_at IS NULL ORDER BY p.runner_id`, repository)
+      .filter((p) => {
+        if (demoted.has(p.credential_id) || p.role === 'protection-checker') return false;
+        const stopped = (version: typeof before) => (p.trust_level ?? version.policy.grants.default_trust) === 'trusted' && pinMismatch(p, version.hash, floorsHash);
+        return !stopped(before) && stopped(after);
+      })
+      .map((p) => p.runner_id);
+  }
+
+  /** `PUT /v1/owner/{repository}/policy {base_version, policy | preset, dry_run?}` — in the caller's one
    *  transaction: the compare-and-set on `base_version`, the approver check against the list in
    *  force, the satisfiable-list refusal, the floors re-checked against the new version, the
    *  trust clearing when `approvers.trust` becomes human-only, and the append-only insert with
-   *  its `admin` event. `breakGlass` is BATON_HUMAN_KEYS' fingerprints (R-BTN-185). */
-  put(repository: string, input: unknown, forge: Forge, actor: { credential: string; label: string }, breakGlass: ReadonlySet<string>): { version: number; hash: string; changed: Knob[]; guarantees: Record<GuaranteeName, boolean> } {
+   *  its `admin` event. A dry run returns before the writes. `breakGlass` is BATON_HUMAN_KEYS'
+   *  fingerprints (R-BTN-185). */
+  put(repository: string, input: unknown, forge: Forge, actor: { credential: string; label: string }, breakGlass: ReadonlySet<string>) {
     const body: Record<string, unknown> = isObj(input) ? input : bad('body', 'must be a JSON object');
-    only(body, ['base_version', 'policy', 'preset'], 'body');
+    only(body, ['base_version', 'policy', 'preset', 'dry_run'], 'body');
+    if (Object.hasOwn(body, 'dry_run') && typeof body.dry_run !== 'boolean') bad('dry_run', 'must be true or false');
     if (!Number.isSafeInteger(body.base_version) || (body.base_version as number) < 1) bad('base_version', 'must be the version the change builds on');
     if (body.policy !== undefined && body.preset !== undefined) bad('body', 'carries either a policy or a preset, not both');
     const cur = this.current(repository);
@@ -749,7 +780,7 @@ export class Policies {
     let doc: PolicyDocument;
     let preset: string | null = null;
     if (body.preset !== undefined) {
-      if (typeof body.preset !== 'string' || !(body.preset in PRESETS)) bad('preset', `must be one of ${Object.keys(PRESETS).join(', ')}`);
+      if (typeof body.preset !== 'string' || !Object.hasOwn(PRESETS, body.preset)) bad('preset', `must be one of ${Object.keys(PRESETS).join(', ')}`);
       preset = body.preset as string;
       doc = policyForPreset(body.preset as PresetName, forge);
     } else {
@@ -824,37 +855,36 @@ export class Policies {
     // R-BTN-188: on `approvers.trust` becoming human-only, every trust setting made by a
     // credential the new list does not admit is cleared — untrusted, roles dropped, domains and
     // families null.
-    const wasHumanOnly = humanOnlyList(cur.policy.approvers.trust, factsNow.humans);
-    const nowHumanOnly = humanOnlyList(doc.approvers.trust, factsNow.humans);
-    if (!wasHumanOnly && nowHumanOnly) {
-      const admits = (by: string) => this.entryMatches(doc.approvers.trust, by, factsNow, doc.human_key);
-      const cleared: string[] = [];
-      for (const t of this.rows<{ credential_id: string; trust_set_by: string | null }>(
-        'SELECT credential_id, trust_set_by FROM runner_grants WHERE repository_id = ? AND revoked_at IS NULL AND trust_set_by IS NOT NULL', repository)) {
-        if (!admits(ownerOfTrustSet(t.trust_set_by ?? ''))) {
-          this.exec('UPDATE runner_grants SET trust_level = ?, trust_domain = NULL, model_family = NULL, role = NULL WHERE credential_id = ? AND repository_id = ?', 'untrusted', t.credential_id, repository);
-          cleared.push(`grant:${t.credential_id}`);
-        }
-      }
-      for (const t of this.rows<{ credential_id: string; trust_set_by: string | null }>(
-        'SELECT credential_id, trust_set_by FROM couriers WHERE repository_id = ? AND trust_set_by IS NOT NULL', repository)) {
-        if (!admits(ownerOfTrustSet(t.trust_set_by ?? ''))) {
-          this.exec('UPDATE couriers SET trust_level = ?, trust_domain = NULL WHERE credential_id = ? AND repository_id = ?', 'untrusted', t.credential_id, repository);
-          cleared.push(`courier:${t.credential_id}`);
-        }
-      }
-      if (cleared.length) logEvent(this.c.store, this.c.now(), 'admin', actor.label, { act: 'policy-trust-cleared', repository, cleared }, null, null, repository);
-    }
-
-    const version = cur.version + 1;
+    const trust = this.trustToClear(repository, cur.policy, doc, factsNow);
+    const cleared = [...trust.grants.map((id) => `grant:${id}`), ...trust.couriers.map((id) => `courier:${id}`)];
     const hash = hashOfDocument(doc);
     const changed = diffPolicies(cur.policy, doc);
+    const guarantees = guaranteesOf(doc, { protection: this.protectionOk(repository), humanKeys: factsNow.humans });
+    if (body.dry_run === true) {
+      const runners = this.newlyUnpinned(repository, cur, { hash, policy: doc }, new Set(trust.grants));
+      // Core cannot predict effects of gates it doesn't enforce. Name those gaps rather than
+      // guessing which legs merge by their names or whether external checks would pass.
+      return {
+        changed, guarantees, stops: { grants: cleared, runners, legs: [], tickets: [], unreached: [] },
+        not_evaluated: ['outbox-delivery', 'leg-attestation-requirements', 'trusted-merge', 'repos.unlisted'],
+      };
+    }
+
+    for (const id of trust.grants) {
+      this.exec('UPDATE runner_grants SET trust_level = ?, trust_domain = NULL, model_family = NULL, role = NULL WHERE credential_id = ? AND repository_id = ?', 'untrusted', id, repository);
+    }
+    for (const id of trust.couriers) {
+      this.exec('UPDATE couriers SET trust_level = ?, trust_domain = NULL WHERE credential_id = ? AND repository_id = ?', 'untrusted', id, repository);
+    }
+    if (cleared.length) logEvent(this.c.store, this.c.now(), 'admin', actor.label, { act: 'policy-trust-cleared', repository, cleared }, null, null, repository);
+
+    const version = cur.version + 1;
     this.exec('INSERT INTO repository_policies (repository_id, version, policy_json, hash, previous_hash, changed_by, approver, preset, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       repository, version, canonicalJson(doc), hash, cur.hash, actor.label, approver, preset, this.c.now());
     logEvent(this.c.store, this.c.now(), 'admin', actor.label, { act: 'policy-changed', repository, from: cur.version, to: version, changed }, null, null, repository);
     // The answer's guarantees are the enforced state of the new version — the protection report
     // counted, as the signed read counts it (the floors above stayed policy-only, R-BTN-189).
-    return { version, hash, changed, guarantees: guaranteesOf(doc, { protection: this.protectionOk(repository), humanKeys: factsNow.humans }) };
+    return { version, hash, changed, guarantees };
   }
 
   /** R-BTN-181's store half: a `service:` writer the policy names must hold no owner, runner or
@@ -1037,7 +1067,7 @@ export class Policies {
       this.exec('INSERT INTO policy_pins (runner_id, repository_id, hash, floors_hash, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (runner_id, repository_id) DO UPDATE SET hash = excluded.hash, floors_hash = excluded.floors_hash, at = excluded.at',
         runnerId, pin.repository, pin.hash, pin.floors_hash ?? null, this.c.now());
       const floorsHash = cur ? this.floorsHashOf(this.floors(pin.repository)) : null;
-      if (cur && (cur.hash !== pin.hash || (pin.floors_hash != null && pin.floors_hash !== floorsHash))) {
+      if (cur && pinMismatch(pin, cur.hash, floorsHash)) {
         differed.push(pin.repository);
         this.openCondition(pin.repository, 'baton.policy-unpinned', `runner:${runnerId}`, { pinned: pin.hash, current: cur.hash, ...(pin.floors_hash != null && pin.floors_hash !== floorsHash ? { pinned_floors: pin.floors_hash, current_floors: floorsHash } : {}) });
       } else {
@@ -1059,7 +1089,7 @@ export class Policies {
     const trusted = this.rows<{ trust_level: string | null }>(
       'SELECT trust_level FROM runner_grants WHERE credential_id = (SELECT credential_id FROM runners WHERE id = ?) AND repository_id = ? AND revoked_at IS NULL', runnerId, repository)[0];
     if (!(trusted != null && (trusted.trust_level ?? cur.policy?.grants.default_trust ?? 'untrusted') === 'trusted')) return false;
-    return cur.hash !== pin.hash || (pin.floors_hash != null && pin.floors_hash !== this.floorsHashOf(this.floors(repository)));
+    return pinMismatch(pin, cur.hash, this.floorsHashOf(this.floors(repository)));
   }
 
   /** Whether the runner's credential is the repository's protection checker — the one claimant

@@ -695,6 +695,7 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       await expect(run(['log', 'ops', '--after', '2'])).resolves.toBe(0);
       await expect(run(['set', 'ops', policyFile, '--base', '4'])).resolves.toBe(0);
       await expect(run(['apply', 'ops', 'protected', '--base', '5'])).resolves.toBe(0);
+      await expect(run(['apply', 'ops', 'protected', '--base', '5', '--dry-run'])).resolves.toBe(0);
       await expect(run(['floor', 'add', 'ops', 'fieldhouse', '--guarantees', 'no-runner-lands,human-gates', '--remove-by', 'owner'])).resolves.toBe(0);
       await expect(run(['floor', 'remove', 'ops', 'fieldhouse'])).resolves.toBe(0);
       // Round 1, findings 9 and 10: `set` without --base refuses rather than fetch-and-overwrite
@@ -712,6 +713,7 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       'GET /v1/owner/ops/policy/log?after=2',
       'PUT /v1/owner/ops/policy',
       'PUT /v1/owner/ops/policy',
+      'PUT /v1/owner/ops/policy',
       'POST /v1/owner/ops/policy/floors',
       'POST /v1/owner/ops/policy/floors',
       'GET /v1/repositories/ops/policy',
@@ -719,8 +721,9 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
     // The compare-and-set builds on the version the operator named, never one the CLI fetched.
     expect(requests[3].body).toEqual({ base_version: 4, policy: { ...READ.policy, human_key: 'hardware' } });
     expect(requests[4].body).toEqual({ base_version: 5, preset: 'protected' });
-    expect(requests[5].body).toEqual({ name: 'fieldhouse', guarantees: ['no-runner-lands', 'human-gates'], remove_by: 'owner' });
-    expect(requests[6].body).toEqual({ name: 'fieldhouse', remove: true, confirm: true });
+    expect(requests[5].body).toEqual({ base_version: 5, preset: 'protected', dry_run: true });
+    expect(requests[6].body).toEqual({ name: 'fieldhouse', guarantees: ['no-runner-lands', 'human-gates'], remove_by: 'owner' });
+    expect(requests[7].body).toEqual({ name: 'fieldhouse', remove: true, confirm: true });
     // diff printed the one knob; show printed the read it verified the fields of.
     expect(outs.join('')).toContain('human_key');
   });
