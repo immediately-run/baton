@@ -107,11 +107,12 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     - An arrival whose `ref` Baton has applied for this ticket is accepted and moves nothing.
     - An arrival that fails only because a claim is active or Baton holds the ticket is kept with
       its `ref` and applied when the hold ends, if it still meets every other condition — except
-      the sync's `std:arrival@1`, which is recorded `arrival-unapplied` and not kept: the facts may
-      change under a claim, so the next sync posts it again if its fact still holds.
+      the sync's `std:arrival@1` meeting an active claim, which is recorded `arrival-unapplied`
+      (once per `ref`) and not kept: the facts may change under a claim, so the next sync posts it
+      again if its fact still holds. One meeting only a hold is kept and applied as above.
     - A sync `std:arrival@1` on a fact leg with no runs left (R-BTN-63) is kept as a piece of `fact`
       evidence (below), not applied.
-    - Any other arrival is kept as evidence: Baton logs an `arrival-unapplied` history row with
+    - Any other arrival is recorded for people, not as outside-work evidence: Baton logs an `arrival-unapplied` history row with
       the attestation and its own position, shown on the ticket's view (§11), and raises nothing.
       The owner's commands that would settle the disagreement, a route and adopt, are not built.
   - **Evidence and the reconcile leg.** Baton keeps each `std:evidence@1` the policy admits
@@ -124,8 +125,11 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     leg is not a person leg, a suspended leg, nor one an owner's route, a retry's `exhausted` leg
     or an expiry placed (R-BTN-83). It replaces the queued leg, and Baton records the displaced leg
     with the station it was queued at. A reconcile leg already queued at that station keeps the
-    record and only gains the evidence; any station change the reconcile leg's own finish did not
-    make clears the record, and the next queueing records afresh. History row `reconcile-queued`.
+    record and only gains the evidence; any change of the ticket's station or queued leg that the
+    reconcile leg's own queueing or finish did not make (a fact arrival at the same station
+    included) clears the record, and the next queueing records afresh. A reconcile leg with no
+    runs left, or ended `exhausted` by its retries, puts the displaced leg back and clears the
+    record. History row `reconcile-queued`.
     The reconcile leg runs like any leg. Its finishing position is one of its outcomes (R-BTN-69):
     `unchanged` at the station it left, with the displaced leg as `next` and no other; or a station
     of its `reconciles.to`, the one it left included, with that entry's `next`. A conclusion naming

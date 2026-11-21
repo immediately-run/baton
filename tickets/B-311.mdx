@@ -70,12 +70,13 @@ outside Baton* and *The reconcile leg*.
      are dropped and the board accepted), and the policy admits the writer;
    - a fact leg leaves Baton's station;
    - `reached` is its outcome;
-   - no claim is active and nothing holds the ticket (otherwise defer).
+   - no claim is active (otherwise record `arrival-unapplied` once per `ref` and drop it, below)
+     and nothing holds the ticket (otherwise keep it and apply it when the hold lifts).
 
    Apply once per attestation `ref`, queue `next` (per verdict on a `pr-verdict` leg), and log
    `fact-arrival`. A hand arrival counts as a run of the fact leg itself (R-BTN-63). A sync
-   arrival meeting a claim or hold is recorded `arrival-unapplied` and dropped, not deferred: the
-   next sync posts it again if its fact still holds. A sync arrival on a fact leg with no runs left
+   arrival meeting a claim is dropped, not deferred: the next sync posts it again if its fact
+   still holds. A sync arrival on a fact leg with no runs left
    is kept as `fact` evidence. An arrival refused only because the policy admits
    no `sync` writer is kept as evidence (`fact`, or `merged-early` for `pr-merged`).
 3. **`std:evidence@1` and the reconcile leg.**
@@ -85,17 +86,21 @@ outside Baton* and *The reconcile leg*.
    - In every transaction that changes a ticket's station, queued leg, claim, hold or evidence,
      apply R-BTN-39's rule: queue the reconcile leg leaving the station (runs left; never in place
      of a person, suspended, routed, exhausted or expired leg), and record the displaced leg with
-     its station. A reconcile leg already queued at that station keeps the record. Any station
-     change the reconcile leg's own finish didn't make clears it. Log `reconcile-queued`.
+     its station. A reconcile leg already queued at that station keeps the record. Any change of
+     station or queued leg the reconcile leg didn't make clears it, including a fact arrival at
+     the same station. An exhausted reconcile leg puts the displaced leg back. Log
+     `reconcile-queued`.
    - Accept as its finishing position only `unchanged` (the station it left, `next` = the
      displaced leg) or a `reconciles.to` station with its mapped `next`. That position marks the claim's evidence
      weighed and clears the record. A claim ending any other way leaves both.
    - Evidence the rule can't hand on waits, and the ticket read lists it (§14 `evidence`). The
      attestations read lists fact arrivals and evidence.
 4. **The claim answer** (§9.1) for a reconcile leg carries `evidence: [{ref, kind}]` and
-   `displaced`. The observation (§4.3) serves the sync `runner_pushers` and `verdict_refs`. A
-   review leg's finishing position names its verdict comment's URL as `ref` (R-BTN-83); the
-   standard review stubs must report it.
+   `displaced`. The observation (§4.3) serves the sync `runner_pushers`, `verdict_refs`,
+   `claim_prs` and `claim_shas`, all from the evidence claims reported (R-BTN-8's
+   `ended_at_sha`, the leg outputs and the PR URLs), and each position's `changed_at`. The
+   standard review stubs must report their verdict comment's URL even when the claim is released
+   after posting it.
 
 ### Sync (`src/defaults/`)
 
@@ -109,15 +114,15 @@ outside Baton* and *The reconcile leg*.
    carry no attestations today), and pass `ctx.positions` (`StationCtx` doesn't carry it). A
    machine-key sync posts none.
    - No `pr-opened`, `pr-verdict` or `pr-pushed` while `runner_pushers` is NULL or `[]`.
-   - `pr-opened`: a PR whose head carries no claim's trailer, and not authored by a
-     `runner_pushers` login.
-   - `pr-verdict`: ignore `runner_pushers` logins, the PR's author, the head's pushers and the
-     `verdict_refs` Baton served. Honour `arrives.verdict`. No condition on the test gate (open
-     world, values #13).
+   - `pr-opened`: a PR not in `claim_prs` and not authored by a `runner_pushers` login.
+   - `pr-verdict`: the head's latest verdict, newer than the position's `changed_at`, when it is
+     a hand verdict (not `runner_pushers`, the PR's author, the head's pushers, or a
+     `verdict_refs` URL). One per head. Honour `arrives.verdict`. No condition on the test gate
+     (open world, values #13).
    - `pr-pushed`: after the latest changes verdict (none without one), by no `runner_pushers` login,
-     with no claim trailer, changing more than the merged-in base.
-   - `pr-merged`: at least one PR of the ticket's, every one merged, none open, none by a `merge`
-     leg.
+     of no commit in `claim_shas`, changing more than the merged-in base.
+   - `pr-merged`: in each repository the ticket's PRs map, a merged PR and none open (PRs closed
+     unmerged ignored), none by a `merge` leg. A partial merge is `merged-early`.
 7. **Evidence.**
    - Post `merged-early` for a `pr-merged` fact that no fact leg can take.
    - Post `mention` for pushers' PRs (home and `repos:`) merged between the times Baton accepted
@@ -139,8 +144,7 @@ outside Baton* and *The reconcile leg*.
        unchecked `at merged` fails;
      - on `create-pr`, `delivered <sha|PR,…>`, checked on the default branch as B-257's
        `delivered` is. Every
-     reconcile leg and every cyclic fact leg has `max_runs`, so `baton test-course` passes the
-     cycle rule.
+     cycle contains a leg with `max_runs` (R-BTN-69), so `baton test-course` passes.
    - Its instructions file (`legs/reconcile.md`) says what the agent reads and what it may not
      decide.
 
@@ -195,9 +199,10 @@ New inputs, each read by the sync and judged by Baton:
 - **The sync finds, the core places (R-BTN-35, R-BTN-39, R-BTN-50).** The sync never sets a
   position. Baton applies arrivals and reconcile legs' conclusions along edges of the ticket's own
   course.
-- **A claimed or held ticket is untouched.** Arrivals and queueing wait for the claim or hold to
-  end. Archive and `status: done` close as before. Pinned, person and suspended legs are never
-  displaced.
+- **A claimed or held ticket is untouched.** Queueing waits for the claim or hold to end. A sync
+  arrival under a claim is dropped and posted again by the next sync; one under a hold is kept
+  and applied when it lifts. Archive and `status: done` close as before. Pinned, person and
+  suspended legs are never displaced.
 - **A partial reading is never posted (R-BTN-96).**
 - **Filter fields only (R-BTN-33).** Evidence is a `ref` and a `kind`; no title or message is
   stored.

@@ -120,16 +120,18 @@ its fact. Its `from` list is the whole of what that hand act can do:
 - **A runner's act is never a hand act.** No hand-opened PR, review or push counts while the
   repository's `runner_pushers` is unset. Once it's set, these don't count:
   - PRs, verdicts and pushes by those logins;
-  - PRs or pushes carrying a claim's trailer;
-  - verdicts by the PR's author or a pusher of its head;
-  - any verdict a claim of the ticket posted.
+  - PRs, commits and verdicts Baton's record shows a claim of the ticket made;
+  - verdicts by the PR's author or a pusher of its head.
 
-  A push counts only after a changes verdict. A hand merge needs at least one PR of the ticket's.
+  A hand verdict counts only if it is the head's latest verdict and newer than Baton's last move
+  of the ticket, so a runner's later review wins. A push counts only after a changes verdict. A
+  hand merge needs a merged PR in every repository the ticket names, and none open; a merge in only
+  some of them is evidence for the reconcile leg.
 - **A hand act is a run of its fact leg**, toward that leg's `max_runs`, not the runner leg's. Once
   a fact leg's runs are used up, a further hand act is kept as evidence for the reconcile leg.
-- **A hand act seen while a runner holds the ticket isn't kept.** The next sync looks again once
-  the claim ends, so a runner's own pushes and verdicts during its claim never land late as hand
-  acts.
+- **A hand act seen while a claim runs isn't kept.** The next sync looks again once the claim
+  ends, so a runner's own pushes and verdicts during its claim never land late as hand acts. A
+  hand act on a held ticket is kept and applied when the hold lifts.
 - **Only the sync's own board** (its sync key or the CI identity) carries hand acts and evidence.
   A runner's machine key can't.
 

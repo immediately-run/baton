@@ -142,7 +142,7 @@ here; every other cause is its rule's.
 | `GET /v1/owner/{repository}/policy/log` | owner | `?after=<version>` | `{versions: [{version, hash, previous_hash, changed_by, approver, preset?, at, changed[]}]}` | R-BTN-188 |
 | `POST /v1/human-keys` | a `human_only` key | `{public_key, signature}`, `signature` the new key's SSHSIG over its own public line; or `{fingerprint, revoke: true, confirm: true}` | `{ok: true}`; `conflict`; `unsatisfiable-approvers` | R-BTN-185, R-BTN-188 |
 | **Sync and forges** | | | | |
-| `POST /v1/sync/observation` | sync | an empty body, or `{release: <number>}` | §4.3's observation; a release `{released: <number>}` | R-BTN-11, R-BTN-62, R-BTN-126, R-BTN-139, R-BTN-140, R-BTN-150 |
+| `POST /v1/sync/observation` | sync | an empty body, or `{release: <number>}` | §4.3's observation; a release `{released: <number>}` | R-BTN-11, R-BTN-62, R-BTN-126, R-BTN-139, R-BTN-140, R-BTN-150, R-BTN-203 |
 | `POST /v1/sync/board` | sync | the board post (§4), with `legs_landed?: {count, tickets}` | `{ok: true}`; `head-moved`; `snapshot-rejected` for a held `force` post | R-BTN-11, R-BTN-147, R-BTN-149, R-BTN-190 |
 | `POST /v1/github/webhook` | the GitHub App, by `X-Hub-Signature-256` | a delivery | `204`; repeats and the sync's own events ignored | R-BTN-73 |
 | `POST /v1/forges/{repository}/notify` | a GitLab or Gitea notification, verified against `BATON_FORGE_SECRETS` | the notification | not built: `not-found`, or `too-large` over R-BTN-73's cap | R-BTN-95 |

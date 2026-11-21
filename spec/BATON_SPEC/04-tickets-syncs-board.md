@@ -237,10 +237,10 @@ numbers.
 
     | Kind | The fact | `ref` |
     |---|---|---|
-    | `pr-opened` | a PR of the ticket's, open, that no claim of the ticket opened (its head carries no claim's trailer, R-BTN-8) and no `runner_pushers` login authored | the PR's URL |
-    | `pr-verdict` | a verdict on the PR's head — of the kind `arrives.verdict` names, if it names one — by a pusher (R-BTN-139) who is none of the repository's `runner_pushers`, not the PR's author and not a pusher of its head, on a comment or review no claim of the ticket posted (each review leg's finishing position names its verdict's URL as `ref`, R-BTN-83, and Baton serves them, §4.3) | the review's or comment's URL |
-    | `pr-pushed` | a push to the PR after its latest changes verdict, by no `runner_pushers` login and carrying no claim's trailer, that changes more than the base merged in; none while the PR has no changes verdict | the head sha |
-    | `pr-merged` | at least one PR of the ticket's, every one merged, none open, none by a `merge` leg | the last merge commit |
+    | `pr-opened` | a PR of the ticket's, open, that no claim of the ticket opened (no PR its implement or create legs reported, served as `claim_prs`, §4.3) and no `runner_pushers` login authored | the PR's URL |
+    | `pr-verdict` | the latest verdict on a PR's head — of the kind `arrives.verdict` names, if it names one — when it is a hand verdict: by a pusher (R-BTN-139) who is none of the repository's `runner_pushers`, not the PR's author and not a pusher of its head, on no comment or review a claim of the ticket posted (`verdict_refs`, §4.3), and newer than Baton's last change of the ticket's position. A runner's verdict counts as the latest when it is newer. On a ticket with several PRs, every PR's latest verdict, one per head | the review's or comment's URL |
+    | `pr-pushed` | a push to the PR after its latest changes verdict, by no `runner_pushers` login and of no commit a claim of the ticket reported (`claim_shas`, §4.3), that changes more than the base merged in; none while the PR has no changes verdict | the head sha |
+    | `pr-merged` | in each repository the ticket's PRs map (its `prs:` and `repos:`), at least one PR merged and none open, PRs closed unmerged ignored, none merged by a `merge` leg; a merge in some but not all of them is `merged-early` evidence | the last merge commit |
 
     While `runner_pushers` is NULL or `[]`, no `pr-opened`, `pr-verdict` or `pr-pushed` is found:
     a runner's act cannot be told from a person's (Baton serves the logins with `positions`,
@@ -256,8 +256,8 @@ numbers.
       the home or a `repos:` repository — between the times Baton accepted the last head and handed
       out this observation, or in the message of a first-parent commit reaching the default branch
       between the last accepted head and the observation's head (§4.3). Not counted: a commit that changes only the ticket
-      paths or `.baton/`; a commit or PR carrying a claim's trailer (R-BTN-8) or on a branch any
-      course of the ticket maps (its own PRs and their merges); the commit that filed the ticket;
+      paths or `.baton/`; a commit a claim of the ticket reported (`claim_shas`) or a PR on a
+      branch any course of the ticket maps (its own PRs and their merges); the commit that filed the ticket;
       a commit or PR naming more than three ids. Not posted for a ticket at an end station.
 
     Only `ref` and `kind` are posted: titles and messages never are (R-BTN-33). Baton keeps each
@@ -280,8 +280,10 @@ numbers.
      check_app_id, provisional, positions, versions, legs, unconfirmed}`, before it reads
      anything else: Baton's head (null before the first post); a fresh observation number
      (R-BTN-62); the owner bars in force or scheduled (R-BTN-67); the trust inputs (R-BTN-139,
-     R-BTN-140), `runner_pushers` and `verdict_refs` (each live ticket's verdict URLs its review
-     legs reported) among them (R-BTN-203); the commits provisional block rows wait for (R-BTN-126); `positions`, every
+     R-BTN-140), and R-BTN-203's `runner_pushers`, `verdict_refs` (each live ticket's verdict
+     URLs its claims posted, from their evidence, R-BTN-8), `claim_prs` and `claim_shas` (the PRs
+     and commits its claims reported) among them; `positions` also carry each ticket's
+     `changed_at`, when Baton last changed its position; the commits provisional block rows wait for (R-BTN-126); `positions`, every
      live ticket's `{station, path_len, path, next_leg, running?}` from Baton's course history
      (R-BTN-39), a ticket absent from it being at its course's `start`; `versions`, each live
      ticket's last accepted version; `legs`, the runs claims finished with evidence, newest
