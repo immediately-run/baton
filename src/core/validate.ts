@@ -155,8 +155,6 @@ export interface Heartbeat {
   /** §12.8 (B-145, R-BTN-180): the protection checker's reports, one per repository; the core
    *  checks the caller is each repository's checker and refuses the rest per entry. */
   protection: { repository: string; matched: boolean; reading_hash: string }[];
-  /** §12.8 (B-145, R-BTN-189): the policy hash pins a trusted runner reports per repository. */
-  policy_pins: { repository: string; hash: string }[];
   /** R-BTN-113 (B-234): the running leg's session link, as the runner holds it. Shape-checked
    *  here only as a bounded string; the heartbeat drops one that fails the link rule (https, no
    *  userinfo, an allowlisted host) and logs it, never refusing the beat. */
@@ -292,7 +290,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     fenced: checkFenced(b.fenced),
     couriers: checkCouriers(b.couriers),
     protection: checkProtection(b.protection),
-    policy_pins: checkPolicyPins(b.policy_pins),
     session_url,
     session_urls,
     concurrency: clampConcurrency(b.concurrency),
@@ -1364,22 +1361,6 @@ export function checkProtection(v: unknown): { repository: string; matched: bool
       legs = { count: l.count as number, tickets: l.tickets as number };
     }
     return { repository: checkRepositoryId(e.repository, `protection[${i}].repository`), matched: e.matched as boolean, reading_hash: e.reading_hash as string, ...(legs ? { legs } : {}) };
-  });
-}
-
-/** §12.8 (B-145, R-BTN-189): the heartbeat's policy pins — `{repository, hash, floors_hash?}`:
- * the whole policy document's hash, and the floors' when the runner pins it (R-BTN-189 says a
- * trusted runner pins both). */
-export function checkPolicyPins(v: unknown): { repository: string; hash: string; floors_hash?: string }[] {
-  if (v === undefined) return [];
-  if (!Array.isArray(v) || v.length > 64) bad('policy_pins', 'must be a list of at most 64 pins');
-  return (v as unknown[]).map((x, i) => {
-    if (!isObj(x)) bad(`policy_pins[${i}]`, 'must be an object');
-    const e = x as Record<string, unknown>;
-    for (const k of Object.keys(e)) if (k !== 'repository' && k !== 'hash' && k !== 'floors_hash') bad(`policy_pins[${i}].${k}`, 'unknown field');
-    if (typeof e.hash !== 'string' || !/^[0-9a-f]{16,128}$/.test(e.hash)) bad(`policy_pins[${i}].hash`, 'must be the policy document’s SHA-256');
-    if (e.floors_hash !== undefined && (typeof e.floors_hash !== 'string' || !/^[0-9a-f]{64}$/.test(e.floors_hash))) bad(`policy_pins[${i}].floors_hash`, 'must be the floors’ SHA-256');
-    return { repository: checkRepositoryId(e.repository, `policy_pins[${i}].repository`), hash: e.hash as string, ...(e.floors_hash !== undefined ? { floors_hash: e.floors_hash as string } : {}) };
   });
 }
 

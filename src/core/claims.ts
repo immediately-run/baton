@@ -60,8 +60,7 @@ export interface Ctx {
   intake?: (repo: string, course: string) => 'open' | 'closed';
   /** R-BTN-108: a schema by id for a repository — the `std:` library's or the repository's. */
   schema?: (repo: string, id: string) => Schema | null;
-  /** §12.8 (B-145): the repository policies — the `floor` rule (R-BTN-189), the policy pins and
-   *  the hashes the claim response carries. */
+  /** §12.8 (B-145): the repository policies, including the `floor` rule (R-BTN-189). */
   policies?: import('./policy').Policies;
   /** A repository's forge, for the knobs that a `git` repository refuses (R-BTN-188). */
   forgeOf?: (repository: string) => import('./links').Forge;
@@ -315,11 +314,10 @@ export class Claims {
     return [...reached];
   }
 
-  /** R-BTN-189's rule `floor` and R-BTN-189's pins, at a claim and an advance: Baton itself
+  /** R-BTN-189's rule `floor`, at a claim and an advance: Baton itself
    *  refuses to offer or accept work on a ticket that reaches a repository whose floored
-   *  guarantee is broken, and a runner whose policy pin differs acts on nothing in the
-   *  repository — the protection checker exempt from both, for it keeps checking. */
-  private refuseStopped(ticketId: string, runner?: { id: number; credential_id: string }): void {
+   *  guarantee is broken, except for the protection checker, which keeps checking. */
+  private refuseStopped(ticketId: string, runner?: { credential_id: string }): void {
     const policies = this.c.policies;
     if (!policies) return;
     const home = repositoryOf(ticketId);
@@ -328,9 +326,6 @@ export class Claims {
         .flatMap((r) => policies.brokenUnderFloors(r).map((b) => ({ ...b, repository: r })))[0];
       if (broken) {
         throw new BatonError('not-eligible', `${ticketId}: the floor ${broken.floor} is broken on ${broken.repository} (${broken.guarantee}) (R-BTN-189)`, { rule: 'floor', rule_code: 'floor-broken', repository: broken.repository });
-      }
-      if (runner && policies.pinDiffers(runner.id, home)) {
-        throw new BatonError('not-eligible', `${ticketId}: this runner's policy pin differs from ${home}'s current policy (R-BTN-189)`, { rule: 'policy-pin', rule_code: 'policy-unpinned' });
       }
     }
   }
@@ -1356,13 +1351,12 @@ export class Claims {
     const handoff = this.rows<{ handoff_url: string | null }>('SELECT handoff_url FROM ticket_stations WHERE ticket_id = ?', c.ticket_id)[0]?.handoff_url ?? null;
     const previous = this.rows<{ id: number; status: string; end_reason: string | null; end_detail: string | null; ended_at: number | null; resume_json: string | null }>(
       `SELECT id, status, end_reason, end_detail, ended_at, resume_json FROM claims WHERE ticket_id = ? AND id < ? AND status != 'active' ORDER BY id DESC`, c.ticket_id, id);
-    // §12.8 (B-145): the policy facts of the claim's repository (R-BTN-189) and where state one
-    // leg hands the next lives (R-BTN-188's `leg_state` — B-148 reads it). B-182 (R-BTN-190): a
+    // §12.8 (B-145): where state one leg hands the next lives (R-BTN-188's `leg_state` —
+    // B-148 reads it). B-182 (R-BTN-190): a
     // `git` home's claimed ticket on a course that reads PR facts keeps its rounds in its PR's
     // conversation, on whichever forge holds the PR — the course's `facts` (R-BTN-134), as the
     // registry posted it, says whether it reads any.
     const repo = repositoryOf(c.ticket_id);
-    const policy = this.c.policies?.hashesFor(repo) ?? null;
     const cur = this.c.policies?.current(repo);
     const readsPrs = c.course_id != null && (this.rows<{ facts: string }>('SELECT facts FROM courses WHERE repository_id = ? AND id = ?', repo, c.course_id)[0]?.facts ?? '[]').includes('"prs"');
     const legState = cur && this.c.forgeOf ? legStateOf(cur.policy, this.c.forgeOf(repo), readsPrs) : null;
@@ -1375,7 +1369,6 @@ export class Claims {
     const brief = briefRow?.brief ? JSON.parse(briefRow.brief) as { signed: boolean; signer?: string; commit: string } : null;
     return {
       claim_id: c.id, ticket_id: c.ticket_id, course_id: c.course_id, course_version: courseVersion,
-      ...(policy ? { policy_hash: policy.policy_hash, guarantees_hash: policy.guarantees_hash, floors_hash: policy.floors_hash } : {}),
       ...(legState ? { leg_state: legState } : {}),
       ...(brief ? { brief } : {}),
       station: c.station, legs: c.offered_leg ? [c.offered_leg] : [], next: this.nextLegs(c.ticket_id, c.station),

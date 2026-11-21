@@ -453,10 +453,6 @@ export class RunnerApi {
         protectionRefused.push({ repository: report.repository, code: 'not-granted' });
       }
     }
-    // §12.8 (B-145, R-BTN-189): the policy pins a trusted runner reports — stored per
-    // repository, a differing one holding `baton.policy-unpinned` open (a pin from a grant not
-    // trusted on the repository drives nothing).
-    if (this.c.policies && hb.policy_pins.length) this.c.policies.recordPins(w.id, cred.id, hb.policy_pins, new Set(granted ?? []));
     if (!was?.live || rewrote) this.c.fleetChanged?.();
     const refused = hb.transcript_refusals;
     const unlinked = this.recordTranscripts(w.id, hb, now);
@@ -522,26 +518,12 @@ export class RunnerApi {
       mode: Object.fromEntries(this.rows<{ id: string; cutover_at: number | null }>('SELECT id, cutover_at FROM repositories WHERE retired_at IS NULL ORDER BY id')
         .map((r) => [r.id, r.cutover_at == null ? 'shadow' : 'cut-over'])),
       server_time: now,
-      // §12.8 (B-145, R-BTN-189): the policy facts of every repository the runner serves — a
-      // map, for a runner's grants and courses reach several.
-      ...(this.c.policies ? { policies: this.policyFacts(granted, hb) } : {}),
       ...(protectionRefused.length ? { protection_refused: protectionRefused } : {}),
       ...(sessionUrlDropped != null ? { session_url_dropped: sessionUrlDropped } : {}),
       ...(refused.length ? { transcripts_refused: refused } : {}),
       ...(refusedCouriers.length ? { refused_couriers: refusedCouriers } : {}),
       ...(unlinked.length ? { transcripts_unlinked: unlinked } : {}),
     };
-  }
-
-  /** §12.8 (B-145, R-BTN-189): the policy facts of the repositories this heartbeat's runner
-   *  serves — its grants', and a bearer's or seed key's the courses it declares. */
-  private policyFacts(granted: string[] | null, hb: Heartbeat): Record<string, { version: number; policy_hash: string; guarantees_hash: string; floors_hash: string }> {
-    const policies = this.c.policies!;
-    const repos = granted ?? [...new Set(hb.courses.map((c) => c.repository))];
-    return Object.fromEntries(repos
-      .map((repository) => [repository, policies.hashesFor(repository)] as const)
-      .filter(([, v]) => v != null)
-      .map(([repository, v]) => [repository, v!]));
   }
 
   /**

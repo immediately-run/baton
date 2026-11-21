@@ -13,9 +13,9 @@
 // export — nothing of either is in the code yet; the PR body says so. Runs on both hosts.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { call as hostCall } from '#host';
-import { cutover, course, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, setPolicySigningKey, syncCall, withCore } from '../helpers';
+import { cutover, course, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, syncCall, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
-import { COOPERATIVE, PLAIN_GIT, canonicalJson, legStateOf } from '../../src/core/policy';
+import { COOPERATIVE, PLAIN_GIT, legStateOf } from '../../src/core/policy';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-30T12:00:00Z');
@@ -24,9 +24,6 @@ let owner: TestKey;
 let human: TestKey;
 let breakGlass: TestKey;
 let checkerKey: TestKey;
-/** The tenant's Ed25519 key this test configured (BATON_SIGNING_KEY) — what a pinned reader holds. */
-let signingJwk: JsonWebKey;
-
 /** A signed call by an arbitrary key (the human one among them). */
 async function as(key: TestKey, path: string, body?: unknown, method?: string) {
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
@@ -40,8 +37,8 @@ async function policyRow(repository: string) {
     'SELECT version, hash, previous_hash, changed_by, approver, preset, policy_json FROM repository_policies WHERE repository_id = ? ORDER BY version DESC LIMIT 1', repository))[0];
 }
 
-/** The signed read of a repository's policy, verified: the signature covers the exact fields. */
-async function signedRead(repository: string, key: TestKey) {
+/** Read the repository policy as an authorized key. */
+async function policyRead(repository: string, key: TestKey) {
   return as(key, `/v1/repositories/${repository}/policy`);
 }
 
@@ -53,7 +50,6 @@ beforeEach(async () => {
   breakGlass = await makeKey('ssh-ed25519', 'break-glass');
   checkerKey = await makeKey('ssh-ed25519', 'checker');
   await setAdminKeys(admin);
-  signingJwk = await setPolicySigningKey();
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', forge: 'github', remote: 'ssh://git@github.com/immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', sync_keys: [] , owner_keys: [owner.publicKey] })).status).toBe(200);
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
   await syncCall('/v1/sync/board', payload(board.shas.A, null, board.states.A));
@@ -131,22 +127,17 @@ describe('S-BTN-189 the repository policy', () => {
       expect(applied.json.guarantees[g], g).toBe(true);
     }
 
-    // The signed read carries every field R-BTN-189 binds, and its Ed25519 signature covers
-    // exactly them: baton-policy@1 over the canonical JSON of the rest.
-    const read = await signedRead('ops', owner);
+    const read = await policyRead('ops', owner);
     expect(read.status).toBe(200);
-    expect(read.json.repository).toBe('ops');
-    expect(read.json.tenant).toBeTruthy();
-    expect(read.json.version).toBe(2);
-    expect(read.json.guarantees['no-runner-lands']).toBe(false);
-    expect(read.json.valid_until).toBe(read.json.at + 10 * 60_000);
-    expect(await verifyRead(read.json)).toBe(true);
-    const tampered = { ...read.json, repository: 'docs' };
-    expect(await verifyRead(tampered)).toBe(false);
+    expect(read.json).toEqual({
+      repository: 'ops', version: 2, hash: applied.json.hash,
+      policy: JSON.parse((await policyRow('ops')).policy_json),
+      guarantees: applied.json.guarantees, floors: [], check_app_id: null, at: T0, valid_until: T0,
+    });
 
     // no-runner-lands holds only once the protection checker reports a match (R-BTN-180).
     await checkerBeat('ops', true, 'r1');
-    const after = await signedRead('ops', owner);
+    const after = await policyRead('ops', owner);
     expect(after.json.guarantees['no-runner-lands']).toBe(true);
     expect(after.json.guarantees['control-paths-human']).toBe(true);
     expect(after.json.guarantees['tickets-approved']).toBe(true);
@@ -227,7 +218,7 @@ describe('S-BTN-189 the repository policy', () => {
     expect((await rows(`SELECT detail_json FROM events WHERE kind = 'admin' AND json_extract(detail_json, '$.act') = 'policy-trust-cleared'`)).length).toBe(1);
   });
 
-  it('a claim response carries the policy hashes and leg_state of its repository', async () => {
+  it('claims keep leg_state but no longer carry policy hashes (S-BTN-190)', async () => {
     const w = await makeKey('ssh-ed25519', 'w');
     expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: w.publicKey, hostname: 'w-host', capabilities: ['agent-venue'] })).status).toBe(200);
     const secret = 'secret-w';
@@ -237,17 +228,15 @@ describe('S-BTN-189 the repository policy', () => {
     }));
     expect(hb.status).toBe(200);
     const hbJson = (await hb.json()) as Record<string, any>;
-    expect(hbJson.policies.docs.version).toBe(1);
-    expect(hbJson.policies.docs.policy_hash).toMatch(/^[0-9a-f]{64}$/);
-    expect(hbJson.policies.docs.guarantees_hash).toMatch(/^[0-9a-f]{64}$/);
-    expect(hbJson.policies.docs.floors_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(hbJson).not.toHaveProperty('policies');
     const claim = await hostCall(await signedRequest(w, ORIGIN + '/v1/runner/claim', {
       created, method: 'POST', headers: { 'X-Runner-Secret': secret }, body: JSON.stringify({ request_id: 'req-s189-1' }),
     }));
     const claimJson = (await claim.json()) as Record<string, any>;
-    expect(claimJson.policy_hash).toBe(hbJson.policies.docs.policy_hash);
-    expect(claimJson.guarantees_hash).toBe(hbJson.policies.docs.guarantees_hash);
-    expect(claimJson.floors_hash).toBe(hbJson.policies.docs.floors_hash);
+    expect(claim.status).toBe(200);
+    for (const field of ['policy_hash', 'guarantees_hash', 'floors_hash']) {
+      expect(claimJson).not.toHaveProperty(field);
+    }
     expect(claimJson.leg_state).toBe('forge');
   });
 
@@ -353,18 +342,4 @@ async function checkerBeat(repository: string, matched: boolean, readingHash: st
   }));
   expect(res.status).toBe(200);
   return (await res.json()) as Record<string, any>;
-}
-
-/** Verify a signed policy read as a trusted runner does (R-BTN-189): Ed25519 by the tenant's
- *  signing key over `baton-policy@1\n` and the canonical JSON of the other fields — the key the
- *  test configured as BATON_SIGNING_KEY, a reader's pinned tenant key, never one the read
- *  carries. */
-async function verifyRead(read: Record<string, any>): Promise<boolean> {
-  const pub = await crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: signingJwk.x }, { name: 'Ed25519' }, false, ['verify']);
-  const { repository, tenant, version, hash, policy, guarantees, guarantees_hash, floors, floors_hash, at, valid_until, kid, signature } = read;
-  const fields = { repository, tenant, version, hash, policy, guarantees, guarantees_hash, floors, floors_hash, at, valid_until };
-  // The canonical JSON of the fields is what was signed — key order independent.
-  const sig = Uint8Array.from(atob(signature), (c) => c.charCodeAt(0));
-  if (!(await crypto.subtle.verify({ name: 'Ed25519' }, pub, sig, new TextEncoder().encode(`baton-policy@1\n${canonicalJson(fields)}`)))) return false;
-  return kid === (await sha256Of(String(signingJwk.x)));
 }
