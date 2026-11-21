@@ -71,9 +71,16 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   outside it open, review and merge PRs and edit tickets; it gates only its own state; so almost
   any transition may happen outside Baton, and its job is to detect it and place the ticket. A
   factory needing strictness gates the forge events on Baton's state or disables them. So the
-  standard courses' fact legs are broad (`merged-by-hand` from every non-end station, a hand review
+  standard courses' fact legs are broad (`merged-by-hand` from every station but the ends and `delivered`, a hand review
   on any head) and a reconcile leg may conclude any station the evidence shows, `merged`
-  included; values #13 states the stance.
+  included; values #13 states the stance. A third review round found runners' own pushes and PRs
+  counted as hand acts and deferred arrivals applied blind; a stale displaced-leg record after a
+  station change; `pr-merged` vacuous for a ticket with no PRs; the per-verdict `next` with no
+  shape in R-BTN-69; and unverified `at merged` conclusions. So runners' PRs and pushes are
+  excluded (none found while `runner_pushers` is unset), a sync arrival under a claim is dropped
+  and posted again by the next sync, the displaced record is cleared on any other station change,
+  `pr-merged` needs a PR, `arrives.next` takes one leg per verdict, a fact leg with no runs left
+  yields evidence, and a reconcile leg's merge or verdict is checked as the fact leg's would be.
 
 - **2026-11-20 — A session's reads outside `/v1/ui/*`, the strip's ready count, V1's paged lists (R-BTN-16, R-BTN-155, S-BTN-243, S-BTN-254).**
   Rules changed: R-BTN-16, R-BTN-155.

@@ -64,7 +64,7 @@ by a review.</Lede>
     ticket in the course graph accordingly (the owner, 2026-11-21). A course models those moves as
     edges of its own graph: fact legs for the hand acts it recognises, a reconcile leg for the
     evidence it must weigh ([BATON_SPEC §4.2](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2),
-    R-BTN-203). A factory that needs a course followed strictly gates the outside events
+    [R-BTN-203](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)). A factory that needs a course followed strictly gates the outside events
     themselves — PR merges, workflow triggers — on Baton's state at the forge, or disables those
     avenues so that only Baton's runners move tickets; it never asks Baton to stop them. The PR
-    courses model outside moves; the courses that commit to the default branch do not yet.
+    courses (`create-pr`, `review-pr`, `create-spec`) model outside moves; the others do not yet.

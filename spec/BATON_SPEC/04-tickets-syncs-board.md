@@ -227,8 +227,9 @@ numbers.
   strictly gates the outside events at the forge or disables them. The sync
   (the CLI, for every ticket whatever its course's station function, never the server) finds that
   work and attests it; Baton applies it by its own rules (R-BTN-39). Only a board posted with a
-  sync key or the registered CI identity (R-BTN-93) carries these attestations; one a runner's
-  machine key posts carries none, and Baton refuses any it carries.
+  sync key or the registered CI identity (R-BTN-93) carries these attestations. On a post with a
+  runner's machine key the CLI omits them, and Baton drops any it finds there without refusing the
+  board; a repository synced only by machine key detects no outside work.
   - **A leg done by hand is a fact leg.** A course names, as legs of their own, the hand acts it
     accepts: each a leg with `arrives` (R-BTN-69), one outcome, and its own `from`, so the course
     file says exactly where a hand act may move a ticket. The kinds, each read for the ticket's
@@ -236,13 +237,14 @@ numbers.
 
     | Kind | The fact | `ref` |
     |---|---|---|
-    | `pr-opened` | a PR of the ticket's, open | the PR's URL |
-    | `pr-verdict` | a verdict on the PR's head — of the kind `arrives.verdict` names, if it names one — by a pusher (R-BTN-139) who is none of the repository's `runner_pushers`, not the PR's author and not a pusher of its head, on a comment or review no claim of the ticket posted (Baton serves the URLs its review legs reported) | the review's or comment's URL |
-    | `pr-pushed` | a push to the PR after its latest changes verdict that changes more than the base merged in | the head sha |
-    | `pr-merged` | every PR of the ticket's merged, none open, none by a `merge` leg | the last merge commit |
+    | `pr-opened` | a PR of the ticket's, open, that no claim of the ticket opened (its head carries no claim's trailer, R-BTN-8) and no `runner_pushers` login authored | the PR's URL |
+    | `pr-verdict` | a verdict on the PR's head — of the kind `arrives.verdict` names, if it names one — by a pusher (R-BTN-139) who is none of the repository's `runner_pushers`, not the PR's author and not a pusher of its head, on a comment or review no claim of the ticket posted (each review leg's finishing position names its verdict's URL as `ref`, R-BTN-83, and Baton serves them, §4.3) | the review's or comment's URL |
+    | `pr-pushed` | a push to the PR after its latest changes verdict, by no `runner_pushers` login and carrying no claim's trailer, that changes more than the base merged in; none while the PR has no changes verdict | the head sha |
+    | `pr-merged` | at least one PR of the ticket's, every one merged, none open, none by a `merge` leg | the last merge commit |
 
-    While `runner_pushers` is NULL or `[]`, no `pr-verdict` is found: a runner's verdict cannot be
-    told from a person's (Baton serves the logins with `positions`, §4.3). The sync posts one
+    While `runner_pushers` is NULL or `[]`, no `pr-opened`, `pr-verdict` or `pr-pushed` is found:
+    a runner's act cannot be told from a person's (Baton serves the logins with `positions`,
+    §4.3). The sync posts one
     `std:arrival@1` as writer `sync` per fact that a fact leg leaving Baton's station takes, with
     that `ref` and the leg's `next` for it. A `pr-merged` no fact leg leaving the station takes is
     `merged-early` evidence (below); any other fact no fact leg takes is posted as nothing.
@@ -250,9 +252,10 @@ numbers.
     `std:evidence@1` (`{ref, kind}`) per piece of evidence that a ticket may have moved outside
     Baton in a way no fact leg takes:
     - `merged-early`: as above;
-    - `mention`: the ticket's id as a whole word in the title or body of a pusher's PR merged, or
-      the message of a first-parent commit reaching the default branch, between the last accepted
-      head and the observation's head (§4.3). Not counted: a commit that changes only the ticket
+    - `mention`: the ticket's id as a whole word in the title or body of a pusher's PR merged — in
+      the home or a `repos:` repository — between the times Baton accepted the last head and handed
+      out this observation, or in the message of a first-parent commit reaching the default branch
+      between the last accepted head and the observation's head (§4.3). Not counted: a commit that changes only the ticket
       paths or `.baton/`; a commit or PR carrying a claim's trailer (R-BTN-8) or on a branch any
       course of the ticket maps (its own PRs and their merges); the commit that filed the ticket;
       a commit or PR naming more than three ids. Not posted for a ticket at an end station.
@@ -273,11 +276,12 @@ numbers.
 ### 4.3 The sync run and the head
 
 - **The sync run.** A run checks out with full history (ancestry needs it), then:
-  1. `POST /v1/sync/observation` → `{sha, observation, bars, pushers, code_repos, repos_unlisted,
+  1. `POST /v1/sync/observation` → `{sha, observation, bars, pushers, runner_pushers, verdict_refs, code_repos, repos_unlisted,
      check_app_id, provisional, positions, versions, legs, unconfirmed}`, before it reads
      anything else: Baton's head (null before the first post); a fresh observation number
      (R-BTN-62); the owner bars in force or scheduled (R-BTN-67); the trust inputs (R-BTN-139,
-     R-BTN-140); the commits provisional block rows wait for (R-BTN-126); `positions`, every
+     R-BTN-140), `runner_pushers` and `verdict_refs` (each live ticket's verdict URLs its review
+     legs reported) among them (R-BTN-203); the commits provisional block rows wait for (R-BTN-126); `positions`, every
      live ticket's `{station, path_len, path, next_leg, running?}` from Baton's course history
      (R-BTN-39), a ticket absent from it being at its course's `start`; `versions`, each live
      ticket's last accepted version; `legs`, the runs claims finished with evidence, newest

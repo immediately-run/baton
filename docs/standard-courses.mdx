@@ -117,10 +117,19 @@ its fact. Its `from` list is the whole of what that hand act can do:
   `merged`, whatever the verdict and whether the test gate ran. A factory that needs the gate and
   the review enforced gates the merge at the forge (branch protection, a required check on Baton's
   state, Fieldhouse's forge gate) or narrows these `from` lists in its own course file.
-- **A runner's verdict is never a hand act.** No `pr-verdict` counts while the repository's
-  `runner_pushers` is unset. Once it's set, verdicts by those logins, by the PR's author, by a
-  pusher of its head, and any verdict a claim of the ticket posted don't count.
-- **A hand act is a run of its fact leg**, toward that leg's `max_runs`, not the runner leg's.
+- **A runner's act is never a hand act.** No hand-opened PR, review or push counts while the
+  repository's `runner_pushers` is unset. Once it's set, these don't count:
+  - PRs, verdicts and pushes by those logins;
+  - PRs or pushes carrying a claim's trailer;
+  - verdicts by the PR's author or a pusher of its head;
+  - any verdict a claim of the ticket posted.
+
+  A push counts only after a changes verdict. A hand merge needs at least one PR of the ticket's.
+- **A hand act is a run of its fact leg**, toward that leg's `max_runs`, not the runner leg's. Once
+  a fact leg's runs are used up, a further hand act is kept as evidence for the reconcile leg.
+- **A hand act seen while a runner holds the ticket isn't kept.** The next sync looks again once
+  the claim ends, so a runner's own pushes and verdicts during its claim never land late as hand
+  acts.
 - **Only the sync's own board** (its sync key or the CI identity) carries hand acts and evidence.
   A runner's machine key can't.
 
@@ -148,8 +157,11 @@ person leg, a suspended leg, or a leg an owner's route, a retry or an expiry pla
   criteria's checks in its own checkout and writes nothing.
 - **Its answer is its last line:**
   - `unchanged <reason>`: the ticket stays where it is, and the displaced leg is queued again.
-  - `at <station> <evidence>`: one of the stations in its table row, with that row's next leg. A
-    station from a verdict or a merge names the review or merge it found.
+  - `at <station> <evidence>`: one of the stations in its table row, with that row's next leg,
+    including the station it left (so `at reviewed` from `reviewed` queues `merge`). A station
+    reached by a verdict or a merge names the review or the PR it found. The stub checks it as the
+    fact leg would: the PR is the ticket's, merged, on the default branch, or the verdict is on its
+    head. An unchecked `at merged` fails the leg.
   - On `create-pr`, `delivered <sha|PR,…> <evidence>`: each named commit or PR must be on the
     default branch, as the implement leg's `delivered` answer is. `confirm` follows, where a person
     closes the ticket or sends it back to `implement`.
@@ -160,8 +172,10 @@ person leg, a suspended leg, or a leg an owner's route, a retry or an expiry pla
   `merged`. A repository that wants a person to confirm every reconciled close drops `merged`
   from its reconcile leg's `reconciles.to`.
 - **Runs.** A reconcile leg has three runs per ticket. After that, new evidence waits on the
-  ticket's page for a person. Evidence counts as weighed only when the leg finishes with an
-  answer; a released or failed run leaves it to be weighed again.
+  ticket's page. Nothing yet lets a person settle it by hand, since the owner's route and adopt
+  (B-120) aren't built. Evidence counts as weighed only when the leg finishes with an answer; a
+  released or failed run leaves it to be weighed again. If something else moves the ticket while
+  `reconcile` is queued, Baton records the leg it displaces afresh at the new station.
 - **Configuring it.** It's a leg like any other: a repository edits its instructions, overrides
   its `run` (*Overriding a leg*, below), or changes its `reconciles.to` in the course file.
 - **The other standard courses** (`bug-report`, `draft-ticket`, `decision`, `build-app`,

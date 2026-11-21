@@ -228,7 +228,7 @@ courses `draft-doc`, `epic`, `branch`, `ask`, `deliver` and `announce`.
     by its `id` wherever the branch holds it (under `archive/` once archived). `prs:` and the
     ticket's other filter fields are read from the default branch only.
   - **The owner's merge is the approval.** `merged-by-hand` waits on the `owner` and arrives
-    when they merge the PR, exactly as `create-pr`'s does (R-BTN-192). Which merge counts, the
+    when they merge the PR, exactly as `create-pr`'s does (R-BTN-203). Which merge counts, the
     owner's own commits on the PR, and what a hand merge may change are that rule's, for every
     course alike (B-154).
   - **Sending back and rejecting.** The owner may send the last writing leg back with
@@ -263,15 +263,8 @@ courses `draft-doc`, `epic`, `branch`, `ask`, `deliver` and `announce`.
   `ready` or `waiting`, and settle a leg that declares `arrives` (R-BTN-192); they never place a
   ticket. A verdict a holder's leg writes is its evidence; the holder's `advance` or end moves
   the ticket. What a human does on the forge moves it through the courses' fact legs:
-  - `create-pr` adds `reviewed-by-hand` (`from: [pr-open, fixed]`, `to: reviewed`,
-    `arrives: {fact: pr-verdict}`) and `merged-by-hand` (`from: [pr-open, fixed, reviewed,
-    adjudicated, human-merge]`, `to: merged`, `arrives: {fact: pr-merged}`): a pusher's verdict
-    under `cooperative`, or the human-only identity's where the policy admits no `sync` arrival
-    (R-BTN-192), that no claim of the ticket wrote; and a merge no `merge` leg made, a human's
-    landing of a control path at `human-merge` included (R-BTN-184). A runner's `review` and
-    `merge` stay runner legs.
-  - `create-spec`'s `converse` declares `arrives: {fact: pr-opened}` and `address`
-    `arrives: {fact: pr-pushed}` (below).
+  - The PR courses' fact legs and reconcile legs are R-BTN-203's, listed in
+    `docs/standard-courses.mdx`. A runner's `review` and `merge` stay runner legs.
 - **`spec-to-tickets`** (B-99) takes one merged specification — entered by `baton ticket request`
   (`starts_from: request`), the sentence naming the spec; a `create-spec` conversation's merged
   PR is the usual input — and files its child tickets. `decompose` drafts one ticket per spec
