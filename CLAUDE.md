@@ -32,7 +32,8 @@ decisions](docs/context/architecture.mdx) (git is the ledger, the server is the 
 allocator, verification at the boundary, separate tickets never share a write target),
 [the values](docs/context/values.mdx), [the vocabulary](docs/context/vocabulary.mdx)
 (core's words, one sentence each — `step_kinds` included) and [how to read and write the
-spec](docs/context/spec-writing.mdx) (one home per statement, cite by id). A change that contradicts a
+spec](docs/context/spec-writing.mdx) (one home per statement, cite by id). Before a dashboard change, also read [the UX rules](docs/context/ux.mdx) (the questions the
+dashboard answers in a few clicks, and the rules a change is checked against). A change that contradicts a
 decision there is a change to Baton, not a change in Baton.
 
 ## Rules
