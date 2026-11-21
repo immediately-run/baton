@@ -334,10 +334,21 @@ export class Resources {
   }
 
   /** The instances, their states and the readings in force — for the dashboard (§14). */
-  view(now: number) {
+  readings(now: number, inForce = false) {
+    return this.rows<{ instance: string; source: string; writer: string | null; kind: 'state' | 'measure'; available: number | null; until: number | null; observed_at: number; lapses_at: number; detail: string | null }>(
+      `SELECT instance, source, writer, kind, available, until, observed_at, lapses_at, detail FROM instance_readings
+       ${inForce ? 'WHERE lapses_at > ?' : ''} ORDER BY instance, observed_at DESC, rowid DESC`, ...(inForce ? [now] : []))
+      .map((r) => ({ ...r, available: r.available == null ? null : !!r.available, detail: r.detail == null ? null : JSON.parse(r.detail) as unknown, stale: r.lapses_at <= now }));
+  }
+
+  view(now: number, repositories?: string[]) {
     return {
-      resources: this.rows('SELECT name, scope FROM external_resources ORDER BY name'),
-      instances: this.rows<{ name: string; repositories: string }>(`SELECT name, repositories FROM resource_instances ORDER BY name`).map((i) => ({
+      resources: this.rows<{ name: string; scope: string }>('SELECT name, scope FROM external_resources ORDER BY name'),
+      instances: this.rows<{ name: string; repositories: string }>(`SELECT name, repositories FROM resource_instances i
+        ${repositories === undefined ? '' : `WHERE EXISTS (SELECT 1 FROM instance_serves s JOIN external_resources r ON r.name = s.resource
+          WHERE s.instance = i.name AND r.scope = 'service') OR EXISTS (SELECT 1 FROM json_each(i.repositories) j
+          WHERE j.value IN (SELECT value FROM json_each(?)))`} ORDER BY name`,
+        ...(repositories === undefined ? [] : [JSON.stringify(repositories)])).map((i) => ({
         name: i.name,
         repositories: JSON.parse(i.repositories) as string[],
         serves: this.rows<{ resource: string }>('SELECT resource FROM instance_serves WHERE instance = ? ORDER BY resource', i.name).map((r) => r.resource),

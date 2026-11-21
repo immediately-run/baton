@@ -18,9 +18,6 @@ Not built, each a design its rule below still states:
   `max_blocked` with its `blocked-exhausted` hold, and `baton.blocked-ends`. A `released:blocked`
   end names a `capability` and nothing else.
 - §6.6: rule 13, the `trusted` rule and the `wip-bound` flag.
-- R-BTN-99: all three views
-  ([data model and API proposal](../proposals/data-model-and-api.md)).
-- R-BTN-100: `prefer` and `rationale`.
 - `requires.attestations` ([security proposal](../proposals/security.md)).
 
 ### 6.1 Prerequisites
@@ -407,11 +404,10 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
 ### 6.7 What a runner ranks from
 
-- **R-BTN-99 (the views a runner ranks from).** Not built: Baton serves none of the three routes.
-  Read-only, signed by a machine key alone (no
+- **R-BTN-99 (the views a runner ranks from).** Read-only, signed by a machine key alone (no
   runner secret). Each answers with an `ETag`, so an unchanged poll costs a `304`. The tag
-  changes with every write a view shows (a `measure` reading at most once a minute per
-  instance), with each lapse and bar start or end, with the key's grant set, and each UTC hour.
+  uses the view versions, the key's grant set and UTC hour, and changes at relevant lapses,
+  backoff deadlines and bar starts or ends.
   - **`GET /v1/runner/fleet?repository=<id>`** (key granted there): every active claim (ticket,
     station, leg, the leg's opaque course fields, the latest `advance`'s `course` data,
     `claimed_at`; the runner's hostname, tags, opaque profile and the capabilities its grant here
@@ -419,7 +415,9 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     runner-level reports naming this repository; the **board summary** (tickets per station; per
     leg ready and waiting counts, queue depth, `max_queue`, intake, R-BTN-79); owner bars in
     force or scheduled; each course's `course_data` (§4). Peers granted on a repository read
-    each other's claims, profiles and reports.
+    each other's claims, profiles and reports. A heartbeat posts up to 16 reports, each at most
+    4 KB of opaque JSON. Baton retains the newest 16 keys per runner and claim or repository,
+    for six hours from receipt; a claim report can be posted only by its current holder.
   - **`GET /v1/runner/instances`**: every `service` instance, every account instance listing
     a granted repository, with state, every reading in force (source, `observed_at`,
     `lapses_at`, `kind`, `detail`); and every capability with a capacity (R-BTN-178), with the
@@ -436,13 +434,17 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   candidates; `advice` and `launch` validate against the course file's `rank_advice` and
   `rank_launch` schema ids (R-BTN-108), dropped when it names none; on any failure, Baton's order.
 
-- **R-BTN-100 (a claim names its preferences).** `POST /v1/runner/claim`
-  takes `request_id` and an optional `ticket_id` (recommended or not). With no `ticket_id`, Baton
-  claims its first recommendation. A `prefer` list and a `rationale` are proposed in the
-  [data model and API proposal](../proposals/data-model-and-api.md).
+- **R-BTN-100 (a claim names its preferences).** `POST /v1/runner/claim` takes `request_id`
+  and at most one of `ticket_id` and `prefer: [{ticket_id, leg?}]`. Baton tries up to 50 known
+  tickets in order, using the same gates as a named claim, and grants the first passing entry
+  in the same transaction. If none passes it answers `no-eligible-ticket` with
+  `refusals: [{ticket_id, code, rule?}]`. An ungranted ticket gets rule 7 without an existence
+  check. With neither selector, Baton claims its first recommendation.
 
-  A claim against Baton's advice (a resource block, the expedite bound, `max_queue`) records
-  `advice-overridden`; against the course's ranking, nothing.
+  `rationale` is optional opaque JSON of at most 4 KB. Baton stores it in the claim's
+  `advice_json` and ticket history (including exports with history), never ranks on it and
+  never includes it in the fleet view. A claim against Baton's advice (such as a resource
+  block or the expedite bound) records `advice-overridden`; changing the order does not.
 
 ### 6.8 Owner overrides: expedite and hold
 

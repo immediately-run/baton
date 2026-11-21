@@ -20,8 +20,10 @@ export function randomHex(bytes: number): string {
 
 /** B-240: rows read for many parents at once, grouped by their parent's `key` and each without
  *  it, in the order the query gave them. */
-export function groupBy<T extends Row>(rows: T[], key = 'claim_id'): Map<SqlValue, Row[]> {
-  const out = new Map<SqlValue, Row[]>();
+export function groupBy<T extends object, K extends keyof T>(rows: T[], key: K): Map<T[K], Omit<T, K>[]>;
+export function groupBy<T extends Row>(rows: T[]): Map<SqlValue, Row[]>;
+export function groupBy<T extends object>(rows: T[], key: keyof T = 'claim_id' as keyof T): Map<unknown, object[]> {
+  const out = new Map<unknown, object[]>();
   for (const { [key]: k, ...rest } of rows) {
     const list = out.get(k);
     if (list) list.push(rest);
