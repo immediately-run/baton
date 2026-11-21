@@ -132,7 +132,7 @@ describe('S-BTN-189 the repository policy', () => {
     expect(read.json).toEqual({
       repository: 'ops', version: 2, hash: applied.json.hash,
       policy: JSON.parse((await policyRow('ops')).policy_json),
-      guarantees: applied.json.guarantees, floors: [], at: T0,
+      guarantees: applied.json.guarantees, floors: [], check_app_id: null, at: T0, valid_until: T0,
     });
 
     // no-runner-lands holds only once the protection checker reports a match (R-BTN-180).

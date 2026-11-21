@@ -811,6 +811,7 @@ export class BatonCore {
   private policyRead(repository: string): Response {
     const cur = this.policies.current(repository);
     if (!cur) throw new BatonError('not-found', `${repository} has no policy yet`);
+    const at = this.now();
     return json({
       repository,
       version: cur.version,
@@ -818,7 +819,11 @@ export class BatonCore {
       policy: cur.policy,
       guarantees: this.policies.guaranteesFor(repository),
       floors: this.policies.floors(repository),
-      at: this.now(),
+      check_app_id: this.instance.checkAppId(),
+      at,
+      // CLI 0.1.3 and 0.1.4 format this unconditionally in `owner policy show`.
+      // Use the read time, not a future expiry: this response is unsigned.
+      valid_until: at,
     });
   }
 

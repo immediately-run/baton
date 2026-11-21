@@ -23,8 +23,8 @@ depends_on:
 ---
 
 **Brief:** the ticket plan for the current-state spec (PR #71, 2026-10-20), §2's B-64, rescoped by
-the 2026-10-30 amendment (one outbox, couriers; `spec/BATON_SPEC_HISTORY.md`). Baton holds no git
-or forge credential, so the handler tickets of its own conditions (R-BTN-163), the withdrawals of
+the 2026-10-30 amendment (one outbox, couriers; `spec/BATON_SPEC_HISTORY.md`). Baton holds no
+credential for outbox delivery, so the handler tickets of its own conditions (R-BTN-163), the withdrawals of
 superseded tickets (R-BTN-168), promoted light questions' files (R-BTN-173) and check runs
 (R-BTN-115) reach the outside only through a courier.
 **Spec:** [BATON_SPEC §7.8](../spec/BATON_SPEC/07-conditions.md#sec-7-8) [R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8) (the outbox and couriers); [§10](../spec/BATON_SPEC/10-checks.md#sec-10) [R-BTN-115](../spec/BATON_SPEC/10-checks.md#sec-10) (the
@@ -151,8 +151,9 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
 
 ### Do not
 
-- Give Baton or the Worker any git or forge credential, or write git from core: every effect is
-  a deliverer's delivery of an unsigned entry.
+- Give Baton or the Worker an outbox delivery credential, or write git from core. A deliverer
+  performs each outbox effect from an unsigned entry. Workflow dispatch is not an outbox effect:
+  Baton holds the dispatch credential and calls the forge directly (R-BTN-94).
 - Let a key deliver that the policy's `outbox` does not admit, or hard-code a rule the policy
   owns (who delivers, trust, release).
 - Store a subject, body or any free text in `fields` beyond a `forge-check`'s rendered `summary`.

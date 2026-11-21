@@ -258,13 +258,18 @@ describe('S-BTN-190 guarantees and floors', () => {
 
   it('returns the same unsigned policy to authorized readers', async () => {
     await protectedSigned();
+    expect((await keyCall(admin, '/v1/admin/settings', { check_app_id: '12345' }, 'PUT')).status).toBe(200);
     const path = '/v1/repositories/ops/policy';
     const read = await as(owner, path);
     expect(read.status).toBe(200);
     expect(await as(runnerKey, path)).toEqual(read);
     expect(Object.keys(read.json).sort()).toEqual([
-      'at', 'floors', 'guarantees', 'hash', 'policy', 'repository', 'version',
+      'at', 'check_app_id', 'floors', 'guarantees', 'hash', 'policy', 'repository', 'valid_until', 'version',
     ]);
+    expect(read.json.check_app_id).toBe('12345');
+    // Published CLI 0.1.3/0.1.4 call this unconditionally after printing the JSON.
+    expect(new Date(read.json.valid_until).toISOString()).toBe(new Date(T0).toISOString());
+    expect(read.json.valid_until).toBe(read.json.at);
   });
 
   it('ignores a legacy runner policy pin without gating claims or opening a condition', async () => {

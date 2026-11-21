@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1163
 tier: critical
-description: "The owner, 2026-10-28, as specified in BATON_SPEC §12.8 since 2026-10-31: a merge runner, a grant with the trusted-runner role, claims only `trusted: true` legs, runs a pinned CLI and no repository code, and merges an exact head when the repository policy's `merge`, `paths` and `authorship` say so, checked from git and from attestations (R-BTN-182, R-BTN-183, R-BTN-184); it also performs the proposal merge (R-BTN-180), pins what it trusts (R-BTN-182, R-BTN-189), and `baton repo protect` prints and checks the forge protection from the policy's `refs.*` for the separate protection checker to report (R-BTN-180). S-BTN-180, S-BTN-182, S-BTN-183, S-BTN-184, S-BTN-191. Requires: a GitHub organisation with a dedicated App, a Gitea instance and a plain git server for the drills."
+description: "The owner, 2026-10-28, as specified in BATON_SPEC §12.8 since 2026-10-31: a merge runner, a grant with the trusted-runner role, claims only `trusted: true` legs, runs a pinned CLI and no repository code, and merges an exact head when the repository policy allows it, checked from git and from Baton's attestations (R-BTN-182, R-BTN-183, R-BTN-184); it also performs the proposal merge (R-BTN-180), and `baton repo protect` prints and checks the forge protection from the policy's `refs.*` for the separate protection checker to report (R-BTN-180). S-BTN-180, S-BTN-182, S-BTN-183, S-BTN-184, S-BTN-191. Requires: a GitHub organisation with a dedicated App, a Gitea instance and a plain git server for the drills."
 topics:
   - baton
 owns: {}
@@ -40,10 +40,10 @@ policy's knobs (R-BTN-188) rather than a mode: runners propose and the merge run
 and `paths.tickets` say; status, claims and course history live in Baton.
 
 **Spec:** R-BTN-180 (refs, `baton repo protect`, the protection checker, proposals and the
-proposal merge), R-BTN-182 (trusted runners: the role, no repository code, pins, the refusal-only
+proposal merge), R-BTN-182 (trusted runners: the role, no repository code, the refusal-only
 override), R-BTN-183 (what the merge runner merges), R-BTN-184 (protected paths), R-BTN-187 (what a
 trusted leg reads), R-BTN-188 (`merge.*`, `paths.*`, `authorship`, `refs.*`, `grants.trusted_domain`),
-R-BTN-189 (pins); R-BTN-131 (the standard courses' `merge` leg), R-BTN-134 (sources); B-136, B-138,
+R-BTN-189 (the policy read and floors); R-BTN-131 (the standard courses' `merge` leg), R-BTN-134 (sources); B-136, B-138,
 B-139, B-141; FLDH-37, FLDH-43.
 **Depends on:** B-145 (the policy the merge runner reads), B-146 (attestations it acts on), B-147
 (the trusted-runner role and trust domains).
@@ -82,8 +82,7 @@ branch).
      write (no range, no foreign-commit reset);
    - how: squash or merge at exactly `H` with the base pinned (a compare-and-swap push), a commit
      message it writes itself; a branch that moved since an attestation was made is refused.
-   Every attestation is fetched, verified against the pins, its subject compared with the exact
-   object, and a `once` attestation consumed by compare-and-swap (R-BTN-182).
+   Fetch each attestation from Baton and compare its subject with the exact object (R-BTN-182).
 3. **The proposal merge** (R-BTN-180): it merges `baton/proposed/<ticket>` when every commit on it
    since the merge base is a deliverer's template write for that ticket's outbox entries (B-64),
    touching only the paths they name, and one `std:approval@1` whose subject is that ticket at that

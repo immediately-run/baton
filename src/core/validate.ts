@@ -155,7 +155,6 @@ export interface Heartbeat {
   /** §12.8 (B-145, R-BTN-180): the protection checker's reports, one per repository; the core
    *  checks the caller is each repository's checker and refuses the rest per entry. */
   protection: { repository: string; matched: boolean; reading_hash: string }[];
-  /** §12.8 (B-145, R-BTN-189): the policy hash pins a trusted runner reports per repository. */
   /** R-BTN-113 (B-234): the running leg's session link, as the runner holds it. Shape-checked
    *  here only as a bounded string; the heartbeat drops one that fails the link rule (https, no
    *  userinfo, an allowlisted host) and logs it, never refusing the beat. */

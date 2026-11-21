@@ -71,6 +71,7 @@ export async function main(argv: string[]) {
       origin: { type: 'string' },
       'admin-keys': { type: 'string' },
       'github-webhook-secret': { type: 'string' },
+      'signing-key': { type: 'string' }, // Retired; accept old launch commands without reading the file.
       config: { type: 'string' },
     },
   });

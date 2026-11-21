@@ -10,7 +10,7 @@ import type { Store } from '../../src/core/ports';
 import { dropDerivedSchema } from '../lib/migrationRewind';
 
 describe('migration 0070: retire policy pins (B-160, S-BTN-190)', () => {
-  it('drops deployed pins and their conditions without removing protection conditions', async () => {
+  it('removes retired conditions and keeps the preceding server’s pin query working on rollback', async () => {
     const stub = env.BATON.get(env.BATON.idFromName('migrations-0070'));
     await runInDurableObject(stub, (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
@@ -31,7 +31,10 @@ describe('migration 0070: retire policy pins (B-160, S-BTN-190)', () => {
                 ('docs', 'baton.policy-unpinned', 'runner:7', 1), ('docs', 'baton.unprotected', '', 1)`);
       sql.exec(MIGRATIONS.find((m) => m.id === 70)!.sql);
 
-      expect(sql.exec("SELECT name FROM sqlite_master WHERE name = 'policy_pins'").toArray()).toEqual([]);
+      // The preceding server's pinDiffers query runs whether or not the runner ever pinned.
+      const pin = 'SELECT hash, floors_hash FROM policy_pins WHERE runner_id = ? AND repository_id = ?';
+      expect(sql.exec(pin, 7, 'docs').toArray()).toEqual([{ hash: 'old', floors_hash: null }]);
+      expect(sql.exec(pin, 8, 'docs').toArray()).toEqual([]);
       expect(sql.exec('SELECT type, closed_at FROM policy_conditions').toArray()).toEqual([{ type: 'baton.unprotected', closed_at: null }]);
       expect(sql.exec('PRAGMA foreign_key_check').toArray()).toEqual([]);
     });

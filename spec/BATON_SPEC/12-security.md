@@ -444,8 +444,10 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     itself, never by asking runners.
   - **The read.** `GET /v1/repositories/{repository}/policy` answers owners, administrators and
     keys granted on the repository with `{repository, version, hash, policy, guarantees: {<name>:
-    held | broken}, floors, at}`. A trusted runner and a deployment's audit read the same route,
-    each with its own key.
+    held | broken}, floors, check_app_id, at, valid_until}`. `check_app_id` is the instance
+    setting (§12.7). The response is unsigned; `valid_until` equals `at` for CLI 0.1.3 and
+    0.1.4 compatibility, not as a validity guarantee. A trusted runner and a deployment's
+    audit read the same route, each with its own key.
 - **R-BTN-180 (roles, domains and protection).**
   - **Every grant has a role and a domain.** The role is `runner` or `trusted-runner` (R-BTN-182),
     and a `trusted-runner` grant may further be marked the repository's protection checker
