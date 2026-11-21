@@ -92,7 +92,29 @@ it at the end station `confirmed`; `filed` sends it back to `implement`. The age
 never closes a ticket. The ticket's file still says what it said; `baton tickets done <ticket>`
 archives it as for any ticket closed by hand.
 
-## Work done outside Baton: `reconcile`
+## Work done outside Baton
+
+Any leg may be done by someone who never claims the ticket (BATON_SPEC
+[R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)). Each standard course's
+course file says which of its legs can arrive that way, and by which fact:
+
+| course | leg | arrives on | so that |
+|---|---|---|---|
+| `create-pr` | `implement` | `pr-opened` | a PR a person opened on the ticket's branch, or named in `prs:`, is the implement leg done |
+| `create-pr` | `review` | `pr-verdict` | a pusher's approving or changes-requested review is that round |
+| `create-pr` | `fix` | `pr-pushed` | a push after a changes verdict is the fix |
+| `create-pr` | `merge` | `pr-merged` | a merge by hand ends the course at `merged` |
+| `review-pr` | `review` | `pr-verdict` | a pusher's review is a round |
+| `create-spec` | `merge` | `pr-merged` | as `create-pr`'s |
+
+`run-tests` has no such fact: its gate counts only the test runs Baton recorded, on purpose. A
+change merged by hand closes the ticket anyway, from any station, when every PR its `prs:` names
+has merged. The legs that write to the default branch (`bug-report`, `draft-ticket`, `decision`,
+`build-app`) arrive by their marker lines, as they always have. A person who writes a marker line
+by hand has done that leg. A repository changes which legs arrive by which fact in its own course
+file. Evidence weaker than these facts goes to `reconcile`, below.
+
+## The reconciliation course, `reconcile`
 
 Baton must work where only part of an organization uses it. The sync closes a ticket on strong
 evidence (archived, `status: done`, or every PR its `prs:` names merged; BATON_SPEC
@@ -101,9 +123,10 @@ or default-branch commit that names the ticket's id without being in its `prs:`.
 ticket on `reconcile`, or on the course `reconcile_course` in `.baton/baton.json` names,
 instead of its own. The evidence rides in the ticket's sync-local fields.
 
-1. **`weigh`** (an agent leg, read-only). It reads the ticket, its exit criteria and each piece
-   of evidence: the PR's diff and description, the commit. It runs the checks the exit criteria
-   name at the default branch's head. Its last line is one of:
+1. **`weigh`** (an agent leg, read-only). It reads the ticket, its exit criteria, the position
+   Baton held and the legs still ahead of it, and each piece of evidence: the PR's diff and
+   description, the commit. It runs the checks the exit criteria name at the default branch's
+   head. Its last line is one of:
    - `delivered <sha|PR,…> <what it ran and what it showed>`: every exit criterion holds. The
      stub checks that each named commit or PR is on the default branch, as `create-pr`'s
      `delivered` answer does.
@@ -117,7 +140,8 @@ instead of its own. The evidence rides in the ticket's sync-local fields.
    weighed into `reconciled:`, the PRs into `prs:`, and for `partial` the remainder as a dated
    line in `## Status`. A `closed` ticket is also moved to `archive/` with `status: done`, as
    `baton tickets done` does. It lands as one commit under the ticket paths, so the next sync sees
-   the evidence acknowledged. The ticket then closes, or goes back to its own course at its start.
+   the evidence acknowledged. The ticket then closes, or goes back to its own course at the
+   position Baton held when the evidence appeared.
 
 Its ends are `closed` and `returned`. A leg that cannot decide fails like any other, and the
 ticket stays on `reconcile` until a runner or a person settles it. Overriding `weigh`, `confirm`

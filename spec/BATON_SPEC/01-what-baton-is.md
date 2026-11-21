@@ -95,10 +95,10 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   - **The station function** (R-BTN-74) is handed each live ticket's position as Baton holds it
     and never sets one. A station its facts imply is shown on the ticket's view and never compared
     with Baton's position.
-  - **A fact arrival** is an arrival on a leg no claim runs. The one Baton applies is a person's
-    leg's, from its answer, a `std:decision@1` (R-BTN-116); a leg declaring `arrives: {fact:
-    <kind>}`, attested as `std:arrival@1`, is [proposed](../proposals/security.md) (R-BTN-191,
-    R-BTN-192), and such an attestation is kept as evidence, as below. Baton applies an arrival
+  - **A fact arrival** is an arrival on a leg no claim runs: a person's leg's, from its answer, a
+    `std:decision@1` (R-BTN-116); and a leg declaring `arrives: {fact: <kind>}`, from the sync's
+    `std:arrival@1` (R-BTN-203). Where the policy admits no `sync` writer for that type, the fact
+    reader's is [proposed](../proposals/security.md) (R-BTN-192). Baton applies an arrival
     in the transaction that accepts the attestation when all hold: the policy admits its writer
     for the type (R-BTN-191); the leg leaves Baton's current station, queued or not; `reached` is one of its
     outcomes; no claim is active on the ticket; and Baton holds the ticket for nothing else (§7).

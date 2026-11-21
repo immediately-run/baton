@@ -1,5 +1,5 @@
 ---
-title: "B-311 — Work done outside Baton: the sync closes a ticket on strong evidence and routes weak evidence onto the reconcile course (R-BTN-203, S-BTN-309)"
+title: "B-311 — Work done outside Baton, for every leg: fact arrivals from the sync, closure on strong evidence, the reconcile course for weak evidence (R-BTN-203, S-BTN-309)"
 id: B-311
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1311
 tier: critical
-description: "In the sync's markdown source and fact reading, never the server: a ticket Baton holds at its start closes when archived, done or every PR its prs: names is merged; a pushers' merged PR or commit naming it puts it on the repository's reconcile_course until its reconciled: list acknowledges the evidence. Ships the standard course reconcile (weigh, confirm, record)."
+description: "In the sync, never the server, for any ticket with no active claim: a leg declaring arrives: {fact} arrives by the sync's std:arrival@1 (pr-opened, pr-verdict, pr-pushed, pr-merged); archived, done or every prs: PR merged closes it from any station; a pusher's merged PR or commit naming it puts it on reconcile_course until reconciled: acknowledges it. Declares arrives on the standard PR courses and ships the reconcile course."
 topics:
   - sync
   - courses
@@ -22,62 +22,89 @@ depends_on: []
 **Brief:** the owner, 2026-11-21: "Baton should handle work performed outside of baton gracefully:
 If it is possible to determine that a ticket has been completed in a separate session, baton
 should update its board accordingly … This should be performed by the sync github action code,
-not the baton server", and "baton *must* work well in a setup where only a portion of the
-organization is using baton." On weak evidence the owner chose a reconciliation course Baton
-manages, "configurable / overrideable like other courses", over a flag. The case that started
-it: B-166 was delivered on 2026-11-02 by PRs #158, #159, #163 and #164, never claimed or closed,
-and cost a runner's implement leg on 2026-11-21.
+not the baton server"; "baton *must* work well in a setup where only a portion of the
+organization is using baton"; and "the codegen leg is not the only leg which may be completed
+outside baton." On weak evidence the owner chose a reconciliation course Baton manages,
+"configurable / overrideable like other courses", over a flag. The case that started it: B-166
+was delivered on 2026-11-02 by PRs #158, #159, #163 and #164, never claimed or closed, and cost a
+runner's implement leg on 2026-11-21.
 
-**Spec:** [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2), [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)), [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-96](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), [R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), [R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)),
-[§5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8)), [R-BTN-64](../spec/BATON_SPEC/05-courses.md#sec-5-7); scenario [S-BTN-309](../spec/BATON_SPEC/15-verification.md#scenarios); the course's contract is
-`docs/standard-courses.mdx`, *Work done outside Baton: `reconcile`*.
+**Spec:** [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2), [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2)), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)'s fact arrival),
+[§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) ([R-BTN-96](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), [R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), [R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4)), [§5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8)), [R-BTN-64](../spec/BATON_SPEC/05-courses.md#sec-5-7), [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8)'s
+`attestations`; scenario [S-BTN-309](../spec/BATON_SPEC/15-verification.md#scenarios); the courses' contract is `docs/standard-courses.mdx`, *Work done
+outside Baton* and *The reconciliation course*.
 
 ## Plan
 
-1. **Who is judged.** In the markdown source (`src/defaults/tickets-markdown.ts`), judge only a
-   ticket `ctx.positions` holds at its course's start with no claim; every other ticket is
-   posted as today.
-2. **Strong evidence.** Archived and `status: done` already close (keep). Add: every PR `prs:`
-   names (resolve with `prRefs`, `src/defaults/course-pr.ts`) is merged, none open, at least one
-   named — read through the fact adapter (R-BTN-96) for the home and the `repos:` repositories.
-   Post `closed` as done with `display.status` `done (outside Baton: <ref>)`.
-3. **Weak evidence.** Read the home's commits in the window `ctx.head` gives (last accepted head
-   → posted head) and the adapter's merged PRs in the same window, for the home and the
-   repositories live tickets' `repos:` reach. Keep only pushers' (R-BTN-139). Match each ticket's
-   id as a whole word in a PR title or commit message; drop refs its `prs:` or `reconciled:`
-   names. A ticket with any left is posted with `course_id` = `reconcile_course` (default
-   `reconcile`; `null` disables) and the refs in its sync-local `fields`. First snapshot: none.
-4. **Settings.** `reconcile_course` in `.baton/baton.json`, validated with the other settings;
+1. **Who is judged.** Every ticket with no active claim, at whatever station `ctx.positions`
+   gives; a claimed ticket is posted as today.
+2. **Fact arrivals for every leg.** Build the sync half of R-BTN-39's fact arrival. For each
+   ticket whose leg leaving Baton's station declares `arrives: {fact: <kind>}`, find the fact among
+   the adapter's PR facts: `pr-opened`; `pr-verdict` (pushers' only, and not one a claim of the
+   ticket wrote); `pr-pushed` (after the leg began waiting); `pr-merged` (by a merge no `merge` leg
+   reported). Post an `std:arrival@1` as `sync` with R-BTN-203's `ref`. Baton's apply path
+   (R-BTN-39: the edge check, no active claim, once per `ref`) applies it; check it handles
+   `arrives` legs, and add what is missing in `src/core/` (applying is core's, finding is the
+   sync's). Declare `arrives` in the standard courses' files as `docs/standard-courses.mdx` lists
+   (`create-pr`'s implement, review, fix and merge; `review-pr`'s review; `create-spec`'s merge) and
+   bump each course's version (R-BTN-22).
+3. **Strong evidence, from any station.** Archived and `status: done` already close (keep). Add:
+   every PR `prs:` names (resolved with `prRefs`, `src/defaults/course-pr.ts`) is merged, none
+   open, at least one named, read through the fact adapter (R-BTN-96) for the home and the
+   `repos:` repositories. Post `closed` as done with `display.status`
+   `done (outside Baton: <ref>)`.
+4. **Weak evidence.** Read the home's commits in the window `ctx.head` gives (last accepted head →
+   posted head) and the adapter's merged PRs in the same window, for the home and the
+   repositories live tickets' `repos:` reach. Keep only pushers' (R-BTN-139). Match each
+   ticket's id as a whole word in a PR title or commit message; drop what `prs:`, `reconciled:` or
+   an arrival accounts for. A ticket with any left is posted with `course_id` = `reconcile_course`
+   (default `reconcile`; `null` disables), and the refs and Baton's position in its sync-local
+   `fields`. A first snapshot reads none. Once acknowledged, the ticket goes back to its own course
+   at that position (R-BTN-64).
+5. **Settings.** `reconcile_course` in `.baton/baton.json`, validated with the other settings;
    `reconciled` joins `prs` and `answer` as sync-local frontmatter.
-5. **The standard course `reconcile`** under `src/defaults/courses/reconcile/`: `course.json`
-   (stations: `weighing` → `confirming` → `recording` → ends `closed`, `returned`), leg
-   instructions and scripts for `weigh` (agent, read-only; answers `delivered`, `partial`,
-   `unrelated`, checking named commits/PRs are on the default branch as B-257's `delivered`
-   does), the person leg `confirm`, and `record` (a ticket-only commit: `reconciled:`, `prs:`, a
-   `## Status` line, and for `closed` the archive move as `baton tickets done` writes it). Its
-   station function reads the refs from `fields`. `baton repo init --course reconcile`
-   scaffolds it; add it to `docs/standard-courses.mdx`'s table (done in the spec PR).
-6. **`baton ticket check`.** Report, never as a finding, each ticket closed by strong evidence
+6. **The standard course `reconcile`** under `src/defaults/courses/reconcile/`: `course.json`
+   (stations `weighing` → `confirming` → `recording`, ends `closed` and `returned`), and leg
+   instructions and scripts for:
+   - `weigh`: an agent, read-only, answering `delivered`, `partial` or `unrelated` against the
+     legs still ahead of Baton's position, and checking named commits and PRs are on the default
+     branch as B-257's `delivered` does;
+   - `confirm`: the person leg;
+   - `record`: a ticket-only commit (`reconciled:`, `prs:`, a `## Status` line, and for `closed`
+     the archive move as `baton tickets done` writes it).
+
+   Its station function reads the refs from `fields`. `baton repo init --course reconcile`
+   scaffolds it.
+7. **`baton ticket check`.** Report, never as a finding, each ticket closed by strong evidence
    whose file is not yet archived.
-7. **Tests.** S-BTN-309's cases in one test file naming the row, plus a course test for
-   `reconcile` (`baton course test`), and B-166's shape as a fixture: four merged PRs naming it
-   in their titles, none in `prs:`, so it is routed to `reconcile`, not closed.
+8. **Tests.** S-BTN-309's cases in one test file naming the row; a course test for `reconcile`
+   (`baton course test`); B-166's shape as a fixture (four merged PRs naming it in their titles,
+   none in `prs:`, so it is routed to `reconcile`, not closed); and a `create-pr` ticket at
+   `pr-open` whose PR a pusher approves by hand arriving at `reviewed`, then closing when the PR
+   is merged by hand.
 
 ### Trust
 
-New inputs: PR titles and commit messages, read as text to find a ticket id. Only pushers'
-merged PRs and commits on the default branch count (R-BTN-139); a non-pusher's PR names
-nothing. Strong evidence comes from `prs:` (a pusher's push to the ticket file) and the forge's
-merged state through the fact adapter. The setting `reconcile_course` is the repository's file.
-The `weigh` agent's answer never closes a ticket alone: `confirm` is a person's unless the
+New inputs:
+- PR titles and commit messages, read as text to find a ticket id. Only pushers' merged PRs and
+  commits on the default branch count (R-BTN-139), so a non-pusher's PR names nothing.
+- The forge's reviews, pushes and merges, which can now move a ticket by an arrival. The policy
+  decides whether the sync may attest arrivals at all (`attestations` for `std:arrival@1`:
+  `cooperative` admits `sync`, `protected` does not, R-BTN-188), so a protected home is unchanged
+  until the fact reader (R-BTN-192) exists.
+- `prs:`, which comes from a pusher's push to the ticket file, and the forge's merged state,
+  read through the fact adapter.
+- `reconcile_course`, which is the repository's own file.
+
+The `weigh` agent's answer never closes a ticket alone: `confirm` is a person's, unless the
 repository overrides it in its own files.
 
 ### Invariants
 
-- **The sync, never the server (R-BTN-35, R-BTN-50).** All of it is CLI default code; `src/core/`
-  imports none of it.
-- **Baton's work is its course's (R-BTN-39).** A claimed ticket, or one past its start, is never
-  closed or re-routed here.
+- **The sync finds, the core applies (R-BTN-35, R-BTN-50).** Detection is CLI default code that
+  `src/core/` never imports; Baton applies arrivals by its existing rule.
+- **Baton places tickets (R-BTN-39).** The sync never sets a position: it attests arrivals, and
+  Baton applies them along an edge. A claimed ticket is never closed, arrived or re-routed here.
 - **A partial reading is never posted (R-BTN-96).** An unreadable repository fails the sync.
 - **Filter fields only (R-BTN-33).** Evidence rides in sync-local `fields`; titles and messages
   are never posted.
@@ -90,4 +117,4 @@ repository overrides it in its own files.
 
 ## Status
 
-_filed 2026-11-21._ From the owner's ruling in the supervising session on bering, after B-166.
+_filed 2026-11-21._ From the owner's rulings in the supervising session on bering, after B-166.
