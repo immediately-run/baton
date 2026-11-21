@@ -17,12 +17,13 @@ export { DEFAULT_TRANSCRIPT_REPOS };
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { compareVersions } from '../shared/versions.mjs';
 import {
-  checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, bad, HOSTNAME, isGrantedKey,
+  REPORT_HORIZON_MS, REPORT_KEYS_MAX, checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, bad, HOSTNAME, isGrantedKey,
   type ActivityReport, type Heartbeat, HOLDING } from './validate';
 import type { Policies } from './policy';
 
 import type { Config, Row, SqlValue, Store } from './ports';
 import { liveness } from './stateVersion';
+import { REPORT_AGE_FROM, REPORTS_FROM } from './runnerViews';
 
 const CLOSE_GRACE_MS = 10 * 60_000; // §6.9: closing updates are accepted 10 minutes after a claim ends
 
@@ -437,6 +438,7 @@ export class RunnerApi {
     const granted = this.grantedRepos(cred);
     // R-BTN-103: the notices it delivers as a runner courier — a machine key's, on repositories it
     // is granted on; a refused entry never refuses the heartbeat either.
+    const refusedReports = this.recordReports(w.id, granted, hb.reports, now);
     const refusedCouriers = [...hb.couriers.refused, ...(this.c.couriers?.(w.id, cred.kind === 'runner' ? granted : null, hb.couriers.entries) ?? [])];
     // §12.8 (B-145, R-BTN-180): only the protection checker's reports feed `no-runner-lands` —
     // a report from anyone else is refused per entry; the sync's and other trusted runners'
@@ -499,6 +501,7 @@ export class RunnerApi {
     const grantCapabilities = this.grantCapabilities(cred, w.id);
     return {
       runner_id: w.id,
+      ...(refusedReports.length ? { reports_refused: refusedReports } : {}),
       // B-68's dual-read window: old runners can finish upgrading from the same answer. B-69
       // removes this alias once `legacy_names_at` shows none remain.
       worker_id: w.id,
@@ -580,6 +583,27 @@ export class RunnerApi {
   private credentialAllowed(id: string): string[] {
     const row = this.rows<{ allowed_capabilities: string }>('SELECT allowed_capabilities FROM credentials WHERE id = ?', id)[0];
     return row ? [...(JSON.parse(row.allowed_capabilities) as string[])] : [];
+  }
+
+  private recordReports(runner: number, grants: string[] | null, reports: Heartbeat['reports'], now: number): number[] {
+    const refused: number[] = [];
+    for (const [i, report] of reports.entries()) {
+      const claim = 'claim_id' in report ? report.claim_id : 0;
+      const held = claim ? this.rows<{ ticket_id: string }>("SELECT ticket_id FROM claims WHERE id = ? AND runner_id = ? AND status = 'active'", claim, runner)[0] : null;
+      const repo = held ? repositoryOf(held.ticket_id) : 'repository' in report ? report.repository : null;
+      if (!repo || (grants && !grants.includes(repo)) || !this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NULL', repo).length) {
+        refused.push(i);
+        continue;
+      }
+      const scope = [runner, repo, claim] as const;
+      this.exec(`INSERT INTO runner_reports (runner_id, repository_id, claim_id, key, received_at, payload)
+        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET received_at = excluded.received_at, payload = excluded.payload`,
+        ...scope, report.key, now, report.payload);
+      this.exec(`DELETE FROM runner_reports WHERE runner_id = ? AND repository_id = ? AND claim_id = ? AND key IN (
+        SELECT key FROM runner_reports WHERE runner_id = ? AND repository_id = ? AND claim_id = ?
+        ORDER BY received_at DESC, rowid DESC LIMIT -1 OFFSET ?)`, ...scope, ...scope, REPORT_KEYS_MAX);
+    }
+    return refused;
   }
 
   /** §3's write budget: capability rows change only with the settings hash. */
@@ -786,6 +810,8 @@ export class RunnerApi {
   /** The expiry of a reaped runner's open messages (§9). R3-1212 adds reaping. */
   alarm() {
     const now = this.c.now();
+    this.exec(`DELETE FROM runner_reports WHERE rowid IN (
+      SELECT rr.rowid FROM ${REPORTS_FROM} WHERE (${REPORT_AGE_FROM}) <= ?)`, now - REPORT_HORIZON_MS);
     // B-236: driven from the open messages (`messages_by_status`), each runner read by its key —
     // never from the reaped runners, whose rows are kept forever (R-BTN-3).
     this.exec(`UPDATE messages SET status = 'expired' WHERE status IN ('pending','delivered')

@@ -259,6 +259,7 @@ function History({ base }: { base: string }) {
               { head: 'Leg', cell: (r) => (r.leg ? <><Text mono value={r.leg} />{r.run != null ? <span className="mut"> · run <Text value={r.run} /></span> : null}{r.run_id ? <span className="mut"> · <Text mono value={r.run_id} /></span> : null}</> : dash) },
               { head: 'Reached', cell: (r) => (r.reached ? <Text mono value={r.reached} /> : dash) },
               { head: 'Next leg', cell: (r) => (r.next_leg ? <Text mono value={r.next_leg} /> : dash) },
+              { head: 'Rationale', cell: (r) => r.rationale === undefined ? dash : <JsonText value={r.rationale} /> },
               { head: 'Inputs and outputs', cell: (r) => {
                 const d = isObj(r.detail) ? r.detail : null;
                 const inputs = r.inputs ?? d?.inputs;

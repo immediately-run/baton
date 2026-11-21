@@ -1,6 +1,6 @@
 // gates.test.ts — §7.2's gate table, R3-1232: every gate at a claim and at an advance, through the
 // one pure function (`gatesFor`) the candidate query mirrors (G-BTN-40), and every advice input
-// accepted and recorded, never refused (R-BTN-45, S-BTN-24).
+// accepted without an override, never refused (R-BTN-45, S-BTN-24).
 import { describe, it, expect, beforeEach } from 'vitest';
 import { gatesFor, type GateContext, type GateLeg, type GateTicket, type GateRunner } from '../../src/core/gates';
 import { claimItem, cutover, payload, recommended, register, rows, setClock, syncCall, seedClaim } from '../helpers';
@@ -143,26 +143,24 @@ describe('gatesFor: every gate of the table', () => {
 
 const board = inject('board');
 
-describe('advice is never a gate (R-BTN-45, S-BTN-24): every advice input is accepted and recorded', () => {
+describe('advice is never a gate (R-BTN-45, S-BTN-24): every advice input is accepted without an override', () => {
   beforeEach(async () => {
     await setClock(T0);
     await syncCall('/v1/sync/board', payload(board.shas.A, null, board.states.A));
     await cutover();
   });
 
-  it('the order: a ticket claimed past the first recommendation records its place and the first', async () => {
+  it('the order: a ticket claimed past the first recommendation does not record an override', async () => {
     const w = await register('vm-a');
     expect(await recommended(w.id)).toEqual(['docs:R3-9001', 'docs:R3-9002']);
     const c = await claimItem('vm-a', w.secret, { ticket_id: 'docs:R3-9002' });
     expect(c.status).toBe(200);
-    expect(JSON.parse((await rows<{ advice_json: string }>('SELECT advice_json FROM claims WHERE id = ?', c.json.claim_id))[0].advice_json))
-      .toMatchObject({ overridden: [{ advice: 'order', place: 2, first: 'docs:R3-9001' }] });
-    expect(await rows(`SELECT actor FROM events WHERE kind = 'advice-overridden' AND claim_id = ?`, c.json.claim_id)).toEqual([{ actor: `runner:${w.id}` }]);
+    expect(await rows(`SELECT 1 FROM events WHERE kind = 'advice-overridden' AND claim_id = ?`, c.json.claim_id)).toEqual([]);
   });
 
-  it('the first recommendation, claimed by name or not, records the recommendation and no override', async () => {
+  it('the first recommendation, claimed without a ticket id, records the recommendation and no override', async () => {
     const w = await register('vm-a');
-    const c = await claimItem('vm-a', w.secret, { ticket_id: 'docs:R3-9001' });
+    const c = await claimItem('vm-a', w.secret);
     expect(JSON.parse((await rows<{ advice_json: string }>('SELECT advice_json FROM claims WHERE id = ?', c.json.claim_id))[0].advice_json))
       .toEqual({ recommendation: expect.objectContaining({ ticket_id: 'docs:R3-9001', legs: ['implement'] }) });
     expect(await rows(`SELECT 1 FROM events WHERE kind = 'advice-overridden'`)).toEqual([]);
