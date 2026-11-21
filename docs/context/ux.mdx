@@ -27,7 +27,8 @@ and the answer is on the page, not behind a CLI line:
    it next to it: held tickets, open decisions and conditions, unconfirmed completions,
    tickets nobody can take.
 3. **Which (ticket, leg) pairs are the runners working on now?** Ticket, leg, runner, how long
-   it has run, and whether it is stalled.
+   it has run, and whether it is stalled — and for an agentic leg, a link into its live agent
+   session (the opencode session, or the host's leg page that serves it).
 4. **What is the factory's throughput?** Over a window the person picks (a day, a week):
    tickets finished, PRs merged, legs run and failed, by course and by runner, and the trend.
 5. **What happened to a given ticket so far?** Its whole history in order: every claim, leg,
@@ -40,7 +41,7 @@ instance is healthy.
 
 ## The rules
 
-Every dashboard change is checked against these. A reviewer names the task the change serves
+Every dashboard change is checked against these eight. A reviewer names the task the change serves
 and walks each rule.
 
 1. **No task needs a terminal or devtools.** If Baton can produce a state, a person can clear it
@@ -66,7 +67,13 @@ and walks each rule.
 6. **A failure names its cause in words a person acts on.** A failed leg shows the reason
    Baton recorded and the agent's last message. A refusal shows what to change. Raw JSON is
    available, but not first.
-7. **Answers are counted, not left for a person to compute.** Throughput, progress, and age
+7. **A running agentic leg is one click from its live session, on both sides.** A ticket whose
+   leg is running opens the leg's agent session from the ticket's own page and its row on the
+   Board. A runner running such a leg opens the same session from the runner's page and its row
+   on Runners. The link is the claim's `session_url` (R-BTN-113), labelled "Open session" with
+   its host. Where none is reported, the page says so, and it never shows a stale one once the
+   leg ends.
+8. **Answers are counted, not left for a person to compute.** Throughput, progress, and age
    and wait times are drawn as numbers and trends. A person never counts rows to answer a
    question.
 
@@ -88,4 +95,8 @@ Each gap needs its own ticket; these rules alone do not close them.
 - **A ticket's history (question 5):** a ticket's page draws its history and attempts, with the
   recorded end reason. But no screen jumps to a ticket by id, and a failed leg's agent's last
   message is only in the host's leg archive.
-- Question 3 is answered today by the Board's Running section.
+- **Running legs (question 3, rule 7):** the Board's Running section answers which pairs are
+  running. The session link is drawn on a ticket's page (its claim) and on a runner's card and
+  timeline, but not on the Board's Running rows. Bering's runners report it (its leg pages,
+  e.g. `https://bering.…:8702/baton/baton%3AB-60/review/…`); it is a link only where its host
+  passes the repository's link rule (`session_hosts`).
