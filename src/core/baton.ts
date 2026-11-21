@@ -1802,6 +1802,7 @@ export class BatonCore {
       // import's pending ticket-scoped rows, applied to the tickets this post creates.
       this.settleSpawned(r, p, n, at);
       this.ownerState.applyPending(r, new Set(rows.map(({ row }) => row.id)), at);
+      this.claims.confirmOutputs(r, p.attestations ?? []);
       const seen = this.stations.apply(r, p.sha, n, stations, p.closed ?? [], at, wrote.closingParents);
       // R-BTN-116: the questions the post carries for its queued person legs (§4.4), then the
       // sync's attestations (R-BTN-191) — a person leg's answer, read from the ticket's
@@ -1809,7 +1810,6 @@ export class BatonCore {
       // the blocks are re-evaluated below.
       this.questions.posted(r, p.tickets ?? [], new Set(stations.keys()));
       this.questions.attestations(r, p.attestations ?? []);
-      this.claims.confirmOutputs(r, p.attestations ?? []);
       // B-129 (R-BTN-85, both values): a post whose ticket frontmatter says `available` while
       // the ticket is past its course's start — the snapshot implying a position Baton has
       // moved past, the false `available`/`prs: []` of the 2026-10-27 release — is a
@@ -2179,6 +2179,7 @@ export class BatonCore {
     // 24 hours (R-BTN-62; round 2, 2-A-0). A plain refresh's own closures are applied as they
     // arrive (B-183): validation already refuses a post closing a ticket it also posts, and its
     // materialization dropped what it no longer names.
+    this.claims.confirmOutputs(r, p.attestations ?? []);
     const seen = this.stations.apply(r, p.sha, n, stations, (p.closed ?? []).filter((c) => held || !live.has(c.id)), at);
     // R-BTN-86: a refresh judges a `spawned` end's children as a new head does — it is a
     // reading too, numbered above the end's.
@@ -2187,7 +2188,6 @@ export class BatonCore {
     // head (§4.4) — each is idempotent, so a re-post of the same question or answer moves nothing.
     this.questions.posted(r, (p.tickets ?? []).filter((t) => live.has(t.id)), new Set(stations.keys()));
     this.questions.attestations(r, p.attestations ?? []);
-    this.claims.confirmOutputs(r, p.attestations ?? []);
     // A refresh's stations carry `needs` and `decisions` too (R-BTN-76, R-BTN-78); a refresh that
     // materialized (B-183) recounts for what its rows moved, as a new head does.
     this.applyBlocks(r, stations, wrote?.upserted ?? [], legsBefore, !!wrote && wrote.deleted > 0);

@@ -15,7 +15,7 @@ import { pointerAllowed } from './contractPointers';
 import type { PostedAttestation } from './board';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
-import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
+import { extendsPath, graphOf, leaves, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
 import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from '../shared/schema.mjs';
 import type { Seen, Stations } from './stations';
 import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
@@ -1187,6 +1187,8 @@ export class Claims {
       throw e;
     }
     const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
+    this.exec(`UPDATE claims SET (contract_course_json, contract_course_version) =
+      (SELECT course_json, version FROM courses WHERE repository_id = ? AND id = ?) WHERE id = ?`, item.repository, item.course, id);
     this.event('claimed', `runner:${runnerId}`, { request_id: b.request_id, station: st.station, leg: st.next_leg }, item.id, id);
     // R-BTN-178: the claim's seats, for the leg it is for — the set as rule 4 matched it here,
     // rewritten at each advance that starts a leg.
@@ -1272,7 +1274,7 @@ export class Claims {
       // B-134: the ticket's scope — its home and its `repos:` — as lowercased forge paths. The
       // runner audits each leg's pushes against this and reports what falls outside.
       ...(this.c.scope ? { scope: this.c.scope.scopeOf(c.ticket_id) } : {}),
-      ...(graph && [...graph.legs.values()].some((l) => l.inputs || l.outputs)
+      ...(graph && (graph.entry.size || [...graph.legs.values()].some((l) => l.inputs || l.outputs))
         ? { pointer_reach: pointerReach(this.c.store, repo, c.ticket_id) } : {}),
       ...(handoff ? { handoff_url: handoff } : {}), path, nonce: c.nonce, snapshot_sha: c.snapshot_sha,
       // B-183 (§4.5): the ticket's version and the source's reading of it — `version` is `''`
@@ -1314,6 +1316,7 @@ export class Claims {
       : null;
     return {
       ...(defaultBranch ? { default_branch: defaultBranch } : {}),
+      pointer_reach: pointerReach(this.c.store, repositoryOf(ticketId), ticketId),
       runs: runs.map((r, ordinal) => {
         const mine = inputs.filter((i) => i.claim_id === r.claim_id && i.seq === r.seq);
         const ticket = mine.find((i) => i.name === '');
@@ -1344,6 +1347,13 @@ export class Claims {
   private runningLeg(claimId: number) {
     return this.rows<{ seq: number; leg: string; from_station: string; run_id: string | null }>(
       'SELECT seq, leg, from_station, run_id FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
+  }
+
+  private contract(claim: number, current: Graph) {
+    const pinned = this.rows<{ contract_course_json: string | null; contract_course_version: number | null }>(
+      'SELECT contract_course_json, contract_course_version FROM claims WHERE id = ?', claim)[0];
+    return { graph: pinned?.contract_course_json ? graphOf(JSON.parse(pinned.contract_course_json)) : current,
+      version: pinned?.contract_course_version };
   }
 
   /** B-4 (R-BTN-113): the instance's session-host allowlist, as the runner calls' shared rule
@@ -1440,14 +1450,17 @@ export class Claims {
     const advancing = this.runner(runnerId);
     const v = this.gate(advancing, item, leg, 'advance', { except: claimId, holderBars: b.bars });
     if (!v.ok) throw this.refusal(c.ticket_id, v, 'advance', advancing, claimId);
+    const contract = this.contract(claimId, g);
+    const scriptLeg = resolveLeg(contract.graph, b.leg);
+    if (!scriptLeg) throw offGraph(`${b.leg} is not in the claim's pinned snapshot`);
     // R-BTN-109: the finished leg arrives at `at` with what its entry asks; inline values in full.
     if (run) {
       this.checkEntry(repo, g, at, b.outputs);
-      this.recordOutputs(c.ticket_id, claimId, run, g, b.outputs);
+      this.recordOutputs(c.ticket_id, claimId, run, contract.graph, b.outputs);
     } else if (b.outputs.length) {
       throw new BatonError('invalid-params', 'outputs: no producing leg is running');
     }
-    const resolved = ticketInputs(this.c.store, c.ticket_id, g, leg);
+    const resolved = ticketInputs(this.c.store, c.ticket_id, contract.graph, scriptLeg);
     if (resolved.wait) throw new BatonError('not-eligible', `${leg}: ${resolved.wait}`, { rule: 1, rule_code: resolved.wait });
     // R-BTN-76: an advance into a leg blocked on a resource is accepted — the holder may know better.
     const resources = this.resourceAdvice(runnerId, c.ticket_id, leg);
@@ -1504,7 +1517,7 @@ export class Claims {
     // start — pointers and digests only (R-BTN-33), the ticket's version and its read's digest
     // on the row whose name is empty. Replay reads these rows; a retried advance that reached
     // this far never runs twice (its claim-legs insert above is the transaction's own).
-    for (const i of g.legs.get(leg)?.inputs ? [] : b.run_inputs.inputs) {
+    for (const i of contract.graph.legs.get(scriptLeg)?.inputs ? [] : b.run_inputs.inputs) {
       if (i.hasValue || !pointerAllowed(i.uri, pointerReach(this.c.store, repo, c.ticket_id))) {
         throw new BatonError('invalid-params', `run_inputs: ${i.name} must be a pointer within the ticket's reach`);
       }
@@ -1517,15 +1530,16 @@ export class Claims {
         claimId, seq, c.ticket_id, b.run_inputs.ticket.version, b.run_inputs.ticket.read_digest);
     }
     const started = this.legFacts(claimId, leg, runId);
-    const contractVersion = g.legs.get(leg)!.version;
+    const contractVersion = contract.graph.legs.get(scriptLeg)!.version;
+    const courseVersion = contract.version ?? started.row.course_version;
     this.exec('UPDATE claim_legs SET contract_version = ?, contract_course_version = ? WHERE claim_id = ? AND seq = ?',
-      contractVersion, started.row.course_version, claimId, seq);
+      contractVersion, courseVersion, claimId, seq);
     for (const i of resolved.inputs) {
       this.exec(`INSERT INTO leg_run_inputs (claim_id, seq, name, ticket_id, from_leg, from_run, uri, digest, value_json, leg_version, schema)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, claimId, seq, i.name, c.ticket_id, i.from_leg, i.from_run,
         i.uri ?? null, i.digest ?? null, Object.hasOwn(i, 'value') ? JSON.stringify(i.value) : null, i.leg_version, i.schema);
     }
-    if (resolved.inputs.length) this.c.history?.record(started.ticket, { kind: 'inputs', ...started.row, leg_version: contractVersion,
+    if (resolved.inputs.length) this.c.history?.record(started.ticket, { kind: 'inputs', ...started.row, course_version: courseVersion, leg_version: contractVersion,
       detail: { seq, names: resolved.inputs.map((i) => i.name) } });
     this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}) } });
     // R-BTN-62: only a reading numbered above the counter now can judge the claim stale.
@@ -1609,7 +1623,7 @@ export class Claims {
     if (e.status === 'completed' && finished && g) {
       this.checkEntry(repositoryOf(c.ticket_id), g, reached, e.outputs);
       const run = this.runningLeg(c.id);
-      if (run) this.recordOutputs(c.ticket_id, c.id, run, g, e.outputs);
+      if (run) this.recordOutputs(c.ticket_id, c.id, run, this.contract(c.id, g).graph, e.outputs);
     }
     else if (e.status === 'completed') this.checkOutputValues(repositoryOf(c.ticket_id), e.outputs);
     // R-BTN-153 (B-175): a `done` end's `reached` is what the owners' conclusions map reads
@@ -1712,31 +1726,33 @@ export class Claims {
     }
   }
 
-  private recordOutputs(ticket: string, claim: number, run: NonNullable<ReturnType<Claims['runningLeg']>>, graph: Graph, outputs: Output[]) {
+  private recordOutputs(ticket: string, claim: number, run: NonNullable<ReturnType<Claims['runningLeg']>>, graph: Graph, outputs: Output[], recoveredRun?: number) {
     const repo = repositoryOf(ticket);
     const leg = graph.legs.get(resolveLeg(graph, run.leg) ?? run.leg);
     const fault = declaredOutputFault(leg, outputs);
     if (fault) throw new BatonError('not-eligible', fault, { rule: 'entry', rule_code: 'output-invalid' });
     if (!outputs.length) return;
     const f = this.legFacts(claim, run.leg, run.run_id);
+    if (recoveredRun !== undefined) f.row.run = recoveredRun;
     const versions = this.rows<{ contract_version: number | null; contract_course_version: number | null }>(
       'SELECT contract_version, contract_course_version FROM claim_legs WHERE claim_id = ? AND seq = ?', claim, run.seq)[0];
     const version = versions.contract_version ?? leg?.version ?? 0;
     const courseVersion = versions.contract_course_version ?? f.row.course_version ?? 0;
     const reach = outputs.some((o) => o.uri) ? pointerReach(this.c.store, repo, ticket) : null;
+    for (const o of outputs) if (o.uri && !pointerAllowed(o.uri, reach!)) {
+      throw new BatonError('not-eligible', `output ${o.name}: pointer has no repository or bucket reach`, { rule: 'entry', rule_code: 'output-invalid' });
+    }
     for (const o of outputs) {
-      if (o.uri && !pointerAllowed(o.uri, reach!)) {
-        throw new BatonError('not-eligible', `output ${o.name}: pointer has no repository or bucket reach`, { rule: 'entry', rule_code: 'output-invalid' });
-      }
-      this.exec(`INSERT INTO leg_outputs (ticket_id, leg, run, name, schema, uri, digest, value_json, course_version, leg_version, claim_id, source, recorded_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'holder', ?)`, ticket, run.leg, f.row.run, o.name, o.schema,
-        o.uri ?? null, o.digest ?? null, Object.hasOwn(o, 'value') ? JSON.stringify(o.value) : null, courseVersion, version, claim, this.c.now());
+      this.exec(`INSERT INTO leg_outputs (ticket_id, leg, run, name, schema, uri, digest, value_json, course_version, leg_version, claim_id, source, confirmed, recorded_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ticket, run.leg, f.row.run, o.name, o.schema,
+        o.uri ?? null, o.digest ?? null, Object.hasOwn(o, 'value') ? JSON.stringify(o.value) : null, courseVersion, version, claim,
+        recoveredRun === undefined ? 'holder' : 'sync', recoveredRun === undefined ? 0 : 1, this.c.now());
     }
     this.c.history?.record(ticket, { kind: 'outputs', ...f.row, course_version: courseVersion, leg_version: version, detail: { names: outputs.map((o) => o.name) } });
   }
 
-  /** Confirm only envelopes that the named claim recorded against this exact evidence. A
-   * foreign nonce, another run's ref, or a replacement envelope cannot feed a consumer. */
+  /** S-BTN-48: read attestations from the authenticated sync, never raw station markers.
+   * Confirm exact holder evidence; recover only for an identified, abandoned run. */
   confirmOutputs(repo: string, attestations: PostedAttestation[]) {
     for (const a of attestations) {
       if (a.type !== 'std:git.output@1' || !a.ref || !a.value || typeof a.value !== 'object') continue;
@@ -1747,6 +1763,7 @@ export class Claims {
         if (e instanceof BatonError) continue;
         throw e;
       }
+      if (typeof value.run_id === 'string') this.recoverOutputs(repo, a.ticket, { nonce: value.claim_nonce, leg: value.leg, runId: value.run_id }, outputs);
       for (const o of outputs) {
         this.exec(`UPDATE leg_outputs SET confirmed = 1
           WHERE ticket_id = ? AND leg = ? AND name = ? AND schema = ? AND uri IS ? AND digest IS ? AND value_json IS ? AND confirmed = 0
@@ -1757,6 +1774,28 @@ export class Claims {
           `${repo}:${a.ticket}`, value.leg, o.name, o.schema, o.uri ?? null, o.digest ?? null, Object.hasOwn(o, 'value') ? JSON.stringify(o.value) : null,
           value.claim_nonce, a.ref);
       }
+    }
+  }
+
+  private recoverOutputs(repo: string, local: string, evidence: { nonce: string; leg: string; runId: string }, outputs: Output[]) {
+    const ticket = `${repo}:${local}`;
+    const run = this.rows<{ claim_id: number; seq: number; leg: string; run_id: string; from_station: string; course_id: string }>(
+      `SELECT l.claim_id, l.seq, l.leg, l.run_id, l.from_station, c.course_id FROM claim_legs l JOIN claims c ON c.id = l.claim_id
+       JOIN tickets t ON t.id = c.ticket_id WHERE c.ticket_id = ? AND c.nonce = ? AND l.leg = ? AND l.run_id = ?
+       AND l.abandoned_at IS NOT NULL AND c.contract_course_json IS NOT NULL
+       AND c.end_reason NOT IN ('released:cannot-finish:contract-input', 'released:cannot-finish:contract-output')`,
+      ticket, evidence.nonce, evidence.leg, evidence.runId)[0];
+    if (!run || !outputs.length) return;
+    const graph = this.stations.graph(repo, run.course_id);
+    if (!graph) return;
+    const ordinal = this.rows<{ n: number }>(`SELECT COUNT(*) AS n FROM claim_legs p JOIN claims k ON k.id = p.claim_id
+      WHERE k.ticket_id = ? AND p.leg = ? AND (k.id < ? OR (k.id = ? AND p.seq <= ?))`, ticket, run.leg, run.claim_id, run.claim_id, run.seq)[0].n;
+    if (this.rows('SELECT 1 FROM leg_outputs WHERE ticket_id = ? AND leg = ? AND run = ? LIMIT 1', ticket, run.leg, ordinal).length) return;
+    try {
+      this.checkOutputValues(repo, outputs);
+      this.recordOutputs(ticket, run.claim_id, run, this.contract(run.claim_id, graph).graph, outputs, ordinal);
+    } catch (e) {
+      if (!(e instanceof BatonError)) throw e;
     }
   }
 
@@ -1878,7 +1917,7 @@ export class Claims {
     if (status === 'completed') this.confirmByClosure(claimId);
     else if (reason === 'released:cannot-finish:contract-input') {
       this.hold(ticketId, 'non-retryable:contract-input', 'baton', { claim_id: claimId, detail: opts.detail ?? null });
-      this.c.blocks?.raise(ticketId, 'baton.contract');
+      this.c.blocks?.raise(ticketId, 'baton.contract', opts.detail ?? null);
     } else this.applyRetryPolicy(claimId, ticketId, reason);
   }
 

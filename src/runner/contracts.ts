@@ -1,6 +1,9 @@
 // S-BTN-48: live runs and replay read the same bytes and use the shared schema validator.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { gitPointer, pointerAllowed, S3_POINTER, type PointerReach } from '../core/contractPointers';
 import { declaredOutputFault, type ResolvedInput } from '../core/contracts';
 import { checkOutputs, type Output } from '../core/validate';
@@ -13,7 +16,7 @@ export const sha256 = (bytes: Buffer): string => `sha256:${createHash('sha256').
 
 export function gitBytes(home: string, args: string[]): Buffer | null {
   try {
-    return execFileSync('git', ['-C', home, ...args], { encoding: 'buffer', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: MAX_BYTES, timeout: 30_000, killSignal: 'SIGKILL' });
+    return execFileSync('git', ['-C', home, ...args], { encoding: 'buffer', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: MAX_BYTES, timeout: 30_000, killSignal: 'SIGKILL', env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } });
   } catch {
     return null;
   }
@@ -23,15 +26,31 @@ export function slugOf(url: string): string {
   return url.trim().replace(/\.git$/, '').replace(/^.*[:/]([^/:]+\/[^/:]+)$/, '$1').toLowerCase();
 }
 
-async function pointerBytes(home: string, uri: string): Promise<Buffer> {
+async function pointerBytes(home: string, uri: string, reach: PointerReach): Promise<Buffer> {
   const pointer = gitPointer(uri);
   if (pointer) {
-    // Read the configured spelling, not the local insteadOf rewrite (e.g. a test's git server).
-    if (slugOf(git(home, ['config', 'remote.origin.url'])) !== pointer.repository.toLowerCase()) throw new Error('the pointer does not name the checkout');
+    const name = pointer.repository.toLowerCase();
+    const origin = git(home, ['config', 'remote.origin.url']).trim();
+    const base = reach.web.find((url) => new URL(url).pathname.slice(1).toLowerCase() === name);
+    const originUrl = /^(?:[^@]+@)?([^:/]+):([^/].*)$/.exec(origin);
+    const originHost = origin.includes('://') ? new URL(origin).host : originUrl?.[1];
+    const local = slugOf(origin) === name && (!base || originHost?.toLowerCase() === new URL(base).host);
     const object = pointer.blob ?? `${pointer.commit}:${pointer.path}`;
-    const bytes = gitBytes(home, ['cat-file', 'blob', object]);
-    if (!bytes) throw new Error('the pointer is not a readable blob in the checkout');
-    return bytes;
+    const existing = local ? gitBytes(home, ['cat-file', 'blob', object]) : null;
+    if (existing) return existing;
+    if (!base && !local) throw new Error('the pointer has no fetch location');
+    const scratch = mkdtempSync(join(tmpdir(), 'baton-artifact-'));
+    try {
+      if (!gitBytes(scratch, ['init', '--bare', '--quiet']) || !gitBytes(scratch, [
+        '-c', 'credential.helper=', '-c', 'http.followRedirects=false', 'fetch', '--no-tags', '--no-write-fetch-head',
+        '--depth=1', '--', base ? `${base}.git` : origin, pointer.commit ?? pointer.blob!,
+      ])) throw new Error('the Git object could not be fetched');
+      const bytes = gitBytes(scratch, ['cat-file', 'blob', object]);
+      if (!bytes) throw new Error('the pointer is not a readable blob');
+      return bytes;
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   }
   const bucket = S3_POINTER.exec(uri)?.[1];
   const url = bucket ? `https://${bucket}.s3.amazonaws.com${uri.slice('s3://'.length + bucket.length)}` : uri;
@@ -54,11 +73,11 @@ async function pointerBytes(home: string, uri: string): Promise<Buffer> {
   }
 }
 
-export async function readArtifact(home: string, envelope: Omit<Output, 'schema'> & { schema?: string }, resolve: Resolve, reach?: PointerReach, meter = { steps: PATTERN_STEPS_MAX }): Promise<unknown> {
+export async function readArtifact(home: string, envelope: Omit<Output, 'schema'> & { schema?: string }, resolve: Resolve, reach: PointerReach, meter = { steps: PATTERN_STEPS_MAX }): Promise<unknown> {
   let value = envelope.value;
   if (envelope.uri) {
-    if (reach && !pointerAllowed(envelope.uri, reach)) throw new Error('pointer has no repository or bucket reach');
-    const bytes = await pointerBytes(home, envelope.uri);
+    if (!pointerAllowed(envelope.uri, reach)) throw new Error('pointer has no repository or bucket reach');
+    const bytes = await pointerBytes(home, envelope.uri, reach);
     if (envelope.digest && sha256(bytes) !== envelope.digest) throw new Error(`the fetched bytes digest to ${sha256(bytes).slice(0, 17)}…, not the recorded digest`);
     if (!envelope.schema) return undefined; // a pre-contract replay recorded only the pointer
     try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }

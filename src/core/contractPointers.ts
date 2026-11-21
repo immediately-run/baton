@@ -1,6 +1,8 @@
 // R-BTN-82 and §12.3: the pointer shapes and ticket-scoped allowlist, shared with the runner.
 import { underWebBase } from '../shared/links.mjs';
 
+export const OUTPUTS_MAX = 16;
+
 const GIT_POINTER = /^git:([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)(?:@([0-9a-f]{40}):([A-Za-z0-9._/-]{1,512})|#blob=([0-9a-f]{40}))$/;
 export const S3_POINTER = /^s3:\/\/([a-z0-9][a-z0-9.-]{1,61}[a-z0-9])\/[^\s?#]+\?versionId=[^\s&#]+$/;
 

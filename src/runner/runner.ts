@@ -1624,6 +1624,11 @@ export class Runner {
         wait(order.ticket_id, def == null ? `${leg} is not a leg of course ${course.course}` : `${leg} leaves ${def.from.join(' or ')}, and without Baton the runner cannot tell where the ticket rests`);
         continue;
       }
+      if (Object.keys(def.inputs ?? {}).length || def.outputs || def.to.some((station) => course.graph.entry.has(station))) {
+        dropCourse(course.scratch);
+        wait(order.ticket_id, `${leg} needs Baton for its contract or station entry (R-BTN-82)`);
+        continue;
+      }
       this.saidOffline.delete(order.ticket_id);
       await this.runOfflineLeg(order, leg, at, sha, course, why);
       return true;
@@ -1678,6 +1683,13 @@ export class Runner {
         if ('bug' in verdict) {
           q.dropOrder(ticket);
           this.log(`baton: ${ticket}'s offline ${leg} script bug: ${maskLegOutput(verdict.why, this.legSecrets)} — the order is dropped (R-BTN-202)`);
+          return;
+        }
+        // Undeclared outputs are allowed online, but offline we cannot judge their reach.
+        const outputs = (outcome.result as { outputs?: unknown }).outputs;
+        if (outputs != null && (!Array.isArray(outputs) || outputs.length !== 0)) {
+          q.dropOrder(ticket);
+          this.log(`baton: ${ticket}'s offline ${leg} returned outputs; no evidence was written and the order was dropped (R-BTN-82)`);
           return;
         }
         const closed = await this.callClose(course.scripts.get(leg) ?? null, ctx, outcome.result);

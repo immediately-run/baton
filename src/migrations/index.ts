@@ -64,6 +64,7 @@ import runnersViewReads from './0063_runners_view_reads.sql';
 import childrenOwnerState from './0064_children_owner_state.sql';
 import readEfficiency from './0065_read_efficiency.sql';
 import legContracts from './0066_leg_contracts.sql';
+import pinnedContracts from './0067_pinned_contracts.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -208,4 +209,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 64, sql: childrenOwnerState },
   { id: 65, sql: readEfficiency },
   { id: 66, sql: legContracts },
+  { id: 67, sql: pinnedContracts },
 ];

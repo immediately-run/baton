@@ -22,8 +22,7 @@ import { API_KEY, signingKey } from '../../cli/sign.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
 import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
-import { GIT_SHA, OUTPUTS_MAX } from '../core/validate';
-import { decodeMarkerField } from '../core/contractPointers';
+import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
 import { stampMarkdownVersions } from './ticket-versions';
 import { closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, RUN_TESTS_TIMEOUT_MS } from './ticket-state';
@@ -483,21 +482,14 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     }
     if (found) controlField = { control: { keys: signingKeys.map((k) => k.fingerprint), groups: found.groups, unsigned: clampUnsignedList(found.unsigned) } };
   }
-  const attestations = markers.flatMap((m) => {
-    if (typeof m.outputs !== 'string' || m.outputs.length > 250_000 || !m.claim_nonce) return [];
-    try {
-      const outputs = JSON.parse(decodeMarkerField(m.outputs));
-      if (!Array.isArray(outputs) || outputs.length === 0 || outputs.length > OUTPUTS_MAX) return [];
-      return [{ type: 'std:git.output@1', ticket: m.ticket, ref: m.ref, value: { claim_nonce: m.claim_nonce, leg: m.leg, outputs } }];
-    } catch { return []; }
-  }).slice(0, 100);
   return {
     // B-183 (§4.4): the source's declaration — `kind`, how it reads (`versions`) and the CLI
     // that posts — beside its tickets, each stamped with its `version` and `key` above.
     payload: {
       source: { kind: sourceKind, ...(sourceVersions ? { versions: sourceVersions } : {}), cli: cliVersion() },
+      // R-BTN-139: station functions report observations, not forge authorship. None of
+      // their raw markers may be promoted to a std:git.output attestation here.
       registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...controlField,
-      ...(attestations.length ? { attestations } : {}),
     },
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };

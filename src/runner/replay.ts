@@ -39,6 +39,7 @@ import { bareTicketId } from '../defaults/ticket-state';
 import { digestOfRead, MARKDOWN_SOURCE } from '../defaults/ticket-versions';
 import { dropCourse, git, loadCourse, extractTicketSource, type CourseLoad } from './home';
 import { gitBytes, readArtifact } from './contracts';
+import type { PointerReach } from '../core/contractPointers';
 import { stdSchema } from '../shared/std.mjs';
 import { loadExecutor, type Executor, type Handle } from './executor';
 import { maskLegOutput, readMaskEnv, runnerConfigPath, secretValues } from './mask';
@@ -355,7 +356,7 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
     for (const input of run.inputs) {
       let checked: { ok: boolean; why?: string };
       try {
-        const value = await readArtifact(a.home, input, course.schema ?? stdSchema);
+        const value = await readArtifact(a.home, input, course.schema ?? stdSchema, read.pointer_reach ?? { git: [], web: [], buckets: [] });
         checkedInputs.push(value === undefined ? input : { ...input, value });
         checked = { ok: true };
       } catch (e) {
@@ -421,17 +422,19 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
 }
 
 /** The run's record and the repository's default branch, read with the caller's key (§14). */
-async function readRuns(a: ReplayArgs, io: ReplayIo): Promise<{ runs: RecordedRun[]; default_branch?: string }> {
+async function readRuns(a: ReplayArgs, io: ReplayIo): Promise<RunsRead> {
   const path = `/v1/repositories/${encodeURIComponent(a.repository)}/tickets/${encodeURIComponent(a.ticket)}/legs/${encodeURIComponent(a.leg)}/runs`;
   const target = new URL(path, a.url).toString();
   const cred = requestCredential(a.key);
   const headers = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: 'GET', url: target, body: '', key: cred.key });
   const transport = io.transport ?? ((req) => fetch(req));
   const res = await transport(new Request(target, { method: 'GET', headers, signal: AbortSignal.timeout(30_000) }));
-  const json = await res.json().catch(() => null) as { runs?: RecordedRun[]; default_branch?: string; message?: string } | null;
+  const json = await res.json().catch(() => null) as (Partial<RunsRead> & { message?: string }) | null;
   if (!res.ok) throw new Error(`reading the leg's runs failed (${res.status}: ${json?.message ?? 'no message'}) — the key must be an owner's or an administrator's (§14)`);
-  return { runs: json?.runs ?? [], ...(json?.default_branch ? { default_branch: json.default_branch } : {}) };
+  return { runs: json?.runs ?? [], default_branch: json?.default_branch, pointer_reach: json?.pointer_reach };
 }
+
+interface RunsRead { runs: RecordedRun[]; default_branch?: string; pointer_reach?: PointerReach }
 
 /** The course id the snapshot's own settings name (§2c): one, else the refusal — the recorded
  *  run names which course it ran, and a replay never guesses. */

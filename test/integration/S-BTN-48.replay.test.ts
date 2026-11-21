@@ -147,10 +147,10 @@ export async function close() { return 'https://example.test/close'; }
     expect(code).toBe(0);
   }
   /** The runner over this home, as S-BTN-207's: one session, one credential. */
-  runner(session: string): Runner {
+  runner(session: string, transport: (req: Request) => Promise<Response> = hostCall): Runner {
     const api = new BatonApi({
       url: ORIGIN,
-      transport: (req) => hostCall(req),
+      transport,
       auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
     });
     return new Runner({
@@ -185,11 +185,11 @@ afterEach(() => {
 
 /** One replay over `repo`, its report read back. The environment carries a secret under a name
  *  `--env` keeps, so the report's masking is exercised on every run. */
-async function replay(args: string[], env: Record<string, string> = {}): Promise<{ code: number; report: Record<string, any>; lines: string[] }> {
+async function replay(args: string[], env: Record<string, string> = {}, leg = 'implement'): Promise<{ code: number; report: Record<string, any>; lines: string[] }> {
   const report = join(mkdtempSync(join(tmpdir(), 'baton-s48-report-')), 'report.json');
   work.push(report);
   const lines: string[] = [];
-  const code = await replayMain(['docs:T-1', 'implement', '-i', keyFile, '--home', repo.dir, '--report', report, ...args], {
+  const code = await replayMain(['docs:T-1', leg, '-i', keyFile, '--home', repo.dir, '--report', report, ...args], {
     transport: (req) => hostCall(req),
     env: { ...process.env, MY_PROVIDER_TOKEN: 'tok-secret-value-0123456789', SSH_AUTH_SOCK: '/agent.sock', ...env },
     log: (l) => lines.push(l),
@@ -198,7 +198,7 @@ async function replay(args: string[], env: Record<string, string> = {}): Promise
 }
 
 describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
-  it.each([false, true])('checks a producer artifact before close (invalid=%s)', async (invalid) => {
+  it.each(['valid', 'bad-output', 'bad-input'])('checks envelopes before run or close (%s)', async (mode) => {
     repo = new Repo(false);
     repos.push(repo);
     await repo.setup();
@@ -207,7 +207,7 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     delete config.courses[0].source;
     writeFileSync(configPath, JSON.stringify(config));
-    writeFileSync(join(repo.dir, 'plan.json'), JSON.stringify(invalid ? { wrong: true } : { url: 'https://example.test' }));
+    writeFileSync(join(repo.dir, 'plan.json'), JSON.stringify(mode === 'bad-output' ? { wrong: true } : { url: 'https://example.test' }));
     const artifact = repo.commit('plan artifact');
     writeFileSync(join(dir, 'course.json'), JSON.stringify({ start: 'filed', start_leg: 'implement', end: ['done'], stations: { filed: {}, planned: {}, done: {} }, legs: {
       implement: { from: ['filed'], to: 'planned', outputs: { plan: { schema: 'std:url@1' } } },
@@ -215,7 +215,7 @@ describe('S-BTN-48 replay: a recorded run re-run without a claim', () => {
     } }));
     writeFileSync(join(dir, 'legs', 'implement.mjs'), `import { writeFileSync } from 'node:fs';
 export function run() { return { reached: 'planned', next: 'apply', outputs: [{ name: 'plan', schema: 'std:url@1', uri: 'git:immediately-run/docs@${artifact}:plan.json' }] }; }
-export function close(ctx) { writeFileSync(ctx.checkout + '/producer-closed', 'yes'); return null; }
+export function close(ctx) { writeFileSync(ctx.checkout + '/producer-closed', 'yes'); return '${artifact}'; }
 export function handoff() { return null; }
 `);
     writeFileSync(join(dir, 'legs', 'apply.mjs'), `import { writeFileSync } from 'node:fs';
@@ -225,16 +225,43 @@ export function handoff() { return null; }
 `);
     repo.commit('contract course');
     await repo.sync();
-    const outcome = await repo.runner(`s48-contract-${process.pid}-${invalid}`).runOnce();
-    if (invalid) {
+    const outcome = await repo.runner(`s48-contract-${process.pid}-${mode}`, async (req) => {
+      const response = await hostCall(req);
+      if (mode !== 'bad-input' || !req.url.endsWith('/advance') || !response.ok) return response;
+      const answer = await response.clone().json() as { inputs?: { digest?: string }[] };
+      if (!answer.inputs?.length) return response;
+      // Simulate a recorded, well-shaped digest whose artifact bytes no longer match it.
+      answer.inputs[0].digest = sha256('different bytes');
+      return Response.json(answer);
+    }).runOnce();
+    if (mode === 'bad-output') {
       expect(outcome).toMatchObject({ end_reason: 'released:cannot-finish:contract-output' });
       expect(await rows('SELECT failed_attempt FROM claims')).toEqual([{ failed_attempt: 1 }]);
       expect(await rows('SELECT * FROM leg_outputs')).toEqual([]);
       expect(() => readFileSync(join(repo.dir, 'producer-closed'))).toThrow();
+    } else if (mode === 'bad-input') {
+      expect(outcome).toMatchObject({ end_reason: 'released:cannot-finish:contract-input' });
+      expect(await rows('SELECT failed_attempt FROM claims')).toEqual([{ failed_attempt: 0 }]);
+      expect(await rows("SELECT question FROM ticket_decisions WHERE decision_id = 'baton.contract'")).toEqual([
+        { question: expect.stringMatching(/input plan \(std:url@1\) from implement version 0: .*digest/) },
+      ]);
+      expect(() => readFileSync(join(repo.dir, 'consumer-value'))).toThrow();
     } else {
       expect(outcome).toMatchObject({ end_reason: 'done' });
       expect(readFileSync(join(repo.dir, 'consumer-value'), 'utf8')).toBe('https://example.test');
       expect(await rows("SELECT schema, value_json FROM leg_run_inputs WHERE name = 'plan'")).toEqual([{ schema: 'std:url@1', value_json: null }]);
+      const again = await replay([], {}, 'apply');
+      expect(again.code, JSON.stringify(again.report)).toBe(0);
+      expect(again.report.inputs).toMatchObject([{ name: 'plan', ok: true }]);
+      expect(again.report.wrote_to_baton).toBe(false);
+      const [{ nonce }] = await rows<{ nonce: string }>('SELECT nonce FROM claims');
+      const outputs = encodeURIComponent(JSON.stringify([{ name: 'plan', schema: 'std:url@1', uri: `git:immediately-run/docs@${artifact}:plan.json` }]));
+      writeFileSync(join(dir, 'sync.mjs'), `export default { stations() { return { stations: {}, markers: ${JSON.stringify([
+        { ticket: 'T-1', leg: 'implement', ref: artifact, claim_nonce: nonce, outputs },
+      ])} }; } };`);
+      repo.commit('custom station emits an unverified marker');
+      await repo.sync();
+      expect(await rows('SELECT confirmed FROM leg_outputs')).toEqual([{ confirmed: 0 }]);
     }
   });
   it('the runner records each run\'s inputs — the ticket\'s version, its read\'s digest and the head — and replay runs the run writing nothing to Baton', async () => {

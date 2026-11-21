@@ -509,7 +509,8 @@ export interface Output {
 }
 
 /** R-BTN-82: outputs per leg run. */
-export const OUTPUTS_MAX = 16;
+import { OUTPUTS_MAX } from './contractPointers';
+export { OUTPUTS_MAX };
 const OUTPUT_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const OUTPUT_DIGEST = /^sha256:[0-9a-f]{64}$/;
 /** R-BTN-82's pointers: `git:<owner>/<name>@<commit>:<path>` or `#blob=<sha>` (content-addressed),

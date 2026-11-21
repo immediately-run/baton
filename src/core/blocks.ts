@@ -421,9 +421,9 @@ export class Blocks {
 
   /** Raise Baton's decision `id` on the whole ticket, `asks: owner`, in the caller's transaction:
    *  a `decision` block with its notices (R-BTN-78, R-BTN-80). A decision already open is left. */
-  raise(ticket: string, id: BatonDecision): boolean {
+  raise(ticket: string, id: BatonDecision, detail: string | null = null): boolean {
     if (this.hasDecision(ticket, id)) return false;
-    this.exec(`INSERT INTO ticket_decisions (ticket_id, decision_id, leg, asks, url, source) VALUES (?, ?, '', 'owner', NULL, 'baton')`, ticket, id);
+    this.exec(`INSERT INTO ticket_decisions (ticket_id, decision_id, leg, asks, url, source, question) VALUES (?, ?, '', 'owner', NULL, 'baton', ?)`, ticket, id, detail);
     this.c.decisions?.opened(ticket, [id]);
     this.write([ticket], ['decision']);
     return true;

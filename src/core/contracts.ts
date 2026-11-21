@@ -56,11 +56,21 @@ export function declaredOutputFault(leg: Leg | undefined, outputs: Output[]): st
 export function pointerReach(store: Store, repo: string, ticket: string): PointerReach {
   const row = store.exec<{ repos: string }>('SELECT repos FROM tickets WHERE id = ?', ticket).toArray()[0];
   const paths = JSON.parse(row?.repos ?? '[]') as string[];
-  const home = homeForgeOf(store, repo)?.github.toLowerCase();
+  const home = homeForgeOf(store, repo);
   const entries = codeReposOf(store, repo);
-  const git = home ? [home, ...paths.map((r) => (r.includes('/') ? r : `${home.split('/')[0]}/${r}`).toLowerCase())
-    .filter((r) => entries.length === 0 || entries.some((e) => e.path.toLowerCase() === r))] : [];
-  const web = ticketRepositories(store, repo, paths).map((r) => r.webBase);
+  const owner = home?.github.split('/').slice(0, -1).join('/').toLowerCase();
+  const unlisted = (id: string) => store.exec<{ mode: string | null }>(
+    `SELECT json_extract(policy_json, '$.repos.unlisted') AS mode FROM repository_policies
+      WHERE repository_id = ? ORDER BY version DESC LIMIT 1`, id).toArray()[0]?.mode ?? 'by-name';
+  const listed = entries.length || !home ? paths : unlisted(repo) !== 'by-name' ? [] : paths.filter((name) => {
+    const path = (name.includes('/') ? name : `${owner}/${name}`).toLowerCase();
+    if (path.slice(0, path.lastIndexOf('/')) !== owner || !home.host) return false;
+    const registered = store.exec<{ id: string }>(
+      'SELECT id FROM repositories WHERE lower(web_base) = ?', `https://${home.host}/${path}`).toArray();
+    return registered.every(({ id }) => unlisted(id) === 'by-name');
+  });
+  const web = ticketRepositories(store, repo, listed).map((r) => r.webBase);
+  const git = [...new Set([...(home ? [home.github.toLowerCase()] : []), ...web.map((base) => new URL(base).pathname.slice(1).toLowerCase())])];
   const settings = store.exec<{ artifact_buckets: string }>('SELECT artifact_buckets FROM repositories WHERE id = ?', repo).toArray()[0];
   return { git, web, buckets: JSON.parse(settings?.artifact_buckets ?? '[]') as string[] };
 }
