@@ -1,3 +1,4 @@
+import type { SessionLinkView } from './links';
 // courseView.ts — one course of a repository as the Courses screens read it (B-197; BATON_SPEC
 // §5.2 R-BTN-69, §5.3 R-BTN-83, §5.4 R-BTN-79, §6.2 R-BTN-126, §14 `course.show`): the file as
 // last accepted and the newer one Baton refused, the runners declaring it, each leg's queue and
@@ -59,7 +60,7 @@ type Facts = {
 /** The course, or null when the repository's registry holds neither an accepted file nor a
  *  refused one under `course`. `after` is the position a `?cursor=` carried; `summary` leaves
  *  the tickets and the runs out (the list screen's poll). */
-export function courseView(c: ViewCtx, repo: string, course: string, opts: { since: number; summary: boolean; after: CoursePosition | null }) {
+export function courseView(c: ViewCtx, repo: string, course: string, opts: { since: number; summary: boolean; after: CoursePosition | null; sessionLink: SessionLinkView }) {
   const now = c.now();
   const row = c.sql<{ id: string; version: number; min_runner_version: number; skill: string; course_json: string }>(
     'SELECT id, version, min_runner_version, skill, course_json FROM courses WHERE repository_id = ? AND id = ?', repo, course)[0];
@@ -173,7 +174,7 @@ export function courseView(c: ViewCtx, repo: string, course: string, opts: { sin
         end: r.status === 'active' ? null : r.end_reason, claim_end: claimEnd(r.status, r.end_reason), detail: r.end_detail,
         snapshot_sha: r.snapshot_sha, head_sha: r.head_sha,
         // R-BTN-113: stored only where it passed; R-BTN-128: the directory, as text.
-        session_url: r.session_url, log_dir: r.leg_log_dir,
+        ...opts.sessionLink(r.session_url, r.runner_id), log_dir: r.leg_log_dir,
         transcripts: transcripts.get(r.claim_id) ?? [],
       };
       runsByLeg.set(r.leg, [...(runsByLeg.get(r.leg) ?? []), run]);

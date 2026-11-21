@@ -310,10 +310,18 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
   one link for each claim's running leg, and `advance` or `end` a `session_url` for the leg it
   finishes. A link must be `https`, at most 512 characters, without userinfo, with its host in
   the instance's `session_hosts` (an administrator's setting, default `claude.ai`, §12.7), else
-  it is dropped and logged, never a refused call. It is stored on `claim_legs.session_url` (latest wins while
-  running) and shown on Board and the runner page (§11.4). Under an executor whose handle names
-  its session's link (R-BTN-107), it is that link, or a page the runner serves that leads a
-  person to the session.
+  it is dropped, never a refused call; only the reason, not any part of the supplied address, is
+  logged or returned. It is stored on `claim_legs.session_url` (latest wins while running). An
+  executor (R-BTN-107) may report the session's link or a runner-hosted leg page that leads to it.
+  - **A session link may carry a bearer capability.** The read dispatcher (R-BTN-129) discloses
+    it only to authorized owner and administrator dashboard sessions (R-BTN-155) and to the
+    runner session whose claim reported it, verified by its key and runner secret (R-BTN-14).
+    Other readers get `session_url: null` and `session_link: true`
+    when a link exists (`false` when absent). An `interact` condition uses `url` for the same
+    field and also discloses it in its delivery (R-BTN-163).
+  - The link never goes into events, ticket history, logs, error messages or the admin state
+    export. The dashboard labels it **Open leg page**, validates it by its link rule, and opens
+    it with `rel="noreferrer"` and the referrer policy of R-BTN-16.
 - **R-BTN-201 (a launcher starts sessions; Baton reserves nothing for them).** A **launcher** is
   a process outside Baton, run by the deployment, that starts runner sessions when there is work
   for them. Baton records no launch and reserves nothing for one: a started session claims as

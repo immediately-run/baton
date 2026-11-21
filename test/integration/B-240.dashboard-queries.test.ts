@@ -65,6 +65,7 @@ async function oldRunning(now: number) {
     const alive = c.kind !== 'legacy' && now - c.last_seen_at < c.lease_timeout_ms;
     out.push({
       ...c,
+      session_url: null, session_link: c.session_url != null,
       alive,
       reap_at: c.kind === 'legacy' ? null : c.last_seen_at + c.lease_timeout_ms,
       stalled: alive && (c.last_activity_at == null ? now - c.claimed_at : now - c.last_activity_at) > STALLED_MS,
@@ -90,7 +91,7 @@ async function oldTimeline(now: number) {
         activities.push({ ...a, transcript_url: t ? transcriptUrl(t.repo, t.path) : null });
       }
       const runs = (await rows<Record<string, any>>('SELECT leg, started_at, finished_at, abandoned_at, session_url FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id))
-        .map((r) => ({ leg: r.leg, started_at: r.started_at, ended_at: r.finished_at ?? r.abandoned_at ?? null, session_url: r.session_url }));
+        .map((r) => ({ leg: r.leg, started_at: r.started_at, ended_at: r.finished_at ?? r.abandoned_at ?? null, session_url: null, session_link: r.session_url != null }));
       claims.push({ ...c, runs, activities });
     }
     lanes.push({ ...l, claims });

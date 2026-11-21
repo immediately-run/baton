@@ -479,7 +479,7 @@ export class RunnerApi {
       const why = sessionLinkWhy(link.url, this.c.sessionHosts?.() ?? SESSION_HOSTS.of(this.c.config));
       if (why != null) {
         sessionUrlDropped = why;
-        this.event('discrepancy', `runner:${w.id}`, { sub: 'session-url', why, url: link.url.slice(0, 120) }, claim.ticket_id, claim.id);
+        this.event('discrepancy', `runner:${w.id}`, { sub: 'session-url', why }, claim.ticket_id, claim.id);
       } else {
         // The same link again changes no row (B-237: so a working runner's beat moves no version).
         this.exec(`UPDATE claim_legs SET session_url = ? WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL AND session_url IS NOT ?`,
