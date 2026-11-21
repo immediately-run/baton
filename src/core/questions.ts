@@ -492,7 +492,7 @@ export class Questions {
    *  The row's question is the leg's own: one a previous leg's answer closed names nothing here.
    *  B-133: each option carries its COMPUTED action — the station it reaches and the legs that
    *  leave it, person or runner, from the course graph — beside the packet's words. */
-  needsYou() {
+  needsYou(repository?: string) {
     const waiting = this.rows<{ ticket_id: string; leg: string; person_expires_at: number | null; course_id: string; repository_id: string; title: string;
       question_id: string | null; url: string | null; severity: string | null; options_json: string | null }>(
       `SELECT s.ticket_id, s.next_leg AS leg, s.person_expires_at, t.course_id, t.repository_id, t.title,
@@ -502,7 +502,8 @@ export class Questions {
               CASE WHEN q.leg = s.next_leg THEN q.options_json END AS options_json
        FROM ticket_stations s JOIN tickets t ON t.id = s.ticket_id LEFT JOIN ticket_questions q ON q.ticket_id = s.ticket_id
        WHERE s.next_leg IS NOT NULL AND (q.ticket_id IS NULL OR q.answered_at IS NULL OR q.leg != s.next_leg)
-       ORDER BY t.repository_id, s.ticket_id`);
+       ${repository === undefined ? '' : 'AND t.repository_id = ?'}
+       ORDER BY t.repository_id, s.ticket_id`, ...(repository === undefined ? [] : [repository]));
     const out: { ticket_id: string; leg: string; asks: string | null; title: string; question_id: string | null; url: string | null; severity: string | null; options: (QuestionOption & { action: string })[]; expires_at?: number }[] = [];
     for (const w of waiting) {
       const g = this.c.graph(w.repository_id, w.course_id);

@@ -73,7 +73,8 @@ describe('S-BTN-189 the repository policy', () => {
     expect((await as(owner, path, { ...preview, base_version: 2 }, 'PUT')).json.code).toBe('conflict');
     const dry = await as(owner, path, preview, 'PUT');
     expect(dry.status).toBe(200);
-    expect(dry.json.stops).toEqual({ grants: [`courier:${checkerKey.fingerprint}`], runners: [], legs: [], tickets: [], unreached: [] });
+    expect(dry.json.trust_cleared).toEqual([`courier:${checkerKey.fingerprint}`]);
+    expect(dry.json.stops).toEqual({ legs: [], tickets: [] });
     expect(dry.json.not_evaluated).toContain('trusted-merge');
     expect(await snapshot()).toEqual(before);
 

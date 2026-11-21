@@ -728,7 +728,8 @@ export class Policies {
    *  trust clearing when `approvers.trust` becomes human-only, and the append-only insert with
    *  its `admin` event. A dry run returns before the writes. `breakGlass` is BATON_HUMAN_KEYS'
    *  fingerprints (R-BTN-185). */
-  put(repository: string, input: unknown, forge: Forge, actor: { credential: string; label: string }, breakGlass: ReadonlySet<string>) {
+  put(repository: string, input: unknown, forge: Forge, actor: { credential: string; label: string },
+    { breakGlass, personAnswerStops }: { breakGlass: ReadonlySet<string>; personAnswerStops: () => { ticket_id: string; leg: string }[] }) {
     const body: Record<string, unknown> = isObj(input) ? input : bad('body', 'must be a JSON object');
     only(body, ['base_version', 'policy', 'preset', 'dry_run'], 'body');
     if (Object.hasOwn(body, 'dry_run') && typeof body.dry_run !== 'boolean') bad('dry_run', 'must be true or false');
@@ -822,10 +823,11 @@ export class Policies {
     const changed = diffPolicies(cur.policy, doc);
     const guarantees = guaranteesOf(doc, { protection: this.protectionOk(repository), humanKeys: factsNow.humans });
     if (body.dry_run === true) {
+      const legs = cur.policy.inputs.answers === 'git' && doc.inputs.answers === 'attestation' ? personAnswerStops() : [];
       // Core cannot predict effects of gates it doesn't enforce. Name those gaps rather than
       // guessing which legs merge by their names or whether external checks would pass.
       return {
-        changed, guarantees, trust_cleared: cleared, stops: { legs: [], tickets: [] },
+        changed, guarantees, trust_cleared: cleared, stops: { legs, tickets: legs.map(({ ticket_id }) => ticket_id) },
         not_evaluated: ['outbox-delivery', 'leg-attestation-requirements', 'trusted-merge', 'repos.unlisted'],
       };
     }

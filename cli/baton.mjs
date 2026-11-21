@@ -217,7 +217,7 @@ export function parseArgs(argv, booleans = [], allowed = null, positionals = Inf
       continue;
     }
     const value = argv[++i];
-    if (value === undefined) throw new Error(`${a} needs a value`);
+    if (value === undefined || value.startsWith('--') || value === '-i') throw new Error(`${a} needs a value`);
     if (name === 'required-bar') groups.push({ leg: value });
     else if (groups.length && ['course', 'except', 'tag-prefix'].includes(name) && flags['required-bar-mode']) groups.at(-1)[name] = value;
     else flags[name] = value;
@@ -288,7 +288,7 @@ function workingTreeRefusal(argv) {
  *  the owner and administrator commands' value-less flags (parseArgs booleans) are named here so
  *  `--yes --dev` still counts. An unknown boolean is read as value-taking, which refuses rather
  *  than bypasses — the safe direction. */
-const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all']);
+const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all', 'dry-run']);
 function devFlagPositions(argv) {
   const at = [];
   for (let i = 1; i < argv.length; i++) {
@@ -1001,6 +1001,8 @@ async function policyMain(argv) {
   // REPO` is the documented form — or after it, as every other command takes them. B-121:
   // `--home` rides along the same way, and the home in force supplies the repository the
   // missing positional names and the origin a missing --url/BATON_URL calls.
+  // Validate adjacency before separating global options from command options.
+  parseArgs(argv, ['dry-run']);
   const isFlagOrValue = (_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url' || a[i] === '--home' || a[i - 1] === '--home';
   const { flags: globalFlags } = parseArgs(argv.filter(isFlagOrValue));
   const args = argv.filter((x, i, a) => !isFlagOrValue(x, i, a));

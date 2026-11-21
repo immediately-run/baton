@@ -284,7 +284,6 @@ describe('S-BTN-190 guarantees and floors', () => {
     expect(claim.status).toBe(200);
     expect(claim.json.ticket_id).toBe('ops:R3-9001');
   });
-
 });
 
 /** The runner claims whatever ops offers. */

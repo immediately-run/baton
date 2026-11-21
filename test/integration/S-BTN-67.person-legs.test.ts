@@ -103,6 +103,9 @@ it('under protected a human key can answer the person leg, but the sync and ordi
   const human = await makeKey('ssh-ed25519', 'human');
   await setHumanKeys(human);
   expect((await keyCall(owner, '/v1/owner/docs/owners', { public_key: human.publicKey })).status).toBe(200);
+  const preview = await keyCall(owner, '/v1/owner/docs/policy', { base_version: 1, preset: 'protected', dry_run: true }, 'PUT');
+  expect(preview.status).toBe(200);
+  expect(preview.json.stops).toEqual({ legs: [], tickets: [] });
   expect((await keyCall(owner, '/v1/owner/docs/policy', { base_version: 1, preset: 'protected' }, 'PUT')).status).toBe(200);
 
   expect((await git.post({ attestations: [decision('P', 'ship', 'f'.padEnd(40, '1'))] })).status).toBe(200);
@@ -111,6 +114,36 @@ it('under protected a human key can answer the person leg, but the sync and ordi
   expect((await keyCall(owner, p.path, p.body)).json.code).toBe('forbidden');
   expect((await keyCall(human, p.path, p.body)).json).toMatchObject({ ok: true, reached: 'adjudicated' });
   expect(await answerRow('P')).toEqual([{ option: 'ship', answered_by: `human:${human.fingerprint}` }]);
+});
+
+it('S-BTN-197: preview identifies a queued person leg that loses both answer paths', async () => {
+  atDecide('P');
+  atDecide('G');
+  git.add('A', {}, placed('reviewed', REVIEWED, [['fix', 'ready']]));
+  expect((await git.post()).status).toBe(200);
+  const path = '/v1/owner/docs/policy';
+  const current = await keyCall(owner, '/v1/repositories/docs/policy', undefined, 'GET');
+  const { version, policy } = current.json;
+  const candidate = { base_version: version, policy: { ...policy, inputs: { ...policy.inputs, answers: 'attestation' } } };
+  const preview = await keyCall(owner, path, { ...candidate, dry_run: true }, 'PUT');
+  expect(preview.status).toBe(200);
+  expect(preview.json.changed).toEqual(['inputs.answers']);
+  expect(preview.json.stops).toEqual({
+    legs: [{ ticket_id: 'docs:G', leg: 'decide' }, { ticket_id: 'docs:P', leg: 'decide' }],
+    tickets: ['docs:G', 'docs:P'],
+  });
+  // A preview has not disabled the old answer path.
+  const before = answerPlan('docs:G', 'ship');
+  expect((await keyCall(owner, before.path, before.body)).status).toBe(200);
+  const after = await keyCall(owner, path, candidate, 'PUT');
+  expect(after.status).toBe(200);
+  const p = answerPlan('docs:P', 'ship');
+  expect((await keyCall(owner, p.path, p.body)).json.code).toBe('forbidden');
+  expect((await git.post({ attestations: [decision('P', 'ship', 'f'.padEnd(40, '2'))] })).status).toBe(200);
+  expect(await station('P')).toMatchObject([{ station: 'reviewed', next_leg: 'decide' }]);
+  const same = await keyCall(owner, path, { ...candidate, base_version: after.json.version, dry_run: true }, 'PUT');
+  expect(same.status).toBe(200);
+  expect(same.json.stops).toEqual({ legs: [], tickets: [] });
 });
 
 it('an answer naming an option the question lacks: invalid-params from the CLI, dropped answer-invalid from the sync', async () => {

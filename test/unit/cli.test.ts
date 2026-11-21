@@ -694,13 +694,16 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       await expect(run(['log', 'ops', '--after', '2'])).resolves.toBe(0);
       await expect(run(['set', 'ops', policyFile, '--base', '4'])).resolves.toBe(0);
       await expect(run(['apply', 'ops', 'protected', '--base', '5'])).resolves.toBe(0);
-      await expect(run(['apply', 'ops', 'protected', '--base', '5', '--dry-run'])).resolves.toBe(0);
+      await expect(main(['owner', '-i', file, 'policy', 'apply', 'ops', 'protected', '--base', '5', '--dry-run', '--dev', '--url', ORIGIN])).resolves.toBe(0);
       await expect(run(['floor', 'add', 'ops', 'fieldhouse', '--guarantees', 'no-runner-lands,human-gates', '--remove-by', 'owner'])).resolves.toBe(0);
       await expect(run(['floor', 'remove', 'ops', 'fieldhouse'])).resolves.toBe(0);
       // Round 1, findings 9 and 10: `set` without --base refuses rather than fetch-and-overwrite
       // (the compare-and-set builds on the version the operator read), and `baton owner -i KEY
       // policy show REPO` — the documented form — reaches the policy commands.
       await expect(run(['set', 'ops', policyFile])).rejects.toThrow(/--base/);
+      for (const flag of ['--base', '-i', '--identity', '--url', '--home']) {
+        await expect(run(['apply', 'ops', 'protected', flag, '--dry-run', '--base', '5'])).rejects.toThrow(`${flag} needs a value`);
+      }
       await expect(main(['owner', '-i', file, 'policy', 'show', 'ops', '--dev', '--url', ORIGIN])).resolves.toBe(0);
     } finally {
       globalThis.fetch = was;

@@ -744,7 +744,7 @@ export class BatonCore {
         // R-BTN-185: an owner key of the repository, or a human-only one — a registered human
         // key's own public line serves the signature lookup, not the host's break-glass lines
         // alone (a key registered through POST /v1/human-keys owns nothing, but answers).
-        const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.admin.humanKeyLine(fp));
+        const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.decisionKeyLine(fp));
         const fp = signed.cred;
         const human = await this.admin.isHumanKey(fp);
         if (admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is never an owner key (R-BTN-57); a person’s answer is an owner’s or a human-only key’s');
@@ -1257,8 +1257,10 @@ export class BatonCore {
       const repoRow = this.registry.get(repo);
       if (!repoRow || repoRow.retired_at != null) throw new BatonError('not-found', `${repo} is not registered`);
       const b = await body();
-      const breakGlass = await this.humanBreakGlass();
-      return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, new Set(breakGlass.keys()))));
+      const breakGlass = new Set((await this.humanBreakGlass()).keys());
+      const personAnswerStops = () => this.admin.hasHumanDecisionWriter(breakGlass, admins) ? []
+        : this.questions.needsYou(repo).map(({ ticket_id, leg }) => ({ ticket_id, leg }));
+      return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, { breakGlass, personAnswerStops })));
     }
     if (m === 'POST' && rest === 'policy/floors') {
       const b = await body();
