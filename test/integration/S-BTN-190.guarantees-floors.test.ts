@@ -8,6 +8,7 @@
 // the forge closes it at once; a reading that changes while matching raises it again), and
 // stops trusted runners. Policy reads are unsigned and runner pins no longer gate claims.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
+import { PROTECTED } from '../../src/core/policy';
 import { call as hostCall } from '#host';
 import { cutover, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, syncCall, syncToken, tick, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
@@ -81,8 +82,8 @@ async function current() {
   return { version: row.version, doc: JSON.parse(row.policy_json) };
 }
 
-/** Set `ops` to the `protected-signed` preset, with a human owner and the checker in place. */
-async function protectedSigned() {
+/** Set `ops` to protected with signed authorship and custody-only human keys. */
+async function protectedWithSignedAuthorship() {
   // The human key registers with the tenant (break-glass signs the first one, R-BTN-185), then
   // becomes an owner marked `human_only`.
   const blob = await sshsig(breakGlass, new TextEncoder().encode(human.publicKey.trim()), 'baton-human-keys@1');
@@ -92,18 +93,11 @@ async function protectedSigned() {
   }));
   expect(registered.status).toBe(200);
   await as(owner, '/v1/owner/ops/owners', { public_key: human.publicKey });
-  // R-BTN-188 (round 1, finding 2): `protected-signed`'s `human_key: hardware` needs an owner
-  // whose key MEETS hardware — a FIDO attestation. B-136's attestation routes are not built, so
-  // the scenario writes the column as its check would (the way it writes the checker's role);
-  // without it the apply is refused `unsatisfiable-approvers`.
-  await rows('UPDATE repository_owners SET fido_attestation = ? WHERE fingerprint = ?', 'att:human-key-1', human.fingerprint);
-  // The break-glass key is an owner too — marked `human_only` like every key BATON_HUMAN_KEYS
-  // lists — so it can act on the owner routes (which an owner key alone holds) whose human-only
-  // lists it alone satisfies under `hardware`.
+  // Enroll break-glass as an owner too, so it can call the owner routes.
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', owner_keys_add: [breakGlass.publicKey] })).status).toBe(200);
   await makeChecker();
   const { version } = await current();
-  const out = await as(human, '/v1/owner/ops/policy', { base_version: version, preset: 'protected-signed' }, 'PUT');
+  const out = await as(human, '/v1/owner/ops/policy', { base_version: version, policy: { ...PROTECTED, human_identity: '42', authorship: 'signed' } }, 'PUT');
   expect(out.status).toBe(200);
   return out;
 }
@@ -162,12 +156,11 @@ describe('S-BTN-190 guarantees and floors', () => {
     const brokenEarly = await as(owner, '/v1/owner/ops/policy/floors', { name: 'early', guarantees: ['no-runner-lands'] });
     expect(brokenEarly.status).toBe(409);
     expect(brokenEarly.json.code).toBe('floor-violated');
-    await protectedSigned();
-    // The floor: Fieldhouse's four (R-FH-3's mode, named as the deployment knows them).
-    // Under `protected-signed` (`human_key: hardware`), the human entries are met only by a
-    // hardware key (B-136's build) or the break-glass one — the deployment's root of trust is
-    // the human_only key that acts here (R-BTN-185).
-    const floor = await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['no-runner-lands', 'independent-review', 'signed-authorship', 'human-gates-hardware'] });
+    await protectedWithSignedAuthorship();
+    // A custody-only human gate can hold; it cannot satisfy a hardware floor.
+    const hardware = await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'hardware', guarantees: ['human-gates-hardware'] });
+    expect(hardware.json).toMatchObject({ code: 'floor-violated', guarantee: 'human-gates-hardware' });
+    const floor = await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['no-runner-lands', 'independent-review', 'signed-authorship', 'human-gates'] });
     expect(floor.status).toBe(200);
     // A change admitting runner to refs.default_branch (or refs.other) is refused floor-violated.
     const { version, doc } = await current();
@@ -193,8 +186,8 @@ describe('S-BTN-190 guarantees and floors', () => {
   });
 
   it('a report that no longer matches raises baton.unprotected, releases the claim released:floor, and refuses claims floor-broken until a matching report', async () => {
-    await protectedSigned();
-    await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['no-runner-lands', 'independent-review', 'signed-authorship', 'human-gates-hardware'] });
+    await protectedWithSignedAuthorship();
+    await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['no-runner-lands', 'independent-review', 'signed-authorship', 'human-gates'] });
     // A claim to lose: the runner holds one while the checker still reports a match.
     await checkerBeat('ops', true, 'reading-1');
     const claim = await claimAsRunner();
@@ -233,8 +226,8 @@ describe('S-BTN-190 guarantees and floors', () => {
   });
 
   it('a report lapsed past 24 hours raises baton.unprotected and stops the repository until a fresh report', async () => {
-    await protectedSigned();
-    await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['no-runner-lands', 'independent-review', 'signed-authorship', 'human-gates-hardware'] });
+    await protectedWithSignedAuthorship();
+    await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['no-runner-lands', 'independent-review', 'signed-authorship', 'human-gates'] });
     await checkerBeat('ops', true, 'reading-1');
     // R-BTN-189 (round 1, finding 7): a report lapsed past its 24 hours raises
     // `baton.unprotected` all the same as a failed one — the alarm's floor sweep opens it. (No
@@ -257,7 +250,7 @@ describe('S-BTN-190 guarantees and floors', () => {
   });
 
   it('returns the same unsigned policy to authorized readers', async () => {
-    await protectedSigned();
+    await protectedWithSignedAuthorship();
     expect((await keyCall(admin, '/v1/admin/settings', { check_app_id: '12345' }, 'PUT')).status).toBe(200);
     const path = '/v1/repositories/ops/policy';
     const read = await as(owner, path);
@@ -273,7 +266,7 @@ describe('S-BTN-190 guarantees and floors', () => {
   });
 
   it('ignores a legacy runner policy pin without gating claims or opening a condition', async () => {
-    await protectedSigned();
+    await protectedWithSignedAuthorship();
     await rows('UPDATE runner_grants SET trust_level = ?, trust_domain = ? WHERE credential_id = ? AND repository_id = ?', 'trusted', 'runner-host', runnerKey.fingerprint, 'ops');
     const beat = await runnerBeat('runner-secret', { policy_pins: [{ repository: 'ops', hash: 'e'.repeat(64) }] });
     expect(beat.status).toBe(200);

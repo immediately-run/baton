@@ -147,9 +147,9 @@ describe('the repository policy (R-BTN-188, R-BTN-189)', () => {
       expect(prot[g], g).toBe(expectHeld);
     }
     expect(prot['human-gates']).toBe(true); // [human] lists are human-only whatever the marks
-    // protected-signed holds all nine, judged on the policy alone.
+    // The preset cannot establish a hardware gate before attestation verification exists.
     const signed = of(PROTECTED_SIGNED);
-    for (const g of GUARANTEE_NAMES) expect(signed[g], g).toBe(true);
+    for (const g of GUARANTEE_NAMES) expect(signed[g], g).toBe(g !== 'human-gates' && g !== 'human-gates-hardware');
     // no-runner-lands needs the protection report when one is applied (R-BTN-189).
     expect(of(PROTECTED, { protection: false })['no-runner-lands']).toBe(false);
     expect(of(PROTECTED, { protection: true })['no-runner-lands']).toBe(true);

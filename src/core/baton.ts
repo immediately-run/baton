@@ -43,7 +43,7 @@ import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { checkResync } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import { codeReposOf, pushersOf } from './codeRepos';
-import { Policies, sha256HexSync } from './policy';
+import { acceptsUnattestedHumanKey, Policies, sha256HexSync } from './policy';
 import { Scope } from './scope';
 import { logEvent, systemRandom } from './db';
 import { Deprecated } from './deprecated';
@@ -747,11 +747,15 @@ export class BatonCore {
         const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.admin.humanKeyLine(fp));
         const fp = signed.cred;
         const human = await this.admin.isHumanKey(fp);
+        const policy = this.policies.current(repo)?.policy;
         if (admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is never an owner key (R-BTN-57); a person’s answer is an owner’s or a human-only key’s');
         if (!human && !this.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key neither owns ${repo} nor is a human-only key (R-BTN-116, R-BTN-185)`);
+        if (human && !acceptsUnattestedHumanKey(policy?.human_key ?? 'any')) {
+          throw new BatonError('forbidden', `${repo}'s policy requires an attested hardware key for a human answer (R-BTN-185)`);
+        }
         // §12.8, R-BTN-191: where the policy's `inputs.answers` is `attestation` (`protected`),
         // a person's answer counts from a human key alone — an owner key's does not.
-        if (!human && (this.policies.current(repo)?.policy.inputs.answers ?? 'git') === 'attestation') {
+        if (!human && policy?.inputs.answers === 'attestation') {
           throw new BatonError('forbidden', `${repo}'s policy counts a person's answer from a human key alone (inputs.answers: attestation)`);
         }
         const b = checkAttestation(await readJson(signed.req), repo);

@@ -574,6 +574,8 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     shows before a signature, are [proposed](../proposals/security.md) (B-136). Under `any` a
     human-only list is a custody promise: Baton cannot tell a key an agent session can use, so
     no guarantee claims it as a human gate (`human-gates`, R-BTN-189).
+  - Until FIDO attestation verification is built, no key, including a break-glass line, meets
+    the repository's `hardware` minimum. A stored attestation marker alone is not evidence.
   - **The owner's agent** is a principal (§12.1): an owner key not `human_only`. It acts as
     `owner`, never as `human`. A dashboard session of a `human_only` key is an owner's
     session too: no session, and no OAuth approval by one, satisfies a human-only `approvers.*`

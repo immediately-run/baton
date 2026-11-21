@@ -96,6 +96,13 @@ export type RefWriter = (typeof REF_WRITERS)[number];
 export const BOARD_INPUTS = ['sync-key', 'ci-identity', 'machine'] as const;
 /** An approver-list entry (R-BTN-188): a class, or one named key. */
 export type ApproverEntry = 'owner' | 'human' | `key:${string}`;
+export type HumanKeyMinimum = 'any' | 'hardware';
+
+/** R-BTN-185: no credential proves hardware custody until Baton verifies FIDO attestation.
+ *  A configured key, an SK public-key prefix, or an opaque stored value is not that proof. */
+export function acceptsUnattestedHumanKey(minimum: HumanKeyMinimum): boolean {
+  return minimum === 'any';
+}
 /** An attestation's or reading's writer class (R-BTN-181). */
 export type WriterClass = 'human' | 'owner' | 'baton' | 'runner' | 'instrument' | 'admin' | `service:${string}`;
 
@@ -112,7 +119,7 @@ export interface OutboxRoute {
  *  `human_identity` means none). */
 export interface PolicyDocument {
   approvers: { members: ApproverEntry[]; trust: ApproverEntry[]; policy: ApproverEntry[] };
-  human_key: 'any' | 'hardware';
+  human_key: HumanKeyMinimum;
   /** R-BTN-188: the human-only identity as the fact reader and the merge runner see it — on a
    *  forge its immutable forge user id, on `git` the `pre-receive` pusher identity. Absent or
    *  null means none; B-182: while a `code_repos` entry sits on another host, it stays null —
@@ -503,8 +510,8 @@ export function guaranteesOf(policy: PolicyDocument, opts: { protection?: boolea
       && ['std:review@1', 'std:wrote@1', 'std:ran@1'].every((t) => attOnly(t, 'baton')),
     'signed-authorship': noRunnerLands && policy.authorship === 'signed',
     'trusted-domain-separate': policy.grants.trusted_domain === 'separate' && policy.grants.default_trust === 'untrusted',
-    'human-gates': gates,
-    'human-gates-hardware': gates && policy.human_key === 'hardware',
+    'human-gates': gates && acceptsUnattestedHumanKey(policy.human_key),
+    'human-gates-hardware': false,
     'board-from-trusted': noRunnerLands && !policy.inputs.board.includes('machine') && policy.inputs.answers === 'attestation',
   };
 }
@@ -548,7 +555,7 @@ export interface ProtectionReport { repository: string; matched: boolean; readin
  *  resulting `human_key` among the repository's owners", so a list a break-glass key alone
  *  could satisfy is a gate with no key to open it. */
 export interface ApproverFacts {
-  owners: Map<string, { human_only: boolean; fido_attestation: string | null }>;
+  owners: Map<string, { human_only: boolean }>;
   humans: Set<string>;
   breakGlass: Set<string>;
   humanOwners: Set<string>;
@@ -640,9 +647,9 @@ export class Policies {
    *  fingerprints — is passed by the routes that judge an acting credential or a list's
    *  satisfiability (R-BTN-185); the guarantee computations read the owners' own marks. */
   facts(repository: string, breakGlass: ReadonlySet<string> = new Set()): ApproverFacts {
-    const owners = new Map(this.rows<{ fingerprint: string; human_only: number; fido_attestation: string | null }>(
-      'SELECT fingerprint, human_only, fido_attestation FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository)
-      .map((o) => [o.fingerprint, { human_only: !!o.human_only, fido_attestation: o.fido_attestation }]));
+    const owners = new Map(this.rows<{ fingerprint: string; human_only: number }>(
+      'SELECT fingerprint, human_only FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository)
+      .map((o) => [o.fingerprint, { human_only: !!o.human_only }]));
     const registered = new Set(this.rows<{ fingerprint: string }>('SELECT fingerprint FROM human_keys WHERE revoked_at IS NULL').map((r) => r.fingerprint));
     const humans = new Set<string>(breakGlass);
     const humanOwners = new Set<string>();
@@ -657,40 +664,18 @@ export class Policies {
     return { owners, humans, breakGlass: new Set(breakGlass), humanOwners };
   }
 
-  /** R-BTN-185: whether a human-only owner key meets `human_key` — `any` always; `hardware`
-   *  only with a FIDO attestation (B-136 builds the attestation check; until it does, no key
-   *  carries one, and only break-glass meets `hardware`). */
-  private meetsHumanKey(owner: { human_only: boolean; fido_attestation: string | null }, humanKey: 'any' | 'hardware'): boolean {
-    if (!owner.human_only) return false;
-    return humanKey === 'any' || owner.fido_attestation != null;
-  }
-
   /** Whether `credential` matches an approver entry of `list`, as it stands (R-BTN-188): an
    *  owner key matches `owner`; a `human` entry needs a `human_only` owner meeting `human_key`,
    *  or a break-glass key; a `key:` entry names one live owner key, meeting `human_key` when
    *  it is a `human_only` key. A delegated key (R-BTN-130) matches no entry — none is
    *  registered yet (B-124 builds them); when one is, its class answers before this runs. */
-  entryMatches(list: ApproverEntry[], credential: string, facts: ApproverFacts, humanKey: 'any' | 'hardware'): boolean {
-    for (const e of list) {
-      if (e === 'owner') {
-        if (facts.owners.has(credential)) return true;
-      } else if (e === 'human') {
-        if (this.humanEntryOk(credential, facts, humanKey)) return true;
-      } else if (e === `key:${credential}`) {
-        const o = facts.owners.get(credential);
-        if (o && (!o.human_only || this.meetsHumanKey(o, humanKey))) return true;
-      }
-    }
-    return false;
-  }
-
-  /** A `human` entry's key: break-glass always — R-BTN-185: the host's configuration satisfies
-   *  every `human` entry of every repository, and no `human_key` rises above it; any other key
-   *  needs a `human_only` owner's mark meeting the repository's `human_key`. */
-  private humanEntryOk(credential: string, facts: ApproverFacts, humanKey: 'any' | 'hardware'): boolean {
-    if (facts.breakGlass.has(credential)) return true;
-    const o = facts.owners.get(credential);
-    return o !== undefined && facts.humans.has(credential) && this.meetsHumanKey(o, humanKey);
+  entryMatches(list: ApproverEntry[], credential: string, facts: ApproverFacts, humanKey: HumanKeyMinimum): boolean {
+    const humanAllowed = acceptsUnattestedHumanKey(humanKey);
+    const owner = facts.owners.get(credential);
+    return list.some((e) => {
+      if (e === 'human') return humanAllowed && (facts.breakGlass.has(credential) || facts.humanOwners.has(credential));
+      return !!owner && (!facts.humans.has(credential) || humanAllowed) && (e === 'owner' || e === `key:${credential}`);
+    });
   }
 
   /** R-BTN-188's no-gate-without-a-key: whether some live credential could satisfy `list` —
@@ -698,15 +683,8 @@ export class Policies {
    *  meeting `human_key` (break-glass never opens a gate: it is the acting root of trust, not
    *  an owner; a repository whose human lists only break-glass could satisfy has no key to open
    *  them), a `key:` entry a live owner of its own. */
-  listSatisfiable(list: ApproverEntry[], facts: ApproverFacts, humanKey: 'any' | 'hardware'): boolean {
-    return list.some((e) => {
-      if (e === 'owner') return facts.owners.size > 0;
-      if (e === 'human') {
-        return [...facts.humanOwners].some((fp) => this.meetsHumanKey({ human_only: true, fido_attestation: facts.owners.get(fp)?.fido_attestation ?? null }, humanKey));
-      }
-      const o = facts.owners.get(e.slice(4));
-      return o !== undefined && (!o.human_only || this.meetsHumanKey(o, humanKey));
-    });
+  listSatisfiable(list: ApproverEntry[], facts: ApproverFacts, humanKey: HumanKeyMinimum): boolean {
+    return [...facts.owners.keys()].some((fp) => this.entryMatches(list, fp, facts, humanKey));
   }
 
   // ── the change (R-BTN-188, R-BTN-189) ──────────────────────────────────────────────────

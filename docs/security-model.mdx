@@ -23,6 +23,14 @@ mitigations, with what each costs.</Lede>
 - **Fieldhouse adds trust levels** (*What Fieldhouse is*, Axioms 4 and 6). A sandbox VM is the
   least trusted level, the host above it, humans at the top, and a credential never crosses
   downward. Agents in VMs write the home repository without approval.
+- **Separate proposing from approving.** For a protected deployment, interactive agents use
+  an owner's-agent forge identity and a separate Baton credential. They propose changes;
+  they do not satisfy code-owner reviews, deployment approvals or ruleset bypass. The human
+  uses a forge account whose credentials are unavailable in every agent session, and a
+  separate touch- and verification-required hardware key for Baton human gates. A session
+  does not inherit either credential from the person driving it. This is a deployment
+  requirement, not a claim that the live accounts have been migrated or that Baton can
+  verify hardware custody today (B-136).
 
 Put together: **push is held at the VM level, so everything git controls is controlled at
 the VM level.** A compromised VM, a prompt-injected leg, a leaked worker token or a careless
@@ -32,7 +40,7 @@ Two corrections from the adversarial review (2026-10-27, *Review* below) bound t
 
 - **Push is not the only door.** A push to `baton` deploys Baton's server (reach 0), and any
   runner's machine key can post a board (reach 7). Neither is a push to a home's tickets.
-- **Owner gates are not human gates.** The owner's agent sessions hold the owner's GitHub
+- **Owner gates are not human gates.** At the time of the review, the owner's agent sessions held the owner's GitHub
   account and keys, so every gate that asks for "the owner" (ruleset bypass, code-owner
   approval, environment approval, an owner pusher, an owner signature) is passable by an
   injected session (reach 3). A gate is human only when it needs a credential no agent session
