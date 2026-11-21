@@ -40,6 +40,14 @@ interface PushRow {
 
 /** A chain longer than this is a rewritten history wearing a push list; it stops the walk. */
 const CHAIN_MAX = 100;
+const CONTROL_NOTICE_MS = 7 * 86_400_000;
+
+/** The directly named control paths, not owner globs or paths discovered by reading files. */
+function isControlPath(path: string): boolean {
+  const p = path.normalize('NFC').toLowerCase();
+  return /^(?:\.baton\/|\.github\/|(?:docs\/)?codeowners$)/.test(p)
+    || /(?:^|\/)(?:\.(?:claude|codex|opencode)\/|(?:claude\.md|agents\.md|opencode\.json|\.mcp\.json|\.npmrc|\.yarnrc[^/]*|\.envrc)$)/.test(p);
+}
 
 export class Provenance {
   constructor(private readonly c: { store: Store }) {}
@@ -83,9 +91,11 @@ export class Provenance {
    * change is followed by a push past the recording bounds, whose paths Baton cannot see — is
    * `pusher-unknown`. A first snapshot (`from` null) records nothing: there is no range.
    */
-  advance(repository: Repository, from: string | null, to: string, at: number, rows: readonly TicketRow[], changed: ReadonlySet<string>): void {
+  advance(repository: Repository, from: string | null, to: string, at: number, rows: readonly TicketRow[], changed: ReadonlySet<string>, reportControl = false): void {
     if (from == null || from === to) return;
-    const pushes = this.chain(repository.github.toLowerCase(), `refs/heads/${repository.default_branch}`, from, to);
+    const fromApp = repository.forge === 'github' && repository.web_base?.toLowerCase() === `https://github.com/${repository.github.toLowerCase()}`;
+    const pushes = fromApp ? this.chain(repository.github.toLowerCase(), `refs/heads/${repository.default_branch}`, from, to) : [];
+    if (reportControl) this.controlChanges(repository.id, from, to, pushes, at);
     // path → the newest traced commit that changed it, with its push's position in the chain.
     const newest = new Map<string, { sha: string; id: number | null; login: string | null; at: number; push: number }>();
     // The position of the newest push past the recording bounds: a change after it is visible,
@@ -108,6 +118,33 @@ export class Provenance {
       }
       if (lw) this.c.store.exec('UPDATE tickets SET last_written_by = ? WHERE id = ?', JSON.stringify(lw), `${repository.id}:${row.id}`);
     }
+  }
+
+  private controlChanges(repo: string, from: string, to: string, pushes: PushRow[], at: number) {
+    // An incomplete chain does not prove that control paths were unchanged. Report the gap
+    // even if the portion we can see contained no known control change.
+    const unrecorded = pushes[0]?.before_sha !== from || pushes.some((push) => push.truncated || !push.commits.length);
+    const changes: { path: string; commit: string; pusher: string; pusher_id?: number }[] = [];
+    let omitted = 0;
+    for (const push of pushes) for (const commit of push.commits) for (const path of new Set(commit.paths.filter(isControlPath))) {
+      if (changes.length === 16) { omitted++; continue; }
+      changes.push({ path, commit: commit.sha, pusher: push.sender_id == null ? PUSHER_UNKNOWN : push.sender_login ?? String(push.sender_id),
+        ...(push.sender_id == null ? {} : { pusher_id: push.sender_id }) });
+    }
+    if (!unrecorded && !changes.length) return;
+    this.c.store.exec(`INSERT INTO sync_control_changes (repository_id, sha, detail_json, at) VALUES (?, ?, ?, ?)
+      ON CONFLICT (repository_id, sha) DO NOTHING`, repo, to, JSON.stringify({ changes, omitted,
+      ...(unrecorded ? { unrecorded: PUSHER_UNKNOWN } : {}) }), at);
+  }
+
+  needsYou(now: number, repo?: string) {
+    return this.rows<{ repository_id: string; sha: string; at: number; detail_json: string }>(`SELECT repository_id, sha, at, detail_json FROM sync_control_changes
+      WHERE at > ? AND (? IS NULL OR repository_id = ?) ORDER BY at DESC, repository_id, sha`, now - CONTROL_NOTICE_MS, repo ?? null, repo ?? null)
+      .map(({ detail_json, ...row }) => ({ ...row, ...JSON.parse(detail_json) }));
+  }
+
+  prune(now: number) {
+    this.c.store.exec('DELETE FROM sync_control_changes WHERE at <= ?', now - CONTROL_NOTICE_MS);
   }
 }
 

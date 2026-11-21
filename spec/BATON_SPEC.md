@@ -491,6 +491,7 @@ is stale. Never edit it by hand.
 | S-BTN-307 | a screen draws only its caller's actions | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-308 | sign-in through Cloudflare Access | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-309 | work done outside Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-310 | board boundary | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

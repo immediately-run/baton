@@ -253,6 +253,8 @@ script: setups, values and refusal codes are there and in the rules, not here. A
 | **§16** | | |
 | S-BTN-16 cutover | Legacy, removed with its code (R-BTN-193): at cutover an in-flight git claim is imported as a legacy claim, adopted only after an administrator confirms and by one requester; a checkout that saw the cutover takes no git claim; a silent legacy runner is not reaped early. | R-BTN-28 |
 
+| S-BTN-310 board boundary | A policy-excluded input cannot post; only the issuer can use or release its observation, and revoking its key frees the next allocation. A rate limit on one credential leaves others usable; refused posts use the post quota. Repeated expiry alerts owners. On a restricted head move, omitted control changes are reported from the delivery, and a missing chain is reported as unknown. | R-BTN-62, R-BTN-187 |
+
 ### Gates
 
 Each gate is an invariant, the rule that owns it, and the scenarios or tests that prove it.

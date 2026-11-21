@@ -599,8 +599,20 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     Tightening is open to any owner credential.
 - **R-BTN-187 (what Baton trusts from a board post).** Who may post the board is the policy's
   `inputs.board`, and whether what a post read from git counts is its `attestations` entries
-  (R-BTN-188, R-BTN-191). A webhook delivery only triggers a sync (values 6). Per-key limits on observation numbers, board posts and concurrent claims are
-  [proposed](../proposals/security.md) (B-137).
+  (R-BTN-188, R-BTN-191). The sync routes admit registered sync keys and verified CI identities
+  only when their input is listed; machine-key sync is not built. Repositories with runners
+  below the human level exclude `machine`. A sync credential is limited to 60 observation
+  allocations and, separately, 60 board requests (including refused posts) per UTC hour.
+  CI tokens for the same repository share one credential's quota. Over quota is `rate-limited`
+  (HTTP 429). Two or more expired reservations by the same credential on a UTC day are listed
+  under Needs you for that day (R-BTN-62).
+  On a head move while `paths.control` is not `any`, Baton reports control changes from the
+  recorded push chain (R-BTN-73, R-BTN-194), not the board. It matches the directly named
+  control paths in [the protected paths proposal](../proposals/security.md#9-protected-paths-r-btn-184-proposed),
+  not paths discovered by reading files. A gap or truncated delivery is `pusher-unknown`, not
+  evidence of unchanged control paths. Needs you lists the notice for seven days, with up to
+  sixteen changed paths and the number omitted. This is a report, not a refusal or a course
+  accounting claim (§12.9).
 
 ### 12.9 A leg's scope
 
