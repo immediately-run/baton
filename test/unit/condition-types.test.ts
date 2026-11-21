@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { validateCourse } from '../../src/core/course';
 import { graphOf } from '../../src/core/graph';
-import { STANDARD_CONDITION_TYPES, checkRaise, dispositionOf, declaredConditions, errorClassOf, signatureConditions } from '../../src/core/conditionTypes';
+import { STANDARD_CONDITION_TYPES, checkRaise, dispositionOf, declaredConditions, errorClassOf, raiseRestarts, signatureConditions } from '../../src/core/conditionTypes';
 
 const declared = declaredConditions({
   conditions: {
@@ -48,6 +48,24 @@ describe('the standard condition types (R-BTN-160)', () => {
     expect(errorClassOf('error.needs-person', declared)).toBe('spec'); // non-retryable, no class of its own (R-BTN-195)
     expect(errorClassOf('error.transient', declared)).toBe('transient');
     expect(errorClassOf('error', declared)).toBe('transient'); // an untyped exception is error.transient (R-BTN-122)
+  });
+
+  it('keeps the built-in transient class when a course declares restart options', () => {
+    const types = declaredConditions({ conditions: { 'error.transient': { restarts: { retry: 'Retry' } } } });
+    expect(types.has('error.transient')).toBe(true);
+    expect(errorClassOf('error.transient', types)).toBe('transient');
+    expect(errorClassOf('error.transient.child', types)).toBe('transient');
+  });
+
+  it('inherits the nearest restart policy through a description-only subtype, including labels and default', () => {
+    const types = declaredConditions({ conditions: {
+      warning: { disposition: 'notify', restarts: { retry: 'Retry', park: 'Park' }, default: 'retry' },
+      'warning.child': { description: 'Child' },
+    } });
+    expect(raiseRestarts('warning.child', types, undefined, undefined)).toEqual({ ok: true, restarts: { retry: 'Retry', park: 'Park' }, defaultRestart: 'retry' });
+    expect(raiseRestarts('warning.child', types, { park: 'Park' }, undefined)).toEqual({ ok: true, restarts: { park: 'Park' }, defaultRestart: undefined });
+    expect(raiseRestarts('warning.child', types, { abandon: 'Abandon' }, undefined)).toMatchObject({ ok: false });
+    expect(raiseRestarts('warning.child', types, { retry: 'Park' }, undefined)).toMatchObject({ ok: false });
   });
 
   it('errorClassOf: a subtype takes its ancestor\'s class; a course\'s own type follows its retryable; the end each forms is a §6.5 reason', () => {

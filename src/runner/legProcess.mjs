@@ -16,6 +16,7 @@
 // "error": …, "aborted": …}`, written synchronously before the process exits.
 import { writeSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { legErrorType, raise } from './legClient.mjs';
 
 const [, , call, script] = process.argv;
 const stop = new AbortController();
@@ -79,9 +80,9 @@ try {
   const owner = typeof mod[call] === 'function' ? mod : holder != null && typeof holder[call] === 'function' ? holder : null;
   const fn = owner != null ? owner[call] : call === 'run' && typeof mod.default === 'function' ? mod.default : undefined;
   if (typeof fn !== 'function') throw new Error(`the script exports no ${call}()`);
-  if (call === 'run') args[0] = { ...args[0], signal: stop.signal };
+  if (call === 'run') args[0] = { ...args[0], signal: stop.signal, raise };
   const result = await fn.apply(owner, args);
   finish({ ok: true, result: result === undefined ? null : result }, 0);
 } catch (e) {
-  finish({ ok: false, error: e instanceof Error ? e.message : String(e), aborted: stop.signal.reason === undefined ? null : String(stop.signal.reason) }, stop.signal.reason === undefined ? 4 : 5);
+  finish({ ok: false, error: e instanceof Error ? e.message : String(e), errorType: call === 'run' ? legErrorType(e) : undefined, aborted: stop.signal.reason === undefined ? null : String(stop.signal.reason) }, stop.signal.reason === undefined ? 4 : 5);
 }

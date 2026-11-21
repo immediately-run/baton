@@ -306,6 +306,35 @@ describe('S-BTN-222: an interaction request (R-BTN-195)', () => {
     expect((await needsYou()).map((x) => x.severity)).toEqual(['critical', ...Array<string>(19).fill('normal')]);
   });
 
+  it('S-BTN-131: one open core condition per repository, type, ticket and ref, even without a ticket', async () => {
+    await withCore((core) => {
+      const insert = (ticket: string | null, ref: string, outcome = 'open') => core.store.exec(
+        `INSERT INTO conditions(repository_id, ticket_id, ref, type, disposition, raised_at, outcome)
+         VALUES ('docs', ?, ?, 'baton.stalled', 'notify', ?, ?)`, ticket, ref, T0, outcome);
+      for (const ticket of ['docs:A', null]) {
+        insert(ticket, 'x');
+        expect(() => insert(ticket, 'x')).toThrow(/UNIQUE/i);
+        insert(ticket, 'y');
+        insert(ticket, 'x', 'closed');
+      }
+    });
+  });
+
+  it('G-BTN-146: records an unbound warning, its activity and history on the same run, without private text', async () => {
+    const w = await register('vm-a');
+    const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });
+    const { json: a } = await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' });
+    const rejected = await raise1('vm-a', w.secret, c.claim_id, { type: 'warning', body: 'private' });
+    expect(rejected.json.code).toBe('invalid-params');
+    const accepted = await raise1('vm-a', w.secret, c.claim_id, { type: 'warning' });
+    expect(accepted.status).toBe(200);
+    expect(await conditionRows()).toEqual([expect.objectContaining({ id: accepted.json.condition_id, run_id: a.run_id, outcome: 'recorded' })]);
+    expect(await rows(`SELECT kind, source, run_id, outcome, detail_json FROM activities WHERE claim_id = ?`, c.claim_id)).toEqual([
+      { kind: 'condition', source: 'baton', run_id: a.run_id, outcome: 'succeeded', detail_json: JSON.stringify({ condition_id: accepted.json.condition_id, type: 'warning', disposition: 'notify' }) },
+    ]);
+    expect(await rows(`SELECT kind, run_id FROM ticket_history WHERE ticket_id = 'docs:A' AND kind = 'condition'`)).toEqual([{ kind: 'condition', run_id: a.run_id }]);
+  });
+
   it('counts closed raises against the daily ticket quota and pages the list', async () => {
     const w = await register('vm-a');
     const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' });

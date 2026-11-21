@@ -47,6 +47,7 @@ import checkConclusions from './0045_check_conclusions.sql';
 import ticketProvenance from './0046_ticket_provenance.sql';
 import legRunInputs from './0047_leg_run_inputs.sql';
 import conditions from './0048_conditions.sql';
+import conditionRecords from './0069_condition_records.sql';
 import eventLookups from './0049_event_lookups.sql';
 import alarmIndexes from './0052_alarm_indexes.sql';
 import retention from './0053_retention.sql';
@@ -208,4 +209,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 64, sql: childrenOwnerState },
   { id: 65, sql: readEfficiency },
   { id: 66, sql: runnerViews },
+  { id: 69, sql: conditionRecords },
 ];

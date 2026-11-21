@@ -143,7 +143,8 @@ interface LegChild {
 }
 
 /** The outcome a wrapper call printed on its last stdout line (R-BTN-133). */
-function wrapperOutcome(stdout: string): { ok: boolean; result?: unknown; error?: string; aborted?: string | null } | null {
+type WrapperOutcome = { ok: boolean; result?: unknown; error?: string; errorType?: unknown; aborted?: string | null };
+function wrapperOutcome(stdout: string): WrapperOutcome | null {
   const last = stdout.trimEnd().split('\n').at(-1) ?? '';
   try {
     const out = JSON.parse(last) as { ok?: unknown };
@@ -2396,6 +2397,12 @@ export class Runner {
           // output — masked the same way and bounded to §9.4's detail, so Baton's record of a leg
           // that exited 0 with nothing done says what the agent said, after the sandbox is gone.
           const detail = failureDetail(outcome.error, this.legSecrets);
+          if (typeof outcome.errorType === 'string') {
+            const answer = await this.onChannel({ op: 'raise', type: outcome.errorType, subject: 'The leg threw a LegError.' }, course, legName, ctx, detail ?? 'The leg failed.');
+            if (!answer.ok) this.log(`baton: the typed error was refused (${maskLegOutput(answer.error, this.legSecrets)})`);
+            const release = this.abortSignal();
+            if (release) return await this.finish(claimId, { end_reason: release.reason ?? `suspended:${at}`, reached: at, next: legName, ...(release.error ? { error: release.error } : {}) }, await this.callHandoff(script, ctx));
+          }
           return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: at, next: legName, error: { type: 'error.transient', message: detail ?? 'The leg failed.' }, ...(detail != null ? { detail } : {}) }, await this.callHandoff(script, ctx));
         }
         const result = outcome.result;
@@ -2551,7 +2558,7 @@ export class Runner {
     }
   }
 
-  private async runLeg(course: CourseLoad, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'missing' } | { kind: 'lease-lost' }> {
+  private async runLeg(course: CourseLoad, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string; errorType?: unknown } | { kind: 'missing' } | { kind: 'lease-lost' }> {
     const script = course.scripts.get(leg);
     if (script == null) return { kind: 'missing' };
     // R-BTN-202 (B-248): a leg run under a local order while Baton is unreachable has no lease.
@@ -2602,7 +2609,7 @@ export class Runner {
       // (`runLeg`'s context), which is the primary path (round 4).
       ...(typeof ctx.default_branch === 'string' && ctx.default_branch !== '' ? { BATON_DEFAULT_BRANCH: ctx.default_branch } : {}),
       // B-234 (R-BTN-106): the leg's channel, its address as the session's CLI reads it.
-      ...(channel ? { BATON_SOCKET: channel.path } : {}),
+      BATON_SOCKET: channel?.path,
     };
     // R-BTN-107 (B-184): the leg runs in a session of the executor the host chose, keyed by its
     // run id's first session; the previous leg's session goes first (its close and hand-off ran).
@@ -2749,7 +2756,7 @@ export class Runner {
     if (out == null) return { kind: 'crashed', error: 'the leg wrote no result' };
     // A crashed leg's error is its own text (the thrown message the wrapper printed), masked
     // here — where the set lives — so the log it reaches carries no literal of the leg's env.
-    return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: maskLegOutput(out.error ?? 'the leg script failed', legSecrets) };
+    return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: maskLegOutput(out.error ?? 'the leg script failed', legSecrets), errorType: out.errorType };
   }
 
   /** R-BTN-72 (B-188): the running leg's place in the state file, for a reattach. */
@@ -2772,7 +2779,7 @@ export class Runner {
    *  the session's posted or final result is the leg's, checked as any result is. A lost lease
    *  or claim stops it, no hand-off; a release stops it after the grace, as a leg that will not
    *  take its release is stopped. */
-  private async reattachedLeg(course: CourseLoad, leg: string, handle: Handle): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'lease-lost' }> {
+  private async reattachedLeg(course: CourseLoad, leg: string, handle: Handle): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string; errorType?: unknown } | { kind: 'lease-lost' }> {
     let channel: LegChannel | null = null;
     try {
       channel = await LegChannel.serve(channelPath(this.o.stateFile, handle.session_id));
@@ -2814,8 +2821,8 @@ export class Runner {
     const result = first.r.result;
     if (result == null) return { kind: 'crashed', error: 'the reattached leg ended with no result' };
     // The session's result is the wrapper's outcome or the leg's own result (R-BTN-107).
-    const out = typeof result === 'object' && typeof (result as { ok?: unknown }).ok === 'boolean' ? result as { ok: boolean; result?: unknown; error?: string } : null;
-    if (out) return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: maskLegOutput(out.error ?? 'the leg script failed', this.legSecrets) };
+    const out = typeof result === 'object' && typeof (result as { ok?: unknown }).ok === 'boolean' ? result as WrapperOutcome : null;
+    if (out) return out.ok ? { kind: 'ok', result: out.result } : { kind: 'crashed', error: maskLegOutput(out.error ?? 'the leg script failed', this.legSecrets), errorType: out.errorType };
     return { kind: 'ok', result };
   }
 
@@ -2829,7 +2836,7 @@ export class Runner {
    * substitute is `error.needs-person`, which it raises like any error. The suspend wait
    * (R-BTN-162) is not built: a `suspend` raise records and returns, nothing waits.
    */
-  private async onChannel(req: ChannelRequest, course: CourseLoad, leg: string, ctx: Record<string, unknown>): Promise<ChannelAnswer> {
+  private async onChannel(req: ChannelRequest, course: CourseLoad, leg: string, ctx: Record<string, unknown>, typedMessage?: string): Promise<ChannelAnswer> {
     if (req.op !== 'raise') return { ok: false, error: `the channel carries raise and done, nothing else (R-BTN-106)` };
     const ticket = String((ctx.ticket as { id?: string })?.id ?? '');
     const claimId = Number((ctx.claim as { id?: number } | undefined)?.id ?? 0);
@@ -2861,17 +2868,19 @@ export class Runner {
     if (severity == null) return { ok: false, error: `severity must be one of ${SEVERITIES.join(', ')} (R-BTN-125)` };
     const options = raiseRestarts(type, declared, req.restarts, req.default);
     if (!options.ok) return { ok: false, error: options.reason };
+    const disposition = dispositionOf(type, declared) ?? 'notify';
+    if (typedMessage != null && disposition !== 'interrupt') return { ok: false, error: 'LegError must name an interrupt condition (R-BTN-160)' };
     const body = typeof req.body === 'string' ? req.body : null;
     // R-BTN-33: the subject and body stay here — the runner's log, masked of the leg's own
     // secrets — and nothing of them is reported. The raise's line is what an operator reads.
     this.log(maskLegOutput(`baton: ${ticket}'s ${leg} raised ${type} — ${subject.slice(0, 200)}${body != null ? ` (body ${Buffer.byteLength(body, 'utf8')} bytes, kept in this log only)` : ''}`, this.legSecrets));
-    const disposition = dispositionOf(type, declared) ?? 'notify';
     let answer: Record<string, any>;
     try {
       answer = await this.o.api.conditions(claimId, {
         type,
         disposition,
-        restarts: options.restarts,
+        // Older servers accept omission, but reject an explicitly empty map.
+        ...(Object.keys(options.restarts).length ? { restarts: options.restarts } : {}),
         ...(options.defaultRestart != null ? { default: options.defaultRestart } : {}),
         ...(severity !== 'normal' ? { severity } : {}),
       });
@@ -2887,7 +2896,7 @@ export class Runner {
     // leg goes on (R-BTN-116: nothing waits on it). A `suspend` records and returns too: its
     // wait (R-BTN-162) is not built.
     const end = disposition === 'interrupt' ? `released:cannot-finish:${errorClassOf(type, declared)}` : null;
-    if (end != null) this.signalLeg('release', end, { type, message: `The leg raised ${type}.` });
+    if (end != null) this.signalLeg('release', end, { type, message: typedMessage ?? `The leg raised ${type}.` });
     return { ok: true, condition_id: answer.condition_id, disposition: answer.disposition ?? disposition, ...(severity !== 'normal' ? { severity } : {}), ...(end != null ? { end } : {}) };
   }
 

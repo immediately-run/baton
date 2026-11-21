@@ -62,14 +62,18 @@ Not built either, each a design its rule below still states:
     own types and, unless a leg narrows them, the standard ones. `baton course test` prints the
     signature.
   - **Raising.** A session in a leg calls `baton leg raise <type> --subject … [--body <file>]
-    [--restarts <json>] [--default <id>] [--severity …]` on the local channel (R-BTN-106). The
-    runner checks a raise as it checks a move, and answers one that fails on the channel with the
-    reason:
+    [--restarts <json>] [--default <id>] [--severity …]` on the local channel (R-BTN-106). A
+    script's `run(ctx)` uses the same channel through `await ctx.raise(type, options)` and
+    receives the answer or an exception with the refusal. The options are `subject`, `body?`,
+    `restarts?`, `default?` and `severity?`. A script can also throw `LegError(type, message)`
+    from `@immediately-run/baton/leg` to raise an `interrupt` type, with the message on the end
+    rather than in the report. The runner checks a raise as it checks a move:
     - the type is well formed, standard or declared, and allowed to the leg;
     - the leg's `autonomous` and the `interact` checks pass (R-BTN-195);
-    - `restarts` map ids to descriptions. The raise takes the declared restarts (from the nearest
-      declaration), or supplies a subset. A standard type or subtype with no declared restarts
-      may supply its own. `default` names an offered restart; an omitted default takes the
+    - `restarts` map ids to descriptions. The raise takes the restarts from the nearest
+      declaration that names them, or supplies a subset with the same descriptions. A standard
+      type or subtype with no declared restarts may supply its own. `default` names an offered
+      restart; an omitted default takes the
       declaration's default if it is offered;
     - `severity` is valid (R-BTN-125).
   - **Dispositions.**
@@ -81,7 +85,7 @@ Not built either, each a design its rule below still states:
     | `notify` | The raise is recorded and returns at once, and the leg goes on |
 
   - **Reported before it takes effect.** The runner reports each raise with `POST
-    /v1/runner/claims/{id}/conditions` and the body `{type, disposition, restarts, default?,
+    /v1/runner/claims/{id}/conditions` and the body `{type, disposition, restarts?, default?,
     severity?, url?}`.
     - The body holds filter fields only (R-BTN-33), never the subject or the body, which stay
       with the runner.
@@ -90,11 +94,11 @@ Not built either, each a design its rule below still states:
     - A `suspend` condition's `url` points to where git holds the question and is kept only under
       R-BTN-92's link rule. An `interact` condition's `url` is Baton's own (R-BTN-195). No other
       condition carries one.
-    - Baton answers with a `condition_id`, stores the `conditions` row and records a `condition`
-      event in the ticket's history (R-BTN-81).
+    - Baton answers with a `condition_id` and writes the `conditions` row, a `condition`
+      activity on the raising run and a `condition` row in the ticket's history (R-BTN-81)
+      in one transaction.
     - A claim may hold at most 20 open conditions, and a ticket may raise at most 200 a day.
       Past either limit the request is refused with `quota`.
-    - A raise costs two writes (§2's write budget).
   - **Closing.** A condition is open until it closes:
 
     | Condition | Closes when |

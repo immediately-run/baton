@@ -14,7 +14,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { course as courseEntry, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, syncCall, tick, ticket, TOKENS } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
@@ -150,7 +150,7 @@ function writeHome(scripts: Record<string, string>): { home: string; sha: string
   write('.baton/courses/timeout-pr/course.json', `${JSON.stringify(TIMEOUT_COURSE, null, 2)}\n`);
   write('.baton/baton.json', `${JSON.stringify({ courses: [{ id: 'roadmap-pr', version: 3 }, { id: 'timeout-pr', version: 1 }] }, null, 2)}\n`);
   for (const [name, text] of Object.entries(scripts)) write(`.baton/courses/roadmap-pr/legs/${name}.mjs`, text);
-  write('.baton/courses/timeout-pr/legs/linger.mjs', scripts.linger!);
+  if (scripts.linger != null) write('.baton/courses/timeout-pr/legs/linger.mjs', scripts.linger);
   g('add', '-A');
   g('-c', 'user.email=b234@test', '-c', 'user.name=b234 test', 'commit', '--no-gpg-sign', '-qm', 'courses');
   return { home, sha: g('rev-parse', 'HEAD').trim() };
@@ -349,12 +349,47 @@ describe('S-BTN-222 (the runner half): the channel checks a raise (R-BTN-160, R-
     }
   }, 240_000);
 
+  it.each([
+    { thrown: `new LegError('error.spec', 'declared failure')`, type: 'error.spec', cls: 'spec', message: 'declared failure' },
+    { thrown: `new Error('plain failure')`, type: 'error.transient', cls: 'transient', message: 'plain failure' },
+  ])('G-BTN-146: ctx.raise and a script that throws $type', async ({ thrown, type, cls, message }) => {
+    const client = pathToFileURL(join(ROOT, 'src/runner/legClient.mjs')).href;
+    const { home, sha } = writeHome({ implement: `
+      import { LegError } from ${JSON.stringify(client)};
+      export async function run(ctx) {
+        await ctx.raise('warning', { subject: 'private subject', body: 'private body' });
+        throw ${thrown};
+      }
+    ` });
+    boardSha = sha;
+    await postBoard([{ id: 'A' }], { A: placed('filed', [], [['implement', 'ready']]) });
+    await register('vm-a');
+    const r = newRunner(home, () => {});
+    try {
+      expect(await r.runOnce()).toMatchObject({ ticket: 'docs:A', end_reason: `released:cannot-finish:${cls}` });
+      expect((await conditionRows('docs:A')).map(({ type, outcome }) => ({ type, outcome }))).toEqual([
+        { type: 'warning', outcome: 'recorded' },
+        ...(cls === 'spec' ? [{ type, outcome: 'recorded' }] : []),
+      ]);
+      expect(await rows(`SELECT json_extract(detail_json, '$.error.type') AS type,
+                                json_extract(detail_json, '$.error.message') AS message
+                         FROM events WHERE kind = 'released' AND ticket_id = 'docs:A'`)).toEqual([{ type, message }]);
+    } finally {
+      r.stop();
+      cleanup(home);
+    }
+  }, 240_000);
+
   it('the channel\'s own refusals, checked without a claim: no link, baton, an unknown type, a bad severity — none reaching Baton', async () => {
     const { home } = writeHome(legScripts(join(tmpdir(), `baton-222-rec-${process.pid}.jsonl`)));
     try {
       let reported = 0;
       const r = new Runner({
-        api: { setSecret: () => {}, conditions: async () => { reported++; return { condition_id: 1, disposition: 'notify' }; } } as unknown as BatonApi,
+        api: { setSecret: () => {}, conditions: async (_: number, body: Record<string, unknown>) => {
+          expect(body).not.toHaveProperty('restarts'); // old servers require omission for an empty map
+          reported++;
+          return { condition_id: 1, disposition: 'notify' };
+        } } as unknown as BatonApi,
         home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'b234-checks',
         courses: [{ course: 'roadmap-pr', version: 3 }], stateFile, beatEvery: 60_000, log: () => {},
       });
