@@ -68,6 +68,7 @@ export interface RunnerOptions {
   /** B-86: what the heartbeat declares — `--capabilities`, which narrows. Absent, the runner asks
    *  once (a beat declaring nothing) and declares the grant the answer carries. */
   capabilities?: string[];
+  capabilityChecks?: { passes(name: string): boolean; refresh(now: () => number, force?: boolean): Promise<void> };
   /** B-86: the rule 4 names the legs of the courses it serves require, read from the home checkout
    *  each time it is asked, so a runner whose declaration lacks one says so at startup. Injected by
    *  `baton run`; absent, no such line. B-103: every served course's legs, not one course's. */
@@ -695,7 +696,7 @@ export class Runner {
    *  settled list less every lock capability whose file this process does not hold — of the
    *  runners on one machine only the one holding the lock declares it (R-BTN-178). */
   private declaringList(): string[] {
-    const base = this.declared ?? this.o.capabilities ?? [];
+    const base = (this.declared ?? this.o.capabilities ?? []).filter((name) => this.o.capabilityChecks?.passes(name) ?? true);
     const locks = this.locks;
     return locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
   }
@@ -717,6 +718,7 @@ export class Runner {
     // is the claims' own — `ensureLegLocks` holds the legs' locks and releases the rest — so the
     // idle maintenance stays out until every claim ends.
     if (this.locks && !live.some((x) => x.inflight)) await this.locks.takeAll();
+    if (!live.some((x) => x.inflight)) await this.o.capabilityChecks?.refresh(() => this.now());
     const declaring = this.declaringList();
     // R-BTN-113, R-BTN-90 (B-188): each claim's running leg's link and finished run, by claim;
     // read at build time, so the answer below clears only what this beat carried.
@@ -1453,6 +1455,7 @@ export class Runner {
     await this.endEarlierSessions();
     // R-BTN-4 (B-188): no room — the runner holds its bound.
     if (this.slots.size >= this.concurrency) return null;
+    await this.o.capabilityChecks?.refresh(() => this.now(), true);
     // B-86: the claim goes out only on the declaration the server holds — `sent` is the list the
     // last answered beat carried, which is what `rewriteSettings` recorded. A runner whose grant
     // arrived on a beat that declared nothing must beat once more before claiming (review round

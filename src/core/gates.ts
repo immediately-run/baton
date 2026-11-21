@@ -131,11 +131,12 @@ export function gatesFor(runner: GateRunner | null, ticket: GateTicket, leg: Gat
   // the whole ticket or on the leg refuses a claim of it and an advance into it — never fails open.
   const blocks = facts.blocks ?? [];
   const decided = blocks.some((b) => b.kind === 'decision' && (b.leg === '' || b.leg === leg.name));
+  const dependency = blocks.some((b) => b.kind === 'ticket' && (b.leg === '' || b.leg === leg.name));
   if (phase === 'claim') {
     if (leg.state !== 'ready') return refuse(1);
-    if (decided || blocks.some((b) => b.kind === 'ticket')) return refuse(1, 'blocked');
+    if (decided || dependency) return refuse(1, 'blocked');
     if (facts.claims.some(claimHolds)) return refuse(3);
-  } else if (decided) {
+  } else if (decided || dependency) {
     return refuse(1, 'blocked');
   }
   if (facts.override?.hold) return refuse(3, 'held');

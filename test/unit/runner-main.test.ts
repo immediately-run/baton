@@ -1,6 +1,7 @@
 // runner-main.test.ts — `baton run`'s pure half (BATON_SPEC §6.13; R3-1245): the flag parser,
 // the course declarations a heartbeat needs (rule 9), the credential the environment names and
 // the runner secret's shape. Node only: it writes temp checkouts and runs ssh-keygen.
+import { capabilityChecks } from '../../src/runner/capabilityChecks';
 import { describe, it, expect, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -1273,4 +1274,24 @@ describe('baton run --home: a name resolves to its checkout (B-121)', () => {
       rmSync(config, { recursive: true, force: true });
     }
   });
+});
+
+it('S-BTN-73 withholds a failed check, then restores it after an idle check passes', async () => {
+  let time = 0;
+  const clock = () => time;
+  const env = { CHECK_RESULT: '1' };
+  const checks = capabilityChecks({ capabilities: [
+    { name: 'vpn:corp', check: [process.execPath, '-e', 'process.exit(Number(process.env.CHECK_RESULT))'], every_s: 2 },
+    { name: 'human-operator' },
+  ] }, process.cwd(), env);
+  expect(checks.passes('vpn:corp')).toBe(false);
+  expect(checks.passes('human-operator')).toBe(true);
+  await checks.refresh(clock);
+  expect(checks.passes('vpn:corp')).toBe(false);
+  env.CHECK_RESULT = '0';
+  await checks.refresh(clock, true);
+  expect(checks.passes('vpn:corp')).toBe(false);
+  time = 2000;
+  await checks.refresh(clock);
+  expect(checks.passes('vpn:corp')).toBe(true);
 });
