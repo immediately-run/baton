@@ -1,0 +1,64 @@
+---
+title: "B-313 — Leg activity from the executor: the liveness line and heartbeat last_activity_at read the session, not the host's harness store"
+id: B-313
+project: baton
+status: available
+updated: 2026-11-21
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: normal
+description: "Under a non-builtin executor (Fieldhouse E2B) the runner's liveness line reads the host's opencode/Claude stores, which legs in a sandbox never write — every leg reads days idle — and the heartbeat never sends last_activity_at, so every claim over 2 h reads stalled. Add an optional executor activity(handle) to R-BTN-107, use it in R-BTN-72's line and send it as last_activity_at; host stores only under builtin; this.now() not Date.now()."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-21, on the runner's liveness line reading "newest activity 12021m ago (harness-store)" on every leg while the legs were plainly working: "report the time of the sandbox's newest output or opencode session event", and file it as a Baton ticket plus a Fieldhouse one for the executor's side (FLDH-63).
+
+**What is wrong.** R-BTN-72's liveness line (B-108) takes the newest of two signals, `legActivity` in `src/runner/runner.ts` and the stderr drain:
+- `harness-store`: the newest write under the *runner host's* harness stores (`~/.local/share/opencode/…`, `~/.claude/projects/…`);
+- `drained-line`: the newest stderr line of a leg child.
+
+Under an executor that runs the leg elsewhere (Fieldhouse's E2B executor, a `pinned:` bundle) the agent writes its store inside the sandbox, so the host's store never moves. On bering it was last written on 2026-11-13, when an agent last ran on the host, so every leg reads about eight days idle. The line is for the operator's eye only, so nothing acts on it, but it tells the operator the opposite of the truth.
+
+Two more faults on the same path:
+- **The heartbeat never sends `last_activity_at`** (§8.3's heartbeat table; `src/core/tickets.ts`). The ticket read's `stalled` is therefore `alive && now - claimed_at > 2 h` (`STALLED_MS`): every claim held more than two hours reads stalled on the dashboard, whatever its leg is doing.
+- **`runner.ts`'s stderr sink stamps `legLineAt` with `Date.now()`**, not the runner's clock (CLAUDE.md, *One clock*).
+
+**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3), the liveness line; [R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3), the executor interface), §8.3's heartbeat field `last_activity_at`, §14 *Running* (`stalled`).
+
+## Plan
+
+1. **Spec (R-BTN-107).** Add an optional method to `executor_api: 1`, as `reattach` is optional: `activity(handle) → {at, name} | null`, the time of the session's newest activity the executor sees and a short label for it (Fieldhouse: `sandbox-output` or `agent-event`). It is advice, never a detector, like the line it feeds. `builtin` implements it from its own children's output.
+2. **Spec (R-BTN-72).** The liveness line takes the newest of the executor's `activity` and the drained line. The host's harness stores count only under `builtin`, whose legs run on the host. With no signal the line says `newest activity not seen (<executor source>)`, never an age from a store the leg cannot write.
+3. **Runner.** Call `activity` in the beat's liveness block when the executor offers it. Restrict `legActivity`'s store paths to `builtin`. Stamp `legLineAt` with `this.now()`.
+4. **Heartbeat.** Send `last_activity_at`, the newest signal over the runner's live legs, as §8.3's table already allows. Then the ticket read's `stalled` (§14) means "no activity for 2 h", not "claimed 2 h ago". Validate it in `src/core/validate.ts`: an integer, not in the future beyond the clock-skew bound, never before the runner's session started.
+5. **Tests.** A new scenario (`baton tickets next scenario`) covering:
+   - a fake executor whose `activity` answers recent: the line shows its age and label, and the heartbeat carries it;
+   - one without `activity` under a non-`builtin` source: `not seen (…)`, and the host store is not read;
+   - `builtin` still reads the stores;
+   - a claim held 3 h with activity a minute ago is not `stalled`, and one with none for 2 h is.
+
+### Trust
+
+`last_activity_at` is a runner-supplied field. It is display only (it moves `stalled`, which no rule acts on), validated before storing, and a runner can make only its own claims look busy or idle. `activity` comes from the host's chosen executor, which the runner already trusts for everything it runs.
+
+### Invariants
+
+- **One clock (R-BTN-32).** Every timestamp the runner sends or compares comes from its clock.
+- **Advice, never a detector.** Neither the line nor `stalled` stops, reaps or judges a leg; the stub concludes its agent (R-BTN-72).
+- **R-BTN-107's agnosticism.** Baton names no sandbox: the signal is the executor's, through its interface.
+
+## Exit criteria
+
+- [ ] `npm test` passes, with the new scenario's test file naming its §15 row.
+- [ ] `npm run typecheck` passes.
+- [ ] On a Fieldhouse host after FLDH-63 deploys, a running leg's line shows an age under a few minutes, labelled by the executor.
+
+## Status
+
+_filed 2026-11-21._
