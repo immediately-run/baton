@@ -827,7 +827,7 @@ export class Policies {
       // Core cannot predict effects of gates it doesn't enforce. Name those gaps rather than
       // guessing which legs merge by their names or whether external checks would pass.
       return {
-        changed, guarantees, trust_cleared: cleared, stops: { legs, tickets: legs.map(({ ticket_id }) => ticket_id) },
+        changed, guarantees, trust_cleared: cleared, stops: { legs, tickets: [...new Set(legs.map(({ ticket_id }) => ticket_id))] },
         not_evaluated: ['outbox-delivery', 'leg-attestation-requirements', 'trusted-merge', 'repos.unlisted'],
       };
     }

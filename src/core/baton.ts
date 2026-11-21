@@ -1259,7 +1259,7 @@ export class BatonCore {
       const b = await body();
       const breakGlass = new Set((await this.humanBreakGlass()).keys());
       const personAnswerStops = () => this.admin.hasHumanDecisionWriter(breakGlass, admins) ? []
-        : this.questions.needsYou(repo).map(({ ticket_id, leg }) => ({ ticket_id, leg }));
+        : this.questions.answerableLegs(repo);
       return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, { breakGlass, personAnswerStops })));
     }
     if (m === 'POST' && rest === 'policy/floors') {

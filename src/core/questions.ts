@@ -82,6 +82,11 @@ function optionAction(g: Graph, station: string): string {
   return `moves the ticket to ‘${station}’${next.length ? `, which queues ${next.join(', ')}` : g.ends.has(station) ? ' — the course’s end' : ''}`;
 }
 
+/** A person leg carries only its decision as entry evidence (R-BTN-109). */
+function unmetAnswerEntry(g: Graph, station: string) {
+  return g.entry.get(station)?.find((r) => r.output !== 'answer' || r.schema !== DECISION_TYPE);
+}
+
 /** A `std:decision@1` value as the library's schema shapes it (§5.5). */
 export interface DecisionValue {
   id: string;
@@ -300,11 +305,8 @@ export class Questions {
       return { reached: station };
     }
     // R-BTN-109: the station reached takes the answer as its entry, if it asks for anything.
-    for (const r of g.entry.get(option.reached) ?? []) {
-      if (r.output !== 'answer' || r.schema !== DECISION_TYPE) {
-        return bad(`${option.reached}'s entry asks for ${r.output} (${r.schema}); a person leg arrives with answer (${DECISION_TYPE}) alone`);
-      }
-    }
+    const unmetEntry = unmetAnswerEntry(g, option.reached);
+    if (unmetEntry) return bad(`${option.reached}'s entry asks for ${unmetEntry.output} (${unmetEntry.schema}); a person leg arrives with answer (${DECISION_TYPE}) alone`);
     // R-BTN-39: deferred, not refused, while held — an answer that has passed every other check
     // and fails only because a claim holds the ticket waits, kept with its ref, and is applied
     // when the hold ends if it still meets every other condition then (`applyPending`, the
@@ -357,7 +359,7 @@ export class Questions {
   }
 
   /** The leg's options: the question's when it has them, else each outcome under its own name. */
-  private optionsOf(g: Graph, leg: string, stored: QuestionRow | null): QuestionOption[] {
+  private optionsOf(g: Graph, leg: string, stored: Pick<QuestionRow, 'leg' | 'options_json'> | null): QuestionOption[] {
     const posted = stored != null && stored.leg === leg ? (JSON.parse(stored.options_json) as QuestionOption[]) : [];
     if (posted.length) return posted;
     return (g.legs.get(leg)?.to ?? []).map((reached) => ({ id: reached, reached }));
@@ -479,6 +481,32 @@ export class Questions {
   }
 
   // ── reads ────────────────────────────────────────────────────────────────────────────────
+
+  /** S-BTN-197: the answer paths a policy change can remove. Unlike Needs you, an explicit
+   *  answer may name any person leg leaving the station. A live claim only defers an answer. */
+  answerableLegs(repository: string): { ticket_id: string; leg: string }[] {
+    const tickets = this.rows<{ ticket_id: string; course_id: string; station: string;
+      question_leg: string | null; options_json: string | null; answered_at: number | null }>(
+      `SELECT t.id AS ticket_id, t.course_id, s.station, q.leg AS question_leg, q.options_json, q.answered_at
+       FROM tickets t JOIN ticket_stations s ON s.ticket_id = t.id
+       LEFT JOIN ticket_questions q ON q.ticket_id = t.id
+       WHERE t.repository_id = ? AND NOT EXISTS (SELECT 1 FROM closed_tickets c WHERE c.ticket_id = t.id)
+       ORDER BY t.id`, repository);
+    const out: { ticket_id: string; leg: string }[] = [];
+    for (const t of tickets) {
+      const g = this.c.graph(repository, t.course_id);
+      if (!g) continue;
+      const station = resolveStation(g, t.station) ?? t.station;
+      const question = t.question_leg != null && t.options_json != null ? { leg: t.question_leg, options_json: t.options_json } : null;
+      for (const [leg, def] of g.legs) {
+        if (!def.person || !def.from.includes(station) || (t.question_leg === leg && t.answered_at != null)) continue;
+        if (this.optionsOf(g, leg, question).some(({ reached }) => !unmetAnswerEntry(g, reached))) {
+          out.push({ ticket_id: t.ticket_id, leg });
+        }
+      }
+    }
+    return out;
+  }
 
   /** Where the ticket is and what its course is, as the question's checks read it. */
   private where(id: string): { course: string; station: { station: string; next_leg: string | null } } | null {

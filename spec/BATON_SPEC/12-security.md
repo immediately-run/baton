@@ -325,8 +325,10 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     `trust_cleared` lists the trust settings apply would clear (`grant:<fingerprint>` or
     `courier:<fingerprint>`), not grants it would revoke. On a change from `inputs.answers: git`
     to `attestation` with no human-only key admitted by the decision route (R-BTN-116),
-    `stops.legs` lists unanswered queued person legs as `{ticket_id, leg}`, and `stops.tickets`
-    lists their qualified ticket ids. This reports loss of the answer path, not loss of expiry.
+    `stops.legs` lists the person legs that could take an answer from each live ticket's current
+    station, including when another leg is queued, as `{ticket_id, leg}`. `stops.tickets` lists
+    their distinct qualified ticket ids. This reports loss of the answer path, not loss of expiry
+    or of other legs the ticket can take.
     `not_evaluated` names the effects this preview does not predict: `outbox-delivery`,
     `leg-attestation-requirements`, `trusted-merge` and `repos.unlisted`.
   - **Who may change it.** Every change to the policy, in any direction, needs an approver on the
