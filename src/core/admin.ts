@@ -474,6 +474,9 @@ export class Admin {
           const name = old[g.max_tier!];
           this.exec('UPDATE runner_grants SET max_tier = ? WHERE credential_id = ? AND repository_id = ?', name && tiers.includes(name) ? tiers.indexOf(name) : 0, g.credential_id, id);
         }
+        for (const token of this.rows<{ id: string; max_tier: number }>('SELECT id, max_tier FROM registration_tokens WHERE repository_id = ? AND max_tier IS NOT NULL AND revoked_at IS NULL', id)) {
+          this.exec('UPDATE registration_tokens SET max_tier = ? WHERE id = ?', Math.max(0, tiers.indexOf(old[token.max_tier])), token.id);
+        }
       }
       for (const fp of remove) this.exec('UPDATE sync_keys SET revoked_at = ? WHERE fingerprint = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fp, id);
       if (linked) {
@@ -1120,17 +1123,16 @@ export class Admin {
     // `success` — is any owner key's, as every owner route is (`/v1/owner/…` refuses a key that
     // does not own the repository, and a delegated key above); a LOOSENING needs an approver on
     // `approvers.policy` as it stands, the same gate R-BTN-188 puts on an R-BTN-66 setting.
-    if (this.loosensSettings(repository, sets, codeRepos)) {
+    const breakGlass = await this.breakGlassSet();
+    return this.c.store.transaction(() => {
       const policies = this.c.policies;
       const cur = policies?.current(repository);
-      if (policies && cur) {
-        const facts = policies.facts(repository, await this.breakGlassSet());
+      if (policies && cur && this.loosensSettings(repository, sets, codeRepos)) {
+        const facts = policies.facts(repository, breakGlass);
         if (!policies.entryMatches(cur.policy.approvers.policy, actor.slice(actor.indexOf(':') + 1), facts, cur.policy.human_key)) {
           throw new BatonError('forbidden', 'loosening an R-BTN-66 setting needs an approver on approvers.policy (R-BTN-186, R-BTN-188)');
         }
       }
-    }
-    return this.c.store.transaction(() => {
       for (const [k, v] of sets) this.exec(`UPDATE repositories SET ${k} = ? WHERE id = ?`, v, repository);
       if (codeRepos != null) writeCodeRepos(this.c.store, repository, codeRepos, actor, this.c.now());
       this.event(actor, { act: 'settings', repository, ...Object.fromEntries(sets.map(([k, v]) => [k === 'remind_after_s' ? 'remind_after' : k, v == null ? null : settingValue(v)])), ...(codeRepos != null ? { code_repos: codeRepos } : {}) }, repository);
@@ -1170,6 +1172,7 @@ export class Admin {
     }
     const flat = ['retry', 'transcript_repos'];
     for (const [k, v] of sets) {
+      if (k === 'api_keys' && v === '1' && this.rows('SELECT 1 FROM repositories WHERE id = ? AND api_keys = 0', repository).length) return true;
       if (flat.includes(k)) {
         const old = k === 'retry' ? this.retry(repository) : null;
         const before = k === 'transcript_repos' ? JSON.parse(this.rows<{ v: string | null }>('SELECT transcript_repos AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? 'null') : old;

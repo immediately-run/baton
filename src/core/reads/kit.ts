@@ -5,6 +5,7 @@ import { BatonError } from '../http';
 import { keyCaller, sessionCaller, type Action, type Caller, type SessionRole } from '../actions';
 import { checkCursor, mintCursor, page, PAGE_DEFAULT, type CursorBinding } from '../cursor';
 import { liveness } from '../stateVersion';
+import { runnerKeyAllowed } from '../runnerKeyPolicy';
 import type { BatonCore } from '../baton';
 import type { Config, Row, Store } from '../ports';
 
@@ -90,7 +91,8 @@ export function canRead(cx: ReadCtx, principal: ReadPrincipal, repository: strin
   }
   if (principal.role === 'admin') return true;
   if (principal.role === 'owner') return cx.core.admin.owns(principal.cred, repository);
-  return cx.sql('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', principal.cred, repository).length > 0;
+  return runnerKeyAllowed(cx.store, principal.cred, repository)
+    && cx.sql('SELECT 1 FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', principal.cred, repository).length > 0;
 }
 
 /** `canRead`, or the one refusal. */

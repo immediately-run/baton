@@ -173,7 +173,7 @@
 // https://baton.immediately.run.
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -288,7 +288,7 @@ function workingTreeRefusal(argv) {
  *  the owner and administrator commands' value-less flags (parseArgs booleans) are named here so
  *  `--yes --dev` still counts. An unknown boolean is read as value-taking, which refuses rather
  *  than bypasses — the safe direction. */
-const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all']);
+const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all', 'confirm', 'api-keys', 'no-api-keys']);
 function devFlagPositions(argv) {
   const at = [];
   for (let i = 1; i < argv.length; i++) {
@@ -892,23 +892,46 @@ async function registerRunner(args) {
   const homes = await homesContext(flags.home, flags.url ?? process.env.BATON_URL ?? null);
   const url = registrationUrl(flags.url ?? process.env.BATON_URL ?? homes.inForce?.home.origin ?? DEFAULT_URL);
   const out = resolve(flags.out ?? `baton-${name}`);
-  if (existsSync(out) || (key === 'ssh' && existsSync(`${out}.pub`))) throw new Error('the output key file already exists; choose --out');
   const dir = mkdtempSync(join(tmpdir(), 'baton-register-'));
   const file = join(dir, 'key');
+  let output;
+  let publicOutput;
+  let keep = false;
   try {
     if (key === 'ssh') execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', file]);
     const publicKey = key === 'ssh' ? readFileSync(`${file}.pub`, 'utf8').trim() : null;
+    output = openSync(out, 'wx', 0o600);
+    if (publicKey) {
+      publicOutput = openSync(`${out}.pub`, 'wx', 0o644);
+      writeFileSync(output, readFileSync(file));
+      writeFileSync(publicOutput, `${publicKey}\n`);
+      // If delivery of the reply is uncertain, keep the SSH key that may already be registered.
+      keep = true;
+    }
     const headers = flags.identity ? { 'Baton-Registration-Token': token } : { Authorization: `Baton-Token ${token}` };
     const res = await send(url, { method: 'POST', path: '/v1/register', headers,
       body: { name, ...(publicKey ? { public_key: publicKey } : { api_key: true }) } }, flags.identity);
-    if (res.status !== 200 || !res.json?.credential_id) throw new Error(`registration refused (HTTP ${res.status}${res.json?.code ? `, ${res.json.code}` : ''})`);
-    const secret = key === 'ssh' ? readFileSync(file) : res.json.api_key;
-    if (key === 'api' && (typeof secret !== 'string' || !/^bak_[0-9a-f]{16}_[0-9a-f]{64}$/.test(secret))) throw new Error('registration did not return an API key');
-    writeFileSync(out, secret, { flag: 'wx', mode: 0o600 });
-    if (publicKey) writeFileSync(`${out}.pub`, `${publicKey}\n`, { flag: 'wx' });
+    if (res.status !== 200 || !res.json?.credential_id) {
+      if (res.status >= 400 && res.status < 500) keep = false;
+      throw new Error(`registration refused (HTTP ${res.status}${res.json?.code ? `, ${res.json.code}` : ''})`);
+    }
+    if (key === 'api') {
+      const secret = res.json.api_key;
+      if (typeof secret !== 'string' || !/^bak_[0-9a-f]{16}_[0-9a-f]{64}$/.test(secret)) throw new Error('registration did not return an API key');
+      writeFileSync(output, secret);
+      keep = true;
+    }
     process.stdout.write(`${res.json.credential_id} ${out}\n`);
     return 0;
   } finally {
+    if (output !== undefined) {
+      closeSync(output);
+      if (!keep) rmSync(out, { force: true });
+    }
+    if (publicOutput !== undefined) {
+      closeSync(publicOutput);
+      if (!keep) rmSync(`${out}.pub`, { force: true });
+    }
     rmSync(dir, { recursive: true });
   }
 }

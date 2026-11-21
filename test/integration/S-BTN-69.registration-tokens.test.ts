@@ -1,11 +1,12 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, inject, it } from 'vitest';
 import { call as hostCall } from '#host';
-import { apiKeyCall, makeApiKey, ORIGIN, setAdminKeys, setClock, sha256, withCore } from '../helpers';
+import { apiKeyCall, cutover, hbBody, makeApiKey, ORIGIN, payload, setAdminKeys, setClock, sha256, syncCall, withCore } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-10-19T12:00:00Z');
 const DAY = 86_400_000;
 const base = '/v1/owner/ops';
+const board = inject('board');
 let owner: Awaited<ReturnType<typeof makeApiKey>>;
 let admin: Awaited<ReturnType<typeof makeApiKey>>;
 
@@ -67,6 +68,52 @@ describe('S-BTN-69 registration and API keys', () => {
     expect((await register(token, { name: 'api', api_key: true }, initial.json.api_key)).status).toBe(401);
   });
 
+  it('a token-registered API runner can heartbeat and claim a modeled ticket', async () => {
+    expect((await apiKeyCall(admin.key, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.line] })).status).toBe(200);
+    await syncCall('/v1/sync/board', payload('f'.repeat(40), null, board.states.A));
+    await cutover();
+    const t = await apiKeyCall(owner.key, '/v1/owner/docs/tokens', { role: 'runner', capabilities: ['agent-venue'] });
+    expect(t.status).toBe(200);
+    const key = await register(t.json.token, { name: 'registered', api_key: true });
+    expect(key.status).toBe(200);
+    const beat = await apiKeyCall(key.json.api_key, '/v1/runner/heartbeat', hbBody('vm-a', {
+      hostname: 'registered', session_name: 'registered', secret_hash: await sha256('registered-secret'),
+    }));
+    expect(beat.status).toBe(200);
+    const claim = await hostCall(new Request(`${ORIGIN}/v1/runner/claim`, {
+      method: 'POST', headers: { Authorization: `Bearer ${key.json.api_key}`, 'X-Runner-Secret': 'registered-secret', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request_id: 'registered-key-1' }),
+    }));
+    expect(await claim.json()).toMatchObject({ ticket_id: expect.stringMatching(/^docs:/) });
+  });
+
+  it('keeps outstanding and spent tokens at the same named ceiling when the ladder changes', async () => {
+    const { json: { token } } = await mint({ uses: 2, max_tier: 'judgement' });
+    const initial = await register(token, { name: 'api', api_key: true });
+    expect(initial.json.grant.max_tier).toBe(1);
+    expect((await apiKeyCall(admin.key, '/v1/admin/repositories', { id: 'ops', tiers: ['judgement', 'critical'] })).status).toBe(200);
+    expect((await register(token, { name: 'another', api_key: true })).json.grant.max_tier).toBe(0);
+    const rotated = await register(token, { name: 'api', api_key: true }, initial.json.api_key);
+    expect(rotated.json.grant.max_tier).toBe(0);
+  });
+
+  it('refuses API-key access only on the repository that disabled it', async () => {
+    const runner = await makeApiKey();
+    for (const repo of ['ops', 'other']) {
+      expect((await apiKeyCall(owner.key, `/v1/owner/${repo}/grants`, {
+        hostname: 'shared-runner', public_key: runner.line, capabilities: [],
+      })).status).toBe(200);
+    }
+    expect((await apiKeyCall(owner.key, `${base}/settings`, { api_keys: false }, 'PUT')).status).toBe(200);
+    for (const [repo, status] of [['ops', 403], ['other', 200]] as const) {
+      expect((await apiKeyCall(runner.key, `/v1/runner/tickets/${repo}:B-1/holder`)).status).toBe(status);
+      expect((await apiKeyCall(runner.key, `/v1/repositories/${repo}/blocked`)).status).toBe(status);
+      const beat = hbBody('vm-a', { hostname: 'shared-runner', secret_hash: await sha256('shared-secret'),
+        courses: [{ repository: repo, course: 'roadmap-pr', version: 3 }] });
+      expect((await apiKeyCall(runner.key, '/v1/runner/heartbeat', beat)).status).toBe(status);
+    }
+  });
+
   it('honors token and key lifetimes and rejects API runners at the next call', async () => {
     expect((await mint({ role: 'courier' })).status).toBe(400);
     expect((await mint({ capabilities: ['capability:human-operator'] })).status).toBe(400);
@@ -95,6 +142,28 @@ describe('S-BTN-69 registration and API keys', () => {
       WHERE kind = 'admin' AND repository_id = 'ops'`).toArray().map((r) => r.act));
     expect(events.filter((a) => a === 'runner-registered')).toHaveLength(12);
     expect(events.filter((a) => a === 'baton.token-burst')).toHaveLength(1);
+  });
+
+  it('rechecks freeze after the request body is read for each token write', async () => {
+    const { json: { id, token } } = await mint({ uses: 2 });
+    const run = (path: string, headers: Record<string, string>, body: unknown) => withCore(async (c) => {
+      const req = new Request(`${ORIGIN}${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+      const read = req.json.bind(req);
+      req.json = async <T>() => {
+        const parsed = await read<T>();
+        c.store.transaction(() => c.ownerState.freeze('admin:test'));
+        return parsed;
+      };
+      const res = await c.fetch(req);
+      c.store.transaction(() => c.ownerState.unfreeze('admin:test'));
+      return (await res.json() as { code: string }).code;
+    });
+    const ownerHeaders = { 'X-Baton-Api-Key': owner.key };
+    expect(await run(`${base}/tokens`, ownerHeaders, { role: 'runner' })).toBe('frozen');
+    expect(await run(`${base}/tokens/${id}/revoke`, ownerHeaders, { confirm: true })).toBe('frozen');
+    expect(await run('/v1/register', { Authorization: `Baton-Token ${token}` }, { name: 'racing', api_key: true })).toBe('frozen');
+    expect(await withCore((c) => c.store.exec('SELECT uses_left, revoked_at FROM registration_tokens').toArray())).toEqual([{ uses_left: 2, revoked_at: null }]);
+    expect((await register(token, { name: 'racing', api_key: true })).status).toBe(200);
   });
 
   it('S-BTN-198: retirement exhausts tokens but does not revoke their key', async () => {

@@ -22,16 +22,15 @@ interface Token {
 export class RegistrationTokens {
   constructor(private readonly store: Store, private readonly now: () => number) {}
 
-  async mint(repository: string, tiers: string[], actor: string, body: unknown, authorize: () => void) {
-    const scope = tokenScope(body, tiers);
-    const expanded = [...new Set(capabilitiesOf(scope.capabilities))].sort();
-    if (expanded.some((c) => c === 'human-operator' || c === 'capability:human-operator')) bad('capabilities', 'human-operator is not a token capability');
+  async mint(repository: string, actor: string, body: unknown, authorize: () => string[]) {
     const id = randomHex(8);
     const token = `brt_${id}_${randomHex(32)}`;
     const hash = await sha256Hex(token);
-    const now = this.now();
     this.store.transaction(() => {
-      authorize();
+      const scope = tokenScope(body, authorize());
+      const expanded = [...new Set(capabilitiesOf(scope.capabilities))].sort();
+      if (expanded.some((c) => c === 'human-operator' || c === 'capability:human-operator')) bad('capabilities', 'human-operator is not a token capability');
+      const now = this.now();
       this.store.exec(`INSERT INTO registration_tokens
         (id, repository_id, secret_hash, capabilities, max_tier, uses_left, grant_ttl_s, expires_at, created_by, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, repository, hash, JSON.stringify(expanded), scope.maxTier,
@@ -57,7 +56,7 @@ export class RegistrationTokens {
     });
   }
 
-  async register(token: string, raw: unknown, current: string | null, keyInUse: (id: string) => boolean) {
+  async register(token: string, raw: unknown, current: string | null, keyInUse: (id: string) => boolean, writable: () => void) {
     const tokenId = registrationTokenId(token);
     if (!tokenId) throw new BatonError('unauthenticated', 'a registration token is required');
     const { name, publicKey } = registrationBody(raw);
@@ -67,6 +66,7 @@ export class RegistrationTokens {
     const id = ssh?.fingerprint ?? apiKey!.slice(0, 20);
     const line = ssh ? publicKey!.trim().split(/\s+/).slice(0, 2).join(' ') : `${id} sha256:${await sha256Hex(apiKey!)}`;
     return this.store.transaction(() => {
+      writable();
       const now = this.now();
       const t = this.store.exec(`SELECT t.*, r.api_keys FROM registration_tokens t JOIN repositories r ON r.id = t.repository_id
         WHERE t.id = ? AND r.retired_at IS NULL`, tokenId).toArray()[0] as unknown as Token | undefined;
@@ -78,6 +78,7 @@ export class RegistrationTokens {
       const held = this.store.exec(`SELECT id, registration_token_id FROM credentials WHERE hostname = ? AND kind IN ('runner', 'token')
         AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) AND (last_used_at IS NULL OR last_used_at > ?)`, name, now, now - 7 * DAY_MS).toArray();
       const rekey = current != null && held.length === 1 && held[0].id === current && held[0].registration_token_id === tokenId;
+      if (rekey && current.startsWith('bak_') && !t.api_keys) throw new BatonError('forbidden', 'this repository does not allow API-key runners');
       if (!rekey && t.uses_left === 0) throw new BatonError('unauthenticated', 'this registration token is spent');
       if ((held.length && !rekey) || (current != null && !rekey)) throw new BatonError('conflict', 'this name is bound to another credential');
       if (keyInUse(id)) throw new BatonError('conflict', 'this key is already registered');

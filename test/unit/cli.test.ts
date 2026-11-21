@@ -16,6 +16,37 @@ import { call as hostCall } from '#host';
 const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwner';
 const key = (p: string) => p;
 
+it('S-BTN-69: reserves private registration output before sending and never clobbers it', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'baton-register-cli-'));
+  const out = join(root, 'key');
+  let requests = 0;
+  let reserved = 0;
+  const secret = `bak_${'1'.repeat(16)}_${'2'.repeat(64)}`;
+  const server = http.createServer((_req, res) => {
+    requests++;
+    reserved = statSync(out).mode & 0o777;
+    res.end(JSON.stringify({ credential_id: secret.slice(0, 20), api_key: secret }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const register = (file: string) => main(['runner', 'register', '--key', 'api', '--name', 'runner', '--url', url,
+    '--token', `brt_${'a'.repeat(16)}_${'b'.repeat(64)}`, '--out', file]);
+  try {
+    await expect(register(join(root, 'missing', 'key'))).rejects.toThrow('ENOENT');
+    expect(requests).toBe(0);
+    expect(await register(out)).toBe(0);
+    expect(requests).toBe(1);
+    expect(reserved).toBe(0o600);
+    expect(readFileSync(out, 'utf8')).toBe(secret);
+    await expect(register(out)).rejects.toThrow('EEXIST');
+    expect(requests).toBe(1);
+    expect(readFileSync(out, 'utf8')).toBe(secret);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 /** A stdin for the confirm prompts' tests: a TTY that answers `line` once asked. */
 import { EventEmitter } from 'node:events';
 const fakeIn = (line?: string) => {
@@ -491,6 +522,14 @@ describe('an owner or administrator key never runs a working-tree CLI (B-138)', 
     const dev = spawnSync('node', [cli, 'owner', 'grants', 'baton', '--dev', '-i', file, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
     expect(dev.status).toBe(2);
     expect(dev.stderr).not.toContain('working tree');
+    for (const [command, flag] of [
+      [['token', 'revoke', 'baton', 'a'.repeat(16)], '--confirm'],
+      [['settings', 'baton'], '--api-keys'],
+      [['settings', 'baton'], '--no-api-keys'],
+    ] as const) {
+      const afterBoolean = spawnSync('node', [cli, 'owner', ...command, flag, '--dev', '-i', file, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });
+      expect(afterBoolean.stderr).not.toContain('working tree');
+    }
     // Round 1: a --dev that sits in a *value* position is that value, not the override —
     // `--capabilities --dev` names the capability string "--dev", and the guard still refuses.
     const asValue = spawnSync('node', [cli, 'owner', 'grant', 'baton', '--capabilities', '--dev', '-i', file, '--url', 'http://127.0.0.1:1'], { encoding: 'utf8' });

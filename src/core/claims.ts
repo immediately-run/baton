@@ -4,6 +4,7 @@
 // stale claim (R-BTN-35). The lock is the two partial unique indexes: a claim inserts and lets
 // SQLite refuse a second holder, never check-then-insert without them (R-BTN-4).
 import { BatonError } from './http';
+import { runnerKeyAllowed } from './runnerKeyPolicy';
 import { SESSION_HOSTS, sessionLinkWhy, transcriptUrl } from './links';
 import { groupBy, isUniqueViolation, logEvent, mintRunId, randomHex, type Random } from './db';
 import type { Deprecated } from './deprecated';
@@ -404,6 +405,7 @@ export class Claims {
        WHERE c.credential_id = ? AND g.revoked_at IS NULL`, credential), 'repository_id');
     return Object.fromEntries(this.rows<{ repository_id: string; max_tier: number | null; max_claims: number }>(
       'SELECT repository_id, max_tier, max_claims FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', credential)
+      .filter((g) => runnerKeyAllowed(this.c.store, credential, g.repository_id))
       .map((g) => [g.repository_id, { capabilities: (patterns.get(g.repository_id) ?? []).map((c) => c.capability_pattern as string), max_tier: g.max_tier, max_claims: g.max_claims }]));
   }
 

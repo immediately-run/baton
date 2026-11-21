@@ -7,6 +7,7 @@
 // and an unavailable provider is a reading (§6.3, R-BTN-76), never a table core keeps.
 import { BatonError } from './http';
 import { groupBy, logEvent } from './db';
+import { requireRunnerKeyPolicy, runnerKeyAllowed } from './runnerKeyPolicy';
 import type { Deprecated } from './deprecated';
 import { NONCE_TTL_MS, parseSshKey } from './auth';
 import { SESSION_HOSTS, isPullRequestUrl, sessionLinkWhy, transcriptUrl } from './links';
@@ -217,14 +218,9 @@ export class RunnerApi {
       AND (expires_at IS NULL OR expires_at > ?) AND (last_used_at IS NULL OR last_used_at > ?)`, id, now, now - 7 * DAY_MS).length;
   }
 
-  /** Authenticated calls renew the idle window, never the absolute one. An API runner's
-   *  session can span repositories, so refuse the whole session if any live grant forbids it. */
+  /** Authenticated calls renew the idle window, never the absolute one. */
   useCredential(id: string): void {
     const now = this.c.now();
-    if (id.startsWith('bak_') && this.rows(`SELECT 1 FROM runner_grants g JOIN repositories r ON r.id = g.repository_id
-      WHERE g.credential_id = ? AND g.revoked_at IS NULL AND r.retired_at IS NULL AND r.api_keys = 0`, id).length) {
-      throw new BatonError('forbidden', 'a repository granted to this runner does not allow API keys');
-    }
     if (this.rows('SELECT 1 FROM credentials WHERE id = ? AND last_used_at IS NOT NULL', id).length) {
       nonScheduling(this.c.store, () => this.exec(`UPDATE credentials SET last_used_at = ? WHERE id = ?
         AND revoked_at IS NULL AND last_used_at > ? AND last_used_at < ? AND expires_at > ?`, now, id, now - 7 * DAY_MS, now, now));
@@ -380,6 +376,7 @@ export class RunnerApi {
       const foreign = [...new Set(hb.courses.map((c) => c.repository).filter((r) => !granted.has(r)))];
       if (foreign.length) throw new BatonError('forbidden', `this credential is granted no access to ${foreign.join(', ')}; it may not declare their courses`);
     }
+    for (const repository of new Set(hb.courses.map((c) => c.repository))) requireRunnerKeyPolicy(this.c.store, cred.id, repository);
     // R-BTN-32: only the test credential may run a test-harness sidecar.
     if (hb.test_harness && cred.id !== 'test') throw new BatonError('forbidden', 'test_harness is refused from any credential but the test one');
 
@@ -477,12 +474,12 @@ export class RunnerApi {
     }
     if (!was?.live || rewrote) this.c.fleetChanged?.();
     const refused = hb.transcript_refusals;
-    const unlinked = this.recordTranscripts(w.id, hb, now);
+    const unlinked = this.recordTranscripts(w.id, hb, now, cred.id);
 
     const fresh = this.rows<{ incarnation: number; lease_timeout_ms: number }>('SELECT incarnation, lease_timeout_ms FROM runners WHERE id = ?', w.id)[0];
     // R-BTN-19: only a heartbeat with the secret (never the hash path) clears a fence.
     if (secretSeen) for (const f of hb.fenced) this.c.fenced?.(w.id, fresh.incarnation, f.claim_id);
-    const claims = this.activeClaims(w.id);
+    const claims = this.activeClaims(w.id).filter((claim) => runnerKeyAllowed(this.c.store, cred.id, repositoryOf(claim.ticket_id)));
     const mine = new Map(claims.map((c) => [c.id, c]));
     // R-BTN-113 (B-234, B-4): the running leg's session link, stored on its `claim_legs` row (latest
     // wins while the run is live). A link that fails the rule — https, no userinfo, an
@@ -568,6 +565,7 @@ export class RunnerApi {
    *  stored — the same rows the heartbeat's grantCapabilities unions over. Public: the board
    *  route names the same grant the heartbeat names (src/core/baton.ts). */
   grantedCapabilities(credential: string, repository: string): string[] {
+    if (!runnerKeyAllowed(this.c.store, credential, repository)) return [];
     const row = this.rows<{ capabilities: string }>(
       'SELECT capabilities FROM runner_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', credential, repository)[0];
     return row ? (JSON.parse(row.capabilities) as string[]) : [];
@@ -577,7 +575,8 @@ export class RunnerApi {
    *  whose reach is its own. */
   private grantedRepos(cred: { id: string; granted: boolean }): string[] | null {
     return cred.granted
-      ? this.rows<{ repository_id: string }>('SELECT repository_id FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', cred.id).map((r) => r.repository_id)
+      ? this.rows<{ repository_id: string }>('SELECT repository_id FROM runner_grants WHERE credential_id = ? AND revoked_at IS NULL', cred.id)
+        .map((r) => r.repository_id).filter((repository) => runnerKeyAllowed(this.c.store, cred.id, repository))
       : null;
   }
 
@@ -642,7 +641,7 @@ export class RunnerApi {
   /** §6.8: a path reported under a claim is linked to it; one reported with none waits for the
    *  next claim (`Claims.claim` links it). A repeat report moves `last_pushed_at` and fills a
    *  missing `activity_id` once that activity has arrived. */
-  private recordTranscripts(runnerId: number, hb: Heartbeat, now: number) {
+  private recordTranscripts(runnerId: number, hb: Heartbeat, now: number, credential: string) {
     const unlinked: number[] = [];
     if (!hb.transcripts.length) return unlinked;
     const claims = this.activeClaims(runnerId);
@@ -658,6 +657,10 @@ export class RunnerApi {
       const named = t.claim_id ?? (t.activity_id ? this.rows<{ claim_id: number | null }>('SELECT claim_id FROM activities WHERE runner_id = ? AND id = ?', runnerId, t.activity_id)[0]?.claim_id ?? undefined : undefined);
       const claim = named != null ? claims.find((c) => c.id === named) ?? null : claims.length === 1 ? claims[0] : null;
       if (claim) {
+        if (!runnerKeyAllowed(this.c.store, credential, repositoryOf(claim.ticket_id))) {
+          hb.transcript_refusals.push({ index: t.index ?? -1, code: 'forbidden', message: 'this repository does not allow API-key runners' });
+          continue;
+        }
         // A pointer under a claim names one of that claim's repository's transcript repositories
         // (§6.8, R-BTN-66): another repository's list does not widen it.
         if (!transcriptReposOf(this.c.store, repositoryOf(claim.ticket_id)).includes(t.repo)) {
@@ -769,9 +772,10 @@ export class RunnerApi {
     }
     if (typeof a.detail?.pr === 'string') this.checkPullRequest(a.detail.pr, a.claim_id, `activity ${a.id}.detail.pr`);
     if (a.claim_id !== null) {
-      const claim = this.rows<{ runner_id: number; status: string; ended_at: number | null }>(
-        'SELECT runner_id, status, ended_at FROM claims WHERE id = ?', a.claim_id)[0];
+      const claim = this.rows<{ runner_id: number; status: string; ended_at: number | null; credential_id: string; ticket_id: string }>(
+        'SELECT c.runner_id, c.status, c.ended_at, w.credential_id, c.ticket_id FROM claims c JOIN runners w ON w.id = c.runner_id WHERE c.id = ?', a.claim_id)[0];
       if (!claim || claim.runner_id !== runnerId) throw new BatonError('not-holder', `claim ${a.claim_id} is not this runner's`);
+      requireRunnerKeyPolicy(this.c.store, claim.credential_id, repositoryOf(claim.ticket_id));
       if (claim.status !== 'active') {
         // §6.9: for 10 minutes after the end, an update that only closes an open activity is
         // accepted; anything else, and every later update, is claim-ended.
@@ -836,6 +840,8 @@ export class RunnerApi {
   shadowReport(runnerId: number, body: unknown) {
     const r = checkShadowReport(body);
     const repo = repositoryOf(r.ticket_id);
+    const credential = this.rows<{ credential_id: string }>('SELECT credential_id FROM runners WHERE id = ?', runnerId)[0]?.credential_id;
+    if (credential) requireRunnerKeyPolicy(this.c.store, credential, repo);
     if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NULL', repo).length) throw new BatonError('invalid-params', 'ticket_id: not a registered repository’s ticket');
     if (this.mode(repo).mode !== 'shadow') throw new BatonError('forbidden', `${repo}'s shadow reports ended at its cutover`);
     const actor = `runner:${runnerId}`;

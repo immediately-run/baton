@@ -156,6 +156,9 @@ describe('S-BTN-189 the repository policy', () => {
     // names `retry` flatly); the human key's change is accepted.
     expect((await as(owner, '/v1/owner/ops/settings', { retry: { backoff_ms: [3_600_000], max_failed: 3 } }, 'PUT')).json.code).toBe('forbidden');
     expect((await as(human, '/v1/owner/ops/settings', { retry: { backoff_ms: [3_600_000], max_failed: 3 } }, 'PUT')).status).toBe(200);
+    expect((await as(owner, '/v1/owner/ops/settings', { api_keys: false }, 'PUT')).status).toBe(200);
+    expect((await as(owner, '/v1/owner/ops/settings', { api_keys: true }, 'PUT')).json.code).toBe('forbidden');
+    expect((await as(human, '/v1/owner/ops/settings', { api_keys: true }, 'PUT')).status).toBe(200);
     // Round 1, finding 3: revoking the last human owner under `protected` would leave every
     // human list with no live credential (R-BTN-188: naming the list) — the replacement is
     // added first, then the old key revoked.
