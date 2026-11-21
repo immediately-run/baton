@@ -2,8 +2,8 @@
 title: "R3-1269 — Baton serves state: retire hooks; fleet and instance views, launch candidates, and claims with prefer, bills and rationale"
 id: R3-1269
 project: baton
-status: available
-updated: 2026-11-02
+status: done
+updated: 2026-11-21
 repos:
   - baton
 tags:
@@ -15,14 +15,15 @@ description: "Baton runs no repository code (BATON_SPEC §1 R-BTN-98, §6.7 R-BT
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/315
 depends_on:
   - R3-1251
   - R3-1255
 ---
 
 **Brief:** the Baton project; the owner, 2026-10-16: Baton only accepts and delivers state; hooks inside the server are retired.
-**Spec:** [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) [R-BTN-98](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (what Baton still decides), [§6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) [R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) (the views, ETags, `?all=1`, `launch-candidates`) and [R-BTN-100](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) (`prefer`, `bills`, `rationale`), [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (matching), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`claim_bills`, `board_head.fleet_version`, `instances_version`), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-21](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-57](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-61](../spec/BATON_SPEC/15-verification.md#scenarios) (shared instances) and [G-BTN-88](../spec/BATON_SPEC/15-verification.md#gates); the hook residue in `spec/BATON_SPEC_HISTORY.md` (Migrations)
+**Spec:** [BATON_SPEC §1](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) [R-BTN-98](../../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (what Baton still decides), [§6.7](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) [R-BTN-99](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) (the views, ETags, `?all=1`, `launch-candidates`) and [R-BTN-100](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) (`prefer`, `bills`, `rationale`), [§6.6](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (matching), [§13](../../spec/BATON_SPEC/13-data-model.md#sec-13) (`claim_bills`, `board_head.fleet_version`, `instances_version`), [§14](../../spec/BATON_SPEC/14-api.md#sec-14), [§15](../../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-21](../../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-57](../../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-61](../../spec/BATON_SPEC/15-verification.md#scenarios) (shared instances) and [G-BTN-88](../../spec/BATON_SPEC/15-verification.md#gates); the hook residue in `spec/BATON_SPEC_HISTORY.md` (Migrations)
 **Depends on:** R3-1251 (instances and readings, which the instance view serves), R3-1255 (queue depths in the board summary)
 
 ### Requires
@@ -86,4 +87,4 @@ the fleet view and the ETag's bumps gain the ontology's `runner_derived` (R-BTN-
 with B-104). Each seam is named inline above; whichever ticket lands second wires its half.)_
 - 2026-11-02: the spec restructure's part 4 (B-166): `claim_bills` and the instance view's billings are gone — it serves each capability with a capacity and the claims holding its seats (R-BTN-178, B-106); the caller's `host` instances and the ontology's `runner_derived` are gone (R-BTN-76, R-BTN-174; B-167, B-168).
 
-_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the launcher is part 7 of [the checks-and-executors proposal](../spec/proposals/checks-and-executors.md), and the views a runner ranks from are under "The runner's views and the doorbell" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md). Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
+_(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the launcher is part 7 of [the checks-and-executors proposal](../../spec/proposals/checks-and-executors.md), and the views a runner ranks from are under "The runner's views and the doorbell" in [the tables-and-routes proposal](../../spec/proposals/data-model-and-api.md). Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is unchanged.)_
