@@ -180,8 +180,8 @@ Every value below is validated on write; a value over its cap is refused `invali
   - **Every session request.** Any request a dashboard session authorizes, reads included,
     carries an `Origin` equal to the origin when it carries one, and `Sec-Fetch-Site:
     same-origin` when it carries that header, else `forbidden`.
-  - **Sessions.** `/v1/ui/*` requires a dashboard session minted from an administrator key
-    (R-BTN-155). Outside `/v1/ui/*` a session authenticates only the `GET`s §14 lists it on —
+  - **Sessions.** `/v1/ui/*` requires a dashboard session of an administrator key, minted by
+    its link or bound through Cloudflare Access (R-BTN-155). Outside `/v1/ui/*` a session authenticates only the `GET`s §14 lists it on —
     the reads it shares with the keys — and no write.
     Cloudflare Access may stand in front of the dashboard; Baton never requires it and never reads
     its cookie. Baton verifies the assertion Access forwards, and that assertion alone

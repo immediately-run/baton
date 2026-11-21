@@ -18,6 +18,16 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-21 — Sign-in through Cloudflare Access (R-BTN-155, S-BTN-308).**
+  Rules changed: R-BTN-155. The owner approved it on 2026-11-21: a person Cloudflare Access has
+  verified reaches a dashboard session without minting a link in a terminal (the dashboard's
+  UX rules, `docs/context/ux.mdx`, rule 1). Authority stays with a key: `ACCESS_IDENTITIES`
+  binds each email to one key, the deployment's to set, and the session is that key's and
+  ends with its key or its line. The Access factor must be one no agent session holds, because
+  sessions carry the owner's forge account (reach 3); Access by that account would let an
+  injected session sign in. Owners' sessions stay proposed; the proposal's §3 now admits an
+  owner key's line the same way. Rejected: Access alone, with no key (it would make the
+  identity provider the authority and end the rule that a key mints every session).
 - **2026-11-20 — A session's reads outside `/v1/ui/*`, the strip's ready count, V1's paged lists (R-BTN-16, R-BTN-155, S-BTN-243, S-BTN-254).**
   Rules changed: R-BTN-16, R-BTN-155.
   The V2 dashboard (BATON-UI-V2, merged 2026-11-20) reads the repository and tenant `GET`s §14

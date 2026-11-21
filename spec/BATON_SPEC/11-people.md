@@ -300,11 +300,22 @@ contents are not built; their design is
     soon as the key leaves `BATON_ADMIN_KEYS`, checked on every request. It calls `/v1/ui/*`
     and reads the `GET`s §14 lists a session on (§14, R-BTN-16); a destructive action carries `confirm: true` (§12.2). Link tokens and session values
     are stored as hashes (§12.1).
+  - **Sign-in through Cloudflare Access.** Behind Cloudflare Access a person signs in with no
+    terminal. `/login` sends `POST /v1/login {access: true}`; Baton verifies the request's
+    `Cf-Access-Jwt-Assertion` against the team's keys and the application's audience and reads
+    its email. The secret `ACCESS_IDENTITIES` binds emails to keys, one `<email> <fingerprint>`
+    line each, set by whoever controls the deployment (R-BTN-57). An email bound to an
+    administrator key gets a session of that key, as its link would mint it; an unverified or
+    absent assertion, or an email bound to no administrator key, is `unauthenticated`, and the
+    page names `baton admin open`. Each request also checks the email's line: the session ends
+    as soon as the line leaves `ACCESS_IDENTITIES` or names another key. The deployment's Access
+    application signs these emails in by a factor no agent session holds (a one-time code to
+    the person's mailbox, a hardware key), never by the forge account sessions carry
+    (`docs/security-model.mdx`, reach 3).
   - **Cloudflare Access, with no administrator key.** While `BATON_ADMIN_KEYS` names no key, a
     request to `/v1/ui/*` is authenticated by a verified Cloudflare Access
-    assertion alone (`Cf-Access-Jwt-Assertion`, checked against the team's keys and the
-    application's audience, for an email in `OWNER_EMAILS`). Once an administrator key is
-    configured, only a session authenticates `/v1/ui/*` (R-BTN-16).
+    assertion alone (checked as above, for an email in `OWNER_EMAILS`). Once an administrator
+    key is configured, only a session authenticates `/v1/ui/*` (R-BTN-16).
   - **Not built:** sign-in by a code the key holder confirms, owners' sessions, session
     revocation and confirmation codes
     ([the proposal, §3](../proposals/people-and-dashboard.md#3-sign-in-sessions-and-confirmed-actions);
