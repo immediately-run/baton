@@ -363,8 +363,11 @@ function translateStep(step, P, env, k) {
       if (!c.timeoutRelease && d.timeoutRelease) {
         if (origin !== 'alarm' || c.deadlineAt == null || step.now < c.deadlineAt) return { reject: `claim ${id} queued a leg-timeout before its deadline` };
         acts.push('4.reps(_ => tick)', `queueTimeout(${m})`);
-      } else if ((c.timeoutRelease && !d.timeoutRelease) || (d.deadlineAt != null && d.deadlineAt !== c.deadlineAt)) {
+      } else if ((c.timeoutRelease && !d.timeoutRelease) || d.deadlineAt !== c.deadlineAt) {
         if (origin !== '/v1/runner/heartbeat') return { reject: `claim ${id}'s deadline changed outside a finishing beat` };
+        if (d.deadlineAt !== c.deadlineAt && (c.deadlineAt == null || d.deadlineAt !== step.now + 40 * 60_000)) {
+          return { reject: `claim ${id}'s finishing beat re-armed the wrong deadline` };
+        }
         acts.push(`legFinished(${w})`);
       } else if (c.timeoutRelease?.deliveredAt == null && d.timeoutRelease?.deliveredAt != null) {
         if (origin !== '/v1/runner/heartbeat' || d.timeoutRelease.deliveredAt !== step.now) return { reject: `claim ${id} delivered a leg-timeout outside a heartbeat` };

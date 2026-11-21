@@ -48,6 +48,11 @@ module regressions {
     .then(legFinished("w1")).expect(c1.deadline == -1 and c1.releasePhase == "none")
     .then(deliverTimeout("w1")).fail()
 
+  run deadlineDeliveredRefusesAdvanceTest = start.then(claim("w1", "t1"))
+    .then(advanceRun("w1", "implement", NONE, 2)).then(tick).then(tick).then(queueTimeout(1))
+    .then(deliverTimeout("w1")).then(pushEvidence("w1", false))
+    .then(advance("w1", "review", NONE)).fail()
+
   run deadlineReapAndFenceTest = start.then(claim("w1", "t1"))
     .then(advanceRun("w1", "implement", NONE, 2)).then(tick).then(heartbeat("w1"))
     .then(tick).then(queueTimeout(1)).then(deliverTimeout("w1"))

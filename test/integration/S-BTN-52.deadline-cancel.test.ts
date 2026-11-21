@@ -1,6 +1,6 @@
 // S-BTN-52, G-BTN-80 (R-BTN-90): run deadlines and the fence before re-issue, on both hosts.
 import { beforeEach, describe, expect, it } from 'vitest';
-import { advance, beat, claimItem, course, cutover, endClaim, Git, hbBody, register, rows, runnerCall, setClock, sha256, tick } from '../helpers';
+import { advance, beat, claimItem, course, cutover, endClaim, Git, hbBody, ORIGIN, ownerCall, register, rows, runnerCall, setClock, sha256, tick } from '../helpers';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 
 const T0 = Date.parse('2026-11-14T09:00:00Z');
@@ -84,6 +84,40 @@ describe('S-BTN-52: a run deadline', () => {
     expect(await claimRow(id)).toMatchObject({ status: 'released', failed_attempt: 1, fence_pending: 0 });
     expect((await runnerCall(`/v1/runner/messages/${delivery[0].id}/ack`, { cred: 'vm-a', secret: a.secret, body: {} })).status).toBe(200);
     expect((await beat('vm-a', a.secret, LEASE)).json.messages).toEqual([]);
+  });
+
+  it('refuses a successor if the timeout was delivered before advance', async () => {
+    const { a, id } = await start();
+    await alarmAt(DUE);
+    const delivery = (await beat('vm-a', a.secret, LEASE)).json.messages;
+    expect(delivery).toHaveLength(1);
+    const next = await advance('vm-a', a.secret, id, { reached: 'pr-open', leg: 'review' });
+    expect(next.json).toMatchObject({ rule_code: 'leg-timeout' });
+    expect((await beat('vm-a', a.secret, LEASE)).json.messages).toEqual(delivery);
+    await alarmAt(DUE + 15 * MIN);
+    expect(await claimRow(id)).toMatchObject({ end_reason: 'reaped:leg-timeout', failed_attempt: 1 });
+    expect(await rows('SELECT leg, abandoned_at FROM claim_legs WHERE claim_id = ?', id))
+      .toEqual([{ leg: 'implement', abandoned_at: DUE + 15 * MIN }]);
+  });
+
+  it('expires other releases for the reaped ticket, but not releases for another ticket', async () => {
+    const { a, id } = await start();
+    await alarmAt(DUE);
+    const requestRelease = async (ticketId: string) => {
+      const response = await ownerCall('/v1/ui/messages', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
+        body: JSON.stringify({ kind: 'release', to_runner_id: a.id, payload: { ticket_id: ticketId, reason: 'requested' } }),
+      });
+      expect(response.status).toBe(200);
+    };
+    await requestRelease(ticket);
+    await requestRelease('docs:B');
+    const delivery = (await beat('vm-a', a.secret, LEASE)).json.messages;
+    expect(delivery).toHaveLength(3);
+    await requestRelease(ticket); // A second request is still pending at reap time.
+    await alarmAt(DUE + 15 * MIN);
+    expect(await claimRow(id)).toMatchObject({ end_reason: 'reaped:leg-timeout' });
+    expect((await beat('vm-a', a.secret, LEASE)).json.messages).toEqual([delivery[2]]);
   });
 
   it.each(['sidecar', 'deadline'])('reaps only 15 minutes after delivery and clears by %s', async (clear) => {

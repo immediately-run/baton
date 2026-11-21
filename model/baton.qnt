@@ -571,6 +571,7 @@ module baton {
       not(seatsFull(c.ticket, c.id)),                         // rule 11 at each advance (R-BTN-178)
     }
     all {
+      c.releasePhase != "delivered",                       // R-BTN-90: the release stands for this run
       c.leg == "" or st.pushed.get(w),                        // git first
       c.leg != "" or c.finished.length() > 0 or leg == c.offered, // not-queued (R-BTN-83)
       FROM.get(leg).contains(stn),                            // an edge (R-BTN-69)
@@ -586,7 +587,7 @@ module baton {
       st' = st.with("claims", st.claims.set(c.id, c.with("station", stn).with("finished", fin)
                 .with("leg", leg).with("startBars", postedBarsOf(c.ticket, leg).union(bars))
                 .with("deadline", if (budget > 0) st.now + budget else -1)
-                .with("releasePhase", if (c.releasePhase == "pending") "none" else c.releasePhase)
+                .with("releasePhase", "none")
                 .with("rearmed", false).with("finishGraceUntil", -1)
                 .with("claimObs", st.counter).with("gateViolation", c.gateViolation or violated)))
               .with("seats", st.seats.set(c.id, seatSet(c.ticket)))
