@@ -1181,6 +1181,44 @@ export const VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 
  *  (a bearer token, a BATON_KEYS seed key) keeps its interim reach on every repository. The one
  *  test of `credentials.created_by`, in TypeScript and as SQL over a column. */
 export const isGrantedKey = (createdBy: string | null | undefined): boolean => !!createdBy && /^(owner|admin):/.test(createdBy);
+
+const TOKEN_KEY = /^brt_([0-9a-f]{16})_[0-9a-f]{64}$/;
+export const registrationTokenId = (token: string) => TOKEN_KEY.exec(token)?.[1] ?? null;
+export const checkRegistrationTokenId = (id: string) => /^[0-9a-f]{16}$/.test(id) ? id : bad('id', 'must be a registration token id');
+export const DAY_MS = 86_400_000;
+
+export function registrationBody(value: unknown) {
+  const b = registrationObject(value, ['name', 'public_key', 'api_key']);
+  const name = typeof b.name === 'string' && HOSTNAME.test(b.name) ? b.name : bad('name', 'must be a hostname');
+  if (b.api_key === true && b.public_key === undefined) return { name, publicKey: null };
+  if (b.api_key === undefined && typeof b.public_key === 'string') return { name, publicKey: b.public_key };
+  return bad('body', 'supply a public_key or api_key: true, not both');
+}
+
+export function registrationObject(value: unknown, fields: string[]) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return bad('body', 'must be a JSON object');
+  const b = value as Record<string, unknown>;
+  for (const field of Object.keys(b)) if (!fields.includes(field)) bad(field, 'unknown field');
+  return b;
+}
+
+export function tokenScope(value: unknown, tiers: string[]) {
+  const b = registrationObject(value, ['role', 'capabilities', 'max_tier', 'ttl_s', 'uses', 'grant_ttl_s']);
+  if (b.role !== 'runner') bad('role', 'must be runner');
+  const capabilities = b.capabilities === undefined ? [] : b.capabilities;
+  if (!Array.isArray(capabilities) || capabilities.length > 64 || capabilities.some((c) =>
+    typeof c !== 'string' || !CAPABILITY_NAME.test(c) || c === 'human-operator' || c === 'capability:human-operator')) {
+    return bad('capabilities', 'must be at most 64 capability names, without human-operator');
+  }
+  const maxTier = b.max_tier === undefined ? null : typeof b.max_tier === 'string' && tiers.includes(b.max_tier)
+    ? tiers.indexOf(b.max_tier) : bad('max_tier', `must be one of ${tiers.join(', ')}`);
+  const bounded = (field: string, fallback: number, max: number) => {
+    const v = b[field] === undefined ? fallback : b[field];
+    return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= max ? v : bad(field, `must be an integer from 1 to ${max}`);
+  };
+  const ttl = bounded('ttl_s', 7 * DAY_MS / 1000, 30 * DAY_MS / 1000);
+  return { capabilities: capabilities as string[], maxTier, ttl, uses: bounded('uses', 1, 100), grantTtl: bounded('grant_ttl_s', ttl, 90 * DAY_MS / 1000) };
+}
 export const grantedKeySql = (column: string) => `(${column} LIKE 'owner:%' OR ${column} LIKE 'admin:%')`;
 
 export const isInstanceName = (v: unknown): v is string => typeof v === 'string' && INSTANCE_NAME.test(v);

@@ -70,7 +70,9 @@ checked in the transaction that adds or first accepts a key (§12.1).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `credentials` | `id` (fingerprint) | `kind` (`runner` — a machine key; `probe` — an instrument key), `public_key` (an SSH public key or an API key's public line; unique), `label`, `hostname` (machine keys; unique among live ones), `expires_at`, `last_used_at`, `created_by`, `revoked_at` | Every key but owners', sync keys and administrators' (R-BTN-13, R-BTN-102, R-BTN-117, R-BTN-159) |
+| `credentials` | `id` (fingerprint) | `kind` (`runner` — a machine key; `probe` — an instrument key), `public_key` (an SSH public key or an API key's public line; unique), `label`, `hostname` (machine keys; unique among live ones), `registration_token_id`, `expires_at`, `last_used_at`, `created_by`, `revoked_at` | Every key but owners', sync keys and administrators' (R-BTN-13, R-BTN-102, R-BTN-117, R-BTN-159) |
+| `registration_tokens` | `id` | `repository_id`, `secret_hash`, `capabilities`, `max_tier`, `uses_left`, `grant_ttl_s`, `expires_at`, `created_by`, `created_at`, `revoked_at` | Runner enrollment (R-BTN-117) |
+| `token_registrations` | — | `token_id`, `at` | Recent registrations, for burst detection (R-BTN-117) |
 | `repository_owners` | `(repository_id, fingerprint)` | `public_key`, `human_only`, `fido_attestation`, `added_by`, `added_at`, `removed_at` | Owner keys (R-BTN-58, R-BTN-185) |
 | `runner_grants` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `max_tier`, `sync`, `role`, `checker` (0/1), `domain` (a label; NULL when unset), `max_claims`, `set_by` (the credential that set the role, mark and domain), `granted_by`, `granted_at`, `accepted_at` (NULL while pending), `revoked_at` | What a machine key may do where (R-BTN-4, R-BTN-58, R-BTN-146, R-BTN-180, R-BTN-188) |
 | `grant_capabilities` | `(credential_id, repository_id, capability_pattern)` | — | A grant's capabilities as rows, derived from `runner_grants.capabilities` in the statement that writes it (§6.6 rule 4) |

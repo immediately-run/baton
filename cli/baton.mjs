@@ -173,8 +173,8 @@
 // https://baton.immediately.run.
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requestCredential, signHeaders, signingKey } from './sign.mjs';
@@ -506,6 +506,26 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     throw new Error('baton admin repos|repo|grant|probe|resource|instance|capacity|settings|revoke|open');
   }
   if (role === 'owner') {
+    if (cmd === 'token' && rest[0] === 'create') {
+      const { flags, positional } = parseArgs(rest.slice(1), [], ['repo', 'role', 'capabilities', 'max-tier', 'ttl', 'uses', 'grant-ttl'], 1);
+      if (flags.repo && positional.length) throw new Error('name the repository once');
+      const repo = repoOrHome(flags.repo ?? positional[0], home);
+      if (flags.role !== 'runner') throw new Error('--role must be runner');
+      return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/tokens`, body: {
+        role: flags.role, capabilities: list(flags.capabilities) ?? [],
+        ...(flags['max-tier'] ? { max_tier: flags['max-tier'] } : {}),
+        ...(flags.ttl ? { ttl_s: duration(flags.ttl) / 1000 } : {}),
+        ...(flags.uses ? { uses: Number(flags.uses) } : {}),
+        ...(flags['grant-ttl'] ? { grant_ttl_s: duration(flags['grant-ttl']) / 1000 } : {}),
+      } };
+    }
+    if (cmd === 'token' && rest[0] === 'revoke') {
+      const { flags, positional } = parseArgs(rest.slice(1), ['confirm'], ['repo'], 2);
+      if (!flags.confirm) throw new Error('pass --confirm to revoke the token and all credentials it registered');
+      const repo = repoOrHome(flags.repo ?? (positional.length === 2 ? positional[0] : undefined), home);
+      const id = need(positional.at(-1), 'the token id');
+      return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repo)}/tokens/${encodeURIComponent(id)}/revoke`, body: { confirm: true } };
+    }
     if (cmd === 'grants') {
       // B-90: the repository's owners, grants, settings and bars in force, read-only.
       const { positional } = parseArgs(rest, [], [], 1);
@@ -551,8 +571,10 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       } };
     }
     if (cmd === 'settings') {
-      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars', 'require-signed-control', 'no-require-signed-control'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'code-repos', 'forge-ids', 'pushers'], 1);
+      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars', 'require-signed-control', 'no-require-signed-control', 'api-keys', 'no-api-keys'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'code-repos', 'forge-ids', 'pushers'], 1);
       const body = {};
+      if (flags['api-keys'] && flags['no-api-keys']) throw new Error('choose --api-keys or --no-api-keys');
+      if (flags['api-keys'] || flags['no-api-keys']) body.api_keys = !!flags['api-keys'];
       if (flags['no-required-bars']) {
         if (groups.length) throw new Error('--no-required-bars clears them: name no --required-bar beside it');
         body.required_bars = [];
@@ -829,12 +851,12 @@ const redirectAnswered = (target, status, to) => new Error(
  *  as); a command's own requests are always `clientVersion()`'s. */
 let saidClientVersions = false;
 export async function send(url, p, keyFile, fetchImpl = fetch, client = clientVersion()) {
-  const cred = requestCredential(keyFile);
+  const cred = keyFile ? requestCredential(keyFile) : null;
   const target = new URL(p.path, url).toString();
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
-  const auth = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
-  const headers = { 'Baton-Client': client, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
+  const auth = !cred ? {} : cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
+  const headers = { 'Baton-Client': client, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth, ...p.headers };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
   let res;
   try {
@@ -857,6 +879,46 @@ export async function send(url, p, keyFile, fetchImpl = fetch, client = clientVe
     json = null;
   }
   return { status: res.status, json, text: raw };
+}
+
+async function registerRunner(args) {
+  const { flags } = parseArgs(args, [], ['token', 'name', 'key', 'out', 'url', 'home', 'identity'], 0);
+  const token = need(flags.token, '--token');
+  if (!/^brt_[0-9a-f]{16}_[0-9a-f]{64}$/.test(token)) throw new Error('--token must be a registration token');
+  const name = need(flags.name, '--name');
+  if (!/^[A-Za-z0-9.-]{1,253}$/.test(name)) throw new Error('--name must be a hostname');
+  const key = flags.key ?? 'ssh';
+  if (key !== 'ssh' && key !== 'api') throw new Error('--key must be ssh or api');
+  const homes = await homesContext(flags.home, flags.url ?? process.env.BATON_URL ?? null);
+  const url = registrationUrl(flags.url ?? process.env.BATON_URL ?? homes.inForce?.home.origin ?? DEFAULT_URL);
+  const out = resolve(flags.out ?? `baton-${name}`);
+  if (existsSync(out) || (key === 'ssh' && existsSync(`${out}.pub`))) throw new Error('the output key file already exists; choose --out');
+  const dir = mkdtempSync(join(tmpdir(), 'baton-register-'));
+  const file = join(dir, 'key');
+  try {
+    if (key === 'ssh') execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', file]);
+    const publicKey = key === 'ssh' ? readFileSync(`${file}.pub`, 'utf8').trim() : null;
+    const headers = flags.identity ? { 'Baton-Registration-Token': token } : { Authorization: `Baton-Token ${token}` };
+    const res = await send(url, { method: 'POST', path: '/v1/register', headers,
+      body: { name, ...(publicKey ? { public_key: publicKey } : { api_key: true }) } }, flags.identity);
+    if (res.status !== 200 || !res.json?.credential_id) throw new Error(`registration refused (HTTP ${res.status}${res.json?.code ? `, ${res.json.code}` : ''})`);
+    const secret = key === 'ssh' ? readFileSync(file) : res.json.api_key;
+    if (key === 'api' && (typeof secret !== 'string' || !/^bak_[0-9a-f]{16}_[0-9a-f]{64}$/.test(secret))) throw new Error('registration did not return an API key');
+    writeFileSync(out, secret, { flag: 'wx', mode: 0o600 });
+    if (publicKey) writeFileSync(`${out}.pub`, `${publicKey}\n`, { flag: 'wx' });
+    process.stdout.write(`${res.json.credential_id} ${out}\n`);
+    return 0;
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
+}
+
+function registrationUrl(value) {
+  const url = new URL(value);
+  if (!(url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) {
+    throw new Error('registration tokens require HTTPS or a loopback HTTP server');
+  }
+  return url;
 }
 
 /** R-BTN-197: `baton: this CLI is <version>; Baton recommends <recommended> and refuses below
@@ -1113,6 +1175,7 @@ async function homesContext(flag, explicitUrl = null) {
  *  Baton's — a refusal, or a 2xx body that is not JSON (B-80) — and any error thrown up to the
  *  caller (the CLI prints `baton: …` and exits 2). Exported for the tests of that contract. */
 export async function main(argv) {
+  if (argv[0] === 'runner' && argv[1] === 'register') return registerRunner(argv.slice(2));
   // B-138: an owner or administrator key signs with the code that reads it, so the CLI that
   // takes one is a pinned release — never a git working tree, whose code a push (a branch a leg
   // checks out) changes. `--dev` is the override for this repository's own development; the
@@ -1298,6 +1361,7 @@ export async function main(argv) {
   const p = plan(role, args, undefined, undefined, home);
   const url = flags.url ?? process.env.BATON_URL ?? homes.inForce?.home.origin ?? DEFAULT_URL;
   const keyFile = need(flags.identity, '-i KEY (an administrator, owner or runner key file)');
+  if (role === 'owner' && args[0] === 'token') registrationUrl(url);
   // B-182 (R-BTN-140): `--code-repos` entries whose ids the operator did not supply offline are
   // read from their forge here, before the settings PUT goes out — Baton never fetches.
   if (p.resolveCodeRepos) {

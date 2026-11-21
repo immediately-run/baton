@@ -17,12 +17,12 @@ export { DEFAULT_TRANSCRIPT_REPOS };
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { compareVersions } from '../shared/versions.mjs';
 import {
-  REPORT_HORIZON_MS, REPORT_KEYS_MAX, checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, bad, HOSTNAME, isGrantedKey,
+  REPORT_HORIZON_MS, REPORT_KEYS_MAX, checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, bad, DAY_MS, HOSTNAME, isGrantedKey,
   type ActivityReport, type Heartbeat, HOLDING } from './validate';
 import type { Policies } from './policy';
 
 import type { Config, Row, SqlValue, Store } from './ports';
-import { liveness } from './stateVersion';
+import { liveness, nonScheduling } from './stateVersion';
 import { REPORT_AGE_FROM, REPORTS_FROM } from './runnerViews';
 
 const CLOSE_GRACE_MS = 10 * 60_000; // §6.9: closing updates are accepted 10 minutes after a claim ends
@@ -110,7 +110,7 @@ export class RunnerApi {
     if (this.setting('credentials_marker') !== marker) this.mirrorCredentials(policy, hashes, marker, now);
     const row = this.rows<{ id: string; hostname: string; allowed_capabilities: string; revoked_at: number | null; kind: string; created_by: string | null }>(
       'SELECT id, hostname, allowed_capabilities, revoked_at, kind, created_by FROM credentials WHERE id = ?', id)[0];
-    if (!row || row.revoked_at != null) throw new BatonError('forbidden', 'this credential is not registered or is revoked');
+    if (!row || row.revoked_at != null || !this.credentialInForce(id)) throw new BatonError('forbidden', 'this credential is not registered or is revoked or expired');
     // R-BTN-58: a key an owner or administrator granted may declare what its grants together give
     // it — expanded capabilities, `human-operator` only from an administrator's grant.
     if (isGrantedKey(row.created_by)) {
@@ -206,7 +206,29 @@ export class RunnerApi {
   /** The public key a fingerprint names, if it is registered and not revoked. */
   publicKey(fingerprint: string): string | null {
     return this.rows<{ public_key: string }>(
-      'SELECT public_key FROM credentials WHERE id = ? AND public_key IS NOT NULL AND revoked_at IS NULL', fingerprint)[0]?.public_key ?? null;
+      `SELECT public_key FROM credentials WHERE id = ? AND revoked_at IS NULL
+       AND (expires_at IS NULL OR expires_at > ?) AND (last_used_at IS NULL OR last_used_at > ?)`,
+      fingerprint, this.c.now(), this.c.now() - 7 * DAY_MS)[0]?.public_key ?? null;
+  }
+
+  private credentialInForce(id: string): boolean {
+    const now = this.c.now();
+    return !!this.rows(`SELECT 1 FROM credentials WHERE id = ? AND revoked_at IS NULL
+      AND (expires_at IS NULL OR expires_at > ?) AND (last_used_at IS NULL OR last_used_at > ?)`, id, now, now - 7 * DAY_MS).length;
+  }
+
+  /** Authenticated calls renew the idle window, never the absolute one. An API runner's
+   *  session can span repositories, so refuse the whole session if any live grant forbids it. */
+  useCredential(id: string): void {
+    const now = this.c.now();
+    if (id.startsWith('bak_') && this.rows(`SELECT 1 FROM runner_grants g JOIN repositories r ON r.id = g.repository_id
+      WHERE g.credential_id = ? AND g.revoked_at IS NULL AND r.retired_at IS NULL AND r.api_keys = 0`, id).length) {
+      throw new BatonError('forbidden', 'a repository granted to this runner does not allow API keys');
+    }
+    if (this.rows('SELECT 1 FROM credentials WHERE id = ? AND last_used_at IS NOT NULL', id).length) {
+      nonScheduling(this.c.store, () => this.exec(`UPDATE credentials SET last_used_at = ? WHERE id = ?
+        AND revoked_at IS NULL AND last_used_at > ? AND last_used_at < ? AND expires_at > ?`, now, id, now - 7 * DAY_MS, now, now));
+    }
   }
 
   /** R-BTN-13: a nonce seen for this key within 10 minutes is a replay. Every signed request
