@@ -545,3 +545,78 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   deploys, which stays a stop; (2) an agent's "ask the owner" should end the leg as a raised
   condition that waits for an answer (R-BTN-163), not as a failed attempt; (3) the sync should
   record pushers so `last_written_by` is ever known. *No ticket yet* for any of the three.
+
+## 2026-11-21 08:00 — 31 `attempts-exhausted` holds lifted by a console script
+
+- **Host:** bering (none of its runners ran; the holds were on the board)
+- **Tickets:** the 31 listed in the 06:36 entry
+- **Why it was needed:** the gateway churn (06:36 entry) left 31 tickets held `attempts-exhausted`
+  by a host fault, not by the tickets. The dashboard lifts a hold one ticket page at a time
+  (`ticket.unhold`), with no bulk control.
+- **Resolution:** the supervisor wrote a script the owner pasted into the browser console of a
+  signed-in dashboard session, posting `POST /v1/ui/overrides/baton:<id> {hold: false}` for each
+  of the 31; every one answered and the tickets were ready again (checked through the ticket read).
+- **Autonomous handling:** a bulk control on the dashboard for holds of one reason (the UX rules,
+  `docs/context/ux.mdx`, rule 2); a host fault should not count against tickets at all (B-247);
+  and a batch intervention per condition type (`spec/proposals/intervention-sessions.md`).
+  *No ticket yet* for the bulk control.
+
+## 2026-11-21 12:15 — B-166 closed by hand: delivered on 2026-11-02 outside Baton
+
+- **Host:** bering (runner-1 spent an implement leg on it at ≈09:30)
+- **Tickets:** B-166
+- **Why it was needed:** B-166 was delivered by PRs #158, #159, #163 and #164 on 2026-11-02 by
+  sessions that never claimed it, and its file still said `status: available`. Its implement
+  leg found the work done and stopped without a PR, a failed attempt; the ticket was claimable
+  again. The leg's `delivered` answer (B-257) was not in this repository's pinned course (next
+  entry).
+- **Resolution:** at the owner's word, `baton tickets done B-166 --pr …/164` (commit `ff7d40dc`).
+- **Autonomous handling:** work done outside Baton is detected by the sync and weighed by the
+  course's reconcile leg (R-BTN-203, #313; built by B-311).
+
+## 2026-11-21 12:45 — this repository's `create-pr` course and sync CLI were pinned before B-257
+
+- **Host:** none (the repository's `.baton/` and sync workflow)
+- **Tickets:** none (B-166 above was its symptom)
+- **Why it was needed:** `.baton/baton.json` and `.github/workflows/baton-sync.yml` pinned the
+  course source and the CLI at `835056e0` (2026-11-11), before B-257's `delivered` answer, B-256
+  and the `run-tests` gate for PRs in other repositories (B-292's failure). The leg instructions
+  were older copies of the defaults.
+- **Resolution:** #314 moved both pins to `17ae8cce` and replaced the leg instructions with the
+  current defaults, keeping `BATON_GITHUB_READ_TOKEN` (`repo init`'s template would have dropped
+  it); the owner approved the workflow change.
+- **Autonomous handling:** report a home whose course pin lags the CLI's latest release by more
+  than a set age; `repo init` should not drop a workflow's local lines. *No ticket yet.*
+
+## 2026-11-21 13:58 and 18:35 — bering's executor re-pinned twice (fieldhouse #45, #44)
+
+- **Host:** bering (both runners)
+- **Tickets:** none (the executor bundle)
+- **Why it was needed:** fieldhouse #45 fixed a leg-page crash any tailnet peer could trigger
+  (an absolute-form request target), and #44 gave every leg a token-protected leg page. Each takes
+  effect only after the host's executor checkout moves, its bundle digest is recomputed, and
+  `BATON_EXECUTOR` in `~/factory/runner.env` is re-pinned, with the runners drained (SIGTERM) and
+  restarted. The launcher also requires `baton-cli` at `main`'s tip, so it moved each time.
+- **Resolution:** at the owner's word, both times: drained, `~/factory/fieldhouse` to `0e24da4`
+  then `8dfee9e`, digests `03be1826…` then `5072240b…` checked against a prepared worktree,
+  `runner.env` backed up and re-pinned, runners restarted.
+- **Autonomous handling:** a runbook command that does the drain, re-pin and restart as one step,
+  verifying the digest; *no ticket yet*.
+
+## 2026-11-21 16:56–18:35 — runners idle after a drain; the live check's sandboxes left running
+
+- **Host:** bering
+- **Tickets:** none
+- **Why it was needed:** the runners were drained for the #44 re-pin; the supervisor's watch on
+  the drain expired and runner-1's exit at 16:56 went unnoticed for 1 h 40 min. Then fieldhouse's
+  live leg-page check (`executor-legpage.mjs`) started three 4 GiB sandboxes; E2B placed two (the
+  hugepage pool of 4352 pages held two) and the script exited on the third's error, leaving the two
+  running for up to 4 h 10 min, which would have made the runners' next legs fail placement.
+- **Resolution:** with the owner's leave, the two sandboxes (`B-CHECK`, `r_PAGE1`/`r_PAGE2`) were
+  killed through the E2B SDK with the host's `E2B_LEG_SECRETS`; the runners were re-pinned and
+  restarted at 18:35. The owner raised the hugepage pool to 7168 (sysctl and Embed's `.env`;
+  fieldhouse #46).
+- **Autonomous handling:** the live check always cleans up and runs at most two sandboxes by
+  default (fieldhouse #47); a supervisor's watch must last until the runners are back (lessons);
+  an idle runner fleet with ready work should raise a condition (intervention-sessions proposal,
+  "runner-starved"). *No ticket yet* for the last.
