@@ -25,6 +25,12 @@ ends on anything else loses the round. Baton writes the verdict line on the PR f
 
 ## The round
 
+Read `AGENTS.md`, `CLAUDE.md`, and the cited scenarios. Include the round record in your PR
+review: say which head was reviewed, which checks ran, and what each finding requires. Post a
+record for every verdict, including an approval with should-fix findings or no findings. The
+forge conversation is the round's source of truth; `fix` or the person who closes the ticket
+archives it at `docs/review/<ticket>-round-<n>.mdx`. Do not push the reviewed head.
+
 - **Which model reviews is the repository's choice** (§6.10, R-BTN-131). Your command's own
   `--model` is the one the stub runs; Baton delivers no advice about a model, a key or a route,
   and no `$BATON_ADVICE` file exists. A repository that picks a reviewer at run time writes a

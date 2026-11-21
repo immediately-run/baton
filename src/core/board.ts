@@ -786,7 +786,7 @@ export function rowFor(it: StateItem, rankOf: Map<string, number>): TicketRow {
   const tags = it.tags ?? [];
   const names = it.requires ?? null;
   const clause = names == null ? 'absent' : names.every((n) => n === 'none') ? 'none' : 'listed';
-  const path = `content/roadmap/${it.id}.mdx`;
+  const path = `content/roadmap/${it.id}.mdx`; // dependency-history: legacy ticket URL, not an input
   return {
     id: it.id,
     path,

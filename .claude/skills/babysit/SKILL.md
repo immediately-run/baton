@@ -21,7 +21,7 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   |---|---|
   | `spec/`, `docs/`, `tickets/` | `npm run check:spec`, `npm run check:wiki`, `npm run check:tickets`; for `spec/`, `npm run spec:impact` (below) |
   | `src/`, `cli/`, `scripts/` | `npm run typecheck`, and `npm test` (or `npm run test:no-quint` without quint) |
-  | `src/shared/` | never by hand: change it in docs, then `npm run vendor` |
+  | `src/shared/` | edit the Baton-owned sources here; run `npm run typecheck` and `npm test`. Consumers update their pins separately. |
   | `src/migrations/` | only a new numbered file, its number from `node cli/baton.mjs tickets next migration` (below); never edit an old one |
 
 - **Local failures that are not yours**: a cloud container without `ssh-keygen` or `ssh-agent`

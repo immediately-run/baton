@@ -5,9 +5,9 @@ dashboard at `https://baton.immediately.run` — on a Cloudflare Worker and one 
 Durable Object.
 
 The design is `BATON_SPEC`: [`spec/BATON_SPEC/`](spec/BATON_SPEC/), one file per section, indexed
-by [`spec/BATON_SPEC.md`](spec/BATON_SPEC.md) (moved here from the `immediately-run/docs`
-repository in R3-1252; split in B-179); the work is the tickets in [`tickets/`](tickets/). Where
-an item says `infra/baton/<path>`, it means `<path>` in this repository (BATON_SPEC §3).
+by [`spec/BATON_SPEC.md`](spec/BATON_SPEC.md); the work is the tickets in [`tickets/`](tickets/).
+See [AGENTS.md](AGENTS.md) to work a ticket and [the deployment guide](docs/DEPLOY.md) to run
+Baton on Cloudflare. No other checkout is needed.
 
 How Baton differs from a durable-execution engine such as Temporal, and where each fits:
 [`docs/compared-to-temporal.mdx`](docs/compared-to-temporal.mdx).
@@ -97,7 +97,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/dashboard/` | The dashboard (BATON-UI-V2), in React 19 and TypeScript with no other runtime dependency: a walk down the entity tree — sign in, pick a repository, then one entity a screen. `app/` is the frame, the router, the sign-in and the controls drawn from the registry; `screens/` one folder per entity (`root`, `board`, `tickets`, `goals`, `courses`, `conditions`, `runners`, `credentials`, `governance`, `attestations`, `sync`, `tenant`), each registered in `screens/index.ts` under its id in `src/core/screens.ts` and kept to `screens/README.md`'s contract; `lib/` the shared pieces (`Text` and `View`, the polling store, the link rule). Every screen draws its entity's reads (`src/core/reads/`) and the registry entries `ui.view` places on it — never the whole state. Built by `npm run build:ui` (esbuild) into `src/dashboard/dist/` (gitignored): one bundle served as text by both hosts (R-BTN-55), never Workers assets |
 | `test/ui/` | The dashboard's tests (vitest project `ui`, jsdom): each screen over a mocked `fetch`, the source gate (no markup-parsing API under `src/dashboard/**`, §12.3), hostile values through the real screens (S-BTN-76) and a screen drawing only its caller's actions (S-BTN-307) |
 | `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list` (`decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
-| `src/shared/` | **Vendored** from docs `scripts/lib/` — never edit here (R-BTN-37); `batonSync.mjs` is the board sync's own decision code, which S-BTN-13 drives. Except two of Baton's own, which every part imports: `schema.mjs`, the one validator of leg outputs and readings (R-BTN-108: the subset, the linear-time pattern engine, the refinement check), and `std.mjs`, the `std:` library (R-BTN-110) |
+| `src/shared/` | Baton's source modules (R-BTN-37), including `batonSync.mjs` (driven by S-BTN-13), `schema.mjs` (R-BTN-108), and `std.mjs` (R-BTN-110) |
 | `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
 | `test/integration/trace.ts` | R3-1244: every scenario's run on the local host as a trace — one step per request or alarm tick, with the state projection the formal model has — written to `test/.traces/` |
 | `test/model/replay.test.ts` | R3-1244: traces drawn from `model/replay.qnt` drive the core, compared with the model's state at every step |
@@ -160,8 +160,7 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   `baton tickets --help`, and the generated `tickets/HOW-TICKETS-WORK.md`), until Baton claims
   them (R3-1266). Every commit the commands push carries the provenance trailers `TICKET_TRAILERS`
   holds, appended after a blank line (B-16) — the handoff's commit rule: the agent-provenance
-  trailers, then `Claude-Session` and `Co-Authored-By`, taken whole as docs' `claim.sh` takes
-  `CLAIM_TRAILERS` and baton computes none of its own — and with `TICKET_REQUIRE_TRAILERS=1`, a
+  trailers, then `Claude-Session` and `Co-Authored-By`, taken whole; Baton computes none of its own — and with `TICKET_REQUIRE_TRAILERS=1`, a
   command without trailers refuses rather than push a commit that cannot be attributed. `claim`
   asks Baton first (B-129): with the session's key (`-i KEY`, else
   `BATON_KEY_FILE`) it reads the ticket's position from Baton's board and history, continues a
@@ -197,12 +196,9 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   repository command, not an API call: the push triggers the sync, the board places the ticket, and
   the next claim starts the course. The course's file must say `starts_from: request`.
   `docs/standard-courses.mdx` has the pattern.
-- `npm run vendor` — re-copy the files `src/shared/manifest.json` lists (`baton.mjs`, `vocabulary.mjs`,
-  `sessionUsage.mjs`, `batonSync.mjs`, `ticketPr.mjs`) from a sibling `../docs`
-  checkout (or `DOCS_DIR`) and rewrite `src/shared/manifest.json`. Do this in a PR here after
-  docs changes any of them.
-- `npm run fixtures` — regenerate `test/fixtures/boards.json` with the real docs
-  `factory-state` code.
+- `npm run check:standalone` — check active source and guidance for consumer-checkout
+  references. Use a `dependency-history:` HTML comment for a historical note; links to this
+  repository’s own `docs/` are allowed. CI runs this through `check:spec`.
 
 ## The wikis
 
@@ -333,8 +329,7 @@ A ticket rests at a **station** of its course file and a **leg** takes it to the
 §2e). Each repository's sync places its tickets (`stations` in the board post, §7.1): the station,
 the path of legs run so far, the queued leg, each next leg `ready` or `waiting`, and the tags
 barred from each leg; Baton keeps that as a cache (`src/core/stations.ts`) and never computes a
-station. docs' interim post, until R3-1233, places every ticket at its course's start with the
-start leg ready when factory-state calls it ready.
+station.
 
 A claim is at a station and runs at most one leg. `POST /v1/runner/claims/{id}/advance
 {reached?, leg, evidence?, bars?}` finishes the running leg at `reached` and starts `leg`, on the

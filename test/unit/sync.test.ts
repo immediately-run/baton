@@ -122,19 +122,6 @@ describe('POST /v1/sync/board', () => {
     expect((await syncCall('/v1/sync/board', payload(board.shas.B, A, board.states.B, retired))).status).toBe(200);
     expect(await logged()).toHaveLength(3);
   });
-
-  it.skipIf(!inject('liveBoard'))("accepts what the docs sync builds for today's board, reference data included", async () => {
-    // buildPayload(origin/main) from the sibling docs checkout: the real producer's output
-    // through the real validator (R3-386's annotated repos entry was refused before repoName).
-    const live = inject('liveBoard') as { state: { items: unknown[] }; ready: string[]; providers: { accounts: unknown[] }; reviewers: object };
-    const res = await syncCall('/v1/sync/board', payload('f'.repeat(40), null, live));
-    expect(res.status).toBe(200);
-    expect(await rows('SELECT count(*) AS n FROM tickets')).toEqual([{ n: live.state.items.length }]);
-    // B-142: the providers block the sync still posts is accepted and ignored — no table exists.
-    expect(live.providers.accounts.length).toBeGreaterThan(0);
-    expect(await rows(`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'model_providers'`)).toEqual([{ n: 0 }]);
-    expect(await rows('SELECT count(*) AS n FROM reviewer_agents')).toEqual([{ n: Object.keys(live.reviewers).length }]);
-  });
 });
 
 describe('the course registry on a board post (R-BTN-48, R-BTN-69)', () => {

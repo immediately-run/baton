@@ -39,12 +39,13 @@ process for development and CI. Nothing crosses a tenant.
 - **Code.** Schema migrations are numbered and append-only; the object refuses to serve until
   all are applied. There is no staging instance: a home repository binds to one Baton
   (R-BTN-56).
-- **R-BTN-37 (shared modules are vendored by hash).** The Worker imports byte-identical copies
-  of the pure modules it shares with another repository from `src/shared/`, listed in
-  `src/shared/manifest.json` with the commit they came from and each file's SHA-256. The suite
-  checks every copy against the manifest and fails on drift. Code with course meaning (`locate`,
-  ranking, activity matchers) is never vendored: the sync posts its results, and core compares
-  strings and integers only.
+- **R-BTN-37 (shared modules are vendored by hash).** Baton maintains `baton.mjs`, `vocabulary.mjs`,
+  `sessionUsage.mjs`, `batonSync.mjs` and `ticketPr.mjs` as sources under `src/shared/`.
+  Consumers use byte-identical copies pinned to a Baton commit and check their hashes, or
+  consume the modules from a pinned Baton CLI release that exposes them. Baton builds and
+  tests without a consumer checkout. Code with course meaning (`locate`, ranking, activity
+  matchers) stays with its course: the sync posts its results, and core compares strings and
+  integers only.
 - **R-BTN-32 (one clock, with a production-inert test seam).** Every component reads time
   through one function — `batonNow()` in the client library, the core through its injected
   clock (`this.now`, set in tests by `setClock`) — never `Date.now()` directly; in production
