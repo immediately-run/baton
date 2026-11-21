@@ -1,5 +1,5 @@
 // R-BTN-117 / S-BTN-69: repository-scoped runner enrolment. No secret enters SQL.
-import { equalBytes, parseSshKey } from './auth';
+import { equalBytes, parseApiKeyLine, parseSshKey } from './auth';
 import { logEvent, randomHex } from './db';
 import { BatonError } from './http';
 import type { Store } from './ports';
@@ -62,9 +62,10 @@ export class RegistrationTokens {
     const { name, publicKey } = registrationBody(raw);
     const hash = await sha256Hex(token);
     const apiKey = publicKey == null ? `bak_${randomHex(8)}_${randomHex(32)}` : null;
-    const ssh = publicKey == null ? null : await parseSshKey(publicKey);
-    const id = ssh?.fingerprint ?? apiKey!.slice(0, 20);
-    const line = ssh ? publicKey!.trim().split(/\s+/).slice(0, 2).join(' ') : `${id} sha256:${await sha256Hex(apiKey!)}`;
+    const api = publicKey == null ? null : parseApiKeyLine(publicKey);
+    const ssh = publicKey == null || api ? null : await parseSshKey(publicKey);
+    const id = api?.fingerprint ?? ssh?.fingerprint ?? apiKey!.slice(0, 20);
+    const line = api?.line ?? (ssh ? publicKey!.trim().split(/\s+/).slice(0, 2).join(' ') : `${id} sha256:${await sha256Hex(apiKey!)}`);
     return this.store.transaction(() => {
       writable();
       const now = this.now();
@@ -74,7 +75,8 @@ export class RegistrationTokens {
       if (!equalBytes(bytes.encode(hash), bytes.encode(t?.secret_hash ?? '0'.repeat(64))) || !t || t.revoked_at != null || t.expires_at <= now) {
         throw new BatonError('unauthenticated', 'unknown, expired or revoked registration token');
       }
-      if (apiKey && !t.api_keys) throw new BatonError('forbidden', 'this repository does not allow API-key runners');
+      if (t.max_tier != null && t.max_tier < 0) throw new BatonError('forbidden', 'the registration token tier was removed');
+      if ((api || apiKey) && !t.api_keys) throw new BatonError('forbidden', 'this repository does not allow API-key runners');
       const held = this.store.exec(`SELECT id, registration_token_id FROM credentials WHERE hostname = ? AND kind IN ('runner', 'token')
         AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) AND (last_used_at IS NULL OR last_used_at > ?)`, name, now, now - 7 * DAY_MS).toArray();
       const rekey = current != null && held.length === 1 && held[0].id === current && held[0].registration_token_id === tokenId;

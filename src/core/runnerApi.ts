@@ -478,7 +478,13 @@ export class RunnerApi {
 
     const fresh = this.rows<{ incarnation: number; lease_timeout_ms: number }>('SELECT incarnation, lease_timeout_ms FROM runners WHERE id = ?', w.id)[0];
     // R-BTN-19: only a heartbeat with the secret (never the hash path) clears a fence.
-    if (secretSeen) for (const f of hb.fenced) this.c.fenced?.(w.id, fresh.incarnation, f.claim_id);
+    if (secretSeen && this.c.fenced) for (const f of hb.fenced) {
+      if (cred.id.startsWith('bak_')) {
+        const claim = this.rows<{ ticket_id: string }>('SELECT ticket_id FROM claims WHERE id = ? AND runner_id = ?', f.claim_id, w.id)[0];
+        if (!claim || !runnerKeyAllowed(this.c.store, cred.id, repositoryOf(claim.ticket_id))) continue;
+      }
+      this.c.fenced(w.id, fresh.incarnation, f.claim_id);
+    }
     const claims = this.activeClaims(w.id).filter((claim) => runnerKeyAllowed(this.c.store, cred.id, repositoryOf(claim.ticket_id)));
     const mine = new Map(claims.map((c) => [c.id, c]));
     // R-BTN-113 (B-234, B-4): the running leg's session link, stored on its `claim_legs` row (latest

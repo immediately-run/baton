@@ -97,6 +97,39 @@ describe('S-BTN-69 registration and API keys', () => {
     expect(rotated.json.grant.max_tier).toBe(0);
   });
 
+  it('cannot redeem or rotate a token after its named ceiling is removed', async () => {
+    const { json: { id, token } } = await mint({ uses: 2, max_tier: 'judgement' });
+    const initial = await register(token, { name: 'api', api_key: true });
+    expect(initial.status).toBe(200);
+    expect((await apiKeyCall(admin.key, '/v1/admin/repositories', { id: 'ops', tiers: ['critical'] })).status).toBe(200);
+    expect((await register(token, { name: 'another', api_key: true })).status).toBe(403);
+    expect((await register(token, { name: 'api', api_key: true }, initial.json.api_key)).status).toBe(403);
+    expect((await apiKeyCall(initial.json.api_key, '/v1/runner/tickets/ops:B-1/holder')).status).toBe(403);
+    expect((await apiKeyCall(admin.key, '/v1/admin/repositories', { id: 'ops', tiers: ['judgement', 'critical'] })).status).toBe(200);
+    expect((await register(token, { name: 'another', api_key: true })).status).toBe(403);
+    expect(await withCore((c) => c.store.exec('SELECT uses_left FROM registration_tokens WHERE id = ?', id).toArray()[0].uses_left)).toBe(1);
+    expect((await apiKeyCall(owner.key, `${base}/tokens/${id}/revoke`, { confirm: true })).status).toBe(200);
+    expect((await apiKeyCall(initial.json.api_key, '/v1/runner/tickets/ops:B-1/holder')).status).toBe(401);
+  });
+
+  it('installs a prepared API public line without returning or storing the secret', async () => {
+    const { json: { token } } = await mint();
+    const old = await register(token, { name: 'api', api_key: true });
+    const prepared = await makeApiKey();
+    const check = '/v1/runner/tickets/ops:B-1/holder';
+    expect((await apiKeyCall(owner.key, `${base}/settings`, { api_keys: false }, 'PUT')).status).toBe(200);
+    expect((await register(token, { name: 'api', public_key: prepared.line }, old.json.api_key)).status).toBe(403);
+    expect((await apiKeyCall(owner.key, `${base}/settings`, { api_keys: true }, 'PUT')).status).toBe(200);
+    expect((await apiKeyCall(old.json.api_key, check)).status).toBe(200);
+    const rotated = await register(token, { name: 'api', public_key: prepared.line }, old.json.api_key);
+    expect(rotated.status).toBe(200);
+    expect(rotated.json.credential_id).toBe(prepared.key.slice(0, 20));
+    expect(rotated.json).not.toHaveProperty('api_key');
+    expect(await withCore((c) => c.store.exec('SELECT public_key FROM credentials WHERE id = ?', rotated.json.credential_id).toArray()[0].public_key)).toBe(prepared.line);
+    expect((await apiKeyCall(prepared.key, check)).status).toBe(200);
+    expect((await apiKeyCall(old.json.api_key, check)).status).toBe(401);
+  });
+
   it('refuses API-key access only on the repository that disabled it', async () => {
     const runner = await makeApiKey();
     for (const repo of ['ops', 'other']) {
@@ -112,6 +145,38 @@ describe('S-BTN-69 registration and API keys', () => {
         courses: [{ repository: repo, course: 'roadmap-pr', version: 3 }] });
       expect((await apiKeyCall(runner.key, '/v1/runner/heartbeat', beat)).status).toBe(status);
     }
+  });
+
+  it('does not acknowledge a fence on a disabled repository from an allowed repository heartbeat', async () => {
+    expect((await apiKeyCall(admin.key, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.line] })).status).toBe(200);
+    await syncCall('/v1/sync/board', payload('f'.repeat(40), null, board.states.A));
+    await cutover();
+    const runner = await makeApiKey();
+    for (const repo of ['docs', 'other']) {
+      expect((await apiKeyCall(owner.key, `/v1/owner/${repo}/grants`, {
+        hostname: 'shared-runner', public_key: runner.line, capabilities: ['agent-venue'],
+      })).status).toBe(200);
+    }
+    const secret = 'shared-secret';
+    const headers = { Authorization: `Bearer ${runner.key}`, 'X-Runner-Secret': secret, 'Content-Type': 'application/json' };
+    const post = (path: string, body: unknown) => hostCall(new Request(ORIGIN + path, { method: 'POST', headers, body: JSON.stringify(body) }));
+    const beat = hbBody('vm-a', { hostname: 'shared-runner', secret_hash: await sha256(secret) });
+    expect((await post('/v1/runner/heartbeat', beat)).status).toBe(200);
+    const claim = await post('/v1/runner/claim', { request_id: 'shared-key-1' });
+    const { claim_id, ticket_id } = await claim.json() as { claim_id: number; ticket_id: string };
+    expect(ticket_id).toMatch(/^docs:/);
+    await withCore((c) => c.claims.forceReap('admin:test', claim_id, { confirm: true }));
+    const pending = () => withCore((c) => c.store.exec('SELECT fence_pending FROM claims WHERE id = ?', claim_id).toArray()[0].fence_pending);
+    expect(await pending()).toBe(1);
+    const allowKeys = (allow: boolean) => apiKeyCall(owner.key, '/v1/owner/docs/settings', { api_keys: allow }, 'PUT');
+    expect((await allowKeys(false)).status).toBe(200);
+    const ack = { ...beat, courses: [{ repository: 'other', course: 'roadmap-pr', version: 3 }],
+      fenced: [{ claim_id, terminated: true }] };
+    expect((await post('/v1/runner/heartbeat', ack)).status).toBe(200);
+    expect(await pending()).toBe(1);
+    expect((await allowKeys(true)).status).toBe(200);
+    expect((await post('/v1/runner/heartbeat', ack)).status).toBe(200);
+    expect(await pending()).toBe(0);
   });
 
   it('honors token and key lifetimes and rejects API runners at the next call', async () => {

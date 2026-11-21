@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1111
 tier: critical
-description: "Owners mint scoped, expiring, revocable registration tokens for runners; a session registers an SSH key or an API key with one; the owners' `api_keys: false` refuses API-key runners and MCP keys; today's bearer and seed keys become API-key runner credentials with explicit grants, each raised for its owners (BATON_SPEC R-BTN-117, R-BTN-159, R-BTN-146); S-BTN-69, G-BTN-94, G-BTN-144. Requires: none."
+description: "Owners mint scoped, expiring, revocable registration tokens for runners; a session registers an SSH key or an API key with one; the owners' `api_keys: false` refuses API-key runners for their repository; today's bearer and seed keys become API-key runner credentials with explicit grants, each raised for its owners (BATON_SPEC R-BTN-117, R-BTN-159, R-BTN-146); S-BTN-69, G-BTN-94, G-BTN-144. Requires: none."
 topics:
   - baton
 owns: {}
@@ -49,10 +49,12 @@ Registration tokens let the owner scope what such a session may become; R-BTN-15
    use. Each registration is an `admin` event; more than 10 by one token in 24 hours raises
    `baton.token-burst`. The credential lasts until the token's `grant_ttl` or 7 days without an
    authenticated call; revoking the token revokes every credential it registered.
-3. **API-key runners.** Bearers work on the push and stream upgrades as on every other
-   `/v1/runner/*` route. The repository setting `api_keys: false` (R-BTN-66, default `true`)
-   refuses an API-key runner at its next call, and MCP keys (B-25). An API-key runner credential
-   lives at most 90 days.
+3. **API-key runners.** Bearers work on the implemented runner routes that admit API keys
+   (R-BTN-159). The repository setting `api_keys: false` (R-BTN-66, default `true`) refuses an
+   API-key runner's next call for that repository. An API-key runner credential lives at most
+   90 days. Bearer support for the push upgrade belongs to the proposed
+   [R-BTN-91 doorbell](../spec/proposals/checks-and-executors.md#3-the-push-doorbell); the stream
+   upgrade was retired with R-BTN-118. Refusing MCP keys belongs to B-25, which builds those keys.
 4. **The migration** (history, "Bearer-key migration"): the bearer tokens and `BATON_KEYS` seed
    keys the code accepts become API-key runner credentials, granted on each repository they
    heartbeated or claimed on in the 30 days before, with the capabilities they declared there

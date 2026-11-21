@@ -470,12 +470,18 @@ export class Admin {
           this.exec('UPDATE tickets SET tier_position = ? WHERE id = ?', tierPosition(tiers, t.tier), t.id);
         }
         // A grant's max_tier was a position in the old ladder: kept by name where the new one has it.
-        for (const g of this.rows<{ credential_id: string; max_tier: number | null }>('SELECT credential_id, max_tier FROM runner_grants WHERE repository_id = ? AND max_tier IS NOT NULL', id)) {
-          const name = old[g.max_tier!];
-          this.exec('UPDATE runner_grants SET max_tier = ? WHERE credential_id = ? AND repository_id = ?', name && tiers.includes(name) ? tiers.indexOf(name) : 0, g.credential_id, id);
+        for (const g of this.rows<{ credential_id: string; max_tier: number; granted_by: string }>('SELECT credential_id, max_tier, granted_by FROM runner_grants WHERE repository_id = ? AND max_tier IS NOT NULL', id)) {
+          const position = tiers.indexOf(old[g.max_tier]);
+          if (position < 0 && g.granted_by.startsWith('token:')) {
+            // The token never authorized a different tier. End this grant rather than widening it.
+            this.exec('UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), g.credential_id, id);
+          } else {
+            this.exec('UPDATE runner_grants SET max_tier = ? WHERE credential_id = ? AND repository_id = ?', Math.max(0, position), g.credential_id, id);
+          }
         }
         for (const token of this.rows<{ id: string; max_tier: number }>('SELECT id, max_tier FROM registration_tokens WHERE repository_id = ? AND max_tier IS NOT NULL AND revoked_at IS NULL', id)) {
-          this.exec('UPDATE registration_tokens SET max_tier = ? WHERE id = ?', Math.max(0, tiers.indexOf(old[token.max_tier])), token.id);
+          // -1 permanently disables registration, without disabling explicit token revocation.
+          this.exec('UPDATE registration_tokens SET max_tier = ? WHERE id = ?', tiers.indexOf(old[token.max_tier]), token.id);
         }
       }
       for (const fp of remove) this.exec('UPDATE sync_keys SET revoked_at = ? WHERE fingerprint = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fp, id);

@@ -3,6 +3,7 @@
 // file by `ssh-keygen -Y sign` that Baton's verifier accepts. Node only: it runs ssh-keygen.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import * as http from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,31 +17,57 @@ import { call as hostCall } from '#host';
 const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwner';
 const key = (p: string) => p;
 
-it('S-BTN-69: reserves private registration output before sending and never clobbers it', async () => {
+it('S-BTN-69: durably prepares private registration output before sending and never clobbers it', async () => {
   const root = mkdtempSync(join(tmpdir(), 'baton-register-cli-'));
   const out = join(root, 'key');
   let requests = 0;
   let reserved = 0;
-  const secret = `bak_${'1'.repeat(16)}_${'2'.repeat(64)}`;
-  const server = http.createServer((_req, res) => {
+  let prepared = '';
+  let body = '';
+  const server = http.createServer(async (req, res) => {
     requests++;
     reserved = statSync(out).mode & 0o777;
-    res.end(JSON.stringify({ credential_id: secret.slice(0, 20), api_key: secret }));
+    prepared = readFileSync(out, 'utf8');
+    for await (const chunk of req) body += chunk;
+    res.end(JSON.stringify({ credential_id: prepared.slice(0, 20) }));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const register = (file: string) => main(['runner', 'register', '--key', 'api', '--name', 'runner', '--url', url,
-    '--token', `brt_${'a'.repeat(16)}_${'b'.repeat(64)}`, '--out', file]);
+  const args = (file: string) => ['runner', 'register', '--key', 'api', '--name', 'runner', '--url', url,
+    '--token', `brt_${'a'.repeat(16)}_${'b'.repeat(64)}`, '--out', file];
+  const register = (file: string) => main(args(file));
   try {
     await expect(register(join(root, 'missing', 'key'))).rejects.toThrow('ENOENT');
     expect(requests).toBe(0);
+    const inject = `import fs from 'node:fs'; import {syncBuiltinESMExports} from 'node:module';
+      const write = fs.writeFileSync;
+      fs.writeFileSync = (fd, data, ...rest) => {
+        if (typeof fd === 'number' && typeof data === 'string' && data.startsWith('bak_')) throw new Error('ENOSPC: injected key write failure');
+        return write(fd, data, ...rest);
+      };
+      syncBuiltinESMExports();`;
+    const current = join(root, 'current');
+    const currentKey = `bak_${'1'.repeat(16)}_${'2'.repeat(64)}`;
+    writeFileSync(current, currentKey, { mode: 0o600 });
+    const child = spawn(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(inject)}`,
+      'cli/baton.mjs', ...args(out), '--identity', current], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+    expect(stderr).toContain('ENOSPC: injected key write failure');
+    expect(code).toBe(2);
+    expect(requests).toBe(0);
+    expect(() => statSync(out)).toThrow('ENOENT');
+    expect(readFileSync(current, 'utf8')).toBe(currentKey);
     expect(await register(out)).toBe(0);
     expect(requests).toBe(1);
     expect(reserved).toBe(0o600);
-    expect(readFileSync(out, 'utf8')).toBe(secret);
+    expect(prepared).toMatch(/^bak_[0-9a-f]{16}_[0-9a-f]{64}$/);
+    expect(JSON.parse(body)).toEqual({ name: 'runner', public_key: `${prepared.slice(0, 20)} sha256:${createHash('sha256').update(prepared).digest('hex')}` });
+    expect(readFileSync(out, 'utf8')).toBe(prepared);
     await expect(register(out)).rejects.toThrow('EEXIST');
     expect(requests).toBe(1);
-    expect(readFileSync(out, 'utf8')).toBe(secret);
+    expect(readFileSync(out, 'utf8')).toBe(prepared);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(root, { recursive: true, force: true });
