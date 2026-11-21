@@ -234,7 +234,7 @@ describe('the home in force: --home, then BATON_HOME, then default (S-BTN-225\'s
     writeHomesFile({ default: 'fieldhouse', ...homesOf() });
     expect((await mainCapturing(['ticket', 'history', 'B-5', '-i', key])).urls).toEqual([`${URLS.fieldhouse}/v1/repositories/fieldhouse/tickets/B-5/history`]);
     expect((await mainCapturing(['ticket', 'show', 'B-5', '--home', 'docs', '-i', key])).urls).toEqual([`${URLS.docs}/v1/repositories/docs/tickets/B-5`]);
-    expect((await mainCapturing(['blocked', 'B-7', '-i', key])).urls).toEqual([`${URLS.fieldhouse}/v1/repositories/fieldhouse/tickets/B-7/blocks`]);
+    expect((await mainCapturing(['ticket', 'blocked', 'B-7', '-i', key])).urls).toEqual([`${URLS.fieldhouse}/v1/repositories/fieldhouse/tickets/B-7/blocks`]);
     // plan() pure, as every command's request is: the repository the home names, in the body too.
     expect(plan('owner', ['grants'], undefined, undefined, { repository: 'fieldhouse', names: [] }).path).toBe('/v1/owner/fieldhouse/grants');
     expect(plan('owner', ['revoke', 'SHA256:abc'], undefined, undefined, { repository: 'fieldhouse', names: [] }).path).toBe('/v1/owner/fieldhouse/grants/SHA256%3Aabc/revoke');
@@ -346,7 +346,7 @@ describe('resolveHomes and runnerHome: the pure halves', () => {
     writeHomesFile({ homes: { relay: { origin: URLS.baton, repository: 'baton', checkout: '/w/relay' }, bare: { origin: URLS.baton, repository: 'baton' } } });
     expect(runnerHome('/a/checkout', env)).toBe('/a/checkout');
     expect(runnerHome('relay', env)).toBe('/w/relay');
-    expect(() => runnerHome('bare', env)).toThrow('the home bare names no checkout — baton run works a checkout');
+    expect(() => runnerHome('bare', env)).toThrow('the home bare names no checkout — baton runner start works a checkout');
     expect(() => runnerHome('nope', env)).toThrow('--home names no home nope — homes: relay, bare (baton home list, B-121)');
     expect(() => runnerHome('nope', { XDG_CONFIG_HOME: join(dir, 'empty') })).toThrow('and no homes.json is configured');
   });

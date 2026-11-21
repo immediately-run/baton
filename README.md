@@ -20,7 +20,7 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 npx --yes @immediately-run/baton@0.1.4 run   # a runner (§6.13), with BATON_KEY_FILE set
 ```
 
-From the package, `baton run`, `baton repo init`, `baton decision list` and the
+From the package, `baton runner start`, `baton repo init`, `baton decision list` and the
 `baton admin|owner …` API client work. Init names the commit the package was built from
 (`dist/build.json`) as its courses' source and its workflow's pin, and copies the leg stubs and
 instructions `build:cli` prebuilt into `dist/defaults/`, so it needs no checkout and no esbuild.
@@ -36,7 +36,7 @@ and read the transition's `IR_BATON_*` credential names). In a checkout, `node c
 remains the development path — the repository commands (`tickets`, `repo`, `test-course`,
 `request`) and the reads run from it, and the management commands with `--dev`.
 
-`baton run --lock` (R-BTN-178) and its tests (`npm test`, `npm run model:pr`) need util-linux
+`baton runner start --lock` (R-BTN-178) and its tests (`npm test`, `npm run model:pr`) need util-linux
 `flock` on `PATH`; macOS has none — `brew install flock` gives one with the same flags.
 
 ## Layout
@@ -92,11 +92,11 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
 | `src/core/text.ts` | Pure: §10.4's free text as one predicate (`isFreeText`) — a length, no control characters, none of `< > { }` |
 | `src/cloudflare/` | The Cloudflare host: the Worker (`worker.ts`) and the `Baton` Durable Object (`baton.ts`), wiring `ctx.storage`, the alarm and `waitUntil` into the ports |
 | `src/local/` | The local host: `node:sqlite` as the `Store` (`store.ts`), one queue for every request and alarm tick (`queue.ts`), a timer as the alarm (`host.ts`), `node:http` (`server.ts`), the command line (`main.ts`); the course test kit (`testCourse.ts`, R3-1248) |
-| `src/runner/` | `baton run`'s runner loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`), the CLI entry (`main.ts`) and `baton leg replay` (§9.8 R-BTN-84, `replay.ts`) |
+| `src/runner/` | `baton runner start`'s runner loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`), the CLI entry (`main.ts`) and `baton leg replay` (§9.8 R-BTN-84, `replay.ts`) |
 | `src/migrations/` | Numbered schema migrations, applied before the object serves |
 | `src/dashboard/` | The dashboard (BATON-UI-V2), in React 19 and TypeScript with no other runtime dependency: a walk down the entity tree — sign in, pick a repository, then one entity a screen. `app/` is the frame, the router, the sign-in and the controls drawn from the registry; `screens/` one folder per entity (`root`, `board`, `tickets`, `goals`, `courses`, `conditions`, `runners`, `credentials`, `governance`, `attestations`, `sync`, `tenant`), each registered in `screens/index.ts` under its id in `src/core/screens.ts` and kept to `screens/README.md`'s contract; `lib/` the shared pieces (`Text` and `View`, the polling store, the link rule). Every screen draws its entity's reads (`src/core/reads/`) and the registry entries `ui.view` places on it — never the whole state. Built by `npm run build:ui` (esbuild) into `src/dashboard/dist/` (gitignored): one bundle served as text by both hosts (R-BTN-55), never Workers assets |
 | `test/ui/` | The dashboard's tests (vitest project `ui`, jsdom): each screen over a mocked `fetch`, the source gate (no markup-parsing API under `src/dashboard/**`, §12.3), hostile values through the real screens (S-BTN-76) and a screen drawing only its caller's actions (S-BTN-307) |
-| `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list` (`decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
+| `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list` (`decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton course test`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
 | `src/shared/` | **Vendored** from docs `scripts/lib/` — never edit here (R-BTN-37); `batonSync.mjs` is the board sync's own decision code, which S-BTN-13 drives. Except two of Baton's own, which every part imports: `schema.mjs`, the one validator of leg outputs and readings (R-BTN-108: the subset, the linear-time pattern engine, the refinement check), and `std.mjs`, the `std:` library (R-BTN-110) |
 | `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
 | `test/integration/trace.ts` | R3-1244: every scenario's run on the local host as a trace — one step per request or alarm tick, with the state projection the formal model has — written to `test/.traces/` |
@@ -124,7 +124,9 @@ remains the development path — the repository commands (`tickets`, `repo`, `te
   reached (G-BTN-77). The Cloudflare budgets are read on production's own `capacity` log and
   live figures (B-224), never from a staging run.
 - `npm run start:local -- --db <path> --port <n>` — Baton as a local process (below).
-- `node cli/baton.mjs test-course <repository root> <course> [--base REF|none] [--board FILE]` — the course test kit
+- `baton leg runs <ticket> [<leg>]` lists run records. `baton leg log <ticket> [<leg>] -f` follows archived output with your storage credentials; `baton leg stop <ticket>` requests a release with an owner key.
+- Archival is off until an owner sets `--leg-log-root` on `baton owner settings`. Use an owner-managed `s3://` or `gs://` location (`file:///` only on a local Baton). Storage access and retention are managed outside Baton; the runner writes with its ambient credentials. Use `--leg-log-root none` to turn off new archives.
+- `node cli/baton.mjs course test <repository root> <course> [--base REF|none] [--board FILE]` — the course test kit
   (§2d, R-BTN-64/-65): the working tree's `.baton/` against REF's (default `origin/HEAD`, else
   `origin/main`; none resolving is an error, `--base none` skips the removal rule), run on a local
   Baton — the core accepts the file, the live tickets FILE places keep their paths, a removal raised

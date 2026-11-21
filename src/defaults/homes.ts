@@ -5,7 +5,7 @@
 // nothing, and every request is still signed and checked as without it. What it holds is what
 // a command needs when its argument names no repository: the repository (a positional REPO and
 // a qualified ticket id still override it), the origin (`--url` and `BATON_URL` still override
-// it) and, for `baton run`, the checkout.
+// it) and, for `baton runner start`, the checkout.
 //
 // The home in force is `--home <name|path>`, then `BATON_HOME`, then the file's `default` —
 // never a guess: a home whose origin differs from `--url`/`BATON_URL` refuses, both named
@@ -24,7 +24,7 @@ import { homesPath } from '../../cli/baton.mjs';
 
 /** One home as homes.json holds it (B-121): the origin its repository's Baton serves (a
  *  checkout's `baton_url`, R-BTN-56), the repository id, and — when the operator named one —
- *  the checkout `baton run --home <name>` works. */
+ *  the checkout `baton runner start --home <name>` works. */
 export interface HomeEntry {
   origin: string;
   repository: string;
@@ -181,7 +181,7 @@ export function resolveHomes(opts: { flag?: string; env?: NodeJS.ProcessEnv; exp
   return { inForce, names };
 }
 
-/** `baton run`'s `--home` (B-121): its meaning kept — a checkout the runner works — with a
+/** `baton runner start`'s `--home` (B-121): its meaning kept — a checkout the runner works — with a
  *  name resolving to its home's `checkout`, refused naming the home when the home has none. A
  *  path (a value containing `/` or naming an existing directory) is itself, as R-BTN-131 has
  *  always read it. */
@@ -191,7 +191,7 @@ export function runnerHome(value: string, env: NodeJS.ProcessEnv = process.env, 
   const home = homes?.homes[value];
   if (!home) throw new Error(`--home names no home ${value}${homes ? ` — homes: ${Object.keys(homes.homes).join(', ')}` : ' and no homes.json is configured'} (baton home list, B-121)`);
   if (home.checkout == null) {
-    throw new Error(`the home ${value} names no checkout — baton run works a checkout; baton home add ${value} --repository ${home.repository} --origin ${home.origin} --checkout <path> names one (B-121)`);
+    throw new Error(`the home ${value} names no checkout — baton runner start works a checkout; baton home add ${value} --repository ${home.repository} --origin ${home.origin} --checkout <path> names one (B-121)`);
   }
   return home.checkout;
 }

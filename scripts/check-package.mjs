@@ -40,11 +40,11 @@ try {
   // The runner bundle and its leg wrapper load: `run` reaches its credential check (§6.4) and
   // stops there, so nothing contacts a Baton. The environment is cleared of any real credential.
   const env = { PATH: process.env.PATH, HOME: dir };
-  const run = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['run'], { cwd: app, env, encoding: 'utf8' });
-  if (!/no credential: BATON_KEY_FILE/.test(run.stderr)) fail(`the installed \`baton run\` did not reach its credential check:\n${run.stdout}${run.stderr}`);
+  const run = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['runner', 'start'], { cwd: app, env, encoding: 'utf8' });
+  if (!/no credential: BATON_KEY_FILE/.test(run.stderr)) fail(`the installed \`baton runner start\` did not reach its credential check:\n${run.stdout}${run.stderr}`);
   // B-97: the release dropped the transition's IR_BATON_* spellings — only they set, the same check.
-  const legacy = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['run'], { cwd: app, env: { ...env, IR_BATON_TOKEN: 'legacy' }, encoding: 'utf8' });
-  if (!/no credential: BATON_KEY_FILE/.test(legacy.stderr)) fail(`the installed \`baton run\` still reads the dropped IR_BATON_* spellings:\n${legacy.stdout}${legacy.stderr}`);
+  const legacy = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['runner', 'start'], { cwd: app, env: { ...env, IR_BATON_TOKEN: 'legacy' }, encoding: 'utf8' });
+  if (!/no credential: BATON_KEY_FILE/.test(legacy.stderr)) fail(`the installed \`baton runner start\` still reads the dropped IR_BATON_* spellings:\n${legacy.stdout}${legacy.stderr}`);
   // The API client: an unknown role is refused by the CLI itself, before any request.
   const api = spawnSync(join(app, 'node_modules', '.bin', 'baton'), [], { cwd: app, env, encoding: 'utf8' });
   if (!/baton admin … \| baton owner …/.test(api.stderr)) fail(`the installed \`baton\` did not print its usage:\n${api.stdout}${api.stderr}`);

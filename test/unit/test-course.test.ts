@@ -1,4 +1,4 @@
-// test-course.test.ts — `baton test-course` (BATON_SPEC §2d, R-BTN-64, R-BTN-65; R3-1248): the kit
+// test-course.test.ts — `baton course test` (BATON_SPEC §2d, R-BTN-64, R-BTN-65; R3-1248): the kit
 // over docs' real roadmap-pr course passes, and over each broken variant fails naming its rule —
 // a course file the core refuses, a removal that leaves min_runner_version, leg scripts that do
 // not pair with the legs, and a live ticket the proposed file would move back. Node only: it runs
@@ -27,7 +27,7 @@ const { adjudicate: _a, ...legsWithout } = roadmapPr.legs;
 const { adjudicated: _s, ...stationsWithout } = roadmapPr.stations;
 const WITHOUT_ADJUDICATE = { ...roadmapPr, stations: stationsWithout, legs: { ...legsWithout, merge: { ...legsWithout.merge, from: ['reviewed'] } } };
 
-describe('baton test-course', () => {
+describe('baton course test', () => {
   it('docs’ roadmap-pr passes: the core accepts it, and a ticket runs its shortest route to a confirmed done', async () => {
     expect(shortestRoute(graphOf(roadmapPr))!.map((s) => s.leg)).toEqual(['implement', 'review', 'merge']);
     // The route starts with the start leg, though another leg reaches an end sooner (R-BTN-83).
@@ -70,7 +70,7 @@ describe('baton test-course', () => {
     expect(broken).toEqual([{ rule: 'legs-scripts', message: "legs/fix.mjs does not load: Cannot find package 'some-missing-pkg'" }]);
     const thin = await checkCourse(input({ legScripts: legs.map((l) => (l.name === 'merge' ? { name: 'merge', exports: ['run'] } : l)) }));
     expect(thin).toEqual([expect.objectContaining({ rule: 'legs-scripts', message: 'legs/merge.mjs exports no handoff, close (§6.13: run, handoff and close)' })]);
-    // as `baton run` reads them: named, on a default object, or a default function for run
+    // as `baton runner start` reads them: named, on a default object, or a default function for run
     const f = () => {};
     expect(legExports({ run: f, handoff: f, close: f })).toEqual(all);
     expect(legExports({ default: { run: f, handoff: f, close: f } })).toEqual(all);

@@ -1,4 +1,4 @@
-// runner.ts — `baton run`'s generic runner loop (BATON_SPEC §6.13 R-BTN-72): it heartbeats (it
+// runner.ts — `baton runner start`'s generic runner loop (BATON_SPEC §6.13 R-BTN-72): it heartbeats (it
 // hosts the sidecar of §6.3–6.4), claims, loads the claim's course file and leg scripts from the
 // home checkout at the claim's `snapshot_sha` (R-BTN-34), and runs each leg as a child process
 // that gets `BATON_PARENT` and `BATON_STATE` and an AbortSignal. It knows no course: the
@@ -27,6 +27,8 @@ import { outsideScope, pushesBetween, readRefState, type RefState } from './audi
 import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
+import { LegLog } from './legLog';
+import { logStore } from './logStore';
 import { MIN_SECRET_BYTES, createLegMasker, failureDetail, maskLegOutput, namesASecret, secretValues } from './mask';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { StateFile, leaseLostFrom, type PersistedClaim, type RunnerState } from './state';
@@ -70,7 +72,7 @@ export interface RunnerOptions {
   capabilities?: string[];
   /** B-86: the rule 4 names the legs of the courses it serves require, read from the home checkout
    *  each time it is asked, so a runner whose declaration lacks one says so at startup. Injected by
-   *  `baton run`; absent, no such line. B-103: every served course's legs, not one course's. */
+   *  `baton runner start`; absent, no such line. B-103: every served course's legs, not one course's. */
   legNeeds?: () => Promise<string[]> | string[];
   tierCeiling?: string;
   /** The courses this runner serves and declares (B-103, rule 9): every course its home checkout
@@ -102,7 +104,7 @@ export interface RunnerOptions {
    *  ends or a leg not requiring it starts. Absent, no lock governs anything. */
   locks?: Record<string, string>;
   /** B-253 (R-BTN-72): the runner's own opaque statement, carried on every heartbeat as
-   *  `profile` — `baton run` puts its CLI's pinning under `cli`. Absent (a caller that is not
+   *  `profile` — `baton runner start` puts its CLI's pinning under `cli`. Absent (a caller that is not
    *  the CLI), the heartbeat sends none. */
   profile?: Record<string, unknown>;
   /** B-134: one read of the home checkout's remote refs — the runner's evidence for its leg-end
@@ -110,9 +112,10 @@ export interface RunnerOptions {
    *  that fails skips the audit (logged), never the leg. */
   auditRefs?: (home: string) => RefState | null;
   /** R-BTN-144 class 7 (B-170): the names `runner.json` `mask_env` lists, which are masked
-   *  besides the names that say a secret by their ending. `baton run` reads them before the
+   *  besides the names that say a secret by their ending. `baton runner start` reads them before the
    *  loop; absent (a caller that is not the CLI), none are named. */
   maskEnv?: string[];
+  credentialLiterals?: readonly string[];
   /** B-234 (R-BTN-195, R-BTN-145): how long a released leg gets to take its safe point and exit
    *  by itself before its still-running session is treated as joinable-and-stuck — killed,
    *  stopped, the claim ended with the signal's reason. The default is the stop ladder's own
@@ -414,6 +417,12 @@ export class Runner {
   /** The ends Baton never answered (the network went with the lease), by claim: retried on
    *  every beat. */
   private pendingEnds = new Map<number, Record<string, unknown>>();
+  private readonly logArchives = new Set<Promise<void>>();
+
+  /** S-BTN-98: archive I/O is independent of each claim, but not of graceful CLI exit. */
+  async drainLogArchives(): Promise<void> {
+    while (this.logArchives.size) await Promise.all([...this.logArchives]);
+  }
   /** B-86: the capabilities the beats declare — null until the grant is known; a restart reads
    *  what the last process settled (state.ts's `declared`) rather than asking again. */
   private declared: string[] | null;
@@ -1191,14 +1200,15 @@ export class Runner {
    *  at the call's end; every other call's stderr is the verbose drain, masked of classes 5 and
    *  6 and of the leg's class 7 set — those calls run in the leg's session, with the same
    *  environment its literals came from. */
-  private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number, sink?: () => ReturnType<Runner['legSink']>): Running {
+  private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number, sink?: () => ReturnType<Runner['legSink']>, onOutput?: import('./executor').ExecOptions['onOutput']): Running {
     const leg = sink?.();
-    return this.executor.exec(h, ['node', LEG_PROCESS, call, script], {
+    return this.executor.exec(h, ['node', LEG_PROCESS, call, script, ...(onOutput ? ['--outcome-fd'] : [])], {
+      ...(onOutput ? { onOutput } : {}),
       cwd: this.checkout, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
       // R-BTN-144: what a leg's stderr carries leaves masked — class 5 and class 6 by the shared
       // pattern, the leg's own class 7 set with it while its run streams, and by the drain after.
       // B-108: a drained line is leg activity either way — the beat's liveness line counts it.
-      onStderr: leg ? (l: string) => { this.legLineAt = Date.now(); leg.onStderr(l); } : this.verbose ? (l: string) => { this.legLineAt = Date.now(); this.log(maskLegOutput(`baton: ${call}: ${l}`, this.legSecrets)); } : undefined,
+      onStderr: onOutput ? undefined : leg ? (l: string) => { this.legLineAt = Date.now(); leg.onStderr(l); } : this.verbose ? (l: string) => { this.legLineAt = Date.now(); this.log(maskLegOutput(`baton: ${call}: ${l}`, this.legSecrets)); } : undefined,
     });
   }
 
@@ -2237,6 +2247,7 @@ export class Runner {
         this.log(`baton: ${ticket}'s reattached ${legName} runs on without its lock (R-BTN-178)`);
       }
       let runId: string | null = reattached?.runId ?? null;
+      let logDir: string | undefined;
       if (reattached) {
         this.legSeq = reattached.seq;
         const g = reattached.ctx.snapshot as { path?: { leg: string; reached: string }[]; next?: NextLegs } | undefined;
@@ -2249,6 +2260,7 @@ export class Runner {
         nextLegs = (firstAnswer.next ?? nextLegs) as NextLegs;
         advice = firstAnswer.advice ?? advice;
         // R-BTN-63 (B-185): the run's id, minted by Baton at the advance that started it.
+        logDir = firstAnswer.leg_log?.dir;
         runId = typeof firstAnswer.run_id === 'string' ? firstAnswer.run_id : null;
         // §7.5 R-BTN-90 (B-234): the run's `claim_legs.seq`, likewise — the finishing
         // heartbeat's word when the script returns.
@@ -2332,7 +2344,7 @@ export class Runner {
           this.cur.localOrder = { by: pre.by, ran_at: pre.ran_at };
           this.log(`baton: ${ticket}'s ${legName} ran offline at ${pre.ran_at} under ${pre.by}'s order — its result is reported now, gated as usual (R-BTN-202)`);
         }
-        const outcome = usePre ? { kind: 'ok' as const, result: pre.result } : resuming ? await this.reattachedLeg(course, legName, resuming.handle) : await this.runLeg(course, legName, ctx, scratch);
+        const outcome = usePre ? { kind: 'ok' as const, result: pre.result } : resuming ? await this.reattachedLeg(course, legName, resuming.handle) : await this.runLeg(course, legName, ctx, scratch, logDir);
         resuming = undefined;
         // R-BTN-72 (B-188): the run is over — nothing of it is left for a restart to reattach to.
         if (this.cur.place.handle) {
@@ -2460,6 +2472,7 @@ export class Runner {
         at = answer.station ?? verdict.reached;
         nextLegs = (answer.next ?? nextLegs) as NextLegs;
         advice = answer.advice ?? advice;
+        logDir = answer.leg_log?.dir;
         runId = typeof answer.run_id === 'string' ? answer.run_id : null;
         // §7.5 R-BTN-90 (B-234): the next run's seq, as the first advance's above.
         this.legSeq = typeof answer.seq === 'number' ? answer.seq : null;
@@ -2498,7 +2511,7 @@ export class Runner {
   /** One `advance`, its refusal settled by §6.13: off-graph ends `released:course-changed`; an
    * `entry` refusal (R-BTN-109) ends `released:cannot-finish:contract-output`; every other
    * refusal suspends at the station the claim reached, never releasing. */
-  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number } | { settle: Record<string, unknown> }> {
+  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number; leg_log?: { dir: string } } | { settle: Record<string, unknown> }> {
     // R-BTN-202 (B-248): the advance that finishes a leg run under a local order says who gave
     // it — once; a refused advance's settling end carries it instead (`finish`).
     if (this.cur.localOrder && body.reached) {
@@ -2507,7 +2520,7 @@ export class Runner {
     try {
       const answer = await this.o.api.advance(claimId, body);
       if (body.local_order) this.cur.localOrder = null;
-      return answer as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number };
+      return answer as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number; leg_log?: { dir: string } };
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
       const kind = refusalKind(e.ruleCode);
@@ -2550,7 +2563,7 @@ export class Runner {
     }
   }
 
-  private async runLeg(course: CourseLoad, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'missing' } | { kind: 'lease-lost' }> {
+  private async runLeg(course: CourseLoad, leg: string, ctx: Record<string, unknown>, scratch: string, logDir?: string): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'missing' } | { kind: 'lease-lost' }> {
     const script = course.scripts.get(leg);
     if (script == null) return { kind: 'missing' };
     // R-BTN-202 (B-248): a leg run under a local order while Baton is unreachable has no lease.
@@ -2618,7 +2631,13 @@ export class Runner {
     // `mask_env` names every other environment it reaches: a name the host keeps under no
     // ending (a provider's key in `ANTHROPIC_API_KEY`, say) stays masked when a repository's
     // environment spells it too.
-    const legSecrets = this.legSecrets = secretValues(env, maskEnv);
+    const credentials = [...(course.graph?.legs.values() ?? [])].flatMap((l) => l.requires)
+      .filter((cap) => cap.startsWith('credential:')).map((cap) => cap.slice('credential:'.length));
+    const stateSecret = this.state.get().secret;
+    const legSecrets = this.legSecrets = [...new Set([
+      ...secretValues(env, [...maskEnv, ...credentials, 'AWS_ACCESS_KEY_ID', 'AWS_SESSION_TOKEN']),
+      ...(this.o.credentialLiterals ?? []), ...(stateSecret ? [stateSecret] : []),
+    ].filter((s) => Buffer.byteLength(s) >= MIN_SECRET_BYTES))];
     if (this.verbose) {
       const short = Object.keys(env).filter((n) => (maskEnv.includes(n) || namesASecret(n)) && Buffer.byteLength(env[n], 'utf8') < MIN_SECRET_BYTES);
       if (short.length) this.log(`baton: ${leg}'s ${short.join(', ')} ${short.length === 1 ? 'is' : 'are'} under ${MIN_SECRET_BYTES} bytes, so not masked (R-BTN-144)`);
@@ -2660,7 +2679,24 @@ export class Runner {
     // lost to the leg; the raise check refuses on the channel until the link has landed.
     if (this.legSessionUrl != null) await this.landSessionLink();
     if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} run ${basename(script)} (session ${sessionId}, executor ${this.executor.source})`);
-    const running = this.wrapperCall(handle, 'run', script, [ctx], undefined, () => sink);
+    const runId = ctx.run_id;
+    const claimId = Number((ctx.claim as { id?: number } | undefined)?.id);
+    const archiveEnabled = claimId > 0 && logDir && typeof runId === 'string' && this.executor.source === 'builtin'
+      && course.graph?.legs.get(leg)?.stream !== false;
+    const archive = archiveEnabled ? (() => {
+      let store: ReturnType<typeof logStore> | undefined;
+      return new LegLog(async (name, body) => (await (store ??= logStore(logDir))).create(name, body), legSecrets, async () => {
+        this.log(`baton: ${leg}: leg-log-write-failed (R-BTN-128)`);
+        const at = this.now();
+        // Archive retries can outlive the claim. Baton admits only this terminal diagnostic
+        // for the owner's run after the claim ends, not arbitrary late activities.
+        const leftover = await this.postActivities([{ id: `${runId}:log`, claim_id: claimId, source: 'hook', kind: 'other',
+          label: 'leg-log-write-failed', started_at: at, ended_at: at, outcome: 'failed' }]);
+        if (leftover.length) appendFileSync(this.state.spool, leftover.map((row) => JSON.stringify(row)).join('\n') + '\n');
+      }, (stream, text) => { if (stream === 'stderr' || this.verbose) this.log(text.replace(/\n$/, '')); });
+    })() : null;
+    const running = this.wrapperCall(handle, 'run', script, [archive ? { ...ctx, stream_output: true } : ctx], undefined, () => sink,
+      archive ? (stream, data) => { this.legLineAt = Date.now(); archive.push(stream, data); } : undefined);
     const inflight = this.inflight!;
     inflight.child = { running };
     // The call is over: the stream's held tail may leave with the outcome the wrapper prints last.
@@ -2669,6 +2705,12 @@ export class Runner {
       if (released) return;
       released = true;
       sink.release();
+      if (archive && typeof runId === 'string') {
+        const pending = archive.finish({ claim: claimId, leg, run: Number(ctx.run), run_id: runId })
+          .catch(() => this.log(`baton: ${leg}: could not record leg-log-write-failed activity`));
+        this.logArchives.add(pending);
+        void pending.then(() => this.logArchives.delete(pending));
+      }
     };
     let done = false;
     const exited = running.result.then((r) => {
@@ -2715,6 +2757,7 @@ export class Runner {
       // session; what the agent left in git is its own evidence, checked as any result is.
       await this.executor.end(handle).catch((e) => this.log(`baton: the executor's end failed (${msg(e)})`));
       await this.stopSession('leg-result');
+      if (archive) await exited;
       inflight.child = null;
       release();
       this.log(`baton: ${inflight.ticket}'s ${leg} ended at the result posted on its channel — the session is stopped (R-BTN-195)`);
@@ -2727,6 +2770,7 @@ export class Runner {
       const signal = this.abortSignal()!;
       this.killGroup(inflight.child);
       await this.stopSession(`signal:${signal.signal}`);
+      if (archive) await exited;
       inflight.child = null;
       release();
       return { kind: 'crashed', error: `the leg's session was asked to stop (${signal.reason ?? signal.signal}) and neither exited nor posted its result` };
@@ -2736,8 +2780,10 @@ export class Runner {
       // record covers it (R-BTN-24) — and stop its session.
       this.killGroup(inflight.child);
       inflight.child = null;
-      release();
+      if (!archive) release();
       await this.stopSession('lease-lost');
+      if (archive) await exited;
+      release();
       return { kind: 'lease-lost' };
     }
     // A leg's end is its whole group's end whatever ended it (R-BTN-72, S-BTN-200): the

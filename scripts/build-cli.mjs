@@ -15,6 +15,7 @@ const src = (path) => JSON.stringify(join(ROOT, path));
 
 /** Each on-demand bundler cli/baton.mjs imports, as the module it would have bundled. */
 const PREBUILT = {
+  'baton-log.mjs': `export { logRoles, terminalText, viewLog } from ${src('src/runner/logView.ts')};`,
   'baton-run.mjs': `export { runMain, queueCommand } from ${src('src/runner/main.ts')};
 export { replayMain } from ${src('src/runner/replay.ts')};`,
   'baton-leg.mjs': `export { raiseMain } from ${src('src/runner/leg.ts')};`,
@@ -25,7 +26,8 @@ export { replayMain } from ${src('src/runner/replay.ts')};`,
 export { ticketsMain } from ${src('src/defaults/tickets.ts')};
 export { requestMain } from ${src('src/defaults/request.ts')};
 export { homeMain, resolveHomes } from ${src('src/defaults/homes.ts')};`,
-  'bundle.mjs': `const ENTRIES = { 'src/local/testCourse.ts': () => import(${src('src/local/testCourse.ts')}) };
+  'bundle.mjs': `const ENTRIES = { 'src/local/testCourse.ts': () => import(${src('src/local/testCourse.ts')}),
+    'src/local/main.ts': () => import(${src('src/local/main.ts')}) };
 export async function bundleLocal(entry) {
   const load = ENTRIES[entry];
   if (!load) throw new Error(\`build-cli: \${entry} is not prebuilt — add it to scripts/build-cli.mjs\`);

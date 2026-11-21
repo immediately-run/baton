@@ -1,5 +1,5 @@
 // runner-clipin.test.ts — the CLI's own pinning (B-253, BATON_SPEC §8.3 R-BTN-72): what
-// `baton run` and `baton runner start` print at start and every heartbeat carries as
+// `baton runner start` print at start and every heartbeat carries as
 // `profile.cli`. A working tree on a branch is not a pinned commit — the owner's warning, in
 // the owner's words — while a tag and a detached commit are; a released copy reads the commit
 // its build.json names, unpinned when that build was dirty; a state nothing can read is said

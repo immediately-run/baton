@@ -1,7 +1,7 @@
 // cloud-runner.test.ts — B-115: scripts/cloud-runner.sh turns a Claude Code cloud session into
 // the host of a Baton process-mode runner (BATON_SPEC §8.1's `cloud` host). The preflight's
 // every check exits non-zero naming itself when it fails, and the capabilities the runner is
-// started with are only what the preflight checked (llm-call, create-pr) — never `baton run`'s
+// started with are only what the preflight checked (llm-call, create-pr) — never `baton runner start`'s
 // default declaration, which names agent-venue, a capability a cloud container does not hold
 // unless a venue is up. The start is detached (setsid nohup), leaves its pid and log under
 // ~/.cache/immediately-run/baton/cloud-runner/, scrubs a leg's BATON_* environment from the
@@ -163,7 +163,7 @@ describe('the cloud runner script (B-115)', () => {
     const w = world({
       // A stand-in runner: the preflight's CLI probe (`node <cli> run --help`) answers 0; the
       // launch records argv and environment, then stays alive as the real runner would.
-      node: `[ "$2" = run ] && [ "$3" = --help ] && exit 0
+      node: `[ "$2" = runner ] && [ "$3" = start ] && [ "$4" = --help ] && exit 0
 printf '%s\\n' "$@" >"${args}"
 env | sort >"${envFile}"
 exec sleep 600`,
@@ -187,7 +187,8 @@ exec sleep 600`,
       // Detached: the script has returned, the runner lives on (and dies with the test's kill).
       expect(() => process.kill(pid, 0)).not.toThrow();
       const argv = readFileSync(args, 'utf8');
-      expect(argv).toContain('run');
+      expect(argv).toContain('runner');
+      expect(argv).toContain('start');
       expect(argv).toContain('--harness');
       expect(argv).toContain('claude-code');
       expect(argv).toContain('--home');

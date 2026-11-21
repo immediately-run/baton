@@ -1,6 +1,6 @@
 // bundle.mjs — the local host as one Node module (BATON_SPEC §3a R-BTN-55): esbuild bundles a
 // src/local entry with the schema migrations and the dashboard as text, as wrangler's Text rule
-// does for the Worker. `npm run start:local` and `baton test-course` (R3-1248) both run through it.
+// does for the Worker. `npm run start:local` and `baton course test` (R3-1248) both run through it.
 import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';

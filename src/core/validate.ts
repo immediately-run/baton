@@ -1380,3 +1380,18 @@ export function checkNoticeClaim(v: unknown): number {
   if (!Number.isInteger(b.limit) || (b.limit as number) < 1 || (b.limit as number) > CLAIM_MAX) bad('limit', `must be an integer from 1 to ${CLAIM_MAX}`);
   return b.limit as number;
 }
+
+/** S-BTN-98: an owner names a storage location, never credentials or an HTTP endpoint. */
+export function checkLegLogRoot(value: unknown, local: boolean): string | null {
+  if (value === null) return null;
+  if (typeof value === 'string') {
+    const cloud = /^(?:s3|gs):\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](?:\/(.*))?$/.exec(value);
+    const file = local ? /^file:\/\/\/(.*)$/.exec(value) : null;
+    const path = (cloud ?? file)?.[1]?.replace(/\/$/, '');
+    if ((cloud || file) && (path === undefined || path === '' ||
+      (TRANSCRIPT_PATH.test(path) && !path.split('/').some((s) => !s || s === '..' || s === '.'))) && !/[\r\n]/.test(value)) {
+      return value.replace(/\/$/, '') + (value === 'file:///' ? '/' : '');
+    }
+  }
+  return bad('leg_log_root', `must be null, an s3:// or gs:// bucket with an optional safe prefix${local ? ', or file:/// with a safe absolute path' : ''}`);
+}

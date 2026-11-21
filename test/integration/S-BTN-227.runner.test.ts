@@ -19,14 +19,14 @@ const T0 = Date.parse('2026-11-17T11:00:00Z');
 /** The run's deploy (vitest.config.ts): min above the old client, recommended above min. */
 const MIN = '0.1.4';
 const RECOMMENDED = '0.1.5';
-/** This checkout's package version — what a real `baton run` names, with `+dev`. */
+/** This checkout's package version — what a real `baton runner start` names, with `+dev`. */
 const PACKAGE_VERSION = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 
 let dir: string;
 let n = 0;
 const lines: string[] = [];
 
-/** The runner's client of Baton, as `baton run` wires it — the transport hands the request to
+/** The runner's client of Baton, as `baton runner start` wires it — the transport hands the request to
  *  this test's Baton unchanged, so the `Baton-Client` the runner names is its own. */
 function api(client?: string): BatonApi {
   return new BatonApi({
@@ -50,7 +50,7 @@ afterEach(async () => {
 
 describe('S-BTN-227 the runner half', () => {
   it('every call carries Baton-Client — the checkout\'s own version, +dev from a working tree', async () => {
-    // api() with no `client` is what a real `baton run` sends: baton/<package version>+dev.
+    // api() with no `client` is what a real `baton runner start` sends: baton/<package version>+dev.
     const seen: string[] = [];
     const a = new BatonApi({
       url: ORIGIN,

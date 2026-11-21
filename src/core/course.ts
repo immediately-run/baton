@@ -12,7 +12,7 @@ export type CourseRule =
   | 'shape' | 'unknown-key' | 'id' | 'unknown-station' | 'start-leg' | 'unreachable' | 'no-end' | 'terminal'
   | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar' | 'no-chain-from' | 'entry' | 'schema' | 'role-in-roles' | 'starts-from'
   | 'policy' // §12.8 (B-145, R-BTN-181): the repository policy the snapshot is judged against
-  | 'conditions' | 'autonomous' // R-BTN-160 (B-234): declared condition types, and a leg's `autonomous`
+  | 'stream' | 'conditions' | 'autonomous' // R-BTN-160 (B-234): declared condition types, and a leg's `autonomous`
   | 'spawns'; // R-BTN-111 (B-52): a leg's declaration of the children it files
 
 export interface CourseViolation {
@@ -64,7 +64,7 @@ const STARTS_FROM = new Set(['request']);
 const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
 const ENTRY_KEYS = new Set(['output', 'schema']);
 const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
-  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires', 'conditions', 'autonomous', 'spawns']);
+  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires', 'conditions', 'autonomous', 'spawns', 'stream']);
 /** R-BTN-116: the one kind a leg may be today — `person`, a leg a person answers by a
  *  `std:decision@1`. A `call` leg (R-BTN-165) is not built, so a file carrying one is refused
  *  rather than kept unread. */
@@ -371,6 +371,7 @@ export function validateCourse(json: unknown): CourseViolation[] {
         }
       }
     }
+    if ('stream' in l && typeof l.stream !== 'boolean') add('bound', `${at}.stream`, 'stream is true or false (S-BTN-98)');
     // R-BTN-195 (B-234): a leg declared `autonomous` never asks for a person. The field sits on
     // no `kind: person` leg (a person's leg is answered by a person, R-BTN-116), nor on any
     // other kind the file refuses on its own (`call` and `arrives` are not built), and never

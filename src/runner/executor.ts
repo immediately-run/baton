@@ -1,6 +1,6 @@
 // executor.ts — the leg executor (BATON_SPEC §8.3 R-BTN-107; B-184): every leg the CLI runner
 // runs, and every call into repository code, goes through an executor whose code the runner's
-// HOST chooses — `runner.json` `executor` or `baton run --executor <source>`, never a repository
+// HOST chooses — `runner.json` `executor` or `baton runner start --executor <source>`, never a repository
 // file. Baton is agnostic about isolation: an executor that isolates lives in its deployment's
 // repository (Fieldhouse's E2B executor, for one), loaded here as a `pinned` bundle.
 //
@@ -70,6 +70,8 @@ export interface ExecOptions {
   env?: Record<string, string>;
   /** Each stderr line as it arrives (the runner's verbose drain, B-108). */
   onStderr?: (line: string) => void;
+  /** Builtin wrapper only: diagnostic pipes, with the outcome isolated on fd 3. */
+  onOutput?: (stream: 'stdout' | 'stderr', bytes: Buffer) => void;
 }
 
 export interface ExecResult {
@@ -147,7 +149,7 @@ export function builtinExecutor(): Executor {
       if (!s) throw new Error(`no session ${h.session_id}`);
       const [cmd, ...args] = argv;
       const child = spawn(cmd === 'node' ? process.execPath : cmd, args, {
-        cwd: o.cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: o.cwd, detached: true, stdio: o.onOutput ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
         env: { ...s.brief.env, ...(o.env ?? {}) },
       });
       const kill = () => {
@@ -160,10 +162,14 @@ export function builtinExecutor(): Executor {
       let stdout = '';
       let stderr = '';
       let partial = '';
-      child.stdout!.on('data', (d) => { stdout += d.toString('utf8'); });
+      const outcome = o.onOutput ? child.stdio[3] as import('node:stream').Readable : child.stdout!;
+      outcome.setEncoding('utf8');
+      outcome.on('data', (d) => { stdout += d; });
+      if (o.onOutput) child.stdout!.on('data', (d) => o.onOutput!('stdout', d));
       child.stderr!.on('data', (d) => {
+        o.onOutput?.('stderr', d);
         const text = d.toString('utf8');
-        stderr += text;
+        stderr = o.onOutput ? (stderr + text).slice(-8192) : stderr + text;
         if (!o.onStderr) return;
         partial += text;
         let at;
@@ -186,6 +192,8 @@ export function builtinExecutor(): Executor {
           // A call's end is its whole group's end (R-BTN-72, R-BTN-145): what the call left
           // behind goes with it.
           kill();
+        });
+        child.on('close', (code) => {
           if (partial && o.onStderr) o.onStderr(partial);
           resolveResult({ status: code, stdout, stderr });
         });

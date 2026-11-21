@@ -8,7 +8,8 @@ import { BatonError, json } from '../http';
 import { STATS_WINDOW_MS } from '../stats';
 import { withCredentials } from './credentials';
 import { conditionsList } from './conditions';
-import type { ReadRoute } from './kit';
+import { readableRepositories, type ReadRoute } from './kit';
+import { qualify, TICKET_ID } from '../validate';
 
 /** The eight reads `BatonCore.repositoryRead` serves, by the path. */
 const legacy = (action: string, over: Partial<ReadRoute> = {}): ReadRoute => ({
@@ -28,6 +29,18 @@ export const REPOSITORY_READS: ReadRoute[] = [
   legacy('ticket.children', { clock: false }),
   legacy('ticket.history', { clock: false }),
   legacy('leg.runs'),
+  {
+    action: 'leg.ticket-find',
+    run(cx, call) {
+      const local = call.params.local;
+      if (!TICKET_ID.test(`repo:${local}`)) throw new BatonError('invalid-params', 'ticket: must be a local ticket id');
+      const ids = readableRepositories(cx, call.principal).map((r) => qualify(r, local));
+      const matches = cx.sql<{ id: string }>(`SELECT id FROM tickets WHERE id IN (SELECT value FROM json_each(?))
+        UNION SELECT ticket_id AS id FROM closed_tickets WHERE ticket_id IN (SELECT value FROM json_each(?)) ORDER BY id`,
+      JSON.stringify(ids), JSON.stringify(ids));
+      return { matches: matches.map((r) => r.id) };
+    },
+  },
   // `?runner=me` is a runner session's own answer, decided by its secret after authorization:
   // never conditional, so a `304` is never answered where the secret would have been refused.
   legacy('ticket.blocks', { etag: (call) => !call.url.searchParams.has('runner') && !call.url.searchParams.has('worker') }),

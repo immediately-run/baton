@@ -57,6 +57,7 @@ export class LocalHost {
       store: opts.store,
       scheduler: this.scheduler,
       config: opts.config,
+      local: true,
       dispatch: {
         send: (target) => dispatchWorkflow(opts.config.GITHUB_DISPATCH_TOKEN, target),
         defer: (work) => {

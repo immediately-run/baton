@@ -7,7 +7,7 @@ import * as http from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { answerPlan, confirmAsk, confirmCapacity, createApiKey, duration, main, parseArgs, plan, policyDiff, send, workingTreeOf } from '../../cli/baton.mjs';
+import { answerPlan, confirmAsk, confirmCapacity, createApiKey, duration, firstHeldKey, main, parseArgs, plan, policyDiff, send, workingTreeOf } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
 import { ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
@@ -527,7 +527,7 @@ describe('an owner or administrator key never runs a working-tree CLI (B-138)', 
   });
 });
 
-describe('baton test-course: the command (R3-1248)', () => {
+describe('baton course test: the command (R3-1248)', () => {
   it('exits 0 on a sound course and 1 naming each violation, needing no Baton or key', () => {
     const root = mkdtempSync(join(tmpdir(), 'baton-cli-kit-'));
     try {
@@ -535,7 +535,7 @@ describe('baton test-course: the command (R3-1248)', () => {
       const dir = join(root, '.baton/courses/roadmap-pr');
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'course.json'), JSON.stringify(course));
-      const run = (...more: string[]) => spawnSync('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'test-course', root, 'roadmap-pr', ...more], { encoding: 'utf8', env: { ...process.env, BATON_URL: 'http://127.0.0.1:1' } });
+      const run = (...more: string[]) => spawnSync('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'course', 'test', root, 'roadmap-pr', ...more], { encoding: 'utf8', env: { ...process.env, BATON_URL: 'http://127.0.0.1:1' } });
       // no base resolves: an error naming --base, never a silent skip of the removal rule (round 1, 1-A-3)
       const nobase = run();
       expect([nobase.status, nobase.stderr]).toEqual([2, expect.stringContaining('pass --base REF')]);
@@ -550,8 +550,8 @@ describe('baton test-course: the command (R3-1248)', () => {
       const bad = run2();
       expect(bad.status).toBe(1);
       expect(bad.stdout).toContain('✗ legs-scripts: legs/deploy.mjs is no leg of the course');
-      const usage = spawnSync('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'test-course', root], { encoding: 'utf8' });
-      expect([usage.status, usage.stderr]).toEqual([2, expect.stringContaining('usage: baton test-course')]);
+      const usage = spawnSync('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'course', 'test', root], { encoding: 'utf8' });
+      expect([usage.status, usage.stderr]).toEqual([2, expect.stringContaining('usage: baton course test')]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1020,5 +1020,74 @@ describe('the client versions the CLI states and answers (R-BTN-197, B-254)', ()
     expect(plan('admin', ['settings', 'set', '--session-hosts', 'claude.ai', '--recommended-client', '0.1.6']).body)
       .toEqual({ session_hosts: ['claude.ai'], recommended_client: '0.1.6' });
     expect(() => plan('admin', ['settings', 'set'])).toThrow(/--recommended-client/);
+  });
+});
+
+
+describe('S-BTN-97: key selection and the original renames', () => {
+  it('selects owner before administrator, falls back to administrator, and names owner when missing', () => {
+    const roles = ['owner', 'administrator'];
+    expect(firstHeldKey(roles, undefined, { administrator: 'admin.key', owner: 'owner.key' })).toBe('owner.key');
+    expect(firstHeldKey(roles, undefined, { administrator: 'admin.key' })).toBe('admin.key');
+    expect(firstHeldKey(roles, 'explicit.key', { owner: 'owner.key' })).toBe('explicit.key');
+    expect(() => firstHeldKey(roles, undefined, {})).toThrow('no key for owner');
+  });
+
+  it('refuses the old runner name without invoking the runner', () => {
+    const out = spawnSync('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'run', '--help'], { encoding: 'utf8' });
+    expect([out.status, out.stdout, out.stderr]).toEqual([2, '', 'renamed: baton runner start\n']);
+  });
+
+  it('signs the runs route with the first held role for the target origin', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-log-roles-'));
+    const sent: (string | undefined)[] = [];
+    const server = http.createServer((req, res) => {
+      sent.push(req.headers['signature-input'] as string | undefined);
+      if (req.url !== '/v1/repositories/docs/tickets/T-1/legs/build/runs') res.statusCode = 404;
+      res.end('{"runs":[]}');
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const config = join(dir, 'baton');
+    mkdirSync(config);
+    const key = (role: string) => {
+      const path = join(dir, role);
+      expect(spawnSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', path]).status).toBe(0);
+      const fingerprint = spawnSync('ssh-keygen', ['-lf', `${path}.pub`], { encoding: 'utf8' }).stdout.split(' ')[1];
+      return { path, fingerprint };
+    };
+    const run = () => new Promise<{ code: number | null; stderr: string }>((done, reject) => {
+      const child = spawn(process.execPath, [join(import.meta.dirname, '../../cli/baton.mjs'), 'leg', 'runs', '--dev', '--url', url, 'docs:T-1', 'build'],
+        { env: { ...process.env, BATON_HOME: undefined, XDG_CONFIG_HOME: dir }, stdio: ['ignore', 'ignore', 'pipe'] });
+      let stderr = '';
+      child.stderr.on('data', (d) => { stderr += d; });
+      child.once('error', reject);
+      child.once('close', (code) => done({ code, stderr }));
+    });
+    try {
+      const owner = key('owner');
+      const admin = key('admin');
+      const use = (keys: object) => writeFileSync(join(config, 'keys.json'), JSON.stringify({ [url]: keys }));
+      use({ administrator: admin.path, owner: owner.path });
+      expect(await run()).toMatchObject({ code: 0 });
+      expect(sent[0]).toContain(owner.fingerprint);
+      use({ administrator: admin.path });
+      expect(await run()).toMatchObject({ code: 0 });
+      expect(sent[1]).toContain(admin.fingerprint);
+      use({});
+      expect(await run()).toMatchObject({ code: 2, stderr: expect.stringContaining('no key for owner') });
+      expect(sent).toHaveLength(2);
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('dispatches the built replacements for why and start', () => {
+    for (const [noun, verb] of [['leg', 'why'], ['server', 'start']]) {
+      const out = spawnSync(process.execPath, [join(import.meta.dirname, '../../cli/baton.mjs'), noun, verb, '--help'], { encoding: 'utf8' });
+      expect(out.status).toBe(0);
+      expect(out.stdout).toContain(`baton ${noun} ${verb}`);
+    }
   });
 });

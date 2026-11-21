@@ -66,7 +66,7 @@ done
 V="\${PKG##*@}"
 mkdir -p "$DEST/node_modules/@immediately-run/baton/dist"
 echo "{\\"name\\":\\"@immediately-run/baton\\",\\"version\\":\\"$V\\"}" >"$DEST/node_modules/@immediately-run/baton/package.json"
-echo 'if (process.argv[2] === "run") { process.stderr.write("baton: ${cred}\\n"); process.exit(2); }' >"$DEST/node_modules/@immediately-run/baton/dist/baton.mjs"`);
+echo 'if (process.argv[2] === "runner" && process.argv[3] === "start") { process.stderr.write("baton: ${cred}\\n"); process.exit(2); }' >"$DEST/node_modules/@immediately-run/baton/dist/baton.mjs"`);
   stub('opencode', 'exit 0');
   execFileSync('git', ['init', '-q', '-b', 'main', checkout], { stdio: 'ignore' });
   const git = (...args: string[]) => execFileSync('git', ['-C', checkout, ...args], { stdio: ['ignore', 'ignore', 'inherit'] });
@@ -184,7 +184,7 @@ describe('start-runner runs a pinned released CLI, never a working tree\'s (B-13
       // would strand.
       const cli = join(w.dir, 'rel', 'node_modules', '@immediately-run', 'baton', 'dist', 'baton.mjs');
       mkdirSync(dirname(cli), { recursive: true });
-      writeFileSync(cli, 'if (process.argv[2] === "run") { process.stderr.write("baton: no credential: BATON_KEY_FILE, BATON_KEY or BATON_TOKEN (probe)\\n"); process.exit(2); }\n');
+      writeFileSync(cli, 'if (process.argv[2] === "runner" && process.argv[3] === "start") { process.stderr.write("baton: no credential: BATON_KEY_FILE, BATON_KEY or BATON_TOKEN (probe)\\n"); process.exit(2); }\n');
       const out = run(w, ['--check', '--cli', relative(process.cwd(), cli)]);
       expect(out.stderr).toBe('');
       expect(out.status).toBe(0);
@@ -226,7 +226,7 @@ describe('start-runner runs a pinned released CLI, never a working tree\'s (B-13
       // Something rewrote the CLI itself after the install — finding 5's shape through the
       // install path: the hash recorded at install no longer matches, so no start runs it.
       writeFileSync(pkg, was);
-      writeFileSync(cli, 'if (process.argv[2] === "run") { process.exit(0); }\n');
+      writeFileSync(cli, 'if (process.argv[2] === "runner" && process.argv[3] === "start") { process.exit(0); }\n');
       const tampered = run(w, ['--check']);
       expect(tampered.status).toBe(2);
       expect(tampered.stderr).toMatch(/changed since it was installed .*B-138/s);

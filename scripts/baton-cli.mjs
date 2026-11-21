@@ -52,7 +52,7 @@ export const ticketsMain = tickets.ticketsMain;
 const requested = await bundleCommand('request.ts', (file) => import(pathToFileURL(file).href));
 export const requestMain = requested.requestMain;
 // B-121: `baton home …` and the home in force — the CLI's homes.json, read by the API commands
-// through this bundle (cli/baton.mjs's homesContext) and by `baton run`'s name resolution.
+// through this bundle (cli/baton.mjs's homesContext) and by `baton runner start`'s name resolution.
 const homesMod = await bundleCommand('homes.ts', (file) => import(pathToFileURL(file).href));
 export const homeMain = homesMod.homeMain;
 export const resolveHomes = homesMod.resolveHomes;

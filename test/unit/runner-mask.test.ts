@@ -162,3 +162,87 @@ describe('runner.json mask_env (R-BTN-144)', () => {
     expect(underBatonDirectory('/srv/repo/.baton/runner.json')).toBe(true);
   });
 });
+
+// S-BTN-98/S-BTN-99: the writer and reader share the real create-only file adapter.
+describe('leg log archive', () => {
+  it('masks split credentials, keeps separate streams and refuses replacement', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { pathToFileURL } = await import('node:url');
+    const { logStore } = await import('../../src/runner/logStore');
+    const { LegLog } = await import('../../src/runner/legLog');
+    const dir = await mkdtemp(join(tmpdir(), 'baton-log-'));
+    try {
+      const store = await logStore(pathToFileURL(dir).href);
+      const failures: string[] = [];
+      const log = new LegLog(store.create, ['my-secret-value', 'first-part\r\nsecond-part'], () => { failures.push('failed'); });
+      log.push('stdout', Buffer.from('good my-secret-'));
+      log.push('stderr', Buffer.from('stderr line\n'));
+      log.push('stdout', Buffer.from('value and bak_'));
+      log.push('stdout', Buffer.from('sensitive\n'));
+      log.push('stderr', Buffer.from('-----BEGIN TEST PRIVATE KEY-----\nprivate-content\n'));
+      log.push('stderr', Buffer.from(`${'a'.repeat(1024)}\n`.repeat(20) + 'private-after-limit\n'));
+      log.push('stderr', Buffer.from('-----END TEST PRIVATE KEY-----\n'));
+      log.push('stdout', Buffer.from('first-part\r\nsecond-part\r\n'));
+      await log.finish({ claim: 1, leg: 'implement', run: 1, run_id: 'r_test' });
+      expect(failures).toEqual([]);
+      const body = (await store.read('000000.jsonl'))!;
+      const frames = body.trim().split('\n').map((line) => JSON.parse(line));
+      const text = (stream: string) => frames.filter((frame) => frame.stream === stream).map((frame) => frame.text).join('');
+      expect(text('stdout')).toBe('good *** and ***\n***\r\n');
+      expect(text('stderr')).toBe('stderr line\n***\n');
+      expect(frames.map((frame) => frame.seq)).toEqual(frames.map((_, i) => i));
+      expect(JSON.parse((await store.read('end.json'))!)).toMatchObject({ chunks: 1, frames: frames.length, gaps: 0 });
+      await expect(store.create('000000.jsonl', 'overwrite')).rejects.toMatchObject({ code: 'EEXIST' });
+      expect(await store.read('000000.jsonl')).toBe(body);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it('streams unbroken output and masks overlapping literals across writes', async () => {
+    const { LegLog } = await import('../../src/runner/legLog');
+    const chunks = new Map<string, string>();
+    const log = new LegLog(async (name, data) => { chunks.set(name, data); }, ['abcdefgh', 'efghijkl'], () => {});
+    log.push('stdout', Buffer.from('progress abcdefgh'));
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(chunks.get('000000.jsonl')).toContain('progress ');
+    expect(chunks.get('000000.jsonl')).not.toMatch(/abcd|efgh/);
+    log.push('stdout', Buffer.from('ijkl bak_' + 'a'.repeat(300 * 1024)));
+    const long = '.'.repeat(300 * 1024);
+    log.push('stdout', Buffer.from(' ' + long + ' still visible'));
+    await log.finish({ claim: 1, leg: 'implement', run: 1, run_id: 'r_test' });
+    const text = [...chunks].filter(([name]) => name.endsWith('.jsonl')).flatMap(([, body]) =>
+      body.trim().split('\n').map((line) => JSON.parse(line).text)).join('');
+    expect(text).toBe(`progress *** *** ${long} still visible`);
+    expect(JSON.parse(chunks.get('end.json')!)).toMatchObject({ gaps: 0, truncated: false });
+  });
+});
+
+it('S-BTN-99 follows create-only chunks through the end marker and sanitizes the terminal', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { pathToFileURL } = await import('node:url');
+  const { logStore } = await import('../../src/runner/logStore');
+  const { viewLog } = await import('../../src/runner/logView');
+  const { vi } = await import('vitest');
+  const dir = await mkdtemp(join(tmpdir(), 'baton-log-follow-'));
+  const out: string[] = [];
+  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((s) => { out.push(String(s)); return true; });
+  try {
+    const log_dir = pathToFileURL(dir).href;
+    const store = await logStore(log_dir);
+    const write = (name: string, value: object) => store.create(name, `${JSON.stringify(value)}\n`);
+    await write('000000.jsonl', { seq: 0, stream: 'stdout', text: '\x1b[31mfirst\x1b[0m\x07\n' });
+    let polled = false;
+    expect(await viewLog({ run: 1, log_dir }, { follow: true, json: false, transcripts: false, refresh: async () => {
+      polled = true;
+      await write('000001.jsonl', { gap: 1 });
+      await write('000002.jsonl', { seq: 2, stream: 'stderr', text: 'last\n' });
+      await write('end.json', { chunks: 3 });
+      return { run: 1, ended_at: 2, log_dir };
+    } })).toBe(0);
+    expect(polled).toBe(true);
+    expect(out.join('')).toBe('first\n[gap]\nlast\n');
+  } finally { stdout.mockRestore(); await rm(dir, { recursive: true, force: true }); }
+});

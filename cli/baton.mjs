@@ -3,7 +3,7 @@
 // the one management path. Each command builds one request — `plan`, pure, so it is tested on its
 // own — and signs it with the key `-i` names; Baton validates it with the functions of
 // src/core/admin.ts on either host. Nothing here holds a rule of its own: a refusal is Baton's,
-// printed as it came. `baton run` (§6.13 R-BTN-72) is the runner loop: it lives in src/runner
+// printed as it came. `baton runner start` (§6.13 R-BTN-72) is the runner loop: it lives in src/runner
 // (TypeScript, node-only), so scripts/baton-run.mjs bundles it first, the way start-local does.
 //
 //   baton key create FILE [--comment TEXT]     an API key (R-BTN-159), beside SSH keys: FILE for -i, FILE.pub its public line
@@ -39,7 +39,7 @@
 //                BATON_SESSION_HOSTS, default claude.ai; recommended_client: the code's own,
 //                B-254 R-BTN-197 — raiseable, never below the code's)
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
-//   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
+//   baton ticket blocked -i KEY TICKET                           baton ticket blocked -i KEY --repository R --on KIND:REF [--transitive]
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
 //                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
 //   baton admin -i KEY revoke FINGERPRINT                          baton admin -i KEY open
@@ -81,7 +81,7 @@
 //   baton admin -i KEY repos                                         (B-90: the registry — one signed request, one JSON answer)
 //   baton owner -i KEY grants REPO                    (B-90: the repository's owners, grants and settings, and the bars in force)
 //   baton board -i KEY REPO                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
-//   baton run [--home <checkout|home name>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
+//   baton runner start [--home <checkout|home name>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
 //             [--harness opencode|claude-code] [--verbose]   (R-BTN-72: the runner loop; a home
 //             name resolves to its checkout, B-121)
 //   baton leg raise <type> --subject TEXT [--body <file>] [--restarts <json>] [--default <id>]
@@ -163,7 +163,7 @@
 //                github.com; no credential prints the branch and exits non-zero, and any other
 //                refusal stays git's own words.
 //
-//   baton test-course <repository root> <course> [--base REF] [--board FILE]
+//   baton course test <repository root> <course> [--base REF] [--board FILE]
 //                — the course test kit (§2d, R-BTN-64/-65; R3-1248): the working tree's .baton/ is
 //                the proposal, REF's the course in force (default: origin/HEAD, else origin/main;
 //                none resolving is an error — `--base none` skips the removal rule on purpose),
@@ -288,7 +288,7 @@ function workingTreeRefusal(argv) {
  *  the owner and administrator commands' value-less flags (parseArgs booleans) are named here so
  *  `--yes --dev` still counts. An unknown boolean is read as value-taking, which refuses rather
  *  than bypasses — the safe direction. */
-const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all']);
+const NO_VALUE_FLAGS = new Set(['transitive', 'cut-over', 'available', 'unavailable', 'clear', 'yes', 'release-holders', 'no-required-bars', 'require-signed-control', 'no-require-signed-control', 'watch', 'all', 'follow', 'transcripts', 'json']);
 function devFlagPositions(argv) {
   const at = [];
   for (let i = 1; i < argv.length; i++) {
@@ -315,7 +315,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     // R-BTN-75: a GET any key granted on the repository, an owner of it or an administrator signs.
     const { flags, positional } = parseArgs(argv, ['transitive'], ['on', 'repository'], 1);
     if (flags.on) {
-      if (positional.length) throw new Error('baton blocked --on KIND:REF takes no ticket');
+      if (positional.length) throw new Error('baton ticket blocked --on KIND:REF takes no ticket');
       const q = new URLSearchParams({ on: flags.on, ...(flags.transitive ? { transitive: '1' } : {}) });
       return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(repoOrHome(flags.repository, home, '--repository (with --on)'))}/blocked?${q}` };
     }
@@ -551,7 +551,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       } };
     }
     if (cmd === 'settings') {
-      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars', 'require-signed-control', 'no-require-signed-control'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'code-repos', 'forge-ids', 'pushers'], 1);
+      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars', 'require-signed-control', 'no-require-signed-control'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'leg-log-root', 'unblocked-workflow', 'remind-after', 'code-repos', 'forge-ids', 'pushers'], 1);
       const body = {};
       if (flags['no-required-bars']) {
         if (groups.length) throw new Error('--no-required-bars clears them: name no --required-bar beside it');
@@ -563,6 +563,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       // `--retry default` returns to Baton's default policy (R-BTN-23).
       if (flags.retry === 'default') body.retry = null;
       else if (flags.retry) body.retry = { backoff_ms: list(flags.retry).map(duration), max_failed: Number(need(flags['max-failed'], '--max-failed (with --retry)')) };
+      if (flags['leg-log-root']) body.leg_log_root = flags['leg-log-root'] === 'none' ? null : flags['leg-log-root'];
       if (flags['transcript-repos']) body.transcript_repos = list(flags['transcript-repos']);
       // R-BTN-77's trigger: a workflow path on GitHub, or `none` to clear it.
       if (flags['unblocked-workflow'] === 'none') body.unblocked_trigger = null;
@@ -888,10 +889,10 @@ export function defaultBase(root) {
   return null;
 }
 
-/** `baton test-course` (R3-1248): exit 0 when the kit finds nothing, 1 naming each violation. */
+/** `baton course test` (R3-1248): exit 0 when the kit finds nothing, 1 naming each violation. */
 async function testCourse(argv) {
   const { flags, positional } = parseArgs(argv, [], ['base', 'board'], 2);
-  if (positional.length !== 2) throw new Error('usage: baton test-course <repository root> <course> [--base REF] [--board FILE]');
+  if (positional.length !== 2) throw new Error('usage: baton course test <repository root> <course> [--base REF] [--board FILE]');
   const root = resolve(positional[0]);
   // A base that does not resolve fails the run, never skips a rule unseen (round 1, 1-A-3).
   const base = flags.base === 'none' ? null : flags.base ?? defaultBase(root);
@@ -906,7 +907,7 @@ async function testCourse(argv) {
     input.live ? `${input.live.length} live ticket(s) replayed` : 'no --board (live tickets not replayed)',
     input.legScripts ? `${input.legScripts.length} leg script(s)` : 'no legs/',
   ];
-  process.stdout.write(`baton test-course: ${said.join('; ')}\n`);
+  process.stdout.write(`baton course test: ${said.join('; ')}\n`);
   // R-BTN-111 (B-234, B-52): the signature — the course's input (its start station's entry), its
   // output (each end station's) and the conditions its legs may raise, each course its legs'
   // spawns name printed beside it; `baton course test` prints it.
@@ -1109,15 +1110,112 @@ async function homesContext(flag, explicitUrl = null) {
   return resolveHomes({ flag, env: process.env, explicitUrl });
 }
 
+/** S-BTN-97: pick a held role in registry order, not by trying authenticated requests. */
+export function firstHeldKey(roles, identity, keys) {
+  const file = identity ?? roles.map((role) => keys?.[role] ?? (role === 'administrator' ? keys?.admin : undefined))
+    .find((path) => typeof path === 'string' && path !== '');
+  if (!file) throw new Error(`no key for ${roles[0]} (use -i or configure keys.json)`);
+  return file;
+}
+
+const LOG_USAGE = {
+  log: 'baton leg log <ticket> [<leg>] [--run <n>] [-f] [--transcripts] [--json]',
+  runs: 'baton leg runs <ticket> [<leg>] [--json]',
+  stop: 'baton leg stop <ticket>',
+  why: 'baton leg why <ticket> [<leg>] [--json]',
+};
+
+async function logCommand(verb, argv) {
+  if (argv.includes('--help')) { process.stdout.write(`${LOG_USAGE[verb]}\n`); return 0; }
+  const booleans = verb === 'log' ? ['follow', 'transcripts', 'json'] : verb === 'stop' ? [] : ['json'];
+  const { flags, positional } = parseArgs(argv.map((arg) => arg === '-f' ? '--follow' : arg), booleans,
+    ['identity', 'url', 'home', ...(verb === 'log' ? ['run'] : [])], verb === 'stop' ? 1 : 2);
+  const raw = need(positional[0], 'the ticket id');
+  const ordinal = flags.run == null ? null : Number(flags.run);
+  if (ordinal !== null && (!/^\d+$/.test(flags.run) || !Number.isSafeInteger(ordinal) || ordinal < 1)) throw new Error('--run must be a positive integer');
+  const { logRoles, terminalText, viewLog } = await import('../scripts/baton-log.mjs');
+  const homes = await homesContext(flags.home, flags.url ?? process.env.BATON_URL ?? null);
+  const url = flags.url ?? process.env.BATON_URL ?? homes.inForce?.home.origin ?? DEFAULT_URL;
+  let keys = {};
+  if (!flags.identity) {
+    const keyPath = join(dirname(homesPath()), 'keys.json');
+    if (existsSync(keyPath)) keys = JSON.parse(readFileSync(keyPath, 'utf8'));
+  }
+  const action = verb === 'stop' ? 'leg.release-request' : verb === 'why' ? 'ticket.blocks' : 'leg.runs';
+  const key = firstHeldKey(logRoles(action), flags.identity, keys[new URL(url).origin]);
+  const request = (path, method = 'GET') => send(url, { path, method }, key);
+  const ok = ({ status, json }) => status >= 200 && status < 300 && json != null;
+  const refusal = (res) => { process.stderr.write(`${terminalText(JSON.stringify(res.json ?? { error: res.status }))}\n`); return 1; };
+  let ticket = raw;
+  if (!raw.includes(':')) {
+    const home = homes.inForce?.home.repository;
+    if (home) ticket = `${home}:${raw}`;
+    else {
+      const res = await request(`/v1/ticket-matches/${encodeURIComponent(raw)}`);
+      if (!ok(res)) return refusal(res);
+      const matches = res.json.matches;
+      if (matches.length > 1) throw new Error(terminalText(`ambiguous ticket ${raw}: ${matches.join(', ')}`));
+      if (!matches.length) throw new Error(terminalText(`no ticket matches ${raw}`));
+      [ticket] = matches;
+    }
+  }
+  const { repository, local } = ticketArg(ticket, null);
+  const r = encodeURIComponent(repository);
+  const t = encodeURIComponent(local);
+  if (verb === 'stop') {
+    const res = await request(`/v1/owner/${r}/tickets/${t}/release`, 'POST');
+    if (!ok(res)) return refusal(res);
+    process.stdout.write(`${JSON.stringify(res.json)}\n`);
+    return 0;
+  }
+  const base = `/v1/repositories/${r}/tickets/${t}`;
+  if (verb === 'why') {
+    const res = await request(`${base}/blocks`);
+    if (!ok(res)) return refusal(res);
+    const target = positional[1];
+    const report = target == null ? res.json : { ...res.json,
+      blocks: res.json.blocks.filter((row) => !row.leg || row.leg === target),
+      other: res.json.other.filter((row) => !row.detail?.leg || row.detail.leg === target) };
+    process.stdout.write(`${JSON.stringify(report)}\n`);
+    return 0;
+  }
+  let leg = positional[1];
+  if (leg == null) {
+    const show = await request(base);
+    if (!ok(show) && show.status !== 404) return refusal(show);
+    leg = (show.json?.claim?.leg_started_at != null ? show.json.claim.leg : null) ?? show.json?.position?.next_leg ?? show.json?.claim?.leg;
+    if (!leg) {
+      const history = await request(`${base}/history?limit=200`);
+      if (!ok(history)) return refusal(history);
+      leg = history.json.rows.find((row) => row.kind === 'leg-started')?.leg;
+    }
+    if (!leg) throw new Error(terminalText(`${ticket}: no running, queued or recorded leg`));
+  }
+  const path = `${base}/legs/${encodeURIComponent(leg)}/runs`;
+  const res = await request(path);
+  if (!ok(res)) return refusal(res);
+  if (verb === 'runs') { process.stdout.write(`${JSON.stringify(res.json)}\n`); return 0; }
+  const run = ordinal === null ? res.json.runs.at(-1) : res.json.runs.find((x) => x.run === ordinal);
+  if (!run) { process.stderr.write(terminalText(`${ticket} ${leg}: no such run\n`)); return 1; }
+  return viewLog(run, { follow: !!flags.follow, json: !!flags.json, transcripts: !!flags.transcripts, refresh: async () => {
+    const latest = await request(path);
+    if (!ok(latest)) throw new Error(latest.json?.error?.message ?? `run read returned ${latest.status}`);
+    return latest.json.runs.find((x) => run.run_id ? x.run_id === run.run_id : x.run === run.run);
+  } });
+}
+
 /** The one management path's exit: 0 when Baton answered its JSON, 1 when the answer was not
  *  Baton's — a refusal, or a 2xx body that is not JSON (B-80) — and any error thrown up to the
  *  caller (the CLI prints `baton: …` and exits 2). Exported for the tests of that contract. */
 export async function main(argv) {
+  if (argv[0] === 'help' && argv[1] === 'leg' && Object.hasOwn(LOG_USAGE, argv[2])) return logCommand(argv[2], ['--help']);
+  const legLog = argv[0] === 'leg' && Object.hasOwn(LOG_USAGE, argv[1]);
+  if (legLog && argv.includes('--help')) return logCommand(argv[1], ['--help']);
   // B-138: an owner or administrator key signs with the code that reads it, so the CLI that
   // takes one is a pinned release — never a git working tree, whose code a push (a branch a leg
   // checks out) changes. `--dev` is the override for this repository's own development; the
   // other roles (the reads, the runner, the repository commands) run from a checkout still.
-  if (argv[0] === 'admin' || argv[0] === 'owner') {
+  if (argv[0] === 'admin' || argv[0] === 'owner' || legLog) {
     const dev = devFlagPositions(argv);
     const end = argv.indexOf('--') === -1 ? argv.length : argv.indexOf('--');
     if (dev.length > 0 && dev.length === argv.slice(0, end).reduce((n, a) => n + (a === '--dev' ? 1 : 0), 0)) {
@@ -1126,7 +1224,24 @@ export async function main(argv) {
       throw new Error(workingTreeRefusal(argv));
     }
   }
-  if (argv[0] === 'test-course') return testCourse(argv.slice(1));
+  if (legLog) return logCommand(argv[1], argv.slice(2));
+  const renamed = { why: 'leg why', run: 'runner start', 'test-course': 'course test', init: 'repo init', sync: 'repo sync',
+    mirror: 'repo mirror', spool: 'repo spool', inbox: 'decision list', blocked: 'ticket blocked', replay: 'leg replay',
+    register: 'runner register', start: 'server start' };
+  if (Object.hasOwn(renamed, argv[0])) { process.stderr.write(`renamed: baton ${renamed[argv[0]]}\n`); return 2; }
+  if (argv[0] === 'course' && argv[1] === 'test') return testCourse(argv.slice(2));
+  if (argv[0] === 'server' && argv[1] === 'start') {
+    if (argv.includes('--help')) {
+      process.stdout.write('baton server start --db <file> --admin-keys <file> [--host <host>] [--port <n>] [--origin <url>] [--config <file>]\n');
+      return 0;
+    }
+    const { bundleLocal } = await import('../scripts/bundle.mjs');
+    const { main: start } = await bundleLocal('src/local/main.ts', 'baton-server.mjs');
+    await start(argv.slice(2));
+    // The server's listener owns the lifetime of the process.
+    return undefined;
+  }
+  if (argv[0] === 'ticket' && argv[1] === 'blocked') argv = ['blocked', ...argv.slice(2)];
   if (argv[0] === 'key') {
     if (argv[1] !== 'create' || !argv[2]) throw new Error('baton key create FILE [--comment TEXT]');
     const { flags } = parseArgs(argv.slice(3), [], ['comment'], 0);
@@ -1237,11 +1352,11 @@ export async function main(argv) {
     const { homeMain } = await import('../scripts/baton-cli.mjs');
     return homeMain(argv.slice(1));
   }
-  if (argv[0] === 'run') {
+  if (argv[0] === 'runner' && argv[1] === 'start') {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.
     const { runMain } = await import('../scripts/baton-run.mjs');
-    return runMain(argv.slice(1));
+    return runMain(argv.slice(2));
   }
   if (argv[0] === 'queue') {
     // R-BTN-202 (B-248): this host's local work queue for the runners on one home — local
@@ -1375,7 +1490,7 @@ function exitDrained(code) {
 
 // argv[1] may be npx's link to this file: compare real paths.
 if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
-  main(process.argv.slice(2)).then(exitDrained, (e) => {
+  main(process.argv.slice(2)).then((code) => { if (code !== undefined) exitDrained(code); }, (e) => {
     process.stderr.write(`baton: ${e.message}\n`);
     exitDrained(2);
   });

@@ -1,6 +1,6 @@
 // harness.ts — the commands that run one leg through a harness Baton knows (B-83, BATON_SPEC
 // §2f R-BTN-74: `agent_command`; §5.8 R-BTN-131: the stubs): the validated invocations
-// `baton repo init --agent` writes and `baton run --harness` runs when the settings name no
+// `baton repo init --agent` writes and `baton runner start --harness` runs when the settings name no
 // `agent_command`. Both pin their model: an unpinned agent runs whatever the machine defaults
 // to, which is no way to run a leg. B-84's no-shell spawn is why the commands carry neither the
 // `< /dev/null` redirection B-83 first shipped (the stub closes the agent's stdin itself, and
@@ -36,7 +36,7 @@ export const AGENT_PROMPT =
 const quotedBriefing = `"${AGENT_PROMPT.replaceAll('"', '\\"')}"`;
 
 /** Each harness's `agent_command` (B-83): what `baton repo init --agent <harness>` writes and
- * `baton run --harness <harness>` runs when `.baton/baton.json` names none. `--auto` and
+ * `baton runner start --harness <harness>` runs when `.baton/baton.json` names none. `--auto` and
  * `--permission-mode bypassPermissions` are the unattended modes — a leg's agent edits the
  * working tree, runs the checks and pushes, with nobody watching to answer a prompt. */
 export const HARNESS_AGENTS: Record<Harness, string> = {

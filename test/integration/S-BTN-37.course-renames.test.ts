@@ -12,7 +12,7 @@
 // the bar's `except` names `adjudicate`; a claim at `adjudicated` gets `station: unknown` and ends
 // `released:course-changed`, no failed attempt; W2, on the old version, is refused `stale-skills`
 // only after the second change; the third and fourth files are refused (R-BTN-69) and listed
-// under Needs you, the second staying in force. (`baton test-course` failing the second change without its
+// under Needs you, the second staying in force. (`baton course test` failing the second change without its
 // `min_runner_version` raise is test/unit/test-course.test.ts.) Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';

@@ -410,7 +410,7 @@ async function standard(ctx) {
   const show = (rel2) => gitRun("git", ["-C", ctx.checkout, "show", settingsSha + ":" + rel2], { maxBuffer: 67108864 });
   const settings = JSON.parse(show(".baton/baton.json"));
   const settingsCommand = typeof settings.agent_command === "string" && settings.agent_command !== "" ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? "";
-  if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
+  if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton runner start --harness <harness> runs its command when the settings name none");
   const agentWords = splitWords(settingsCommand);
   const agentCommand = agentWords.join(" ");
   const courseSha = typeof ctx.signed_control?.course === "string" && ctx.signed_control.course !== "" ? ctx.signed_control.course : sha;
@@ -451,6 +451,7 @@ async function standard(ctx) {
   }
   const lastOutput = (so, se) => (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
   const received = await new Promise((resolve, reject) => {
+    const archive = ctx.stream_output === true;
     const echo = process.env.BATON_VERBOSE === "1";
     const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout,
@@ -477,11 +478,13 @@ async function standard(ctx) {
         reject(new Error("the agent printed more than 67108864 bytes"));
         return;
       }
-      if (echo) process.stderr.write(c);
+      if (archive) process.stdout.write(c);
+      else if (echo) process.stderr.write(c);
     });
     child.stderr.on("data", (c) => {
       if (se.length < 2048) se = (se + String(c)).slice(-2048);
-      if (echo) process.stderr.write(c);
+      if (archive) process.stdout.write(c);
+      else if (echo) process.stderr.write(c);
     });
     child.on("error", (e) => {
       if (watch != null) clearInterval(watch);

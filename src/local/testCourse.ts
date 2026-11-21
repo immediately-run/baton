@@ -1,4 +1,4 @@
-// testCourse.ts — `baton test-course <repository root> <course>` (BATON_SPEC §2d "A test kit, not a
+// testCourse.ts — `baton course test <repository root> <course>` (BATON_SPEC §2d "A test kit, not a
 // deploy", R-BTN-64, R-BTN-65; R3-1248): what a home repository's CI runs on a PR that changes
 // `.baton/`. It is the local host, not a second implementation: the course file is checked by
 // `validateCourse` and accepted or refused by the core exactly as a sync's post would be, every
@@ -86,7 +86,7 @@ export interface KitInput {
 const asRecord = (v: unknown): Record<string, any> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, any>) : {});
 const names = (v: unknown): string[] => (typeof v === 'string' ? [v] : Array.isArray(v) ? (v as string[]) : []);
 
-/** §6.13's three exports of a leg script, each a function (default-exported or named, as `baton run` reads them). */
+/** §6.13's three exports of a leg script, each a function (default-exported or named, as `baton runner start` reads them). */
 export const LEG_EXPORTS = ['run', 'handoff', 'close'] as const;
 
 /** B-102's shared-file rule, the words every implement and fix instruction carries: a leg
