@@ -117,6 +117,12 @@ describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1
   it('a claim\'s legs moved by anything but its advance', async () => {
     await rejected('legs-by-heartbeat', [[claimReq, claimed()], [req('POST', '/v1/runner/heartbeat'), claimed({ leg: 'implement' })]], 'legs changed by /v1/runner/heartbeat');
   });
+  it('a finishing heartbeat re-armed the deadline one millisecond late (S-BTN-52)', async () => {
+    await rejected('wrong-rearm', [[claimReq, claimed()],
+      [req('POST', '/v1/runner/claims/1/advance', { leg: 'implement' }), claimed({ leg: 'implement', deadlineAt: 30 * 60_000 })],
+      [req('POST', '/v1/runner/heartbeat', { legs_finished: [{ claim_id: 1, seq: 1 }] }),
+        claimed({ leg: 'implement', deadlineAt: 40 * 60_000 + 1 })]], 'finishing beat re-armed the wrong deadline');
+  });
   it('an advance whose stored bars are not the ones the holder sent', async () => {
     await rejected('bars-not-sent', [[claimReq, claimed()],
       [req('POST', '/v1/runner/claims/1/advance', { leg: 'implement', bars: ['family:a'] }), claimed({ leg: 'implement', legBars: ['family:b'] })]], 'not the ["family:a"] the holder sent');

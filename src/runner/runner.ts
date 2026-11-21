@@ -2510,6 +2510,7 @@ export class Runner {
       return answer as { station?: string; next?: NextLegs; advice?: unknown; run_id?: string; seq?: number };
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
+      if (e.ruleCode === 'leg-timeout') return { settle: { end_reason: 'released:leg-timeout' } };
       const kind = refusalKind(e.ruleCode);
       if (kind === 'course-changed') {
         return { settle: { end_reason: 'released:course-changed', reached: body.reached ?? fallbackStation, ...(body.leg ? { next: body.leg } : {}) } };

@@ -63,6 +63,7 @@ import dependencyConsents from './0062_dependency_consents.sql';
 import runnersViewReads from './0063_runners_view_reads.sql';
 import childrenOwnerState from './0064_children_owner_state.sql';
 import readEfficiency from './0065_read_efficiency.sql';
+import legTimeoutFence from './0066_leg_timeout_fence.sql';
 import { isUniqueViolation, logEvent, mintRunId, type Random } from '../core/db';
 import type { Store } from '../core/ports';
 
@@ -206,4 +207,5 @@ export const MIGRATIONS: Migration[] = [
   // `frozen`, `unfrozen`, `sealed`, `imported` event kinds).
   { id: 64, sql: childrenOwnerState },
   { id: 65, sql: readEfficiency },
+  { id: 66, sql: legTimeoutFence },
 ];

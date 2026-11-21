@@ -29,6 +29,7 @@ export const REGRESSED_FLAG_MS = 30 * 60_000;
 /** §14 Needs you: how long a bars-mismatch stays listed (spec-silent, recorded on R3-1232). */
 const BARS_MISMATCH_LISTED_MS = 24 * 3_600_000;
 const RELEASE_ACK_MS = 2 * 3_600_000; // §9: a delivered release unacknowledged for 2 h reaps the claim
+const LEG_TIMEOUT_ACK_MS = 15 * 60_000; // R-BTN-90, S-BTN-52
 export const UNCONFIRMED_FLAG_MS = 6 * 3_600_000; // §6.7
 export const STALLED_MS = 2 * 3_600_000; // §14 Running: alive but no activity for 2 h
 /** §7.5 R-BTN-90: what a `leg_finished` heartbeat re-arms a still-armed deadline to — now plus
@@ -1139,7 +1140,7 @@ export class Claims {
 
   /** `POST /v1/runner/claim` (§6.2): idempotent by `request_id`; the lock is the index. The claim
    *  is at the ticket's posted station, running nothing, its path recorded (R-BTN-63). */
-  // @model claim sha256:8f7c06135889
+  // @model claim sha256:5ed2b68d7479
   claim(runnerId: number, body: unknown) {
     const b = checkClaim(body);
     // R-BTN-47 (B-173): a wanted ticket of a repository not registered — retired, or never
@@ -1376,11 +1377,18 @@ export class Claims {
    * state. The first advance starts the leg the claim was offered (R-BTN-83). A refusal changes
    * nothing. The answer carries the latest snapshot's next legs and the run's id.
    */
-  // @model advance sha256:b3d31855be72
+  // @model advance sha256:dbabe06d0382
+  // @model advanceRun sha256:e26f7e481078
   advance(runnerId: number, claimId: number, body: unknown) {
     const b = checkAdvance(body);
     const c = this.held(runnerId, claimId);
     if (c.status !== 'active') throw new BatonError('claim-ended', `the claim already ended (${c.status}: ${c.end_reason})`);
+    // R-BTN-90: delivery can race with the runner's close. Keep the timed-out run current
+    // until the runner ends it or the alarm reaps it; only a pending release can be withdrawn.
+    if (this.rows(`SELECT 1 FROM messages WHERE to_runner_id = ? AND kind = 'release' AND status = 'delivered'
+                  AND json_extract(payload_json, '$.ticket_id') = ? AND json_extract(payload_json, '$.reason') = 'leg-timeout' LIMIT 1`, runnerId, c.ticket_id).length) {
+      throw new BatonError('not-eligible', 'the current run has a delivered leg-timeout release', { rule_code: 'leg-timeout' });
+    }
     // §12.8 (B-145, R-BTN-189): rule `floor` and the pins bind an advance as they bind a claim.
     this.refuseStopped(c.ticket_id, this.runner(runnerId));
     const repo = repositoryOf(c.ticket_id);
@@ -1508,6 +1516,8 @@ export class Claims {
     // carries one (`deadline_s`, the file's `max_duration`) and clears it when it does not —
     // the next advance re-arms for its own run, and the claim's end clears it below.
     const deadline = g.legs.get(leg)?.maxDuration ?? null;
+    // A pending release for the previous run must not stop the run about to start.
+    this.settleDeadlineRelease(runnerId, c.ticket_id, 'advance', now);
     this.exec('UPDATE claims SET station = ?, leg = ?, claim_observation = ?, deadline_at = ? WHERE id = ?', at, leg, n, deadline != null ? now + deadline * 1000 : null, claimId);
     // R-BTN-178: the seats of the leg this advance starts, rewritten in its transaction — an
     // advance into a leg not requiring a capability releases that seat.
@@ -1524,7 +1534,7 @@ export class Claims {
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
-  // @model endClaim sha256:e4e72748f7b1
+  // @model endClaim sha256:29d8fe0ebc66
   end(runnerId: number, claimId: number, body: unknown) {
     const e = checkEnd(body);
     const c = this.held(runnerId, claimId);
@@ -1749,9 +1759,9 @@ export class Claims {
    *  `from` (R-BTN-71), open activities close `abandoned` (§6.9), the resume record is written
    *  for every end (R-BTN-24), and the end is logged. */
   private finish(claimId: number, ticketId: string, status: 'completed' | 'released' | 'reaped', reason: string, actor: string,
-    opts: { ended_at_sha?: string | null; fence?: { incarnation: number } | null; detail?: string | null; reached?: string | null; finished?: boolean; evidence?: string | null; next?: string | null; localOrder?: { leg: string | null; by: string; ran_at: string } | null } = {}) {
+    opts: { ended_at_sha?: string | null; fence?: { incarnation: number; deadline?: number } | null; detail?: string | null; reached?: string | null; finished?: boolean; evidence?: string | null; next?: string | null; localOrder?: { leg: string | null; by: string; ran_at: string } | null } = {}) {
     const now = this.c.now();
-    const c = this.rows<{ station: string; regressed_since: number | null }>('SELECT station, regressed_since FROM claims WHERE id = ?', claimId)[0];
+    const c = this.rows<{ station: string; runner_id: number; regressed_since: number | null }>('SELECT station, runner_id, regressed_since FROM claims WHERE id = ?', claimId)[0];
     const run = this.runningLeg(claimId);
     const reached = opts.reached ?? c.station;
     if (run && opts.finished) {
@@ -1777,10 +1787,11 @@ export class Claims {
     // regressed_since clears with the end; a suspension made while regressed is confirmed by any
     // later snapshot, which `ended_regressed` remembers. R-BTN-90: the claim's deadline dies
     // with it.
-    this.exec(`UPDATE claims SET status = ?, ended_at = ?, end_reason = ?, end_detail = ?, ended_at_sha = ?, fence_pending = ?, fence_incarnation = ?, end_observation = ?,
+    this.exec(`UPDATE claims SET status = ?, ended_at = ?, end_reason = ?, end_detail = ?, ended_at_sha = ?, fence_pending = ?, fence_incarnation = ?, fence_deadline = ?, end_observation = ?,
                  station = ?, leg = NULL, ended_regressed = ?, regressed_since = NULL, deadline_at = NULL WHERE id = ?`,
-      status, now, reason, opts.detail ?? null, status === 'completed' ? opts.ended_at_sha ?? '' : null, opts.fence ? 1 : 0, opts.fence?.incarnation ?? null,
+      status, now, reason, opts.detail ?? null, status === 'completed' ? opts.ended_at_sha ?? '' : null, opts.fence ? 1 : 0, opts.fence?.incarnation ?? null, opts.fence?.deadline ?? null,
       this.handedOut(repositoryOf(ticketId)), reached, c.regressed_since != null ? 1 : 0, claimId);
+    this.settleDeadlineRelease(c.runner_id, ticketId, reason === 'released:leg-timeout' ? 'acknowledge' : 'end', now);
     this.exec(`UPDATE activities SET ended_at = ?, outcome = 'abandoned' WHERE claim_id = ? AND ended_at IS NULL`, now, claimId);
     // R-BTN-178: the claim's seats release at its end — except a fence-pending reap's, which a
     // reaped incarnation may still be driving (R-BTN-19): those go at `fence-cleared` or the
@@ -1898,7 +1909,7 @@ export class Claims {
 
   /** `POST /v1/ui/overrides/{item}` (§8, §11): `{expedite?, hold?}`. Lifting a hold clears its
    *  reason and any backoff, and resets the attempt count (§6.10). */
-  // @model setHold sha256:903289ca788a
+  // @model setHold sha256:caa9ba2006a9
   setOverride(owner: string, item: string, body: unknown) {
     const o = checkOverride(body);
     const actor = `owner:${owner}`;
@@ -2138,8 +2149,8 @@ export class Claims {
 
   /** The heartbeat's `fenced` report (R-BTN-19): clears the fence of a claim reaped while this
    *  runner was alive — only in the incarnation it was reaped in, since a re-key never clears one. */
-  // @model fenceCleared sha256:47b3ec65a3e2
-  // @model heartbeat sha256:b4745be87ea5
+  // @model fenceCleared sha256:3a6fc339c67d
+  // @model heartbeat sha256:d1023b949863
   fenced(runnerId: number, incarnation: number, claimId: number) {
     const c = this.rows<{ ticket_id: string }>(
       `SELECT ticket_id FROM claims WHERE id = ? AND runner_id = ? AND status = 'reaped' AND fence_pending = 1 AND fence_incarnation = ?`,
@@ -2158,7 +2169,7 @@ export class Claims {
   /** `POST /v1/ui/claims/{id}/reap`: any active claim. A live runner's claim is fence-pending
    *  (R-BTN-19) and the runner is not reaped, so its sidecar can still report the fence; a
    *  silent runner's is reaped as the alarm would. */
-  // @model forceReap sha256:6ee6ddd566ed
+  // @model forceReap sha256:17d58e3bb041
   forceReap(owner: string, claimId: number, body: unknown) {
     checkConfirm(body);
     const c = this.rows<{ id: number; ticket_id: string; runner_id: number; status: string }>('SELECT id, ticket_id, runner_id, status FROM claims WHERE id = ?', claimId)[0];
@@ -2181,7 +2192,7 @@ export class Claims {
    *  not pending is `conflict`; a freeze never refuses it (R-BTN-88), so a seal waiting on the
    *  claim proceeds after it. The runner is not reaped: it may still be alive, its own lease
    *  check (R-BTN-26) the bound on what it can push. */
-  // @model adminFenceClear sha256:6562fdc155d9
+  // @model adminFenceClear sha256:10fa263a59df
   fenceClear(admin: string, claimId: number, body: unknown) {
     checkConfirm(body);
     const c = this.rows<{ ticket_id: string }>('SELECT ticket_id FROM claims WHERE id = ?', claimId)[0];
@@ -2218,7 +2229,7 @@ export class Claims {
    *  its own `action`): an unconfirmed completion is never confirmed automatically; the owner
    *  confirms it (git does carry it) or releases it (it never landed), which makes the item
    *  claimable again. The commit it named stays in the event. */
-  // @model ownerResolve sha256:122aad00079b
+  // @model ownerResolve sha256:cbf9168ccc6b
   resolve(owner: string, claimId: number, body: unknown) {
     const { action } = checkResolve(body);
     const c = this.rows<{ ticket_id: string; end_reason: string; ended_at_sha: string }>(
@@ -2264,6 +2275,7 @@ export class Claims {
    * a failed attempt (§6.10); this only takes the claim back, it ends nothing itself. The
    * caller's transaction (the alarm's).
    */
+  // @model queueTimeout sha256:0e2945037a29
   deadlineDue(now: number): number {
     const due = this.rows<{ id: number; ticket_id: string; runner_id: number; deadline_at: number }>(
       `SELECT id, ticket_id, runner_id, deadline_at FROM claims WHERE status = 'active' AND deadline_at IS NOT NULL AND deadline_at <= ? ORDER BY deadline_at`, now);
@@ -2280,7 +2292,20 @@ export class Claims {
 
   /** The earliest armed deadline the alarm can consume, for the alarm (§3). */
   nextDeadline(): number | null {
-    return this.rows<{ d: number | null }>(`SELECT MIN(deadline_at) AS d FROM claims WHERE status = 'active' AND deadline_at IS NOT NULL`)[0]?.d ?? null;
+    return this.rows<{ d: number | null }>(`SELECT MIN(d) AS d FROM (
+      SELECT MIN(deadline_at) AS d FROM claims WHERE status = 'active' AND deadline_at IS NOT NULL
+      UNION ALL SELECT MIN(fence_deadline) FROM claims WHERE status = 'reaped' AND fence_pending = 1 AND fence_deadline IS NOT NULL
+    )`)[0]?.d ?? null;
+  }
+
+  /** A timeout message must not carry over to another run or claim. A timeout end itself
+   *  acknowledges delivery, so the sidecar's subsequent ack remains idempotent. */
+  private settleDeadlineRelease(runnerId: number, ticketId: string, how: 'advance' | 'end' | 'acknowledge', now: number) {
+    this.exec(`UPDATE messages SET status = CASE WHEN status = 'delivered' AND ? THEN 'acknowledged' ELSE 'expired' END,
+                 acknowledged_at = CASE WHEN status = 'delivered' AND ? THEN ? ELSE acknowledged_at END
+               WHERE to_runner_id = ? AND kind = 'release' AND (status = 'pending' OR (status = 'delivered' AND ?))
+                 AND json_extract(payload_json, '$.ticket_id') = ? AND json_extract(payload_json, '$.reason') = 'leg-timeout'`,
+      how === 'acknowledge' ? 1 : 0, how === 'acknowledge' ? 1 : 0, now, runnerId, how !== 'advance' ? 1 : 0, ticketId);
   }
 
   /**
@@ -2296,6 +2321,7 @@ export class Claims {
    * (the heartbeat's). A seq that names no running run of this runner's active claim — a beat
    * retried past the advance that finished the run — changes nothing.
    */
+  // @model legFinished sha256:375bb464b00b
   legFinished(runnerId: number, claimId: number, seq: number): void {
     const now = this.c.now();
     const c = this.rows<{ ticket_id: string; status: string; runner_id: number; deadline_at: number | null }>(
@@ -2408,7 +2434,7 @@ export class Claims {
    * - R-BTN-63: a holder's declared bars the snapshot posts that leg's bars without log
    *   `bars-mismatch`.
    */
-  // @model syncPost sha256:231806fa206f
+  // @model syncPost sha256:440c0a03894f
   judge(repo: string, observation: number, seen: Map<string, Seen>) {
     let confirmed = 0;
     // A `done` is also confirmed by a reading numbered after the claim's latest advance that shows
@@ -2522,7 +2548,7 @@ export class Claims {
    *  or at an interim status that ends the item — ends `released:stale-board`, and the holder is
    *  told. A station that lags the holder's advances is never staleness (§2e). Before cutover git
    *  decides alone and the shadow reports end claims. */
-  // @model syncPost sha256:231806fa206f
+  // @model syncPost sha256:440c0a03894f
   private staleBoard(repo: string, observation: number) {
     if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND cutover_at IS NOT NULL', repo).length) return 0;
     const active = this.rows<{ id: number; ticket_id: string; runner_id: number; tier_ceiling: string; tier_ceilings: string; kind: string }>(
@@ -2560,8 +2586,8 @@ export class Claims {
 
   // ── the alarm's share (§6.6, §7.1, §9) ──────────────────────────────────────────────────
 
-  // @model alarmReap sha256:7bba7960bdfb
-  // @model fenceTimeout sha256:2eff55029e93
+  // @model alarmReap sha256:42b42031cb3c
+  // @model fenceTimeout sha256:cad495430a4c
   alarm(): string[] {
     const now = this.c.now();
     // B-229 (R-BTN-9): each reap is its own savepoint, and one that throws is named and passed
@@ -2594,30 +2620,18 @@ export class Claims {
         this.exec('UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.runner_id);
       });
     }
-    // §9: a release delivered 2 h ago and still unacknowledged reaps the claim, fenced: the
-    // runner is alive (it took the message), so the item waits for its fence (R-BTN-19).
-    const stale = this.rows<{ mid: number; id: number; ticket_id: string; runner_id: number; incarnation: number }>(
-      `SELECT m.id AS mid, c.id, c.ticket_id, c.runner_id, w.incarnation FROM messages m
-       JOIN claims c ON c.runner_id = m.to_runner_id AND c.status = 'active' AND c.ticket_id = json_extract(m.payload_json, '$.ticket_id')
-       JOIN runners w ON w.id = c.runner_id
-       WHERE m.kind = 'release' AND m.status = 'delivered' AND m.delivered_at <= ?`, now - RELEASE_ACK_MS);
-    const reaped = new Set<number>();
-    for (const c of stale) {
-      this.exec(`UPDATE messages SET status = 'expired' WHERE id = ?`, c.mid);
-      if (reaped.has(c.id)) continue; // two stale releases for one claim reap it once
-      reaped.add(c.id);
-      each(c.id, c.ticket_id, () => this.finish(c.id, c.ticket_id, 'reaped', 'reaped:release-unacknowledged', 'alarm', { fence: { incarnation: c.incarnation } }));
-    }
-    // A fence also clears when its runner goes silent past its own timeout (R-BTN-19).
-    const lapsed = this.rows<{ id: number; ticket_id: string; runner_id: number }>(
-      `SELECT c.id, c.ticket_id, c.runner_id FROM claims c JOIN runners w ON w.id = c.runner_id
-       WHERE c.status = 'reaped' AND c.fence_pending = 1 AND w.last_seen_at + w.lease_timeout_ms <= ?`, now);
+    this.reapUnacknowledged(now, each);
+    // A deadline fence cannot be shortened by silence or extended by another heartbeat.
+    // Other reaps keep their existing clearance path until B-79.
+    const lapsed = this.rows<{ id: number; ticket_id: string; runner_id: number; fence_deadline: number | null }>(
+      `SELECT c.id, c.ticket_id, c.runner_id, c.fence_deadline FROM claims c JOIN runners w ON w.id = c.runner_id
+       WHERE c.status = 'reaped' AND c.fence_pending = 1
+         AND COALESCE(c.fence_deadline, w.last_seen_at + w.lease_timeout_ms) <= ?`, now);
     for (const c of lapsed) {
       this.exec('UPDATE claims SET fence_pending = 0 WHERE id = ?', c.id);
-      // R-BTN-178: the fence deadline releasing, the reaped claim's seats go with it.
       this.exec('DELETE FROM claim_seats WHERE claim_id = ?', c.id);
-      this.exec('UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.runner_id);
-      this.event('fence-cleared', 'alarm', { by: 'timeout' }, c.ticket_id, c.id);
+      if (c.fence_deadline == null) this.exec('UPDATE runners SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.runner_id);
+      this.event('fence-cleared', 'alarm', c.fence_deadline == null ? { by: 'timeout' } : { deadline: true }, c.ticket_id, c.id);
       this.c.blocks?.held(c.ticket_id, false);
     }
     // §7.1: a held history is accepted automatically 24 h after its first post.
@@ -2626,6 +2640,30 @@ export class Claims {
       this.event('snapshot-accepted', 'alarm', { sha: h.sha, held: true, by: 'auto-accept' }, null, null, h.repository_id);
     }
     return failed;
+  }
+
+  /** §9.5: give an unacknowledged leg-timeout priority over a general release for the same claim. */
+  // @model timeoutReap sha256:616d61236fa8
+  private reapUnacknowledged(now: number, each: (claimId: number, ticketId: string, fn: () => void) => void) {
+    const stale = this.rows<{ id: number; ticket_id: string; runner_id: number; incarnation: number; lease_timeout_ms: number; timeout: number }>(
+      `SELECT c.id, c.ticket_id, c.runner_id, w.incarnation, w.lease_timeout_ms,
+              COALESCE(json_extract(m.payload_json, '$.reason') = 'leg-timeout', 0) AS timeout FROM messages m
+       JOIN claims c ON c.runner_id = m.to_runner_id AND c.status = 'active' AND c.ticket_id = json_extract(m.payload_json, '$.ticket_id')
+       JOIN runners w ON w.id = c.runner_id
+       WHERE m.kind = 'release' AND m.status = 'delivered' AND m.delivered_at <= ?
+         AND (timeout = 1 OR m.delivered_at <= ?) ORDER BY timeout DESC, m.id`, now - LEG_TIMEOUT_ACK_MS, now - RELEASE_ACK_MS);
+    const seen = new Set<number>();
+    for (const c of stale) {
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      each(c.id, c.ticket_id, () => {
+        this.finish(c.id, c.ticket_id, 'reaped', c.timeout ? 'reaped:leg-timeout' : 'reaped:release-unacknowledged',
+          c.timeout ? 'alarm:leg-timeout' : 'alarm', { fence: { incarnation: c.incarnation, ...(c.timeout ? { deadline: now + c.lease_timeout_ms } : {}) } });
+        // None of this claim's releases may be delivered to a replacement claim on this runner.
+        this.exec(`UPDATE messages SET status = 'expired' WHERE to_runner_id = ? AND kind = 'release'
+                   AND status IN ('pending', 'delivered') AND json_extract(payload_json, '$.ticket_id') = ?`, c.runner_id, c.ticket_id);
+      });
+    }
   }
 
   /** R-BTN-67: when a bar with `release_holders` starts, every holder whose runner carries its tag
@@ -2782,4 +2820,3 @@ export class Claims {
     };
   }
 }
-

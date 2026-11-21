@@ -38,6 +38,29 @@ module regressions {
       .then(timeUp).expect(st.now == MAX_TIME and runnerClaim("w1").size() == 1)
   run timeUpWaitsForTheBoundTest = start.then(timeUp).fail()
 
+  run deadlineFinishInBudgetTest = start.then(claim("w1", "t1"))
+    .then(advanceRun("w1", "implement", NONE, 2)).then(tick).then(legFinished("w1"))
+    .then(tick).expect(c1.deadline == 5 and c1.releasePhase == "none")
+    .then(queueTimeout(1)).fail()
+
+  run deadlinePendingWithdrawnTest = start.then(claim("w1", "t1"))
+    .then(advanceRun("w1", "implement", NONE, 2)).then(tick).then(tick).then(queueTimeout(1))
+    .then(legFinished("w1")).expect(c1.deadline == -1 and c1.releasePhase == "none")
+    .then(deliverTimeout("w1")).fail()
+
+  run deadlineDeliveredRefusesAdvanceTest = start.then(claim("w1", "t1"))
+    .then(advanceRun("w1", "implement", NONE, 2)).then(tick).then(tick).then(queueTimeout(1))
+    .then(deliverTimeout("w1")).then(pushEvidence("w1", false))
+    .then(advance("w1", "review", NONE)).fail()
+
+  run deadlineReapAndFenceTest = start.then(claim("w1", "t1"))
+    .then(advanceRun("w1", "implement", NONE, 2)).then(tick).then(heartbeat("w1"))
+    .then(tick).then(queueTimeout(1)).then(deliverTimeout("w1"))
+    .then(tick).then(tick).then(timeoutReap(1))
+    .expect(c1.fencePending and not(ticketClaimable("t1")) and st.attempts.get("t1").get("implement") == 1)
+    .then(tick).then(heartbeat("w1")).then((TIMEOUT - 1).reps(_ => tick))
+    .then(fenceTimeout(1)).expect(not(c1.fencePending))
+
   // The fifth review's B3 (a claim hook as an await, R-BTN-52) and its fallback runs went with
   // R-BTN-98, which retired the hook: a claim is one transaction (R3-1254).
 
