@@ -178,7 +178,7 @@ export class BatonApi {
   board(body: Record<string, unknown>): Promise<Record<string, any>> {
     return this.call('POST', '/v1/sync/board', body);
   }
-  claim(body: { request_id: string; ticket_id?: string }): Promise<Record<string, any>> {
+  claim(body: { request_id: string; ticket_id?: string; legs?: string[] }): Promise<Record<string, any>> {
     return this.call('POST', '/v1/runner/claim', body);
   }
   advance(claimId: number, body: { reached?: string; leg: string; bars?: string[]; evidence?: string; outputs?: unknown[]; taken?: { choice: string; alternative: string; dead: string[] }[]; run_inputs?: { ticket?: { version: string; read_digest: string }; inputs: unknown[] }; head_sha?: string | null; session_url?: string; local_order?: { by: string; ran_at: string } }): Promise<Record<string, any>> {

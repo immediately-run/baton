@@ -26,4 +26,4 @@ await build({
   logLevel: 'warning',
 });
 
-export const { raiseMain } = await import(pathToFileURL(outfile).href);
+export const { legMain } = await import(pathToFileURL(outfile).href);

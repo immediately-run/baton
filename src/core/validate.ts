@@ -506,7 +506,7 @@ export function boundedJson(value: unknown, field: string, limit = 4096): string
 
 export interface ClaimPreference { ticket_id: string; leg?: string }
 
-export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null; prefer: ClaimPreference[] | null; rationale: string | null; retired: string[] } {
+export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null; prefer: ClaimPreference[] | null; legs?: string[]; rationale: string | null; retired: string[] } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
   const retired = new Set<string>();
@@ -523,11 +523,18 @@ export function checkClaim(body: unknown): { request_id: string; ticket_id: stri
       return { ticket_id: matches(TICKET_ID, `${at}.ticket_id`)(e.ticket_id), leg: optional(e.leg, matches(COURSE_ID, `${at}.leg`)) };
     });
   }
+  let legs: string[] | undefined;
+  if (b.legs !== undefined) {
+    if (!Array.isArray(b.legs) || !b.legs.length || b.legs.length > 50 || b.ticket_id != null || prefer) {
+      bad('legs', 'give 1 to 50 leg names on an unnamed claim');
+    }
+    legs = [...new Set((b.legs as unknown[]).map(matches(COURSE_ID, 'legs')))];
+  }
   const rationale = b.rationale === undefined ? null : boundedJson(b.rationale, 'rationale');
   return {
     request_id: matches(REQUEST_ID, 'request_id')(b.request_id),
     ticket_id: optional(b.ticket_id, matches(TICKET_ID, 'ticket_id')) ?? null,
-    prefer, rationale, retired: [...retired],
+    prefer, ...(legs ? { legs } : {}), rationale, retired: [...retired],
   };
 }
 

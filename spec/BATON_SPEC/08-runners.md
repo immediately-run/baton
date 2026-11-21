@@ -224,14 +224,22 @@ section that are not built are in [the proposal page](../proposals/checks-and-ex
     channel it arrived on; the leg's session finds its address in `BATON_SOCKET`. The interface
     names an address, not a transport: the transport is the executor's (R-BTN-107). It carries
     JSON lines, wrapped by the CLI's `baton leg` verbs, which act on that leg only and exit 2
-    "not inside a leg" elsewhere. The verbs built are `raise` (`baton leg raise`, R-BTN-160) and `done`,
-    the posted ending of a session that does not exit by itself (R-BTN-107), which has no CLI
-    command; anything else sent
-    on the channel is refused, a raw `advance` or `end` included. The other verbs are
-    in [the proposal page](../proposals/checks-and-executors.md). A script may return its result
-    directly instead.
+    "not inside a leg" elsewhere. `status` returns the leg, station, declared capabilities,
+    deadline and whether it can refresh. `output <name> --uri <uri> [--digest <digest>]` or
+    `output <name> --value <json>` stages or replaces the named output using its declared schema.
+    `done --reached <station> [--next <leg>]`, `suspend --reached <station> [--next <leg>]` and
+    `release --reason <reason>` report one ending; a valid ending consumes the channel's result
+    slot. `raise` reports a condition (R-BTN-160). Raw `advance` and `end` are not channel verbs.
+    A script may return its result directly instead. Further verbs are in
+    [the proposal page](../proposals/checks-and-executors.md).
+  - **A bounded run.** `baton runner start --legs <leg,…> [--max-legs <n>] [--until <instant>]`
+    claims and chains into only the named legs. `legs` on an unnamed claim narrows its normal
+    selection to the listed queued leg names atomically (one to fifty names). A runner starts at
+    most `n` legs per claim (default 8), and none at or after `until`. A move outside these bounds
+    suspends at `reached` with the hand-off and the finished leg's outputs. These bounds are the
+    runner's discipline, not a Baton gate; local queue orders do not supersede a leg list.
   - **The session never talks to Baton**; the runner makes every Baton call.
-  - **The runner checks each move** as it checks a script's result: `reached` an outcome of the
+  - **The runner checks each channel move** using the same graph checks as for a script's result: `reached` an outcome of the
     leg, `next` a leg leaving it, each output valid against its schema, every entry requirement
     of `reached` met (R-BTN-109). A failing move is answered on the channel with the reason and
     may be corrected until the leg's deadline; nothing reaches Baton until it passes. Then

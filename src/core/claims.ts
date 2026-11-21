@@ -650,7 +650,7 @@ export class Claims {
    * refuses, and one reading serves the recommendation and a refusal's `stale-skills` check
    * alike (B-237).
    */
-  private referenceCandidates(w: RunnerFacts, page = 0, rule9 = true): Candidate[] {
+  private referenceCandidates(w: RunnerFacts, page = 0, rule9 = true, only?: readonly string[]): Candidate[] {
     const rows = this.named<Candidate>(
       `SELECT id, repository_id, course_id, weight, expedite, to_end, ready_since, n FROM (
          SELECT w.id, w.repository_id, w.course_id, p.weight, s.to_end, a.ready_since,
@@ -663,6 +663,7 @@ export class Claims {
          JOIN ticket_stations s ON s.ticket_id = w.id
          JOIN ticket_next_legs a ON a.ticket_id = w.id AND a.leg = s.next_leg AND a.state = 'ready'          -- rule 1
          WHERE p.cutover_at IS NOT NULL AND p.retired_at IS NULL
+           AND (:legs IS NULL OR a.leg IN (SELECT value FROM json_each(:legs)))
            AND NOT EXISTS (SELECT 1 FROM ticket_bars b JOIN runner_tags t ON t.tag = b.tag
                            WHERE b.ticket_id = w.id AND b.leg = a.leg AND t.runner_id = :runner)                -- rule 8's posted bars
            AND json_extract(:heads, '$."' || w.repository_id || '"')                                         -- (each head's observation, read once: B-237)
@@ -725,7 +726,7 @@ export class Claims {
         // capabilities only. Rule 4 matches them by name against the declared holdings the grant
         // admits (R-BTN-174); rule 6 is retired, so `human-operator` is the one literal both sides
         // compare. A grant stores capabilities only, so no role is bound.
-        granted: w.grants ? 1 : 0, credential: w.credential_id });
+        legs: only ? JSON.stringify(only) : null, granted: w.grants ? 1 : 0, credential: w.credential_id });
     // Rule 9, per group: a course the runner declares at its registered min_runner_version or
     // above (an unregistered course fits no runner) — read once, not once a ticket.
     const min = new Map(this.rows<{ repository_id: string; id: string; v: number }>('SELECT repository_id, id, min_runner_version AS v FROM courses')
@@ -741,8 +742,8 @@ export class Claims {
    * The projection contains runner-independent facts; all runner gates remain authoritative.
    * JSON parameters below are small request-local sets, expanded once, never stored documents
    * expanded for every candidate. Page cursors live only for this synchronous decision. */
-  candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null, skipExpedited?: ReadonlySet<string>): Candidate[] {
-    if (this.reference) return this.referenceCandidates(w, page, rule9);
+  candidates(w: RunnerFacts, page = 0, rule9 = true, wanted: string[] | null = null, skipExpedited?: ReadonlySet<string>, only?: readonly string[]): Candidate[] {
+    if (this.reference) return this.referenceCandidates(w, page, rule9, only);
     const groups = this.rows<{ repository_id: string; course_id: string; weight: number; min_runner_version: number; observation: number; tiers: string }>(
       `SELECT k.repository_id, k.id AS course_id, p.weight, k.min_runner_version, h.observation, p.tiers
        FROM courses k JOIN repositories p ON p.id = k.repository_id JOIN board_head h ON h.repository_id = p.id
@@ -765,7 +766,8 @@ export class Claims {
         AND NOT EXISTS (SELECT 1 FROM course_leg_capabilities c
           WHERE c.repository_id = l.repository_id AND c.course_id = l.course_id AND c.leg = l.leg
           AND c.capability NOT IN (SELECT value FROM json_each(?)))`, g.repository_id, g.course_id, caps).map((l) => l.leg);
-      if (!legs.length) continue;
+      const allowed = only ? legs.filter((leg) => only.includes(leg)) : legs;
+      if (!allowed.length) continue;
       const prior = page > 0 ? this.cache?.candidatePages.get(key) : undefined;
       if (prior && prior.count < page * 50) continue;
       const after = prior ? `AND (-q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id) > (?, ?, ?, ?, ?, ?)` : '';
@@ -784,7 +786,7 @@ export class Claims {
          ORDER BY -q.expedite, q.to_end, q.rank IS NULL, COALESCE(q.rank, 0), COALESCE(q.ready_since, -1), q.ticket_id
          LIMIT 50${page > 0 && !prior ? ' OFFSET ?' : ''}`,
         g.repository_id, g.course_id, g.observation, this.c.now(), tiers.length - 1, ceiling,
-        JSON.stringify(legs), w.id, caps, ...(prior?.cursor ?? []), ...(page > 0 && !prior ? [page * 50] : []));
+        JSON.stringify(allowed), w.id, caps, ...(prior?.cursor ?? []), ...(page > 0 && !prior ? [page * 50] : []));
       const last = found.at(-1);
       if (last) this.cache?.candidatePages.set(key, {
         cursor: [-last.expedite, last.to_end, Number(last.rank == null), last.rank ?? 0, last.ready_since ?? -1, last.id],
@@ -819,7 +821,7 @@ export class Claims {
    * `limit`; the answer is the one gating every candidate gives. `page0` is the first reading,
    * every group's, rule 9's included, for a refusal's `stale-skills` check.
    */
-  private recommend(w: RunnerFacts, limit: number, out?: { page0?: Candidate[] }, all = false): Recommendation[] {
+  private recommend(w: RunnerFacts, limit: number, out?: { page0?: Candidate[] }, all = false, only?: readonly string[]): Recommendation[] {
     const groups = new Map<string, { rows: (Candidate & { item: ItemFacts })[]; done: boolean; passed: [number, number]; cut: boolean }>();
     // B-127 (fail closed, unpenalised): no ticket of a repository whose required control has no
     // signed version is recommended — see unsignedControlBlocked.
@@ -833,14 +835,14 @@ export class Claims {
       if (wanted && !wanted.length) break;
       let read: Candidate[];
       if (page === 0 && lazy) {
-        const all = this.candidates(w, 0, false);
+        const all = this.candidates(w, 0, false, null, undefined, only);
         if (out) out.page0 = all;
         read = all.filter((r) => r.r9);
       } else {
         // With the lane full, expedited rows are the first sorted run. Once it cannot
         // contribute more to the merged prefix, page only the unexpedited run.
         const skipExpedited = all && full && lazy ? new Set(wanted?.filter((k) => groups.get(k)!.passed[1] >= limit)) : undefined;
-        read = this.candidates(w, page, false, wanted, skipExpedited);
+        read = this.candidates(w, page, false, wanted, skipExpedited, only);
       }
       const counts = new Map<string, number>();
       for (const c of read) {
@@ -998,7 +1000,7 @@ export class Claims {
   }
 
   /** A named or preferred ticket goes through the same gate as the default offer. */
-  private decide(w: RunnerFacts, wanted: string | null, prefer: ClaimPreference[] | null = null): { item: ItemFacts; advice: Record<string, unknown> | null } {
+  private decide(w: RunnerFacts, wanted: string | null, prefer: ClaimPreference[] | null = null, only?: readonly string[]): { item: ItemFacts; advice: Record<string, unknown> | null } {
     if (prefer) {
       for (const { ticket_id } of prefer) {
         if ((!w.grants || w.grants[repositoryOf(ticket_id)]) && !this.item(ticket_id)) {
@@ -1018,7 +1020,7 @@ export class Claims {
     }
     if (wanted) return this.decideNamed(w, wanted);
     const read: { page0?: Candidate[] } = {};
-    const recs = this.recommend(w, 50, read);
+    const recs = this.recommend(w, 50, read, false, only);
     // §12.8 (B-145): a recommended ticket is offered only where the floor rule lets it be — the
     // first one that is not on a stopped repository.
     const first = recs.find((r) => this.canOffer(r.ticket_id, w))
@@ -1032,7 +1034,7 @@ export class Claims {
     // courses the runner declares count; a runner declaring no course is stale on every course.
     // B-237: the recommendation's own first reading, not a second query — only its rule-9
     // groups can refuse by rule 9 (the gate's rule 9 reads what the query's does).
-    const page0 = this.reference ? this.candidates(w, 0, false) : (read.page0 ?? []).filter((c) => !c.r9);
+    const page0 = this.reference ? this.candidates(w, 0, false, null, undefined, only) : (read.page0 ?? []).filter((c) => !c.r9);
     if (page0.some((c) => {
       const item = this.item(c.id);
       return !!item?.station?.next_leg && (!w.courses.length || w.courses.some((k) => k.repository === item.repository && k.course === item.course))
@@ -1224,11 +1226,11 @@ export class Claims {
 
   /** `decide` with the per-request reads cached, and a claim with no ticket named that finds
    *  nothing noted as idle (B-237). */
-  private decideNoting(w: RunnerFacts, wanted: string | null, version: number, prefer: ClaimPreference[] | null = null): { item: ItemFacts; advice: Record<string, unknown> | null } {
+  private decideNoting(w: RunnerFacts, wanted: string | null, version: number, prefer: ClaimPreference[] | null = null, only?: readonly string[]): { item: ItemFacts; advice: Record<string, unknown> | null } {
     try {
-      return this.cached(() => this.decide(w, wanted, prefer));
+      return this.cached(() => this.decide(w, wanted, prefer, only));
     } catch (e) {
-      if (!wanted && !prefer && e instanceof BatonError && (e.code === 'no-eligible-ticket' || e.code === 'stale-skills')) this.idleNote(w.id, version, e);
+      if (!wanted && !prefer && !only && e instanceof BatonError && (e.code === 'no-eligible-ticket' || e.code === 'stale-skills')) this.idleNote(w.id, version, e);
       throw e;
     }
   }
@@ -1267,11 +1269,11 @@ export class Claims {
     // in `decide` — never one claim per runner.
     this.refuseFull(this.runner(runnerId), null);
     // B-237 (R-BTN-196): an idle runner asking again with nothing changed gets the same refusal.
-    const idle = b.ticket_id || b.prefer ? null : this.idleHit(runnerId);
+    const idle = b.ticket_id || b.prefer || b.legs ? null : this.idleHit(runnerId);
     if (idle?.refusal) throw idle.refusal;
     const version = schedulingVersion(this.c.store);
     const w = this.runner(runnerId);
-    const { item, advice } = this.decideNoting(w, b.ticket_id, version, b.prefer);
+    const { item, advice } = this.decideNoting(w, b.ticket_id, version, b.prefer, b.legs);
     const rationale = b.rationale === null ? undefined : JSON.parse(b.rationale) as unknown;
     const savedAdvice = rationale === undefined ? advice : { ...advice, rationale };
     const st = item.station!;

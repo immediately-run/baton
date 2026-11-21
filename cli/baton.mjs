@@ -1237,11 +1237,11 @@ export async function main(argv) {
     const { homeMain } = await import('../scripts/baton-cli.mjs');
     return homeMain(argv.slice(1));
   }
-  if (argv[0] === 'run') {
+  if (argv[0] === 'run' || (argv[0] === 'runner' && argv[1] === 'start')) {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.
     const { runMain } = await import('../scripts/baton-run.mjs');
-    return runMain(argv.slice(1));
+    return runMain(argv.slice(argv[0] === 'run' ? 1 : 2));
   }
   if (argv[0] === 'queue') {
     // R-BTN-202 (B-248): this host's local work queue for the runners on one home — local
@@ -1255,11 +1255,9 @@ export async function main(argv) {
     const { replayMain } = await import('../scripts/baton-run.mjs');
     return replayMain(argv.slice(2));
   }
-  if (argv[0] === 'leg' && argv[1] === 'raise') {
-    // R-BTN-106, R-BTN-160, R-BTN-195 (B-234): raise a condition from the leg this command
-    // runs in, on its channel — the runner checks it, answers it, and reports what passes.
-    const { raiseMain } = await import('../scripts/baton-leg.mjs');
-    return raiseMain(argv.slice(2));
+  if (argv[0] === 'leg' && ['raise', 'status', 'output', 'done', 'suspend', 'release'].includes(argv[1])) {
+    const { legMain } = await import('../scripts/baton-leg.mjs');
+    return legMain(argv.slice(1));
   }
   if (argv[0] === 'repo' && (argv[1] === 'sync' || argv[1] === 'init' || argv[1] === 'migrate-markers')) {
     // §2f, R-BTN-127's names: the defaults are TypeScript under src/defaults, bundled the same way.
