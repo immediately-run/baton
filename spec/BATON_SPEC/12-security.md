@@ -346,7 +346,7 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     | `outbox.source` — `{deliverers}`: which grant roles may deliver the source kinds, from `runner` alone | `{deliverers: [runner]}` | `{deliverers: []}` | | Baton | R-BTN-171 |
     | `inputs.board` — who may post the board, from `sync-key`, `ci-identity`, `machine` | all three | `[sync-key, ci-identity]` | | Baton | R-BTN-93, R-BTN-102, R-BTN-187 |
     | `repos.unlisted` — whether a home that lists no `code_repos` reaches its tickets' `repos:` entries by name: `by-name` or `none`; a stored version naming none reads as `by-name` | `by-name` | `none` | | Baton, the sync | R-BTN-140 |
-    | `attestations` — `{<type>: writers}`: whose attestations about work count; an absent type admits no writer | each `std:` type's standard writer (R-BTN-181), `runner` for the holder's `std:arrival@1` and a deliverer's `std:effect@1`, `sync` for the `std:git.*` types, `std:arrival@1` and `std:decision@1` (R-BTN-191); `std:checks@1` absent until the owner names a check-runner's key (R-BTN-114) | as `cooperative`, except that `std:arrival@1` admits the fact reader's `service:` key once the owner names it (R-BTN-192) and never `sync`, and `std:decision@1` admits `human` alone | | Baton, trusted runners | R-BTN-181 |
+    | `attestations` — `{<type>: writers}`: whose attestations about work count; an absent type admits no writer, except `std:evidence@1`, which a policy stored before it existed admits from `sync` (R-BTN-203) | each `std:` type's standard writer (R-BTN-181), `runner` for the holder's `std:arrival@1` and a deliverer's `std:effect@1`, `sync` for the `std:git.*` types, `std:arrival@1`, `std:evidence@1` and `std:decision@1` (R-BTN-191); `std:checks@1` absent until the owner names a check-runner's key (R-BTN-114) | as `cooperative`, except that `std:arrival@1` admits the fact reader's `service:` key once the owner names it (R-BTN-192) and never `sync`, and `std:decision@1` admits `human` alone | | Baton, trusted runners | R-BTN-181 |
     | `readings` — `{<resource> \| "*": {writers}}`: whose readings count for this repository; `*` covers every resource not listed; an absent entry admits no writer | `{"*": {writers: every writer R-BTN-76 lets report}}` | as `cooperative` | | Baton | R-BTN-76, R-BTN-181 |
     | `floors` — the guarantees no change to this policy may break | no value | no value | no value | Baton | R-BTN-189 |
 
@@ -539,7 +539,9 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     entry admitting `sync` is an answer in git, one admitting only `human` or `owner` is an
     answer in Baton (R-BTN-116). An attestation of a type Baton does not read is kept as evidence
     and recorded `arrival-unapplied` (R-BTN-39).
-  - The sync's other types, the holder's `std:arrival@1` and a deliverer's `std:effect@1` are
+  - The sync's `std:arrival@1` for a fact leg and its `std:evidence@1` are R-BTN-203's, admitted
+    only on a board a sync key or the CI identity posted. Its other
+    types, the holder's `std:arrival@1` and a deliverer's `std:effect@1` are
     [proposed](../proposals/security.md).
 - **R-BTN-192 (the fact reader).** Where the policy admits no `sync` writer for `std:arrival@1`,
   a fact leg's arrival comes from the fact reader: a trusted runner whose `service:` key the

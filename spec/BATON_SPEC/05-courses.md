@@ -78,6 +78,8 @@ Designs for this section that are not built are on the proposal page
   | `from` | leg | the stations it leaves | R-BTN-69 |
   | `to` | leg | its outcome station, or a list of them | R-BTN-83 |
   | `kind` | leg | absent: run by a runner; `person`: a person answers | R-BTN-116 |
+  | `reconciles` | leg | `{to: {<station>: <next leg> \| null}}`: a reconcile leg, run by a runner, which Baton queues when the ticket has evidence of work done outside Baton (R-BTN-39, R-BTN-203). It declares no `to`: its outcomes are each of its `from` (concluding `unchanged`, with the displaced leg next) and each station of `reconciles.to`, with that entry's next leg (`null` at an end). It needs `max_runs`; at most one reconcile leg leaves a station; it is never `start_leg` and never a `next`. Not on a fact or `kind: person` leg | R-BTN-39, R-BTN-203 |
+  | `arrives` | leg | `{fact: <kind>, verdict?, next?}`, a fact leg: no claim runs it; it arrives when the sync attests its fact (R-BTN-203); exactly one outcome; `verdict` (`approve` or `changes`) narrows a `pr-verdict`; `next` is a leg leaving its outcome (none at an end), or on a `pr-verdict` leg `{approve, changes}`, one per verdict. Its arrival is a run of the fact leg itself (R-BTN-63). A fact leg is never `start_leg`, never another leg's `next`, and never chosen as a default next (R-BTN-39). Not on a `kind: person` leg | R-BTN-39, R-BTN-203 |
   | `asks`, `expires` | leg | for `kind: person`: who answers, and when and where the leg arrives unanswered | R-BTN-116 |
   | `max_runs` | leg | how often one ticket may run it without a person | R-BTN-63 |
   | `max_queue` | leg | queue depth that raises a warning | R-BTN-79 |
@@ -310,6 +312,7 @@ Designs for this section that are not built are on the proposal page
   | `std:effect@1` | `{kind, ref?, at}` |
   | `std:decision@1` | `{id, leg, option, reached, ref?, answered_by?, commit?}`, a person's answer (R-BTN-116) |
   | `std:arrival@1` | `{leg, reached, next?, ref?}`: a leg's arrival at one of its outcomes (R-BTN-39, R-BTN-191) |
+  | `std:evidence@1` | `{ref, kind}`: work a ticket may have had done outside Baton, `kind` `merged-early` or `mention` (R-BTN-203); Baton also keeps a refused arrival as `fact` (R-BTN-39) |
   | `std:git.readiness@1`, `std:git.implied@1`, `std:git.output@1`, `std:git.evidence@1` | the sync's attestations (R-BTN-191) |
   | `std:api-capacity@1` | `{window_s, remaining_permille, resets_at_min?}`, integers: a quota's window, what remains of it in ‰, and its reset in epoch minutes. The library's one open schema, so a resource's schema refines it by adding fields |
 
