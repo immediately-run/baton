@@ -6,17 +6,11 @@
 // `baton.unprotected`, breaks `no-runner-lands`, releases the untrusted runner's claim
 // `released:floor`, refuses every claim `floor-broken` until a matching report (one restoring
 // the forge closes it at once; a reading that changes while matching raises it again), and
-// stops trusted runners; a signed read replayed for another repository fails its signature,
-// and one past `valid_until` is stale; a trusted runner whose policy pin differs — the policy
-// document's hash or the floors' — acts on nothing, `baton.policy-unpinned` open until its
-// pins match. The signature's verification side (a trusted runner pinned to the tenant key)
-// is B-140's build; this scenario verifies the signature itself, as its runner would, against
-// the key it configured as BATON_SIGNING_KEY. Runs on both hosts.
+// stops trusted runners. Policy reads are unsigned and runner pins no longer gate claims.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { call as hostCall } from '#host';
-import { cutover, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, setPolicySigningKey, syncCall, syncToken, tick, withCore } from '../helpers';
+import { cutover, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, syncCall, syncToken, tick, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
-import { canonicalJson } from '../../src/core/policy';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-30T12:00:00Z');
@@ -26,8 +20,6 @@ let human: TestKey;
 let breakGlass: TestKey;
 let runnerKey: TestKey;
 let checkerKey: TestKey;
-/** The tenant's Ed25519 key this test configured (BATON_SIGNING_KEY) — what a pinned reader holds. */
-let signingJwk: JsonWebKey;
 const CHECKER_SECRET = 'checker-secret';
 
 async function as(key: TestKey, path: string, body?: unknown, method?: string) {
@@ -36,7 +28,7 @@ async function as(key: TestKey, path: string, body?: unknown, method?: string) {
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 
-/** The runner's heartbeat, with its policy pins. */
+/** The runner's heartbeat. */
 async function runnerBeat(secret: string | null, over: Record<string, unknown> = {}) {
   return runnerBeatAs('runner', 'runner-secret', over);
 }
@@ -136,7 +128,6 @@ beforeEach(async () => {
   checkerKey = await makeKey('ssh-ed25519', 'checker');
   await setAdminKeys(admin);
   await setHumanKeys(breakGlass);
-  signingJwk = await setPolicySigningKey();
   runnerSessions.clear();
   checkerSessions.clear();
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', forge: 'github', remote: 'ssh://git@github.com/immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', sync_keys: [], owner_keys: [owner.publicKey] })).status).toBe(200);
@@ -265,63 +256,32 @@ describe('S-BTN-190 guarantees and floors', () => {
     expect((await claimAs('runner-2', 'runner-secret-2')).json.ticket_id).toBe('ops:R3-9001');
   });
 
-  it('a signed read replayed for another repository fails its signature; one past valid_until is stale', async () => {
+  it('returns the same unsigned policy to authorized readers', async () => {
     await protectedSigned();
-    const read = await as(owner, '/v1/repositories/ops/policy');
+    expect((await keyCall(admin, '/v1/admin/settings', { check_app_id: '12345' }, 'PUT')).status).toBe(200);
+    const path = '/v1/repositories/ops/policy';
+    const read = await as(owner, path);
     expect(read.status).toBe(200);
-    expect(await verifyRead(read.json)).toBe(true);
-    // Replayed for another repository: the signature no longer covers the fields.
-    expect(await verifyRead({ ...read.json, repository: 'docs' })).toBe(false);
-    expect(await verifyRead({ ...read.json, policy: { ...read.json.policy, human_key: 'any' } })).toBe(false);
-    // Past valid_until: the read is stale, whatever its signature.
-    expect(read.json.valid_until).toBeGreaterThan(T0);
-    const stale = { ...read.json, at: T0 - 20 * 60_000, valid_until: T0 - 10 * 60_000 };
-    expect(stale.valid_until < T0).toBe(true);
-    expect(await verifyRead(stale)).toBe(false);
+    expect(await as(runnerKey, path)).toEqual(read);
+    expect(Object.keys(read.json).sort()).toEqual([
+      'at', 'check_app_id', 'floors', 'guarantees', 'hash', 'policy', 'repository', 'valid_until', 'version',
+    ]);
+    expect(read.json.check_app_id).toBe('12345');
+    // Published CLI 0.1.3/0.1.4 call this unconditionally after printing the JSON.
+    expect(new Date(read.json.valid_until).toISOString()).toBe(new Date(T0).toISOString());
+    expect(read.json.valid_until).toBe(read.json.at);
   });
 
-  it('a trusted runner whose pin differs acts on nothing, baton.policy-unpinned open until its pins match — the floors included', async () => {
+  it('ignores a legacy runner policy pin without gating claims or opening a condition', async () => {
     await protectedSigned();
-    const { hash } = (await rows<{ hash: string }>('SELECT hash FROM repository_policies WHERE repository_id = ? ORDER BY version DESC LIMIT 1', 'ops'))[0];
-    // R-BTN-189 names trusted runners (round 1, finding 18): mark the runner's grant trusted —
-    // B-147's trust routes are not built, so the scenario writes the row as its approver would.
     await rows('UPDATE runner_grants SET trust_level = ?, trust_domain = ? WHERE credential_id = ? AND repository_id = ?', 'trusted', 'runner-host', runnerKey.fingerprint, 'ops');
-    // A pin of the wrong hash: stored, the condition opens, and the runner acts on nothing.
-    await runnerBeat('runner-secret', { policy_pins: [{ repository: 'ops', hash: 'e'.repeat(64) }] });
-    expect((await rows(`SELECT count(*) AS n FROM policy_conditions WHERE repository_id = 'ops' AND type = 'baton.policy-unpinned' AND closed_at IS NULL`))[0].n).toBe(1);
-    const refused = await claimAsRunner();
-    expect(refused.status).toBe(409);
-    expect(refused.json.rule_code).toBe('policy-unpinned');
-    // A pin of the right policy hash but the wrong FLOORS hash (round 1, finding 8: a floor
-    // change unpins a trusted runner that pins its floors) keeps it open.
-    await runnerBeat('runner-secret', { policy_pins: [{ repository: 'ops', hash, floors_hash: 'd'.repeat(64) }] });
-    expect((await rows(`SELECT count(*) AS n FROM policy_conditions WHERE repository_id = 'ops' AND type = 'baton.policy-unpinned' AND closed_at IS NULL`))[0].n).toBe(1);
-    expect((await claimAsRunner()).json.rule_code).toBe('policy-unpinned');
-    // A pin matching both closes the condition and the runner acts again. The heartbeat's own
-    // policy facts name the floors hash, as they name the policy's.
-    const beat = await runnerBeat('runner-secret');
-    await runnerBeat('runner-secret', { policy_pins: [{ repository: 'ops', hash, floors_hash: beat.json.policies.ops.floors_hash }] });
-    expect((await rows(`SELECT count(*) AS n FROM policy_conditions WHERE repository_id = 'ops' AND type = 'baton.policy-unpinned' AND closed_at IS NULL`))[0].n).toBe(0);
+    const beat = await runnerBeat('runner-secret', { policy_pins: [{ repository: 'ops', hash: 'e'.repeat(64) }] });
+    expect(beat.status).toBe(200);
+    expect(beat.json).not.toHaveProperty('policies');
+    expect(await rows(`SELECT * FROM policy_conditions WHERE type = 'baton.policy-unpinned'`)).toEqual([]);
     await refreshOps();
     const claim = await claimAsRunner();
-    expect(claim.json.ticket_id).toBe('ops:R3-9001');
-    expect(claim.json.policy_hash).toBe(hash);
-  });
-
-  it('a pin left by a demoted grant drives nothing — the trust that made it matter is gone (round 2, N1)', async () => {
-    await protectedSigned();
-    const { hash } = (await rows<{ hash: string }>('SELECT hash FROM repository_policies WHERE repository_id = ? ORDER BY version DESC LIMIT 1', 'ops'))[0];
-    // Trusted, pinning the wrong hash: stored, open, refusing.
-    await rows('UPDATE runner_grants SET trust_level = ?, trust_domain = ? WHERE credential_id = ? AND repository_id = ?', 'trusted', 'runner-host', runnerKey.fingerprint, 'ops');
-    await runnerBeat('runner-secret', { policy_pins: [{ repository: 'ops', hash: 'e'.repeat(64) }] });
-    expect((await rows(`SELECT count(*) AS n FROM policy_conditions WHERE repository_id = 'ops' AND type = 'baton.policy-unpinned' AND closed_at IS NULL`))[0].n).toBe(1);
-    expect((await claimAsRunner()).json.rule_code).toBe('policy-unpinned');
-    // The demotion — the cooperative → protected trust clearing, or B-147's later route: the
-    // stored row stays, but it no longer refuses the runner's claims, and nothing is left that
-    // only a re-trusted grant could close.
-    await rows('UPDATE runner_grants SET trust_level = ? WHERE credential_id = ? AND repository_id = ?', 'untrusted', runnerKey.fingerprint, 'ops');
-    await refreshOps();
-    const claim = await claimAsRunner();
+    expect(claim.status).toBe(200);
     expect(claim.json.ticket_id).toBe('ops:R3-9001');
   });
 });
@@ -339,16 +299,4 @@ async function claimAs(session: string, secret: string) {
   }));
   void session;
   return { status: res.status, json: (await res.json()) as Record<string, any> };
-}
-
-/** Verify a signed policy read (R-BTN-189): Ed25519 by the tenant's key over `baton-policy@1\n`
- *  and the canonical JSON of the other fields, and not yet past valid_until. The key is the one
- *  this test configured (BATON_SIGNING_KEY) — a reader's pinned tenant key, never one the read
- *  itself carries. */
-async function verifyRead(read: Record<string, any>): Promise<boolean> {
-  const pub = await crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: signingJwk.x }, { name: 'Ed25519' }, false, ['verify']);
-  const { repository, tenant, version, hash, policy, guarantees, guarantees_hash, floors, floors_hash, at, valid_until, signature } = read;
-  const sig = Uint8Array.from(atob(signature), (c) => c.charCodeAt(0));
-  if (!(await crypto.subtle.verify({ name: 'Ed25519' }, pub, sig, new TextEncoder().encode(`baton-policy@1\n${canonicalJson({ repository, tenant, version, hash, policy, guarantees, guarantees_hash, floors, floors_hash, at, valid_until })}`)))) return false;
-  return valid_until > (await withCore((c) => c.now()));
 }

@@ -38,8 +38,7 @@ is `active` until it ends `completed`, `released` or `reaped`.
     `course_version`, `station`, `legs` (the queued leg, R-BTN-83), `next`, `path`, `nonce` (6
     hex, public: written in markers, R-BTN-17), `snapshot_sha`, `default_branch` (R-BTN-143),
     the ticket's `version`, `ticket_source?` and `last_written_by?` (R-BTN-194),
-    `brief?` (R-BTN-194), `scope` (§12.9), the policy's `policy_hash`, `guarantees_hash` and
-    `floors_hash` (R-BTN-189), `leg_state?` (R-BTN-188), `handoff_url?`, `previous_attempts`
+    `brief?` (R-BTN-194), `scope` (§12.9), `leg_state?` (R-BTN-188), `handoff_url?`, `previous_attempts`
     (R-BTN-24), and on a reconcile leg `evidence: [{ref, kind}]` and `displaced` (R-BTN-39).
   - The runner then reads the ticket from git and re-verifies it (R-BTN-34, R-BTN-5).
 - **One claim runs a run of legs** (unnumbered). A claim runs as many legs as it can. Each leg

@@ -9,7 +9,7 @@
 // `unauthenticated`; a `GET` of the route is not served; and `GET /v1/actions` lists
 // `ui.logout` among the session's entries. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { adminSession, call, ORIGIN, rows, sessionCall, setAdminKeys, setClock, setPolicySigningKey } from '../helpers';
+import { adminSession, call, ORIGIN, rows, sessionCall, setAdminKeys, setClock } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-20T12:00:00Z');
@@ -23,7 +23,6 @@ beforeEach(async () => {
   await setClock(T0);
   admin = await makeKey('ssh-ed25519', 'admin');
   await setAdminKeys(admin);
-  await setPolicySigningKey();
   cookie = await adminSession(admin);
 });
 
