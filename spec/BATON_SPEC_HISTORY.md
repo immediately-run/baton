@@ -18,8 +18,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
-- **2026-11-21 — Work done outside Baton (R-BTN-203, R-BTN-39, R-BTN-69, R-BTN-96, R-BTN-131, S-BTN-309).**
-  Rules changed: R-BTN-39, R-BTN-69, R-BTN-74, R-BTN-96, R-BTN-131, R-BTN-188, R-BTN-191; R-BTN-203
+- **2026-11-21 — Work done outside Baton, modelled in each course (R-BTN-203, R-BTN-39, R-BTN-69, R-BTN-96, S-BTN-309).**
+  Rules changed: R-BTN-39, R-BTN-69, R-BTN-96, R-BTN-188, R-BTN-191; R-BTN-203
   new. The owner, 2026-11-21: "baton *must* work well in a setup where only a portion of the
   organization is using baton"; outside work is found by the sync's code, not the server; "the
   codegen leg is not the only leg which may be completed outside baton"; and weak evidence starts a
@@ -33,9 +33,15 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   counting as reviewers. The owner then chose (2026-11-21): hand acts as separate fact legs the
   course file places (the courses proposal's design, over `arrives` on runner legs); mentions
   filtered rather than an explicit trailer; and a hand merge closing only where the course allows.
-  So Baton keeps the evidence (`ticket_evidence`) and the position it leaves (`reconcile_holds`),
-  enters and leaves the reconciliation course itself, and `returned` is no end. Rejected: the
-  server inferring closure from forge events (against R-BTN-35); closing on any mention.
+  The owner then went further (2026-11-21): "Baton's whole strategy is explicitly modeling
+  processes that have been traditionally implicit via the coarse graph. This only works if
+  transitions between stations that happen outside Baton are also modeled. So the reconciler legs
+  need to be part of the course." So there is no reconciliation course: each course carries a
+  reconcile leg (`reconciles: true`) whose edges say where evidence may move a ticket, which Baton
+  queues in place of the queued leg while evidence waits (`ticket_evidence`,
+  `reconcile_displaced`). Rejected: a separate reconciliation course entered and left by a
+  position Baton parks (a move outside the graph); the server inferring closure from forge events
+  (against R-BTN-35); closing on any mention.
 
 - **2026-11-20 — A session's reads outside `/v1/ui/*`, the strip's ready count, V1's paged lists (R-BTN-16, R-BTN-155, S-BTN-243, S-BTN-254).**
   Rules changed: R-BTN-16, R-BTN-155.

@@ -39,6 +39,14 @@ station** finishes the ticket.
 **Leg.** One edge of the course (`implement`, `review`, `merge`). A leg is **ready** or
 **waiting** on something named.
 
+**Fact leg.** A leg no runner runs, for a hand act done outside Baton (`merged-by-hand`): it
+arrives when the sync attests its forge fact, along the edge the course file gives it (R-BTN-203).
+
+**Reconcile leg, evidence.** **Evidence** is a sign the sync found that a ticket may have moved
+outside Baton in a way no fact leg takes (a PR merged early, a commit naming it). A course's
+**reconcile leg** (`reconciles: true`) is the runner leg Baton queues to weigh it; its edges are
+every station the evidence may show the ticket reached (R-BTN-39, R-BTN-203).
+
 **Path.** The legs a ticket has run and the stations they reached, as Baton recorded them: its
 **course history**, which git never writes.
 

@@ -78,6 +78,7 @@ Designs for this section that are not built are on the proposal page
   | `from` | leg | the stations it leaves | R-BTN-69 |
   | `to` | leg | its outcome station, or a list of them | R-BTN-83 |
   | `kind` | leg | absent: run by a runner; `person`: a person answers | R-BTN-116 |
+  | `reconciles` | leg | `true`: a reconcile leg, run by a runner, which Baton queues when the ticket has evidence of work done outside Baton (R-BTN-39, R-BTN-203). Its `from` are the stations it may weigh evidence at, its `to` every station it may conclude the ticket reached, each of its `from` among them. Not on a fact or `kind: person` leg | R-BTN-39, R-BTN-203 |
   | `arrives` | leg | `{fact: <kind>, next?}`, a fact leg: no claim runs it; it arrives when the sync attests its fact (R-BTN-203); exactly one outcome; `next` is the leg queued after it, a leg id or, for `pr-verdict`, `{approve, changes}` of leg ids. Not on a `kind: person` leg | R-BTN-39, R-BTN-203 |
   | `asks`, `expires` | leg | for `kind: person`: who answers, and when and where the leg arrives unanswered | R-BTN-116 |
   | `max_runs` | leg | how often one ticket may run it without a person | R-BTN-63 |
@@ -473,8 +474,7 @@ Designs for this section that are not built are on the proposal page
 
 - **R-BTN-131 (the standard courses).** A standard course is one the baton repository ships
   with the CLI, under `src/defaults/`: `create-pr` (the default), `review-pr`, `bug-report`,
-  `draft-ticket`, `decision`, `build-app`, `create-spec`, `spec-to-tickets` and `reconcile`
-  (R-BTN-203). A repository
+  `draft-ticket`, `decision`, `build-app`, `create-spec` and `spec-to-tickets`. A repository
   scaffolds one with `baton repo init --course <id>` and needs no course code of its own.
   "Standard" names where they live, not a privilege: core imports nothing from them
   (R-BTN-50), and the CLI reads them as any course. They assume no particular deployment and

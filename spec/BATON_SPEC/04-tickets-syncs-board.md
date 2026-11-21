@@ -22,7 +22,7 @@ numbers.
                         #   protocol_files, source?, facts?}];
                         #   and the CLI's settings (R-BTN-74): items, default_course, repos,
                         #   agent_command, agent_wrapper, check, ticket_prefix, legacy_ids,
-                        #   prefixes, project, tags, projects, reconcile_course (R-BTN-203)
+                        #   prefixes, project, tags, projects
     tickets.mjs         # optional ticket source; absent, the CLI's markdown source (R-BTN-74)
     courses/<course>/   # an own course; a sourced course's course.json is its source's (R-BTN-134)
       course.json       # the course file (R-BTN-69)
@@ -240,9 +240,9 @@ numbers.
     writer `sync`, with that `ref` and the `next` the course file's leg names for the fact (a
     course may name a `next` per verdict). A fact for which no fact leg leaves Baton's station is
     evidence (below), never an arrival.
-  - **Other evidence reconciles.** The sync also posts an `std:evidence@1` (`{ref, kind}`) per
-    piece of evidence that a ticket may have been done outside Baton but that no fact leg can
-    take:
+  - **Other evidence is weighed by the course's reconcile leg.** The sync also posts an
+    `std:evidence@1` (`{ref, kind}`) per piece of evidence that a ticket may have moved outside
+    Baton in a way no fact leg can take:
     - `merged-early`: a `pr-merged` fact while no fact leg leaves Baton's station;
     - `mention`: a pusher's merged PR (title or body) or a first-parent commit reaching the
       default branch since the last accepted head (commit message) that names the ticket's id
@@ -252,9 +252,9 @@ numbers.
       naming more than three ids; and a ticket at an end station.
 
     Only `ref` and `kind` are posted: titles and messages never are (R-BTN-33). Baton keeps each
-    piece and moves the ticket onto its repository's reconciliation course (R-BTN-39's
-    reconciliation move); `.baton/baton.json` `reconcile_course` names it (default `reconcile`,
-    R-BTN-131), and `null` posts no evidence.
+    piece, and the course's reconcile leg weighs it where one leaves the ticket's station
+    (R-BTN-39, R-BTN-69). A course models every way its tickets move, inside Baton or outside:
+    fact legs for the hand acts it can recognise, a reconcile leg for the rest.
   - **What the sync reads.** The adapter's PR facts (R-BTN-96) and the home's first-parent
     commits from the last accepted head to the observation's head (§4.3). A first snapshot has
     no window and reads no `mention`. A repository the adapter cannot read fails the sync, as
