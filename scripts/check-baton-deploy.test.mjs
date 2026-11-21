@@ -20,12 +20,18 @@ describe('B-135: production workflow review check', () => {
     expect(check(stringify(workflow({ uses: 'actions/setup-node@v5', with: { 'package-manager-cache': false } })))).toEqual([]);
   });
 
+  it('does not mistake the prefix directory for an npm command', () => {
+    expect(check(stringify(workflow({ run: 'npm --prefix ci run verify' })))).toEqual([]);
+  });
+
   it.each([
     [{ uses: 'actions/setup-node@v4', with: { cache: 'npm', 'package-manager-cache': false } }, 'cache'],
     [{ uses: 'actions/cache/restore@v4' }, 'cache'],
     [{ uses: 'actions/setup-node@v5' }, 'package-manager-cache'],
     [{ run: 'echo Preparing\nnpm ci --ignore-scripts' }, 'npm ci'],
     [{ run: 'npm --prefix=worker clean-install' }, 'npm ci'],
+    [{ run: 'npm --prefix worker ci' }, 'npm ci'],
+    [{ run: 'npm --prefix "worker bundle" --ignore-scripts clean-install' }, 'npm ci'],
   ])('rejects unsafe production step %j', (step, reason) => {
     expect(check(stringify(workflow(step)))).toEqual([expect.stringContaining(reason)]);
   });

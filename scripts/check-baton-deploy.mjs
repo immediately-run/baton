@@ -5,7 +5,8 @@ import { pathToFileURL } from 'node:url';
 import { parse } from 'yaml';
 
 const token = /\bCLOUDFLARE_API_TOKEN\b/i;
-const npmCi = /\bnpm\s+(?:--?[^\s]+\s+)*(?:ci|clean-install|ic|install-clean|isntall-clean)\b/;
+// A separate --prefix value is an argument, even if the directory is named "ci".
+const npmCi = /\bnpm[ \t]+(?:--prefix[ \t]+(?:"[^"\n]*"|'[^'\n]*'|[^\s"';&|]+)[ \t]+|(?!--prefix[ \t])--?[^\s]+[ \t]+)*(?:ci|clean-install|ic|install-clean|isntall-clean)(?=$|[\s;&|<>()])/;
 
 export function check(source) {
   const workflow = parse(source);
