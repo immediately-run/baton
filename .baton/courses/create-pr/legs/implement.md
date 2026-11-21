@@ -20,7 +20,7 @@ declaring a capability you no longer hold.
 > completion: a harness that is a client of a background service must keep its session in
 > process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
 > work ends leaves truncated output and an orphaned session posting to a claim that no longer
-> exists (B-84). A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> exists (B-84). Your completion is your exit **or your silence** (B-108): the stub stops waiting at the earliest of your exit, fifteen minutes of quiet on every activity signal it can see — your stdout, the wrapper’s log, the harness’s own store — and five hours of the leg, its ceiling; the stdout you left is judged as any exit’s is. A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
 > `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
 > your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end
 > with work in flight: the process is the session, and nothing resumes it — wait, in the
@@ -31,9 +31,21 @@ declaring a capability you no longer hold.
 - Read the whole ticket: what to build, the architecture it prescribes, the tests it names, its
   exit criteria. Those sections are the contract. Where the ticket prescribes a decision, take
   it; if you take another, say so under "Deviations" in the PR body.
-- **Check it is not already delivered.** Search the code for what the ticket asks for. If it is
-  done, open no PR: say so in the ticket and stop with an error, so a person looks. If part of it
-  is done, build the remainder and say which part you found.
+- **Check it is not already delivered.** Search the code for what the ticket asks for. If part of
+  it is done, build the remainder and say which part you found. If all of it is already on the
+  default branch, open no PR, push no branch and edit nothing (a branch made only to carry a
+  note is not wanted): run the tests that cover it, and make the **last line** of your output
+
+  ```
+  delivered <sha> <what you ran and what it showed>
+  ```
+
+  `<sha>` is the commit on the default branch that delivered it (several, comma-separated, no
+  spaces, when it took several); the rest is your evidence in one line — the tests and checks
+  you ran and their result, e.g. `delivered 8565aa7 runner-main.test.ts 47 passed, typecheck
+  clean`. Baton checks each commit is on the default branch — one that is not refuses the answer
+  and fails the leg — and moves the ticket to a station where a person reads your evidence and
+  confirms it closed, or sends it back. Your word alone never closes the ticket. Exit 0.
 - Find the code you will touch by name: the helpers, the tests next to it, the repository's own
   checks (lint, typecheck, tests — whatever a contributor runs).
 
@@ -78,13 +90,13 @@ Fix whatever the answers expose before you push.
 - Implement what the ticket says, with its tests. A behaviour change without a test that would
   fail without it is not finished.
 - Run the repository's checks yourself. Push only once they pass.
-- **Install dependencies with hygiene** (B-132): `npm ci` from the lockfile — never an
-  `npm install` that rewrites it — unless the ticket itself asks for a dependency change; with
-  lifecycle scripts off (`npm ci --ignore-scripts`: pass the flag every time — never count on
-  an image's `ignore-scripts=true` being there); a package whose install
-  script the repository needs is listed in `.baton/baton.json` (`allow_install_scripts:
-  [<package>]`, a control input under B-127), and only those packages' scripts are run
-  (`npm rebuild <package> --ignore-scripts=false`). Where the repository sets a registry age
+- **Install dependencies with hygiene** (B-132): from the lockfile only — `npm ci`, never an
+  `npm install` that rewrites it — unless the ticket itself asks for a dependency change; and
+  with lifecycle scripts off (`npm ci --ignore-scripts`: pass the flag every time — never
+  count on an image's `ignore-scripts=true` being there). A package whose install script the repository needs
+  is listed in `.baton/baton.json` (`allow_install_scripts: [<package>]`, a control input under
+  B-127): run exactly those packages' scripts — `npm rebuild <package>
+  --ignore-scripts=false` — never scripts for all. Where the repository sets a registry age
   floor (npm's `before` setting, or a proxy at the fence), install inside it, never around it.
 - Commit with explicit paths (`git commit -- <paths>`), never `git add -A`: the checkout may hold
   other work.
@@ -112,3 +124,9 @@ of every repository the ticket names, and reads them together, as one change.
   aggregate; a release note belongs in the PR body.
 - Merge, approve or review your own PR; later legs do that.
 - Leave the PR without a pushed head: the review reads what is pushed.
+- Exit without a PR and without saying why. Whatever stops you — the ticket already delivered,
+  a stop the repository's rules name, checks you cannot get green, a push or `gh pr create`
+  that fails, a model or provider that refuses (balance, quota, rate limit) — your last lines
+  say what it was, in plain words: an exit with no PR fails the leg, and those lines are all
+  that is kept of it (B-256). Your process exits 0 whatever you say, so saying it is the only
+  way anyone learns it.
