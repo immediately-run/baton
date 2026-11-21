@@ -190,6 +190,13 @@ async function route(req: Request, env: Config, to: Forward): Promise<Answer> {
       return forwardSigned(req, env, to);
     });
   }
+  if (pathname.startsWith('/v1/forge-scope/')) {
+    return under('private', async () => {
+      if (req.method !== 'GET') throw new BatonError('not-found', 'no such route');
+      if (!isSigned(req)) throw new BatonError('unauthenticated', 'a forge-scope read must be signed');
+      return forwardSigned(req, env, to);
+    });
+  }
   if (pathname === '/v1/probe/readings') {
     // R-BTN-53, R-BTN-101: a probe key signs; the core checks it is one.
     return under('private', async () => {
