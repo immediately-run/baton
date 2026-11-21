@@ -119,7 +119,9 @@ Settled 2026-11-21; not reopened by a review.
   ([§6.2](../BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2), with §6.6's gates): a leg
   posted `ready` for a threshold during which at least one live runner granted on the repository
   asked and every one that asked was refused it, its `detail` the rule codes, most frequent
-  first. With **no** asker it does not raise: that is the repository condition below.
+  first. To know that, Baton records, per ready leg, the gate that excluded it from each
+  untargeted claim (a claim naming no ticket, R-BTN-100) — a counter per rule code, reset when
+  the leg is claimed or leaves `ready`. With **no** asker it does not raise: that is the repository condition below.
 - **"A ticket runs out of retries for a leg"** is `baton.retries`'s hold (R-BTN-122, R-BTN-163).
 - **"All work is blocked from a runner."** The nearest condition today is `baton.blocked-ends`
   (R-BTN-126): more than 20 `released:blocked` ends across tickets in 24 hours. It does not see a
@@ -169,8 +171,9 @@ On a Needs-you entry the dashboard draws **Start an intervention**: the registry
 `intervention.start`, whose `ui.view` names `repository/conditions/{condition}`, drawn only where
 `condition.show`'s `allowed` names it (built; the control is B-207's). The person chooses:
 
-1. **the subject** the entry names — a ticket, or a runner — or the **batch** of every open
-   ticket entry of its type and cause ([Batches](#batches));
+1. **the subject** the entry names — a ticket, a runner, or the repository (for a repository
+   entry such as `baton.no-runner` or `baton.queue-over`) — or the **batch** of every open ticket
+   entry of its type and cause ([Batches](#batches));
 2. **the agent**: a **sandboxed leg** ([The leg form](#the-leg-form)), naming the runner that will
    claim it or leaving it to any runner whose grant carries the mark `intervener`; or **an
    existing agent over MCP** ([The MCP form](#the-mcp-form)).
@@ -202,13 +205,17 @@ else is a request.
   the start, confirmed by the open intervention's starter or by an approver on
   `approvers.members`; the old intervention ends `taken-over` first ([Ending](#ending)). Nothing
   ends one silently.
+- **The claimant is checked at start, too.** A start naming as claimant the subject runner, or a
+  runner that ran one of the subject's failed attempts in the last 24 hours (by fingerprint and
+  host), is refused `invalid-params`, as the gate would refuse its claim.
 - **What it writes, in one transaction:** the `interventions` row, with the intervention course
   in force (`course_id`) and the claimant; the entry's link to it (the entry shows "being handled
   by intervention `<id>`, started by `<starter>`"); the outbox entry that files the ticket ([The
   intervention ticket](#the-intervention-ticket)); and an `intervention {id, act: started}` event
   in the subject's history.
 - **The subject's history** is the ticket's history for a ticket subject and each listed
-  ticket's for a batch, and the runner's events (`/runners/{runner}`) for a runner subject.
+  ticket's for a batch, the runner's events (`/runners/{runner}`) for a runner subject, and the
+  repository's events for a repository subject.
 
 ### The intervention ticket
 
@@ -239,13 +246,20 @@ else is a request.
   | `git` on the markdown source; `source` on a custom one | the intervention ticket, through `file(ticket)` | a log, per intervention | a snapshot posts the ticket at its reserved id with `course`, `intervenes` and `baton_write` equal to Baton's row | not confirmed 15 minutes after it was queued: `baton.outbox-late` |
 
   - **Idempotence.** The deliverer reads the reserved path at the fresh head: a file carrying the
-    entry's `baton_write` is delivered already; **any other file at that id is a conflict** —
-    marked `failed` `refused`, the intervention ends `file-conflict`, and the outbox entry raises
-    `baton.outbox-late` naming it. Nothing overwrites it.
+    entry's `baton_write` is delivered already; **any other file at that id is a conflict**: the
+    deliverer reports it, the entry becomes `dropped` (never `failed`, so it is not queued
+    again), the intervention ends `file-conflict`, and `baton.intervention-mismatch` names it.
+    Nothing overwrites the file. R-BTN-171's `outbox-refused` hold applies to no ticket here: the
+    intervention ticket is not on the board, and the subject is not the entry's ticket; a
+    `refused` mark (the deliverer's credential refused) holds nothing and raises
+    `baton.outbox-late`.
   - **A mismatch.** While the posted ticket's `course`, `intervenes` or `baton_write` differ from
-    Baton's row — a push edited it — the ticket's legs are refused (rule `intervention`) and
-    `baton.intervention-mismatch` is raised on the intervention's entry; the intervention ends at
-    expiry unless the file is restored.
+    Baton's row, or the snapshot's `extra: true` flag says the file carries a body or a field
+    beyond those (the markdown source sets it; a custom source must), the ticket's legs are
+    refused (rule `intervention`) and `baton.intervention-mismatch` is raised on the subject
+    ticket, or on the repository for a runner, batch or repository subject; the intervention
+    ends at expiry unless the file is restored. Beyond that check, the leg form's runner and the
+    course read only `intervention_context`, never the ticket's body.
   - **Who can deliver it.** On the markdown source, a deliverer `outbox.git` admits: `runner`
     under `cooperative`; `trusted-runner` under `protected`, where `tickets.created: proposed`
     makes it a proposal that lands only when a human lands it. A custom source needs an
@@ -254,8 +268,10 @@ else is a request.
     sync or the runners are the broken part, the leg form waits, and **the MCP form is the path**:
     its key works from the confirmed start, without the ticket.
 - **What closes it.** The leg form's course ends it (its leg's last outcome is an end station).
-  At the intervention's end, a ticket still open is withdrawn by an outbox `withdraw`
-  (R-BTN-168's kind) with reason `intervention-ended`; an MCP-form ticket always closes that way.
+  At the intervention's end, a ticket still open is superseded under R-BTN-168, with "its
+  intervention ended" as a new supersession cause: a running claim gets `release` with reason
+  `superseded`, the ticket goes `cancelling`, and R-BTN-171's `withdraw` entry withdraws it with
+  reason `intervention-ended`. An MCP-form ticket always closes that way.
 
 ### The intervention key
 
@@ -268,7 +284,10 @@ A delegated key in R-BTN-186's sense, minted per intervention and dying with it.
   dashboard §1) is `true` or `own` and the table below lists it. The actions on its own
   intervention (`intervention.context`, `.request`, `.report`) carry a mark of their own,
   `delegated: "intervention"`, which `check:actions` exempts from R-BTN-186's derivation and
-  admits for no MCP key; `check:actions` fails an `intervention` caller anywhere else.
+  admits for no MCP key. The table below is a machine-readable allowlist in the registry
+  (`src/shared/actions.mjs`, `interventionPowers: {ticket, runner, batch, repository}`, each a list
+  of action ids); `check:actions` fails an `intervention` caller on any entry whose `delegated`
+  mark is `false`, and on any entry that no list of the allowlist names.
 - **Its own powers, by subject** — always within `interventions.repository`:
 
   | Subject | Reads | Tightens (and undoes its own) |
@@ -276,6 +295,7 @@ A delegated key in R-BTN-186's sense, minted per intervention and dying with it.
   | ticket | the ticket and what it references: history, blocks, attempts, conditions, claims, leg runs without their session links, attestations | hold it (`ticket.hold`), lift a hold it set (`ticket.unhold`, `own`), stop its running leg (`leg.stop`) |
   | runner | the runner's heartbeats, declared capabilities, reports, messages, claims and leg runs on this repository only | stop a leg it runs on this repository (`leg.stop`) |
   | batch | each listed ticket as the ticket row reads it, and no other ticket | the ticket row's, on each listed ticket only |
+  | repository | the repository's reads: board, blocks, conditions, tickets' histories, the runners granted there, bars, the policy as `repo.policy` serves it | nothing: requests only |
 
   Every key also calls `intervention.context` (the entry, the subject, the powers and the warning,
   as data), `intervention.request` and `intervention.report`. It never reads a session link
@@ -324,15 +344,16 @@ A delegated key in R-BTN-186's sense, minted per intervention and dying with it.
   draws each pending request with every param, a statement of its effect that Baton words from
   the action and the pinned state ("lifts the hold `attempts-exhausted` set by Baton on B-8; its
   attempt count resets"), and the agent's pointer as a link labelled **agent-written**.
-  **Confirm** is `intervention.request.confirm {request, version}`:
-  - it refuses `conflict` when any target's state differs from the pinned one, or the request's
-    version changed;
+  **Confirm** is `intervention.request.confirm {request, pins_hash}`, `pins_hash` the hash of the
+  pinned states the page drew:
+  - it refuses `conflict` when any target's state differs from the pinned one, or `pins_hash` is
+    not the stored request's;
   - it then runs `authorize(session, <requested action>, target)`: the confirmer must be a caller
     the requested action admits — an unhold of another's hold an approver on `approvers.policy`
     (R-BTN-186), a restart an owner or an administrator (R-BTN-163), an adopt `approvers.policy`
     (R-BTN-188);
   - it takes what §3's table says that action takes from a session: an unhold or an expedite the
-    code, bound to the stored request's id and version; a restart nothing more. The act is the
+    code, bound to the request's id and `pins_hash`; a restart nothing more. The act is the
     confirmer's, recorded with `requested_by: intervention:<id>`.
 
   **Deny** closes the request. Both are `delegated: false`, and no `intervention` or delegated
@@ -378,7 +399,9 @@ A delegated key in R-BTN-186's sense, minted per intervention and dying with it.
   (R-FH-92): the session puts the diff in a report for a person.
 - **A joinable session.** The leg is joinable (R-FH-80), so it needs a deadline on its run
   (R-BTN-167, R-BTN-195; the course file's key is `max_duration`), at most the intervention's
-  remaining lifetime; a start whose course leg has none is refused. Its session link is served as
+  remaining lifetime; a start whose course leg has none is refused, and so is a claim: the row
+  pins the course's version at start (`course_version`), and rule `intervention` refuses a claim
+  of a ticket whose posted course version differs or whose leg lost its deadline. Its session link is served as
   B-312 serves every link: to dashboard sessions — the starter's among them — and to the reporting
   runner; never to the intervention key.
 - **In stage 1**, before the gate, the runner's forge credential is unbounded for the leg as for
@@ -391,15 +414,19 @@ A delegated key in R-BTN-186's sense, minted per intervention and dying with it.
   parallel, is the record, and nothing claims it.
 - **Getting the key.** With a bearer-capable client, the surface that made the start shows the
   `bint_` key once, with the command that adds it to the agent's user-scope configuration (never
-  a checkout's `.mcp.json`).
-- **Over OAuth.** A client that needs OAuth gets, instead of the key, a one-time **pairing
-  secret** shown at the start. The client sends it in BATON_MCP_OAUTH_SPEC's authorization request
-  as the scope token `intervention:<id>:<pairing>`; Baton refuses the request unless the secret is
-  the intervention's and unused, and binds the `oauth_requests` row to the intervention. Consent is
-  only in the session that started it (`not-found` otherwise); the page shows the client and its
-  redirect host. Approval consumes the secret. At most one grant per intervention; the grant's
-  parent row is the `interventions` row, not `mcp_keys`, and its access and refresh tokens die
-  when the intervention ends.
+  a checkout's `.mcp.json`). A **CLI start** has no session, so it offers the bearer key only; an
+  agent that needs OAuth is started from a session.
+- **Over OAuth** (a session's start only). The start shows, instead of the key, a one-time
+  **pairing code**; Baton keeps only its hash (`pairing_hash`). The client runs
+  BATON_MCP_OAUTH_SPEC's flow unchanged up to consent: it requests the challenge's scope (OAuth
+  §2), and nothing secret travels in the authorize URL, `oauth_requests.requested`, the requests
+  answer or the token response. On the consent page, inside the session that started the
+  intervention (any other session is `not-found`), the person picks that open MCP-form
+  intervention — or enters its pairing code — and the page shows the client and its redirect
+  host. The grant's repository and actions are the intervention's, fixed: no repository picker,
+  no ticks. Approval consumes the pairing; at most one grant per intervention. The grant's scope,
+  as the token response names it, is `intervention:<id>`; its parent row is the `interventions`
+  row, not `mcp_keys`, and its access and refresh tokens die when the intervention ends.
 - **What the agent sees.** MCP's methods stay people and dashboard §2's (`initialize`, `ping`,
   `tools/list`, `tools/call`): `tools/list` is the key's actions, and the context comes as the
   result of the tool `intervention_context`, not as a prompt or a resource, which §2 does not
@@ -417,10 +444,16 @@ An administrator's session starts an intervention only with `emergency: {reason}
 - It is still an `approvers.members` act: an administrator matches an `owner` entry and no other
   (R-BTN-188), so under a human-only list an administrator starts none.
 - It is logged as an `admin` event, and raises `baton.intervention-emergency` (`notify`) on the
-  repository, which stays under Needs you until an owner acknowledges it, even after the intervention
-  has ended.
-- A second emergency start on the repository within 24 hours of the first needs an owner's
-  confirmation as well (an `approvers.members` approver), and answers `202` until it has one.
+  repository, which stays under Needs you until an owner acknowledges it, even after the
+  intervention has ended: `intervention.emergency.ack`, keyed by the condition —
+  `POST /v1/owner/{repository}/conditions/{condition}/emergency-ack`, `baton owner intervention ack
+  <repository> <condition>`, or an owner's session on the condition's page.
+- A second emergency start on the repository within 24 hours of the first is held pending
+  (`202 {pending}`) until an `approvers.members` approver confirms it with
+  `intervention.emergency.confirm` (`POST /v1/owner/{repository}/interventions/{id}/emergency-confirm`,
+  or an owner's session); unconfirmed for 30 minutes, it lapses and nothing is minted. Slowing
+  repeats is deliberate: an administrator who needs a third emergency within a day needs an
+  owner's word anyway.
 - Its requests are confirmed as any other's — by a caller the requested action admits.
 
 ### Batches
@@ -433,7 +466,9 @@ An administrator's session starts an intervention only with `emergency: {reason}
 - **Diagnose once, settle each.** The key holds the ticket row's powers on each listed ticket and
   no other. A request may name several listed targets, each with its own pinned state; the page
   draws each target with its pin and effect, unticked; one confirmation applies to the ticked
-  ones, its code bound to the hash of the ticked set, and `dry_run` prints every target. Each
+  ones. A batch confirmation **always** takes the code, even for an action that alone would not
+  (a restart), bound to the hash of the ticked set and its pins, and `dry_run` prints every
+  target. Each
   target is a separate act in its ticket's history, authorized on its own; a target whose state
   moved is refused alone, `conflict`, and the rest go ahead. A ticket whose entry closed drops
   out.
@@ -450,15 +485,16 @@ pointer leads.
 - **Ends** when anyone may tighten ends it — any owner of the repository, an owner's or an
   administrator's session, an administrator (`intervention.end`); at its expiry; when the
   intervention ticket closes; on a takeover; on a ticket-file conflict; or when the starter's key
-  stops owning the repository (an administrator's: leaves `BATON_ADMIN_KEYS`), `starter-lost`.
+  stops owning the repository (an administrator's: leaves `BATON_ADMIN_KEYS`; a break-glass
+  line's: leaves `BATON_HUMAN_KEYS`), `starter-lost`.
 - **Extending** is the starter's, a confirmed action (the code), within the maximum.
 - **When its entry closes** it keeps a read-only tail of 30 minutes: it reads and records reports,
   but tightens nothing, lifts nothing (not even its own holds) and files no request, then ends
   `entry-closed`. The same cause raised again during the tail opens a fresh entry, never this
   intervention's. A batch's tail starts when its last listed entry closes.
 - **At the end, in one transaction:** the key and every OAuth token of it are revoked; pending
-  requests expire; a `release` with reason `requested` (§6.9) is queued for the intervention
-  ticket's claim, if one runs; the ticket, if open, is withdrawn (above); a hold the key set stands
+  requests expire; the ticket, if open, is superseded and withdrawn (above), which releases its
+  claim; a hold the key set stands
   and is listed on the subject as the intervention's, for an owner to keep or lift; an
   `intervention {id, act: ended, end}` event is logged.
 
@@ -466,20 +502,21 @@ pointer leads.
 
 Concrete enough to build from; the open items are marked.
 
-- **Lifetimes** (their one home): default 2 hours, at most 24; an emergency at most 2 hours and
-  never extended. In the leg form the clock starts at the claim, and a ticket not claimed within
-  1 hour of its confirmed filing ends the intervention `unclaimed`; in the MCP form it starts at
-  the confirmed start.
+- **Lifetimes** (their one home): default 2 hours, at most 24 counted from the start; an
+  emergency at most 2 hours and never extended. In the leg form the working clock starts at the
+  claim, never past the 24 hours; a ticket not filed (its outbox entry confirmed) within 1 hour of
+  the start ends the intervention `unfiled`, and one not claimed within 1 hour of its filing ends
+  it `unclaimed`. In the MCP form the clock starts at the confirmed start.
 - **`interventions`**: `repository`, `id` (an integer per repository, never reused), `ticket_id`,
   `course_id`, `entry_kind`, `entry_ref`, `batch_type`, `subject_kind` (`ticket` | `runner` |
   `batch`), `subject_ref`, `agent` (`leg` | `mcp`), `agent_kind`, `claimant`
   (`key:<fingerprint>` | `intervener`), `starter_fingerprint`, `starter_role` (`owner` |
   `administrator`), `starter_human_only`, `emergency_reason`, `key_hash`, `pairing_hash`,
-  `oauth_client_id`, `warning_ack_at`, `started_at`, `expires_at`, `tail_until`, `ended_at`,
-  `end` (`ended` | `expired` | `unclaimed` | `ticket-closed` | `entry-closed` | `taken-over` |
+  `oauth_client_id`, `course_version`, `warning_ack_at`, `started_at`, `expires_at`, `tail_until`, `ended_at`,
+  `end` (`ended` | `expired` | `unfiled` | `unclaimed` | `ticket-closed` | `entry-closed` | `taken-over` |
   `file-conflict` | `starter-lost`). Batch tickets: `intervention_subjects (repository,
   intervention, ticket_id)`. Filter fields only.
-- **`intervention_requests`**: `intervention`, `n`, `version`, `action`, `targets_json`
+- **`intervention_requests`**: `intervention`, `n`, `pins_hash`, `action`, `targets_json`
   (identifiers, each with its pinned state), `params_json` (identifiers), `report_n`, `state`
   (`pending` | `confirmed` | `denied` | `expired`), `filed_at`, `decided_by`, `decided_at`.
   **`intervention_reports`**: `intervention`, `n`, `url`, `at`.
@@ -493,7 +530,8 @@ Concrete enough to build from; the open items are marked.
   | `intervention.request.confirm`, `intervention.request.deny` | session, or a key, authorized as the requested action; never `intervention` or delegated | `POST /v1/ui/interventions/{id}/requests/{n}/confirm \| deny`; `baton owner intervention confirm \| deny` | write |
   | `intervention.end` | any owner, session or administrator | `POST /v1/ui/interventions/{id}/end`; `POST /v1/owner/{repository}/interventions/{id}/end` | write |
   | `intervention.extend` | the starter, confirmed | `POST /v1/ui/interventions/{id}/extend`; `baton owner intervention extend` | write |
-  | `intervention.emergency.ack` | an owner, or an owner's session | `POST /v1/ui/interventions/{id}/emergency-ack` | write |
+  | `intervention.emergency.ack` | an owner, or an owner's session | `POST /v1/owner/{repository}/conditions/{condition}/emergency-ack`; `baton owner intervention ack` | write |
+  | `intervention.emergency.confirm` | an `approvers.members` approver, or an owner's session | `POST /v1/owner/{repository}/interventions/{id}/emergency-confirm` | write |
 
 ## Security
 
@@ -508,7 +546,7 @@ Concrete enough to build from; the open items are marked.
   Baton's row; a push that edits the ticket stops the leg form, it does not redirect it.
 - **No code reaches the agent.** A request answers `pending`; a confirmation happens on the
   approver's page and, where §3 asks for a code, with the approver's own key, bound to that
-  request's version.
+  request's id and pins.
 - **Forge acts outside Baton are not Baton's to bound.** In stage 1 and on the MCP path they are
   an outside actor's (values #13); in stage 2 the gate gives the leg no merge and no write to
   another ticket's branch (R-FH-92–94).
@@ -526,7 +564,7 @@ PR #327 (open) are named by their exact titles.
 | [07:45 — implement agents stop on CLAUDE.md's credential rule: legs fail with no PR](../../docs/interventions.mdx#2026-11-21-0745--implement-agents-stop-on-claudemds-credential-rule-legs-fail-with-no-pr) | Diagnose and report; the rule is the owner's to change |
 | PR #327, "12:45 — this repository's `create-pr` course and sync CLI were pinned before B-257" | A CI workflow: diagnose, put the diff in a report; a person lands it (the gate refuses `.github/`, R-FH-92) |
 | PR #327, "13:58 and 18:35 — bering's executor re-pinned twice (fieldhouse #45, #44)" | Host and deployment: diagnose, report |
-| PR #327, "16:56–18:35 — runners idle after a drain; the live check's sandboxes left running" | No runner was live, so neither `baton.unclaimable` (it needs an asker) nor `baton.runner-starved` raises; `baton.no-runner` would. The sandboxes are host state: diagnose, report |
+| PR #327, "16:56–18:35 — runners idle after a drain; the live check's sandboxes left running" | No runner was live, so neither `baton.unclaimable` (it needs an asker) nor `baton.runner-starved` raises; `baton.no-runner` would, and a repository-subject intervention on it reads, diagnoses and requests (a sync want; the runners' restart is the host's). The sandboxes are host state: diagnose, report |
 
 Two gaps the day shows: **31 holds wanted one act** — decision 4's batch; and **the gateway
 churn and the credential stops raised no Needs-you entry** — each was a run of failed attempts,
@@ -556,13 +594,16 @@ What building this changes, each in its owning place:
   §2's "an administrator … signs no `/v1/owner/*` route … and mints none" amended so an
   administrator's emergency start, from a session, mints an intervention key.
 - **People and dashboard §3**: the table's rows for `intervention.start` and
-  `intervention.extend` (the code) and `intervention.request.confirm` (what the requested action
-  takes, bound to the request's version). **§4, and §11.4's screens table (R-BTN-155)**: the screen
+  `intervention.extend` (the code); `intervention.request.confirm` (what the requested action
+  takes, bound to the request's id and `pins_hash`); and a batch confirmation (always the code,
+  bound to the ticked set's hash). **§4, and §11.4's screens table (R-BTN-155)**: the screen
   `repository/interventions/{intervention}`, and the Conditions entry's control.
-- **BATON_MCP_OAUTH_SPEC §4** (the scope token `intervention:<id>:<pairing>`), **§5** (consent
-  only in the starting session; "an administrator's session is `forbidden`" amended for an
-  emergency, whose grant dies with the intervention rather than with an owner key), **§7 and §8**
-  (an intervention grant is not an MCP key; its tokens end with the intervention), **§12**
+- **BATON_MCP_OAUTH_SPEC §4** (no change to the request: no intervention parameter and no scope
+  token), **§5** (the pairing step: in the starting session, pick the open MCP-form intervention
+  or enter its pairing code; the grant's repository and actions fixed; "an administrator's
+  session is `forbidden`" amended for an emergency, whose grant dies with the intervention rather
+  than with an owner key), **§7 and §8** (an intervention grant is not an MCP key; its scope is
+  `intervention:<id>`; its tokens end with the intervention), **§12**
   (`oauth_requests.intervention`, the grant's parent row `interventions`).
 - **R-BTN-163 (§7.3)**: a Needs-you entry carries its open intervention; "Baton files no ticket
   for it" gains the intervention ticket filed through the outbox; `repo.needs-you`'s `listings`
@@ -570,7 +611,14 @@ What building this changes, each in its owning place:
 - **R-BTN-161** ([conditions §2](conditions.md#2-handlers)): intervention tickets beside handler
   tickets — the reserved ids `.i<n>` and `i<n>`, the `intervenes` block — filed by a deliverer.
 - **R-BTN-171** ([conditions §8](conditions.md#8-the-outbox)): the outbox kind `intervention`,
-  and `withdraw`'s reason `intervention-ended`.
+  and `withdraw`'s reason `intervention-ended`. **R-BTN-168** (conditions §7): "its intervention
+  ended" as a supersession cause.
+- **R-BTN-160's close table (§7.1)**: rows for `baton.intervention-emergency` (closes at an
+  owner's acknowledgement), `baton.intervention-mismatch` (when the posted file matches again, or
+  the intervention ends), `baton.unclaimable` (when the leg is claimed or leaves `ready`),
+  `baton.no-runner` (when a runner granted on the repository is live, or no leg is `ready`) and
+  `baton.runner-starved` (at the runner's next granted claim, or when it is no longer live).
+- **The snapshot (R-BTN-74)**: the intervention ticket's `extra` flag.
 - **R-BTN-12 (§6.8)**: `hold_reason` `intervention:<id>`. **§6.6**: the gate rule `intervention`.
   **R-BTN-180**: the grant mark `intervener` under `approvers.roles`. **R-BTN-66**: the setting
   `intervention_courses`.
@@ -601,32 +649,38 @@ G-BTN-149 (Baton files the intervention ticket through the outbox); S-BTN-275 an
 - **The intervention ticket and its outbox kind**: filed at its reserved id with ids only;
   confirmed by a matching snapshot; a foreign file at the id a conflict that ends the
   intervention; a pushed edit refusing the legs and raising `baton.intervention-mismatch`; late
-  raising `baton.outbox-late`; withdrawn at the end.
+  raising `baton.outbox-late`; a conflict `dropped`, not re-queued; the `extra` flag a mismatch;
+  superseded and withdrawn at the end.
 - **The gate rule `intervention`**: admits only the claimant's fingerprint, or an `intervener`
   grant; refuses the subject runner and runners of its failed attempts by fingerprint and host;
-  the key minted only for a claim on the recorded course.
+  the key minted only for a claim on the recorded course and version; a start naming such a
+  claimant refused; the check:actions allowlist failing an unlisted or `false` entry.
 - **The key**: reads only its subject in its repository (another `forbidden`, as unknown); no
   session link; tightens and undoes only its own; every other act, every restart and cancel
   included, `forbidden`; refused off `POST /v1/mcp`; the runner relays only the allowlist and
   keeps the key out of the leg's environment.
 - **Requests**: filed `pending` with no code and the pinned state; bounded (10 pending, 30 an
   hour, duplicates `conflict`); refused on a target with a security finding or hold; `conflict`
-  at confirm on a moved state or a changed version; confirmed only by a caller the requested
+  at confirm on a moved state or a stale `pins_hash`; confirmed only by a caller the requested
   action admits; expired after an hour and at the end; `pr.merge` refused for a PR outside the
   home or the subject's branch pattern, and writing no attestation.
-- **Batches**: nothing ticked by default; the code bound to the ticked set; a moved target refused
+- **Batches**: nothing ticked by default; the code always taken and bound to the ticked set; a moved target refused
   alone; reads limited to listed tickets; no batch from a runner entry.
 - **Diagnose-only entries**: a person-leg, finding or security entry's intervention files no
-  request.
-- **Lifetimes and ending**: default and maximum; extend confirmed and bounded; an emergency not
+  request. **The repository subject**: repository-wide reads, every act `forbidden` but requests.
+- **Lifetimes and ending**: default and the 24-hour maximum from the start; `unfiled` after an
+  hour; extend confirmed and bounded; an emergency not
   extended; the leg form's clock from the claim and `unclaimed` after an hour; any owner, session
   or administrator ends one; `starter-lost`; the tail lifts nothing and a reraise opens a fresh
   entry; the end revokes the key and tokens and releases the claim.
-- **Emergencies**: `baton.intervention-emergency` raised, kept until an owner acknowledges; a
-  second within 24 hours waits for an owner.
-- **The MCP form over OAuth**: a request without the pairing secret, or with a used one, refused;
-  consent outside the starting session `not-found`; one grant per intervention; tokens dead with
-  it.
+- **Emergencies**: `baton.intervention-emergency` raised, kept until an owner acknowledges it by
+  the condition on each surface; a second within 24 hours pending until
+  `intervention.emergency.confirm`, lapsing after 30 minutes with nothing minted.
+- **The MCP form over OAuth**: consent outside the starting session `not-found`; a wrong or used
+  pairing code refused; the grant's repository and actions the intervention's, with no picker;
+  the token response's scope `intervention:<id>`, and no secret in the request, the requests
+  answer or the token response; one grant per intervention; tokens dead with it; a CLI start
+  offering only the bearer key.
 - **Conditions**: `baton.unclaimable` raised only with an asker, and closed when the leg is
   claimed or no longer `ready`; `baton.no-runner` raised with no live runner and closed when one
   is live; `baton.runner-starved` raised from its claims' refusals and closed at its next granted
