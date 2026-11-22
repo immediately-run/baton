@@ -2191,12 +2191,12 @@ export class Runner {
     // When the source's read handed its ticket back as text — the markdown a pathless source
     // returns, its frontmatter the markdown source's keys — that text is the legs' ticket file:
     // written once, mode 0600, into the claim's scratch (every leg session's path, removed at
-    // the claim's end) and named to each leg as `ctx.ticket.file`. A ticket with a path, the
-    // markdown source's every ticket, gets no file and its ctx is unchanged.
+    // the claim's end). A read-only leg also uses the verified text for tickets with a path;
+    // ordinary legs with a path still see the checkout copy.
     let ticketFile: string | null = null;
     const resumedFile = (reattached?.ctx.ticket as { file?: unknown } | undefined)?.file;
     if (typeof resumedFile === 'string') ticketFile = resumedFile;
-    else if ((claim.path == null || claim.path === '') && typeof versionCheck.ticket === 'string') {
+    else if (typeof versionCheck.ticket === 'string' && (!claim.path || [...course.graph.legs.values()].some((leg) => leg.readsOnly))) {
       ticketFile = join(scratch, 'ticket.md');
       writeFileSync(ticketFile, versionCheck.ticket, { mode: 0o600 });
     }
@@ -2301,7 +2301,7 @@ export class Runner {
         const run = resuming && typeof resuming.ctx.run === 'number' ? resuming.ctx.run : runNumber(course.graph, gitPath, legName, own);
         own.push(legName);
         const ctx: Record<string, unknown> = resuming ? resuming.ctx : {
-          ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}), ...(ticketFile != null ? { file: ticketFile } : {}) },
+          ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}), ...(ticketFile != null && (!claim.path || course.graph.legs.get(legName)?.readsOnly) ? { file: ticketFile } : {}) },
           claim: { id: claimId, nonce: claim.nonce, station: at },
           leg: legName, run, ...(runId ? { run_id: runId } : {}),
           snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
@@ -2553,7 +2553,10 @@ export class Runner {
   private async runLeg(course: CourseLoad, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'missing' } | { kind: 'lease-lost' }> {
     const script = course.scripts.get(leg);
     if (script == null) return { kind: 'missing' };
-    if (course.graph?.legs.get(leg)?.readsOnly) ctx.reads_only = true;
+    if (course.graph?.legs.get(leg)?.readsOnly) {
+      ctx.reads_only = true;
+      ctx.review_store = this.o.home;
+    }
     // R-BTN-202 (B-248): a leg run under a local order while Baton is unreachable has no lease.
     const offlineLeg = this.cur.offline;
     const tag = randomBytes(4).toString('hex');
@@ -2629,7 +2632,7 @@ export class Runner {
     try {
       handle = await this.startSession('leg', {
         session_id: sessionId, ...(typeof ctx.run_id === 'string' ? { run_id: ctx.run_id } : {}), ticket: String((ctx.ticket as { id?: string })?.id ?? ''), leg,
-        snapshot_sha: String((ctx.snapshot as { sha?: string })?.sha ?? ''), paths: [scratch, course.scratch], env,
+        snapshot_sha: String((ctx.snapshot as { sha?: string })?.sha ?? ''), paths: [scratch, course.scratch, ...(ctx.reads_only === true && this.o.home !== this.checkout ? [this.o.home] : [])], env,
         channel: channel ? channel.path : null,
         // R-BTN-107: the brief carries the leg's autonomy as a hint — the raise check below is
         // what enforces it, whatever the executor does with the hint.

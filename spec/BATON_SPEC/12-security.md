@@ -557,20 +557,27 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
   PR's exact head are [proposed](../proposals/security.md) (B-140).
   - **Read-only agents (B-141).** A deployment can mark a runner leg `reads_only: true`.
     The runner passes that declaration to the stub and as a hint to the executor (R-BTN-107).
-    A stub must explicitly support the contract (export `readsOnly: true`); older stubs fail
-    rather than launch unrestricted. Deployment-owned course code can select the review commit
+    A deployment installs compatible stubs when opting in. The runner rejects older stubs
+    (no `readsOnly: true` export), and the shipped stub checks the pinned graph and refuses an
+    opted-in leg when an older runner omits the read-only context. Deployment-owned course code selects the review commit
     through its snapshot override: pass `ctx.review_head`, an exact commit id already present in
-    the home object store, when calling `standard(ctx)`. The stub does not infer the head from
-    a local checkout or branch name. Replay does not run these legs until it records the review
+    the home object store, when calling `standard(ctx)`. The stub reads that store even when
+    the claim clone does not have the object. It never infers the head from a checkout or
+    branch name. Replay does not run these legs until it records the review
     input. No standard course opts in.
   - **The workspace.** The agent starts in a temporary directory outside the checkout, with
     `review.diff` from the snapshot and review head's merge base to the review head, and the
     changed regular blobs under `changes/` as non-executable files. No git metadata, symlink,
     submodule or branch harness configuration is extracted. The ticket and leg instructions
-    come from the claim's source and control snapshot, not the review head. The stub removes
+    come from the claim's source and control snapshot, not the review head. For a versioned
+    ticket this requires the verified source text, even when the ticket also has a path. The stub removes
     the workspace when the agent call ends.
   - **The launch.** The stub takes the harness and model from the snapshot's agent command
-    (or the host fallback in R-BTN-131) and builds the command itself. No wrapper, project
+    (or the host fallback in R-BTN-131) and builds the command itself. Native settings come
+    from the same settings commit: OpenCode's root and `.opencode/` JSON/JSONC supply model,
+    default agent, declarative agents and providers; Claude's `.claude/settings.json` supplies
+    model and language. The explicit command's model wins. The stub does not forward native
+    permission, plugin, hook or MCP settings. No wrapper, project
     configuration from the review head, auto-approval or bypass is passed on. It allows file
     reads and searches only: OpenCode 2.2.3 or newer in the 2.x series uses a standalone
     invocation and a deny-by-default tool policy; Claude Code uses a bare invocation with only

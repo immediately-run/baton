@@ -13,9 +13,10 @@ type Git = (args: string[]) => Buffer;
 
 export function readOnlyWorkspace(ctx: {
   checkout: string;
+  review_store: string;
   snapshot: { sha: string };
   review_head?: string;
-  ticket: { path?: string | null; file?: string };
+  ticket: { path?: string | null; file?: string; version?: string };
 }, instructions: string | null, git: Git, byteLimit: number) {
   const { sha } = ctx.snapshot;
   const head = ctx.review_head;
@@ -28,9 +29,11 @@ export function readOnlyWorkspace(ctx: {
   const base = git(['merge-base', sha, head]).toString().trim();
   const diff = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', '--no-relative', '--ignore-submodules=none'];
   const tmp = realpathSync(tmpdir());
-  const fromCheckout = relative(realpathSync(ctx.checkout), tmp);
-  if (fromCheckout === '' || (fromCheckout !== '..' && !fromCheckout.startsWith(`..${sep}`))) {
-    throw new Error('reads_only needs a temporary directory outside the checkout');
+  for (const checkout of [ctx.checkout, ctx.review_store]) {
+    const fromCheckout = relative(realpathSync(checkout), tmp);
+    if (fromCheckout === '' || (fromCheckout !== '..' && !fromCheckout.startsWith(`..${sep}`))) {
+      throw new Error('reads_only needs a temporary directory outside the checkout');
+    }
   }
   const cwd = mkdtempSync(join(tmp, 'baton-review-'));
   const cleanup = () => rmSync(cwd, { recursive: true, force: true });
@@ -58,15 +61,16 @@ export function readOnlyWorkspace(ctx: {
     const instructionFile = instructions == null ? '' : join(cwd, 'instructions.md');
     if (instructions != null) save(instructionFile, instructions);
     let ticket = '';
-    if (ctx.ticket.path && git(['--literal-pathspecs', 'ls-tree', '-z', sha, '--', ctx.ticket.path]).length) {
-      ticket = join(cwd, 'ticket.md');
-      save(ticket, git(['cat-file', 'blob', `${sha}:${ctx.ticket.path}`]));
-    } else if (!ctx.ticket.path && ctx.ticket.file) {
-      // A pathless ticket is a regular file the runner wrote from the ticket source.
+    if (ctx.ticket.file) {
       const stat = lstatSync(ctx.ticket.file);
       if (!stat.isFile() || stat.size > byteLimit - bytes) throw new Error('invalid reads_only ticket file');
       ticket = join(cwd, 'ticket.md');
       save(ticket, readFileSync(ctx.ticket.file));
+    } else if (ctx.ticket.version) {
+      throw new Error('reads_only needs verified ticket text from the ticket source');
+    } else if (ctx.ticket.path && git(['--literal-pathspecs', 'ls-tree', '-z', sha, '--', ctx.ticket.path]).length) {
+      ticket = join(cwd, 'ticket.md');
+      save(ticket, git(['cat-file', 'blob', `${sha}:${ctx.ticket.path}`]));
     }
     return { cwd, instructions: instructionFile, ticket, cleanup };
   } catch (error) {
