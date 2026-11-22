@@ -85,6 +85,28 @@ export function holdLiteralTail(text: string, literals: readonly string[]): { he
   return { head: text, tail: '' };
 }
 
+/** Redact matches against the unsplit line, but emit only the head. A match can
+ *  cross the cut when its suffix is also the start of another literal. */
+function maskLiteralHead({ head, tail }: { head: string; tail: string }, literals: readonly string[]): string {
+  if (!tail) return maskLiterals(head, literals);
+  if (!head) return '';
+  const text = head + tail;
+  const matches: { start: number; end: number }[] = [];
+  for (const literal of literals) {
+    for (let start = text.indexOf(literal); start !== -1 && start < head.length; start = text.indexOf(literal, start + 1)) {
+      matches.push({ start, end: Math.min(start + literal.length, head.length) });
+    }
+  }
+  matches.sort((a, b) => a.start - b.start);
+  let cursor = 0;
+  let masked = '';
+  for (const { start, end } of matches) {
+    if (start >= cursor) masked += head.slice(cursor, start) + '***';
+    cursor = Math.max(cursor, end);
+  }
+  return masked + head.slice(cursor);
+}
+
 /** R-BTN-144 across a stream, which a line-at-a-time sink cannot do. Class 6's key block is
  *  `src/shared/mask.mjs`'s stream (`createMasker`: a block's lines are held until its `END` line
  *  or `KEY_HOLD` bytes, and classes 5 and 6 are masked on every line as it leaves) — each line
@@ -121,16 +143,16 @@ export function createLegMasker(secrets: readonly string[]) {
         const opens = joined.filter((j) => j.split.tail !== '').sort((a, b) => b.split.tail.length - a.split.tail.length);
         const best = completes[0] ?? opens[0];
         if (best) {
-          said.push(block.push(maskLiterals(best.split.head, literals)));
+          said.push(block.push(maskLiteralHead(best.split, literals)));
           held = best.split.tail;
           return said.filter(Boolean).join('\n');
         }
         said.push(block.push('***'));
         held = '';
       }
-      const { head, tail } = holdLiteralTail(line, literals);
-      said.push(block.push(maskLiterals(head, literals)));
-      held = tail;
+      const split = holdLiteralTail(line, literals);
+      said.push(block.push(maskLiteralHead(split, literals)));
+      held = split.tail;
       return said.filter(Boolean).join('\n');
     },
     flush(): string {
