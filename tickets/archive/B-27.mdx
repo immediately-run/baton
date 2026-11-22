@@ -2,7 +2,7 @@
 title: "B-27 — Baton refuses a board post with no queued leg short of an end, or keeps it and raises a condition"
 id: B-27
 project: baton
-status: available
+status: done
 updated: 2026-11-22
 repos:
   - immediately-run/baton
@@ -19,4 +19,4 @@ depends_on: []
 
 **Brief:** the owner, 2026-11-22, deciding the question this ticket asks: **accept the post and raise a condition**. When a board post holds a ticket with legs left and no queued next leg (contrary to R-BTN-83), Baton keeps the post. That ticket gets a `baton.<sub>` condition under Needs you (R-BTN-163), raised on the ticket and closing when a later post gives it a next leg, and it is not claimable meanwhile. Every other ticket in the post is placed as usual: one malformed ticket never blocks the rest of the board (values #13, open world). The implement agent on 2026-11-22 recommended the same.
 
-Build it: amend R-BTN-83 in [BATON_SPEC §5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) to say so, name the condition in the rule that raises it, give it a scenario (`baton tickets next scenario`), and change `src/core/board.ts`. Then open the PR.
+Build it: amend R-BTN-83 in [BATON_SPEC §5.3](../../spec/BATON_SPEC/05-courses.md#sec-5-3) to say so, name the condition in the rule that raises it, give it a scenario (`baton tickets next scenario`), and change `src/core/board.ts`. Then open the PR.
