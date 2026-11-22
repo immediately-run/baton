@@ -289,11 +289,15 @@ export class Resources {
   /** R-BTN-76: the most recently observed `state` reading in force, else `unknown` — an
    *  administrator's one instrument's among the rest. */
   stateOf(instance: string, now = this.c.now()): { state: InstanceState; until: number | null } {
-    const r = this.rows<{ available: number; until: number | null }>(
-      `SELECT available, until FROM instance_readings WHERE instance = ? AND kind = 'state' AND lapses_at > ?
-       ORDER BY observed_at DESC, rowid DESC LIMIT 1`, instance, now)[0];
+    const r = this.stateReading(instance, now);
     if (!r) return { state: 'unknown', until: null };
     return r.available ? { state: 'available', until: null } : { state: 'unavailable', until: r.until };
+  }
+
+  stateReading(instance: string, now = this.c.now()) {
+    return this.rows<{ available: number; until: number | null; source: string }>(
+      `SELECT available, until, source FROM instance_readings WHERE instance = ? AND kind = 'state' AND lapses_at > ?
+       ORDER BY observed_at DESC, rowid DESC LIMIT 1`, instance, now)[0];
   }
 
   /** Re-evaluate these instances' states (every instance with a reading or a stored state when

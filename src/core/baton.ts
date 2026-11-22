@@ -10,6 +10,7 @@ import { versionedStore, clockBucket, ifNoneMatch, nonScheduling, schedulingVers
 import { runnerViewResponse, requireFleetScope } from './runnerViews';
 import { BatonError, CLIENT_HEADER, errorResponse, json, servedClientVersions, withClientVersions } from './http';
 import { checkPayload, DEFAULT_COURSE, resolveParents, retiredBoardFields, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
+import { noteIdle, type IdleDetail } from './idleReasons';
 import { Stations, type Seen } from './stations';
 import { Questions } from './questions';
 import { Conditions } from './conditions';
@@ -200,7 +201,7 @@ export class BatonCore {
     // bases (as a question's), and the Needs-you and list reads a delivery runner polls.
     this.conditions = new Conditions({ store, now: () => this.now(), graph: (repo, course) => this.stations.graph(repo, course), history: this.history,
       linkBases: (ticket) => this.blocks.linkBases(ticket) });
-    this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
+    this.claims = new Claims({ store, now: () => this.now(), random: (n) => this.random(n), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history, resourceReadings: this.resources,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
       policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github', scope: this.scope, deprecated: this.deprecated,
@@ -979,7 +980,7 @@ export class BatonCore {
         // snapshot itself; a signed read must be its ancestor) burned the honest claim as
         // `cannot-finish:spec`, a counted, non-retryable attempt, where the stale board's
         // release is unpenalised.
-        const answer = tx(() => {
+        const answer = this.claimWithIdle(runnerId, () => {
           const a = this.claims.claim(runnerId, body);
           const ticket = String(a.ticket_id ?? '');
           if (ticket.includes(':')) {
@@ -1145,6 +1146,26 @@ export class BatonCore {
       }
     }
     return null;
+  }
+
+  /** B-244: an idle refusal may queue a notification, but never commits the refused claim's
+   *  transaction. The existing unblocked alarm sends the committed queue. */
+  private claimWithIdle<T>(runnerId: number, claim: () => T): T {
+    try {
+      return this.store.transaction(() => {
+        const answer = claim();
+        this.store.exec('DELETE FROM runner_idle WHERE runner_id = ?', runnerId);
+        return answer;
+      });
+    } catch (e) {
+      if (e instanceof BatonError && (e.code === 'no-eligible-ticket' || e.code === 'not-eligible')) {
+        const seconds = Number(this.ports.config.BATON_IDLE_NOTIFY_AFTER_S);
+        const threshold = (Number.isSafeInteger(seconds) && seconds > 0 ? seconds : 1800) * 1000;
+        this.store.transaction(() => noteIdle(this.store, runnerId, this.now(), threshold, e.extra.detail as IdleDetail | undefined,
+          (repo, entry) => this.blocks.queueTrigger(repo, entry)));
+      }
+      throw e;
+    }
   }
 
   /**

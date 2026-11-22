@@ -28,6 +28,7 @@ import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTick
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
 import { MIN_SECRET_BYTES, createLegMasker, failureDetail, maskLegOutput, namesASecret, secretValues } from './mask';
+import { idleReason } from './idle';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
 import { StateFile, leaseLostFrom, type PersistedClaim, type RunnerState } from './state';
 import { bareTicketId } from '../defaults/ticket-state';
@@ -404,6 +405,8 @@ export class Runner {
   private fences: number[] = [];
   /** R-BTN-77: set when a heartbeat carried an `unblocked` message, so the idle wait ends early. */
   private unblocked = false;
+  /** B-244: one line on entry and on a changed refusal, not one per beat. */
+  private idle: { since: number; line: string } | null = null;
   /** Bumps with every claim: an answer a beat started before the claim cannot fence it. */
   private epoch = 0;
   /** One beat at a time — the sidecar's answers stay ordered against the loop. The in-flight
@@ -1514,7 +1517,6 @@ export class Runner {
         }
         return null;
       }
-      if (e instanceof BatonRefusal && e.code === 'no-eligible-ticket') return null;
       if (e instanceof BatonRefusal && e.code === 'unauthenticated') {
         // B-93: only the registration's own missing-secret refusal is quiet. A replaced
         // secret or replayed nonce still names itself, now on the single claim request.
@@ -1535,8 +1537,14 @@ export class Runner {
         return null;
       }
       // R-BTN-4 (B-188): `max-claims` among them — the runner is at its bound for now.
-      if (e instanceof BatonRefusal && e.code === 'not-eligible') {
-        this.log(`baton: no claim (${e.message})`);
+      if (e instanceof BatonRefusal && (e.code === 'not-eligible' || e.code === 'no-eligible-ticket')) {
+        if (!this.slots.size) {
+          const line = maskLegOutput(`baton: idle — ${e.code}: ${idleReason(e)}`, this.legSecrets);
+          if (line !== this.idle?.line) {
+            this.log(line);
+            this.idle = { since: this.idle?.since ?? this.now(), line };
+          }
+        }
         return null;
       }
       throw e;
@@ -1546,6 +1554,10 @@ export class Runner {
     this.epoch++;
     const ticket = claim.ticket_id as string;
     const claimId = claim.claim_id as number;
+    if (this.idle) {
+      this.log(`baton: idle for ${ageWords(this.now() - this.idle.since)}, ended by claim ${claimId}`);
+      this.idle = null;
+    }
     // R-BTN-4 (B-188): the claim's slot is held from here — before any await, so no beat can
     // read a claim Baton granted as one this runner does not hold.
     const slot = this.newSlot();

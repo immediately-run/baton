@@ -6,7 +6,7 @@
 // and, as an operator's console reads it, through the CLI's own esbuild bundle (what
 // scripts/baton-cli.mjs loads for `baton repo sync`). Node only: it writes a real git checkout
 // and builds that bundle.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,10 +32,10 @@ process.stdout.write(JSON.stringify(remoteSlug(${JSON.stringify(root)})));\n`);
 /** A fresh session's start: no state file and no runner, the first attempt's beat registering one.
  *  Its state lives in this process's memory — the handful of fields one heartbeat registers — and
  *  its home, state file and spool are its own, under a fresh temp directory. */
-const start = (api: BatonApi, log: (l: string) => void, state: Record<string, unknown> = { runner_id: null, claim: null }): Runner => {
+const start = (api: BatonApi, log: (l: string) => void, state: Record<string, unknown> = { runner_id: null, claim: null }, now?: () => number): Runner => {
   const home = mkdtempSync(join(tmpdir(), 'baton-fb-'));
   const r = new Runner({ api, home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'fresh',
-    courses: [{ course: 'create-pr', version: 1 }], stateFile: join(home, 's.json'), beatEvery: 60_000, log });
+    courses: [{ course: 'create-pr', version: 1 }], stateFile: join(home, 's.json'), beatEvery: 60_000, log, now });
   (r as unknown as { state: unknown }).state = {
     get: () => state,
     set: (patch: Record<string, unknown>) => { Object.assign(state, patch); },
@@ -92,9 +92,8 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
     // and is answered the grant, the second carries the settled list before the claim. Then the
     // single unnamed claim follows the settled heartbeat.
     expect(calls).toEqual({ heartbeats: 2, recommendations: 0, claims: 1 });
-    // The only line is the declaration the grant settles — not `no recommendation (no runner
-    // holds this secret)` on every start.
-    expect(lines).toEqual(["baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given"]);
+    expect(lines).toEqual(["baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given",
+      'baton: idle — no-eligible-ticket: nothing to claim']);
     r.stop();
   });
 
@@ -115,14 +114,46 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
     const r = start(api, (l) => lines.push(l), { runner_id: 7, claim: null });
     await r.runOnce();
     expect(asked).toEqual([null]); // the server chooses and claims in one transaction
-    // B-86's once-per-declaration line, and nothing else: the state names the runner, so its
-    // refusal would have been logged had it come — and none was due.
-    expect(lines).toEqual(["baton: declaring create-pr — the grant's capabilities, no --capabilities given"]);
+    expect(lines).toEqual(["baton: declaring create-pr — the grant's capabilities, no --capabilities given",
+      'baton: idle — no-eligible-ticket: nothing to claim']);
     refuseGates = true;
     lines.length = 0;
     await r.runOnce();
-    expect(lines).toEqual(['baton: no claim (every gate refused this runner)']);
+    await r.runOnce();
+    expect(lines).toEqual(['baton: idle — not-eligible: every gate refused this runner']);
     r.stop();
+  });
+
+  it('logs both idle causes once and ends the stretch when the retry is claimed', async () => {
+    const lines: string[] = [];
+    let now = 0;
+    let available = false;
+    const api = new BatonApi({ url: 'https://baton.invalid', auth: () => ({}), transport: async (req) => {
+      if (new URL(req.url).pathname.endsWith('/heartbeat')) {
+        return Response.json({ runner_id: 7, incarnation: 1, messages: [], sent: (await req.json() as { capabilities: string[] }).capabilities,
+          grant: { capabilities: ['create-pr'] } });
+      }
+      if (available) return Response.json({ claim_id: 42, ticket_id: 'docs:RETRY' });
+      return Response.json({ code: 'no-eligible-ticket', message: 'no ready ticket fits this runner', detail: { repositories: [{ repository: 'docs', gates: [
+        { gate: 'grant-max-tier', count: 1, limit: 'judgement', tickets: ['docs:HIGH'] },
+        { gate: 'attempts-exhausted', count: 1, tickets: ['docs:RETRY'] },
+      ] }] } }, { status: 404 });
+    } });
+    const runner = start(api, (line) => lines.push(line), { runner_id: 7, claim: null }, () => now);
+    const run = vi.spyOn(runner as unknown as { runInSlot: () => Promise<unknown> }, 'runInSlot').mockResolvedValue(null);
+    try {
+      expect(await runner.runOnce()).toBeNull();
+      await runner.tick();
+      expect(await runner.runOnce()).toBeNull();
+      expect(lines.filter((l) => l.startsWith('baton: idle'))).toEqual([
+        "baton: idle — no-eligible-ticket: no ready ticket fits this worker: 1 above the grant's max_tier judgement (docs:HIGH), 1 held attempts-exhausted (baton:retries open: docs:RETRY)",
+      ]);
+      now = 30 * 60_000;
+      available = true;
+      await runner.runOnce();
+      expect(run).toHaveBeenCalledOnce();
+      expect(lines).toContain('baton: idle for 30m, ended by claim 42');
+    } finally { runner.stop(); }
   });
 
   it('an origin-less checkout gives null with its stderr empty, in process and through the bundle', () => {
