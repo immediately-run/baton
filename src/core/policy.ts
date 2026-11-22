@@ -574,6 +574,24 @@ export class Policies {
     return this.c.humanKeyFloor === 'hardware' ? 'hardware' : repositoryKey;
   }
 
+  /** Refuse a host floor that would make an existing, satisfiable gate unreachable. */
+  checkHumanKeyFloor(repository: string, breakGlass: ReadonlyMap<string, string>): void {
+    const doc = this.current(repository)?.policy;
+    if (!doc) return;
+    const minimum = this.effectiveHumanKey(doc.human_key);
+    if (doc.human_key === minimum) return;
+    const facts = this.facts(repository, breakGlass);
+    const lists: [string, ApproverEntry[]][] = [
+      ...Object.entries(doc.approvers).map(([name, list]): [string, ApproverEntry[]] => [`approvers.${name}`, list]),
+      ...this.floors(repository).map((floor): [string, ApproverEntry[]] => [`floor:${floor.name}`, [floor.remove_by]]),
+    ];
+    for (const [name, list] of lists) {
+      if (this.listSatisfiable(list, facts, doc.human_key) && !this.listSatisfiable(list, facts, minimum)) {
+        throw new BatonError('unsatisfiable-approvers', `${repository}: ${name} would have no live approver under the instance human_key minimum (R-BTN-188)`, { list: name });
+      }
+    }
+  }
+
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray() as T[];
   }
@@ -679,13 +697,19 @@ export class Policies {
    *  registered yet (B-124 builds them); when one is, its class answers before this runs. */
   entryMatches(list: ApproverEntry[], credential: string, facts: ApproverFacts, repositoryKey: PolicyDocument['human_key']): boolean {
     const humanKey = this.effectiveHumanKey(repositoryKey);
+    return this.matches(list, credential, facts, humanKey);
+  }
+
+  private matches(list: ApproverEntry[], credential: string, facts: ApproverFacts, humanKey: PolicyDocument['human_key'], liveOwnerOnly = false): boolean {
     const line = facts.breakGlass.get(credential);
     if (line !== undefined && !breakGlassMeetsHumanKey(line, humanKey)) return false;
     for (const e of list) {
       if (e === 'owner') {
         if (facts.owners.has(credential)) return true;
       } else if (e === 'human') {
-        if (this.humanEntryOk(credential, facts, humanKey)) return true;
+        if (!liveOwnerOnly && line !== undefined) return true; // passed the configured-line minimum above
+        const owner = facts.owners.get(credential);
+        if (owner && facts.humanOwners.has(credential) && this.meetsHumanKey({ ...owner, human_only: true }, humanKey)) return true;
       } else if (e === `key:${credential}`) {
         const o = facts.owners.get(credential);
         if (o && (!o.human_only || this.meetsHumanKey(o, humanKey))) return true;
@@ -694,28 +718,12 @@ export class Policies {
     return false;
   }
 
-  /** Both break-glass and human-only owner keys must meet the effective minimum. */
-  private humanEntryOk(credential: string, facts: ApproverFacts, humanKey: 'any' | 'hardware'): boolean {
-    const line = facts.breakGlass.get(credential);
-    if (line !== undefined) return breakGlassMeetsHumanKey(line, humanKey);
-    const o = facts.owners.get(credential);
-    return o !== undefined && facts.humans.has(credential) && this.meetsHumanKey(o, humanKey);
-  }
-
   /** R-BTN-188's no-gate-without-a-key: whether some live credential could satisfy `list` —
    *  `owner` needs a live owner, a `human` entry a human-only key among the repository's OWNERS
-   *  meeting `human_key` (break-glass never opens a gate: it is the acting root of trust, not
-   *  an owner; a repository whose human lists only break-glass could satisfy has no key to open
-   *  them), a `key:` entry a live owner of its own. */
+   *  meeting `human_key`, a `key:` entry a live owner of its own. A configured recovery line
+   *  counts only through a live owner entry it independently qualifies for. */
   listSatisfiable(list: ApproverEntry[], facts: ApproverFacts, humanKey: 'any' | 'hardware'): boolean {
-    return list.some((e) => {
-      if (e === 'owner') return facts.owners.size > 0;
-      if (e === 'human') {
-        return [...facts.humanOwners].some((fp) => this.meetsHumanKey({ human_only: true, fido_attestation: facts.owners.get(fp)?.fido_attestation ?? null }, humanKey));
-      }
-      const o = facts.owners.get(e.slice(4));
-      return o !== undefined && (!o.human_only || this.meetsHumanKey(o, humanKey));
-    });
+    return [...facts.owners.keys()].some((fp) => this.matches(list, fp, facts, humanKey, true));
   }
 
   // ── the change (R-BTN-188, R-BTN-189) ──────────────────────────────────────────────────
@@ -726,12 +734,16 @@ export class Policies {
    *  trust clearing when `approvers.trust` becomes human-only, and the append-only insert with
    *  its `admin` event. `breakGlass` is BATON_HUMAN_KEYS' public lines (R-BTN-185). */
   put(repository: string, input: unknown, forge: Forge, actor: { credential: string; label: string }, breakGlass: ReadonlyMap<string, string>): { version: number; hash: string; changed: Knob[]; guarantees: Record<GuaranteeName, boolean> } {
+    const cur = this.current(repository);
+    if (!cur) throw new BatonError('not-found', `${repository} has no policy yet`);
+    // Only the list in force decides, even for a stale or otherwise invalid write.
+    const factsNow = this.facts(repository, breakGlass);
+    const approver = cur.policy.approvers.policy.find((e) => this.entryMatches([e], actor.credential, factsNow, cur.policy.human_key));
+    if (!approver) throw new BatonError('forbidden', 'this credential is not an approver on approvers.policy as it stands (R-BTN-188)');
     const body: Record<string, unknown> = isObj(input) ? input : bad('body', 'must be a JSON object');
     only(body, ['base_version', 'policy', 'preset'], 'body');
     if (!Number.isSafeInteger(body.base_version) || (body.base_version as number) < 1) bad('base_version', 'must be the version the change builds on');
     if (body.policy !== undefined && body.preset !== undefined) bad('body', 'carries either a policy or a preset, not both');
-    const cur = this.current(repository);
-    if (!cur) throw new BatonError('not-found', `${repository} has no policy yet`);
     if (body.base_version !== cur.version) throw new BatonError('conflict', `base_version ${body.base_version} is stale: the policy is at version ${cur.version}`);
 
     let doc: PolicyDocument;
@@ -754,14 +766,6 @@ export class Policies {
         throw new BatonError('invalid-params', `policy.human_identity: ${repository} holds the code repository ${cross.path} on ${cross.host}, another host than the home's — no human identity across hosts yet (B-182); per-host identities are a later ticket`);
       }
     }
-
-    // The list in force decides (R-BTN-188): every change, in any direction, needs an approver
-    // on `approvers.policy` as it stands before the change.
-    const factsNow = this.facts(repository, breakGlass);
-    if (!this.entryMatches(cur.policy.approvers.policy, actor.credential, factsNow, cur.policy.human_key)) {
-      throw new BatonError('forbidden', 'this credential is not an approver on approvers.policy as it stands (R-BTN-188)');
-    }
-    const approver = cur.policy.approvers.policy.find((e) => this.entryMatches([e], actor.credential, factsNow, cur.policy.human_key)) ?? 'owner';
 
     // No gate without a key to open it (R-BTN-188, R-BTN-185): the new lists must be
     // satisfiable, under the new `human_key` for their `human` entries.

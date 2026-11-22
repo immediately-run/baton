@@ -12,6 +12,8 @@ import { call as hostCall } from '#host';
 import { keyCall, ORIGIN, rows, setAdminKeys, setClock, setHumanKeys, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
 import { Policies } from '../../src/core/policy';
+import { BatonCore } from '../../src/core/baton';
+import { front } from '../../src/core/front';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-30T12:00:00Z');
@@ -39,14 +41,28 @@ async function current() {
 
 /** Register `key` as a human-only key signed by `by`, and make it an owner of ops. */
 async function humanOwner(key: TestKey, by: TestKey) {
-  const blob = await sshsig(by, new TextEncoder().encode(key.publicKey.trim()), 'baton-human-keys@1');
-  const created = Math.floor((await withCore((c) => c.now())) / 1000);
-  const res = await hostCall(await signedRequest(by, ORIGIN + '/v1/human-keys', {
-    created, method: 'POST', body: JSON.stringify({ public_key: key.publicKey, signature: btoa(String.fromCharCode(...blob)) }),
-  }));
-  expect(res.status).toBe(200);
+  expect((await registerHuman(key, by)).status).toBe(200);
   expect((await as(b, '/v1/owner/ops/owners', { public_key: key.publicKey })).status).toBe(200);
   expect((await rows<{ human_only: number }>('SELECT human_only FROM repository_owners WHERE fingerprint = ?', key.fingerprint))[0].human_only).toBe(1);
+}
+
+async function registerHuman(key: TestKey, by: TestKey) {
+  const blob = await sshsig(by, new TextEncoder().encode(key.publicKey.trim()), 'baton-human-keys@1');
+  return as(by, '/v1/human-keys', { public_key: key.publicKey, signature: btoa(String.fromCharCode(...blob)) });
+}
+
+function restart(c: BatonCore, floor: 'any' | 'hardware') {
+  const config = { BATON_ORIGIN: ORIGIN, OIDC_ISSUER: '', OIDC_JWKS_URL: '', ACCESS_TEAM_DOMAIN: '', ACCESS_AUD: '', OWNER_EMAILS: '',
+    BATON_HUMAN_KEYS: breakGlass.publicKey, BATON_HUMAN_KEY: floor };
+  const core = new BatonCore({
+    store: c.store,
+    clock: () => c.now(),
+    config,
+    adminKeys: { list: () => [admin.publicKey] },
+    scheduler: { get: async () => null, set: async () => {} },
+    dispatch: { send: async () => {}, defer: () => {} },
+  });
+  return { start: () => core.start(), handle: (req: Request) => front(req, config, (r) => core.fetch(r)) };
 }
 
 beforeEach(async () => {
@@ -88,6 +104,72 @@ describe('S-BTN-192 approver lists', () => {
   it('does not admit a break-glass key to unrelated owner routes', async () => {
     const res = await as(breakGlass, '/v1/owner/ops/signing-keys');
     expect(res.status).toBe(401);
+  });
+
+  it('does not disclose policy state to a configured key without repository reach', async () => {
+    const { version, doc } = await current();
+    expect((await as(b, '/v1/owner/ops/policy', { base_version: version, policy: doc }, 'PUT')).status).toBe(200);
+    const stale = { base_version: version, policy: doc };
+    const denied = await as(breakGlass, '/v1/owner/ops/policy', stale, 'PUT');
+    expect(denied.status).toBe(403);
+    expect(denied).toEqual(await as(breakGlass, '/v1/owner/missing/policy', stale, 'PUT'));
+    expect((await as(b, '/v1/owner/ops/policy', stale, 'PUT')).json.code).toBe('conflict');
+  });
+
+  it('refuses a change that would count a disqualified configured fingerprint as the only approver', async () => {
+    expect((await as(b, '/v1/owner/ops/owners', { public_key: breakGlass.publicKey })).status).toBe(200);
+    const { version, doc } = await current();
+    const policy = { ...doc, human_key: 'hardware', approvers: { ...doc.approvers, policy: ['owner'] } };
+    expect((await as(b, '/v1/owner/ops/policy', { base_version: version, policy }, 'PUT')).status).toBe(200);
+    const remove = await as(b, '/v1/owner/ops/owners', { fingerprint: b.fingerprint, remove: true });
+    expect(remove.json).toMatchObject({ code: 'unsatisfiable-approvers', list: 'approvers.members' });
+    expect((await rows('SELECT fingerprint FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', 'ops')).length).toBe(2);
+  });
+
+  it.each(['policy', 'owners'] as const)('rejects a configured owner on %s at hardware after verifying the owner signature', async (action) => {
+    expect((await as(b, '/v1/owner/ops/owners', { public_key: breakGlass.publicKey })).status).toBe(200);
+    const { version, doc } = await current();
+    const approvers = { ...doc.approvers, policy: ['owner', 'human'], members: ['owner', 'human'] };
+    const policy = { ...doc, human_key: 'hardware', approvers };
+    expect((await as(b, '/v1/owner/ops/policy', { base_version: version, policy }, 'PUT')).status).toBe(200);
+    const { version: active } = await current();
+    const res = action === 'policy'
+      ? await as(breakGlass, '/v1/owner/ops/policy', { base_version: active, policy }, 'PUT')
+      : await as(breakGlass, '/v1/owner/ops/owners', { public_key: a.publicKey });
+    expect(res.json.code).toBe('forbidden');
+  });
+
+  it('refuses a startup minimum that strands an existing approver list', async () => {
+    await humanOwner(a, breakGlass);
+    const { version, doc } = await current();
+    const policy = { ...doc, approvers: { ...doc.approvers, policy: ['human'] } };
+    expect((await as(b, '/v1/owner/ops/policy', { base_version: version, policy }, 'PUT')).status).toBe(200);
+    await withCore(async (c) => {
+      await expect(restart(c, 'hardware').start()).rejects.toMatchObject({ code: 'unsatisfiable-approvers', extra: { list: 'approvers.policy' } });
+      await restart(c, 'any').start();
+    });
+    expect((await current()).doc).toEqual(policy);
+  });
+
+  it.each(['any', 'hardware'] as const)('uses instance %s for signed tenant key management', async (floor) => {
+    const registered = await makeKey('ssh-ed25519', 'another-human');
+    expect((await registerHuman(registered, breakGlass)).status).toBe(200);
+    for (const actor of [breakGlass, registered]) {
+      const target = await makeKey('ssh-ed25519', 'revoke-target');
+      expect((await registerHuman(target, breakGlass)).status).toBe(200);
+      const result = await withCore(async (c) => {
+        const core = restart(c, floor);
+        await core.start();
+        const res = await core.handle(await signedRequest(actor, `${ORIGIN}/v1/human-keys`, {
+          created: T0 / 1000, method: 'POST', body: JSON.stringify({ fingerprint: target.fingerprint, revoke: true, confirm: true }),
+        }));
+        return { status: res.status, body: await res.json() };
+      });
+      expect(result.status, JSON.stringify(result.body)).toBe(floor === 'any' ? 200 : 403);
+      if (floor === 'hardware') expect(result.body).toMatchObject({ code: 'forbidden' });
+      expect((await rows<{ revoked_at: number | null }>('SELECT revoked_at FROM human_keys WHERE fingerprint = ?', target.fingerprint))[0].revoked_at)
+        .toBe(floor === 'any' ? T0 : null);
+    }
   });
 
   it('does not count break-glass as a live human owner when validating a list', async () => {

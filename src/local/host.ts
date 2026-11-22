@@ -4,13 +4,14 @@
 import { BatonCore } from '../core/baton';
 import { front } from '../core/front';
 import { dispatchWorkflow } from '../core/mirror';
-import type { AdminKeys, Config, Scheduler, Store } from '../core/ports';
+import type { AdminKeys, Config, HumanKeys, Scheduler, Store } from '../core/ports';
 import { RequestQueue } from './queue';
 
 export interface LocalOptions {
   store: Store;
   config: Config;
   adminKeys?: AdminKeys;
+  humanKeys?: HumanKeys;
   /** R3-1236's local `workerd` runner; until it lands, tests inject a fake. */
   /** `timer` fires the alarm by the clock; `manual` only records it (a test ticks it). */
   alarm?: 'timer' | 'manual';
@@ -65,6 +66,7 @@ export class LocalHost {
         },
       },
       adminKeys: opts.adminKeys ?? { list: () => [] },
+      humanKeys: opts.humanKeys,
       gate: { outside: (work) => this.queue.outside(work) },
     });
   }

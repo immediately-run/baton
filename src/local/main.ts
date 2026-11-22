@@ -1,6 +1,6 @@
 // main.ts — `npm run start:local -- --db <path> --port <n>` (BATON_SPEC §3a R-BTN-55, R-BTN-57).
 // Options, never a `.dev.vars` file: `--origin` (default `http://127.0.0.1:<port>`), `--admin-keys
-// <file>` (one OpenSSH public key per line), `--github-webhook-secret <file>` (R-BTN-73),
+// <file>` and `--human-keys <file>` (one OpenSSH public key per line), `--github-webhook-secret <file>` (R-BTN-73),
 // and `--config <file>`, a JSON object of the
 // Runner's other variables and secrets (OIDC_ISSUER, OIDC_JWKS_URL, BATON_REPOSITORIES — the
 // repositories to register, as a JSON string —, ACCESS_*, OWNER_EMAILS, TOKEN_HASHES,
@@ -56,6 +56,7 @@ export function localConfig(file: Record<string, unknown>, origin: string): Conf
     BATON_KEYS: opt('BATON_KEYS'),
     BATON_SESSION_HOSTS: opt('BATON_SESSION_HOSTS'),
     BATON_HUMAN_KEY: opt('BATON_HUMAN_KEY'),
+    BATON_HUMAN_KEYS: opt('BATON_HUMAN_KEYS'),
     BATON_GITHUB_WEBHOOK_SECRET: opt('BATON_GITHUB_WEBHOOK_SECRET'),
     BATON_FORGE_SECRETS: opt('BATON_FORGE_SECRETS'),
     GITHUB_DISPATCH_TOKEN: opt('GITHUB_DISPATCH_TOKEN'),
@@ -71,6 +72,7 @@ export async function main(argv: string[]) {
       host: { type: 'string', default: '127.0.0.1' },
       origin: { type: 'string' },
       'admin-keys': { type: 'string' },
+      'human-keys': { type: 'string' },
       'github-webhook-secret': { type: 'string' },
       'signing-key': { type: 'string' }, // Retired; accept old launch commands without reading the file.
       config: { type: 'string' },
@@ -102,7 +104,8 @@ export async function main(argv: string[]) {
   // R-BTN-55: the GitHub App's webhook secret, from the file `--github-webhook-secret` names
   // (a file, so the secret is in no process list); it wins over a --config value.
   if (values['github-webhook-secret']) config.BATON_GITHUB_WEBHOOK_SECRET = readFileSync(values['github-webhook-secret'], 'utf8').trim();
-  const host = new LocalHost({ store, config, adminKeys: adminKeysFrom(values['admin-keys']) });
+  const host = new LocalHost({ store, config, adminKeys: adminKeysFrom(values['admin-keys']),
+    humanKeys: values['human-keys'] ? adminKeysFrom(values['human-keys']) : undefined });
   await host.start();
   const server = serve(host, origin);
   server.listen(port, values.host, () => console.log(`baton: serving ${origin} from ${values.db}`));

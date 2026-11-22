@@ -152,7 +152,8 @@ async function registerRunner() {
 }
 
 describe('S-BTN-190 guarantees and floors', () => {
-  it.each(['any', 'hardware'] as const)('applies human_key: %s to break-glass floor removal', async (human_key) => {
+  it.each([['any', false], ['hardware', false], ['hardware', true]] as const)('applies human_key: %s to break-glass floor removal (also owns: %s)', async (human_key, owns) => {
+    if (owns) expect((await as(owner, '/v1/owner/ops/owners', { public_key: breakGlass.publicKey })).status).toBe(200);
     const { version, doc } = await current();
     const policy = {
       ...doc, human_key, approvers: { ...doc.approvers, policy: ['owner', 'human'], members: ['owner', 'human'] },

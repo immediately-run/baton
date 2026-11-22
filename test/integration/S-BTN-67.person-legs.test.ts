@@ -97,9 +97,10 @@ it('the owner answers with baton decision answer: the same arrival through the a
   expect(await answerRow('C')).toEqual([{ option: 'ship', answered_by: `owner:${owner.fingerprint}` }]);
 });
 
-it.each(['any', 'hardware'] as const)('applies human_key: %s to a signed break-glass answer', async (human_key) => {
+it.each([['any', false], ['hardware', false], ['hardware', true]] as const)('applies human_key: %s to a signed break-glass answer (also owns: %s)', async (human_key, owns) => {
   const breakGlass = await makeKey('ssh-ed25519', 'break-glass');
   await setHumanKeys(breakGlass);
+  if (owns) expect((await keyCall(owner, '/v1/owner/docs/owners', { public_key: breakGlass.publicKey })).status).toBe(200);
   const { version, policy } = (await keyCall(owner, '/v1/repositories/docs/policy')).json;
   expect((await keyCall(owner, '/v1/owner/docs/policy', {
     base_version: version, policy: { ...policy, human_key, inputs: { ...policy.inputs, answers: 'attestation' } },

@@ -244,6 +244,10 @@ export class BatonCore {
     // §12.8 (B-145): every repository's version 1 — the cooperative preset on a forge,
     // plain-git where the forge is git — so every reader finds one.
     this.store.transaction(() => this.policies.seedAll());
+    if (this.policies.effectiveHumanKey() === 'hardware') {
+      const breakGlass = await this.humanBreakGlass();
+      for (const { id } of this.registry.all()) this.policies.checkHumanKeyFloor(id, breakGlass);
+    }
     await this.keepAlarm();
     // A trailing webhook dispatch owed from before a restart keeps its time (round 1, 1-A-4);
     // so do a trailing unblocked dispatch and the next reading to lapse (R-BTN-76, R-BTN-77).
@@ -1234,16 +1238,25 @@ export class BatonCore {
     const o = /^\/v1\/owner\/([^/]+)\/(.+)$/.exec(p);
     if (!o) throw new BatonError('not-found', `no route ${m} ${p}`);
     const repo = checkRepositoryId(seg(o[1]));
-    // R-BTN-47 (B-173): one check for every route naming a repository — a retired one is
-    // `not-found`, as one never registered, whoever asks.
-    if (!this.registry.live(repo)) throw new BatonError('not-found', `${repo} is not registered`);
+    const repoRow = this.registry.live(repo);
+    const owns = this.admin.owns(fp, repo);
+    const rest = o[2];
+    // A configured line establishes identity, not reach. For a non-owner, absent, retired
+    // and out-of-reach repositories must all look the same, even for a stale policy write.
+    if (!owns && breakGlass.has(fp) && !admins.has(fp)) {
+      const cur = repoRow && this.policies.current(repo);
+      const list = rest === 'owners' ? cur?.policy.approvers.members : cur?.policy.approvers.policy;
+      if (!cur || !list || !this.policies.entryMatches(list, fp, this.policies.facts(repo, breakGlass), cur.policy.human_key)) {
+        throw new BatonError('forbidden', 'this key is not an approver for this repository (R-BTN-188)');
+      }
+    }
+    // R-BTN-47 (B-173): a retired repository is treated as never registered.
+    if (!repoRow) throw new BatonError('not-found', `${repo} is not registered`);
     // An administrator's key is no owner's, even one added as an owner before it was listed (R-BTN-57).
     if (admins.has(fp)) throw new BatonError('forbidden', 'an administrator key is never an owner key (R-BTN-57)');
     // Owning one repository confers nothing on another (R-BTN-58).
-    const owns = this.admin.owns(fp, repo);
     if (!owns && !breakGlass.has(fp)) throw new BatonError('forbidden', `this key does not own ${repo}`);
     const actor = `${owns ? 'owner' : 'human'}:${fp}`;
-    const rest = o[2];
     // B-90: the repository's grants and settings — and the policy's log below — are read in
     // src/core/reads/repository.ts (B-192: a session's reads too).
     // B-127: the repository's owner signing keys — public keys of its human-only owners — the
@@ -1267,8 +1280,6 @@ export class BatonCore {
     // transaction — the compare-and-set, the approver check against the list in force, the
     // floors and the satisfiable-list refusals all inside it.
     if (m === 'PUT' && rest === 'policy') {
-      const repoRow = this.registry.get(repo);
-      if (!repoRow || repoRow.retired_at != null) throw new BatonError('not-found', `${repo} is not registered`);
       const b = await body();
       return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, breakGlass)));
     }

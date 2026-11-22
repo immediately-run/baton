@@ -319,7 +319,8 @@ export class Admin {
     if (!policies) return;
     const cur = policies.current(repository);
     if (!cur) return;
-    const live = (list: ApproverEntry[]) => policies.listSatisfiable(list, facts, policies.effectiveHumanKey(cur.policy.human_key)) || list.every((e) => e === 'owner');
+    const live = (list: ApproverEntry[]) => policies.listSatisfiable(list, facts, policies.effectiveHumanKey(cur.policy.human_key))
+      || (facts.owners.size === 0 && list.every((e) => e === 'owner'));
     for (const [name, list] of [['approvers.members', cur.policy.approvers.members], ['approvers.trust', cur.policy.approvers.trust], ['approvers.policy', cur.policy.approvers.policy]] as const) {
       if (!live(list)) {
         throw new BatonError('unsatisfiable-approvers', `${name}: this would leave no live credential able to satisfy it (R-BTN-188)`, { list: name });

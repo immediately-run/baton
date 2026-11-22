@@ -226,6 +226,13 @@ describe('a local start', () => {
       .rejects.toThrow(/--origin is required/);
   });
 
+  it('accepts the human key file option and preserves human key config (B-294, S-BTN-192)', async () => {
+    await expect(main(['--db', ':memory:', '--human-keys', '/unused/human.keys', '--port', '0']))
+      .rejects.toThrow(/--origin is required/);
+    expect(localConfig({ BATON_HUMAN_KEYS: 'public lines', BATON_HUMAN_KEY: 'hardware' }, 'http://localhost'))
+      .toMatchObject({ BATON_HUMAN_KEYS: 'public lines', BATON_HUMAN_KEY: 'hardware' });
+  });
+
   it('refuses the test bindings and non-string values', () => {
     expect(() => localConfig({ BATON_TEST_BINDINGS: 'true' }, 'http://127.0.0.1:8787')).toThrow(/test bindings/);
     expect(() => localConfig({ TEST_OIDC_JWKS: '{}' }, 'http://127.0.0.1:8787')).toThrow(/test bindings/);
