@@ -12,6 +12,7 @@ import { sha256HexSync } from './policy';
 import { logEvent } from './db';
 import { REPOSITORY_ID, TICKET_ID } from './validate';
 import type { Store } from './ports';
+import { grantRoleProblem } from './grantRole';
 
 export const OWNER_STATE_FORMAT = 'baton.owner-state/v1';
 
@@ -260,11 +261,27 @@ export class OwnerState {
       if (prior != null && prior !== here) bad('sync_keys row', `${fp} holds a second role (${prior} and ${here}, R-BTN-57)`);
       roles.set(fp, here);
     }
-    const creds = new Set((sections.credentials ?? []).map((r) => String(r.id)));
-    for (const r of sections.runner_grants ?? []) {
-      if (!str(r.credential_id) || !creds.has(r.credential_id)) bad('runner_grants row', `${JSON.stringify(r.credential_id)} is not an imported credential`);
+    const creds = new Map((sections.credentials ?? []).map((r) => [String(r.id), r]));
+    const grants = sections.runner_grants ?? [];
+    const active = new Map<unknown, Record<string, unknown>[]>();
+    for (const r of grants) {
+      if (r.revoked_at != null) continue;
+      const peers = active.get(r.repository_id) ?? [];
+      peers.push(r);
+      active.set(r.repository_id, peers);
+    }
+    for (const r of grants) {
+      const id = String(r.credential_id);
+      const credential = (str(r.credential_id) ? creds.get(id) : undefined)
+        ?? bad('runner_grants row', `${JSON.stringify(r.credential_id)} is not an imported credential`);
       if (!str(r.repository_id) || !repoIds.has(r.repository_id)) bad('runner_grants row', `${JSON.stringify(r.repository_id)} is not an imported repository`);
-      if (r.role != null && !['runner', 'trusted-runner'].includes(String(r.role))) bad('runner_grants row', `${r.credential_id}: role is unknown`);
+      for (const field of ['checker', 'claimed_trusted']) {
+        if (r[field] !== 0 && r[field] !== 1) bad('runner_grants row', `${id}: ${field} must be 0 or 1`);
+      }
+      const peers = r.revoked_at == null ? (active.get(r.repository_id) ?? []).filter(p => p !== r) : [];
+      const problem = grantRoleProblem(r.role, r.trust_domain, r.checker === 1, r.claimed_trusted === 1,
+        { id, kind: credential.kind, public_key: credential.public_key }, peers);
+      if (problem) bad('runner_grants row', `${id}: ${problem.join(': ')}`);
     }
     for (const r of sections.couriers ?? []) {
       if (!str(r.credential_id) || !creds.has(r.credential_id)) bad('couriers row', `${JSON.stringify(r.credential_id)} is not an imported credential`);

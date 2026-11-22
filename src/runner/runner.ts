@@ -2113,7 +2113,7 @@ export class Runner {
     try {
       // S-BTN-182: this is the ordinary runner. A trusted leg needs the dedicated
       // runner, not the repository's ordinary run/close scripts (B-140).
-      if (claim.trusted === true) return await this.finish(claimId, { end_reason: 'released:cannot-finish:permanent', reached: claim.station,
+      if (claim.trusted === true) return await this.finish(claimId, { end_reason: 'released:requested', reached: claim.station,
         detail: 'trusted leg requires a dedicated trusted runner (R-BTN-182)' }, null);
       // R-BTN-34: the snapshot must be in the home checkout — one fetch, else stale-board.
       if (!ensureSha(this.o.home, claim.snapshot_sha, () => this.o.fetch?.(this.o.home))) {

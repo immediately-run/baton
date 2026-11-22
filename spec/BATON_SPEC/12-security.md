@@ -269,12 +269,12 @@ Built: one versioned policy document per repository, changed by compare-and-set 
 `approvers.policy` and logged (R-BTN-188); the approver lists, the refusal of a list no live
 credential can satisfy, and break-glass; the guarantees computed over each version and
 answered by the policy read, and floors, with `floor-violated` and the stop of a repository
-whose floor is broken (R-BTN-189); the store of a protection checker's report, its lapse and
+whose floor is broken (R-BTN-189); setting a grant's role, domain and checker mark; the store of a protection checker's report, its lapse and
 `baton.unprotected` (R-BTN-180); human-only keys (`POST /v1/human-keys`, R-BTN-185); and a
 person's answer as a `std:decision@1` attestation (R-BTN-181). The built document's knob
 names, presets and guarantee names are those of `src/core/policy.ts`, which the tables below
-do not match everywhere. Not built: any route that sets a grant's role, domain or checker
-mark (R-BTN-180), so no grant is the protection checker and no protection report counts.
+do not match everywhere. Baton accepts a marked checker's report; the forge-side check that
+produces it is proposed (R-BTN-180).
 Proposed, in [the security proposal](../proposals/security.md) (B-136, B-137, B-140, B-141,
 B-146, B-147): what enforces `merge.*`, `paths.*` and `tickets.created: proposed` — trusted
 runners, the merge runner, the fact reader and attestations of every other type. Until those are
@@ -472,7 +472,8 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     (at most one checker per repository).
     A marked grant is offered no leg and admitted to no `outbox` class, and Baton refuses to mark
     a grant whose domain is null or carried by another grant of the repository, that has claimed
-    a trusted leg, or that delivers a class (`invalid-params`). It reports `{matched,
+    a trusted leg, or that delivers a class (`invalid-params`). The grant remembers a trusted
+    claim even after the claim is pruned or the grant is revoked and reissued. It reports `{matched,
     reading_hash}` with its heartbeat's `protection`, at least hourly, which Baton keeps as the
     repository's last report (`repositories.protection_json`, §13). Only its reports feed
     `no-runner-lands`; clearing the mark voids the last report. A report from any other runner

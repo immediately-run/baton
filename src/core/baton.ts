@@ -1155,12 +1155,15 @@ export class BatonCore {
     const apiKey = req.headers.get('X-Baton-Api-Key');
     if (!req.headers.has('X-Baton-Signed') && apiKey == null) throw new BatonError('unauthenticated', 'sign with an administrator or owner key, or send its API key');
     const admins = await this.admin.adminFingerprints();
-    const lookup = (fp: string) => admins.get(fp) ?? this.admin.ownerKey(fp);
+    const p = url.pathname;
+    const m = req.method;
+    const grantRole = m === 'PUT' && /^\/v1\/owner\/[^/]+\/grants\/([^/]+)\/role$/.exec(p);
+    // Break-glass is a signature-only principal for this route, not a repository owner.
+    const breakGlass = grantRole && apiKey == null ? await this.humanBreakGlass() : new Map<string, string>();
+    const lookup = (fp: string) => admins.get(fp) ?? breakGlass.get(fp) ?? this.admin.ownerKey(fp);
     // R-BTN-159: a person's API key, checked against its public line, in place of a signature.
     const signed = await this.authenticated(req, lookup);
     const fp = signed.cred;
-    const p = url.pathname;
-    const m = req.method;
     const body = async () => readJson(signed.req);
     const seg = pathSegment;
     if (p.startsWith('/v1/admin/')) {
@@ -1227,6 +1230,9 @@ export class BatonCore {
     if (!this.registry.live(repo)) throw new BatonError('not-found', `${repo} is not registered`);
     // An administrator's key is no owner's, even one added as an owner before it was listed (R-BTN-57).
     if (admins.has(fp)) throw new BatonError('forbidden', 'an administrator key is never an owner key (R-BTN-57)');
+    if (grantRole && (breakGlass.has(fp) || this.admin.owns(fp, repo))) {
+      return json(this.admin.setGrantRole(fp, repo, seg(grantRole[1]), await body(), new Set(breakGlass.keys())));
+    }
     // Owning one repository confers nothing on another (R-BTN-58).
     if (!this.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
     const actor = `owner:${fp}`;
@@ -1238,8 +1244,6 @@ export class BatonCore {
     // observation serves its own credential).
     if (m === 'GET' && rest === 'signing-keys') return json({ keys: await this.admin.signingKeys(repo) });
     if (m === 'POST' && rest === 'grants') return json(await this.admin.grant(actor, repo, await body(), 'owner'));
-    const grantRole = /^grants\/([^/]+)\/role$/.exec(rest);
-    if (m === 'PUT' && grantRole) return json(this.admin.setGrantRole(actor, repo, seg(grantRole[1]), await body()));
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
     if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1])));
     if (m === 'POST' && rest === 'owners') return json(await this.admin.owners(actor, repo, await body()));

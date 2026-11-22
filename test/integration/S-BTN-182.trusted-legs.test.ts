@@ -1,6 +1,6 @@
 // S-BTN-180 / S-BTN-182 (B-147): grants decide which legs a runner can take, on either host.
 import { beforeEach, describe, expect, it } from 'vitest';
-import { Git, ORIGIN, course, cutover, hbBody, keyCall, makeApiKey, placed, requestId, rows, setAdminKeys, setClock, sha256, withCore } from '../helpers';
+import { Git, ORIGIN, course, cutover, hbBody, keyCall, makeApiKey, placed, requestId, rows, setAdminKeys, setClock, setHumanKeys, sha256, withCore } from '../helpers';
 import { call as hostCall } from '#host';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 
@@ -9,6 +9,11 @@ const TRUST = { role: 'trusted-runner', domain: 'lab:A_1' };
 let owner: TestKey;
 let runner: TestKey;
 let other: TestKey;
+let git: Git;
+const graph = {
+  start: 'filed', start_leg: 'prepare', end: ['done'], stations: { filed: {}, prepared: {}, done: {} },
+  legs: { prepare: { from: ['filed'], to: 'prepared' }, land: { from: ['prepared'], to: 'done', trusted: true } },
+};
 const rolePath = (fingerprint: string) => `/v1/owner/docs/grants/${encodeURIComponent(fingerprint)}/role`;
 const role = (key: TestKey, body: unknown) => keyCall(owner, rolePath(key.fingerprint), body, 'PUT');
 const grant = (key: TestKey, hostname: string) => keyCall(owner, '/v1/owner/docs/grants', { public_key: key.publicKey, hostname, capabilities: ['agent-venue'] });
@@ -38,11 +43,8 @@ beforeEach(async () => {
   for (const [key, hostname] of [[runner, 'lab-a'], [other, 'lab-b']] as const) {
     expect((await run(key, 'heartbeat', hbBody('vm-a', { hostname, secret_hash: await sha256(SECRET) }))).status).toBe(200);
   }
-  const git = new Git();
-  git.registry = [course(3, 3, { course: {
-    start: 'filed', start_leg: 'prepare', end: ['done'], stations: { filed: {}, prepared: {}, done: {} },
-    legs: { prepare: { from: ['filed'], to: 'prepared' }, land: { from: ['prepared'], to: 'done', trusted: true } },
-  } })];
+  git = new Git();
+  git.registry = [course(3, 3, { course: graph })];
   git.add('T-1', {}, placed('filed', [], [['prepare', 'ready']]));
   git.add('T-2', {}, placed('prepared', [['prepare', 'prepared']], [['land', 'ready']]));
   expect((await git.post()).status).toBe(200);
@@ -50,6 +52,18 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-182 trusted legs', () => {
+  it('refuses to advance a held claim after a sync moves its ticket to a different course', async () => {
+    const held = await claim(other, 'T-1');
+    expect(held.status).toBe(200);
+    const path = `claims/${held.json.claim_id}`;
+    expect((await run(other, `${path}/advance`, { leg: 'prepare' })).status).toBe(200);
+    git.registry.push(course(3, 3, { id: 'ordinary', course: { ...graph, legs: { ...graph.legs, land: { ...graph.legs.land, trusted: false } } } }));
+    git.add('T-1', { course_id: 'ordinary' }, placed('prepared', [['prepare', 'prepared']], [['land', 'ready']]));
+    expect((await git.post()).status).toBe(200);
+    expect((await run(other, `${path}/advance`, { leg: 'land', reached: 'prepared' })).json).toMatchObject({ code: 'not-eligible', rule_code: 'off-graph' });
+    expect(await rows('SELECT leg, finished_at FROM claim_legs WHERE claim_id = ?', held.json.claim_id)).toEqual([{ leg: 'prepare', finished_at: null }]);
+  });
+
   it('offers only the matching kind, even after a role change, on both candidate paths', async () => {
     for (const reference of [false, true]) {
       await withCore(c => { c.claims.reference = reference; });
@@ -84,6 +98,34 @@ describe('S-BTN-182 trusted legs', () => {
 });
 
 describe('S-BTN-180 grant roles', () => {
+  it('admits configured break-glass signatures only to the role route and only under a human entry', async () => {
+    const key = await makeKey('ssh-ed25519', 'break-glass');
+    await setHumanKeys(key);
+    const setRole = () => keyCall(key, rolePath(runner.fingerprint), TRUST, 'PUT');
+    expect((await setRole()).json.code).toBe('forbidden');
+    const current = await withCore(c => c.policies.current('docs')!.policy);
+    expect((await keyCall(owner, '/v1/owner/docs/policy', { base_version: 1, policy: { ...current, approvers: { ...current.approvers, trust: ['owner', 'human'] } } }, 'PUT')).status).toBe(200);
+    expect((await setRole()).status).toBe(200);
+    expect((await keyCall(key, '/v1/owner/docs/grants', { public_key: other.publicKey })).status).not.toBe(200);
+  });
+
+  it('remembers a trusted claim after its history is pruned and the grant is reissued', async () => {
+    expect((await role(runner, TRUST)).status).toBe(200);
+    const held = await claim(runner, 'T-2');
+    expect(held.status).toBe(200);
+    expect((await run(runner, `claims/${held.json.claim_id}/end`, { end_reason: 'released:requested', reached: 'prepared' })).status).toBe(200);
+    expect(await rows('SELECT failed_attempt FROM claims WHERE id = ?', held.json.claim_id)).toEqual([{ failed_attempt: 0 }]);
+    expect((await git.close('T-2', 'done').post()).status).toBe(200);
+    // Put the closed ticket at the retention stage where its events are gone and its claims are due.
+    await rows('DELETE FROM events WHERE claim_id = ?', held.json.claim_id);
+    await rows('UPDATE closed_tickets SET claims_due_at = ? WHERE ticket_id = ?', T0, 'docs:T-2');
+    await withCore(c => c.retention.prune());
+    expect(await rows('SELECT id FROM claims WHERE id = ?', held.json.claim_id)).toEqual([]);
+    expect((await keyCall(owner, `/v1/owner/docs/grants/${encodeURIComponent(runner.fingerprint)}/revoke`, {})).status).toBe(200);
+    expect((await grant(runner, 'lab-a')).status).toBe(200);
+    expect((await role(runner, { ...TRUST, checker: true })).json.code).toBe('invalid-params');
+  });
+
   it('validates signed runner grants and keeps the checker domain exclusive', async () => {
     expect((await keyCall(runner, rolePath(other.fingerprint), TRUST, 'PUT')).status).not.toBe(200);
     expect((await role(runner, { role: 'trusted-runner' })).json.code).toBe('invalid-params');

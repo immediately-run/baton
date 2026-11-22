@@ -16,6 +16,7 @@ import { envAuth } from '../../src/runner/api';
 import { advanceHome, courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
 import { declarationFrom } from '../../src/runner/runner';
 import { validateCourse } from '../../src/core/course';
+import { checkEnd } from '../../src/core/validate';
 
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
@@ -677,6 +678,23 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
    *  declaration settles and the claim that follows needs no second beat. `every` is the seed
    *  key's answer (no `grant` at all), the case the settle line is about. */
   const GRANT = { grant: { capabilities: ['agent-venue', 'create-pr', 'drivable-browser', 'llm-call'] } };
+
+  it('S-BTN-182: the ordinary runner releases a trusted offer without loading its course', async () => {
+    const end = vi.fn(async (_id: number, body: unknown) => { checkEnd(body); });
+    const api = {
+      setSecret: () => {},
+      heartbeat: async (body: Record<string, unknown>) => ({ runner_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], ...GRANT }),
+      claim: async () => ({ claim_id: 3, ticket_id: 'docs:T-1', station: 'prepared', trusted: true }),
+      end,
+    } as unknown as BatonApi;
+    const runner = runFresh(api, () => {});
+    try {
+      expect(await runner.runOnce()).toMatchObject({ end_reason: 'released:requested', reached: 'prepared' });
+      expect(end).toHaveBeenCalledExactlyOnceWith(3, expect.objectContaining({ end_reason: 'released:requested', reached: 'prepared' }));
+    } finally {
+      runner.stop();
+    }
+  });
   /** B-86's declaration line, said once when a runner's first answered beat settles it. */
   const DECLARED = "baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given";
 

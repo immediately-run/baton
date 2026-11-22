@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, adminSession, keyCall, mirrorCall, rows, setAdminKeys, setClock, sessionCall, syncCall, tick, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { SECTIONS, OWNER_STATE_FORMAT } from '../../src/core/ownerState';
+import { canonicalJson, sha256HexSync } from '../../src/core/policy';
 
 const T0 = Date.parse('2026-11-18T12:00:00Z');
 
@@ -151,6 +152,40 @@ describe('R-BTN-88: the export', () => {
 });
 
 describe('R-BTN-88: the import', () => {
+  it('S-BTN-180: restores trusted-claim memory and rejects invalid checker grants even with a valid digest', async () => {
+    const a = await makeKey('ssh-ed25519', 'a');
+    const b = await makeKey('ssh-ed25519', 'b');
+    for (const [key, hostname] of [[a, 'a'], [b, 'b']] as const) {
+      expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: key.publicKey, hostname, capabilities: [] })).status).toBe(200);
+    }
+    const putRole = (key: TestKey, domain: string, checker: boolean) => keyCall(owner,
+      `/v1/owner/docs/grants/${encodeURIComponent(key.fingerprint)}/role`, { role: 'trusted-runner', domain, checker }, 'PUT');
+    expect((await putRole(a, 'a', true)).status).toBe(200);
+    expect((await putRole(b, 'b', false)).status).toBe(200);
+    await rows('UPDATE runner_grants SET claimed_trusted = 1 WHERE credential_id = ?', b.fingerprint);
+    await mirrorCall('/v1/sync/events?after=1000000');
+    expect((await call('/v1/admin/seal', {})).status).toBe(200);
+    const ex = (await call('/v1/admin/export')).json;
+    await wipe();
+
+    const mutations: [string, (sections: typeof ex.sections, grant: Record<string, unknown>) => void][] = [
+      ['must sign with an SSH key', (sections) => { sections.credentials.find((c: { id: string }) => c.id === a.fingerprint).kind = 'api'; }],
+      ['a trusted runner needs a domain', (_, grant) => { grant.trust_domain = null; }],
+      ['already claimed a trusted leg', (_, grant) => { grant.claimed_trusted = 1; }],
+      ['cannot share its domain', (_, grant) => { grant.trust_domain = 'b'; }],
+    ];
+    for (const [why, mutate] of mutations) {
+      const { digest: _, ...changed } = structuredClone(ex);
+      mutate(changed.sections, changed.sections.runner_grants.find((g: { credential_id: string }) => g.credential_id === a.fingerprint));
+      const result = await call('/v1/admin/import', { ...changed, digest: sha256HexSync(canonicalJson(changed)) });
+      expect(result.json.code).toBe('invalid-params');
+      expect(result.json.message).toContain(why);
+    }
+    expect(await rows('SELECT id FROM repositories')).toEqual([]);
+    expect((await call('/v1/admin/import', ex)).status).toBe(200);
+    expect(await rows('SELECT claimed_trusted FROM runner_grants WHERE credential_id = ?', b.fingerprint)).toEqual([{ claimed_trusted: 1 }]);
+  });
+
   it('restores the owner state into an empty Baton, continues the event sequence, unkeys the runners, and refuses a second import', async () => {
     const h = await import('../helpers');
     // A runner to carry: its row exports and resumes unkeyed (§4.8).

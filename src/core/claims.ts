@@ -1284,6 +1284,7 @@ export class Claims {
     const rationale = b.rationale === null ? undefined : JSON.parse(b.rationale) as unknown;
     const savedAdvice = rationale === undefined ? advice : { ...advice, rationale };
     const st = item.station!;
+    const trusted = !!(st.next_leg && this.stations.graph(item.repository, item.course)?.legs.get(st.next_leg)?.trusted);
     try {
       // R-BTN-62: the counter's last handed-out number now; only a reading numbered above it can
       // make this claim stale.
@@ -1295,13 +1296,14 @@ export class Claims {
                  VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)`,
         item.id, runnerId, b.request_id, randomHex(3), this.headOf(item.repository) ?? '', now, this.handedOut(item.repository),
         st.station, item.course, JSON.stringify(st.path), st.next_leg, savedAdvice ? JSON.stringify(savedAdvice) : null, readySince,
-        st.next_leg && this.stations.graph(item.repository, item.course)?.legs.get(st.next_leg)?.trusted ? 1 : 0);
+        Number(trusted));
     } catch (e) {
       // R-BTN-4: the partial unique indexes refuse a second holder of the ticket or the runner.
       if (isUniqueViolation(e)) throw new BatonError('not-eligible', `${item.id} is already held`, { rule: 3, rule_code: GATE_CODES[3] });
       throw e;
     }
     const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
+    if (trusted) this.markTrustedClaim(item.repository, w.credential_id);
     this.event('claimed', `runner:${runnerId}`, { request_id: b.request_id, station: st.station, leg: st.next_leg }, item.id, id);
     if (b.rationale !== null) this.c.history?.record(item.id, { kind: 'claimed', claim_id: id, runner_id: runnerId, leg: st.next_leg, rationale_json: b.rationale });
     // R-BTN-178: the claim's seats, for the leg it is for — the set as rule 4 matched it here,
@@ -1506,6 +1508,7 @@ export class Claims {
     const item = this.item(c.ticket_id);
     if (!g || !item) throw new BatonError('not-eligible', `${c.ticket_id} is no longer on the board, or its course is not in force`, { rule: 1, rule_code: 'gone' });
     const offGraph = (why: string) => new BatonError('not-eligible', `off-graph: ${why}`, { rule: 1, rule_code: 'off-graph' });
+    if (item.course !== c.course_id) throw offGraph(`the ticket moved from ${c.course_id} to ${item.course}`);
     const station = resolveStation(g, c.station);
     if (!station) throw offGraph(`the claim's station ${c.station} is no longer in the course file`);
     const leg = resolveLeg(g, b.leg);
@@ -1609,6 +1612,7 @@ export class Claims {
         if (!isUniqueViolation(e) || !/run_id/.test(String(e)) || tries >= 8) throw e;
       }
     }
+    if (g.legs.get(leg)!.trusted) this.markTrustedClaim(repo, advancing.credential_id);
     // B-190 (R-BTN-82, R-BTN-84, §13.5): the run's inputs as the runner reported them at its
     // start — pointers and digests only (R-BTN-33), the ticket's version and its read's digest
     // on the row whose name is empty. Replay reads these rows; a retried advance that reached
@@ -1854,6 +1858,10 @@ export class Claims {
     if (!permitsTrust(grant, startedTrusted || nowTrusted)) {
       throw new BatonError('not-eligible', 'trusted: this grant cannot conclude this leg (R-BTN-182)', { rule: 'trusted', rule_code: 'trusted' });
     }
+  }
+
+  private markTrustedClaim(repository: string, credential: string): void {
+    this.exec(`UPDATE runner_grants SET claimed_trusted = 1 WHERE repository_id = ? AND credential_id = ? AND claimed_trusted = 0`, repository, credential);
   }
 
   private restingAt(c: HeldClaim, e: End): { reached: string; finished: boolean } {

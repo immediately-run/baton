@@ -18,6 +18,7 @@ import { graphOf, resolveLeg, type Graph } from './graph';
 import { humanOnlyList, type ApproverEntry, type ApproverFacts, type Policies } from './policy';
 import type { Config, Store } from './ports';
 import { sha256Hex } from './runnerApi';
+import { grantRoleProblem } from './grantRole';
 
 /** A one-time link lives 5 minutes; a session 12 hours (R-BTN-57). */
 export const LOGIN_LINK_MS = 5 * 60_000;
@@ -759,40 +760,28 @@ export class Admin {
   }
 
   /** R-BTN-180 / S-BTN-180: replace the role, domain and checker mark on one live grant. */
-  setGrantRole(actor: string, repository: string, raw: string, body: unknown) {
+  setGrantRole(setter: string, repository: string, raw: string, body: unknown, breakGlass: ReadonlySet<string>) {
     const fingerprint = fingerprintOf(raw, 'fingerprint');
     const policies = this.c.policies;
-    const cur = policies?.current(repository);
-    const setter = actor.slice('owner:'.length);
-    if (!actor.startsWith('owner:') || !policies || !cur ||
-        !policies.entryMatches(cur.policy.approvers.trust, setter, policies.facts(repository), cur.policy.human_key)) {
-      throw new BatonError('forbidden', 'an approver on approvers.trust (approvers.roles in R-BTN-188) is required');
-    }
-    const b = isObj(body) ? body as Record<string, unknown> : bad('body', 'must be a JSON object');
-    only(b, ['role', 'domain', 'checker'], 'body');
-    const role = b.role === 'runner' || b.role === 'trusted-runner' ? b.role : bad('role', 'must be runner or trusted-runner');
-    const domain = b.domain == null ? null : typeof b.domain === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(b.domain)
-      ? b.domain : bad('domain', 'must be a domain label');
-    const checker = b.checker === undefined || typeof b.checker === 'boolean' ? b.checker === true : bad('checker', 'must be boolean');
-    if (role === 'trusted-runner' && domain === null) bad('domain', 'a trusted runner needs a domain');
-    if (checker && role !== 'trusted-runner') bad('checker', 'a checker must be a trusted runner');
     return this.c.store.transaction(() => {
-      const grant = this.rows<{ kind: string; public_key: string | null; checker: number; trust_domain: string | null }>(
-        `SELECT c.kind, c.public_key, g.checker, g.trust_domain FROM runner_grants g JOIN credentials c ON c.id = g.credential_id
+      const cur = policies?.current(repository);
+      if (!policies || !cur || !policies.entryMatches(cur.policy.approvers.trust, setter, policies.facts(repository, breakGlass), cur.policy.human_key)) {
+        throw new BatonError('forbidden', 'an approver on approvers.trust (approvers.roles in R-BTN-188) is required');
+      }
+      const actor = `owner:${setter}`;
+      const b = isObj(body) ? body as Record<string, unknown> : bad('body', 'must be a JSON object');
+      only(b, ['role', 'domain', 'checker'], 'body');
+      const role = b.role === 'runner' || b.role === 'trusted-runner' ? b.role : bad('role', 'must be runner or trusted-runner');
+      const domain = b.domain == null ? null : typeof b.domain === 'string' ? b.domain : bad('domain', 'must be a domain label');
+      const checker = b.checker === undefined || typeof b.checker === 'boolean' ? b.checker === true : bad('checker', 'must be boolean');
+      const grant = this.rows<{ id: string; kind: string; public_key: string | null; checker: number; trust_domain: string | null; claimed_trusted: number }>(
+        `SELECT c.id, c.kind, c.public_key, g.checker, g.trust_domain, g.claimed_trusted FROM runner_grants g JOIN credentials c ON c.id = g.credential_id
          WHERE g.repository_id = ? AND g.credential_id = ? AND g.revoked_at IS NULL AND c.revoked_at IS NULL`, repository, fingerprint)[0];
       if (!grant) throw new BatonError('not-found', `no grant of ${fingerprint} on ${repository}`);
-      if (role === 'trusted-runner' && (grant.kind !== 'runner' || !grant.public_key || !KEY_FINGERPRINT.test(fingerprint))) bad('role', 'a trusted runner must sign with an SSH key');
-      if (checker && this.rows(`SELECT 1 FROM claims c JOIN runners r ON r.id = c.runner_id
-        WHERE r.credential_id = ? AND c.ticket_id LIKE ? || ':%' AND (c.offered_trusted = 1
-          OR EXISTS (SELECT 1 FROM claim_legs l WHERE l.claim_id = c.id AND l.trusted = 1))`, fingerprint, repository).length) {
-        bad('checker', 'this key has already claimed a trusted leg on the repository');
-      }
-      if (checker && this.rows(`SELECT 1 FROM runner_grants WHERE repository_id = ? AND credential_id != ?
-        AND revoked_at IS NULL AND checker = 1`, repository, fingerprint).length) bad('checker', 'this repository already has a checker');
-      if (domain !== null && this.rows(`SELECT 1 FROM runner_grants WHERE repository_id = ? AND credential_id != ?
-        AND revoked_at IS NULL AND trust_domain = ? AND (checker = 1 OR ? = 1)`, repository, fingerprint, domain, Number(checker)).length) {
-        bad('domain', 'a checker cannot share its domain with another grant');
-      }
+      const peers = this.rows<{ checker: number; trust_domain: string | null }>(`SELECT checker, trust_domain FROM runner_grants
+        WHERE repository_id = ? AND credential_id != ? AND revoked_at IS NULL`, repository, fingerprint);
+      const problem = grantRoleProblem(role, domain, checker, grant.claimed_trusted === 1, grant, peers);
+      if (problem) bad(...problem);
       this.exec(`UPDATE runner_grants SET role = ?, trust_domain = ?, checker = ?, trust_set_by = ?
         WHERE repository_id = ? AND credential_id = ?`, role, domain, Number(checker), actor, repository, fingerprint);
       if (grant.checker && (!checker || domain !== grant.trust_domain)) policies.voidProtection(repository, fingerprint);
