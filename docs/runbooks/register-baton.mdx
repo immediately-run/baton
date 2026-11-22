@@ -59,9 +59,25 @@ npx wrangler secret put BATON_ADMIN_KEYS < ~/.ssh/baton_admin.pub
 npx --yes @immediately-run/baton@0.1.3 admin -i ~/.ssh/baton_admin open     # prints a one-time login link (5 minutes)
 ```
 
-Check: the link opens the dashboard (a session for 12 hours). From now on the dashboard needs a
-login link: Cloudflare Access still stands in front, but on its own it opens the dashboard only
-while `BATON_ADMIN_KEYS` lists no key.
+Check: the link opens the dashboard (a session for 12 hours). Once an administrator key is
+configured, Access alone does not authorize dashboard requests. To let a person sign in without
+a terminal, bind their Access email to an administrator key. Store one `<email> <fingerprint>`
+pair per line in a private file, for example `admin@example.com SHA256:…` (use the fingerprint
+from `ssh-keygen -lf ~/.ssh/baton_admin.pub`, or the `bak_…` identifier for an API key).
+Use ASCII email addresses and list each address only once, regardless of case. Do not commit the file.
+
+```sh
+npx wrangler secret put ACCESS_IDENTITIES < /path/to/access-identities
+```
+
+Set `ACCESS_TEAM_DOMAIN` to the team hostname (no scheme) and `ACCESS_AUD` to the application's
+audience in the deployment. Cover only Baton's hostname and the dashboard routes named in
+[BATON_SPEC §12.4](../../spec/BATON_SPEC/12-security.md#sec-12-4). Set a short Access session duration
+and require a factor no agent session holds, such as a touch-required hardware key. Anyone who can
+make Access assert a bound email can open that administrator's session; see the
+[security model](../security-model.mdx). After passing Access, click **Sign in with Cloudflare Access**
+at `/login`. Removing or changing the binding ends the session on its next request. Locally,
+pass `--access-identities <file>`; Baton re-reads that file on each binding check.
 
 ## 3. Register the repository
 

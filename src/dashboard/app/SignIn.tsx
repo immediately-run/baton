@@ -1,5 +1,5 @@
-// SignIn.tsx — the sign-in screen (B-206 item 4, on what exists today — R-BTN-57's one-time
-// link): a key holder runs the one CLI line, which mints a link and prints it; the link's token
+// SignIn.tsx — the sign-in screen (R-BTN-155). Access sign-in starts only on a button click.
+// Alternatively, a key holder runs the CLI to mint a one-time link; the link's token
 // rides in the URL fragment, the page posts it to `POST /v1/login` and Baton answers the session
 // cookie. Drawn at `/login`, and in place on any screen whose read answers `unauthenticated` —
 // the URL stays, and the screen continues once a session stands. No return URL is carried
@@ -9,7 +9,7 @@
 // sign-in exists; the owner's — and the confirmed-code flow, `POST /v1/login {role}` with its
 // polling — is B-76's, and is added as a row and a `flow` here, not as a second screen.
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, apiGet, asApiError } from '../lib/api';
+import { ApiError, apiGet, apiSend, asApiError } from '../lib/api';
 import type { SessionRole } from '../lib/types';
 import { CliLine, ErrorNote } from '../lib/ui';
 
@@ -53,6 +53,21 @@ export function SignIn({ inPlace, as, error, onSignedIn }: { inPlace: boolean; a
   const [note, setNote] = useState<string | null>(null);
   const [fault, setFault] = useState<ApiError | null>(null);
   const [checking, setChecking] = useState(false);
+  const [signing, setSigning] = useState(false);
+  const [accessFault, setAccessFault] = useState<ApiError | null>(null);
+
+  async function signInWithAccess() {
+    setSigning(true);
+    setAccessFault(null);
+    try {
+      await apiSend('POST', '/v1/login', { access: true });
+      onSignedIn();
+    } catch (e) {
+      setAccessFault(asApiError(e));
+    } finally {
+      setSigning(false);
+    }
+  }
 
   const check = useCallback(async (asked: boolean) => {
     setChecking(true);
@@ -86,13 +101,17 @@ export function SignIn({ inPlace, as, error, onSignedIn }: { inPlace: boolean; a
   return (
     <main className="signin" aria-labelledby="signin-h">
       <h1 id="signin-h">Sign in to Baton</h1>
-      <p className="page-sub">{inPlace ? 'Your session ended, or there is none. Sign in and this page continues where it is.' : 'The dashboard opens with a one-time link from a key holder’s terminal.'}</p>
+      <p className="page-sub">{inPlace ? 'Your session ended, or there is none. Sign in and this page continues where it is.' : 'Sign in with Cloudflare Access or open a one-time link.'}</p>
       {error ? <ErrorNote error={error} what="The link did not sign in" /> : null}
       {missing ? <p className="band band-warn">Signing in as {as === 'owner' ? 'an owner' : as} is not built yet (<span className="mono">{missing}</span>). An administrator’s sign-in is below.</p> : null}
       {(roles.length ? roles : SIGN_IN_ROLES).map((r) => (
         <section key={r.role} className="card signin-role" aria-labelledby={`signin-${r.role}`}>
           <h2 id={`signin-${r.role}`}>Sign in as {r.as}</h2>
-          <p>Run this where your key is:</p>
+          <p><button type="button" className="btn btn-primary" disabled={signing} onClick={() => void signInWithAccess()}>Sign in with Cloudflare Access</button></p>
+          {accessFault?.code === 'unauthenticated'
+            ? <p className="band band-warn" role="alert">No verified Cloudflare Access email is bound to an administrator key. Use a one-time link instead.</p>
+            : accessFault ? <ErrorNote error={accessFault} what="Cloudflare Access sign-in failed" /> : null}
+          <p>For a one-time link, run this where your key is:</p>
           <p><CliLine>{r.cli}</CliLine></p>
           <p className="mut">It prints a link that works once, for five minutes. Open it in this browser: the link signs the browser in, and nothing is typed here.</p>
         </section>
