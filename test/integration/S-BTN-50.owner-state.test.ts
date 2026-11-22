@@ -32,6 +32,7 @@ beforeEach(async () => {
 });
 
 const adminPost = (path: string, body: unknown = {}) => keyCall(admin, path, body);
+const withDigest = (backup: Record<string, unknown>) => ({ ...backup, digest: sha256HexSync(canonicalJson(backup)) });
 
 /** Empty the instance for an import (§4.8): the harness fabricates a fresh Baton, as the move's
  *  target is one; the policy log's append-only triggers (R-BTN-188) go for the wipe alone. */
@@ -83,11 +84,24 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
       [versions.map((r) => r.repository_id === 'docs' && r.version === 2 ? { ...r, hash: '0'.repeat(64) } : r), 'does not match'],
     ] as const) {
       const incomplete = { ...backup, sections: { ...backup.sections, repository_policies: policies } };
-      const response = await adminPost('/v1/admin/import', { ...incomplete, digest: sha256HexSync(canonicalJson(incomplete)) });
+      const response = await adminPost('/v1/admin/import', withDigest(incomplete));
       expect(response.json.code).toBe('invalid-params');
       expect(JSON.stringify(response.json)).toContain(message);
       expect(await rows('SELECT id FROM repositories')).toEqual([]);
     }
+    const badFloor = { ...backup, sections: { ...backup.sections, policy_floors: [
+      { ...backup.sections.policy_floors[0], guarantees: '["human-gates-hardware"]' },
+    ] } };
+    expect((await adminPost('/v1/admin/import', withDigest(badFloor))).json.code).toBe('floor-violated');
+    for (const table of ['repositories', 'repository_policies', 'policy_floors', 'human_keys']) {
+      expect(await rows(`SELECT * FROM ${table}`)).toEqual([]);
+    }
+
+    // The destination must not assign the imported human key its administrator role too.
+    await setAdminKeys(admin, human);
+    expect((await adminPost('/v1/admin/import', exported)).json.code).toBe('invalid-params');
+    expect(await rows('SELECT id FROM repositories')).toEqual([]);
+    await setAdminKeys(admin);
     expect((await adminPost('/v1/admin/import', exported)).status).toBe(200);
     const after = await keyCall(owner, path);
     expect(after.status).toBe(200);
@@ -97,7 +111,7 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     expect(await rows('SELECT * FROM human_keys ORDER BY fingerprint')).toEqual(keys);
   });
 
-  it('restores a Baton-only person-leg arrival before judging the first board post', async () => {
+  it('keeps a person-leg arrival claimable across two moves and a stale first post', async () => {
     const person = {
       ...roadmapPr,
       legs: { ...roadmapPr.legs, decide: { from: ['reviewed'], to: ['adjudicated'], kind: 'person', asks: 'owner' } },
@@ -118,12 +132,46 @@ describe('S-BTN-50 owner state exported (R3-1258)', () => {
     await wipe();
     await setClock(T0 + 60_000);
     expect((await adminPost('/v1/admin/import', backup)).status).toBe(200);
+    expect(await rows('SELECT * FROM ticket_stations')).toEqual([]);
+    expect((await adminPost('/v1/admin/freeze')).status).toBe(200);
+    await mirrorCall('/v1/sync/events?after=1000000');
+    expect((await adminPost('/v1/admin/seal')).status).toBe(200);
+    const secondBackup = (await keyCall(admin, '/v1/admin/export')).json;
+    expect(secondBackup.sections.ticket_stations).toEqual(backup.sections.ticket_stations);
+    await wipe();
+    await setClock(T0 + 120_000);
+    expect((await adminPost('/v1/admin/import', secondBackup)).status).toBe(200);
     const target = new Git().add('A', { question }, stale);
     target.registry = registry;
     expect((await target.post()).status).toBe(200);
     expect(await rows('SELECT station, next_source FROM ticket_stations WHERE ticket_id = ?', 'docs:A'))
       .toEqual([{ station: 'adjudicated', next_source: 'baton' }]);
     expect(await rows('SELECT * FROM pending_owner_state')).toEqual([]);
+    const runner = await register('vm-a', { courses: [{ repository: 'docs', course: 'roadmap-pr', version: 4 }] });
+    const claim = await claimItem('vm-a', runner.secret);
+    expect(claim.status, JSON.stringify(claim.json)).toBe(200);
+    expect(claim.json).toMatchObject({ ticket_id: 'docs:A', station: 'adjudicated', legs: ['merge'] });
+  });
+
+  it('preserves the SQL NULL session-host reset and refuses JSON null text', async () => {
+    const setHosts = (session_hosts: string[] | null) => keyCall(admin, '/v1/admin/settings', { session_hosts }, 'PUT');
+    expect((await setHosts(['example.test'])).status).toBe(200);
+    expect((await setHosts(null)).status).toBe(200);
+    await mirrorCall('/v1/sync/events?after=1000000');
+    expect((await adminPost('/v1/admin/seal')).status).toBe(200);
+    const exported = (await keyCall(admin, '/v1/admin/export')).json;
+    const { digest: _digest, ...backup } = exported;
+    expect(backup.sections.instance_settings[0].session_hosts).toBeNull();
+    await wipe();
+    await setClock(T0 + 60_000);
+    const invalid = { ...backup, sections: { ...backup.sections, instance_settings: [
+      { ...backup.sections.instance_settings[0], session_hosts: 'null' },
+    ] } };
+    expect((await adminPost('/v1/admin/import', withDigest(invalid))).json.code).toBe('invalid-params');
+    expect((await adminPost('/v1/admin/import', exported)).status).toBe(200);
+    expect(await rows('SELECT session_hosts FROM instance_settings')).toEqual([{ session_hosts: null }]);
+    const state = await keyCall(admin, '/v1/admin/state');
+    expect(state.json.instance.session_hosts).toEqual(['claude.ai']);
   });
 
   it('a fence-pending claim holds the seal; the clear is accepted while frozen, and the seal then proceeds; a lagging mirror is named and dispatched', async () => {

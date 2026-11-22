@@ -345,8 +345,10 @@ The fingerprint stores no ticket content and is an optimization, never authority
   A post marked `force` — neither its commit nor the head descends from the other — is refused
   `snapshot-rejected` and held once per sha against the current head. An administrator can
   accept it on the dashboard (`POST /v1/ui/board/accept`); otherwise the alarm accepts it
-  when 24 hours have elapsed since its first post. Acceptance does not move the head: the next
-  `force` post of the accepted sha against that head does. A held post's stations and
+  when 24 hours have elapsed since its first post against that head. Acceptance admits the
+  rewritten line for that repository and previous head; it does not move the head. The next
+  otherwise eligible `force` post against that head moves it, even if the posted sha differs
+  from the held sha. A held post's stations and
   confirmations are applied as a refresh. Which of two posts is newer never depends on a clock.
   An administrator's adoption of a rewritten default branch
   (a forced Resync) is proposed in [tickets and sources](../proposals/tickets-and-sources.md).
@@ -607,7 +609,9 @@ The fingerprint stores no ticket content and is an optimization, never authority
     Only Baton-owned positions on live repositories are exported; the board rebuilds the rest.
     Import zeros runners' liveness and activity timestamps.
   - **History sections** (only with `--with-history`): `ticket_history`, `leg_outputs`,
-    `leg_run_inputs`. An import without them loses them.
+    `leg_run_inputs`. An import without them loses them. A populated `leg_run_inputs` section
+    cannot be restored into an empty target: its rows require originating claims, which do
+    not travel in the export.
   - **Not exported**: claims, their seats and leg rows, events, reading history, sync wants,
     and the board cache apart from the Baton-owned positions above.
   - **Import** (`POST /v1/admin/import`): one transaction, into an **empty** Baton only (no
@@ -617,12 +621,17 @@ The fingerprint stores no ticket content and is an optimization, never authority
     tombstones only on retired rows); the first failing row refuses the whole import. Every live
     repository needs its original policy versions, validated as documents and by their hashes
     and contiguous `previous_hash` chain starting at version 1. Import writes them unchanged
-    and seeds none; a retired repository's tombstone needs none. A digest checks integrity,
+    and seeds none; a retired repository's tombstone needs none. Import refuses floors whose
+    guarantees do not hold on the imported policy and authority facts (R-BTN-189); it does not
+    check a live protection report. Imported human keys must not be destination administrator
+    keys (R-BTN-57). A digest checks integrity,
     not the authority of the source. Signed requests with `created` at or before the source's
     `sealed_at` are refused `unauthenticated`. Ticket-scoped rows wait in `pending_owner_state`
     until the first snapshot that creates their ticket; one the repository's first snapshot does
-    not post is dropped and logged. A pending Baton-owned position is restored before that
-    snapshot's placements are judged (R-BTN-39). The event sequence continues from `events_seq`.
+    not post is dropped and logged. A further move before that snapshot exports those pending
+    rows too. A pending Baton-owned position is restored, and its outgoing legs rebuilt from
+    the course in force, before that snapshot's placements are judged (R-BTN-39). The event
+    sequence continues from `events_seq`.
   - **Moving a Baton**:
     1. **freeze** (`baton admin freeze`, `POST /v1/admin/freeze`; `baton_settings.frozen_at`,
        event `frozen`): new claims and owner writes are refused `frozen`;

@@ -8,7 +8,7 @@
 // own table to that list in its PR (conditions B-55, `ticket_timers` B-61/B-63, the outbox
 // B-64, check runners B-5, MCP keys B-25, registration tokens and instance settings B-8/B-46).
 import { BatonError } from './http';
-import { canonicalJson, checkFloorGuarantees, checkFloorName, PRESETS, sha256HexSync, validatePolicyDocument } from './policy';
+import { canonicalJson, checkFloorGuarantees, checkFloorName, guaranteesOf, PRESETS, sha256HexSync, validatePolicyDocument, type Policies } from './policy';
 import { parseSshKey } from './auth';
 import { checkInstanceSettings } from './instanceSettings';
 import { logEvent } from './db';
@@ -100,7 +100,7 @@ function storedJson(value: unknown, at: string): unknown {
   try { return JSON.parse(value); } catch { return bad(at, 'must be valid JSON'); }
 }
 
-async function validatePolicySections(sections: OwnerStateExport['sections']) {
+async function validatePolicySections(sections: OwnerStateExport['sections'], admins: ReadonlySet<string>) {
   const repos = new Map((sections.repositories ?? []).map((r) => [r.id, r]));
   const versions = [...(sections.repository_policies ?? [])];
   for (const row of versions) {
@@ -136,7 +136,7 @@ async function validatePolicySections(sections: OwnerStateExport['sections']) {
     }
     floors.add(key);
   }
-  const incompatibleKeys = new Set([...(sections.credentials ?? []).map((r) => r.id), ...(sections.sync_keys ?? []).map((r) => r.fingerprint)]);
+  const incompatibleKeys = new Set([...admins, ...(sections.credentials ?? []).map((r) => r.id), ...(sections.sync_keys ?? []).map((r) => r.fingerprint)]);
   const keys = new Set<string>();
   for (const row of sections.human_keys ?? []) {
     const key = await parseSshKey(str(row.public_key) ? row.public_key : '');
@@ -153,6 +153,8 @@ export class OwnerState {
     store: Store;
     now: () => number;
     origin: string;
+    policies: Policies;
+    restoreNext: (repository: string, ticket: string, station: string, leg: string | null, at: number) => void;
     /** §4.8's step 2: a seal refused for lagging mirrors dispatches their workflows (R-BTN-94). */
     dispatchMirror?: (repository: string) => void;
   }) {}
@@ -252,7 +254,19 @@ export class OwnerState {
     if (sealedAt == null) throw new BatonError('conflict', 'the export is of a sealed Baton: freeze, let the claims drain and the mirrors acknowledge, then seal (R-BTN-88)');
     const sections: Record<string, Record<string, unknown>[]> = {};
     for (const s of [...SECTIONS, ...(withHistory ? HISTORY_SECTIONS : [])]) {
-      sections[s.table] = this.sectionRows(s.table, s.order);
+      const rows = this.sectionRows(s.table, s.order);
+      if (!s.ticketScoped) {
+        sections[s.table] = rows;
+        continue;
+      }
+      // A target can move again before its first post materializes these rows.
+      const byTicket = new Map(rows.map((row) => [String(row.ticket_id), row]));
+      for (const { ticket_id, row_json } of this.rows<{ ticket_id: string; row_json: string }>(
+        `SELECT ticket_id, row_json FROM pending_owner_state WHERE kind = ?
+         AND repository_id IN (SELECT id FROM repositories WHERE retired_at IS NULL)`, s.ticketScoped.kind)) {
+        if (!byTicket.has(ticket_id)) byTicket.set(ticket_id, JSON.parse(row_json));
+      }
+      sections[s.table] = [...byTicket.keys()].sort().map((id) => byTicket.get(id)!);
     }
     const out: OwnerStateExport = {
       format: OWNER_STATE_FORMAT,
@@ -360,6 +374,7 @@ export class OwnerState {
       if (row.id !== 1 || row.check_app_id === undefined || row.recommended_client === undefined) bad('instance_settings row', 'invalid singleton row');
       const link = storedJson(row.link_hosts, 'instance_settings.link_hosts');
       const session = row.session_hosts === null ? null : storedJson(row.session_hosts, 'instance_settings.session_hosts');
+      if (session === null && row.session_hosts !== null) bad('instance_settings.session_hosts', 'a reset must be SQL NULL');
       const checked = checkInstanceSettings({ link_hosts: link, session_hosts: session, check_app_id: row.check_app_id, recommended_client: row.recommended_client });
       if (canonicalJson(link) !== canonicalJson(checked.link) || canonicalJson(session) !== canonicalJson(checked.session)) bad('instance_settings row', 'hosts must be normalized');
     }
@@ -371,7 +386,7 @@ export class OwnerState {
    *  `events_seq`; runners' `last_seen_at` is 0 (they resume unkeyed). A sealed source's
    *  `sealed_at` becomes the new instance's floor for signed `created` (§11.1: a pre-seal
    *  replay reaches nothing). */
-  async import(actor: string, body: unknown): Promise<{ ok: true }> {
+  async import(actor: string, body: unknown, admins: ReadonlySet<string>): Promise<{ ok: true }> {
     const b = body as OwnerStateExport;
     if (!b || typeof b !== 'object') throw new BatonError('invalid-params', 'the body is not an owner-state export');
     if (b.format !== OWNER_STATE_FORMAT) throw new BatonError('invalid-params', `the export's format is not ${OWNER_STATE_FORMAT}`);
@@ -388,7 +403,7 @@ export class OwnerState {
     if (!this.isEmpty()) throw new BatonError('conflict', 'the import is into an empty Baton alone (R-BTN-88)');
     for (const { table } of SECTIONS) if (!Object.hasOwn(sections, table)) bad('sections', `missing ${table}; export again from an updated source`);
     this.validate(sections);
-    await validatePolicySections(sections);
+    await validatePolicySections(sections, admins);
     // Recheck under the transaction after asynchronous SSH key validation.
     return this.c.store.transaction(() => {
       if (!this.isEmpty() || this.sealedAt() != null) throw new BatonError('conflict', 'the import is into an empty, unsealed Baton alone (R-BTN-88)');
@@ -433,6 +448,19 @@ export class OwnerState {
         this.c.store.exec("DELETE FROM credentials WHERE id = 'legacy' AND kind = 'legacy'");
       }
       importOne(s.table, rows);
+    }
+    // Use the write path's authority facts, without a live protection report. A failing
+    // floor rolls back the entire import, including the policy and the pending rows.
+    for (const repository of new Set((b.sections.policy_floors ?? []).map((row) => String(row.repository_id)))) {
+      const { policy } = this.c.policies.current(repository)!;
+      const holds = guaranteesOf(policy, { humanKeys: this.c.policies.facts(repository).humans });
+      for (const floor of this.c.policies.floors(repository)) {
+        for (const guarantee of floor.guarantees) {
+          if (!holds[guarantee as keyof typeof holds]) {
+            throw new BatonError('floor-violated', `${repository}: floor ${floor.name} requires ${guarantee} (R-BTN-189)`, { floor: floor.name, guarantee });
+          }
+        }
+      }
     }
     for (const s of HISTORY_SECTIONS) importOne(s.table, b.sections?.[s.table] ?? []);
     // §4.8's step 6 — the repository's first post after the move: each imported repository
@@ -483,6 +511,7 @@ export class OwnerState {
           this.c.store.exec(`INSERT INTO ticket_stations (ticket_id, station, path, path_len, to_end, next_leg, next_source, handoff_url, snapshot_sha, observation, person_expires_at)
                              VALUES (?, ?, ?, ?, ?, ?, 'baton', ?, ?, 0, ?)`, row.ticket_id, value.station, value.path, value.path_len,
             value.to_end, value.next_leg, value.handoff_url, value.snapshot_sha, value.person_expires_at);
+          this.c.restoreNext(repository, row.ticket_id, String(value.station), value.next_leg as string | null, at);
         }
         this.c.store.exec('DELETE FROM pending_owner_state WHERE repository_id = ? AND ticket_id = ? AND kind = ? AND key = ?', repository, row.ticket_id, row.kind, row.key);
       } else if (first) {

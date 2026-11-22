@@ -140,10 +140,10 @@ export class BatonCore {
     // rule, the heartbeat's reports and pins, the owner routes' approver checks.
     this.policies = new Policies({ store, now: () => this.now() });
     this.policies.releaseForFloor = (repository) => this.claims.releaseForFloor(repository);
-    // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88), each one module
-    // with the store and the clock alone.
+    // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88).
     this.capacity = new Capacity({ store, now: () => this.now(), config: ports.config });
     this.ownerState = new OwnerState({ store, now: () => this.now(), origin: ports.config.BATON_ORIGIN,
+      policies: this.policies, restoreNext: (...args) => this.stations.restoreNext(...args),
       dispatchMirror: (repository) => want({ repository, kind: 'mirror' }) });
     this.courses = new Courses({ store, requiredBars: (repo) => this.admin.requiredBars(repo), policies: this.policies });
     this.observations = new Observations({ store, now: () => this.now() });
@@ -1207,7 +1207,7 @@ export class BatonCore {
       if (m === 'GET' && p === '/v1/admin/export') return json(this.ownerState.export(url.searchParams.get('with_history') === '1'));
       if (m === 'POST' && p === '/v1/admin/import') {
         const b = await body();
-        return json(await this.ownerState.import(actor, b));
+        return json(await this.ownerState.import(actor, b, new Set((await this.admin.adminFingerprints()).keys())));
       }
       if (m === 'POST' && p === '/v1/admin/grants') {
         const b = await body();
