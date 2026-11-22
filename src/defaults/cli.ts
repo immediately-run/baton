@@ -1865,7 +1865,22 @@ const wrapperExample = (): string =>
 /** The instructions shipped for one leg of a standard course (R-BTN-131), the Markdown `init`
  * copies into the repository, which owns them from then on. */
 const instructionsOf = (course: string, leg: string): string =>
-  readFileSync(fromSource() ? join(packageRoot(), 'src', 'defaults', 'courses', course, `${leg}.md`) : prebuilt('courses', course, `${leg}.md`), 'utf8');
+  readFileSync(fromSource() ? join(packageRoot(), 'src', 'defaults', 'courses', instructionsCourse(course, leg), `${leg}.md`) : prebuilt('courses', course, `${leg}.md`), 'utf8');
+
+/** The standard course whose shipped `<leg>.md` a course's leg uses: its own, unless the course
+ *  ships none for the leg and names `instructionsFrom` (`bug-fix` and `new-feature` run
+ *  `create-pr`'s legs from `filed` on). build:cli copies the file under the course's own id, so
+ *  an installed package reads it there. */
+function instructionsCourse(course: string, leg: string): string {
+  const own = join(packageRoot(), 'src', 'defaults', 'courses', course, `${leg}.md`);
+  const from = builtIn(course)?.instructionsFrom;
+  return existsSync(own) || from == null ? course : from;
+}
+
+/** The legs of a standard course that ship instructions: its runner legs, and the person legs a
+ *  person works in conversation (R-BTN-116; `bug-fix`'s `describe`, `new-feature`'s `specify`),
+ *  which have no stub. */
+const instructedLegs = (b: BuiltIn): string[] => [...runnerLegs(b), ...(b.conversations ?? [])];
 
 /** The legs of a standard course a runner runs, each with a stub and instructions: every leg
  *  but a person's (R-BTN-116, B-257's `confirm`), which no runner is offered and no script runs. */
@@ -1897,7 +1912,9 @@ export async function prebuildDefaults(dist: string, build: { repository: string
     for (const leg of runnerLegs(b)) {
       await bundleSource(b.legs[leg]?.tests ? testsStubSource(b, b.id, leg) : stubSource(b, b.id, leg), join(out, 'stubs', b.id, `${leg}.mjs`));
       files++;
-      const md = join(packageRoot(), 'src', 'defaults', 'courses', b.id, `${leg}.md`);
+    }
+    for (const leg of instructedLegs(b)) {
+      const md = join(packageRoot(), 'src', 'defaults', 'courses', instructionsCourse(b.id, leg), `${leg}.md`);
       if (existsSync(md)) {
         mkdirSync(join(out, 'courses', b.id), { recursive: true });
         copyFileSync(md, join(out, 'courses', b.id, `${leg}.md`));
@@ -2047,6 +2064,8 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     for (const leg of runnerLegs(bi)) {
       // Each stub is bundled with its `close`, so it imports nothing the runner's scratch copy lacks.
       await put(`.baton/courses/${bi.id}/legs/${leg}.mjs`, (abs) => writeStub(bi, leg, abs), rewrite);
+    }
+    for (const leg of instructedLegs(bi)) {
       // The leg's instructions: shipped with the CLI, the repository's to edit from here on.
       await put(`.baton/courses/${bi.id}/legs/${leg}.md`, (abs) => writeFileSync(abs, instructionsOf(bi.id, leg)));
     }

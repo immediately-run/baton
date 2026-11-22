@@ -102,6 +102,53 @@ export const CREATE_PR_COURSE = {
   },
 };
 
+/** A course that starts with a person's conversation and continues as `create-pr`: the start
+ *  station, and the person leg (R-BTN-116) that leaves it for `filed`. No runner is offered the
+ *  leg or may claim it (rule `person`), so nothing waits for a runner before the conversation:
+ *  the person works it in their own interactive session at once, following the leg's shipped
+ *  instructions, and answers it through Baton (`baton decision answer <ticket> filed`) when the
+ *  ticket reads whole. From `filed` on, every leg, bound and station is `create-pr`'s. */
+export interface ConversationStart {
+  /** The station a new ticket is placed at, waiting on the conversation. */
+  station: string;
+  stationLabel: string;
+  /** The person leg: the conversation that turns the request into a ticket `implement` can run. */
+  leg: string;
+  label: string;
+  /** Who answers it (R-BTN-116's `asks`). */
+  asks: string;
+}
+
+/** `create-pr`'s graph behind a conversation: `start` the conversation's station, `start_leg` its
+ *  person leg, entered by `baton request` (`starts_from: request`, B-98) or a hand-filed ticket. */
+const conversationCourse = (c: ConversationStart) => ({
+  ...CREATE_PR_COURSE,
+  start: c.station,
+  start_leg: c.leg,
+  starts_from: 'request',
+  stations: { [c.station]: { label: c.stationLabel }, ...CREATE_PR_COURSE.stations },
+  legs: { [c.leg]: { from: [c.station], to: 'filed', kind: 'person', asks: c.asks, label: c.label }, ...CREATE_PR_COURSE.legs },
+});
+
+/** The `bug-fix` course's start (R-BTN-131): the reporter and an agent reproduce and describe
+ *  the bug in conversation — symptom, reproduction, expected and actual, the cause where it is
+ *  found, and a regression test as an exit criterion — then `create-pr` fixes it. */
+export const BUG_FIX_START: ConversationStart = {
+  station: 'reported', stationLabel: 'Reported, being described', leg: 'describe', asks: 'reporter',
+  label: 'Describe and reproduce the bug with the reporter',
+};
+
+/** The `new-feature` course's start (R-BTN-131): the requester and an agent shape the feature in
+ *  conversation — who it is for, what it does, what it does not, numbered acceptance criteria —
+ *  then `create-pr` builds it. */
+export const NEW_FEATURE_START: ConversationStart = {
+  station: 'requested', stationLabel: 'Requested, being specified', leg: 'specify', asks: 'requester',
+  label: 'Specify the feature with the requester',
+};
+
+export const BUG_FIX_COURSE = conversationCourse(BUG_FIX_START);
+export const NEW_FEATURE_COURSE = conversationCourse(NEW_FEATURE_START);
+
 /** The `create-spec` course's graph (R-BTN-131, B-96): a specification from the owner's design
  * conversation to a merged PR — `converse` (the interactive session that writes the spec file and
  * opens its PR), `review` (adversarial, non-interactive), `address` (the owner's second
@@ -737,6 +784,28 @@ export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; bran
   }
   for (const [id, loops] of prefixes) stations[id] = { ...stations[id], path: [...loops, ...stations[id].path] };
   return { stations, markers, course_data: {} };
+}
+
+/** The stations of a course that starts with a person's conversation (`bug-fix`, `new-feature`):
+ *  `create-pr`'s placement, with the conversation in front of it.
+ *  - A ticket `create-pr` would place at `filed` with nothing behind it has not been shown to
+ *    have left the conversation: it is posted at the course's start with the person leg queued,
+ *    `ready` whatever its dependencies — a conversation needs none. The person's answer moves it
+ *    on through Baton (R-BTN-116), never through git: the position Baton wrote stands against
+ *    this shorter post (R-BTN-39), and `implement` is queued from it.
+ *  - Any other placement — a PR open or merged, a `delivered` pass — shows the ticket past the
+ *    conversation, done in Baton or outside it (values #13): its path is `create-pr`'s with the
+ *    person leg's step in front, so it follows the file from its start and extends the path the
+ *    answer left. */
+export function stationsConversationPr(start: ConversationStart, ctx: Parameters<typeof stationsPr>[0]): StationsResult {
+  const out = stationsPr(ctx);
+  const step: Step = { leg: start.leg, reached: 'filed' };
+  for (const [id, st] of Object.entries(out.stations)) {
+    out.stations[id] = st.station === 'filed' && st.path.length === 0
+      ? at(start.station, [], [{ leg: start.leg, state: 'ready', waiting_on: null }])
+      : { ...st, path: [step, ...st.path] };
+  }
+  return out;
 }
 
 /** B-257: the station `create-pr`'s `implement` reaches when it finds the ticket already on the

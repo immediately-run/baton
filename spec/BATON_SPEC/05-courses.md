@@ -474,7 +474,8 @@ Designs for this section that are not built are on the proposal page
 
 - **R-BTN-131 (the standard courses).** A standard course is one the baton repository ships
   with the CLI, under `src/defaults/`: `create-pr` (the default), `review-pr`, `bug-report`,
-  `draft-ticket`, `decision`, `build-app`, `create-spec` and `spec-to-tickets`. A repository
+  `draft-ticket`, `decision`, `build-app`, `create-spec`, `spec-to-tickets`, `bug-fix` and
+  `new-feature`. A repository
   scaffolds one with `baton repo init --course <id>` and needs no course code of its own.
   "Standard" names where they live, not a privilege: core imports nothing from them
   (R-BTN-50), and the CLI reads them as any course. They assume no particular deployment and

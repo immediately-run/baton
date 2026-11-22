@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { checkTickets } from '../../src/defaults/tickets-check';
 import { defaultBranch, fileRequest, nextId, readRequestPlan, requestFile, requestMain, requestMessage } from '../../src/defaults/request';
 import { filedDate, sectionsExempt } from '../../src/defaults/tickets-rules';
-import { CREATE_SPEC_COURSE, stationsSpec } from '../../src/defaults/course-pr';
+import { BUG_FIX_COURSE, CREATE_SPEC_COURSE, stationsSpec } from '../../src/defaults/course-pr';
 import { BUILD_APP_COURSE } from '../../src/defaults/courses';
 import { parseFrontmatter, ticketsMarkdown } from '../../src/defaults/tickets-markdown';
 import { readItems } from '../../src/defaults/read-items';
@@ -160,6 +160,17 @@ describe('baton request: the ticket it files (B-98)', () => {
     // build-app is a marker course: its station function reads the course file and no markers.
     const text = atOrigin(dir, 'tickets/B-1.mdx')!;
     expect(parseFrontmatter(text)).toMatchObject({ course: 'build-app', status: 'available' });
+  });
+
+  it('a bug-fix request says its start leg is the person\'s, and how to start the conversation now (R-BTN-116)', async () => {
+    const dir = repo({ courses: { 'bug-fix': BUG_FIX_COURSE as unknown as Record<string, unknown> }, listed: ['bug-fix'] });
+    const r = await request(dir, ['--course', 'bug-fix', 'The board loses a hold after a sync']);
+    expect(r.out).toEqual([
+      'baton request: filed B-1 (course bug-fix) — describe waits on you at reported — no runner takes it',
+      '  start it now: pull the default branch, then give your interactive agent this prompt —',
+      '  Follow .baton/courses/bug-fix/legs/describe.md in this checkout for ticket B-1.',
+    ]);
+    expect(parseFrontmatter(atOrigin(dir, 'tickets/B-1.mdx')!)).toMatchObject({ course: 'bug-fix', status: 'available' });
   });
 
   it('the sentence is quoted safely: a colon-and-space and a hash survive as the title and description', async () => {

@@ -3,7 +3,7 @@
 // its course file, the facts its station function reads, how each leg's stub turns the agent's
 // answer into a position, and the Markdown instructions shipped for each leg. One table, so a
 // course is added in one place. Course code in the CLI, never core (§2b).
-import { CREATE_PR_COURSE, CREATE_SPEC_COURSE, REVIEW_PR_COURSE, stationsPr, stationsReviewPr, stationsSpec, type BatonRecord, type PrFact, type PrGraph, type StationsResult } from './course-pr';
+import { BUG_FIX_COURSE, BUG_FIX_START, CREATE_PR_COURSE, CREATE_SPEC_COURSE, NEW_FEATURE_COURSE, NEW_FEATURE_START, REVIEW_PR_COURSE, stationsConversationPr, stationsPr, stationsReviewPr, stationsSpec, type ConversationStart, type BatonRecord, type PrFact, type PrGraph, type StationsResult } from './course-pr';
 import { stationsTickets, type CourseGraph } from './ticket-state';
 import type { SourceTicket } from './tickets-markdown';
 
@@ -80,6 +80,14 @@ export interface BuiltIn {
   legs: Record<string, LegStub>;
   /** The skill a `courses` entry names (R-BTN-51). */
   skill: string;
+  /** The person legs (R-BTN-116) a person works in conversation, in their own interactive
+   *  session: no stub — no runner runs them — but shipped instructions, which the session follows
+   *  and `init` copies beside the runner legs'. A person leg not listed (`create-pr`'s `confirm`)
+   *  is answered, never worked: no instructions. */
+  conversations?: string[];
+  /** The course whose shipped instructions this one's runner legs use when it ships none of its
+   *  own: `bug-fix` and `new-feature` run `create-pr`'s legs from `filed` on, unchanged. */
+  instructionsFrom?: string;
 }
 
 /** The `bug-report` course (R-BTN-131), from the docs `bug-report` skill: trace a reported
@@ -260,6 +268,21 @@ const CREATE_PR: BuiltIn = {
   skill: 'baton-create-pr',
 };
 
+/** A course that starts with a person's conversation and continues as `create-pr` (`bug-fix`,
+ *  `new-feature`): `create-pr`'s stubs and instructions from `filed` on, its station function with
+ *  the conversation in front, and the conversation's own instructions. */
+const conversationPr = (id: string, summary: string, course: Record<string, any>, start: ConversationStart): BuiltIn => ({
+  id,
+  summary,
+  course,
+  reads: 'prs',
+  stations: (ctx) => stationsConversationPr(start, { tickets: ctx.tickets, facts: ctx.facts, closed: ctx.closed, done: ctx.done, branchPatterns: ctx.branchPatterns, repository: ctx.repository, graph: ctx.graph as PrGraph, ...(ctx.baton ? { baton: ctx.baton } : {}) }),
+  legs: CREATE_PR.legs,
+  skill: `baton-${id}`,
+  conversations: [start.leg],
+  instructionsFrom: CREATE_PR.id,
+});
+
 export const BUILT_INS: BuiltIn[] = [
   CREATE_PR,
   {
@@ -373,6 +396,8 @@ export const BUILT_INS: BuiltIn[] = [
     },
     skill: 'baton-spec-to-tickets',
   },
+  conversationPr('bug-fix', 'describe and reproduce a bug with its reporter in their own session, then fix it as create-pr does', BUG_FIX_COURSE, BUG_FIX_START),
+  conversationPr('new-feature', 'specify a feature with its requester in their own session, then build it as create-pr does', NEW_FEATURE_COURSE, NEW_FEATURE_START),
 ];
 
 /** The course a built-in replaced, still placed for a repository scaffolded before: `pr`, whose
