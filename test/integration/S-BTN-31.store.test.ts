@@ -1,7 +1,8 @@
 // S-BTN-31 (R-BTN-55): the same Store contract runs against both host adapters.
 import { describe, expect, it } from 'vitest';
-import { withStore } from '#host';
+import { HOST, withStore } from '#host';
 import { isUniqueViolation } from '../../src/core/db';
+import { MIGRATIONS } from '../../src/migrations';
 
 const stop = new Error('stop');
 const create = 'CREATE TABLE store_conformance (id INTEGER PRIMARY KEY, note TEXT NOT NULL)';
@@ -47,6 +48,17 @@ describe('S-BTN-31 Store conformance', () => {
     expect(store.exec('SELECT 9007199254740993 AS n').one()).toEqual({ n: 2 ** 53 });
   }));
 
+  it('keeps the host write count for inserts and updates on an indexed column', () => withStore((store) => {
+    store.script(`${create}; CREATE INDEX store_conformance_note ON store_conformance(note);`);
+    const added = store.exec(`${insert} RETURNING id`, 1, 'new');
+    expect(added.one()).toEqual({ id: 1 });
+    const updated = store.exec('UPDATE store_conformance SET note = ? WHERE id = ? RETURNING note', 'updated', 1);
+    expect(updated.one()).toEqual({ note: 'updated' });
+    const expected = HOST === 'cloudflare' ? 2 : 1;
+    expect(added.rowsWritten).toBe(expected);
+    expect(updated.rowsWritten).toBe(expected);
+  }));
+
   it('recognizes a unique violation but not a NOT NULL violation', () => withStore((store) => {
     store.script(create);
     store.exec(insert, 1, 'taken');
@@ -65,5 +77,41 @@ describe('S-BTN-31 Store conformance', () => {
       throw stop;
     }).toThrow(stop);
     expect(store.exec(select).one()).toEqual({ id: 1 });
+  }));
+
+  it('preserves populated legacy tie order and view versions in migration 0076', () => withStore((store) => {
+    // The preceding data backfills have nothing to do in this empty database.
+    for (const m of MIGRATIONS.filter((m) => m.id < 76)) store.transaction(() => store.script(m.sql));
+    store.script(`
+      INSERT INTO credentials (id, hostname, allowed_capabilities, kind) VALUES ('fixture', 'fixture', '[]', 'legacy');
+      INSERT INTO runners (id, hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling,
+        lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+      VALUES (1, 'fixture', 'fixture', 'fixture', 'fixture', 'claude-code', 'legacy', 'critical', 0, '', 0, 0);
+      INSERT INTO repositories (rowid, id, github, default_branch, sync_workflow)
+      VALUES (24, 'alpha', 'fixture/alpha', 'main', 'sync.yml'), (3, 'zulu', 'fixture/zulu', 'main', 'sync.yml');
+      INSERT INTO board_head (repository_id, fleet_version) VALUES ('zulu', 11);
+      INSERT INTO activities (rowid, runner_id, id, kind, source, started_at, received_at)
+      VALUES (24, 1, 'alpha', 'orient', 'skill', 100, 100), (3, 1, 'zulu', 'orient', 'skill', 100, 100);
+      INSERT INTO instance_readings (rowid, instance, source, kind, available, observed_at, lapses_at, posted_by)
+      VALUES (24, 'fixture', 'zulu', 'state', 1, 100, 999, 'zulu'), (3, 'fixture', 'alpha', 'state', 0, 100, 999, 'alpha');
+      INSERT INTO runner_reports (rowid, runner_id, repository_id, key, received_at, payload)
+      VALUES (24, 1, 'zulu', 'zulu', 100, '{}'), (3, 1, 'zulu', 'alpha', 100, '{}');
+    `);
+    const versions = () => [
+      store.exec<{ fleet_version: number }>("SELECT fleet_version FROM board_head WHERE repository_id = 'zulu'").one().fleet_version,
+      store.exec<{ v: number }>("SELECT CAST(value AS INTEGER) AS v FROM baton_settings WHERE key = 'instances_version'").one().v,
+    ];
+    const [fleet, instances] = versions();
+    store.transaction(() => store.script(MIGRATIONS.find((m) => m.id === 76)!.sql));
+    for (const query of [
+      'SELECT id AS name FROM repositories ORDER BY insertion_order',
+      'SELECT id AS name FROM activities ORDER BY started_at, insertion_order',
+      'SELECT source AS name FROM instance_readings ORDER BY observed_at DESC, insertion_order DESC',
+      'SELECT key AS name FROM runner_reports ORDER BY received_at DESC, insertion_order DESC',
+    ]) expect(store.exec(query).toArray()).toEqual([{ name: 'zulu' }, { name: 'alpha' }]);
+    expect(versions()).toEqual([fleet, instances]);
+    store.exec("UPDATE runner_reports SET payload = ? WHERE key = 'zulu'", '{"new":true}');
+    store.exec("UPDATE instance_readings SET available = 0 WHERE source = 'zulu'");
+    expect(versions()).toEqual([fleet + 1, instances + 1]);
   }));
 });

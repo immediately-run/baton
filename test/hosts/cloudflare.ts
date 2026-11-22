@@ -42,7 +42,12 @@ export function withCore<T>(fn: (core: BatonCore) => T | Promise<T>): Promise<T>
 
 /** The host adapter without core's versioning or the trace recorder. */
 export function withStore<T>(fn: (store: Store) => T): Promise<T> {
-  return runInDurableObject(stub(), (_o: Baton, state) => fn(durableStore(state.storage)));
+  return runInDurableObject(stub(), async (_o: Baton, state) => {
+    // The test owns this storage, not the core that just initialized it.
+    await state.storage.deleteAlarm();
+    await state.storage.deleteAll();
+    return fn(durableStore(state.storage));
+  });
 }
 
 /** One alarm tick, run directly. Not `runDurableObjectAlarm`: the fake clock sits behind the

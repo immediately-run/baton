@@ -12,7 +12,7 @@
   "src/core/registry.ts | COLLATE NOCASE | c5fb39b4cd958049": 1,
   "src/core/registry.ts | COLLATE NOCASE | f1b6897b79cf697f": 1,
   "src/core/retention.ts | rowid | 43effc75be262f37": 2,
-  "src/core/runnerApi.ts | rowid | adc76d29edea99bd": 2,
+  "src/core/runnerApi.ts | rowid | 29150ac4611ad086": 2,
   "src/core/runnerApi.ts | scalar MAX | 23bf4c18fcacc96a": 1,
   "src/core/stations.ts | scalar MAX | 26a2bb6af4df584b": 1,
   "src/core/stats.ts | scalar MAX | c339dda5e2f340a0": 1,
@@ -29,5 +29,5 @@
   "src/migrations/0065_read_efficiency.sql | INSERT OR | 71cad513278486a6": 3,
   "src/migrations/0065_read_efficiency.sql | rowid | 71cad513278486a6": 4,
   "src/migrations/0065_read_efficiency.sql | scalar MAX | 71cad513278486a6": 1,
-  "src/migrations/0076_insertion_order.sql | rowid | 2a388a34871cc582": 4
+  "src/migrations/0076_insertion_order.sql | rowid | edf3f6980ea7e9b9": 4
 }

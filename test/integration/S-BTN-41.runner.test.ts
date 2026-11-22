@@ -279,7 +279,9 @@ describe('S-BTN-41 the runner', () => {
   }, 30_000);
 
   it('a short wait that never clears suspends after 30 minutes', async () => {
-    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    const finishBuild = join(home.dir, 'finish-build');
+    home.leg('build', `while (!existsSync(${JSON.stringify(finishBuild)})) await new Promise(r => setTimeout(r, 10));
+    return { reached: 'built', next: 'check' };`);
     home.commit();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
     // The heartbeat starts before the claim (see the short-wait test above).
@@ -288,10 +290,17 @@ describe('S-BTN-41 the runner', () => {
     const done = runner.runOnce();
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`));
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
+    writeFileSync(finishBuild, '');
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
-    await new Promise((r) => setTimeout(r, 120));
-    expect(await rows('SELECT status FROM claims')).toEqual([{ status: 'active' }]); // still waiting
-    clock.now = T0 + 31 * 60_000; // the budget is spent (R-BTN-40)
+    // Spend the wait budget, not the lease: each step is shorter than the lease margin
+    // allows, and the second tick sends at the new time even if the first joined an old beat.
+    for (let minutes = 5; minutes <= 35; minutes += 5) {
+      clock.now = T0 + minutes * 60_000;
+      await setClock(clock.now);
+      await runner.tick();
+      await runner.tick();
+      if (minutes === 25) expect(await rows('SELECT status FROM claims')).toEqual([{ status: 'active' }]);
+    }
     expect(await done).toMatchObject({ end_reason: 'suspended:built', reached: 'built' });
     expect(await rows('SELECT end_reason, status FROM claims')).toEqual([{ end_reason: 'suspended:built', status: 'completed' }]);
     // The waiting leg was started then given up at its from; the end names it queued again.
