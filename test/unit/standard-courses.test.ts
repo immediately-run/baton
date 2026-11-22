@@ -140,7 +140,8 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(builtIn('create-pr')!.course.legs.review).toMatchObject({ no_chain_from: ['implement', 'fix'] });
     for (const dir of [instructionsDir('create-pr'), join(home, 'legs')]) {
       const text = readFileSync(join(dir, 'review.md'), 'utf8');
-      expect(text, dir).toMatch(/Use a different model from those used for\s+`implement` and `fix` on this ticket whenever your runner offers one/);
+      expect(text, dir).toMatch(/Before launching the reviewer, the runner's\s+command, wrapper or override must select a model different from those used for `implement`\s+and `fix` on this ticket whenever it can/);
+      expect(text, dir).toMatch(/If the authoring models are unknown or a different model is unavailable, say so\s+in your review/);
     }
   });
 

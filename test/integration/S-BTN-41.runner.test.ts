@@ -242,6 +242,24 @@ describe('S-BTN-41 the runner', () => {
     expect(await rows('SELECT status, end_reason FROM claims')).toEqual([{ status: 'completed', end_reason: 'suspended:built' }]);
   }, 30_000);
 
+  it('S-BTN-63: a refused advance preserves the evidence of a finished self-loop', async () => {
+    const CHAINED = { ...relay, legs: {
+      ...relay.legs,
+      check: { from: ['built'], to: ['built', 'checked'], max_runs: 2 },
+      merge: { ...relay.legs.merge, from: ['built', 'checked'], no_chain_from: ['build'] },
+    } };
+    home.write('.baton/courses/relay/course.json', `${JSON.stringify(CHAINED, null, 2)}\n`);
+    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    home.leg('check', `return { reached: 'built', next: 'merge' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, undefined, { course: CHAINED });
+    expect(await makeRunner().runOnce()).toMatchObject({ end_reason: 'suspended:built', reached: 'built' });
+    expect(await rows('SELECT leg, to_station, evidence, abandoned_at FROM claim_legs ORDER BY seq')).toMatchObject([
+      { leg: 'build', to_station: 'built' },
+      { leg: 'check', to_station: 'built', evidence: home.sha(), abandoned_at: null },
+    ]);
+  }, 30_000);
+
   it('a done end whose outputs fail its arrival is given up the same way', async () => {
     const END = { ...relay, stations: { ...relay.stations, merged: { ...relay.stations.merged, entry: [{ output: 'artifact', schema: 'std:url@1' }] } } };
     home.write('.baton/courses/relay/course.json', `${JSON.stringify(END, null, 2)}\n`);
