@@ -34,6 +34,8 @@ export interface Ctx {
   queued?: (ticketId: string) => void;
   /** R-BTN-75: a ticket whose queued leg changed has its blocks re-evaluated. */
   reevaluate?: (ticketId: string) => void;
+  /** R-BTN-163: a person arrival can end the cause of a missing-next notice. */
+  closeMissingNext?: (ticketId: string, at: number) => void;
   /** Rule 3's one definition of a held ticket (Blocks.isHeld); an arrival waits for the hold. */
   isHeld?: (ticketId: string) => boolean;
   /** R-BTN-92's link bases for a ticket (Blocks.ticketRepos): a question's `url` is kept only
@@ -460,6 +462,7 @@ export class Questions {
       this.c.history?.record(id, { kind: 'fact-arrival', leg, reached: option.reached, next_leg: next[0] ?? null, detail: { option: option.id, answered_by: meta.by, ...(meta.ref ? { ref: meta.ref } : {}) } });
       this.c.history?.record(id, { kind: 'question-answered', leg, detail: { option: option.id, answered_by: meta.by } });
     }
+    if (next.length || g.ends.has(option.reached)) this.c.closeMissingNext?.(id, now);
     this.c.queued?.(id);
     this.c.reevaluate?.(id);
     this.c.dispatch?.('sync', id);

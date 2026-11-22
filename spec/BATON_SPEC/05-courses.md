@@ -145,6 +145,10 @@ Designs for this section that are not built are on the proposal page
     (a route, or an adopt, R-BTN-39). The reason is in the position's history row. An owner's
     route, a retry policy's `exhausted` leg (R-BTN-122) and a person leg's expiry (R-BTN-116)
     stay queued until the ticket's station changes, whatever readiness a later snapshot posts.
+  - **Missing from a snapshot.** If a board post places a ticket at a non-end station with no
+    queued leg, Baton accepts the post and places its other tickets as usual. The affected ticket
+    is not claimable and Baton raises `baton.missing-next` on it (R-BTN-163). The condition closes
+    when a later post supplies a queued leg, places the ticket at an end, or no longer places it.
   - **Route** (not built: [the proposal](../proposals/data-model-and-api.md#other-reads-and-owner-routes)).
     `baton ticket route <ticket> <leg>` (R-BTN-127) queues any leg leaving Baton's
     station for the ticket, `next_source: owner`, restarting its run count (R-BTN-63);
