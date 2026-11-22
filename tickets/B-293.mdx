@@ -74,9 +74,8 @@ code that day.
      first: a floor naming a removed guarantee stops the migration, as the invariant below
      says for a broken one.
    - **the signed read.** B-160 item 3 removes the signature, the hashes and `policy_pins`
-     on the owner's ruling of 2026-11-01. This ticket does not build that removal; it leaves
-     the read's shape to B-160 and notes there that §14's row is wrong until it lands
-     (B-297 lists the row).
+     on the owner's ruling of 2026-11-01. [B-160](archive/B-160.mdx) has landed; do not
+     reintroduce the removed fields or add the migration's effective hash to claims.
    - **preset apply.** Decide whether an apply replaces the document, as the code does, or
      merges, as the rule says. The rule's version is the safer one: a whole-document apply
      drops a `service:` writer and any knob the owner set outside the preset. Recommended:
@@ -95,11 +94,11 @@ code that day.
    B-293`) does not rewrite a stored version. The reader maps an old document to the new shape
    (a renamed knob renamed, a removed knob dropped, a `courier` writer read as `runner` only if
    the spec PR says so, otherwise dropped), and each repository's next policy write stores the
-   new shape. The current version's hash, which a claim response carries, is recomputed over
-   the new shape in one place and the change is logged as an `admin` event per repository, so a
-   consumer comparing hashes sees why it moved. `policy_floors` rows become the `floors` knob
-   or stay, by step 1.
-5. **Tests.** S-BTN-189, S-BTN-190 and S-BTN-192 are rewritten to the ruled names. New cases:
+   new shape. The policy read's effective hash is recomputed over the new shape in one place
+   and the change is logged as an `admin` event per repository. Stored hashes and links remain
+   unchanged. `policy_floors` rows become the `floors` knob or stay, by step 1.
+5. **Tests.** S-BTN-197 (the policy scenario, formerly numbered S-BTN-189), S-BTN-190 and
+   S-BTN-192 are rewritten to the ruled names. New cases:
    every preset's document validates and yields the guarantees R-BTN-189's table says; a stored
    old-shape version reads back in the new shape with the same guarantees held or broken as
    before the migration (a table-driven test over each preset and one hand-made document per
@@ -115,8 +114,9 @@ code, run on documents their approvers wrote; it may drop or rename, and must ne
 mapped document admits a writer, a deliverer or an approver the stored one did not. The PR
 shows this with the table-driven test of step 5 and a property: for every stored version in a
 copy of the reference deployment's log, the set of held guarantees after mapping is a superset
-of the set before. The copy is read with an administrator's key the owner supplies; this
-ticket changes no key, grant, floor or approver list on any live repository.
+of the set before. The owner supplies an offline copy for this check; an implement leg does
+not read a live deployment or use its administrator key. This ticket changes no key, grant,
+floor or approver list on any live repository.
 
 ### Invariants
 
@@ -138,3 +138,10 @@ ticket changes no key, grant, floor or approver list on any live repository.
 _filed 2026-11-20._ From the spec simplification review of 2026-11-19, *Where the spec and the
 code disagree* (PR #299). Related: B-264 (`repos.unlisted`), B-165 (constant knobs), B-147
 (grants' trust, written for the older `grants.*` shape), B-263, B-64, B-294 (break-glass).
+
+- 2026-11-22, spec-first hand-off: B-293 takes the policy-knob code half of B-165; its
+  other simplifications stay with B-165. B-160 already retired signed policy reads and pins.
+  The code and schema migration follow spec approval. The guarantee comparison still needs
+  the owner's ruling: the old `human-gates` can hold with `human_key: any`, unlike the new
+  one, and two retired guarantees have no successor. An old floor is never silently waived
+  to satisfy the comparison.

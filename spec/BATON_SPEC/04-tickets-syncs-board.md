@@ -596,7 +596,9 @@ The fingerprint stores no ticket content and is an optimization, never authority
     tickets' position rows of `ticket_history` and their `claim_legs`, `closed_tickets`,
     `external_resources`,
     `resource_instances`, `instance_serves`, `capability_capacity`, `check_runners`, `mcp_keys` (hashes only), `instance_settings`, unexpired
-    `registration_tokens` (hashes only), open `conditions`, `ticket_timers`, every `repository_policies` version (R-BTN-188, R-BTN-189).
+    `registration_tokens` (hashes only), open `conditions`, `ticket_timers`, every `repository_policies` version (R-BTN-188, R-BTN-189),
+    and the backing data for any legacy floor projection not yet stored in a policy version
+    (R-BTN-189).
   - **Not exported**: claims and their `claim_seats`, events,
     readings (R-BTN-76), sync wants; and, unless `--with-history`, the history, `leg_outputs`
     and `leg_run_inputs`, which an import without them loses.
@@ -606,7 +608,9 @@ The fingerprint stores no ticket content and is an optimization, never authority
     (one role per key, unique names, id grammars, tombstones only on retired rows); the first
     failing row refuses the whole import. It refuses a live repository whose policy versions do
     not chain by `previous_hash` from version 1, or whose export holds no policy; a retired
-    repository's tombstone needs none. Signed requests with `created` at or before the
+    repository's tombstone needs none. Import validates legacy rows using the stored format and
+    checks the current projection after restoring its backing data (R-BTN-188, R-BTN-189).
+    Signed requests with `created` at or before the
     source's `sealed_at` are refused `unauthenticated`. Ticket-scoped rows wait in
     `pending_owner_state` until the first snapshot that creates their ticket; one the
     repository's first snapshot does not post is dropped and logged. A ticket with pending course

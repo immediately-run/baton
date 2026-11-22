@@ -318,6 +318,21 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     `baton owner policy show | diff | log` read it. Each change is logged `admin` with the
     versions and the knobs it changed, and is checked against the floors (R-BTN-189) and the
     current courses (R-BTN-181) in its transaction.
+  - **Reading a legacy version.** The reader projects a stored document onto the current knob
+    table without rewriting the version, its hash or its place in the log. The policy read's
+    effective hash is over the projected document; the log and its `previous_hash` links keep
+    the original hashes. A migration validates each repository's current projection in one
+    transaction and logs its old and effective hashes as an `admin` event when they differ.
+    Only a subsequent write authorised by the prior `approvers.policy` appends a version; it
+    links to the prior version's stored hash.
+  - **No new authority from a projection.** Rename `approvers.trust` to `approvers.roles`
+    without changing its list. Drop `courier` from writer and deliverer lists; never translate
+    it to `runner`. Read a missing legacy `outbox.source` with no deliverers. Carry the old
+    answer restriction into `std:decision@1` without adding a writer: in particular a policy
+    that required `inputs.answers: attestation` must still refuse ordinary owner answers.
+    Reject a projection that adds authority or leaves a policy that could not work, including
+    an unsatisfiable approver list under the repository's `human_key`. The migration fails
+    atomically and names the repository and the offending knob or floor. It changes no grant.
   - **Who may change it.** Every change to the policy, in any direction, needs an approver on the
     `approvers.policy` list as it stands before the change; Baton never asks whether a change
     tightens or loosens. A change to any `approvers.*` list is authorised the same way, never by
@@ -432,6 +447,11 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     breaks it is refused, so a shortening is its own version, made while the guarantee still
     holds. A consumer reads the `floors` list and the computed `guarantees`, never a floor's name
     alone.
+  - **Legacy floors.** Project named floor rows as the union of the guarantees they list, only
+    if each legacy requirement is preserved. A removed guarantee, a guarantee whose policy
+    conditions the projected document does not meet, or a legacy `remove_by` that adds a
+    removal restriction the new policy would not retain stops the migration. Do not drop a
+    requirement or loosen its removal gate on the repository's behalf.
   - **Floors are judged on the policy alone.** The protection report is not a policy condition,
     so a lapsed or failed report never refuses a change. It breaks `no-runner-lands` all the
     same: Baton raises `baton.unprotected` (R-BTN-180), and a floor that names it stops the
