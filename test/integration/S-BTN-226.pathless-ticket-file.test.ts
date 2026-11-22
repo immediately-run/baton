@@ -85,7 +85,7 @@ class Repo {
     return execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   }
   async setup(leg: string | null, store: Record<string, unknown> = { rev: 1, tickets: [TICKET] }): Promise<Repo> {
-    expect(await initMain([], { root: this.dir, log: () => {} })).toBe(0);
+    expect(await initMain(['--own'], { root: this.dir, log: () => {} })).toBe(0);
     if (this.tracker) writeFileSync(join(this.dir, '.baton', 'tickets.mjs'), trackerSource(this.store));
     if (leg != null) writeFileSync(join(this.dir, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs'), leg);
     writeFileSync(this.store, JSON.stringify(store));

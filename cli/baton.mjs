@@ -181,7 +181,8 @@ import { requestCredential, signHeaders, signingKey } from './sign.mjs';
 import { clientVersion, packageVersion, workingTreeOf } from './version.mjs';
 import { compareVersions, parseClientVersions } from '../src/shared/versions.mjs';
 
-export const DEFAULT_URL = 'https://baton.immediately.run';
+import { DEFAULT_URL } from './default-url.mjs';
+export { DEFAULT_URL };
 /** Where the CLI's homes.json sits (B-121): `$XDG_CONFIG_HOME` (or `~/.config`)/baton/
  *  homes.json — the directory keys.json, origins.json and runner.json's own rules name
  *  (R-BTN-137, R-BTN-144). Spelled here once and imported by src/defaults/homes.ts, so this
@@ -898,8 +899,7 @@ async function testCourse(argv) {
   if (base === null && flags.base !== 'none') throw new Error(`no origin/HEAD or origin/main in ${root}: pass --base REF (fetch the base first), or --base none to skip the removal rule`);
   const { bundleLocal } = await import('../scripts/bundle.mjs');
   const kit = await bundleLocal('src/local/testCourse.ts', 'test-course.mjs');
-  const input = await kit.readInputs(root, positional[1], { base, board: flags.board ?? null });
-  const violations = await kit.checkCourse(input);
+  const { input, violations } = await kit.checkCheckout(root, positional[1], { base, board: flags.board ?? null });
   const said = [
     `course ${positional[1]} in ${root}`,
     base ? `against ${base}${input.base ? '' : ' (no such course there: a new course)'}` : 'with --base none (the removal rule is not checked)',
@@ -1127,6 +1127,10 @@ export async function main(argv) {
     }
   }
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
+  if (argv[0] === 'course' && argv[1] === 'show' && !argv.slice(2).some((a) => a.startsWith('-'))) {
+    const { showCourseMain } = await import('../scripts/baton-cli.mjs');
+    return showCourseMain(argv.slice(2));
+  }
   if (argv[0] === 'key') {
     if (argv[1] !== 'create' || !argv[2]) throw new Error('baton key create FILE [--comment TEXT]');
     const { flags } = parseArgs(argv.slice(3), [], ['comment'], 0);

@@ -80,6 +80,7 @@ try {
   const fn = owner != null ? owner[call] : call === 'run' && typeof mod.default === 'function' ? mod.default : undefined;
   if (typeof fn !== 'function') throw new Error(`the script exports no ${call}()`);
   if (call === 'run') args[0] = { ...args[0], signal: stop.signal };
+  if (call === 'stations') args[0] = { ...args[0], closed: new Set(args[0].closed), done: new Set(args[0].done) };
   const result = await fn.apply(owner, args);
   finish({ ok: true, result: result === undefined ? null : result }, 0);
 } catch (e) {

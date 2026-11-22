@@ -21,7 +21,7 @@ export { replayMain } from ${src('src/runner/replay.ts')};`,
   // Every name cli/baton.mjs takes from ../scripts/baton-cli.mjs: one missing here is `… is not a
   // function` in the published package only, where the checkout's bundler exports it
   // (scripts/check-package.mjs compares the two lists).
-  'baton-cli.mjs': `export { initMain, migrateMarkersMain, parseSyncArgs, syncMain, verifyConfigMain } from ${src('src/defaults/cli.ts')};
+  'baton-cli.mjs': `export { initMain, showCourseMain, migrateMarkersMain, parseSyncArgs, syncMain, verifyConfigMain } from ${src('src/defaults/cli.ts')};
 export { ticketsMain } from ${src('src/defaults/tickets.ts')};
 export { requestMain } from ${src('src/defaults/request.ts')};
 export { homeMain, resolveHomes } from ${src('src/defaults/homes.ts')};`,

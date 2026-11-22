@@ -34,7 +34,7 @@ export function parseSource(s: string): CourseSource {
   }
   if (!GIT_SHA.test(ref)) throw new Error(`${s}: ${ref || '(none)'} is not a full commit — a source names all 40 hex characters`);
   if (!COURSE_ID.test(course)) throw new Error(`${s}: ${course || '(none)'} is not a course id`);
-  return { provider, namespace, repository, ref, course };
+  return { provider, namespace, repository, ref: ref.toLowerCase(), course };
 }
 
 export const printSource = (s: CourseSource): string => [s.provider, s.namespace, s.repository, s.ref, s.course].join('/');

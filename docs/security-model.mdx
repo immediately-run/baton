@@ -159,18 +159,13 @@ secrets, the App key, the trigger tokens and the administrator keys, and redeplo
 A runner executes what the home repository names:
 
 - `.baton/baton.json`'s `agent_command` and `agent_wrapper`, run for every leg;
-- a course's `legs/<leg>.run.<ext>` overrides (R-BTN-131) and `rank.mjs` (R-BTN-98), loaded
-  from the default branch's head;
-- the course `source` pin, which picks the leg stubs and instructions;
-- a course's `sync.mjs`, run by the sync;
-- **the leg scripts of a sourced course, copied into the home** (found 2026-10-28). The spec
-  (R-BTN-134) says a sourced course's code is the source's, at its pinned and verified commit, and
-  the home holds only overrides. The code does otherwise: `baton repo init` copies every
-  `legs/<leg>.mjs` into the home, the runner executes those copies (`src/runner/home.ts`), and the
-  sync checks only `course.json`. Source fetching is not built. So an edited
-  `.baton/courses/create-pr/legs/implement.mjs` runs on every runner at the next leg, unreported,
-  and the pin to a reviewed Baton commit binds nothing. B-139 makes homes refer to the source
-  instead of copying it, and runners run only the source's code.
+- a sourced course's `source` pin, which chooses code and can roll a course back to an older
+  verified commit, and the home's `legs/<leg>.run.<ext>` run overrides (R-BTN-131);
+- a home-owned course's own scripts, including `sync.mjs` in the sync and `rank.mjs` on runners.
+
+For a sourced course (R-BTN-134, B-139), the sync refuses copies in its home directory and the
+runner takes the graph and leg code from the pin, not from that directory. The home may still
+carry `legs/<leg>.md` instruction overrides: those are prompts (reach 3), not leg scripts.
 
 So one push runs code on every runner granted on that home, at the next leg. Bounded by the
 runner's level, that is the VM: its keys and the output repositories. **Unless a runner runs

@@ -311,7 +311,7 @@ describe('the grant\'s declaration (B-86)', () => {
 });
 
 describe('loadCourse (R-BTN-72)', () => {
-  it('extracts each leg\'s script and never a repository\'s <leg>.run.mjs override, which the script loads itself (B-33)', () => {
+  it('extracts each leg\'s script and never a repository\'s <leg>.run.mjs override, which the script loads itself (B-33)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
     try {
       const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
@@ -323,7 +323,7 @@ describe('loadCourse (R-BTN-72)', () => {
       writeFileSync(join(legs, 'go.run.mjs'), 'export async function run(ctx, standard) { return standard(ctx); }\n');
       git('add', '-A');
       git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'relay');
-      const loaded = loadCourse(dir, git('rev-parse', 'HEAD'), 'relay');
+      const loaded = await loadCourse(dir, git('rev-parse', 'HEAD'), 'relay');
       expect([...loaded.scripts.keys()]).toEqual(['go']);
       dropCourse(loaded.scratch);
     } finally {

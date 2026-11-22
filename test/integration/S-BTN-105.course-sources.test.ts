@@ -1,22 +1,13 @@
-// S-BTN-105 a course from its source, one leg overridden (BATON_SPEC §15 S-BTN-105, R-BTN-131,
-// R-BTN-51; B-33): a repository's `create-pr` names its source —
-// `github/<owner>/<name>/<commit>/create-pr`, this CLI's repository at this CLI's commit — and
-// replaces its `review` leg's run with `legs/review.run.mjs`. Must hold: the sync posts it and
-// places the ticket; a claim's review runs the override at the snapshot and the standard close
-// writes the verdict line, which moves the ticket to `reviewed` with `fix` queued; a course file
-// that differs from the source's, a source at another commit or in another repository, and a
-// `sync.mjs` beside a source are each refused, nothing posted; so are a source naming another
-// course than its id and one naming no standard course; the repository's name in another case is
-// the same repository. Node only: it writes a real
-// repository and runs git.
+// S-BTN-105 / S-BTN-310 (B-139): sourced scripts and graph, home overrides, no home copies.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { call as hostCall } from '#host';
-import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
+import { initMain, parseSyncArgs, showCourseMain, syncMain } from '../../src/defaults/cli';
+import { dropCourse, loadCourse } from '../../src/runner/home';
 import { ORIGIN, register, rows, setClock, syncToken } from '../helpers';
 
 const T0 = Date.parse('2026-10-18T12:00:00Z');
@@ -83,7 +74,8 @@ describe('S-BTN-105 a course from its source, one leg overridden', () => {
 
     // The repository's review: its own check, then the course's run with an agent that asks for changes.
     const agent = join(dir, 'agent.sh');
-    writeFileSync(agent, '#!/bin/sh\necho reviewing\necho changes\n');
+    writeFileSync(agent, '#!/bin/sh\ncat "$BATON_INSTRUCTIONS" > instruction.log\necho changes\n');
+    writeFileSync(join(dir, '.baton', 'courses', 'create-pr', 'legs', 'review.md'), 'Home review instructions\n');
     chmodSync(agent, 0o755);
     writeFileSync(settingsFile(), JSON.stringify({ ...settings, agent_command: agent }, null, 2));
     writeFileSync(join(dir, '.baton', 'courses', 'create-pr', 'legs', 'review.run.mjs'), `import { writeFileSync } from 'node:fs';
@@ -94,6 +86,7 @@ export async function run(ctx, standard) {
 }
 `);
     const sha = commit();
+    const loaded = await loadCourse(dir, sha, 'create-pr');
     // A fake gh records the comment the standard close posts.
     const bin = mkdtempSync(join(tmpdir(), 'baton-s105-gh-'));
     writeFileSync(join(bin, 'gh'), `#!/bin/sh\nprintf '%s' "$4" > "${join(bin, 'body')}"\necho https://github.com/o/r/pull/7#issuecomment-1\n`);
@@ -101,10 +94,11 @@ export async function run(ctx, standard) {
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
     try {
-      const leg = await import(`${pathToFileURL(join(dir, '.baton', 'courses', 'create-pr', 'legs', 'review.mjs')).href}?t=${Date.now()}`);
-      const ctx = { ticket: { id: 'docs:T-1', path: 'tickets/t1.md', home: 'docs' }, checkout: dir, snapshot: { sha }, leg: 'review', claim: { nonce: 'n1' } };
+      const leg = await import(`${pathToFileURL(loaded.scripts.get('review')!).href}?t=${Date.now()}`);
+      const ctx = { ticket: { id: 'docs:T-1', path: 'tickets/t1.md', home: 'docs' }, checkout: dir, snapshot: { sha }, sourced_course: loaded.sourced, leg: 'review', claim: { nonce: 'n1' } };
       const result = await leg.run(ctx);
       expect(result).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
+      expect(readFileSync(join(dir, 'instruction.log'), 'utf8')).toBe('Home review instructions\n');
       expect(readFileSync(join(dir, 'gate.log'), 'utf8')).toContain('two blind reviewers');
       expect(await leg.close(ctx, result)).toBe('https://github.com/o/r/pull/7#issuecomment-1');
       const body = readFileSync(join(bin, 'body'), 'utf8');
@@ -113,59 +107,92 @@ export async function run(ctx, standard) {
       writeFileSync(facts, JSON.stringify([{ number: 7, head: 'claude/T-1-x', state: 'open', pushedAt: T0, pushes: [T0], checks: ['success'], reviews: [{ author: 'baton', state: 'COMMENTED', submittedAt: T0 + 60_000, body }], commits }]));
     } finally {
       process.env.PATH = path;
+      dropCourse(loaded.scratch);
       rmSync(bin, { recursive: true, force: true });
     }
     await sync();
     expect(await at()).toMatchObject({ station: 'reviewed', next_leg: 'fix' });
   }, 120_000);
 
-  it('refuses a course file that differs from the source’s, a source at another commit or in another repository, and a sync.mjs beside a source', async () => {
-    const settings = JSON.parse(readFileSync(settingsFile(), 'utf8'));
-    const source: string = settings.courses[0].source;
-    const courseFile = join(dir, '.baton', 'courses', 'create-pr', 'course.json');
-    const graph = readFileSync(courseFile, 'utf8');
-    const withSource = (s: string) => writeFileSync(settingsFile(), JSON.stringify({ ...settings, courses: [{ ...settings.courses[0], source: s }] }, null, 2));
+  it('S-BTN-310 refuses a committed copy and loads the source script instead of it', async () => {
+    const copy = join(dir, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
+    writeFileSync(copy, 'throw new Error("home copy must not run");\n');
+    const sha = commit();
+    await expect(sync()).rejects.toThrow('.baton/courses/create-pr/legs/implement.mjs: not an override');
+    expect(await rows('SELECT ticket_id FROM ticket_stations')).toEqual([]);
+    const course = await loadCourse(dir, sha, 'create-pr');
+    try {
+      expect(readFileSync(course.scripts.get('implement')!, 'utf8')).not.toContain('home copy must not run');
+      expect((await import(pathToFileURL(course.scripts.get('implement')!).href)).run).toBeTypeOf('function');
+    } finally {
+      dropCourse(course.scratch);
+    }
+  });
 
-    writeFileSync(courseFile, graph.replace('"max_runs": 3', '"max_runs": 5'));
-    commit();
-    await expect(sync()).rejects.toThrow(/course\.json differs from the source's — a sourced course keeps its graph exactly; `baton repo init --course create-pr --force` restores it/);
-    writeFileSync(courseFile, graph);
-
-    withSource(source.replace(SHA, '1'.repeat(40)));
-    commit();
-    await expect(sync()).rejects.toThrow(`is at 1111111111, and this CLI is at ${SHA.slice(0, 10)}`);
-
-    withSource(`github/someone/else/${SHA}/create-pr`);
-    commit();
-    await expect(sync()).rejects.toThrow('a course from someone/else is not supported yet');
-
-    withSource(source.replace(/\/create-pr$/, '/review-pr'));
-    commit();
-    await expect(sync()).rejects.toThrow('names course review-pr; a source names the course of its own id');
-
-    // A course of the CLI's repository that is no standard course of it.
-    mkdirSync(join(dir, '.baton', 'courses', 'mine'), { recursive: true });
-    writeFileSync(join(dir, '.baton', 'courses', 'mine', 'course.json'), graph);
-    writeFileSync(settingsFile(), JSON.stringify({ ...settings, courses: [...settings.courses, { id: 'mine', version: 1, source: source.replace(/\/create-pr$/, '/mine') }] }, null, 2));
-    commit();
-    await expect(sync()).rejects.toThrow(/mine is not a standard course of .+ at /);
-    rmSync(join(dir, '.baton', 'courses', 'mine'), { recursive: true, force: true });
-
-    withSource(source);
-    writeFileSync(join(dir, '.baton', 'courses', 'create-pr', 'sync.mjs'), 'export default { async stations() { return { stations: {}, markers: [], course_data: {} }; } };\n');
-    commit();
-    await expect(sync()).rejects.toThrow("sync.mjs would replace the source's station function");
-    expect(await rows('SELECT ticket_id FROM ticket_stations')).toEqual([]); // nothing was ever posted
-
-    rmSync(join(dir, '.baton', 'courses', 'create-pr', 'sync.mjs'));
+  it('S-BTN-310 scaffolds only explicitly requested files and prunes identical copies', async () => {
+    const graphDir = join(dir, '.baton', 'courses', 'create-pr');
+    expect(readdirSync(join(graphDir, 'legs'))).toEqual(['review.run.mjs']);
+    rmSync(graphDir, { recursive: true });
+    const settings = readFileSync(settingsFile(), 'utf8');
+    await initMain(['--force', '--own'], { root: dir, log: () => {} });
+    writeFileSync(settingsFile(), settings);
+    const modified = join(graphDir, 'legs', 'review.md');
+    writeFileSync(modified, 'Home review instructions\n');
+    const log: string[] = [];
+    await initMain(['--prune'], { root: dir, log: (line) => log.push(line) });
+    expect(existsSync(join(graphDir, 'course.json'))).toBe(false);
+    expect(readdirSync(join(graphDir, 'legs'))).toEqual(['review.md']);
+    expect(log.join('\n')).toContain('review.md (differs from source');
+    rmSync(graphDir, { recursive: true });
+    await initMain([], { root: dir, log: () => {} });
+    expect(existsSync(graphDir)).toBe(false);
     commit();
     await sync();
-    expect(await rows('SELECT ticket_id FROM ticket_stations')).toEqual([{ ticket_id: 'docs:T-1' }]);
+    const shown: string[] = [];
+    expect(await showCourseMain(['create-pr', 'implement'], dir, (line) => shown.push(line))).toBe(0);
+    expect(shown.join('\n')).toContain('--- legs/implement.md ---');
+  });
 
-    // GitHub's names ignore case: the same repository in another case is no other repository.
-    const [provider, owner, name, ...rest] = source.split('/');
-    withSource([provider, owner.toUpperCase(), name.toUpperCase(), ...rest].join('/'));
-    commit();
-    await sync();
-  }, 120_000);
+  it('S-BTN-310 reads a fetched pin and rechecks ancestry even when its objects are cached', async () => {
+    const upstream = mkdtempSync(join(tmpdir(), 'baton-s105-source-'));
+    const env = { GIT_CONFIG_COUNT: process.env.GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0: process.env.GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0: process.env.GIT_CONFIG_VALUE_0 };
+    const remote = (...args: string[]) => execFileSync('git', ['-C', upstream, ...args], { encoding: 'utf8' }).trim();
+    try {
+      remote('init', '-q', '-b', 'main');
+      remote('config', 'user.email', 'source@test');
+      remote('config', 'user.name', 'source');
+      remote('commit', '--allow-empty', '-qm', 'base');
+      remote('branch', 'unrelated');
+      const courseDir = join(upstream, '.baton', 'courses', 'create-pr');
+      mkdirSync(join(courseDir, 'legs'), { recursive: true });
+      writeFileSync(join(courseDir, 'course.json'), JSON.stringify({ start: 'filed', start_leg: 'implement', end: ['done'], stations: { filed: {}, done: {} }, legs: { implement: { from: ['filed'], to: 'done' } } }));
+      writeFileSync(join(courseDir, 'entry.json'), '{"skill":"fetched-skill"}');
+      writeFileSync(join(courseDir, 'sync.mjs'), 'export function stations() { return { stations: {}, markers: [], course_data: null }; }');
+      writeFileSync(join(courseDir, 'legs', 'implement.mjs'), 'export const run = () => ({ reached: "done" });');
+      remote('add', '.baton');
+      remote('commit', '-qm', 'course');
+      const pin = remote('rev-parse', 'HEAD');
+      process.env.GIT_CONFIG_COUNT = '1';
+      process.env.GIT_CONFIG_KEY_0 = `url.${upstream}.insteadOf`;
+      process.env.GIT_CONFIG_VALUE_0 = 'https://github.com/fixture/course.git';
+      const settings = JSON.parse(readFileSync(settingsFile(), 'utf8'));
+      delete settings.courses[0].skill;
+      settings.courses[0].source = `github/fixture/course/${pin}/create-pr`;
+      writeFileSync(settingsFile(), JSON.stringify(settings));
+      const sha = commit();
+      const loaded = await loadCourse(dir, sha, 'create-pr');
+      try {
+        expect((await import(pathToFileURL(loaded.scripts.get('implement')!).href)).run()).toEqual({ reached: 'done' });
+      } finally {
+        dropCourse(loaded.scratch);
+      }
+      remote('symbolic-ref', 'HEAD', 'refs/heads/unrelated');
+      await expect(loadCourse(dir, sha, 'create-pr')).rejects.toThrow(new RegExp(`${pin}.*CLI commit ${SHA}.*not an ancestor`));
+    } finally {
+      for (const [k, v] of Object.entries(env)) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+      rmSync(upstream, { recursive: true, force: true });
+    }
+  });
 });

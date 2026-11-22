@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { graphOf, legCapabilities, type Graph } from '../core/graph';
+import { builtInSource, resolveSource, runnerLegs, writeStub } from '../defaults/cli';
+import { writeCourseTree } from '../defaults/course-tree';
 
 /** B-94: the bound on every git the runner itself runs. The heartbeat path reads the snapshot
  * here (`ensureSha`, `courseOf`, `loadCourse`), and a state file lock, a hook or a stalled
@@ -33,6 +35,7 @@ export function git(home: string, args: string[], timeoutMs: number = GIT_TIMEOU
 
 export interface CourseLoad {
   course: string;
+  sourced?: true;
   graph: Graph;
   /** The extracted `legs/<leg>.mjs` of the snapshot, by leg name — file paths on disk. */
   scripts: Map<string, string>;
@@ -172,7 +175,36 @@ export async function prepareClone(home: string, dir: string, sha: string, branc
 
 /** Load a claim's course from the snapshot: the graph, and every leg script the snapshot's
  * `legs/` holds, extracted to a scratch directory (deleted by the runner when the claim ends). */
-export function loadCourse(home: string, sha: string, course: string): CourseLoad {
+export async function loadCourse(home: string, sha: string, course: string, settingsSha = sha): Promise<CourseLoad> {
+  const batonJson = courseSettings(home, settingsSha);
+  const source = batonJson?.courses?.find((c) => c.id === course)?.source;
+  if (source !== undefined) {
+    const cache = join(git(home, ['rev-parse', '--absolute-git-dir']).trim(), 'baton-sources');
+    const resolved = await resolveSource(course, source, cache);
+    const graph = graphOf(JSON.parse(resolved.graph));
+    const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
+    const scripts = new Map<string, string>();
+    try {
+      if (resolved.standard) {
+        for (const leg of runnerLegs(resolved.standard)) {
+          const to = join(scratch, `${leg}.mjs`);
+          await writeStub(resolved.standard, leg, to);
+          scripts.set(leg, to);
+        }
+      } else if (resolved.files) {
+        const dir = join(scratch, 'source');
+        writeCourseTree(dir, resolved.files);
+        for (const { path } of resolved.files) {
+          const leg = /^legs\/([a-z][a-z0-9-]*)\.mjs$/.exec(path)?.[1];
+          if (leg) scripts.set(leg, join(dir, path));
+        }
+      }
+      return { course, sourced: true, graph, scripts, scratch };
+    } catch (e) {
+      dropCourse(scratch);
+      throw e;
+    }
+  }
   const file = readAt(home, sha, `.baton/courses/${course}/course.json`);
   if (file == null) throw new Error(`the snapshot ${sha.slice(0, 10)} has no .baton/courses/${course}/course.json`);
   const graph = graphOf(JSON.parse(file));
@@ -196,6 +228,11 @@ export function loadCourse(home: string, sha: string, course: string): CourseLoa
     scripts.set(leg, to);
   }
   return { course, graph, scripts, scratch };
+}
+
+function courseSettings(home: string, sha: string): { courses?: { id?: string; source?: string }[] } | null {
+  const file = sha ? readAt(home, sha, '.baton/baton.json') : null;
+  return file == null ? null : JSON.parse(file);
 }
 
 /** B-183 (§4.5, R-BTN-74): the repository's ticket source at the claim's snapshot — its
@@ -231,6 +268,13 @@ export function readHead(home: string): string {
  *  finding 1). One file that will not parse, or one the file does not describe, adds nothing: this
  *  is only the never-eligible runner's why, never a gate. An empty `sha` reads the working tree. */
 export function legNeeds(home: string, sha: string, course: string): string[] {
+  try {
+    const source = courseSettings(home, sha)?.courses?.find((c) => c.id === course)?.source;
+    if (source !== undefined) {
+      const b = builtInSource(course, source);
+      return b ? needsOf(b.course) : [];
+    }
+  } catch { return []; }
   const path = `.baton/courses/${course}/course.json`;
   const file = sha ? readAt(home, sha, path) : (() => {
     try {
@@ -240,12 +284,14 @@ export function legNeeds(home: string, sha: string, course: string): string[] {
     }
   })();
   if (file == null) return [];
-  let parsed: { capability_roles?: unknown; legs?: Record<string, { requires?: { capabilities?: unknown } }> };
   try {
-    parsed = JSON.parse(file) as typeof parsed;
+    return needsOf(JSON.parse(file));
   } catch {
     return [];
   }
+}
+
+function needsOf(parsed: { capability_roles?: unknown; legs?: Record<string, any> }): string[] {
   const out: string[] = [];
   for (const leg of Object.values(parsed.legs ?? {})) out.push(...legCapabilities(leg?.requires, parsed.capability_roles));
   return out;

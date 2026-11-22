@@ -309,7 +309,7 @@ describe('S-BTN-43 the sync refuses, posting nothing', () => {
   it('a course with no sync.mjs that is not a standard course, a ticket on an unlisted course, a bad stations return, no baton.json', async () => {
     mkdirSync(join(repo.dir, '.baton')); // the harness keeps its recorded facts there
     await expect(repo.sync()).rejects.toThrow('has no .baton/baton.json — run `baton repo init` first');
-    await init(repo.dir);
+    await init(repo.dir, '--own');
     const settingsFile = join(repo.dir, '.baton', 'baton.json');
     const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
 

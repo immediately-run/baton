@@ -1,3 +1,4 @@
+import { CourseSourceUnavailable } from '../defaults/cli';
 // runner.ts — `baton run`'s generic runner loop (BATON_SPEC §6.13 R-BTN-72): it heartbeats (it
 // hosts the sidecar of §6.3–6.4), claims, loads the claim's course file and leg scripts from the
 // home checkout at the claim's `snapshot_sha` (R-BTN-34), and runs each leg as a child process
@@ -1609,7 +1610,7 @@ export class Runner {
       let course: CourseLoad;
       try {
         sha = readHead(this.o.home);
-        course = loadCourse(this.o.home, sha, courseOf(this.o.home, sha, this.o.courses[0].course));
+        course = await loadCourse(this.o.home, sha, courseOf(this.o.home, sha, this.o.courses[0].course));
       } catch (e) {
         wait(order.ticket_id, `the home's course would not load (${msg(e)})`);
         continue;
@@ -1660,6 +1661,7 @@ export class Runner {
           local_order: { by: order.by, ran_at: ranAt },
           leg, run: runNumber(course.graph, [], leg, []),
           snapshot: { sha, path: [], next: [] },
+          ...(course.sourced ? { sourced_course: true } : {}),
           handoff: null, resume: null, advice: null,
           checkout: this.o.home, session: null,
           state: this.o.stateFile, runner: this.state.get().runner_id,
@@ -2143,7 +2145,8 @@ export class Runner {
       // unpenalised): an unsigned course change keeps the last signed course in force, and a
       // course no owner signed does not run.
       const courseSha = typeof signedControl.course === 'string' && signedControl.course !== '' ? signedControl.course : claim.snapshot_sha as string;
-      course = loadCourse(this.o.home, courseSha, this.claimCourse(claim));
+      const settingsSha = typeof signedControl.agent_command === 'string' && signedControl.agent_command !== '' ? signedControl.agent_command : claim.snapshot_sha as string;
+      course = await loadCourse(this.o.home, courseSha, this.claimCourse(claim), settingsSha);
       // B-228: the legs start from the snapshot's code — the home fast-forwarded to it when it
       // can be; otherwise it runs as it stands, and the log says why. A reattached leg's tree is
       // its running session's, and a claim in a clone of its own is put there below (B-188).
@@ -2158,6 +2161,7 @@ export class Runner {
       }
     } catch (e) {
       this.log(`baton: the claim's course would not load (${msg(e)})`);
+      if (e instanceof CourseSourceUnavailable) return await this.finish(claimId, { end_reason: 'released:cannot-finish:capability', reached: claim.station, detail: msg(e), ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
     // R-BTN-72 (B-188): a claim beside others works in a clone of its own — its own git dir, put
@@ -2305,6 +2309,7 @@ export class Runner {
           claim: { id: claimId, nonce: claim.nonce, station: at },
           leg: legName, run, ...(runId ? { run_id: runId } : {}),
           snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
+          ...(course.sourced ? { sourced_course: true } : {}),
           // B-127: the owner-signed commits a verified board post named — where the repository
           // requires signed control, the legs read `agent_command` and the overrides at these
           // (and the course itself — the graph, these scripts — loaded at the `course` one),

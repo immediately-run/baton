@@ -325,7 +325,7 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
   // 3. The course's scripts at the snapshot, and the leg's own safety marker.
   let course: CourseLoad;
   try {
-    course = loadCourse(a.home, run.snapshot_sha, run.course ?? courseAt(a.home, run.snapshot_sha));
+    course = await loadCourse(a.home, run.snapshot_sha, run.course ?? courseAt(a.home, run.snapshot_sha));
   } catch (e) {
     return refuse(`the course's scripts would not load at the snapshot (${msg(e)})`);
   }
@@ -389,7 +389,7 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
       // 7. `--against <sha>`: the same inputs through the scripts at that sha (R-BTN-143 does
       //    not bind the flag's sha), compared with the recorded run's.
       if (a.against != null) {
-        const againstCourse = loadCourse(a.home, a.against, course.course);
+        const againstCourse = await loadCourse(a.home, a.against, course.course);
         const againstScript = againstCourse.scripts.get(a.leg) ?? null;
         if (againstScript == null) {
           dropCourse(againstCourse.scratch);

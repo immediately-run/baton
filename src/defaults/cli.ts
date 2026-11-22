@@ -17,13 +17,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../runner/api';
 import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
-import { DEFAULT_URL } from '../../cli/baton.mjs';
+import { DEFAULT_URL } from '../../cli/default-url.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
 import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
+import { courseFiles, coursePath, fetchCourse, isOverride, writeCourseTree, type CourseFile } from './course-tree';
 import { stampMarkdownVersions } from './ticket-versions';
 import { closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, RUN_TESTS_TIMEOUT_MS } from './ticket-state';
 
@@ -175,6 +176,7 @@ function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry,
 }
 
 export interface SyncArgs {
+  sourceCache?: string;
   root: string;
   /** Baton's origin; absent, `baton.json`'s `baton_url`, then the CLI's default. */
   url?: string;
@@ -341,7 +343,19 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
 
   // Every live ticket's course must be one this repository lists (R-BTN-74: a ticket on a course
   // with no station function fails the sync — nothing is posted).
-  const courses = batonJson.courses ?? [{ id: batonJson.default_course ?? DEFAULT_COURSE, version: 1 }];
+  const homeEntries = batonJson.courses ?? [{ id: batonJson.default_course ?? DEFAULT_COURSE, version: 1 }];
+  const at = git(root, 'rev-parse', 'HEAD');
+  const sources = new Map<string, Awaited<ReturnType<typeof resolveSource>>>();
+  const courses: CourseEntry[] = [];
+  for (const c of homeEntries) {
+    if (c.source === undefined) { courses.push(c); continue; }
+    for (const f of courseFiles(root, at, c.id)) {
+      if (!f.regular || !isOverride(f.path)) throw new Error(`${coursePath(c.id)}/${f.path}: not an override of sourced course ${c.id}; use baton repo init --prune to remove identical copies`);
+    }
+    const source = await resolveSource(c.id, c.source, args.sourceCache!);
+    sources.set(c.id, source);
+    courses.push({ ...source.entry, ...c });
+  }
   const listed = new Set(courses.map((c) => c.id));
   const stray = result.tickets.find((t) => !closedIds.has(t.id) && !listed.has(t.course_id));
   if (stray) throw new Error(`ticket ${stray.id} is on course ${stray.course_id}, which .baton/baton.json's courses do not list`);
@@ -358,7 +372,10 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   // The forge is read only when a course reads PRs: a repository on the marker courses alone
   // (bug-report, draft-ticket, decision) needs no forge token. A course's own sync.mjs may read
   // them, so it gets them too.
-  const readsPrsOf = (c: CourseEntry): boolean => existsSync(syncMjsOf(c.id)) || builtIn(c.id)?.reads === 'prs';
+  const readsPrsOf = (c: CourseEntry): boolean => {
+    const src = sources.get(c.id);
+    return src ? src.standard?.reads === 'prs' || (Array.isArray(src.entry.facts) && src.entry.facts.includes('prs')) : existsSync(syncMjsOf(c.id)) || builtIn(c.id)?.reads === 'prs';
+  };
   const readsPrs = courses.some(readsPrsOf);
   // The other repositories a live ticket on a PR-reading course names in `repos:` (B-29): its PRs
   // may be there, and a home with none (docs) is the usual case.
@@ -414,30 +431,38 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   const courseData: Record<string, unknown> = {};
   const registry: Record<string, unknown>[] = [];
   for (const c of courses) {
+    const src = sources.get(c.id);
     const courseFile = join(root, '.baton', 'courses', c.id, 'course.json');
-    if (!existsSync(courseFile)) throw new Error(`.baton/courses/${c.id}/course.json is missing — run \`baton repo init --course ${c.id}\``);
-    const course = JSON.parse(readFileSync(courseFile, 'utf8')) as { legs?: Record<string, unknown> };
+    if (!src && !existsSync(courseFile)) throw new Error(`.baton/courses/${c.id}/course.json is missing — run \`baton repo init --course ${c.id}\``);
+    const course = JSON.parse(src?.graph ?? readFileSync(courseFile, 'utf8')) as { legs?: Record<string, unknown> };
     const branchPatterns = [c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])];
     const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, branchPatterns, graph: course, ...(record ? { baton: record } : {}) };
     const syncMjs = syncMjsOf(c.id);
-    if (c.source) checkSource(c, readFileSync(courseFile, 'utf8'), existsSync(syncMjs));
-    const standard = builtIn(c.id);
+    const standard = src ? src.standard : builtIn(c.id);
     let fn: StationFn;
-    if (existsSync(syncMjs)) {
+    let schemas = {};
+    let label = c.source ?? `.baton/courses/${c.id}/sync.mjs`;
+    if (src?.files) {
+      const dir = mkdtempSync(join(args.sourceCache!, 'stations-'));
+      writeCourseTree(dir, src.files);
+      schemas = schemasIn(dir, c.id);
+      fn = () => sourceStations(dir, fnCtx);
+    } else if (!src && existsSync(syncMjs)) {
       const mod = (await import(`${pathToFileURL(syncMjs).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default?: { stations?: StationFn } };
       if (typeof mod.default?.stations !== 'function') throw new Error(`.baton/courses/${c.id}/sync.mjs default-exports no stations(ctx)`);
       fn = mod.default.stations;
     } else if (standard) {
       fn = standard.stations as unknown as StationFn;
+      label = `the ${standard.id} default`;
     } else {
       throw new Error(`course ${c.id} has no sync.mjs and is not a standard course — add .baton/courses/${c.id}/sync.mjs`);
     }
-    const out = stationsResult(await fn(fnCtx), existsSync(syncMjs) ? `.baton/courses/${c.id}/sync.mjs` : `the ${standard!.id} default`);
+    const out = stationsResult(await fn(fnCtx), label);
     Object.assign(stations, out.stations);
     markers.push(...out.markers);
     courseData[c.id] = out.course_data;
     registry.push({
-      ...courseSchemas(root, c.id),
+      ...(src ? schemas : courseSchemas(root, c.id)),
       // B-68's window: a file still carrying `min_worker_version` keeps its floor — the new
       // name wins when both are set — instead of silently falling back to `version`.
       id: c.id, version: c.version, min_runner_version: c.min_runner_version ?? c.min_worker_version ?? c.version, skill: c.skill ?? defaultSkill(c.id), course,
@@ -499,30 +524,45 @@ function cliVersion(): string {
   return (JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8')) as { version?: string }).version ?? '';
 }
 
-/** A sourced course (B-33, R-BTN-131) is the source's exactly, or the sync posts nothing: the
- * source names this CLI's repository at this CLI's commit (the workflow's pin) and a standard
- * course of the same id, the repository's course file is byte-equal to the one that commit
- * scaffolds, and no `sync.mjs` replaces the source's station function. Each refusal names what
- * to do. Other repositories' courses are not resolved yet: running their station code at sync
- * time needs its own design. */
-function checkSource(c: CourseEntry, courseText: string, ownSyncMjs: boolean): void {
-  const src = parseSource(c.source!);
+export class CourseSourceUnavailable extends Error {}
+
+export function builtInSource(id: string, source: string): BuiltIn | undefined {
+  const src = parseSource(source);
+  if (src.course !== id) throw new Error(`${source} names course ${src.course}; a source names the course of its own id`);
   const self = cliSelf();
-  const at = `.baton/baton.json: course ${c.id}'s source ${c.source}`;
-  if (src.course !== c.id) throw new Error(`${at} names course ${src.course}; a source names the course of its own id`);
-  if (!self) throw new Error(`${at}: this CLI is not a git checkout with an origin, so it cannot tell its own commit`);
-  if (!sameRepo(src, self)) {
-    throw new Error(`${at}: a course from ${src.namespace}/${src.repository} is not supported yet — only this CLI's repository, ${self.namespace}/${self.repository}`);
+  if (!self || !sameRepo(src, self) || src.ref.toLowerCase() !== self.sha) return;
+  const b = builtIn(id);
+  if (!b || b.id !== id) throw new Error(`${source}: ${id} is not a standard course at this CLI's commit`);
+  return b;
+}
+
+export async function resolveSource(id: string, source: string, cache: string): Promise<{
+  graph: string; entry: Partial<CourseEntry> & { facts?: string[] }; standard?: BuiltIn; files?: CourseFile[];
+}> {
+  const standard = builtInSource(id, source);
+  if (standard) return { graph: courseFileText(standard), entry: {}, standard };
+  try {
+    const files = await fetchCourse(parseSource(source), cache);
+    const text = (path: string): string | undefined => files.find((f) => f.path === path && f.regular)?.read().toString('utf8');
+    const graph = text('course.json');
+    if (graph === undefined) throw new Error(`${coursePath(id)}/course.json is missing`);
+    return { graph, entry: JSON.parse(text('entry.json') ?? '{}'), files };
+  } catch (e) {
+    throw new CourseSourceUnavailable(`cannot load ${source}; CLI commit ${cliSelf()?.sha ?? '(unknown)'}: ${(e as Error).message}`);
   }
-  if (src.ref !== self.sha) {
-    throw new Error(`${at} is at ${src.ref.slice(0, 10)}, and this CLI is at ${self.sha.slice(0, 10)} — re-run \`baton repo init\` with the CLI at the workflow's pin, which moves both`);
-  }
-  const b = builtIn(src.course);
-  if (!b || b.id !== src.course) throw new Error(`${at}: ${src.course} is not a standard course of ${self.namespace}/${self.repository} at ${self.sha.slice(0, 10)}`);
-  if (ownSyncMjs) throw new Error(`${at}: .baton/courses/${c.id}/sync.mjs would replace the source's station function — remove it, or remove \`source\` to own the course`);
-  if (courseText !== courseFileText(b)) {
-    throw new Error(`${at}: .baton/courses/${c.id}/course.json differs from the source's — a sourced course keeps its graph exactly; \`baton repo init --course ${c.id} --force\` restores it, and legs/<leg>${OVERRIDE_SUFFIX} changes a leg's run`);
-  }
+}
+
+function sourceStations(dir: string, ctx: Record<string, unknown> & { closed: Set<string>; done: Set<string> }): StationsResult {
+  const wrapper = fromSource() ? join(packageRoot(), 'src', 'runner', 'legProcess.mjs') : join(packageRoot(), 'dist', 'legProcess.mjs');
+  const script = join(dir, 'sync.mjs');
+  if (!existsSync(script)) throw new Error('a fetched course must provide sync.mjs');
+  const stdout = execFileSync(process.execPath, [wrapper, 'stations', script], {
+    cwd: dir, encoding: 'utf8', timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 16 << 20,
+    input: `${JSON.stringify([{ ...ctx, closed: [...ctx.closed], done: [...ctx.done] }])}\n`,
+  });
+  const out = JSON.parse(stdout.trimEnd().split('\n').at(-1)!);
+  if (!out.ok) throw new Error(out.error);
+  return out.result;
 }
 
 /** A Baton call through the vendored sync's `{ok, code}` shape: a refusal is its code, never a throw. */
@@ -683,6 +723,15 @@ export async function verifyConfigMain(argv: string[], io: { keys: { public_key:
 }
 
 export async function syncMain(args: SyncArgs): Promise<number> {
+  const cache = mkdtempSync(join(tmpdir(), 'baton-source-'));
+  try {
+    return await syncWithSources({ ...args, sourceCache: cache });
+  } finally {
+    rmSync(cache, { recursive: true, force: true });
+  }
+}
+
+async function syncWithSources(args: SyncArgs & { sourceCache: string }): Promise<number> {
   const log = args.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   const root = args.root;
   const batonJsonPath = join(root, '.baton', 'baton.json');
@@ -757,11 +806,12 @@ export async function syncMain(args: SyncArgs): Promise<number> {
       // baton.json too is read at the commit posted.
       // B-113: the qualified dependencies of other repositories resolve against their boards —
       // one read after the number, its doneness joining the `done` the station functions gate on.
-      board = await readBoard(root, JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson, args, log, record, async (ids) => {
+      const at = git(root, 'rev-parse', 'HEAD');
+      board = await readBoard(root, JSON.parse(gitRaw(root, 'show', `${at}:.baton/baton.json`)) as BatonJson, args, log, record, async (ids) => {
         const answer = await api.dependencies([...ids]);
         return (Array.isArray(answer.dependencies) ? answer.dependencies : []).map((d) => ({ ticket: String(d.ticket), done: d.done === true }));
       });
-      return git(root, 'rev-parse', 'HEAD');
+      return at;
     },
     readHead: () => asResult(() => api.head()),
     post: (body: Record<string, unknown>) => {
@@ -1221,14 +1271,9 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
  * `.mjs` at `outfile`, with no imports outside Node: the file works with no package installed. */
 async function bundleSource(entrySource: string, outfile: string): Promise<void> {
   const { build } = await import('esbuild');
-  const dir = mkdtempSync(join(tmpdir(), 'baton-bundle-'));
-  try {
-    const entry = join(dir, 'entry.ts');
-    writeFileSync(entry, entrySource);
-    await build({ entryPoints: [entry], outfile, bundle: true, platform: 'node', format: 'esm', target: 'node22', logLevel: 'warning' });
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  const root = packageRoot();
+  await build({ stdin: { contents: entrySource, sourcefile: 'baton-default.ts', resolveDir: root, loader: 'ts' }, absWorkingDir: root,
+    outfile, bundle: true, platform: 'node', format: 'esm', target: 'node22', logLevel: 'warning' });
 }
 
 /** The wrappers an ejection bundles: a working file calling the CLI's default through the same
@@ -1452,7 +1497,7 @@ ${pushes ? `  // B-231: run from the gate's red (pr-open, fixed), this leg must 
 ` : ''}  const courseSha = typeof ctx.signed_control?.course === 'string' && ctx.signed_control.course !== '' ? ctx.signed_control.course : sha;
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
   const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', courseSha, '--', rel]).trim() !== '';
-  const text = present ? gitRun('git', ['-C', ctx.checkout, 'show', courseSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }) : null;
+  const text = present ? gitRun('git', ['-C', ctx.checkout, 'show', courseSha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }) : ctx.sourced_course === true ? ${JSON.stringify(instructionsOf(course, leg))} : null;
   const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
   const instructions = dir == null ? '' : join(dir, ${JSON.stringify(`${leg}.md`)});
   if (dir != null) writeFileSync(instructions, text);
@@ -1758,7 +1803,7 @@ async function standard(ctx) {
   // settings never name it: the course owns the gate, not the repository's agent settings.
   let script = 'test';
   try {
-    const file = JSON.parse(show(${JSON.stringify(`.baton/courses/${course}/course.json`)}));
+    const file = ctx.sourced_course === true ? ${JSON.stringify({ test_script: (b.course as { test_script?: string }).test_script })} : JSON.parse(show(${JSON.stringify(`.baton/courses/${course}/course.json`)}));
     if (file && typeof file.test_script === 'string' && /^[\\w:.+-]{1,64}$/.test(file.test_script)) script = file.test_script;
   } catch { /* no course file at the snapshot, or one that is not JSON: the default script */ }
   // The ticket's PR branch in the home repository, by the course's branch patterns as the
@@ -1864,17 +1909,17 @@ const wrapperExample = (): string =>
 
 /** The instructions shipped for one leg of a standard course (R-BTN-131), the Markdown `init`
  * copies into the repository, which owns them from then on. */
-const instructionsOf = (course: string, leg: string): string =>
+export const instructionsOf = (course: string, leg: string): string =>
   readFileSync(fromSource() ? join(packageRoot(), 'src', 'defaults', 'courses', course, `${leg}.md`) : prebuilt('courses', course, `${leg}.md`), 'utf8');
 
 /** The legs of a standard course a runner runs, each with a stub and instructions: every leg
  *  but a person's (R-BTN-116, B-257's `confirm`), which no runner is offered and no script runs. */
-const runnerLegs = (b: BuiltIn): string[] =>
+export const runnerLegs = (b: BuiltIn): string[] =>
   Object.entries(b.course.legs as Record<string, { kind?: unknown }>).filter(([, l]) => l?.kind !== 'person').map(([leg]) => leg);
 
 /** A leg stub, bundled with its `close`: from source in a checkout, else build:cli's copy. The
  * run-tests gate (B-110) generates its own kind — no agent, the script itself. */
-async function writeStub(b: BuiltIn, leg: string, abs: string): Promise<void> {
+export async function writeStub(b: BuiltIn, leg: string, abs: string): Promise<void> {
   if (fromSource()) await bundleSource(b.legs[leg]?.tests ? testsStubSource(b, b.id, leg) : stubSource(b, b.id, leg), abs);
   else copyFileSync(prebuilt('stubs', b.id, `${leg}.mjs`), abs);
 }
@@ -1970,6 +2015,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   let agentNamed = false;
   let agentCommand: string | null = null;
   const overrides: string[] = [];
+  const instructions: string[] = [];
+  let prune = false;
+  let ownCourse = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = (): string => {
@@ -1981,6 +2029,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     else if (a === '--pin') pin = value();
     else if (a === '--force') force = true;
     else if (a === '--override') overrides.push(value());
+    else if (a === '--instructions') instructions.push(value());
+    else if (a === '--prune') prune = true;
+    else if (a === '--own') ownCourse = true;
     else if (a === '--agent') {
       const v = value();
       if (v !== 'opencode' && v !== 'claude-code') throw new Error('--agent: opencode or claude-code');
@@ -1996,6 +2047,10 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   const root = io.root ?? process.env.BATON_HOME ?? process.cwd();
   const settingsPath = join(root, '.baton', 'baton.json');
   const existing = existsSync(settingsPath) ? (JSON.parse(readFileSync(settingsPath, 'utf8')) as BatonJson) : null;
+  if (prune) {
+    if (!existing || argv.some((a) => a !== '--prune' && a !== '--course' && a !== named)) throw new Error('usage: baton repo init --prune [--course <id>] (on an existing home)');
+    return pruneCourses(root, (existing.courses ?? []).filter((c) => !named || c.id === named), log);
+  }
   const course = named ?? existing?.default_course ?? DEFAULT_COURSE;
   const standard = builtIn(course);
   if (eject === 'tickets') {
@@ -2069,7 +2124,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     }
   };
   if (named == null && standard && standard.id !== course) {
-    if (overrides.length) throw new Error(`--override: course ${course} is now ${standard.id} — \`baton repo init --course ${standard.id}\` scaffolds it first`);
+    if (overrides.length || instructions.length) throw new Error(`course ${course} is now ${standard.id} — \`baton repo init --course ${standard.id}\` scaffolds it first`);
     // A repository still on `pr` may list sourced courses beside it: the pin and their sources
     // move together here too, as on every init.
     const courses = existing?.courses ?? [];
@@ -2077,7 +2132,6 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     const movedHere = courses.filter(moves).map((c) => c.id);
     if (movedHere.length) {
       writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: courses.map((c) => (moves(c) ? { ...c, source: sourceOf(c.id)! } : c)) }, null, 2)}\n`);
-      for (const id of movedHere) await scaffold(builtIn(id)!, true);
       log(`baton: ${movedHere.join(', ')} now from ${self!.sha.slice(0, 10)}`);
     }
     writeWorkflow();
@@ -2085,13 +2139,12 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     return 0;
   }
   const b = scaffoldable(course);
-  for (const leg of overrides) {
-    if (!runnerLegs(b).includes(leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${runnerLegs(b).join(', ')}`);
+  for (const leg of [...overrides, ...instructions]) {
+    if (!runnerLegs(b).includes(leg)) throw new Error(`${overrides.includes(leg) ? '--override' : '--instructions'} ${leg}: ${b.id} has no such leg — its legs are ${runnerLegs(b).join(', ')}`);
   }
-  const entry = { ...courseEntry(b.id, Object.keys(b.course.legs)), skill: b.skill, ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
+  const entry = { ...courseEntry(b.id, Object.keys(b.course.legs)), skill: b.skill, ...(!ownCourse && sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
   let settings: BatonJson;
   let changed: string | null = null;
-  let rewriteNamed = force;
   let commandMoved = false;
   const moved: string[] = [];
   if (existing) {
@@ -2103,7 +2156,6 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
       if (c.id === b.id && force) return entry;
       if (moves(c)) {
         moved.push(c.id);
-        if (c.id === b.id) rewriteNamed = true;
         return { ...c, source: sourceOf(parseSource(c.source!).course)! };
       }
       return c;
@@ -2142,12 +2194,14 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // B-83: the command printed for the unfamiliar, whenever this init named one.
     if (!existing || commandMoved) log(`baton: agent_command${agentCommand != null ? ' (--agent-command)' : ` (the ${agent} harness)`}: ${settings.agent_command}`);
   }
-  await scaffold(b, rewriteNamed || !existing);
-  for (const id of moved.filter((m) => m !== b.id)) await scaffold(builtIn(id)!, true);
+  if (!settings.courses?.find((c) => c.id === b.id)?.source) await scaffold(b, force || !existing);
+  for (const leg of instructions) {
+    await put(`${coursePath(b.id)}/legs/${leg}.md`, (abs) => writeFileSync(abs, instructionsOf(b.id, leg)));
+  }
   for (const leg of overrides) {
-    // The leg script is what loads the override, so an older one (from before overrides) is
-    // replaced: it is Baton's file.
-    await put(`.baton/courses/${b.id}/legs/${leg}.mjs`, (abs) => writeStub(b, leg, abs), true);
+    if (!settings.courses?.find((c) => c.id === b.id)?.source) {
+      await put(`${coursePath(b.id)}/legs/${leg}.mjs`, (abs) => writeStub(b, leg, abs), true);
+    }
     await put(`.baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX}`, (abs) => writeFileSync(abs, overrideSource(b, leg)));
     log(`baton: .baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX} — this repository's run of ${leg}; edit it, and the leg script runs it in place of its own`);
   }
@@ -2167,6 +2221,82 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   if (kept.length) log(`baton: kept ${kept.join(', ')} (already there; --force rewrites Baton's files, never your instructions or overrides)`);
   log(`baton: .baton/ scaffolded (course ${b.id}: ${b.summary}) — commit it, add tickets/*.md, and the workflow does the rest`);
   return 0;
+}
+
+async function pruneCourses(root: string, courses: CourseEntry[], log: (line: string) => void): Promise<number> {
+  const scratch = mkdtempSync(join(tmpdir(), 'baton-prune-'));
+  try {
+    for (const entry of courses) {
+      if (entry.source === undefined) continue;
+      const src = await resolveSource(entry.id, entry.source, scratch);
+      const dir = join(root, coursePath(entry.id));
+      // Do not follow links when deciding what to delete.
+      if (!['.baton', '.baton/courses', coursePath(entry.id)].every((p) =>
+        readdirSync(join(root, dirname(p)), { withFileTypes: true }).some((e) => e.name === p.split('/').at(-1) && e.isDirectory()))) continue;
+      const expected = new Map((src.files ?? []).filter((f) => f.regular).map((f) => [f.path, f.read]));
+      if (src.standard) {
+        expected.set('course.json', () => Buffer.from(src.graph));
+        for (const leg of runnerLegs(src.standard)) {
+          const file = join(scratch, `${entry.id}-${leg}.mjs`);
+          await writeStub(src.standard, leg, file);
+          expected.set(`legs/${leg}.mjs`, () => readFileSync(file));
+          expected.set(`legs/${leg}.md`, () => Buffer.from(instructionsOf(entry.id, leg)));
+        }
+      }
+      const walk = (rel: string) => {
+        for (const f of readdirSync(join(dir, rel), { withFileTypes: true })) {
+          const path = rel ? `${rel}/${f.name}` : f.name;
+          if (f.isDirectory()) { walk(path); continue; }
+          const original = expected.get(path);
+          if (f.isFile() && original && readFileSync(join(dir, path)).equals(original())) {
+            rmSync(join(dir, path));
+            log(`baton: removed ${coursePath(entry.id)}/${path} (identical to source)`);
+          } else if (original || !f.isFile() || !isOverride(path)) {
+            log(`baton: kept ${coursePath(entry.id)}/${path} (differs from source; keep as an override or remove)`);
+          }
+        }
+      };
+      walk('');
+    }
+    return 0;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+export async function showCourseMain(argv: string[], root = process.env.BATON_HOME ?? process.cwd(), log = console.log): Promise<number> {
+  const [id, leg] = argv;
+  if (!id || argv.length > 2) throw new Error('usage: baton course show <course> [<leg>]');
+  const at = git(root, 'rev-parse', 'HEAD');
+  const settings = JSON.parse(gitRaw(root, 'show', `${at}:.baton/baton.json`)) as BatonJson;
+  const entry = settings.courses?.find((c) => c.id === id);
+  if (!entry) throw new Error(`.baton/baton.json does not list ${id}`);
+  const scratch = mkdtempSync(join(tmpdir(), 'baton-show-'));
+  try {
+    const src = entry.source === undefined ? null : await resolveSource(id, entry.source, scratch);
+    const show = (path: string, text: string) => log(`--- ${path} ---\n${text.trimEnd()}`);
+    if (src?.standard) {
+      if (!leg) show('course.json', src.graph);
+      const legs = runnerLegs(src.standard);
+      if (leg && !legs.includes(leg)) throw new Error(`${id}: no runnable leg ${leg}`);
+      for (const name of legs.filter((name) => !leg || name === leg)) {
+        const file = join(scratch, `${name}.mjs`);
+        await writeStub(src.standard, name, file);
+        show(`legs/${name}.mjs`, readFileSync(file, 'utf8'));
+        show(`legs/${name}.md`, instructionsOf(id, name));
+      }
+    } else {
+      const wanted = (src?.files ?? courseFiles(root, at, id)).filter((f) => f.regular && (!leg || f.path.startsWith(`legs/${leg}.`)));
+      if (!wanted.length) throw new Error(`${id}: no files${leg ? ` for leg ${leg}` : ''}`);
+      for (const f of wanted) show(f.path, f.read().toString('utf8'));
+    }
+    if (src) for (const f of courseFiles(root, at, id)) {
+      if (f.regular && isOverride(f.path) && (!leg || f.path.startsWith(`legs/${leg}.`))) show(`home override: ${f.path}`, f.read().toString('utf8'));
+    }
+    return 0;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 /** A standard course's file as init writes it, and as the sync holds a sourced course to. */
@@ -2286,7 +2416,11 @@ jobs:
  *  function, so no two parts of Baton disagree on where a schema is. Absent directory, no
  *  schemas; nothing reads `.baton/schemas/<course>/`, the window the move closed. */
 export function courseSchemas(root: string, course: string): { schemas?: { id: string; digest: string; schema: unknown }[] } {
-  const dir = join(root, '.baton', 'courses', course, 'schemas');
+  return schemasIn(join(root, coursePath(course)), course);
+}
+
+export function schemasIn(courseDir: string, course: string): { schemas?: { id: string; digest: string; schema: unknown }[] } {
+  const dir = join(courseDir, 'schemas');
   if (!existsSync(dir)) return {};
   const schemas = readdirSync(dir).filter((f) => /^[A-Za-z][A-Za-z0-9._-]{0,63}@(0|[1-9][0-9]{0,5})\.json$/.test(f)).sort().map((f) => {
     const bytes = readFileSync(join(dir, f));
