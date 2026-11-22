@@ -85,7 +85,7 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
   snapshot places a ticket; a note a leg adds to its ticket is evidence for people, never a
   position. A leg's runs and a ticket's arrivals are counted from this record (R-BTN-63).
   - **Where a ticket starts.** A ticket a snapshot posts for the first time stands at its course's
-    `start` with `start_leg` queued (R-BTN-83), unless an import holds its course history
+    `start` with `start_leg` queued (R-BTN-83), unless an import holds its position
     (R-BTN-88), placed in the transaction that accepts the post, before that post's attestations
     are judged.
   - **Who moves a ticket.** Only these, each along an edge of the course file from Baton's current
@@ -218,4 +218,3 @@ resumed by a **restart** (§7). "Workflow" means only a CI workflow; "activity" 
     recommendations and views — is not built, and no runner runs one:
     [the proposal](../proposals/courses.md).
   - Estimates stay on the runner; Baton stores no estimate or forecast.
-

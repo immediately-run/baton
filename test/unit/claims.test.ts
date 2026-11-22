@@ -699,16 +699,19 @@ describe('G-BTN-40: the matching query and gatesFor agree; git overtaking a clai
   });
 });
 
-describe('§7.1: a held history is accepted after 24 hours or by the owner', () => {
+describe('S-BTN-13 (R-BTN-11): a held history is accepted after 24 hours or on the dashboard', () => {
   it('the alarm accepts it at 24 h; the sync’s next force post becomes the head', async () => {
     await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B));
     const force = () => syncCall('/v1/sync/board', payload(sha.D, sha.B, board.states.D, { force: true }));
     expect(await code(await force())).toBe('snapshot-rejected');
-    await alarmAt(T0 + 24 * 3_600_000 - S);
+    await alarmAt(T0 + 24 * 3_600_000 - 60 * S);
     expect(await code(await force())).toBe('snapshot-rejected');
+    const head = async () => (await (await syncCall('/v1/sync/head')).json() as { sha: string }).sha;
+    expect(await head()).toBe(sha.B);
     await alarmAt(T0 + 24 * 3_600_000);
+    expect(await head()).toBe(sha.B);
     expect((await force()).status).toBe(200);
-    expect((await (await syncCall('/v1/sync/head')).json() as { sha: string }).sha).toBe(sha.D);
+    expect(await head()).toBe(sha.D);
   });
 
   it('the owner accepts it at once', async () => {

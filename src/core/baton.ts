@@ -52,7 +52,7 @@ import type { DispatchTarget, Ports, Row, SqlValue, Store, Workflow } from './po
 import { dispatchRead } from './reads';
 import type { ReadPrincipal } from './reads/kit';
 
-const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
+const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // R-BTN-11: measured from the first post of the held history.
 const RESYNC_WINDOW_MS = 30_000; // B-201: a session's resync, once per repository per R-BTN-73's dispatch window
 const ALARM_EVERY_MS = 60_000; // §3: one alarm, every 60 seconds
 /** One path segment, decoded: a malformed escape is the caller's error, never a 500. */
@@ -1207,7 +1207,7 @@ export class BatonCore {
       if (m === 'GET' && p === '/v1/admin/export') return json(this.ownerState.export(url.searchParams.get('with_history') === '1'));
       if (m === 'POST' && p === '/v1/admin/import') {
         const b = await body();
-        return json(this.store.transaction(() => this.ownerState.import(actor, b)));
+        return json(await this.ownerState.import(actor, b));
       }
       if (m === 'POST' && p === '/v1/admin/grants') {
         const b = await body();

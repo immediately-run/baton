@@ -121,6 +121,7 @@ is stale. Never edit it by hand.
 | | 16.1 Cutover | R-BTN-28 |
 | | 16.2 The reference deployment's rollout | — |
 | | 16.3 The git mirror | R-BTN-17 |
+| | 16.4 The interim board post | — |
 | [`90-load-bearing-assumptions.md`](BATON_SPEC/90-load-bearing-assumptions.md) | **Load-bearing assumptions** | — |
 | [`91-decisions.md`](BATON_SPEC/91-decisions.md) | **Decisions** | — |
 | [`92-open-questions.md`](BATON_SPEC/92-open-questions.md) | **Open questions** | — |
