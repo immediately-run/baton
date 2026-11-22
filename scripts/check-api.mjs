@@ -6,8 +6,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { LOCAL_LOADERS } from './bundle.mjs';
-import { exceptionProblems } from './lib/check-exceptions.mjs';
-import { legacyRoutes, routeKey } from './lib/core-routes.mjs';
+import { exceptionProblems, priorExceptions } from './lib/check-exceptions.mjs';
+import { legacyRoutes, readMethods, routeKey } from './lib/core-routes.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const read = (path) => readFileSync(resolve(ROOT, path), 'utf8');
@@ -18,25 +18,31 @@ async function load(entry) {
 }
 
 export function specifiedRoutes(text) {
-  return new Set([...text.matchAll(/^\| ((?:`[^`]+`(?:, )?)+) \|/gm)].flatMap(([, cell]) => {
+  return new Set(firstCells(text).flatMap((cell) => {
+    if (!cell || !/^`[^`]+`(?:\s*,\s*`[^`]+`)*$/.test(cell)) return [];
     const [first, ...aliases] = [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
-    const route = /^(\w+) (\/v1\/\S+)$/.exec(first);
+    const route = /^(\w+(?:\/\w+)*)\s+(\/v1\/\S+)$/.exec(first);
     if (!route) return [];
-    const [, method, path] = route;
-    return [routeKey(method, path), ...aliases.map((alias) => {
+    const [, methods, path] = route;
+    const paths = [path, ...aliases.map((alias) => {
       if (!alias.startsWith('…/')) throw new Error(`unsupported route alias: ${alias}`);
-      return routeKey(method, path.slice(0, path.lastIndexOf('/')) + alias.slice(1));
+      return path.slice(0, path.lastIndexOf('/')) + alias.slice(1);
     })];
+    return methods.split('/').flatMap((method) => paths.map((path) => routeKey(method, path)));
   }));
+}
+
+function firstCells(text) {
+  return text.split(/\r?\n/).map((line) => /^ {0,3}\|([^|]*)\|/.exec(line)?.[1].trim() ?? null);
 }
 
 export function specifiedTables(text) {
   const tables = new Set();
   let inTable = false;
-  for (const line of text.split('\n')) {
-    if (!line.startsWith('|')) inTable = false;
-    if (line.startsWith('| Table |')) inTable = true;
-    const row = /^\| `([\w]+)` \|/.exec(line);
+  for (const cell of firstCells(text)) {
+    if (cell === null) inTable = false;
+    if (cell === 'Table') inTable = true;
+    const row = /^`(\w+)`$/.exec(cell ?? '');
     if (inTable && row) tables.add(row[1]);
   }
   return tables;
@@ -53,30 +59,35 @@ export function migratedTables(migrations) {
   }
 }
 
-export function comparisonProblems(label, specified, built, exceptions) {
+export function comparisonProblems(label, specified, built, exceptions, prior) {
   const only = (left, right) => [...left].filter((entry) => !right.has(entry));
   return [
-    ...exceptionProblems(`${label} specified but not built`, only(specified, built), exceptions.specifiedOnly),
-    ...exceptionProblems(`${label} built but not specified`, only(built, specified), exceptions.builtOnly),
+    ...exceptionProblems(`${label} specified but not built`, only(specified, built), exceptions.specifiedOnly, prior?.specifiedOnly),
+    ...exceptionProblems(`${label} built but not specified`, only(built, specified), exceptions.builtOnly, prior?.builtOnly),
   ];
+}
+
+export function registeredReadRoutes(actions, reads, methods) {
+  const implemented = new Set(reads.map(({ action }) => action));
+  return actions.filter(({ id, http }) => implemented.has(id) && http.method === 'GET')
+    .flatMap(({ http: { path } }) => methods.map((method) => routeKey(method, path)));
 }
 
 async function run() {
   const [{ ACTIONS }, { READS }, { MIGRATIONS }] = await Promise.all([
     load('src/core/actions.ts'), load('src/core/reads/index.ts'), load('src/migrations/index.ts'),
   ]);
-  const implemented = new Set(READS.map(({ action }) => action));
   const routes = legacyRoutes(read('src/core/baton.ts'));
-  for (const { id, http: { method, path } } of ACTIONS) {
-    if (implemented.has(id)) routes.add(routeKey(method, path));
-  }
+  for (const route of registeredReadRoutes(ACTIONS, READS, readMethods(read('src/core/reads/index.ts')))) routes.add(route);
   const tables = migratedTables(MIGRATIONS);
   const specRoutes = specifiedRoutes(read('spec/BATON_SPEC/14-api.md'));
   const specTables = specifiedTables(read('spec/BATON_SPEC/13-data-model.md'));
-  const baseline = JSON.parse(read('scripts/check-api-exceptions.json'));
+  const file = 'scripts/check-api-exceptions.json';
+  const exceptions = JSON.parse(read(file));
+  const prior = priorExceptions(ROOT, file);
   const problems = [
-    ...comparisonProblems('route', specRoutes, routes, baseline.routes),
-    ...comparisonProblems('table', specTables, tables, baseline.tables),
+    ...comparisonProblems('route', specRoutes, routes, exceptions.routes, prior.routes),
+    ...comparisonProblems('table', specTables, tables, exceptions.tables, prior.tables),
   ];
   for (const problem of problems) console.error(`check:api: ${problem}`);
   if (problems.length) return 1;

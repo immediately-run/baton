@@ -11,6 +11,6 @@ function files(root, dir) {
 }
 
 export function readSpecCode(root) {
-  return ['src', 'test', 'model', 'cli'].flatMap((dir) => files(root, dir))
+  return ['src', 'test', 'model', 'cli', 'scripts'].flatMap((dir) => files(root, dir))
     .map((path) => [path, readFileSync(join(root, path), 'utf8')]);
 }

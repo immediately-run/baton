@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // check-spec.mjs — the spec and the code agree on what the spec defines (R3-1252).
 //
-//   npm run check:spec        check spec/BATON_SPEC/ (its parts joined, B-179) against src/, test/, model/ and cli/ (the
+//   npm run check:spec        check spec/BATON_SPEC/ (its parts joined, B-179) against src/, test/, model/, cli/ and scripts/ (the
 //                             requirement ids they cite) and tickets/ (the tickets it cites)
 //
 // - every requirement id (`R-BTN-n`) the code cites is defined in the spec — as a bold
@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { patchNotes } from './spec-tools.mjs';
 import { joinParts, layoutProblems, specParts } from './spec-files.mjs';
 import { stripFrontmatter } from './lib/stripFrontmatter.mjs';
-import { exceptionProblems } from './lib/check-exceptions.mjs';
+import { exceptionProblems, newExceptionProblems, priorExceptions } from './lib/check-exceptions.mjs';
 import { readSpecCode } from './lib/spec-code.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -194,8 +194,10 @@ export function check(spec, code, tickets, history = '', testNames = [], allowed
 export function sectionPairDifferences(files, targets) {
   const differences = new Set();
   for (const [path, text] of files) {
-    const visible = text.replace(/\[([^\]\n]*)\]\([^\n)]*\)/g, '$1').replace(/[`*_]/g, '');
-    for (const [, section, rule] of visible.matchAll(/§(\d+[a-z]?(?:\.\d+[a-z]?)*)[ \t]+(R-BTN-\d+)\b/g)) {
+    const visible = text.replace(/\[([^\][\n]*)\]\([^\n)]*\)/g, '$1').replace(/[`*_]/g, '');
+    // Strip source comment leaders so a wrapped pair in code is checked like one in prose.
+    const prose = visible.replace(/\r?\n[ \t]*(?:\/\/+[ \t]*)?/g, '\n');
+    for (const [, section, rule] of prose.matchAll(/§(\d+[a-z]?(?:\.\d+[a-z]?)*)\b(?=[ \t\n(])[ \t]*(?:\n[ \t]*)?(?:\([ \t]*(?:\n[ \t]*)?)?(R-BTN-\d+)\b/g)) {
       const at = targets.get(section);
       const ruleAt = targets.get(rule);
       if (!at || !ruleAt || (at !== ruleAt && (section.includes('.') || at.file !== ruleAt.file))) {
@@ -220,7 +222,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const history = existsSync(historyPath) ? stripFrontmatter(readFileSync(historyPath, 'utf8')) : '';
   const integration = join(REPO, 'test', 'integration');
   const testNames = existsSync(integration) ? readdirSync(integration) : [];
-  const problems = check(spec, code, tickets, history, testNames, PATCH_NOTES_ALLOWED, JSON.parse(read('scripts/retired-rule-exceptions.json')));
+  const file = 'scripts/retired-rule-exceptions.json';
+  const exceptions = JSON.parse(read(file));
+  const problems = check(spec, code, tickets, history, testNames, PATCH_NOTES_ALLOWED, exceptions);
+  // check() owns citation matching; validate against the independently committed ceiling here.
+  problems.push(...newExceptionProblems('retired rule citation', exceptions, priorExceptions(REPO, file)));
   problems.push(...layoutProblems(REPO));
   const pages = ['README.md', 'AGENTS.md', ...defaultPages(REPO)].map((p) => [p, read(p)]);
   const pairs = sectionPairDifferences([...code, ...pages, ['spec/BATON_SPEC/', spec]], specTargets(REPO));

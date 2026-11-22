@@ -1,9 +1,49 @@
 import { describe, expect, it } from 'vitest';
-import { comparisonProblems, migratedTables, specifiedRoutes, specifiedTables } from './check-api.mjs';
-import { legacyRoutes } from './lib/core-routes.mjs';
+import { comparisonProblems, migratedTables, registeredReadRoutes, specifiedRoutes, specifiedTables } from './check-api.mjs';
+import { legacyRoutes, readMethods } from './lib/core-routes.mjs';
 
 // B-277 exercises the repository verification under R-BTN-31, not a runtime API change.
 describe('check:api', () => {
+  it.each(['', '  '])('accepts padded and unpadded Markdown cells (%j)', (pad) => {
+    const table = `|${pad}Table${pad}| Key |\n|---|---|\n|${pad}\`widgets\`${pad}| id |`;
+    expect([...specifiedTables(table)]).toEqual(['widgets']);
+    expect([...specifiedRoutes(`|${pad}\`GET/HEAD /v1/widgets\`${pad}| reader |`)]).toEqual([
+      'GET /v1/widgets', 'HEAD /v1/widgets',
+    ]);
+  });
+
+  it('expands the methods admitted by the registered read dispatcher', () => {
+    const guard = (predicate) => `export function dispatchRead(cx, req, url) { if (${predicate}) return null; }`;
+    const actions = [
+      { id: 'widget.read', http: { method: 'GET', path: '/v1/widgets/{widget}' } },
+      { id: 'unserved.read', http: { method: 'GET', path: '/v1/unserved' } },
+    ];
+    const reads = [{ action: 'widget.read' }];
+    expect(registeredReadRoutes(actions, reads, readMethods(guard("req.method !== 'GET' && req.method !== 'HEAD'"))))
+      .toEqual(['GET /v1/widgets/{}', 'HEAD /v1/widgets/{}']);
+    expect(registeredReadRoutes(actions, reads, readMethods(guard("req.method !== 'GET'"))))
+      .toEqual(['GET /v1/widgets/{}']);
+    expect(() => readMethods(guard("req.method !== 'GET' || req.method !== 'HEAD'"))).toThrow(/unsupported/);
+  });
+
+  it('keeps both legacy method alternatives and rejects correlated path/method branches', () => {
+    const router = (guard) => `class Fixture { route(req, url) { if (${guard}) return json({}); } }`;
+    expect([...legacyRoutes(router("(req.method === 'PUT' || req.method === 'POST') && url.pathname === '/v1/widgets'"))])
+      .toEqual(['PUT /v1/widgets', 'POST /v1/widgets']);
+    expect(() => legacyRoutes(router("(req.method === 'PUT' && url.pathname === '/v1/widgets') || (req.method === 'POST' && url.pathname === '/v1/items')")))
+      .toThrow(/unsupported route method alternatives/);
+  });
+
+  it('rejects matching new exceptions in both directions and validates ticket ids', () => {
+    expect(comparisonProblems('route', new Set(['GET /v1/spec']), new Set(['GET /v1/core']), {
+      specifiedOnly: { 'GET /v1/spec': 'B-277' }, builtOnly: { 'GET /v1/core': null },
+    }, { specifiedOnly: {}, builtOnly: {} })).toEqual([
+      'route specified but not built: new exception GET /v1/spec; the list may only shrink',
+      'route built but not specified: invalid ticket for exception GET /v1/core',
+      'route built but not specified: new exception GET /v1/core; the list may only shrink',
+    ]);
+  });
+
   it('compares methods and path shapes, including abbreviated routes and regex alternatives', () => {
     const spec = '| `POST /v1/ui/claims/{id}/confirm`, `…/release` | session |';
     const core = `class Fixture {
