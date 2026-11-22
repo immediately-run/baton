@@ -25,6 +25,9 @@ import { splitWords } from '../../src/defaults/agent-words';
 import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
 import { stampMarkdownVersions } from '../../src/defaults/ticket-versions';
 import { syncOnce } from '../../src/shared/batonSync.mjs';
+import { builtinExecutor } from '../../src/runner/executor';
+import { LegTrees } from '../../src/runner/leg-trees';
+import { removeSealed } from '../../src/runner/leg-dependencies';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const CLI = join(ROOT, 'cli', 'baton.mjs');
@@ -2531,6 +2534,22 @@ export async function run(ctx, standard) {
       const stub = await load(script);
       expect(await stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot, leg: 'review' })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
       expect(readFileSync(join(root, 'override.ran'), 'utf8')).toBe('review');
+      // S-BTN-109: the generated stub runs the same override through the real resolve hook.
+      const wrapper = join(ROOT, 'src/runner/legProcess.mjs');
+      const tree = await new LegTrees(root, builtinExecutor(), wrapper).prepare('fixture', snapshot.sha, 'create-pr', AbortSignal.timeout(10_000));
+      try {
+        writeFileSync(override, 'throw new Error("the writable checkout is not the override");\n');
+        rmSync(join(root, 'override.ran'));
+        const child = spawnSync(process.execPath, [wrapper, 'run', tree.scripts.get('review')!], {
+          cwd: root, encoding: 'utf8', timeout: 10_000,
+          input: `${JSON.stringify({ roots: tree.roots, args: [{ ticket: { id: 'A-1' }, checkout: root, snapshot: { ...snapshot, tree: tree.tree }, leg: 'review' }] })}\n`,
+        });
+        expect(JSON.parse(child.stdout.trimEnd().split('\n').at(-1)!)).toEqual({ ok: true, result: { reached: 'reviewed', next: 'fix', verdict: 'changes' } });
+        expect(readFileSync(join(root, 'override.ran'), 'utf8')).toBe('review');
+      } finally {
+        await tree.release();
+        await removeSealed(join(root, '.git', 'baton'));
+      }
       // The course's close is what the stub exports, whatever the override adds: the stub
       // wraps it to hand the default branch in (so its name is 'close'), and the override's
       // own close is not it.

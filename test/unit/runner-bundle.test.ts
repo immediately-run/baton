@@ -50,7 +50,7 @@ describe('S-BTN-41 the runner from its bundle (R-BTN-72)', () => {
     expect(runLegVia(join(ROOT, 'dist', 'baton.mjs'))).toEqual({ ok: true, result: { echoed: 'implement' } });
   });
 
-  it('S-BTN-109: runner start executes a locked TypeScript leg from checkout and dist', async () => {
+  it('S-BTN-109: runner start runs locked TypeScript from checkout and dist and fences preparation', async () => {
     // Build once before the HTTP fixture starts; both clients then talk to the actual local core.
     execFileSync(process.execPath, [join(ROOT, 'scripts', 'build-cli.mjs')], { cwd: ROOT, timeout: 30_000 });
     const tmp = mkdtempSync(join(tmpdir(), 'baton-109-cli-'));
@@ -92,7 +92,9 @@ describe('S-BTN-41 the runner from its bundle (R-BTN-72)', () => {
       const graph = structuredClone(chore);
       Object.assign(graph.legs.do, { requires: { capabilities: ['runner:leg-trees'] } });
       let parent: string | null = null;
-      for (const [i, cli] of ['cli/baton.mjs', 'dist/baton.mjs'].entries()) {
+      for (const [i, cli] of ['cli/baton.mjs', 'dist/baton.mjs', 'dist/baton.mjs', 'dist/baton.mjs'].entries()) {
+        const failSecondPreparation = i === 2;
+        const failClone = i === 3;
         // Keep the board ancestry linear but use fresh checkout and cache directories per CLI.
         const home = join(tmp, `home-${i}`);
         const git = (...args: string[]) => execFileSync('git', ['-C', home, ...args], { encoding: 'utf8' }).trim();
@@ -113,7 +115,7 @@ describe('S-BTN-41 the runner from its bundle (R-BTN-72)', () => {
 import { writeFileSync } from 'node:fs';
 export function run(ctx: { checkout: string }) {
   writeFileSync(ctx.checkout + '/result.json', JSON.stringify({ value, file: import.meta.filename, cwd: process.cwd(), mode: ${i} }));
-  return { suspend: true, reached: 'done-once' };
+  return ${failSecondPreparation ? "{ reached: 'done-once', next: 'verify' }" : "{ suspend: true, reached: 'done-once' }"};
 }
 export const close = () => 'https://example.test/close';
 `);
@@ -128,8 +130,24 @@ export const close = () => 'https://example.test/close';
         expect(board.status, await board.text()).toBe(200);
         parent = sha;
         const env = { ...cleanNodeEnv(process.env), HOME: tmp, BATON_TOKEN: TOKENS['vm-a'], BATON_KEY: '', BATON_KEY_FILE: '', BATON_PARENT: '' };
+        if (failSecondPreparation) {
+          const npm = execFileSync('sh', ['-c', 'command -v npm'], { encoding: 'utf8' }).trim();
+          const bin = join(tmp, 'bin');
+          const shim = join(bin, 'npm');
+          mkdirSync(bin);
+          writeFileSync(shim, `#!/bin/sh\nif [ "$1" = --version ] && [ -f "$BATON_TEST_PREPARED" ]; then exec sleep 60; fi\nexec "$BATON_TEST_NPM" "$@"\n`, { mode: 0o755 });
+          Object.assign(env, { PATH: `${bin}:${process.env.PATH}`, BATON_TEST_NPM: npm, BATON_TEST_PREPARED: join(home, 'result.json') });
+        }
+        if (failClone) {
+          const git = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+          const bin = join(tmp, 'git-shim');
+          mkdirSync(bin);
+          writeFileSync(join(bin, 'git'), `#!/bin/sh\ncase " $* " in *' clone '*) : > "$BATON_TEST_CLONE_STARTED"; exec sleep 60;; esac\nexec "$BATON_TEST_GIT" "$@"\n`, { mode: 0o755 });
+          Object.assign(env, { PATH: `${bin}:${process.env.PATH}`, BATON_TEST_GIT: git, BATON_TEST_CLONE_STARTED: join(home, 'clone.started') });
+        }
         const child = spawn(process.execPath, [join(ROOT, cli), 'runner', 'start', '--home', home, '--url', url,
-          '--session', `leg-tree-cli-${i}`, '--hostname', 'vm-a', '--prepare-timeout', '5s', '--beat-every', '100'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+          '--session', `leg-tree-cli-${i}`, '--hostname', 'vm-a', '--prepare-timeout', '5s', '--beat-every', '100',
+          ...(failClone ? ['--concurrency', '2'] : [])], { env, stdio: ['ignore', 'pipe', 'pipe'] });
         let log = '';
         child.stdout.on('data', (bytes) => { log += bytes; });
         child.stderr.on('data', (bytes) => { log += bytes; });
@@ -140,7 +158,15 @@ export const close = () => 'https://example.test/close';
           const [code] = await once(child, 'close');
           expect(relayError).toBeUndefined();
           expect(code, log).toBe(0);
-          expect(await rows('SELECT end_reason FROM claims WHERE ticket_id = ?', `docs:${id}`), log).toEqual([{ end_reason: 'suspended:done-once' }]);
+          expect(await rows('SELECT station, end_reason FROM claims WHERE ticket_id = ?', `docs:${id}`), log).toEqual([{
+            station: failClone ? 'open' : 'done-once',
+            end_reason: failSecondPreparation || failClone ? 'released:cannot-finish:transient' : 'suspended:done-once',
+          }]);
+          if (failClone) {
+            expect(readFileSync(join(home, 'clone.started'), 'utf8')).toBe('');
+            expect(() => readFileSync(join(home, 'result.json'))).toThrow(/ENOENT/);
+            continue;
+          }
           const result = JSON.parse(readFileSync(join(home, 'result.json'), 'utf8'));
           expect(result).toMatchObject({ value: 42, cwd: home, mode: i });
           expect(result.file).toContain('/baton/trees/docs/');

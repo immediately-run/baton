@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { builtinExecutor } from '../../src/runner/executor';
 import { removeSealed } from '../../src/runner/leg-dependencies';
 import { LegTrees } from '../../src/runner/leg-trees';
-import { cleanNodeEnv, prepareExec, requireLegNode } from '../../src/runner/preparation';
+import { cleanNodeEnv, hardStopPreparation, prepareExec, requireLegNode } from '../../src/runner/preparation';
 import { readInputs } from '../../src/local/testCourse';
 
 const wrapper = fileURLToPath(new URL('../../src/runner/legProcess.mjs', import.meta.url));
@@ -76,6 +76,20 @@ describe('S-BTN-109 leg trees', () => {
     expect(await trees.onDefault('repo', other, 'registered', signal())).toBe(false);
     expect(await trees.onDefault('repo', registered, 'registered', signal())).toBe(true);
     expect(f.git('rev-parse', 'refs/baton/repo/default')).toBe(registered);
+  });
+
+  it('S-BTN-118: keeps a prior verified head across a held rewrite, but a fresh cache refuses it', async () => {
+    const f = fixture();
+    f.leg('start.mjs', 'export const run = () => 1');
+    const old = f.commit();
+    const trees = new LegTrees(f.home, builtinExecutor(), wrapper);
+    expect(await trees.onDefault('held', old, 'registered', signal())).toBe(true);
+    f.git('checkout', '-q', '--orphan', 'replacement');
+    f.leg('start.mjs', 'export const run = () => 2');
+    const next = f.commit();
+    f.git('branch', '-f', 'registered', next);
+    expect(await trees.onDefault('held', old, 'registered', signal())).toBe(true);
+    expect(await trees.onDefault('fresh', old, 'registered', signal())).toBe(false);
   });
 
   it('refuses an import of a checkout file and an ambiguous leg name', async () => {
@@ -144,14 +158,15 @@ describe('S-BTN-109 leg trees', () => {
         return executor.exec(h, argv, opts);
       } }, wrapper);
       let cache: string;
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 4; i++) {
         const ready = await trees.prepare('repo', sha, 'sample', signal());
         try {
           expect(run(ready.scripts.get('start')!, ready.roots, f.home)).toEqual({ ok: true, result: 42 });
-          expect(installs).toBe(i === 2 ? 2 : 1);
+          expect(installs).toBe(Math.max(1, i));
           cache = join(ready.roots[1], 'fixture-value', 'index.cjs');
         } finally { await ready.release(); }
         if (i === 1) { chmodSync(cache!, 0o644); writeFileSync(cache!, 'module.exports = 0;'); }
+        if (i === 2) await removeSealed(ready.roots[1]); // The stamped worktree is still linked to it.
       }
       expect((await readInputs(f.home, 'sample')).legScripts?.[0]).toMatchObject({ name: 'start', exports: ['run', 'handoff', 'close'] });
     } finally {
@@ -170,6 +185,25 @@ describe('S-BTN-109 leg trees', () => {
       const check = expect(result).rejects.toBe(reason);
       const timer = setTimeout(() => owner.abort(reason), 150);
       try { await check; } finally { clearTimeout(timer); }
+    }
+  });
+
+  it('hard stop interrupts the graceful release ladder and waits for the preparation child', async () => {
+    const f = fixture();
+    const owner = new AbortController();
+    const executor = builtinExecutor();
+    const result = prepareExec(executor, wrapper, {
+      argv: ['node', '-e', `process.on('SIGINT', () => {}); require('node:fs').writeFileSync('ready', ''); setInterval(() => {}, 1000);`],
+      cwd: f.home, signal: owner.signal,
+    });
+    const rejected = expect(result).rejects.toBe('released:requested');
+    try {
+      await expect.poll(() => { try { return statSync(join(f.home, 'ready')).isFile(); } catch { return false; } }).toBe(true);
+      owner.abort('released:requested');
+    } finally {
+      if (!owner.signal.aborted) owner.abort('released:requested');
+      await hardStopPreparation(owner);
+      await rejected;
     }
   });
 });

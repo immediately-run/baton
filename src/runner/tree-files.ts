@@ -20,11 +20,16 @@ export async function treeFiles(root: string, mode: 'verify' | 'seal' | 'unseal'
     const readonly = st.mode & 0o7555;
     if (st.isSymbolicLink()) {
       if (mode === 'unseal') return;
-      const target = await realpath(path).catch(() => '');
-      if (!target || (!within(root, target) && links.get(path) !== target)) {
+      const link = await readlink(path);
+      const target = await realpath(path).catch(() => null);
+      // The caller has checked that this exact absolute link names a digest entry.
+      // A missing entry can be restored from the lockfile, but a redirected entry cannot.
+      const missingDigest = mode === 'verify' && target === null && links.get(path) === link
+        && await lstat(link).then(() => false, (e) => e.code === 'ENOENT');
+      if (!missingDigest && (!target || (!within(root, target) && links.get(path) !== target))) {
         throw new PreparationError('spec', `symlink ${name} resolves outside the leg tree or digest (R-BTN-133)`);
       }
-      hash.update(JSON.stringify([name, 'link', await readlink(path)]));
+      hash.update(JSON.stringify([name, 'link', link]));
       return;
     }
     if (!st.isDirectory() && !st.isFile()) throw new PreparationError('spec', `${name} is not a regular file or directory (R-BTN-133)`);

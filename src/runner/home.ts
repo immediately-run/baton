@@ -4,9 +4,10 @@
 // sha is missing; then `git show` reads blobs straight from the object store. Leg scripts are
 // extracted per claim into a scratch directory, so a course change between two claims needs no
 // restart and the fresh `import()` the wrapper does is of the snapshot's bytes.
-import { execFile, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -22,6 +23,8 @@ export const SAFE_GIT = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor
 // B-94: git's non-interactive environment is defined once, beside the close's bound — the
 // runner's git and the generated stubs import it from there.
 import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
+import { prepareExec } from './preparation';
+import { builtinExecutor } from './executor';
 
 /** One git command in the home checkout; throws with stderr when it fails, and is killed at
  * `timeoutMs` (default `GIT_TIMEOUT_MS`, under a beat) when it cannot answer (B-94). */
@@ -106,40 +109,39 @@ export function ensureSha(home: string, sha: string, fetch: () => void): boolean
   }
 }
 
-/** B-228 (R-BTN-34: the tree is prepared at the claim's sha): bring the home checkout to the
- *  claim's snapshot before a leg runs, so the leg — and an executor that copies the checkout —
- *  starts from the code the claim was decided on, never from wherever the home last stood. Only
- *  a fast-forward, and only on `defaultBranch` with no tracked change: a home that is ahead of the
- *  snapshot, diverged, on another branch or edited is left exactly as it is, and the reason is
- *  returned for the log. Null: the home is at the snapshot now. */
-export function advanceHome(home: string, sha: string, defaultBranch: string | null): string | null {
-  const head = git(home, ['rev-parse', 'HEAD']).trim();
-  const target = git(home, ['rev-parse', `${sha}^{commit}`]).trim();
-  if (head === target) return null;
-  const branch = (() => { try { return git(home, ['symbolic-ref', '--short', '-q', 'HEAD']).trim(); } catch { return ''; } })();
-  if (defaultBranch == null || branch !== defaultBranch) return `the home is on ${branch || 'a detached HEAD'}, not ${defaultBranch ?? 'the default branch'}`;
-  if (git(home, ['status', '--porcelain', '--untracked-files=no']).trim() !== '') return 'the home has tracked changes';
-  try {
-    git(home, ['merge-base', '--is-ancestor', head, target]);
-  } catch {
-    return `the home's ${head.slice(0, 10)} is not behind the snapshot`;
-  }
-  git(home, ['merge', '--ff-only', '-q', target]);
-  return null;
+const checkoutExecutor = builtinExecutor();
+
+/** Git for writable checkouts still runs under the claim's preparation fence. */
+async function checkoutGit(cwd: string, args: string[], signal: AbortSignal): Promise<string> {
+  const result = await prepareExec(checkoutExecutor, '', {
+    argv: ['git', ...SAFE_GIT, ...args], cwd, signal,
+    env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
+  });
+  if (result.status !== 0) throw new Error(`git ${args[0]}: ${result.stderr.trim().slice(0, 300)}`);
+  return result.stdout;
 }
 
-/** B-188: the bound on a clone's own git (the first `clone` of a large home, a fetch of it) — run
- *  asynchronously, so the event loop, and with it the beat, never waits on it. */
-export const CLONE_TIMEOUT_MS = 10 * 60_000;
-
-/** One git command, asynchronously, bounded and non-interactive like `git` (B-94). */
-function gitAsync(cwd: string | null, args: string[], timeoutMs: number = CLONE_TIMEOUT_MS): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile('git', [...(cwd ? ['-C', cwd] : []), ...SAFE_GIT, ...args], {
-      encoding: 'utf8', maxBuffer: 16 << 20, timeout: timeoutMs, killSignal: 'SIGKILL',
-      env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
-    }, (e, stdout, stderr) => (e ? reject(new Error(`git ${args[0]}: ${String(stderr || e.message).trim().slice(0, 300)}`)) : resolve(stdout)));
-  });
+/** B-228: fast-forward a clean home on its default branch to the claim's snapshot. Return null
+ *  when it is at the snapshot, or a reason the runner can log when left unchanged. */
+export async function advanceHome(home: string, sha: string, defaultBranch: string | null, signal: AbortSignal): Promise<string | null> {
+  const git = (args: string[]) => checkoutGit(home, args, signal);
+  const head = (await git(['rev-parse', 'HEAD'])).trim();
+  const target = (await git(['rev-parse', `${sha}^{commit}`])).trim();
+  if (head === target) return null;
+  const branch = (await git(['symbolic-ref', '--short', '-q', 'HEAD']).catch(() => {
+    signal.throwIfAborted();
+    return '';
+  })).trim();
+  if (defaultBranch == null || branch !== defaultBranch) return `the home is on ${branch || 'a detached HEAD'}, not ${defaultBranch ?? 'the default branch'}`;
+  if ((await git(['status', '--porcelain', '--untracked-files=no'])).trim() !== '') return 'the home has tracked changes';
+  try {
+    await git(['merge-base', '--is-ancestor', head, target]);
+  } catch {
+    signal.throwIfAborted();
+    return `the home's ${head.slice(0, 10)} is not behind the snapshot`;
+  }
+  await git(['merge', '--ff-only', '-q', target]);
+  return null;
 }
 
 /** R-BTN-72, R-BTN-4 (B-188): a claim's own checkout when the runner holds several — a separate
@@ -150,28 +152,32 @@ function gitAsync(cwd: string | null, args: string[], timeoutMs: number = CLONE_
  *  tree is then put at the claim's snapshot on `branch` (the default branch, as B-228 puts the
  *  home), forced and cleaned of untracked files: the clone is the runner's, and what an earlier
  *  claim left in it was that claim's to push. */
-export async function prepareClone(home: string, dir: string, sha: string, branch: string | null): Promise<void> {
+export async function prepareClone(home: string, dir: string, sha: string, branch: string | null, signal: AbortSignal): Promise<void> {
   if (!existsSync(join(dir, '.git'))) {
-    rmSync(dir, { recursive: true, force: true });
-    mkdirSync(dirname(dir), { recursive: true });
-    await gitAsync(null, ['clone', '-q', '--no-checkout', home, dir]);
+    signal.throwIfAborted();
+    await rm(dir, { recursive: true, force: true });
+    signal.throwIfAborted();
+    await mkdir(dirname(dir), { recursive: true });
+    await checkoutGit(home, ['clone', '-q', '--no-checkout', home, dir], signal);
   }
   let origin = '';
   try {
-    origin = (await gitAsync(home, ['remote', 'get-url', 'origin'])).trim();
+    origin = (await checkoutGit(home, ['remote', 'get-url', 'origin'], signal)).trim();
   } catch {
+    signal.throwIfAborted();
     origin = ''; // a home with no origin: the clone's origin stays the home
   }
-  await gitAsync(dir, ['remote', 'set-url', 'origin', origin || home]);
-  await gitAsync(dir, ['fetch', '-q', '--no-tags', home, '+refs/heads/*:refs/baton/home/heads/*', '+refs/remotes/*:refs/baton/home/remotes/*']);
+  await checkoutGit(dir, ['remote', 'set-url', 'origin', origin || home], signal);
+  await checkoutGit(dir, ['fetch', '-q', '--no-tags', home, '+refs/heads/*:refs/baton/home/heads/*', '+refs/remotes/*:refs/baton/home/remotes/*'], signal);
   try {
-    await gitAsync(dir, ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`]);
+    await checkoutGit(dir, ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`], signal);
   } catch {
+    signal.throwIfAborted();
     // The snapshot is in the home's objects but on no ref there (a fetched FETCH_HEAD): by id.
-    await gitAsync(dir, ['fetch', '-q', '--no-tags', home, sha]);
+    await checkoutGit(dir, ['fetch', '-q', '--no-tags', home, sha], signal);
   }
-  await gitAsync(dir, ['checkout', '-q', '-f', '-B', branch ?? 'baton-claim', sha]);
-  await gitAsync(dir, ['clean', '-fdq']);
+  await checkoutGit(dir, ['checkout', '-q', '-f', '-B', branch ?? 'baton-claim', sha], signal);
+  await checkoutGit(dir, ['clean', '-fdq'], signal);
 }
 
 /** Load a claim's course from the snapshot: the graph, and every leg script the snapshot's

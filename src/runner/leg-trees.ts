@@ -114,7 +114,7 @@ export class LegTrees {
       }
       const rebuild = async () => {
         if (this.held.has(tree)) throw new PreparationError('transient', 'cannot replace a leg tree while a claim uses it');
-        await this.removeTree(tree);
+        await this.removeTree(tree, signal);
         await this.readGit(this.home, ['worktree', 'add', '--quiet', '--detach', '--no-checkout', tree, sha], signal);
         await this.readGit(tree, ['sparse-checkout', 'set', '--no-cone', '/.baton/'], signal);
         await this.readGit(tree, ['read-tree', '-m', '-u', sha], signal);
@@ -165,8 +165,8 @@ export class LegTrees {
     });
   }
 
-  private async removeTree(tree: string): Promise<void> {
-    const signal = AbortSignal.timeout(30_000);
+  private async removeTree(tree: string, signal = AbortSignal.timeout(30_000)): Promise<void> {
+    signal.throwIfAborted();
     await rm(`${tree}.ready`, { force: true });
     if (await exists(tree)) {
       // Unseal before Git removes the worktree; the walk never follows cache links.

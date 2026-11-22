@@ -24,10 +24,10 @@ import { checkRaise, dispositionOf, errorClassOf, SEVERITIES, type ConditionDecl
 import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal, batonUnreachable } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
-import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
+import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, legNeeds, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
 import { LegTrees } from './leg-trees';
 import { LEG_TREES } from './leg-scripts';
-import { cleanNodeEnv, PREPARE_TIMEOUT_MS, PreparationError } from './preparation';
+import { cleanNodeEnv, hardStopPreparation, PREPARE_TIMEOUT_MS, PreparationError } from './preparation';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
 import { MIN_SECRET_BYTES, createLegMasker, failureDetail, maskLegOutput, namesASecret, secretValues } from './mask';
@@ -1312,7 +1312,10 @@ export class Runner {
   async hardStop(): Promise<void> {
     this.killInflight();
     const live = this.liveSlots();
-    await Promise.all((live.length ? live : [this.solo]).map((x) => this.stopSlotSession(x, 'hard-stop')));
+    const slots = new Set([...live, this.solo, ...(this.offlineSlot ? [this.offlineSlot] : [])]);
+    await Promise.all([...slots].flatMap((x) => [this.stopSlotSession(x, 'hard-stop'),
+      ...(x.preparing ? [hardStopPreparation(x.preparing)] : []),
+    ]));
   }
 
   /** B-109: the immediate stop — a safe point, not an abandonment. The leg in flight is
@@ -2117,13 +2120,13 @@ export class Runner {
     let prepared: Awaited<ReturnType<LegTrees['prepare']>> | undefined;
     const preparation = this.cur.preparing = new AbortController();
     const timer = setTimeout(() => preparation.abort('prepare-timeout'), this.o.prepareTimeoutMs ?? PREPARE_TIMEOUT_MS);
-    const settlePreparation = async (e: unknown): Promise<ClaimOutcome> => {
+    const settlePreparation = async (e: unknown, station = claim.station, next = claim.legs?.[0]): Promise<ClaimOutcome> => {
       if (this.claimLost() || this.stopped) return { ticket, end_reason: 'released:lease-lost', reached: null, handoff: null };
       const reason = this.pendingAbort?.reason;
       const end_reason = reason ?? `released:cannot-finish:${e instanceof PreparationError ? e.kind : 'transient'}`;
       const detail = failureDetail(msg(e), secretValues(process.env, this.o.maskEnv ?? []));
       this.log(`baton: ${ticket}'s preparation stopped (${detail ?? 'no detail'})`);
-      return await this.finish(claimId, { end_reason, reached: claim.station, detail, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+      return await this.finish(claimId, { end_reason, reached: station, detail, ...(next ? { next } : {}) }, null);
     };
     let signedControl: Record<string, string> = {};
     // B-134: the parked report, its overflow count and the audit window belong to one claim
@@ -2171,42 +2174,42 @@ export class Runner {
       // course no owner signed does not run.
       const courseSha = typeof signedControl.course === 'string' && signedControl.course !== '' ? signedControl.course : claim.snapshot_sha as string;
       const courseId = this.claimCourse(claim);
-      if (this.o.legTrees) prepared = await this.o.legTrees.prepare(this.o.repository, courseSha, courseId, preparation.signal);
+      // Older courses still ship stubs that extract their overrides into scratch. Keep their
+      // existing loader until they opt into leg trees; never open the verified import roots.
+      if (this.o.legTrees && legNeeds(this.o.home, courseSha, courseId).includes(LEG_TREES)) {
+        prepared = await this.o.legTrees.prepare(this.o.repository, courseSha, courseId, preparation.signal);
+      }
       preparation.signal.throwIfAborted();
       course = loadCourse(this.o.home, courseSha, courseId, prepared);
       // B-228: the legs start from the snapshot's code — the home fast-forwarded to it when it
       // can be; otherwise it runs as it stands, and the log says why. A reattached leg's tree is
       // its running session's, and a claim in a clone of its own is put there below (B-188).
+      const branch = typeof claim.default_branch === 'string' && claim.default_branch !== '' ? claim.default_branch : null;
       if (!reattached && this.checkout === this.o.home) {
         let stays: string | null;
         try {
-          stays = advanceHome(this.o.home, claim.snapshot_sha, typeof claim.default_branch === 'string' && claim.default_branch !== '' ? claim.default_branch : null);
+          stays = await advanceHome(this.o.home, claim.snapshot_sha, branch, preparation.signal);
         } catch (e) {
+          preparation.signal.throwIfAborted();
           stays = `the fast-forward failed (${msg(e)})`;
         }
         if (stays) this.log(`baton: the home stays at its own commit for ${ticket}, not the snapshot ${String(claim.snapshot_sha).slice(0, 10)}: ${stays}`);
       }
+      if (!reattached && this.checkout !== this.o.home) {
+        // R-BTN-72: parallel claims work in separate clones, under the same preparation fence.
+        await prepareClone(this.o.home, this.checkout, String(claim.snapshot_sha), branch, preparation.signal);
+        if (this.verbose) this.log(`baton: ${ticket} works in its own clone ${this.checkout} (R-BTN-72)`);
+      }
+      preparation.signal.throwIfAborted();
     } catch (e) {
+      if (course) dropCourse(course.scratch);
       await prepared?.release().catch((err) => this.log(`baton: leg tree cleanup failed (${msg(err)})`));
-      if (this.o.legTrees || preparation.signal.aborted) return await settlePreparation(e);
+      if (course || this.o.legTrees || preparation.signal.aborted) return await settlePreparation(e);
       this.log(`baton: the claim's course would not load (${msg(e)})`);
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     } finally {
       clearTimeout(timer);
       this.cur.preparing = null;
-    }
-    // R-BTN-72 (B-188): a claim beside others works in a clone of its own — its own git dir, put
-    // at the snapshot — so concurrent legs never write one tree, and its audit reads its own refs.
-    if (!reattached && this.checkout !== this.o.home) {
-      try {
-        await prepareClone(this.o.home, this.checkout, String(claim.snapshot_sha), typeof claim.default_branch === 'string' && claim.default_branch !== '' ? claim.default_branch : null);
-      } catch (e) {
-        this.log(`baton: ${ticket}'s checkout ${this.checkout} could not be prepared (${msg(e)})`);
-        dropCourse(course.scratch);
-        await prepared?.release().catch((err) => this.log(`baton: leg tree cleanup failed (${msg(err)})`));
-        return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
-      }
-      if (this.verbose) this.log(`baton: ${ticket} works in its own clone ${this.checkout} (R-BTN-72)`);
     }
     const scratch = claimScratch();
     // B-183 (§4.5, R-BTN-5/R-BTN-34): re-verify the ticket by its version before any leg runs.
@@ -2342,9 +2345,10 @@ export class Runner {
               return await this.finish(claimId, { end_reason: 'released:off-branch', reached: at, next: legName, detail: String(claim.snapshot_sha) }, null);
             }
             prepared = await this.o.legTrees.prepare(this.o.repository, signedControl.course ?? claim.snapshot_sha, course.course, checking.signal);
+            checking.signal.throwIfAborted();
             Object.assign(course, prepared);
           } catch (e) {
-            return await settlePreparation(e);
+            return await settlePreparation(e, at, legName);
           } finally {
             clearTimeout(bound);
             this.cur.preparing = null;

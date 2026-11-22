@@ -1386,6 +1386,12 @@ export async function run(ctx) {
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
   // As with the instructions below: only an empty listing means there is no override.
   if (gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', readSha, '--', rel]).trim() === '') return standard(ctx);
+  if (ctx.snapshot.tree) {
+    if (readSha !== (ctx.signed_control?.course || sha)) throw new Error(rel + ' needs a separate verified override tree');
+    const mod = await import(new URL(${JSON.stringify(`./${leg}${OVERRIDE_SUFFIX}`)}, import.meta.url).href);
+    if (typeof mod.run !== 'function') throw new Error(rel + ' exports no run(ctx, standard)');
+    return await mod.run(ctx, standard);
+  }
   const dir = mkdtempSync(join(tmpdir(), 'baton-override-'));
   try {
     const file = join(dir, ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)});
@@ -1703,6 +1709,12 @@ export async function run(ctx) {
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
   if (gitRun(['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() === '') return standard(ctx);
+  if (ctx.snapshot.tree) {
+    if (sha !== (ctx.signed_control?.course || sha)) throw new Error(rel + ' needs a separate verified override tree');
+    const mod = await import(new URL(${JSON.stringify(`./${leg}${OVERRIDE_SUFFIX}`)}, import.meta.url).href);
+    if (typeof mod.run !== 'function') throw new Error(rel + ' exports no run(ctx, standard)');
+    return await mod.run(ctx, standard);
+  }
   const dir = mkdtempSync(join(tmpdir(), 'baton-override-'));
   try {
     const file = join(dir, ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)});

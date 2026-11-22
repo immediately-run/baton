@@ -459,7 +459,9 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // R-BTN-107 (B-184): the executor the host chose, loaded before any claim — a pinned bundle
   // whose digest does not match, or a source not built, refuses to start.
   const executor = await loadExecutor(a.executor, { log: say, wrapper: LEG_WRAPPER, node: process.execPath });
-  const legTrees = new LegTrees(home, executor, LEG_WRAPPER);
+  // The executor v1 interface does not promise a shared filesystem or a cache export.
+  // Only builtin is known to expose these verified host paths to its sessions.
+  const legTrees = executor.source === 'builtin' ? new LegTrees(home, executor, LEG_WRAPPER) : undefined;
   if (a.executor !== 'builtin') say(`baton: executor ${executor.source}${executor.digest ? ` sha256:${executor.digest}` : ''}${executor.provides.length ? `, provides ${executor.provides.join(', ')}` : ''}`);
   runner = new Runner({
     executor, legTrees, prepareTimeoutMs: a.prepareTimeoutMs ?? PREPARE_TIMEOUT_MS,
@@ -490,7 +492,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     ...(a.concurrency !== 1 ? { concurrency: a.concurrency } : {}),
   });
   try {
-    await legTrees.init(AbortSignal.timeout(a.prepareTimeoutMs ?? PREPARE_TIMEOUT_MS));
+    await legTrees?.init(AbortSignal.timeout(a.prepareTimeoutMs ?? PREPARE_TIMEOUT_MS));
     await runner.work();
   } finally {
     process.off('SIGINT', onSignal);

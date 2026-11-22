@@ -133,7 +133,7 @@ export interface ExecutorHost {
  *  ssh-agent: `builtin` binds only cooperating legs (R-BTN-107). `argv[0] === 'node'` runs the
  *  runner's own node. */
 export function builtinExecutor(stopDelay = { term: 10_000, kill: 25_000 }): Executor {
-  const sessions = new Map<string, { brief: Brief; running: Set<Running> }>();
+  const sessions = new Map<string, { brief: Brief; running: Set<Running>; stopping?: boolean }>();
   return {
     api: EXECUTOR_API,
     source: 'builtin',
@@ -145,7 +145,7 @@ export function builtinExecutor(stopDelay = { term: 10_000, kill: 25_000 }): Exe
     },
     exec(h, argv, o) {
       const s = sessions.get(h.session_id);
-      if (!s) throw new Error(`no session ${h.session_id}`);
+      if (!s || s.stopping) throw new Error(`no active session ${h.session_id}`);
       const [cmd, ...args] = argv;
       const child = spawn(cmd === 'node' ? process.execPath : cmd, args, {
         cwd: o.cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'],
@@ -209,7 +209,8 @@ export function builtinExecutor(stopDelay = { term: 10_000, kill: 25_000 }): Exe
     async stop(h, reason) {
       const s = sessions.get(h.session_id);
       if (!s) return;
-      sessions.delete(h.session_id);
+      // Keep the session reachable during the interrupt ladder so hard-stop can escalate it.
+      s.stopping = true;
       const running = [...s.running];
       if (reason === 'preparation-release') {
         const send = (name: NodeJS.Signals) => { for (const call of s.running) call.signal?.(name); };
@@ -222,6 +223,7 @@ export function builtinExecutor(stopDelay = { term: 10_000, kill: 25_000 }): Exe
         for (const r of running) r.kill();
         await Promise.all(running.map((r) => r.result));
       }
+      sessions.delete(h.session_id);
     },
     async end(h) {
       const s = sessions.get(h.session_id);
