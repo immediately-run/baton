@@ -2,7 +2,6 @@
 // event feed `GET /v1/sync/events`, the foreign-claim report, and which workflows Baton
 // dispatches after a transition (§10.3). The mirror workflow itself lives in docs.
 import { BatonError } from './http';
-import { readCapped } from './auth';
 import { TICKET_ID } from './validate';
 import { logEvent } from './db';
 import { importLegacyClaim } from './cutover';
@@ -135,36 +134,73 @@ export class Mirror {
 /** §10.3: the workflows Baton dispatches. */
 export type { Workflow };
 
-export const DISPATCH_REASON_MAX = 500;
+const DISPATCH_REASON_MAX = 500;
 const DISPATCH_BODY_MAX = 8 * 1024;
+const DISPATCH_BODY_TIMEOUT_MS = 1000;
+
+export class DispatchRefused extends Error {
+  constructor(readonly status: number, reason: string) {
+    super(reason ? `HTTP ${status}: ${reason}`.slice(0, DISPATCH_REASON_MAX) : `HTTP ${status}`);
+  }
+}
+
+async function readDispatchBody(res: Response): Promise<string> {
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const read = async () => {
+    if (Number(res.headers.get('Content-Length')) > DISPATCH_BODY_MAX) return '';
+    const decoder = new TextDecoder();
+    let size = 0;
+    let body = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return body + decoder.decode();
+      size += value.byteLength;
+      if (size > DISPATCH_BODY_MAX) return '';
+      body += decoder.decode(value, { stream: true });
+    }
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const deadline = new Promise<string>((resolve) => {
+      timer = setTimeout(() => resolve(''), DISPATCH_BODY_TIMEOUT_MS);
+    });
+    return await Promise.race([read(), deadline]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    // The stream's underlying cancellation must not extend the diagnostic deadline.
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
 
 /** R-BTN-94: keep a short, single-line reason, not the forge's payload. */
 async function dispatchRefusal(res: Response, token: string): Promise<string> {
-  const status = `HTTP ${res.status}`;
   try {
-    const body = new TextDecoder().decode(await readCapped(res, DISPATCH_BODY_MAX));
+    const body = await readDispatchBody(res);
     let reason = body;
-    if (res.headers.get('Content-Type')?.includes('json') || /^\s*(?:\{|\[)/.test(body)) {
+    const mediaType = res.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase();
+    if (mediaType?.endsWith('/json') || mediaType?.endsWith('+json') || (!mediaType && /^\s*[\[{]/.test(body))) {
       const data = JSON.parse(body) as { message?: unknown } | null;
       reason = typeof data?.message === 'string' ? data.message : '';
     }
     // Redact before clipping (including a token that would straddle the limit), and after
     // stripping tags in case the original response split the token across markup.
-    reason = reason.replaceAll(token, '[redacted]').replace(/<[^>]*>/g, '').replace(/[<>]/g, '')
+    return reason.replaceAll(token, '[redacted]').replace(/<[^>]*>/g, '').replace(/[<>]/g, '')
       .replaceAll(token, '[redacted]').replace(/[\p{Cc}\p{Cf}\s]+/gu, ' ').trim();
-    return reason ? `${status}: ${reason}`.slice(0, DISPATCH_REASON_MAX) : status;
   } catch {
-    // An oversized, unreadable or malformed body cannot hide the HTTP status.
-    return status;
+    // An unreadable or malformed body cannot hide the HTTP status.
+    return '';
   }
 }
 
 /**
  * Dispatch a repository's workflow on its default branch with the Actions-write token (§10.3).
- * No token means no dispatch; a failed call rejects so the caller can log the discrepancy
- * without failing the request that wanted the dispatch (R-BTN-94).
+ * No token or no HTTP response means no dispatch; an HTTP refusal rejects so the caller can
+ * log the discrepancy without failing the request that wanted the dispatch (R-BTN-94).
  */
 export async function dispatchWorkflow(token: string | undefined, target: DispatchTarget): Promise<boolean> {
+  token = token?.trim();
   if (!token) return false;
   let res: Response;
   try {
@@ -174,9 +210,9 @@ export async function dispatchWorkflow(token: string | undefined, target: Dispat
       body: JSON.stringify(target.inputs ? { ref: target.ref, inputs: target.inputs } : { ref: target.ref }),
     });
   } catch {
-    // Do not surface transport errors that may include request details.
-    throw new Error('Could not reach the forge to dispatch the workflow');
+    // A transport error is not a forge refusal and may include request details.
+    return false;
   }
-  if (!res.ok) throw new Error(await dispatchRefusal(res, token));
+  if (!res.ok) throw new DispatchRefused(res.status, await dispatchRefusal(res, token));
   return true;
 }

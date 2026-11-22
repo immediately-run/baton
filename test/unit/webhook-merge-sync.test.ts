@@ -27,8 +27,8 @@ const stamps = (c: { store: { exec(q: string): { toArray(): unknown[] } } }) =>
 describe('S-BTN-167 a merge dispatches the sync', () => {
   it('logs a forge-refused dispatch without failing the delivery or undoing its stamp (R-BTN-94)', async () => {
     const token = 'test-dispatch-credential';
-    const fetch = vi.fn(async () => Response.json({
-      message: `<b>Invalid ref</b>\n${token} ${'x'.repeat(600)}`,
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => Response.json({
+      message: `<b>Invalid ref</b>\n${new Headers(init.headers).get('Authorization')?.slice('Bearer '.length)} ${'x'.repeat(600)}`,
       documentation_url: 'https://forge.test/dispatch',
     }, { status: 422 }));
     vi.stubGlobal('fetch', fetch);
@@ -38,17 +38,37 @@ describe('S-BTN-167 a merge dispatches the sync', () => {
         c.now = () => now;
         const { ports } = c as unknown as { ports: Pick<Ports, 'dispatch'> };
         const deferred: Promise<unknown>[] = [];
-        ports.dispatch = { send: (target) => dispatchWorkflow(token, target), defer: (work) => { deferred.push(work); } };
+        ports.dispatch = { send: (target) => dispatchWorkflow(`${token} \t`, target), defer: (work) => { deferred.push(work); } };
         const delivery = await c.fetch(header(d({ id: 'refused' })));
         await Promise.all(deferred);
         expect(delivery.status).toBe(204);
         expect(stamps(c)).toEqual([`baton@${c.now()}`]);
         expect(fetch).toHaveBeenCalledOnce();
+        expect(new Headers(fetch.mock.calls[0][1].headers).get('Authorization')).toBe(`Bearer ${token}`);
         const events = c.store.exec<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'discrepancy' AND repository_id = 'baton'`).toArray();
         expect(events).toHaveLength(1);
         const detail = JSON.parse(events[0].detail_json);
         expect(detail).toEqual({ kind: 'dispatch-refused', repository: 'baton', workflow: 'sync', reason: expect.stringMatching(/^HTTP 422: Invalid ref \[redacted\] x+$/) });
         expect(detail.reason).toHaveLength(500);
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not log a transport failure as a forge refusal (R-BTN-94)', async () => {
+    vi.stubGlobal('fetch', async () => { throw new Error('Could not connect'); });
+    try {
+      await withCore(async (c) => {
+        const { ports } = c as unknown as { ports: Pick<Ports, 'dispatch'> };
+        const deferred: Promise<unknown>[] = [];
+        ports.dispatch = {
+          send: (target) => dispatchWorkflow('test-dispatch-credential', target),
+          defer: (work) => { deferred.push(work); },
+        };
+        expect((await c.fetch(header(d({ id: 'transport-failure' })))).status).toBe(204);
+        await Promise.all(deferred);
+        expect(c.store.exec(`SELECT detail_json FROM events WHERE kind = 'discrepancy' AND repository_id = 'baton'`).toArray()).toEqual([]);
       });
     } finally {
       vi.unstubAllGlobals();
