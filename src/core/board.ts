@@ -341,7 +341,11 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
   // type's own validation — and whether Baton applies the fact — is where the type is read
   // (R-BTN-116 reads `std:decision@1`; the other types arrive with B-146 and B-120).
   if (p.attestations !== undefined) {
-    if (!Array.isArray(p.attestations) || p.attestations.length > 100) throw new BatonError('invalid-params', `attestations must be a list of at most 100`);
+    if (!Array.isArray(p.attestations)) throw new BatonError('invalid-params', 'attestations must be a list');
+    // Outside work can report many refs in one observation. Keep the complete window atomic,
+    // bounded by bytes rather than by the old person-answer count.
+    if (new TextEncoder().encode(JSON.stringify(p.attestations)).length > (1 << 20)) throw new BatonError('invalid-params', 'attestations exceed 1 MiB');
+    let other = 0;
     for (const [i, a] of p.attestations.entries()) {
       const at = `attestations[${i}]`;
       if (!isObj(a) || typeof (a as PostedAttestation).type !== 'string' || !/^[a-z][a-z0-9.-]*(:[a-z][a-z0-9.-]*)?@\d+$/.test((a as PostedAttestation).type)) {
@@ -353,6 +357,7 @@ export function checkPayload(body: unknown, repo?: string): BoardPayload {
         throw new BatonError('invalid-params', `${at}.ref must be a short string or null`);
       }
       if (!isObj((a as PostedAttestation).value)) throw new BatonError('invalid-params', `${at}.value must be an object`);
+      if (a.type !== 'std:arrival@1' && a.type !== 'std:evidence@1' && ++other > 100) throw new BatonError('invalid-params', 'at most 100 other attestations are allowed');
     }
   }
   // B-127 (R-BTN-66 as amended): the post's signed-control record. The shape and bounds here;
@@ -997,4 +1002,3 @@ export function resolveParents(
   }
   return { parentOf, invalid };
 }
-

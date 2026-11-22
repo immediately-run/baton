@@ -48,7 +48,7 @@ export interface Ctx {
   random?: Random;
   /** Where each ticket is, and its course's graph (R-BTN-70). */
   stations: Stations;
-  outsideWork?: Pick<OutsideWork, 'displaced' | 'capture' | 'evidence' | 'finish' | 'queue' | 'pending'>;
+  outsideWork?: Pick<OutsideWork, 'displaced' | 'capture' | 'evidence' | 'finish' | 'queue' | 'pending' | 'restore'>;
   /** The owners' bars and settings (R-BTN-66, R-BTN-67). */
   admin: Admin;
   /** §12: ask for the ticket's repository's sync or mirror to be dispatched once this
@@ -1939,7 +1939,7 @@ export class Claims {
     // started, a decision posted while held) logs `blocked`, which wakes no one.
     this.c.blocks?.held(ticketId, false);
     if (status === 'completed') this.confirmByClosure(claimId);
-    else this.applyRetryPolicy(claimId, ticketId, reason);
+    else this.applyRetryPolicy(claimId, ticketId, reason, run?.leg);
     this.c.outsideWork?.pending(undefined, ticketId);
   }
 
@@ -1955,9 +1955,10 @@ export class Claims {
 
   /** The claims of an item whose end was logged after event `since`, newest end first. */
   private endedSince(item: string, since: number) {
-    return this.rows<{ id: number; runner_id: number; end_reason: string; failed_attempt: number }>(
-      `SELECT id, runner_id, end_reason, failed_attempt FROM (
-         SELECT c.id, c.runner_id, c.end_reason, c.failed_attempt,
+    return this.rows<{ id: number; runner_id: number; end_reason: string; failed_attempt: number; course_id: string | null; last_leg: string | null }>(
+      `SELECT id, runner_id, end_reason, failed_attempt, course_id, last_leg FROM (
+         SELECT c.id, c.runner_id, c.end_reason, c.failed_attempt, c.course_id,
+                (SELECT l.leg FROM claim_legs l WHERE l.claim_id = c.id ORDER BY l.seq DESC LIMIT 1) AS last_leg,
                 (SELECT max(e.seq) FROM events e WHERE e.claim_id = c.id AND e.kind IN ('completed', 'released', 'reaped')) AS end_seq
          FROM claims c WHERE c.ticket_id = ? AND c.status != 'active')
        WHERE end_seq > ? ORDER BY end_seq DESC`, item, since);
@@ -1982,14 +1983,22 @@ export class Claims {
   /** §6.10, after a claim ends other than completed: mark the failed attempt, then back off, or
    *  hold — non-retryable at once, attempts-exhausted at the third. (`awaiting-review-capacity`
    *  is retired: a review with no capacity is simply not ready, §6.5.) */
-  private applyRetryPolicy(claimId: number, item: string, reason: string) {
+  private applyRetryPolicy(claimId: number, item: string, reason: string, leg?: string) {
     const ended = this.endedSince(item, this.lastLift(item));
-    const c = this.rows<{ runner_id: number }>('SELECT runner_id FROM claims WHERE id = ?', claimId)[0];
+    const c = this.rows<{ runner_id: number; course_id: string | null }>('SELECT runner_id, course_id FROM claims WHERE id = ?', claimId)[0];
+    const repo = repositoryOf(item);
+    const reconcile = (course: string | null, name: string | null) => {
+      const g = course && name ? this.stations.graph(repo, course) : null;
+      const resolved = g && name ? resolveLeg(g, name) : null;
+      return resolved && g?.legs.get(resolved)?.reconciles ? `${course}:${resolved}` : null;
+    };
+    const retryGroup = reconcile(c.course_id, leg ?? null);
+    const previousFailures = ended.filter((e) => e.failed_attempt === 1 && reconcile(e.course_id, e.last_leg) === retryGroup);
     const leaseLostBefore = reason === 'released:lease-lost' &&
-      ended.some((e) => e.id !== claimId && e.runner_id === c.runner_id && e.failed_attempt === 1 && e.end_reason === 'released:lease-lost');
+      previousFailures.some((e) => e.id !== claimId && e.runner_id === c.runner_id && e.end_reason === 'released:lease-lost');
     if (countsAsFailed(reason, leaseLostBefore)) {
       this.exec('UPDATE claims SET failed_attempt = 1 WHERE id = ?', claimId);
-      const failed = this.failedAttempts(item);
+      const failed = [...previousFailures.map((e) => e.id), claimId].sort((a, b) => a - b);
       const cls = nonRetryableClass(reason);
       if (cls) {
         this.hold(item, `non-retryable:${cls}`, 'baton', { claim_id: claimId, attempts: failed });
@@ -1998,7 +2007,13 @@ export class Claims {
         this.c.blocks?.raise(item, 'baton:retries');
         return;
       }
-      const next = afterFailure(failed.length, this.c.admin.retry(repositoryOf(item)));
+      const next = afterFailure(failed.length, this.c.admin.retry(repo));
+      if (leg && this.c.outsideWork?.restore(item, leg, !!next && 'hold' in next)) {
+        if (next && 'hold' in next) this.event('attempts-exhausted', 'baton', { claim_id: claimId, attempts: failed, reconcile: leg, course: c.course_id }, item, claimId);
+        // The next claim is for the displaced leg, not another retry of reconciliation.
+        this.exec('UPDATE ticket_overrides SET retry_after = NULL WHERE ticket_id = ?', item);
+        return;
+      }
       if (next && 'hold' in next) {
         this.event('attempts-exhausted', 'baton', { claim_id: claimId, attempts: failed }, item, claimId);
         this.hold(item, next.hold, 'baton', { claim_id: claimId, attempts: failed });
@@ -2640,6 +2655,14 @@ export class Claims {
     if (c.end_reason === 'done') {
       // absent from a snapshot observed after the end
       if (!live) return (c.end_observation ?? 0) < observation;
+      if (g && st && st.observation >= observation && (c.end_observation ?? 0) < observation) {
+        const last = this.rows<{ leg: string; to_station: string | null }>(
+          'SELECT leg, to_station FROM claim_legs WHERE claim_id = ? AND finished_at IS NOT NULL ORDER BY seq DESC LIMIT 1', c.id)[0];
+        if (last && g.legs.get(resolveLeg(g, last.leg) ?? '')?.reconciles) {
+          // A verified reconcile outcome can end the claim without ending the ticket.
+          return extendsPath(g, [...JSON.parse(c.start_path) as Step[], { leg: last.leg, reached: last.to_station! }], JSON.parse(st.path) as Step[], g.start);
+        }
+      }
       return !!st && st.observation >= observation && !!g && g.ends.has(st.station);
     }
     if (!c.end_reason.startsWith('suspended:') || (c.end_observation ?? 0) >= observation || !st || st.observation < observation || !g) return false;

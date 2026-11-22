@@ -117,9 +117,21 @@ export class Stations {
       let st = given;
       if (g && modelsOutsideWork(g)) {
         const station = prevRow?.station ?? g.start;
-        const next_leg = prevRow ? prevRow.next_leg : g.startLeg;
+        const queued = prevRow ? prevRow.next_leg : g.startLeg;
+        const waiting = queued == null ? undefined : g.legs.get(queued);
+        const replacement = given.next_leg == null ? undefined : g.legs.get(given.next_leg);
+        // A station function can retire a queued runner leg and offer an alternative at
+        // the same station. It still cannot supply a new station or amend Baton's path.
+        const switchExhausted = waiting && !waiting.arrives && !waiting.reconciles && !waiting.person
+          && replacement?.from.includes(station)
+          && !replacement.arrives && !replacement.reconciles && !replacement.person && !prevRow?.handoff_url
+          && !t.next.some((n) => n.leg === queued && ['routed', 'expired'].includes(n.waiting_on ?? ''))
+          && given.next.some((n) => n.leg === queued && n.state === 'waiting' && n.waiting_on === 'exhausted')
+          && given.next.some((n) => n.leg === given.next_leg && n.state === 'ready')
+          && !this.rows("SELECT 1 FROM claims WHERE ticket_id = ? AND status = 'active'", id).length;
+        const next_leg = switchExhausted ? given.next_leg : queued;
         const old = t.next.find((n) => n.leg === next_leg);
-        const posted = given.station === station ? given.next.find((n) => n.leg === next_leg) : undefined;
+        const posted = switchExhausted || given.station === station ? given.next.find((n) => n.leg === next_leg) : undefined;
         st = { ...given, station, next_leg, path: prev ?? [], next_source: (prevRow?.next_source ?? 'course') as PostedStation['next_source'],
           handoff_url: prevRow?.handoff_url ?? null, next: next_leg == null ? [] : [posted ?? {
             leg: next_leg, state: old?.state === 'waiting' ? 'waiting' : 'ready', waiting_on: old?.waiting_on ?? null,

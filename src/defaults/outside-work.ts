@@ -2,7 +2,7 @@
 import type { PostedAttestation } from '../core/board';
 import type { Graph } from '../core/graph';
 import { LOCAL_ID } from '../core/validate';
-import { ticketOwns, verdictOf, type PrFact } from './course-pr';
+import { latestHeadVerdict, ticketOwns, verdictOf, type PrFact } from './course-pr';
 import type { SourceTicket } from './tickets-markdown';
 
 export interface OutsideRecord {
@@ -26,6 +26,15 @@ export interface MentionCommit {
 const named = (text: string) => new Set((text.match(/[\w-]+/g) ?? []).filter((word) => LOCAL_ID.test(word) && /-[0-9]+[a-z0-9]*$/i.test(word)));
 const lower = (login: string | undefined) => login?.toLowerCase();
 const repoName = (name: string) => name.toLowerCase().replace(/\.git$/, '');
+
+/** The shared completion test, after mapping PRs to the ticket. A closed unmerged PR
+ * does not add a repository requirement on its own. */
+export function mappedMerges<T extends Pick<PrFact, 'state' | 'repository' | 'base' | 'defaultBranch' | 'mergeSha'>>(facts: T[], repos: string[], home: string | null) {
+  const merged = facts.filter((f) => f.state === 'merged' && f.mergeSha && (f.defaultBranch == null || f.base === f.defaultBranch));
+  const mergedRepos = new Set(merged.map((f) => repoName(f.repository ?? home ?? '')));
+  const expected = new Set([...facts.filter((f) => f.state !== 'closed').map((f) => f.repository ?? home ?? ''), ...repos].map(repoName));
+  return { merged, complete: merged.length > 0 && !facts.some((f) => f.state === 'open') && [...expected].every((r) => mergedRepos.has(r)) };
+}
 
 export function outsideAttestations(input: {
   tickets: SourceTicket[];
@@ -69,32 +78,31 @@ export function outsideAttestations(input: {
       }
       return found;
     };
-    const merged = mine.filter((f) => f.state === 'merged' && f.mergeSha && (f.defaultBranch == null || f.base === f.defaultBranch));
+    const { merged, complete } = mappedMerges(mine, ticket.repos ?? [], repository);
     const last = [...merged].sort((a, b) => (b.mergedAt ?? 0) - (a.mergedAt ?? 0)).find((f) => f.mergeSha && !mergeRefs.has(f.mergeSha) && !mergeRefs.has(f.url ?? ''));
+    let mergeArrived = false;
     if (last?.mergeSha) {
-      const mergedRepos = new Set(merged.map((f) => repoName(f.repository ?? repository ?? '')));
-      const expected = new Set([...mine.map((f) => f.repository ?? repository ?? ''), ...(ticket.repos ?? [])].map(repoName));
-      const complete = [...expected].every((r) => mergedRepos.has(r)) && mine.every((f) => f.state !== 'open');
       const allHand = merged.every((f) => !mergeRefs.has(f.mergeSha ?? '') && !mergeRefs.has(f.url ?? ''));
-      if (!complete || !allHand || !arrive({ fact: 'pr-merged' }, last.mergeSha)) postEvidence(last.mergeSha, 'merged-early');
+      mergeArrived = complete && allHand && arrive({ fact: 'pr-merged' }, last.mergeSha);
+      if (!mergeArrived) postEvidence(last.mergeSha, 'merged-early');
     }
-    if (runners.size && !last) {
+    if (runners.size && !mergeArrived) {
       const heads = new Set<string>();
       for (const f of mine) {
         if (f.state !== 'open' || f.pusher !== true) continue;
         if (f.url && f.author && !runners.has(lower(f.author)) && !claimPrs.has(f.url)) arrive({ fact: 'pr-opened' }, f.url);
-        const head = f.commits?.find((c) => c.sha === f.headSha);
-        const onHead = f.reviews.filter((v) => verdictOf(v) && (v.headSha == null || v.headSha === f.headSha)).sort((a, b) => b.submittedAt - a.submittedAt);
-        const latest = onHead[0];
-        if (latest?.url && head?.pusher && latest.submittedAt > (position?.changed_at ?? 0)
-          && latest.submittedAt >= f.pushedAt && !heads.has(head.sha) && !verdictRefs.has(latest.url)
-          && !runners.has(lower(latest.author)) && lower(latest.author) !== lower(f.author) && lower(latest.author) !== lower(head.pusher)) {
-          heads.add(head.sha);
+        const push = f.headPush;
+        const latest = latestHeadVerdict(f, push?.at ?? f.pushedAt);
+        if (latest?.url && push && latest.submittedAt > (position?.changed_at ?? 0)
+          && latest.submittedAt >= push.at && f.headSha && !heads.has(f.headSha) && !verdictRefs.has(latest.url)
+          && !runners.has(lower(latest.author)) && lower(latest.author) !== lower(f.author) && lower(latest.author) !== lower(push.actor)) {
+          heads.add(f.headSha);
           arrive({ fact: 'pr-verdict' }, latest.url, verdictOf(latest)!);
         }
         const changes = f.reviews.filter((v) => verdictOf(v) === 'changes').sort((a, b) => b.submittedAt - a.submittedAt)[0];
-        if (changes && head?.pusher && head.at > changes.submittedAt && !runners.has(lower(head.pusher)) && !claimShas.has(head.sha) && !head.empty && head.baseOnly === false) {
-          arrive({ fact: 'pr-pushed' }, head.sha);
+        if (changes && push && f.headSha && push.at > changes.submittedAt && (!latest || latest.submittedAt < push.at)
+          && !runners.has(lower(push.actor)) && !claimShas.has(f.headSha) && push.changesWork) {
+          arrive({ fact: 'pr-pushed' }, f.headSha);
         }
       }
     }

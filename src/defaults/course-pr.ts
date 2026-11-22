@@ -31,6 +31,8 @@ export interface PrFact {
   author?: string;
   pusher?: boolean;
   headSha?: string;
+  /** Actual ref update from the forge, not a date or author on the commit object. */
+  headPush?: { actor: string; at: number; changesWork: boolean };
   base?: string;
   defaultBranch?: string;
   mergeSha?: string;
@@ -193,6 +195,11 @@ export function verdictOf(r: PrFact['reviews'][number]): 'approve' | 'changes' |
     if (m) return m[1] === 'approve' ? 'approve' : 'changes';
   }
   return null;
+}
+
+export function latestHeadVerdict(f: Pick<PrFact, 'reviews' | 'headSha'>, pushedAt: number) {
+  return f.reviews.filter((v) => verdictOf(v) && (v.headSha != null ? v.headSha === f.headSha : v.submittedAt > pushedAt))
+    .sort((a, b) => b.submittedAt - a.submittedAt || Number(verdictOf(b) === 'changes') - Number(verdictOf(a) === 'changes'))[0];
 }
 
 /** Whether the head's checks have finished: every conclusion non-null. No checks counts as
@@ -888,7 +895,8 @@ export function stationsReviewPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]
       continue;
     }
     if (fact.state !== 'open' || path.length >= rounds) {
-      stations[t.id] = at(station, path, [{ leg: 'conclude', state: 'ready', waiting_on: null }]);
+      stations[t.id] = at(station, path, [{ leg: 'conclude', state: 'ready', waiting_on: null },
+        ...(ctx.graph?.legs?.reconcile ? [{ leg: 'review', state: 'waiting' as const, waiting_on: 'exhausted' }] : [])]);
       continue;
     }
     const pushes = fact.pushes?.length ? fact.pushes : [fact.pushedAt];

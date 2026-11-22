@@ -17,6 +17,7 @@ import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { githubFake } from '../githubFake';
+import { changedBeyondBase } from '../../src/defaults/push-work';
 import { graphOf } from '../../src/core/graph';
 import { decide } from '../../src/runner/protocol';
 import { CREATE_PR_COURSE, stationsPr, stationsReviewPr, type PrFact } from '../../src/defaults/course-pr';
@@ -1900,6 +1901,27 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
   /** R-BTN-139: what the forge says `login` may do in `repo` — the read that decides a verdict's author. */
   const may = (repo: string, login: string, permission: string) => ({ [`/repos/${repo}/collaborators/${login}/permission`]: { permission } });
 
+  it('uses GitHub ref activity, not the committer, to identify a current-head push (S-BTN-309)', async () => {
+    const at = '2026-10-04T00:00:00Z';
+    const ref = 'refs/heads/work/A-1';
+    const pull = { ...pr(1, 'work/A-1', 'open'), user: { login: 'author' },
+      head: { ref: 'work/A-1', sha: 's1', repo: { id: 1 } }, base: { ref: 'main', repo: { id: 1 } } };
+    serve({
+      '/repos/o/r': { default_branch: 'main' },
+      '/repos/o/r/pulls?state=all': [pull],
+      '/repos/o/r/commits/s1/check-runs': { check_runs: [] },
+      '/repos/o/r/pulls/1/commits': [{ sha: 's1', committer: { login: 'not-the-pusher' }, commit: { committer: { date: '2026-10-01T00:00:00Z' } } }],
+      '/repos/o/r/pulls/1/reviews': [],
+      '/repos/o/r/issues/1/comments': [who('MEMBER', '<!-- baton:verdict approve -->', '2026-10-05T00:00:00Z')],
+      [`/repos/o/r/activity?ref=${encodeURIComponent(ref)}&direction=desc`]: [{ ref, after: 's1', actor: { login: 'pushed-branch' }, timestamp: at, activity_type: 'push' }],
+      ...may('o/r', 'x', 'write'), ...may('o/r', 'author', 'write'),
+    });
+    const [fact] = await githubFacts(dir, () => {}, () => true, [], { outside: { sha: null, observed_at: Date.parse('2026-10-06T00:00:00Z'),
+      head_accepted_at: null, runner_pushers: ['runner'], positions: {}, verdict_refs: {}, claim_prs: {}, claim_shas: {}, merge_refs: {} } });
+    expect(fact.headPush).toEqual({ actor: 'pushed-branch', at: Date.parse(at), changesWork: false });
+    expect(fact.pushedAt).toBe(Date.parse('2026-10-01T00:00:00Z'));
+  });
+
   it('pages the PR list, reads detail only for PRs a live ticket owns — closed unmerged ones too — and keeps verdicts from people with a say', async () => {
     serve({
       '/repos/o/r/pulls?state=all': [[pr(1, 'claude/A-1-x', 'open'), pr(2, 'claude/Z-9-old', 'closed', true)], '/repos/o/r/pulls?state=all&page=2'],
@@ -2803,4 +2825,38 @@ describe('readBoard resolves qualified dependencies against their boards (B-113)
     expect(done.asked).toEqual([]);
     expect(done.stations()['T-1'].next).toEqual([{ leg: 'implement', state: 'ready', waiting_on: null }]);
   }, 30_000);
+});
+
+// S-BTN-309: an ordinary base merge is not implementation work; an edited merge can be.
+it('compares the full push to the tree from just merging the base', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'baton-push-test-'));
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', ...args],
+    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const write = (file: string, content: string) => { writeFileSync(join(cwd, file), content); git('add', file); };
+  try {
+    git('init', '-b', 'main');
+    git('commit', '--allow-empty', '-m', 'initial');
+    git('branch', 'work');
+    write('base', 'new base content');
+    git('commit', '-m', 'base change');
+    git('switch', 'work');
+    write('implementation', 'first draft');
+    git('commit', '-m', 'implementation');
+    const before = git('rev-parse', 'HEAD');
+    git('merge', '--no-ff', 'main', '-m', 'base only');
+    expect(changedBeyondBase(git, before, 'HEAD', 'main')).toBe(false);
+    const merged = git('rev-parse', 'HEAD');
+    git('commit', '--allow-empty', '-m', 'no tree change');
+    expect(changedBeyondBase(git, merged, 'HEAD', 'main')).toBe(false);
+    write('implementation', 'fix after the merge, in the same push');
+    git('commit', '-m', 'fix');
+    expect(changedBeyondBase(git, before, 'HEAD', 'main')).toBe(true);
+    git('switch', '-c', 'edited-merge', before);
+    git('merge', '--no-ff', '--no-commit', 'main');
+    write('implementation', 'fix in the merge itself');
+    git('commit', '-m', 'base plus fix');
+    expect(changedBeyondBase(git, before, 'HEAD', 'main')).toBe(true);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

@@ -22,7 +22,8 @@ import { validateCourse } from '../core/course';
 import { outsideAttestations, type MentionCommit, type OutsideRecord } from './outside-work';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
-import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
+import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, verdictOf, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
+import { pushChangesWork } from './push-work';
 import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
@@ -508,7 +509,6 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     }
     if (found) controlField = { control: { keys: signingKeys.map((k) => k.fingerprint), groups: found.groups, unsigned: clampUnsignedList(found.unsigned) } };
   }
-  if (attestations.length > 100) throw new Error(`outside work found ${attestations.length} attestations, over the board limit of 100; refusing to advance the observation window with a partial reading`);
   return {
     // B-183 (§4.4): the source's declaration — `kind`, how it reads (`versions`) and the CLI
     // that posts — beside its tickets, each stamped with its `version` and `key` above.
@@ -905,7 +905,7 @@ const GRAPHQL_BATCH = 25;
  * covered the REST read. */
 const PR_DETAIL = `fragment D on PullRequest {
   head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
-  commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message committer { user { login } } tree { oid } parents(first: 2) { nodes { oid tree { oid } } } } } }
+  commits(first: 100) { pageInfo { hasNextPage } nodes { commit { oid committedDate message tree { oid } parents(first: 1) { nodes { oid tree { oid } } } } } }
   reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body url commit { oid } } }
   comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation createdAt body url } }
 }`;
@@ -1170,6 +1170,20 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
           && (await trustedOnly(conn, repo, [{ login: pr.user?.login, userId: pr.user?.id, association: pr.author_association }])).length > 0;
         Object.assign(fact, { pusher: trusted, author: pr.user?.login, headSha: pr.head.sha, base: pr.base?.ref, defaultBranch, mergeSha: trusted ? pr.merge_commit_sha : undefined,
           mergedAt, title: pr.title, body: pr.body });
+        if (state === 'open' && trusted && obs.outside.runner_pushers?.length && fact.reviews.some((v) => verdictOf(v))) {
+          const ref = `refs/heads/${pr.head.ref}`;
+          const res = await get(conn, `${conn.rest}/repos/${repo}/activity?ref=${encodeURIComponent(ref)}&direction=desc&per_page=1`);
+          const event = (await res.json() as any[])[0];
+          const at = Date.parse(event?.timestamp);
+          if (event?.ref === ref && event.after === fact.headSha && ['push', 'force_push', 'branch_creation', 'pr_merge', 'merge_queue_merge'].includes(event.activity_type)
+            && /^[\w-]+(?:\[bot\])?$/.test(event.actor?.login ?? '') && at <= obs.outside.observed_at) {
+            const changes = fact.reviews.some((v) => verdictOf(v) === 'changes' && v.submittedAt < at);
+            const latest = fact.reviews.some((v) => verdictOf(v) && v.submittedAt >= at && (!v.headSha || v.headSha === fact.headSha));
+            const hand = !obs.outside.runner_pushers.some((r) => r.toLowerCase() === event.actor.login.toLowerCase());
+            fact.headPush = { actor: event.actor.login, at, changesWork: changes && !latest && hand
+              && pushChangesWork(conn, repo, defaultBranch!, event.before, event.after) };
+          }
+        }
       }
       return fact;
     }));
@@ -1192,21 +1206,19 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     // B-110: the commits themselves too — sha, first parent, whether the tree changed, message —
     // for the run-tests gate's markers, which the station function counts only as the evidence
     // Baton recorded (a counted marker is no push; anything else is, whatever its message).
-    type CommitNode = { oid: string; at: string; message: string; tree: string | null; parent: string | null; parentTree: string | null; parents: number; secondTree?: string; pusher?: string };
+    type CommitNode = { oid: string; at: string; message: string; tree: string | null; parent: string | null; parentTree: string | null };
     const commitNodes: CommitNode[] = node.commits.pageInfo.hasNextPage
       ? (await all<any>(conn, `/repos/${repo}/pulls/${pr.number}/commits`)).map((c: any) => ({
-        oid: c.sha, at: c.commit.committer.date, message: c.commit.message, tree: c.commit.tree?.sha ?? null, parent: c.parents?.[0]?.sha ?? null, parentTree: null, parents: c.parents?.length ?? 0, pusher: c.committer?.login,
+        oid: c.sha, at: c.commit.committer.date, message: c.commit.message, tree: c.commit.tree?.sha ?? null, parent: c.parents?.[0]?.sha ?? null, parentTree: null,
       }))
       : node.commits.nodes.map((c: any) => ({
         oid: c.commit.oid, at: c.commit.committedDate, message: c.commit.message, tree: c.commit.tree?.oid ?? null,
         parent: c.commit.parents?.nodes?.[0]?.oid ?? null, parentTree: c.commit.parents?.nodes?.[0]?.tree?.oid ?? null,
-        parents: c.commit.parents?.nodes?.length ?? 0, secondTree: c.commit.parents?.nodes?.[1]?.tree?.oid, pusher: c.commit.committer?.user?.login,
       }));
     const treeOf = new Map(commitNodes.map((c) => [c.oid, c.tree]));
     const commits: BranchCommit[] = commitNodes.map((c) => {
       const parentTree = c.parentTree ?? (c.parent ? treeOf.get(c.parent) ?? null : null);
-      return { sha: c.oid, at: Date.parse(c.at), parent: c.parent, empty: c.tree != null && parentTree != null && c.tree === parentTree, message: c.message ?? '',
-        ...(obs.outside ? { pusher: c.pusher, baseOnly: c.parents > 1 ? true : false } : {}) };
+      return { sha: c.oid, at: Date.parse(c.at), parent: c.parent, empty: c.tree != null && parentTree != null && c.tree === parentTree, message: c.message ?? '' };
     });
     const pushes = commits.map((c) => c.at);
     // A verdict counts only from someone who can push to the repository (R-BTN-139) — never a

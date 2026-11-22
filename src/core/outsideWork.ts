@@ -137,7 +137,7 @@ export class OutsideWork {
 
   queue(id: string) {
     const pos = this.position(id);
-    if (!pos || this.c.held(id)) return;
+    if (!pos) return;
     const g = this.c.graph(pos.repository_id, pos.course_id);
     if (!g) return;
     const sql = this.c.store;
@@ -148,14 +148,11 @@ export class OutsideWork {
     const alreadyQueued = leg != null && pos.next_leg === leg && displaced?.station === pos.station;
     if (displaced && !alreadyQueued) sql.exec('DELETE FROM reconcile_displaced WHERE ticket_id = ?', id);
     if (!leg) return;
-    const ran = this.rows<{ leg: string }>(`SELECT leg FROM ticket_history WHERE ticket_id = ? AND kind = 'leg-started' AND leg = ?`, id, leg).length;
-    if (alreadyQueued && ran >= max) {
-      sql.exec('DELETE FROM reconcile_displaced WHERE ticket_id = ?', id);
-      sql.exec("UPDATE ticket_stations SET next_leg = ?, next_source = 'baton' WHERE ticket_id = ?", displaced.leg, id);
-      this.setNext(id, displaced.leg);
-    }
+    const exhausted = this.runCapReached(id, leg, max) || this.rows(`SELECT 1 FROM events WHERE ticket_id = ? AND kind = 'attempts-exhausted'
+      AND json_extract(detail_json, '$.reconcile') = ? AND json_extract(detail_json, '$.course') = ? LIMIT 1`, id, leg, pos.course_id).length > 0;
+    if (alreadyQueued && exhausted && !this.c.held(id)) this.restore(id, leg, true);
     const displacedDef = pos.next_leg == null ? undefined : g.legs.get(pos.next_leg);
-    if (alreadyQueued || ran >= max || !pos.next_leg || !displacedDef || this.held(id) || pos.handoff_url
+    if (alreadyQueued || exhausted || !pos.next_leg || !displacedDef || this.held(id) || pos.handoff_url
       || displacedDef.person || displacedDef.arrives || displacedDef.reconciles
       || this.rows("SELECT 1 FROM claims WHERE ticket_id = ? AND status = 'completed' AND end_reason LIKE 'suspended:%' AND ended_at >= (SELECT changed_at FROM ticket_stations WHERE ticket_id = ?)", id, id).length
       || this.rows("SELECT 1 FROM ticket_next_legs WHERE ticket_id = ? AND leg = ? AND waiting_on IN ('course-changed', 'exhausted', 'expired', 'routed')", id, pos.next_leg).length
@@ -164,6 +161,22 @@ export class OutsideWork {
     sql.exec("UPDATE ticket_stations SET next_leg = ?, next_source = 'baton' WHERE ticket_id = ?", leg, id);
     this.setNext(id, leg);
     this.c.record(id, { kind: 'reconcile-queued', leg, next_leg: leg, detail: { displaced: pos.next_leg, station: pos.station } });
+  }
+
+  private runCapReached(id: string, leg: string, max: number) {
+    return (this.rows<{ n: number }>("SELECT count(*) AS n FROM ticket_history WHERE ticket_id = ? AND kind = 'leg-started' AND leg = ?", id, leg)[0]?.n ?? 0) >= max;
+  }
+
+  restore(id: string, leg: string, retriesExhausted: boolean): boolean {
+    const pos = this.position(id);
+    const displaced = this.displaced(id);
+    if (!pos || pos.next_leg !== leg || displaced?.station !== pos.station) return false;
+    const def = this.c.graph(pos.repository_id, pos.course_id)?.legs.get(leg);
+    if (!def?.reconciles || (!retriesExhausted && !this.runCapReached(id, leg, def.maxRuns ?? 0))) return false;
+    this.c.store.exec('DELETE FROM reconcile_displaced WHERE ticket_id = ?', id);
+    this.c.store.exec("UPDATE ticket_stations SET next_leg = ?, next_source = 'baton' WHERE ticket_id = ?", displaced.leg, id);
+    this.setNext(id, displaced.leg);
+    return true;
   }
 
   displaced(id: string) {
