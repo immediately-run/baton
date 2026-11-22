@@ -90,9 +90,9 @@ try {
     if (existsSync(join(repo, '.baton/courses/create-pr'))) fail('the installed init copied a sourced course into the home');
     execFileSync('git', ['-C', repo, 'add', '.baton']);
     execFileSync('git', ['-C', repo, '-c', 'user.name=Package check', '-c', 'user.email=package@example.test', 'commit', '-qm', 'course entry']);
-    const show = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['course', 'show', 'create-pr', 'implement'], { cwd: repo, env, encoding: 'utf8' });
+    const show = spawnSync(join(app, 'node_modules', '.bin', 'baton'), ['course', 'show', 'create-pr'], { cwd: repo, env, encoding: 'utf8' });
     if (show.status !== 0 || !['course.json', 'legs/implement.mjs', 'legs/implement.md'].every((name) => show.stdout.includes(`--- ${name} ---`))) {
-      fail(`the installed CLI did not show the bundled course:\n${show.stdout}${show.stderr}`);
+      fail(`the installed CLI did not show the bundled course: ${show.error ?? show.stderr}\n${show.stdout?.slice(0, 400)}`);
     }
   }
 
