@@ -14,7 +14,9 @@ import { join } from 'node:path';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { BatonApi, envAuth } from './api';
 import { HARNESS_AGENTS, type Harness } from './harness';
-import { holdHome, legNeeds, readHead } from './home';
+import { holdHome, legNeeds, readHead, SAFE_GIT } from './home';
+import { LegTrees } from './leg-trees';
+import { PREPARE_TIMEOUT_MS, requireLegNode } from './preparation';
 import { cliPinLines, cliProfile, readCliPin } from './cliPin';
 import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 import { Runner, stampLine, withTimestamps } from './runner';
@@ -28,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 const LEG_WRAPPER = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 
 export interface RunArgs {
+  prepareTimeoutMs?: number;
   harness: Harness;
   home: string;
   url: string;
@@ -99,6 +102,13 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     else if (a === '--tier') out.tier = value();
     else if (a === '--course') out.course = value();
     else if (a === '--executor') out.executor = value();
+    else if (a === '--prepare-timeout') {
+      const v = value();
+      const duration = /^(\d+)(ms|s|m|h)$/.exec(v);
+      const ms = duration ? Number(duration[1]) * ({ ms: 1, s: 1000, m: 60_000, h: 3_600_000 }[duration[2]] ?? 0) : 0;
+      if (!Number.isSafeInteger(ms) || ms < 1 || ms > 2_147_483_647) throw new Error('--prepare-timeout: a positive duration, e.g. 15m');
+      out.prepareTimeoutMs = ms;
+    }
     else if (a === '--concurrency') {
       const n = Number(value());
       if (!Number.isInteger(n) || n < 1 || n > 32) throw new Error('--concurrency: an integer from 1 to 32 (R-BTN-4)');
@@ -121,6 +131,9 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       out.beatEvery = n;
     } else throw new Error(`${a}: not a flag of baton run`);
   }
+  if (out.capabilities?.some((c) => c.startsWith('runner:')) || Object.keys(out.locks).some((c) => c.startsWith('runner:'))) {
+    throw new Error('runner: capabilities are declared by the runner, not configuration (R-BTN-133)');
+  }
   return out;
 }
 
@@ -140,6 +153,7 @@ export const RUN_USAGE = [
   '~/.config/baton/homes.json, whose checkout it works (B-121).',
   '',
   '  --capabilities a,b  narrows what the grant allows; it never enables what the grant does not.',
+  '  --prepare-timeout  bound on leg-tree preparation (default 15m).',
   '                      Absent, the runner declares what the grant allows — no flag is needed to',
   '                      serve the grant. A machine without a browser narrows, e.g. llm-call,create-pr.',
   '  --course <id>       narrows the courses served to this one, of those the home declares.',
@@ -260,7 +274,7 @@ export const FETCH_TIMEOUT_MS = 20_000;
 
 export function fetchMain(home: string, log: (l: string) => void = () => {}): void {
   try {
-    execFileSync('git', ['-C', home, 'fetch', 'origin', 'main'], {
+    execFileSync('git', ['-C', home, ...SAFE_GIT, 'fetch', 'origin', 'main'], {
       stdio: 'ignore', timeout: FETCH_TIMEOUT_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
     });
   } catch (e) {
@@ -329,6 +343,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     return 0;
   }
   const a = parseRunArgs(argv);
+  requireLegNode();
   // B-121: `--home`/`BATON_HOME` may name a home of ~/.config/baton/homes.json rather than a
   // checkout path — a name resolves to its checkout, refused naming the home when the home has
   // none. A path (a value with `/` or naming an existing directory) keeps R-BTN-131's meaning.
@@ -381,7 +396,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // historical log this week began with no hint of what code produced it. B-103: the courses
   // field names every course the heartbeat declares (`--course` narrowed it, or the home's list).
   try {
-    const head = execFileSync('git', ['-C', home, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+    const head = execFileSync('git', ['-C', home, ...SAFE_GIT, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
     say(`baton: runner starting: home ${home} @ ${head}, capabilities ${declared}, course${courses.length === 1 ? '' : 's'} ${courses.map((c) => `${c.course}@${c.version}`).join(', ')}, host ${a.hostname}, session ${a.session}`);
   } catch { /* a home with no git yet: the rest of the banner still names the run */ }
   // One runner per home checkout: its legs run in the working tree (R-BTN-131). Node's default
@@ -444,9 +459,10 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // R-BTN-107 (B-184): the executor the host chose, loaded before any claim — a pinned bundle
   // whose digest does not match, or a source not built, refuses to start.
   const executor = await loadExecutor(a.executor, { log: say, wrapper: LEG_WRAPPER, node: process.execPath });
+  const legTrees = new LegTrees(home, executor, LEG_WRAPPER);
   if (a.executor !== 'builtin') say(`baton: executor ${executor.source}${executor.digest ? ` sha256:${executor.digest}` : ''}${executor.provides.length ? `, provides ${executor.provides.join(', ')}` : ''}`);
   runner = new Runner({
-    executor,
+    executor, legTrees, prepareTimeoutMs: a.prepareTimeoutMs ?? PREPARE_TIMEOUT_MS,
     api: new BatonApi({ url: a.url, transport, auth }, say),
     // B-229: the earlier sessions' claims are ended through an API of their own runner's.
     apiFor: (secret: string) => { const other = new BatonApi({ url: a.url, transport, auth }, say); other.setSecret(secret); return other; },
@@ -474,6 +490,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     ...(a.concurrency !== 1 ? { concurrency: a.concurrency } : {}),
   });
   try {
+    await legTrees.init(AbortSignal.timeout(a.prepareTimeoutMs ?? PREPARE_TIMEOUT_MS));
     await runner.work();
   } finally {
     process.off('SIGINT', onSignal);

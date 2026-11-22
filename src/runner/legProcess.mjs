@@ -14,8 +14,10 @@
 // reasons — `release` or `regressed`, §6.13's closed set — fired on the AbortSignal `ctx.signal`
 // carries. The outcome is stdout's LAST line: `{"ok": true, "result": …}` or `{"ok": false,
 // "error": …, "aborted": …}`, written synchronously before the process exits.
-import { writeSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { realpathSync, writeSync } from 'node:fs';
+import { registerHooks } from 'node:module';
+import { sep } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const [, , call, script] = process.argv;
 const stop = new AbortController();
@@ -32,7 +34,7 @@ const finish = (out, code) => {
 };
 
 /** The arguments: stdin's first line. Later lines are abort reasons (`run` only). */
-const args = await new Promise((resolveArgs, rejectArgs) => {
+const input = await new Promise((resolveArgs, rejectArgs) => {
   let buffer = '';
   let first = null;
   process.stdin.on('data', (chunk) => {
@@ -68,16 +70,30 @@ const args = await new Promise((resolveArgs, rejectArgs) => {
 }).catch((e) => finish({ ok: false, error: e.message, aborted: null }, 4));
 
 try {
+  const args = Array.isArray(input) ? input : input?.args;
   if (!Array.isArray(args)) throw new Error('legProcess: the arguments are not a JSON array');
+  if (!Array.isArray(input)) {
+    const roots = input.roots.map((dir) => realpathSync(dir));
+    registerHooks({ resolve(specifier, context, next) {
+      const out = next(specifier, context);
+      if (out.url.startsWith('node:')) return out;
+      const file = out.url.startsWith('file:') ? realpathSync(fileURLToPath(out.url)) : null;
+      if (file && roots.some((dir) => file === dir || file.startsWith(dir + sep))) return out;
+      throw new Error(`import ${specifier} resolves outside the verified leg tree and dependency cache (R-BTN-133)`);
+    } });
+  }
   const mod = await import(pathToFileURL(script).href);
   const holder = mod.default != null && typeof mod.default === 'object' ? mod.default : null;
+  const exported = (name) => typeof mod[name] === 'function' ? mod[name]
+    : typeof holder?.[name] === 'function' ? holder[name] : name === 'run' ? mod.default : undefined;
+  if (call === 'exports') finish({ ok: true, result: ['run', 'handoff', 'close'].filter((name) => typeof exported(name) === 'function') }, 0);
   // `describe`: what a ticket source declares (§4.2) — its `versions`, and whether it reads.
   if (call === 'describe') {
     const src = holder ?? mod;
     finish({ ok: true, result: { versions: typeof src.versions === 'string' ? src.versions : null, read: typeof src.read === 'function' } }, 0);
   }
   const owner = typeof mod[call] === 'function' ? mod : holder != null && typeof holder[call] === 'function' ? holder : null;
-  const fn = owner != null ? owner[call] : call === 'run' && typeof mod.default === 'function' ? mod.default : undefined;
+  const fn = exported(call);
   if (typeof fn !== 'function') throw new Error(`the script exports no ${call}()`);
   if (call === 'run') args[0] = { ...args[0], signal: stop.signal };
   const result = await fn.apply(owner, args);

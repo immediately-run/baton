@@ -9,7 +9,6 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { validateCourse } from '../core/course';
 import { graphOf, onGraph, resolvePath, signatureOf, type Graph, type Step } from '../core/graph';
 import { signatureConditions } from '../core/conditionTypes';
@@ -21,6 +20,9 @@ import { courseSchemas } from '../defaults/cli';
 import { parseSource } from '../defaults/course-source';
 import { LocalHost } from './host';
 import { openStore } from './store';
+import { withKitScripts } from './kit-scripts';
+import { LEG_EXTENSION, LEG_TREES, legScripts as scriptEntries } from '../runner/leg-scripts';
+import { checkLegTreeRequirements } from '../runner/leg-tree-requirements';
 
 export type KitRule = 'course' | 'accepted' | 'legs-scripts' | 'min-runner-version' | 'moves-back' | 'generic-run' | 'no-op' | 'instructions'
   | 'schema' | 'entry' | 'spawns';
@@ -59,7 +61,7 @@ export interface KitInput {
   source?: string | null;
   /** The leg scripts in `legs/` — each name without `.mjs`, and which of §6.13's `run`, `handoff`
    *  and `close` it exports — or null when the course has no `legs/`. */
-  legScripts: { name: string; exports: string[]; error?: string }[] | null;
+  legScripts: { name: string; file?: string; exports: string[]; error?: string }[] | null;
   /** The leg instructions in `legs/` — each name without `.md` and its text; an empty list when
    *  the course has none. B-102's rule reads them: the implement and fix instructions carry the
    *  shared-file line, the one place the agents read it. */
@@ -127,7 +129,7 @@ export function staticViolations(k: KitInput): KitViolation[] {
     const scripts = k.legScripts.map((x) => x.name);
     // A person's leg (R-BTN-116) is answered, never run: it needs no script (B-257's `confirm`).
     const runs = legs.filter((x) => asRecord(all[x]).kind !== 'person');
-    for (const l of runs.filter((x) => !scripts.includes(x))) out.push({ rule: 'legs-scripts', message: `leg ${l} has no legs/${l}.mjs` });
+    for (const l of runs.filter((x) => !scripts.includes(x))) out.push({ rule: 'legs-scripts', message: `leg ${l} has no legs/${l}.mjs${k.root ? ' or other supported script' : ''}` });
     for (const s of scripts.filter((x) => !legs.includes(x))) out.push({ rule: 'legs-scripts', message: `legs/${s}.mjs is no leg of the course` });
     // §6.13: "The test kit fails a script without all three" (round 1, 1-A-9).
     for (const x of k.legScripts) {
@@ -416,7 +418,7 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     core.store.transaction(() => core.cutover.cutover('test-course', { repository: REPO, confirm: true }));
     const secret = 'test-course-secret';
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)))].map((b) => b.toString(16).padStart(2, '0')).join('');
-    const hb = await core.runners.heartbeat(CRED, null, { hostname: 'test-course', session_name: 'test-course', harness: 'claude-code', kind: 'vm', capabilities: ['agent-venue'],
+    const hb = await core.runners.heartbeat(CRED, null, { hostname: 'test-course', session_name: 'test-course', harness: 'claude-code', kind: 'vm', capabilities: ['agent-venue', LEG_TREES],
       model_id: 'anthropic/kit',
       tier_ceiling: 'critical', lease_timeout_s: 3600, secret_hash: hash, courses: [{ repository: REPO, course: k.course, version: version.version }] }) as { runner_id: number };
     const tx = <T>(f: () => T) => core.store.transaction(f);
@@ -464,8 +466,8 @@ export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
   }
   if (standard?.reads !== 'prs') return [];
   const startLeg = graphOf(k.proposed).startLeg;
-  const script = join(k.root, '.baton', 'courses', k.course, 'legs', `${startLeg}.mjs`);
-  if (!existsSync(script)) return []; // a missing script is the legs-scripts rule's own failure
+  const script = k.legScripts?.find((s) => s.name === startLeg && !s.error && s.exports.includes('run'))?.file;
+  if (!script) return []; // a missing script is the legs-scripts rule's own failure
   const dir = mkdtempSync(join(tmpdir(), 'baton-kit-noop-'));
   try {
     // The scratch checkout: a no-op agent_command at the snapshot, and an origin no forge
@@ -479,15 +481,12 @@ export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
     git(false, 'add', '-A');
     git(false, 'commit', '-qm', 'kit');
     const sha = git(true, 'rev-parse', 'HEAD').trim();
-    const mod = (await import(`${pathToFileURL(script).href}?t=${Math.random()}`)) as Record<string, unknown>;
-    const run = mod.run ?? (mod.default != null && typeof mod.default === 'object' ? (mod.default as Record<string, unknown>).run : undefined) ?? (typeof mod.default === 'function' ? mod.default : undefined);
-    if (typeof run !== 'function') return []; // a script that exports no run is the legs-scripts rule's
-    try {
-      const result = await (run as (ctx: unknown) => Promise<unknown>)({ ticket: { id: `${REPO}:KIT-1`, home: REPO }, leg: startLeg, checkout: dir, snapshot: { sha } });
+    return await withKitScripts(k.root, k.course, async (call) => { try {
+      const result = await call('run', script, [{ ticket: { id: `${REPO}:KIT-1`, home: REPO }, leg: startLeg, checkout: dir, snapshot: { sha } }], dir);
       return [{ rule: 'no-op', message: `legs/${startLeg}.mjs returned ${JSON.stringify(result)} for an agent_command that exits 0 with no PR — the course opens PRs, so its start leg must verify one on the forge before returning its position, failing the leg naming what it looked for (B-81)` }];
     } catch {
       return []; // the leg refused the no-op: what B-81 asks
-    }
+    } });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -509,8 +508,8 @@ export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
   }
   if (standard?.reads !== 'markers') return [];
   const startLeg = graphOf(k.proposed).startLeg;
-  const script = join(k.root, '.baton', 'courses', k.course, 'legs', `${startLeg}.mjs`);
-  if (!existsSync(script)) return []; // a missing script is the legs-scripts rule's own failure
+  const script = k.legScripts?.find((s) => s.name === startLeg && !s.error && s.exports.includes('close'))?.file;
+  if (!script) return [];
   const dir = mkdtempSync(join(tmpdir(), 'baton-kit-ticket-'));
   // A local bare origin the close can really fetch (round 1, finding 5): the rule must reach
   // the close's own checks, not pass on a fetch that cannot connect.
@@ -527,18 +526,15 @@ export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
     git(false, 'commit', '-qm', 'kit');
     git(false, 'push', '-q', 'origin', 'main');
     const sha = git(true, 'rev-parse', 'HEAD').trim();
-    const mod = (await import(`${pathToFileURL(script).href}?t=${Math.random()}`)) as Record<string, unknown>;
-    const close = mod.close ?? (mod.default != null && typeof mod.default === 'object' ? (mod.default as Record<string, unknown>).close : undefined);
-    if (typeof close !== 'function') return []; // a script that exports no close is the legs-scripts rule's
-    try {
-      await (close as (ctx: unknown, result: unknown) => Promise<unknown>)(
+    return await withKitScripts(k.root, k.course, async (call) => { try {
+      await call('close', script, [
         { ticket: { id: `${REPO}:KIT-1`, path: 'tickets/kit-1.md', home: REPO }, leg: startLeg, checkout: dir, snapshot: { sha }, claim: { nonce: 'kit' }, default_branch: 'main' },
         { reached: graphOf(k.proposed).legs.get(startLeg)!.to[0], next: null },
-      );
+      ], dir);
       return [{ rule: 'no-op', message: `legs/${startLeg}.mjs's close accepted a ticket with no '## ${startLeg}' heading — the marker courses' state is the ticket itself, so the close must validate it (the item schema, the machine fields, its own heading) and fail the leg naming what broke (B-100)` }];
     } catch {
       return []; // the close refused the mangled ticket: what B-100 asks
-    }
+    } });
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(origin, { recursive: true, force: true });
@@ -590,6 +586,7 @@ export async function readInputs(root: string, course: string, opts: { base?: st
   const file = join(dir, 'course.json');
   if (!existsSync(file)) throw new Error(`${file}: no such course file`);
   const proposed = JSON.parse(readFileSync(file, 'utf8'));
+  await checkLegTreeRequirements(root, course, proposed);
   const versionsOf = (json: unknown, id: string): Versions | null => {
     const c = (asRecord(json).courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === id);
     return c && Number.isInteger(c.version) && Number.isInteger(c.min_runner_version) ? { version: c.version, min_runner_version: c.min_runner_version } : null;
@@ -644,19 +641,21 @@ export async function readInputs(root: string, course: string, opts: { base?: st
       const name = f.slice(0, -'.md'.length);
       instructions.push({ name, text: readFileSync(join(legsDir, f), 'utf8') });
     }
-    for (const f of readdirSync(legsDir).filter((x) => x.endsWith('.mjs')).sort()) {
+    const files = readdirSync(legsDir, { withFileTypes: true }).filter((e) => e.isFile() || e.isSymbolicLink()).map((e) => e.name);
+    scriptEntries(files);
+    await withKitScripts(root, course, async (call) => { for (const f of files.filter((x) => LEG_EXTENSION.test(x))) {
       const override = f.endsWith('.run.mjs');
-      const name = f.slice(0, override ? -'.run.mjs'.length : -'.mjs'.length);
-      const into = override ? overrides : legScripts;
+      const name = f.replace(LEG_EXTENSION, '').replace(/\.run$/, '');
+      const into = override ? overrides : legScripts!;
       try {
         // An override runs only through a leg script that looks it up: one from before overrides does not.
         // The script must name this course's own override path: a copy of another course's reads that one's.
         const loaded = override ? (existsSync(join(legsDir, `${name}.mjs`)) && readFileSync(join(legsDir, `${name}.mjs`), 'utf8').includes(`.baton/courses/${course}/legs/${name}.run.mjs`)) : undefined;
-        into.push({ name, exports: legExports(await import(pathToFileURL(join(legsDir, f)).href)), ...(override ? { loaded } : {}) });
+        into.push({ name, exports: await call('exports', f) as string[], ...(override ? { loaded } : { file: f }) });
       } catch (e) {
-        into.push({ name, exports: [], error: (e as Error).message.split('\n')[0] });
+        into.push({ name, ...(!override ? { file: f } : {}), exports: [], error: (e as Error).message.split('\n')[0] });
       }
-    }
+    } });
   }
   let live: KitInput['live'] = null;
   if (opts.board) {

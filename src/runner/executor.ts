@@ -82,6 +82,7 @@ export interface Running {
   result: Promise<ExecResult>;
   write(line: string): void;
   kill(): void;
+  signal?(signal: NodeJS.Signals): void;
 }
 
 export interface Handle {
@@ -131,7 +132,7 @@ export interface ExecutorHost {
  *  user — exactly today's `process` mode. A leg can read the runner's state file and use its
  *  ssh-agent: `builtin` binds only cooperating legs (R-BTN-107). `argv[0] === 'node'` runs the
  *  runner's own node. */
-export function builtinExecutor(): Executor {
+export function builtinExecutor(stopDelay = { term: 10_000, kill: 25_000 }): Executor {
   const sessions = new Map<string, { brief: Brief; running: Set<Running> }>();
   return {
     api: EXECUTOR_API,
@@ -150,13 +151,14 @@ export function builtinExecutor(): Executor {
         cwd: o.cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...s.brief.env, ...(o.env ?? {}) },
       });
-      const kill = () => {
+      const signal = (name: NodeJS.Signals) => {
         try {
-          if (child.pid) process.kill(-child.pid, 'SIGKILL');
+          if (child.pid) process.kill(-child.pid, name);
         } catch {
           // The group is already gone.
         }
       };
+      const kill = () => signal('SIGKILL');
       let stdout = '';
       let stderr = '';
       let partial = '';
@@ -182,10 +184,12 @@ export function builtinExecutor(): Executor {
           resolveResult({ status: null, stdout, stderr: stderr + String(e) });
         });
         child.on('exit', (code) => {
-          if (timer) clearTimeout(timer);
           // A call's end is its whole group's end (R-BTN-72, R-BTN-145): what the call left
           // behind goes with it.
           kill();
+        });
+        child.on('close', (code) => {
+          if (timer) clearTimeout(timer);
           if (partial && o.onStderr) o.onStderr(partial);
           resolveResult({ status: code, stdout, stderr });
         });
@@ -196,16 +200,28 @@ export function builtinExecutor(): Executor {
           if (child.stdin && !child.stdin.destroyed) child.stdin.write(line.endsWith('\n') ? line : `${line}\n`);
         },
         kill,
+        signal,
       };
       s.running.add(running);
       void result.then(() => s.running.delete(running));
       return running;
     },
-    async stop(h) {
+    async stop(h, reason) {
       const s = sessions.get(h.session_id);
       if (!s) return;
-      for (const r of s.running) r.kill();
       sessions.delete(h.session_id);
+      const running = [...s.running];
+      if (reason === 'preparation-release') {
+        const send = (name: NodeJS.Signals) => { for (const call of s.running) call.signal?.(name); };
+        send('SIGINT');
+        const term = setTimeout(() => send('SIGTERM'), stopDelay.term);
+        const kill = setTimeout(() => send('SIGKILL'), stopDelay.kill);
+        try { await Promise.all(running.map((r) => r.result)); }
+        finally { clearTimeout(term); clearTimeout(kill); }
+      } else {
+        for (const r of running) r.kill();
+        await Promise.all(running.map((r) => r.result));
+      }
     },
     async end(h) {
       const s = sessions.get(h.session_id);

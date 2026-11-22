@@ -25,6 +25,9 @@ import type { ScopeAction } from '../core/scope';
 import { BatonApi, BatonRefusal, batonUnreachable } from './api';
 import { outsideScope, pushesBetween, readRefState, type RefState } from './audit';
 import { advanceHome, claimScratch, courseOf, dropCourse, ensureSha, extractTicketSource, freshSecret, git, loadCourse, prepareClone, readHead, type CourseLoad } from './home';
+import { LegTrees } from './leg-trees';
+import { LEG_TREES } from './leg-scripts';
+import { cleanNodeEnv, PREPARE_TIMEOUT_MS, PreparationError } from './preparation';
 import { builtinExecutor, type Executor, type Handle, type Running, type SessionKind } from './executor';
 import { LegChannel, channelPath, type ChannelAnswer, type ChannelRequest } from './channel';
 import { MIN_SECRET_BYTES, createLegMasker, failureDetail, maskLegOutput, namesASecret, secretValues } from './mask';
@@ -89,6 +92,8 @@ export interface RunnerOptions {
   agentCommand?: string;
   /** R-BTN-107 (B-184): the executor the runner's host chose — `builtin` when absent. */
   executor?: Executor;
+  legTrees?: LegTrees;
+  prepareTimeoutMs?: number;
   /** Verbose (the owner, 2026-10-23): timestamp every line, name the claim's id and nonce,
    * log the leg's local command, and drain the leg child's stderr into the log — where the
    * stub reports the agent_command it resolved. A slice of B-23's leg observability. */
@@ -305,6 +310,7 @@ class Slot {
   /** The claim's `request_id` — a claim retried by it answers the same claim (reattach). */
   requestId: string | undefined;
   inflight: Inflight | null = null;
+  preparing: AbortController | null = null;
   /** B-108: the time of the last line drained from the leg child's stderr (—verbose, where the
    *  stub mirrors the agent's streams): a live signal the beat's liveness line counts. */
   legLineAt: number | null = null;
@@ -695,7 +701,8 @@ export class Runner {
    *  settled list less every lock capability whose file this process does not hold — of the
    *  runners on one machine only the one holding the lock declares it (R-BTN-178). */
   private declaringList(): string[] {
-    const base = this.declared ?? this.o.capabilities ?? [];
+    const configured = (this.declared ?? this.o.capabilities ?? []).filter((c) => !c.startsWith('runner:'));
+    const base = this.o.legTrees ? [...configured, LEG_TREES] : configured;
     const locks = this.locks;
     return locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
   }
@@ -879,7 +886,8 @@ export class Runner {
       this.loseLease('lease-timeout');
     } else if (!this.lostLease) {
       for (const x of live) {
-        const id = x.inflight?.claimId;
+        // A beat sent before the claim request settled cannot fence its preparation.
+        const id = x.inflight?.claimId ?? (steady && x.preparing ? x.claimId : null);
         if (id != null && !x.lost && !x.ended && !byId.has(id)) this.loseClaim(x);
       }
     }
@@ -1048,7 +1056,7 @@ export class Runner {
     if (this.declared == null) return;
     // B-104: `human-operator` is the one built-in literal — compared as itself by rule 4 like
     // any capability (rule 6 retired, R-BTN-121 as amended), never an expansion of the four.
-    const held = capabilitiesOf(this.declared);
+    const held = capabilitiesOf(this.declaringList());
     const declared = this.declared.join(', ') || 'nothing';
     let needs: string[];
     try {
@@ -1074,6 +1082,7 @@ export class Runner {
     for (const id of ids) if (!this.fences.includes(id)) this.fences.push(id);
     for (const x of live) {
       x.lost = true;
+      x.preparing?.abort('lease-lost');
       const child = x.inflight?.child;
       if (child) this.killGroup(child);
       void this.stopSlotSession(x, 'lease-lost');
@@ -1086,6 +1095,7 @@ export class Runner {
    *  and the next beat reports its fence. The runner's lease and its other claims run on. */
   private loseClaim(x: Slot): void {
     x.lost = true;
+    x.preparing?.abort('lease-lost');
     const id = x.inflight?.claimId ?? x.claimId;
     this.log(`baton: Baton no longer lists claim ${id ?? '?'} on ${x.inflight?.ticket ?? x.ticket} — its leg stops at once, no hand-off; this runner's other claims run on (R-BTN-6)`);
     if (id != null && !this.fences.includes(id)) this.fences.push(id);
@@ -1110,14 +1120,15 @@ export class Runner {
 
   /** `signalLeg` for a named claim — the beat's, which belongs to no claim (B-188). */
   private signalSlot(x: Slot, signal: PendingAbort['signal'], reason?: string): void {
-    if (!x.inflight) return;
+    if (!x.inflight && !x.preparing) return;
     // A release is the strongest signal: it overrides a regression or a course change that
     // landed first, so its message is never acknowledged away (§6.13, §9).
     if (x.pendingAbort && !(signal === 'release' && x.pendingAbort.signal !== 'release')) return;
     x.pendingAbort = { signal, reason };
+    x.preparing?.abort(reason ?? signal);
     // The wire carries §6.13's closed reason set: a course change stops the leg the way a
     // release does — at its next safe point — so that is the signal it gets.
-    const child = x.inflight.child;
+    const child = x.inflight?.child;
     const wire = signal === 'course-changed' ? 'release' : signal;
     child?.running.write(JSON.stringify({ abort: wire }));
   }
@@ -1147,7 +1158,7 @@ export class Runner {
   /** The environment every session starts from: the runner's, with the parent markers (R-BTN-144). */
   private baseEnv(): Record<string, string> {
     const env: Record<string, string | undefined> = { ...process.env, BATON_PARENT: String(this.state.get().runner_id ?? ''), BATON_STATE: this.o.stateFile };
-    return Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => typeof e[1] === 'string'));
+    return cleanNodeEnv(env);
   }
 
   private async stopSession(reason: string): Promise<void> {
@@ -1193,8 +1204,9 @@ export class Runner {
    *  environment its literals came from. */
   private wrapperCall(h: Handle, call: string, script: string, args: unknown[], timeout_s?: number, sink?: () => ReturnType<Runner['legSink']>): Running {
     const leg = sink?.();
+    const roots = this.inflight?.course?.roots;
     return this.executor.exec(h, ['node', LEG_PROCESS, call, script], {
-      cwd: this.checkout, stdin: `${JSON.stringify(args)}\n`, ...(timeout_s ? { timeout_s } : {}),
+      cwd: this.checkout, stdin: `${JSON.stringify(roots ? { args, roots } : args)}\n`, ...(timeout_s ? { timeout_s } : {}),
       // R-BTN-144: what a leg's stderr carries leaves masked — class 5 and class 6 by the shared
       // pattern, the leg's own class 7 set with it while its run streams, and by the drain after.
       // B-108: a drained line is leg activity either way — the beat's liveness line counts it.
@@ -2102,6 +2114,17 @@ export class Runner {
     const claimId = claim.claim_id as number;
     const ticket = claim.ticket_id as string;
     let course: CourseLoad | null = null;
+    let prepared: Awaited<ReturnType<LegTrees['prepare']>> | undefined;
+    const preparation = this.cur.preparing = new AbortController();
+    const timer = setTimeout(() => preparation.abort('prepare-timeout'), this.o.prepareTimeoutMs ?? PREPARE_TIMEOUT_MS);
+    const settlePreparation = async (e: unknown): Promise<ClaimOutcome> => {
+      if (this.claimLost() || this.stopped) return { ticket, end_reason: 'released:lease-lost', reached: null, handoff: null };
+      const reason = this.pendingAbort?.reason;
+      const end_reason = reason ?? `released:cannot-finish:${e instanceof PreparationError ? e.kind : 'transient'}`;
+      const detail = failureDetail(msg(e), secretValues(process.env, this.o.maskEnv ?? []));
+      this.log(`baton: ${ticket}'s preparation stopped (${detail ?? 'no detail'})`);
+      return await this.finish(claimId, { end_reason, reached: claim.station, detail, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+    };
     let signedControl: Record<string, string> = {};
     // B-134: the parked report, its overflow count and the audit window belong to one claim
     // alone — an earlier claim's throw between parking and its finishing call must not land
@@ -2112,7 +2135,11 @@ export class Runner {
     this.auditScope = null;
     try {
       // R-BTN-34: the snapshot must be in the home checkout — one fetch, else stale-board.
-      if (!ensureSha(this.o.home, claim.snapshot_sha, () => this.o.fetch?.(this.o.home))) {
+      if (this.o.legTrees) {
+        if (!await this.o.legTrees.onDefault(this.o.repository, claim.snapshot_sha, claim.default_branch, preparation.signal)) {
+          return await this.finish(claimId, { end_reason: 'released:off-branch', reached: claim.station, detail: String(claim.snapshot_sha), ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+        }
+      } else if (!ensureSha(this.o.home, claim.snapshot_sha, () => this.o.fetch?.(this.o.home))) {
         return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
       }
       // B-127 (R-BTN-133's verified tree, extended): where the repository requires owner-signed
@@ -2143,7 +2170,10 @@ export class Runner {
       // unpenalised): an unsigned course change keeps the last signed course in force, and a
       // course no owner signed does not run.
       const courseSha = typeof signedControl.course === 'string' && signedControl.course !== '' ? signedControl.course : claim.snapshot_sha as string;
-      course = loadCourse(this.o.home, courseSha, this.claimCourse(claim));
+      const courseId = this.claimCourse(claim);
+      if (this.o.legTrees) prepared = await this.o.legTrees.prepare(this.o.repository, courseSha, courseId, preparation.signal);
+      preparation.signal.throwIfAborted();
+      course = loadCourse(this.o.home, courseSha, courseId, prepared);
       // B-228: the legs start from the snapshot's code — the home fast-forwarded to it when it
       // can be; otherwise it runs as it stands, and the log says why. A reattached leg's tree is
       // its running session's, and a claim in a clone of its own is put there below (B-188).
@@ -2157,8 +2187,13 @@ export class Runner {
         if (stays) this.log(`baton: the home stays at its own commit for ${ticket}, not the snapshot ${String(claim.snapshot_sha).slice(0, 10)}: ${stays}`);
       }
     } catch (e) {
+      await prepared?.release().catch((err) => this.log(`baton: leg tree cleanup failed (${msg(err)})`));
+      if (this.o.legTrees || preparation.signal.aborted) return await settlePreparation(e);
       this.log(`baton: the claim's course would not load (${msg(e)})`);
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
+    } finally {
+      clearTimeout(timer);
+      this.cur.preparing = null;
     }
     // R-BTN-72 (B-188): a claim beside others works in a clone of its own — its own git dir, put
     // at the snapshot — so concurrent legs never write one tree, and its audit reads its own refs.
@@ -2168,6 +2203,7 @@ export class Runner {
       } catch (e) {
         this.log(`baton: ${ticket}'s checkout ${this.checkout} could not be prepared (${msg(e)})`);
         dropCourse(course.scratch);
+        await prepared?.release().catch((err) => this.log(`baton: leg tree cleanup failed (${msg(err)})`));
         return await this.finish(claimId, { end_reason: 'released:cannot-finish:transient', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
       }
       if (this.verbose) this.log(`baton: ${ticket} works in its own clone ${this.checkout} (R-BTN-72)`);
@@ -2184,6 +2220,7 @@ export class Runner {
     if (versionCheck.why != null) {
       this.log(`baton: ${ticket}'s ticket moved under the claim — ${versionCheck.why}`);
       dropCourse(course.scratch);
+      await prepared?.release().catch((err) => this.log(`baton: leg tree cleanup failed (${msg(err)})`));
       rmSync(scratch, { recursive: true, force: true });
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
@@ -2295,6 +2332,24 @@ export class Runner {
           }
           if (this.closedDone) return await this.finish(claimId, { end_reason: 'done', reached: at }, handoffUrl);
         }
+        if (prepared && this.o.legTrees && !resuming && own.length) {
+          const checking = this.cur.preparing = new AbortController();
+          const bound = setTimeout(() => checking.abort('prepare-timeout'), this.o.prepareTimeoutMs ?? PREPARE_TIMEOUT_MS);
+          try {
+            await this.stopSession('verify-leg-tree');
+            await prepared.release();
+            if (!await this.o.legTrees.onDefault(this.o.repository, claim.snapshot_sha, claim.default_branch, checking.signal)) {
+              return await this.finish(claimId, { end_reason: 'released:off-branch', reached: at, next: legName, detail: String(claim.snapshot_sha) }, null);
+            }
+            prepared = await this.o.legTrees.prepare(this.o.repository, signedControl.course ?? claim.snapshot_sha, course.course, checking.signal);
+            Object.assign(course, prepared);
+          } catch (e) {
+            return await settlePreparation(e);
+          } finally {
+            clearTimeout(bound);
+            this.cur.preparing = null;
+          }
+        }
         // B-108: the leg's own start — its clock (the beat's liveness line) and a fresh drain.
         if (this.inflight) { this.inflight.leg = legName; this.inflight.legAt = this.now(); }
         this.legLineAt = null;
@@ -2304,7 +2359,8 @@ export class Runner {
           ticket: { id: ticket, path: claim.path ?? null, home: this.o.repository, ...(typeof claim.version === 'string' && claim.version !== '' ? { version: claim.version } : {}), ...(ticketFile != null ? { file: ticketFile } : {}) },
           claim: { id: claimId, nonce: claim.nonce, station: at },
           leg: legName, run, ...(runId ? { run_id: runId } : {}),
-          snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
+          snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs, ...(course.tree ? { tree: course.tree } : {}) },
+          ...(course.dir ? { course: { dir: course.dir } } : {}),
           // B-127: the owner-signed commits a verified board post named — where the repository
           // requires signed control, the legs read `agent_command` and the overrides at these
           // (and the course itself — the graph, these scripts — loaded at the `course` one),
@@ -2478,6 +2534,7 @@ export class Runner {
       this.inflight = null;
       this.pendingAbort = null;
       dropCourse(course!.scratch);
+      await prepared?.release().catch((err) => this.log(`baton: leg tree cleanup failed (${msg(err)})`));
       rmSync(scratch, { recursive: true, force: true });
     }
   }
@@ -2606,7 +2663,7 @@ export class Runner {
     // R-BTN-107 (B-184): the leg runs in a session of the executor the host chose, keyed by its
     // run id's first session; the previous leg's session goes first (its close and hand-off ran).
     await this.stopSession('next-leg');
-    const env = Object.fromEntries(Object.entries(childEnv).filter((e): e is [string, string] => typeof e[1] === 'string'));
+    const env = cleanNodeEnv(childEnv);
     // R-BTN-144 class 7 (B-170): the leg's masked set is computed once, here, from the environment
     // the leg is given — every variable whose name says a secret, and every name `runner.json`
     // `mask_env` lists. The environment spreads the runner's own, so the host's values are in it;
@@ -2628,7 +2685,7 @@ export class Runner {
     try {
       handle = await this.startSession('leg', {
         session_id: sessionId, ...(typeof ctx.run_id === 'string' ? { run_id: ctx.run_id } : {}), ticket: String((ctx.ticket as { id?: string })?.id ?? ''), leg,
-        snapshot_sha: String((ctx.snapshot as { sha?: string })?.sha ?? ''), paths: [scratch, course.scratch], env,
+        snapshot_sha: String((ctx.snapshot as { sha?: string })?.sha ?? ''), paths: [scratch, course.scratch, ...(course.roots ?? [])], env,
         channel: channel ? channel.path : null,
         // R-BTN-107: the brief carries the leg's autonomy as a hint — the raise check below is
         // what enforces it, whatever the executor does with the hint.

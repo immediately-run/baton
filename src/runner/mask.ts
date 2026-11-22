@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createMasker, maskSecrets } from '../shared/mask.mjs';
+import { createMasker, KEY_BEGIN, KEY_END, maskSecrets } from '../shared/mask.mjs';
 
 /** R-BTN-144 class 7: the name endings the environment decides, compared case-sensitively. */
 export const SECRET_NAME_SUFFIXES = ['_KEY', '_TOKEN', '_SECRET', '_PASSWORD', '_PAT'];
@@ -40,9 +40,7 @@ export function secretValues(env: Record<string, string | undefined>, maskEnv: r
 /** One class 7 literal as a pattern: every occurrence of `secret`, as it stands. */
 const literalOf = (secret: string): RegExp => new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
 
-/** `text` with every class-7 literal replaced by `***` — the literals alone: class 6 belongs to
- *  whoever sees the whole stream (a block is held line by line), so a line on its way into the
- *  block stream is masked of its literals, never of a block it may be part of. */
+/** `text` with every class-7 literal replaced by `***`. */
 const maskLiterals = (text: string, literals: readonly string[]): string => {
   let out = text;
   for (const secret of literals) out = out.replace(literalOf(secret), () => '***');
@@ -51,7 +49,7 @@ const maskLiterals = (text: string, literals: readonly string[]): string => {
 
 /** `text` with every class-5, class-6 and class-7 occurrence replaced by `***`. */
 export function maskLegOutput(text: string, secrets: readonly string[]): string {
-  return maskSecrets(maskLiterals(text, secrets));
+  return maskLiterals(maskSecrets(text), secrets);
 }
 
 /** The end `detail` a failed leg's claim carries (§9.4, B-256): the last line of the leg's error —
@@ -87,9 +85,8 @@ export function holdLiteralTail(text: string, literals: readonly string[]): { he
 
 /** R-BTN-144 across a stream, which a line-at-a-time sink cannot do. Class 6's key block is
  *  `src/shared/mask.mjs`'s stream (`createMasker`: a block's lines are held until its `END` line
- *  or `KEY_HOLD` bytes, and classes 5 and 6 are masked on every line as it leaves) — each line
- *  is masked of its class-7 literals and handed to that stream, never the other way round: a
- *  block's body lines must reach the holder as they came, or the holder never sees the block.
+ *  or `KEY_HOLD` bytes, and classes 5 and 6 are masked on every line as it leaves). Banners and
+ *  body lines reach the block holder intact, before literal redaction can alter a banner.
  *  Class 7 is masked here, as each line is handed on: the tail `holdLiteralTail` says a literal
  *  still extends is held back, unlogged, until the next line completes the literal (masked as
  *  one) or shows it will never complete — and a hold that never completes leaves as `***`,
@@ -106,9 +103,25 @@ export function createLegMasker(secrets: readonly string[]) {
   // the boundary the framing hands back as `\n` alone.
   const literals = [...new Set(secrets.map((secret) => secret.replace(/\r\n/g, '\n').replace(/\r?\n$/, '')).filter((secret) => secret !== ''))];
   const block = createMasker();
+  let inKey = false;
   let held = '';
   return {
     push(line: string): string {
+      if (inKey) {
+        const out = block.push(line);
+        if (out !== '') inKey = false;
+        return out;
+      }
+      const open = line.search(KEY_BEGIN);
+      if (open >= 0) {
+        const prefix = this.push(line.slice(0, open));
+        const tail = held === '' ? '' : '***';
+        held = '';
+        const key = line.slice(open);
+        block.push(key);
+        inKey = !KEY_END.test(key);
+        return [prefix + tail, inKey ? '' : block.flush()].filter(Boolean).join('\n');
+      }
       const said: string[] = [];
       if (held !== '') {
         // The line before ended inside a literal, and this line may complete it: with the

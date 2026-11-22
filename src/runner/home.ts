@@ -17,6 +17,7 @@ import { graphOf, legCapabilities, type Graph } from '../core/graph';
  * filesystem must never hold the event loop past a beat — a runner that stops beating while its
  * process lives is a claim lost silently. */
 export const GIT_TIMEOUT_MS = 30_000;
+export const SAFE_GIT = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false'];
 
 // B-94: git's non-interactive environment is defined once, beside the close's bound — the
 // runner's git and the generated stubs import it from there.
@@ -25,7 +26,7 @@ import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 /** One git command in the home checkout; throws with stderr when it fails, and is killed at
  * `timeoutMs` (default `GIT_TIMEOUT_MS`, under a beat) when it cannot answer (B-94). */
 export function git(home: string, args: string[], timeoutMs: number = GIT_TIMEOUT_MS): string {
-  return execFileSync('git', ['-C', home, ...args], {
+  return execFileSync('git', ['-C', home, ...SAFE_GIT, ...args], {
     encoding: 'utf8', maxBuffer: 16 << 20, timeout: timeoutMs, killSignal: 'SIGKILL',
     env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
   });
@@ -37,6 +38,9 @@ export interface CourseLoad {
   /** The extracted `legs/<leg>.mjs` of the snapshot, by leg name — file paths on disk. */
   scripts: Map<string, string>;
   scratch: string;
+  roots?: string[];
+  tree?: string;
+  dir?: string;
 }
 
 /** The course id the home repository runs, from the snapshot's `.baton/baton.json`: the spec's
@@ -131,7 +135,7 @@ export const CLONE_TIMEOUT_MS = 10 * 60_000;
 /** One git command, asynchronously, bounded and non-interactive like `git` (B-94). */
 function gitAsync(cwd: string | null, args: string[], timeoutMs: number = CLONE_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('git', cwd ? ['-C', cwd, ...args] : args, {
+    execFile('git', [...(cwd ? ['-C', cwd] : []), ...SAFE_GIT, ...args], {
       encoding: 'utf8', maxBuffer: 16 << 20, timeout: timeoutMs, killSignal: 'SIGKILL',
       env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
     }, (e, stdout, stderr) => (e ? reject(new Error(`git ${args[0]}: ${String(stderr || e.message).trim().slice(0, 300)}`)) : resolve(stdout)));
@@ -172,11 +176,12 @@ export async function prepareClone(home: string, dir: string, sha: string, branc
 
 /** Load a claim's course from the snapshot: the graph, and every leg script the snapshot's
  * `legs/` holds, extracted to a scratch directory (deleted by the runner when the claim ends). */
-export function loadCourse(home: string, sha: string, course: string): CourseLoad {
+export function loadCourse(home: string, sha: string, course: string, prepared?: Pick<CourseLoad, 'tree' | 'dir' | 'roots' | 'scripts'>): CourseLoad {
   const file = readAt(home, sha, `.baton/courses/${course}/course.json`);
   if (file == null) throw new Error(`the snapshot ${sha.slice(0, 10)} has no .baton/courses/${course}/course.json`);
   const graph = graphOf(JSON.parse(file));
   const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
+  if (prepared) return { course, graph, scratch, ...prepared };
   const scripts = new Map<string, string>();
   let listing: string[];
   try {
