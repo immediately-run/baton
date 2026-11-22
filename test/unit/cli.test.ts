@@ -116,10 +116,22 @@ describe('plan: one request per command', () => {
     expect(lines.at(-1)).toContain('not confirmed');
   });
 
+  it('S-BTN-311: destructive credential commands plan a prompt or accept --yes', () => {
+    const home = { repository: 'docs', names: [] };
+    for (const [role, args] of [
+      ['admin', ['revoke', 'SHA256:x']],
+      ['owner', ['revoke', 'SHA256:x']],
+      ['owner', ['owners', '--remove', 'SHA256:x']],
+    ] as const) {
+      expect(plan(role, [...args], key, undefined, home)).toMatchObject({ body: { confirm: true }, confirm: { yes: false } });
+      expect(plan(role, [...args, '--yes'], key, undefined, home)).toMatchObject({ body: { confirm: true }, confirm: { yes: true } });
+    }
+  });
+
   it('owner commands, the required bars in their groups', () => {
     expect(plan('owner', ['grant', 'docs', '--key', PUB, '--capabilities', 'agent-venue', '--max-tier', 'routine'], key))
       .toEqual({ method: 'POST', path: '/v1/owner/docs/grants', body: { public_key: PUB, capabilities: ['agent-venue'], max_tier: 'routine' } });
-    expect(plan('owner', ['owners', 'docs', '--remove', 'SHA256:x'], key).body).toEqual({ fingerprint: 'SHA256:x', remove: true });
+    expect(plan('owner', ['owners', 'docs', '--remove', 'SHA256:x'], key).body).toEqual({ fingerprint: 'SHA256:x', remove: true, confirm: true });
     expect(plan('owner', ['bar', 'docs', '--course', '*', '--tag', 'account:go_plus', '--applies', 'claim', '--starts-at', '2026-10-16T13:00:00Z', '--reason', 'go-quota', '--release-holders'], key).body)
       .toEqual({ course: '*', tag: 'account:go_plus', applies: 'claim', starts_at: Date.parse('2026-10-16T13:00:00Z'), release_holders: true, reason: 'go-quota' });
     expect(plan('owner', ['bar', 'lift', 'docs', '7'], key).path).toBe('/v1/owner/docs/bars/7/lift');
@@ -695,7 +707,7 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       await expect(run(['set', 'ops', policyFile, '--base', '4'])).resolves.toBe(0);
       await expect(run(['apply', 'ops', 'protected', '--base', '5'])).resolves.toBe(0);
       await expect(run(['floor', 'add', 'ops', 'fieldhouse', '--guarantees', 'no-runner-lands,human-gates', '--remove-by', 'owner'])).resolves.toBe(0);
-      await expect(run(['floor', 'remove', 'ops', 'fieldhouse'])).resolves.toBe(0);
+      await expect(run(['floor', 'remove', 'ops', 'fieldhouse', '--yes'])).resolves.toBe(0);
       // Round 1, findings 9 and 10: `set` without --base refuses rather than fetch-and-overwrite
       // (the compare-and-set builds on the version the operator read), and `baton owner -i KEY
       // policy show REPO` — the documented form — reaches the policy commands.
@@ -760,7 +772,7 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       await expect(run(['set', policyFile, '--base', '4'])).resolves.toBe(0);
       await expect(run(['apply', 'protected', '--base', '5'])).resolves.toBe(0);
       await expect(run(['floor', 'add', 'fieldhouse', '--guarantees', 'no-runner-lands'])).resolves.toBe(0);
-      await expect(run(['floor', 'remove', 'fieldhouse'])).resolves.toBe(0);
+      await expect(run(['floor', 'remove', 'fieldhouse', '--yes'])).resolves.toBe(0);
       // A named repository (two positionals) still wins over the home.
       await expect(run(['diff', 'docs', policyFile])).resolves.toBe(0);
     } finally {

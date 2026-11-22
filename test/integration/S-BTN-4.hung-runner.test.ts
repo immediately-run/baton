@@ -144,8 +144,8 @@ describe('S-BTN-4 hung runner force-reaped (R-BTN-19)', () => {
     const session = await adminSession(admin);
     // §12.2: destructive, so the body names its confirmation.
     const bare = await sessionPost(session, `/v1/ui/claims/${c1.json.claim_id}/fence-clear`, {});
-    expect(bare.status).toBe(400);
-    expect(await bare.json()).toMatchObject({ code: 'invalid-params' });
+    expect(bare.status).toBe(428);
+    expect(await bare.json()).toMatchObject({ code: 'confirm-required' });
     // An active claim holds no pending fence: conflict, never a second reap by another name.
     const active = await sessionPost(session, `/v1/ui/claims/${c1.json.claim_id}/fence-clear`, { confirm: true });
     expect(active.status).toBe(409);

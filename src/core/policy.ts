@@ -12,6 +12,7 @@ import { BatonError } from './http';
 import { logEvent } from './db';
 import { KEY_FINGERPRINT } from './auth';
 import { crossHostEntries } from './codeRepos';
+import { checkConfirm } from './validate';
 import type { Store } from './ports';
 import type { Forge } from './links';
 
@@ -881,13 +882,13 @@ export class Policies {
     }
     if (body.remove === true) {
       only(body, ['name', 'remove', 'confirm'], 'body');
-      if (body.confirm !== true) throw new BatonError('confirm-required', 'removing a floor takes confirm: true');
       const name = typeof body.name === 'string' && FLOOR_NAME.test(body.name) ? body.name : bad('name', 'must be a floor name');
       const floor = this.floors(repository).find((f) => f.name === name);
       if (!floor) throw new BatonError('not-found', `${repository} has no floor ${name}`);
       if (!this.entryMatches([floor.remove_by], actor.credential, facts, cur.policy.human_key)) {
         throw new BatonError('forbidden', `removing floor ${name} needs a credential its remove_by (${floor.remove_by}) admits (R-BTN-189)`);
       }
+      checkConfirm(body);
       this.exec('DELETE FROM policy_floors WHERE repository_id = ? AND name = ?', repository, name);
       logEvent(this.c.store, this.c.now(), 'admin', actor.label, { act: 'floor-removed', repository, name }, null, null, repository);
       return { ok: true };

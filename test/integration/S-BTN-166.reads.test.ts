@@ -153,7 +153,7 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     expect((await read(admin, '/v1/repositories/nope/board')).json.code).toBe('forbidden');
     expect((await read(admin, '/v1/admin/repositories/extra')).json.code).toBe('not-found');
     // The grant is the repository's alone: revoked, the read is refused.
-    expect((await keyCall(docsOwner, `/v1/owner/docs/grants/${encodeURIComponent(granted.fingerprint)}/revoke`, {})).status).toBe(200);
+    expect((await keyCall(docsOwner, `/v1/owner/docs/grants/${encodeURIComponent(granted.fingerprint)}/revoke`, { confirm: true })).status).toBe(200);
     const revoked = await read(granted, '/v1/repositories/docs/board');
     expect([revoked.status, revoked.json.code]).toEqual([403, 'forbidden']);
   });

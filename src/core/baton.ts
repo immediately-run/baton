@@ -1162,6 +1162,7 @@ export class BatonCore {
     const p = url.pathname;
     const m = req.method;
     const body = async () => readJson(signed.req);
+    const optionalBody = async () => signed.req.body ? body() : null;
     const seg = pathSegment;
     if (p.startsWith('/v1/admin/')) {
       if (!admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is required (R-BTN-57)');
@@ -1215,7 +1216,7 @@ export class BatonCore {
         return json(await this.admin.grant(actor, repo, b, 'admin'));
       }
       const revoke = /^\/v1\/admin\/keys\/([^/]+)\/revoke$/.exec(p);
-      if (m === 'POST' && revoke) return json(await this.admin.revokeKey(actor, seg(revoke[1])));
+      if (m === 'POST' && revoke) return json(await this.admin.revokeKey(actor, seg(revoke[1]), await optionalBody()));
       if (m === 'POST' && p === '/v1/admin/login-links') return json(await this.admin.loginLink(fp));
       throw new BatonError('not-found', `no route ${m} ${p}`);
     }
@@ -1239,7 +1240,7 @@ export class BatonCore {
     if (m === 'GET' && rest === 'signing-keys') return json({ keys: await this.admin.signingKeys(repo) });
     if (m === 'POST' && rest === 'grants') return json(await this.admin.grant(actor, repo, await body(), 'owner'));
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
-    if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1])));
+    if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1]), await optionalBody()));
     if (m === 'POST' && rest === 'owners') return json(await this.admin.owners(actor, repo, await body()));
     // B-113 (R-BTN-140's precedent): the repository's owners' consent to another repository's
     // tickets depending on theirs — the consent a dependency on a less visible repository needs

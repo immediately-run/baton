@@ -76,8 +76,7 @@ process for development and CI. Nothing crosses a tenant.
   - The Durable Object class is wiring only; `src/core/` imports no `cloudflare:*` module (a
     build check enforces it). Every integration scenario runs against both hosts. Signed
     requests (§11.1) and administration (§11) need no Cloudflare service.
-  - The local host binds loopback unless `--bind` says otherwise; TLS is its operator's
-    (R-BTN-158).
+  - The local host's binding (`--host`) and operator-managed TLS follow R-BTN-158.
 - **R-BTN-2 (the day's usage against the plan's limits).** The dashboard shows the day's
   Durable Object requests and SQLite rows written against the plan's limits. The limits are the
   one Worker var `BATON_PLAN_LIMITS` — `{"requests": <n>, "rows_written": <n>}` a UTC day,
@@ -234,4 +233,3 @@ process for development and CI. Nothing crosses a tenant.
     non-zero naming the code. Neither marks a lease lost at once, but an unanswered heartbeat
     still runs the lease clock (G-BTN-4). `too-large` is reported, never retried. A capped forge
     webhook is a lost trigger, covered by the sync's other triggers (R-BTN-94).
-
