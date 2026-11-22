@@ -15,7 +15,7 @@ import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
 import { checkRegistration, retiredPath, seedEntries, tierPosition, type Registration, type Registry } from './registry';
 import { graphOf, resolveLeg, type Graph } from './graph';
-import { humanOnlyList, type ApproverEntry, type ApproverFacts, type Policies } from './policy';
+import { breakGlassMeetsHumanKey, humanOnlyList, type ApproverEntry, type ApproverFacts, type Policies } from './policy';
 import type { Config, Store } from './ports';
 import { sha256Hex } from './runnerApi';
 
@@ -212,10 +212,17 @@ export class Admin {
     return this.rows<{ public_key: string }>('SELECT public_key FROM human_keys WHERE fingerprint = ? AND revoked_at IS NULL', fingerprint)[0]?.public_key ?? null;
   }
 
-  /** R-BTN-185: whether the fingerprint counts as a human-only key — registered here, or a
-   *  break-glass line of the host's. */
-  async isHumanKey(fingerprint: string): Promise<boolean> {
-    return (await this.humanMarks()).has(fingerprint);
+  /** R-BTN-185: whether the signed answer's key meets this repository's minimum. */
+  isHumanKey(repository: string, fingerprint: string, breakGlass: ReadonlyMap<string, string>): boolean {
+    const policies = this.c.policies;
+    const minimum = policies?.effectiveHumanKey(policies.current(repository)?.policy.human_key) ?? 'any';
+    const line = breakGlass.get(fingerprint);
+    if (line !== undefined) return breakGlassMeetsHumanKey(line, minimum);
+    if (!this.humanKeyLine(fingerprint)) return false;
+    if (minimum === 'any') return true;
+    if (!policies) return false;
+    const owner = policies.facts(repository).owners.get(fingerprint);
+    return owner !== undefined && policies.meetsHumanKey(owner, minimum);
   }
 
   /** R-BTN-57: the role a key already holds, if any — one role per key. A key whose only
@@ -251,13 +258,13 @@ export class Admin {
    *  host's BATON_HUMAN_KEYS lines (break-glass). Parsed per call, like the administrators'. */
   private async humanMarks(): Promise<Set<string>> {
     const out = new Set(this.rows<{ fingerprint: string }>('SELECT fingerprint FROM human_keys WHERE revoked_at IS NULL').map((r) => r.fingerprint));
-    for (const fp of await this.breakGlassSet()) out.add(fp);
+    for (const fp of (await this.breakGlass()).keys()) out.add(fp);
     return out;
   }
 
-  /** BATON_HUMAN_KEYS' fingerprints alone — the break-glass set (R-BTN-185). */
-  private async breakGlassSet(): Promise<Set<string>> {
-    return new Set(this.c.humanBreakGlass ? (await this.c.humanBreakGlass()).keys() : []);
+  /** BATON_HUMAN_KEYS' public lines by fingerprint (R-BTN-185). */
+  private async breakGlass(): Promise<ReadonlyMap<string, string>> {
+    return this.c.humanBreakGlass ? this.c.humanBreakGlass() : new Map();
   }
 
   /** B-127: the repository's owner signing keys — its owners' keys the human-only register
@@ -284,7 +291,7 @@ export class Admin {
    *  human-only one only with a break-glass key — R-BTN-185: an action whose list is human-only
    *  is a human gate, for administrators too. A delegated key never gets here: none is
    *  registered yet (B-124), and its class will answer before this runs. */
-  private requireMembersApprover(repository: string, fingerprint: string, by: 'owner' | 'admin', breakGlass: ReadonlySet<string>): void {
+  private requireMembersApprover(repository: string, fingerprint: string, by: 'owner' | 'admin', breakGlass: ReadonlyMap<string, string>): void {
     const policies = this.c.policies;
     if (!policies) return; // no policy store wired (a unit test's Admin)
     const cur = policies.current(repository);
@@ -312,7 +319,7 @@ export class Admin {
     if (!policies) return;
     const cur = policies.current(repository);
     if (!cur) return;
-    const live = (list: ApproverEntry[]) => policies.listSatisfiable(list, facts, cur.policy.human_key) || list.every((e) => e === 'owner');
+    const live = (list: ApproverEntry[]) => policies.listSatisfiable(list, facts, policies.effectiveHumanKey(cur.policy.human_key)) || list.every((e) => e === 'owner');
     for (const [name, list] of [['approvers.members', cur.policy.approvers.members], ['approvers.trust', cur.policy.approvers.trust], ['approvers.policy', cur.policy.approvers.policy]] as const) {
       if (!live(list)) {
         throw new BatonError('unsatisfiable-approvers', `${name}: this would leave no live credential able to satisfy it (R-BTN-188)`, { list: name });
@@ -328,8 +335,8 @@ export class Admin {
   /** The approver facts of `repository` with only `remaining` owners counted. */
   private async factsWithout(repository: string, remaining: string[] | null): Promise<ApproverFacts> {
     const policies = this.c.policies;
-    const breakGlass = this.c.humanBreakGlass ? new Set((await this.c.humanBreakGlass()).keys()) : new Set<string>();
-    if (!policies) return { owners: new Map(), humans: new Set(breakGlass), breakGlass, humanOwners: new Set() };
+    const breakGlass = await this.breakGlass();
+    if (!policies) return { owners: new Map(), humans: new Set(breakGlass.keys()), breakGlass, humanOwners: new Set() };
     const facts = policies.facts(repository, breakGlass);
     if (remaining == null) return facts;
     const owners = new Map([...facts.owners].filter(([fp]) => remaining.includes(fp)));
@@ -432,7 +439,7 @@ export class Admin {
     // actions too — a human-only list is a human gate for administrators (R-BTN-188), the
     // break-glass key the only credential that opens it.
     if (newOwners.length || add.length) {
-      this.requireMembersApprover(id, actor.slice(actor.indexOf(':') + 1), 'admin', await this.breakGlassSet());
+      this.requireMembersApprover(id, actor.slice(actor.indexOf(':') + 1), 'admin', await this.breakGlass());
     }
     const addKeys = await Promise.all(add.map((k) => parseSshKey(k.public_key)));
     for (const key of addKeys) {
@@ -716,7 +723,7 @@ export class Admin {
     const admins = await this.adminFingerprints();
     // B-145 item 12: granting a runner key is an `approvers.members` action, never a plain
     // owner's any more (R-BTN-188).
-    this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), by, await this.breakGlassSet());
+    this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), by, await this.breakGlass());
     return this.c.store.transaction(() => {
       const role = this.roleOf(key.fingerprint, admins);
       if (role && role !== 'runner') throw new BatonError('conflict', `this key is already a ${role} key (R-BTN-57: one role per key)`);
@@ -758,7 +765,7 @@ export class Admin {
   async revokeGrant(actor: string, repository: string, raw: string) {
     const fingerprint = fingerprintOf(raw, 'fingerprint');
     // B-145 item 12: revoking a runner key is an `approvers.members` action too.
-    this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlassSet());
+    this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlass());
     return this.c.store.transaction(() => {
       this.exec('UPDATE runner_grants SET revoked_at = ? WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fingerprint, repository);
       if (!this.changed()) throw new BatonError('not-found', `no grant of ${fingerprint} on ${repository}`);
@@ -777,12 +784,13 @@ export class Admin {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
     // B-145 item 12: adding and removing owners is an `approvers.members` action.
-    this.requireMembersApprover(repository, actor.slice(actor.indexOf(':') + 1), 'owner', await this.breakGlassSet());
+    const fingerprint = actor.slice(actor.indexOf(':') + 1);
     if (b.remove === true) {
       only(b, ['fingerprint', 'remove'], 'body');
       const fp = fingerprintOf(b.fingerprint, 'fingerprint');
       const facts = await this.factsWithout(repository, null);
       return this.c.store.transaction(() => {
+        this.requireMembersApprover(repository, fingerprint, 'owner', facts.breakGlass);
         const left = this.rows<{ fingerprint: string }>('SELECT fingerprint FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository);
         if (!left.some((o) => o.fingerprint === fp)) throw new BatonError('not-found', `${fp} does not own ${repository}`);
         if (left.length === 1) throw new BatonError('conflict', 'a repository keeps at least one owner (R-BTN-58)');
@@ -799,7 +807,9 @@ export class Admin {
     // R-BTN-185: a registered human-only key — or a break-glass line — becomes an owner marked
     // `human_only`; registering one with the tenant owns nothing until this adds it.
     const human = (await this.humanMarks()).has(key.fingerprint) ? 1 : 0;
+    const breakGlass = await this.breakGlass();
     return this.c.store.transaction(() => {
+      this.requireMembersApprover(repository, fingerprint, 'owner', breakGlass);
       if (this.owns(key.fingerprint, repository)) return { ok: true };
       this.mayOwn(key.fingerprint, admins);
       if (this.rows('SELECT 1 FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository).length >= OWNERS_MAX) bad('public_key', `a repository has at most ${OWNERS_MAX} owners`);
@@ -825,7 +835,7 @@ export class Admin {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
     const fingerprint = actor.slice(actor.indexOf(':') + 1);
-    this.requireMembersApprover(repository, fingerprint, 'owner', await this.breakGlassSet());
+    this.requireMembersApprover(repository, fingerprint, 'owner', await this.breakGlass());
     if (b.revoke === true) {
       only(b, ['fingerprint', 'revoke'], 'body');
       const fp = fingerprintOf(b.fingerprint, 'fingerprint');
@@ -849,7 +859,7 @@ export class Admin {
     let trustDomain: string | null = null;
     const policies = this.c.policies;
     const cur = policies?.current(repository);
-    const facts = cur ? policies!.facts(repository, await this.breakGlassSet()) : null;
+    const facts = cur ? policies!.facts(repository, await this.breakGlass()) : null;
     if (cur && facts && (b.trust_level !== undefined || b.trust_domain !== undefined)) {
       if (!policies!.entryMatches(cur.policy.approvers.trust, fingerprint, facts, cur.policy.human_key)) {
         throw new BatonError('forbidden', 'trust_level and trust_domain are set by an approver on approvers.trust (R-BTN-180)');
@@ -1100,7 +1110,7 @@ export class Admin {
       const policies = this.c.policies;
       const cur = policies?.current(repository);
       if (policies && cur) {
-        const facts = policies.facts(repository, await this.breakGlassSet());
+        const facts = policies.facts(repository, await this.breakGlass());
         if (!policies.entryMatches(cur.policy.approvers.policy, actor.slice(actor.indexOf(':') + 1), facts, cur.policy.human_key)) {
           throw new BatonError('forbidden', 'loosening an R-BTN-66 setting needs an approver on approvers.policy (R-BTN-186, R-BTN-188)');
         }

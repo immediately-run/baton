@@ -18,6 +18,10 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
 ## Changelog
 
+- **2026-11-22 — Break-glass respects the human-key minimum (B-294).**
+  Rules changed: R-BTN-185, R-BTN-188, R-BTN-189; S-BTN-192. Until B-136, break-glass cannot
+  meet `hardware`. A host key's SSH type alone is not evidence of hardware custody.
+
 - **2026-11-21 — Sign-in through Cloudflare Access (R-BTN-155, R-BTN-57, S-BTN-308).**
   Rules changed: R-BTN-155, R-BTN-57, R-BTN-16, R-BTN-149, R-BTN-185, R-BTN-188; G-BTN-144, S-BTN-124. The
   owner approved it on 2026-11-21: a person Cloudflare Access has verified reaches a dashboard

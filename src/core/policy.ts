@@ -537,12 +537,9 @@ export interface FloorRow {
 /** What a heartbeat's protection report says (R-BTN-180). */
 export interface ProtectionReport { repository: string; matched: boolean; reading_hash: string; legs?: { count: number; tickets: number } }
 
-/** A repository's live owners, and the human-only keys among them — everything the approver
- *  checks read. `humans` is every fingerprint a `human` entry counts when ACTING: the
- *  repository's `human_only` owners, the tenant's registered human keys, and the host's
- *  BATON_HUMAN_KEYS lines; `breakGlass` is those lines alone (R-BTN-185: the deployment's root
- *  of trust, which satisfies every `human` entry of every repository on the instance, whatever
- *  `human_key` asks, and is the only recovery from a lost key). `humanOwners` is the
+/** A repository's live owners and human-only marks. `humans` classifies entries, not key
+ *  fitness; `breakGlass` holds the host's public lines, including their SSH type, for acting
+ *  credential checks. `humanOwners` is the
  *  repository's owners alone that are human keys by their own mark or the tenant's register —
  *  break-glass excluded: R-BTN-188's no-gate rule needs "a `human_only` key meeting the
  *  resulting `human_key` among the repository's owners", so a list a break-glass key alone
@@ -550,8 +547,14 @@ export interface ProtectionReport { repository: string; matched: boolean; readin
 export interface ApproverFacts {
   owners: Map<string, { human_only: boolean; fido_attestation: string | null }>;
   humans: Set<string>;
-  breakGlass: Set<string>;
+  breakGlass: ReadonlyMap<string, string>;
   humanOwners: Set<string>;
+}
+
+/** R-BTN-185: no configured line meets `hardware` until B-136. The SSH type alone
+ *  is not evidence of hardware custody. */
+export function breakGlassMeetsHumanKey(line: string | undefined, humanKey: PolicyDocument['human_key']): boolean {
+  return line !== undefined && humanKey === 'any';
 }
 
 const FLOOR_NAME = /^[a-z][a-z0-9-]{0,39}$/;
@@ -564,7 +567,12 @@ export class Policies {
    *  lives in claims.ts, wired by the core like every other cross-link. */
   releaseForFloor: ((repository: string) => void) | null = null;
 
-  constructor(private readonly c: { store: Store; now: () => number }) {}
+  constructor(private readonly c: { store: Store; now: () => number; humanKeyFloor?: PolicyDocument['human_key'] }) {}
+
+  /** R-BTN-188: a repository may raise the instance's minimum, never lower it. */
+  effectiveHumanKey(repositoryKey: PolicyDocument['human_key'] = 'any'): PolicyDocument['human_key'] {
+    return this.c.humanKeyFloor === 'hardware' ? 'hardware' : repositoryKey;
+  }
 
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray() as T[];
@@ -636,15 +644,15 @@ export class Policies {
   // ── approvers (R-BTN-188) ──────────────────────────────────────────────────────────────
 
   /** The facts every approver check reads: the repository's live owners (with their human-only
-   *  marks) and every fingerprint a `human` entry counts. `breakGlass` — BATON_HUMAN_KEYS'
-   *  fingerprints — is passed by the routes that judge an acting credential or a list's
+   *  marks). `breakGlass` — BATON_HUMAN_KEYS' public lines by fingerprint — is passed
+   *  by the routes that judge an acting credential or a list's
    *  satisfiability (R-BTN-185); the guarantee computations read the owners' own marks. */
-  facts(repository: string, breakGlass: ReadonlySet<string> = new Set()): ApproverFacts {
+  facts(repository: string, breakGlass: ReadonlyMap<string, string> = new Map()): ApproverFacts {
     const owners = new Map(this.rows<{ fingerprint: string; human_only: number; fido_attestation: string | null }>(
       'SELECT fingerprint, human_only, fido_attestation FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository)
       .map((o) => [o.fingerprint, { human_only: !!o.human_only, fido_attestation: o.fido_attestation }]));
     const registered = new Set(this.rows<{ fingerprint: string }>('SELECT fingerprint FROM human_keys WHERE revoked_at IS NULL').map((r) => r.fingerprint));
-    const humans = new Set<string>(breakGlass);
+    const humans = new Set(breakGlass.keys());
     const humanOwners = new Set<string>();
     for (const [fp, o] of owners) {
       // A `human_only` mark, or the tenant's register, makes an owner a human key — even if its
@@ -654,13 +662,12 @@ export class Policies {
         humanOwners.add(fp);
       }
     }
-    return { owners, humans, breakGlass: new Set(breakGlass), humanOwners };
+    return { owners, humans, breakGlass, humanOwners };
   }
 
   /** R-BTN-185: whether a human-only owner key meets `human_key` — `any` always; `hardware`
-   *  only with a FIDO attestation (B-136 builds the attestation check; until it does, no key
-   *  carries one, and only break-glass meets `hardware`). */
-  private meetsHumanKey(owner: { human_only: boolean; fido_attestation: string | null }, humanKey: 'any' | 'hardware'): boolean {
+   *  only with a FIDO attestation (B-136 builds enrollment). */
+  meetsHumanKey(owner: { human_only: boolean; fido_attestation: string | null }, humanKey: PolicyDocument['human_key']): boolean {
     if (!owner.human_only) return false;
     return humanKey === 'any' || owner.fido_attestation != null;
   }
@@ -670,7 +677,10 @@ export class Policies {
    *  or a break-glass key; a `key:` entry names one live owner key, meeting `human_key` when
    *  it is a `human_only` key. A delegated key (R-BTN-130) matches no entry — none is
    *  registered yet (B-124 builds them); when one is, its class answers before this runs. */
-  entryMatches(list: ApproverEntry[], credential: string, facts: ApproverFacts, humanKey: 'any' | 'hardware'): boolean {
+  entryMatches(list: ApproverEntry[], credential: string, facts: ApproverFacts, repositoryKey: PolicyDocument['human_key']): boolean {
+    const humanKey = this.effectiveHumanKey(repositoryKey);
+    const line = facts.breakGlass.get(credential);
+    if (line !== undefined && !breakGlassMeetsHumanKey(line, humanKey)) return false;
     for (const e of list) {
       if (e === 'owner') {
         if (facts.owners.has(credential)) return true;
@@ -684,11 +694,10 @@ export class Policies {
     return false;
   }
 
-  /** A `human` entry's key: break-glass always — R-BTN-185: the host's configuration satisfies
-   *  every `human` entry of every repository, and no `human_key` rises above it; any other key
-   *  needs a `human_only` owner's mark meeting the repository's `human_key`. */
+  /** Both break-glass and human-only owner keys must meet the effective minimum. */
   private humanEntryOk(credential: string, facts: ApproverFacts, humanKey: 'any' | 'hardware'): boolean {
-    if (facts.breakGlass.has(credential)) return true;
+    const line = facts.breakGlass.get(credential);
+    if (line !== undefined) return breakGlassMeetsHumanKey(line, humanKey);
     const o = facts.owners.get(credential);
     return o !== undefined && facts.humans.has(credential) && this.meetsHumanKey(o, humanKey);
   }
@@ -715,8 +724,8 @@ export class Policies {
    *  transaction: the compare-and-set on `base_version`, the approver check against the list in
    *  force, the satisfiable-list refusal, the floors re-checked against the new version, the
    *  trust clearing when `approvers.trust` becomes human-only, and the append-only insert with
-   *  its `admin` event. `breakGlass` is BATON_HUMAN_KEYS' fingerprints (R-BTN-185). */
-  put(repository: string, input: unknown, forge: Forge, actor: { credential: string; label: string }, breakGlass: ReadonlySet<string>): { version: number; hash: string; changed: Knob[]; guarantees: Record<GuaranteeName, boolean> } {
+   *  its `admin` event. `breakGlass` is BATON_HUMAN_KEYS' public lines (R-BTN-185). */
+  put(repository: string, input: unknown, forge: Forge, actor: { credential: string; label: string }, breakGlass: ReadonlyMap<string, string>): { version: number; hash: string; changed: Knob[]; guarantees: Record<GuaranteeName, boolean> } {
     const body: Record<string, unknown> = isObj(input) ? input : bad('body', 'must be a JSON object');
     only(body, ['base_version', 'policy', 'preset'], 'body');
     if (!Number.isSafeInteger(body.base_version) || (body.base_version as number) < 1) bad('base_version', 'must be the version the change builds on');
@@ -757,7 +766,7 @@ export class Policies {
     // No gate without a key to open it (R-BTN-188, R-BTN-185): the new lists must be
     // satisfiable, under the new `human_key` for their `human` entries.
     for (const [name, list] of [['approvers.members', doc.approvers.members], ['approvers.trust', doc.approvers.trust], ['approvers.policy', doc.approvers.policy]] as const) {
-      if (!this.listSatisfiable(list, factsNow, doc.human_key)) {
+      if (!this.listSatisfiable(list, factsNow, this.effectiveHumanKey(doc.human_key))) {
         throw new BatonError('unsatisfiable-approvers', `${name}: no live credential can satisfy it (R-BTN-188)`, { list: name });
       }
     }
@@ -871,7 +880,7 @@ export class Policies {
   /** `POST /v1/owner/{repository}/policy/floors` (R-BTN-189): the `approvers.policy` approver
    *  registers a floor; a credential satisfying both its `remove_by` (read as a one-entry list)
    *  and `approvers.policy` removes one. */
-  floorsRoute(repository: string, input: unknown, actor: { credential: string; label: string }, breakGlass: ReadonlySet<string>): { ok: true } {
+  floorsRoute(repository: string, input: unknown, actor: { credential: string; label: string }, breakGlass: ReadonlyMap<string, string>): { ok: true } {
     const body: Record<string, unknown> = isObj(input) ? input : bad('body', 'must be a JSON object');
     const facts = this.facts(repository, breakGlass);
     const cur = this.current(repository);

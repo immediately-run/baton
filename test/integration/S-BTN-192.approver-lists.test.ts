@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { call as hostCall } from '#host';
 import { keyCall, ORIGIN, rows, setAdminKeys, setClock, setHumanKeys, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
+import { Policies } from '../../src/core/policy';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-30T12:00:00Z');
@@ -60,6 +61,51 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-192 approver lists', () => {
+  describe.each(['any', 'hardware'] as const)('break-glass under human_key: %s', (human_key) => {
+    beforeEach(async () => {
+      const { version, doc } = await current();
+      const approvers = { ...doc.approvers, policy: ['owner', 'human'], members: ['owner', 'human'] };
+      expect((await as(b, '/v1/owner/ops/policy', { base_version: version, policy: { ...doc, human_key, approvers } }, 'PUT')).status).toBe(200);
+    });
+
+    it('applies the minimum to policy changes', async () => {
+      const { version, doc } = await current();
+      const res = await as(breakGlass, '/v1/owner/ops/policy', { base_version: version, policy: { ...doc, paths: { ...doc.paths, protected: ['spec/**'] } } }, 'PUT');
+      expect(res.status).toBe(human_key === 'any' ? 200 : 403);
+      if (human_key === 'hardware') expect(res.json.code).toBe('forbidden');
+      expect((await current()).version).toBe(version + (human_key === 'any' ? 1 : 0));
+    });
+
+    it('applies the minimum to adding an owner', async () => {
+      const res = await as(breakGlass, '/v1/owner/ops/owners', { public_key: a.publicKey });
+      expect(res.status).toBe(human_key === 'any' ? 200 : 403);
+      if (human_key === 'hardware') expect(res.json.code).toBe('forbidden');
+      expect(await rows('SELECT fingerprint FROM repository_owners WHERE repository_id = ? AND fingerprint = ?', 'ops', a.fingerprint))
+        .toEqual(human_key === 'any' ? [{ fingerprint: a.fingerprint }] : []);
+    });
+  });
+
+  it('does not admit a break-glass key to unrelated owner routes', async () => {
+    const res = await as(breakGlass, '/v1/owner/ops/signing-keys');
+    expect(res.status).toBe(401);
+  });
+
+  it('does not count break-glass as a live human owner when validating a list', async () => {
+    const { version, doc } = await current();
+    const policy = { ...doc, approvers: { ...doc.approvers, policy: ['human'] } };
+    const res = await as(b, '/v1/owner/ops/policy', { base_version: version, policy }, 'PUT');
+    expect(res.json).toMatchObject({ code: 'unsatisfiable-approvers', list: 'approvers.policy' });
+  });
+
+  it('uses the instance hardware minimum even when the repository says any', async () => {
+    const allowed = await withCore((c) => {
+      const policies = new Policies({ store: c.store, now: () => c.now(), humanKeyFloor: 'hardware' });
+      const facts = policies.facts('ops', new Map([[breakGlass.fingerprint, breakGlass.publicKey]]));
+      return policies.entryMatches(['owner', 'human'], breakGlass.fingerprint, facts, policies.current('ops')!.policy.human_key);
+    });
+    expect(allowed).toBe(false);
+  });
+
   it('the named key alone approves; the list in force decides what replaces it', async () => {
     // A is a human_only key and an owner; the list is [key:A].
     await humanOwner(a, breakGlass);

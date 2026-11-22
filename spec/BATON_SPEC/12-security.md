@@ -398,7 +398,7 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
   - **Break-glass.** A key in the host's `BATON_HUMAN_KEYS` configuration satisfies every `human`
     entry of every repository on the instance whose `human_key` it meets; a line that does not
     meet `hardware` satisfies nothing on a repository that requires it. It is set outside Baton
-    and is the only recovery from a lost key.
+    and is the only recovery from a lost key where the line meets `human_key` (R-BTN-185).
   - **Making `approvers.roles` human-only** clears every role, mark and domain set by a credential
     the new list does not admit (`runner_grants.set_by`, §13): each such grant is an ordinary
     `runner` with no domain until an approver on the list sets it again, and a cleared mark voids
@@ -415,7 +415,7 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
     | `control-paths-human` | no control path (R-BTN-184) changes without a human landing it | `no-runner-lands`, and `paths.control` is `human` |
     | `tickets-approved` | no ticket or goal changes, and no ticket a runner creates is filed, without a human approval of that file: a `std:approval@1`, or the human's merge of the PR carrying it | `no-runner-lands`; `paths.tickets` is `approval`; `tickets.created` is `proposed`; `attestations` admits only `human` for `std:approval@1`; and the last accepted post's ticket source is the markdown source (`source.kind: markdown`, R-BTN-74) |
     | `independent-review` | a runner's change the merge runner lands has two reviews from domains other than its writers' and each other's (R-BTN-180); what the human merges by hand, the human has reviewed | `no-runner-lands`; `merge.reviews.count` ≥ 2; and `attestations` admits only `baton` for `std:review@1`, `std:wrote@1` and `std:ran@1` |
-    | `human-gates` | no owner's agent session, and no delegated key, changes membership, roles or the policy, and every human approval is made on a hardware key | `approvers.members`, `approvers.roles` and `approvers.policy` are human-only lists, and the repository's `human_key` is `hardware` |
+    | `human-gates` | no owner's agent session, and no delegated key, changes membership, roles or the policy, and every human approval is made on a hardware key; no break-glass line can act at `hardware` (R-BTN-185) | `approvers.members`, `approvers.roles` and `approvers.policy` are human-only lists, and the repository's `human_key` is `hardware` |
     | `board-from-trusted` | nothing a trusted leg acts on comes from a runner's board post or from git verdicts | `no-runner-lands`; `inputs.board` excludes `machine`; and the `attestations` entries admit no `sync` writer for `std:arrival@1` or `std:decision@1`, and only `human` for `std:decision@1` |
 
     Every guarantee holds against a compromised runner, within what its knobs' enforcers enforce
@@ -571,7 +571,9 @@ trusted runners or of the protection checker; a compromised forge; and a comprom
   - **`human_key: any | hardware`** is an instance setting, default `any`, which a repository's
     policy may raise for itself (R-BTN-188). Switching to `hardware` suspends every `human_only`
     key registered before the switch that does not meet it; what meets it, and what the CLI
-    shows before a signature, are [proposed](../proposals/security.md) (B-136). Under `any` a
+    shows before a signature, are [proposed](../proposals/security.md) (B-136). No break-glass
+    line meets `hardware`, so it cannot remove a human-removable floor or recover a lost key
+    at that minimum. Under `any` a
     human-only list is a custody promise: Baton cannot tell a key an agent session can use, so
     no guarantee claims it as a human gate (`human-gates`, R-BTN-189).
   - **The owner's agent** is a principal (§12.1): an owner key not `human_only`. It acts as

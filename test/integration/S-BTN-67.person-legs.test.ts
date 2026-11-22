@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import { answerPlan } from '../../cli/baton.mjs';
-import { claimItem, course, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, tick, withCore } from '../helpers';
+import { claimItem, course, cutover, Git, keyCall, placed, register, rows, setAdminKeys, setClock, setHumanKeys, tick, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-11-04T09:00:00Z');
@@ -95,6 +95,24 @@ it('the owner answers with baton decision answer: the same arrival through the a
   expect(res.json).toMatchObject({ ok: true, reached: 'adjudicated', option: 'ship' });
   expect(await station('C')).toEqual([{ station: 'adjudicated', next_leg: 'merge', next_source: 'baton' }]);
   expect(await answerRow('C')).toEqual([{ option: 'ship', answered_by: `owner:${owner.fingerprint}` }]);
+});
+
+it.each(['any', 'hardware'] as const)('applies human_key: %s to a signed break-glass answer', async (human_key) => {
+  const breakGlass = await makeKey('ssh-ed25519', 'break-glass');
+  await setHumanKeys(breakGlass);
+  const { version, policy } = (await keyCall(owner, '/v1/repositories/docs/policy')).json;
+  expect((await keyCall(owner, '/v1/owner/docs/policy', {
+    base_version: version, policy: { ...policy, human_key, inputs: { ...policy.inputs, answers: 'attestation' } },
+  }, 'PUT')).status).toBe(200);
+  atDecide('C');
+  expect((await git.post()).status).toBe(200);
+  const p = answerPlan('docs:C', 'ship');
+  const res = await keyCall(breakGlass, p.path, p.body);
+  expect(res.status).toBe(human_key === 'any' ? 200 : 403);
+  if (human_key === 'hardware') expect(res.json.code).toBe('forbidden');
+  expect(await answerRow('C')).toEqual(human_key === 'any'
+    ? [{ option: 'ship', answered_by: `human:${breakGlass.fingerprint}` }]
+    : [{ option: null, answered_by: null }]);
 });
 
 it('an answer naming an option the question lacks: invalid-params from the CLI, dropped answer-invalid from the sync', async () => {

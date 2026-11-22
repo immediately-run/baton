@@ -43,7 +43,7 @@ import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { checkResync } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import { codeReposOf, pushersOf } from './codeRepos';
-import { Policies, sha256HexSync } from './policy';
+import { breakGlassMeetsHumanKey, Policies, sha256HexSync } from './policy';
 import { Scope } from './scope';
 import { logEvent, systemRandom } from './db';
 import { Deprecated } from './deprecated';
@@ -138,7 +138,11 @@ export class BatonCore {
     this.registry = new Registry({ store, now: () => this.now(), ensurePolicy: (repository, forge) => this.policies.ensure(repository, forge) });
     // §12.8 (B-145): the policy store, before everything that reads a knob — the claims' floor
     // rule, the heartbeat's reports and pins, the owner routes' approver checks.
-    this.policies = new Policies({ store, now: () => this.now() });
+    const humanKeyFloor = ports.config.BATON_HUMAN_KEY;
+    if (humanKeyFloor !== undefined && humanKeyFloor !== 'any' && humanKeyFloor !== 'hardware') {
+      throw new Error('BATON_HUMAN_KEY must be any or hardware');
+    }
+    this.policies = new Policies({ store, now: () => this.now(), humanKeyFloor });
     this.policies.releaseForFloor = (repository) => this.claims.releaseForFloor(repository);
     // R3-1258: the capacity envelope (R-BTN-87) and owner state (R-BTN-88), each one module
     // with the store and the clock alone.
@@ -741,13 +745,11 @@ export class BatonCore {
           throw new BatonError('unauthenticated', 'sign with an owner key of the repository or a human-only key, or send its API key');
         }
         const admins = await this.admin.adminFingerprints();
-        // R-BTN-185: an owner key of the repository, or a human-only one — a registered human
-        // key's own public line serves the signature lookup, not the host's break-glass lines
-        // alone (a key registered through POST /v1/human-keys owns nothing, but answers).
-        const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.admin.humanKeyLine(fp));
+        const breakGlass = await this.humanBreakGlass();
+        const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.admin.humanKeyLine(fp) ?? breakGlass.get(fp) ?? null);
         const fp = signed.cred;
-        const human = await this.admin.isHumanKey(fp);
         if (admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is never an owner key (R-BTN-57); a person’s answer is an owner’s or a human-only key’s');
+        const human = !req.headers.has('X-Baton-Api-Key') && this.admin.isHumanKey(repo, fp, breakGlass);
         if (!human && !this.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key neither owns ${repo} nor is a human-only key (R-BTN-116, R-BTN-185)`);
         // §12.8, R-BTN-191: where the policy's `inputs.answers` is `attestation` (`protected`),
         // a person's answer counts from a human key alone — an owner key's does not.
@@ -838,6 +840,11 @@ export class BatonCore {
     const lookup = (fp: string) => breakGlass.get(fp) ?? registered.get(fp) ?? null;
     const signed = await this.verifySigned(req, lookup);
     if (!lookup(signed.cred)) throw new BatonError('unauthenticated', 'the key is not registered or is revoked');
+    // This is a tenant-wide action, so there is no repository minimum or tenant FIDO enrollment.
+    const minimum = this.policies.effectiveHumanKey();
+    if (breakGlass.has(signed.cred) ? !breakGlassMeetsHumanKey(breakGlass.get(signed.cred), minimum) : minimum === 'hardware') {
+      throw new BatonError('forbidden', 'this key does not meet the instance human_key minimum (R-BTN-185)');
+    }
     const body = await readJson(signed.req);
     return json(await this.admin.humanKeys(body, signed.cred, new Set(breakGlass.keys())));
   }
@@ -1154,13 +1161,18 @@ export class BatonCore {
   private async adminRoute(req: Request, url: URL): Promise<Response> {
     const apiKey = req.headers.get('X-Baton-Api-Key');
     if (!req.headers.has('X-Baton-Signed') && apiKey == null) throw new BatonError('unauthenticated', 'sign with an administrator or owner key, or send its API key');
+    const p = url.pathname;
+    const m = req.method;
+    // These three writes have their own in-force approver checks. Do not admit a non-owner
+    // break-glass key on any route that relies on ownership alone.
+    const approverWrite = (m === 'PUT' && /^\/v1\/owner\/[^/]+\/policy$/.test(p))
+      || (m === 'POST' && /^\/v1\/owner\/[^/]+\/(policy\/floors|owners)$/.test(p));
+    const breakGlass = approverWrite && apiKey == null ? await this.humanBreakGlass() : new Map<string, string>();
     const admins = await this.admin.adminFingerprints();
-    const lookup = (fp: string) => admins.get(fp) ?? this.admin.ownerKey(fp);
+    const lookup = (fp: string) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? breakGlass.get(fp) ?? null;
     // R-BTN-159: a person's API key, checked against its public line, in place of a signature.
     const signed = await this.authenticated(req, lookup);
     const fp = signed.cred;
-    const p = url.pathname;
-    const m = req.method;
     const body = async () => readJson(signed.req);
     const seg = pathSegment;
     if (p.startsWith('/v1/admin/')) {
@@ -1228,8 +1240,9 @@ export class BatonCore {
     // An administrator's key is no owner's, even one added as an owner before it was listed (R-BTN-57).
     if (admins.has(fp)) throw new BatonError('forbidden', 'an administrator key is never an owner key (R-BTN-57)');
     // Owning one repository confers nothing on another (R-BTN-58).
-    if (!this.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
-    const actor = `owner:${fp}`;
+    const owns = this.admin.owns(fp, repo);
+    if (!owns && !breakGlass.has(fp)) throw new BatonError('forbidden', `this key does not own ${repo}`);
+    const actor = `${owns ? 'owner' : 'human'}:${fp}`;
     const rest = o[2];
     // B-90: the repository's grants and settings — and the policy's log below — are read in
     // src/core/reads/repository.ts (B-192: a session's reads too).
@@ -1257,13 +1270,11 @@ export class BatonCore {
       const repoRow = this.registry.get(repo);
       if (!repoRow || repoRow.retired_at != null) throw new BatonError('not-found', `${repo} is not registered`);
       const b = await body();
-      const breakGlass = await this.humanBreakGlass();
-      return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, new Set(breakGlass.keys()))));
+      return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, breakGlass)));
     }
     if (m === 'POST' && rest === 'policy/floors') {
       const b = await body();
-      const breakGlass = await this.humanBreakGlass();
-      return json(this.store.transaction(() => this.policies.floorsRoute(repo, b, { credential: fp, label: actor }, new Set(breakGlass.keys()))));
+      return json(this.store.transaction(() => this.policies.floorsRoute(repo, b, { credential: fp, label: actor }, breakGlass)));
     }
     const resolve = /^tickets\/([^/]+)\/resolve$/.exec(rest);
     if (m === 'POST' && resolve) {

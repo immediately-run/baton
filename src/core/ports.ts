@@ -110,9 +110,10 @@ export interface Config {
   /** R-BTN-73: the GitHub App's webhook secret. Absent, every delivery is refused. */
   BATON_GITHUB_WEBHOOK_SECRET?: string;
   /** R-BTN-185 (B-145): the host's human-only keys, one OpenSSH public key per line — the
-   *  deployment's root of trust, set outside Baton. A key in it satisfies every `human` entry
-   *  of every repository on the instance, and it is the only recovery from a lost key. */
+   *  deployment's root of trust, set outside Baton, subject to `human_key`. */
   BATON_HUMAN_KEYS?: string;
+  /** R-BTN-185: the instance's human-key floor (`any` by default). */
+  BATON_HUMAN_KEY?: string;
   /** R-BTN-113 (B-234): the hosts whose session links the instance accepts — `session_hosts`,
    *  a comma- or JSON-separated list. An administrator's setting, as the human keys are; the
    *  default is `claude.ai` alone. */

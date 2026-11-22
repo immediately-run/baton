@@ -97,10 +97,6 @@ async function protectedSigned() {
   // the scenario writes the column as its check would (the way it writes the checker's role);
   // without it the apply is refused `unsatisfiable-approvers`.
   await rows('UPDATE repository_owners SET fido_attestation = ? WHERE fingerprint = ?', 'att:human-key-1', human.fingerprint);
-  // The break-glass key is an owner too — marked `human_only` like every key BATON_HUMAN_KEYS
-  // lists — so it can act on the owner routes (which an owner key alone holds) whose human-only
-  // lists it alone satisfies under `hardware`.
-  expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', owner_keys_add: [breakGlass.publicKey] })).status).toBe(200);
   await makeChecker();
   const { version } = await current();
   const out = await as(human, '/v1/owner/ops/policy', { base_version: version, preset: 'protected-signed' }, 'PUT');
@@ -156,6 +152,21 @@ async function registerRunner() {
 }
 
 describe('S-BTN-190 guarantees and floors', () => {
+  it.each(['any', 'hardware'] as const)('applies human_key: %s to break-glass floor removal', async (human_key) => {
+    const { version, doc } = await current();
+    const policy = {
+      ...doc, human_key, approvers: { ...doc.approvers, policy: ['owner', 'human'], members: ['owner', 'human'] },
+      grants: { ...doc.grants, default_trust: 'untrusted', trusted_domain: 'separate' },
+    };
+    expect((await as(owner, '/v1/owner/ops/policy', { base_version: version, policy }, 'PUT')).status).toBe(200);
+    const path = '/v1/owner/ops/policy/floors';
+    expect((await as(owner, path, { name: 'custody', guarantees: ['trusted-domain-separate'], remove_by: 'human' })).status).toBe(200);
+    const res = await as(breakGlass, path, { name: 'custody', remove: true, confirm: true });
+    expect(res.status).toBe(human_key === 'any' ? 200 : 403);
+    if (human_key === 'hardware') expect(res.json.code).toBe('forbidden');
+    expect(await rows('SELECT name FROM policy_floors WHERE repository_id = ?', 'ops')).toEqual(human_key === 'any' ? [] : [{ name: 'custody' }]);
+  });
+
   it('a floor refuses a change that would break a guarantee it names; both bad floors refused; removal needs its remove_by', async () => {
     // A floor naming a broken guarantee is refused at once: under the cooperative policy
     // `no-runner-lands`'s policy conditions do not hold (the owner is the approver in force).
@@ -164,16 +175,14 @@ describe('S-BTN-190 guarantees and floors', () => {
     expect(brokenEarly.json.code).toBe('floor-violated');
     await protectedSigned();
     // The floor: Fieldhouse's four (R-FH-3's mode, named as the deployment knows them).
-    // Under `protected-signed` (`human_key: hardware`), the human entries are met only by a
-    // hardware key (B-136's build) or the break-glass one — the deployment's root of trust is
-    // the human_only key that acts here (R-BTN-185).
-    const floor = await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['no-runner-lands', 'independent-review', 'signed-authorship', 'human-gates-hardware'] });
+    // The attested human owner meets the hardware minimum.
+    const floor = await as(human, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['no-runner-lands', 'independent-review', 'signed-authorship', 'human-gates-hardware'] });
     expect(floor.status).toBe(200);
     // A change admitting runner to refs.default_branch (or refs.other) is refused floor-violated.
     const { version, doc } = await current();
     const admitRunner = (refs: string[]) => ({ ...doc, refs: { ...doc.refs, default_branch: refs } });
     for (const refs of [['runner', 'trusted-runner', 'human'], ['trusted-runner', 'human', 'runner']] as const) {
-      const refused = await as(breakGlass, '/v1/owner/ops/policy', { base_version: version, policy: admitRunner([...refs]) }, 'PUT');
+      const refused = await as(human, '/v1/owner/ops/policy', { base_version: version, policy: admitRunner([...refs]) }, 'PUT');
       expect(refused.status).toBe(409);
       expect(refused.json.code).toBe('floor-violated');
       expect(refused.json.floor).toBe('fieldhouse');
@@ -181,20 +190,20 @@ describe('S-BTN-190 guarantees and floors', () => {
     }
     // A second floor with the name conflicts (the floors are judged on the policy alone, so
     // the fieldhouse four hold without any report — R-BTN-189).
-    const again = await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['human-gates'] });
+    const again = await as(human, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['human-gates'] });
     expect(again.status).toBe(409);
     expect(again.json.code).toBe('conflict');
     // Removal: an owner key is refused (remove_by: human), a human_only key accepted.
     const byOwner = await as(owner, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', remove: true, confirm: true });
     expect(byOwner.status).toBe(403);
-    const byHuman = await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', remove: true, confirm: true });
+    const byHuman = await as(human, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', remove: true, confirm: true });
     expect(byHuman.status).toBe(200);
     expect((await rows('SELECT count(*) AS n FROM policy_floors WHERE repository_id = ? AND name = ?', 'ops', 'fieldhouse'))[0].n).toBe(0);
   });
 
   it('a report that no longer matches raises baton.unprotected, releases the claim released:floor, and refuses claims floor-broken until a matching report', async () => {
     await protectedSigned();
-    await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['no-runner-lands', 'independent-review', 'signed-authorship', 'human-gates-hardware'] });
+    await as(human, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['no-runner-lands', 'independent-review', 'signed-authorship', 'human-gates-hardware'] });
     // A claim to lose: the runner holds one while the checker still reports a match.
     await checkerBeat('ops', true, 'reading-1');
     const claim = await claimAsRunner();
@@ -234,7 +243,7 @@ describe('S-BTN-190 guarantees and floors', () => {
 
   it('a report lapsed past 24 hours raises baton.unprotected and stops the repository until a fresh report', async () => {
     await protectedSigned();
-    await as(breakGlass, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['no-runner-lands', 'independent-review', 'signed-authorship', 'human-gates-hardware'] });
+    await as(human, '/v1/owner/ops/policy/floors', { name: 'fieldhouse', guarantees: ['no-runner-lands', 'independent-review', 'signed-authorship', 'human-gates-hardware'] });
     await checkerBeat('ops', true, 'reading-1');
     // R-BTN-189 (round 1, finding 7): a report lapsed past its 24 hours raises
     // `baton.unprotected` all the same as a failed one — the alarm's floor sweep opens it. (No
