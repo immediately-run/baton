@@ -697,7 +697,10 @@ export class Runner {
   private declaringList(): string[] {
     const base = this.declared ?? this.o.capabilities ?? [];
     const locks = this.locks;
-    return locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
+    const held = locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
+    // Only a runner forwarding the applied answer and prior claim ends may take legs needing them.
+    return this.o.courses.some((c) => c.course === 'create-pr' && c.version >= 2)
+      ? [...new Set([...held, 'runner:claim-evidence'])] : held;
   }
 
   private async beatOnce(): Promise<void> {

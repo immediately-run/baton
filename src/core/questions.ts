@@ -271,6 +271,7 @@ export class Questions {
     if (!g || leg == null || !def?.person) {
       return bad(value.leg ? `the answer names ${value.leg}, which is not a person leg of ${where.course}` : `${id} has no queued leg to answer`);
     }
+    if (who.by === 'sync' && def.answerSource === 'person') return aside('this leg requires an answer directly from a person');
     const stored = this.rows<QuestionRow>('SELECT * FROM ticket_questions WHERE ticket_id = ?', id)[0] ?? null;
     // The row holds one ask at a time; its answer closes the ask it names. A row closed over a
     // previous leg does not close this one — the ticket queued this leg after that answer.
@@ -460,6 +461,7 @@ export class Questions {
       this.c.history?.record(id, { kind: 'fact-arrival', leg, reached: option.reached, next_leg: next[0] ?? null, detail: { option: option.id, answered_by: meta.by, ...(meta.ref ? { ref: meta.ref } : {}) } });
       this.c.history?.record(id, { kind: 'question-answered', leg, detail: { option: option.id, answered_by: meta.by } });
     }
+    if (next[0] === leg) this.exec('DELETE FROM ticket_questions WHERE ticket_id = ?', id);
     this.c.queued?.(id);
     this.c.reevaluate?.(id);
     this.c.dispatch?.('sync', id);

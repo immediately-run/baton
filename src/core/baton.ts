@@ -2214,6 +2214,7 @@ export class BatonCore {
    *  every course the post's tickets name must be in force — a refused file with none to keep,
    *  or a course the registry dropped while a ticket still names it, refuses the post. */
   private applyRegistry(r: string, p: BoardPayload, ticketCourses: string[], at: number): string[] {
+    const previous = new Map((p.registry ?? []).map((e) => [e.id, this.stations.graph(r, e.id)]));
     const refused = p.registry ? this.courses.apply(r, p.registry, p.sha, at) : [];
     this.stations.reset();
     this.requireCoursesInForce(r, ticketCourses);
@@ -2222,7 +2223,7 @@ export class BatonCore {
       if (refused.includes(e.id)) continue;
       this.claims.renameActive(r, e.id);
       // R-BTN-83: a ticket queued for a leg the accepted file no longer has there waits on course-changed.
-      this.stations.recheckCourse(r, e.id);
+      this.stations.recheckCourse(r, e.id, previous.get(e.id) ?? null);
     }
     // R-BTN-79: every course in force — accepted now or kept over a refused file — has its renamed
     // legs' tickets moved and each leg's bound judged against the row's, so a bound never waits on

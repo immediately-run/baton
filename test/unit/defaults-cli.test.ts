@@ -12,7 +12,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { courseSchemas, githubFacts, initMain, parseSyncArgs, plainGitRemote, remoteSlug, syncMain, syncWorkflow } from '../../src/defaults/cli';
-import type { Transport } from '../../src/runner/api';
+import { BatonApi, type Transport } from '../../src/runner/api';
+import { Runner } from '../../src/runner/runner';
+import { call as hostCall } from '#host';
+import { advance, claimItem, claimRow, cutover, endClaim, keyCall, ORIGIN, register, rows, setAdminKeys, setClock, syncToken, TOKENS } from '../helpers';
+import { makeKey } from '../lib/sshKeys';
 import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
@@ -62,6 +66,82 @@ const load = async (file: string) => import(`${pathToFileURL(file).href}?t=${Mat
 /** A scaffolded leg stub's text: which close it routes to is what the stub's source says. */
 const stubSourceOf = (root: string, course: string, leg: string): string =>
   readFileSync(join(root, '.baton', 'courses', course, 'legs', `${leg}.mjs`), 'utf8');
+
+it('S-BTN-232: an owner returns a delivery, then confirms the next one; the runner pushes and sync closes it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'baton-s232-'));
+  const root = join(dir, 'home');
+  const remote = join(dir, 'origin');
+  const factsFile = join(dir, 'facts.json');
+  const g = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const logs: string[] = [];
+  try {
+    gitInit(root);
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote]);
+    g('remote', 'add', 'origin', remote);
+    for (const file of ['.baton/baton.json', '.baton/courses/create-pr/course.json', '.baton/courses/create-pr/legs/archive.mjs']) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      copyFileSync(join(ROOT, file), join(root, file));
+    }
+    mkdirSync(join(root, 'tickets/nested'), { recursive: true });
+    writeFileSync(join(root, 'tickets/nested/Delivery.MD'), '---\nid: B-1\nstatus: available\n---\nSee [work](../../evidence.txt).\n');
+    writeFileSync(factsFile, '[]');
+    const first = commitAll(root);
+    g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+    const admin = await makeKey('ssh-ed25519', 'admin');
+    const owner = await makeKey('ssh-ed25519', 'owner');
+    await setClock(Date.now() - 1_000);
+    await setAdminKeys(admin);
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
+    const sync = async () => expect(await syncMain({ root, url: ORIGIN, token: await syncToken(), latest: 'main', factsFile,
+      transport: hostCall, log: (line) => logs.push(line),
+    }), logs.join('\n')).toBe(0);
+    await sync();
+    await cutover();
+    const w = await register('vm-a', { courses: [{ repository: 'docs', course: 'create-pr', version: 2 }] });
+    const delivered = async (sha: string) => {
+      const { json: c } = await claimItem('vm-a', w.secret, { ticket_id: 'docs:B-1' });
+      expect(c).toMatchObject({ station: 'filed', legs: ['implement'] });
+      expect((await advance('vm-a', w.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
+      expect((await endClaim('vm-a', w.secret, c.claim_id, { end_reason: 'suspended:delivered', reached: 'delivered', next: 'confirm', ended_at_sha: sha,
+        detail: `delivered at ${sha.slice(0, 10)}: verified work`,
+      })).status).toBe(200);
+      await sync();
+    };
+    const answer = (option: string) => keyCall(owner, '/v1/repositories/docs/attestations', { type: 'std:decision@1', subject: { ticket: 'B-1' }, value: { option } });
+    await delivered(first);
+    expect((await answer('filed')).status).toBe(200);
+    expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(first);
+    expect(await rows('SELECT closed_as FROM closed_tickets WHERE ticket_id = ?', 'docs:B-1')).toEqual([]);
+    writeFileSync(join(root, 'evidence.txt'), 'Second delivery\n');
+    const second = commitAll(root);
+    g('push', '-q', 'origin', 'HEAD:refs/heads/main');
+    await sync();
+    await delivered(second);
+    expect((await answer('confirmed')).status).toBe(200);
+    const api = new BatonApi({ url: ORIGIN, transport: hostCall, client: 'baton/0.1.5',
+      auth: (_method, _url, _body, secret) => ({ Authorization: `Bearer ${TOKENS['vm-b']}`, ...(secret ? { 'X-Runner-Secret': secret } : {}) }),
+    });
+    const runner = new Runner({ api, home: root, repository: 'docs', hostname: 'vm-b', harness: 'opencode', session: 's232-archive',
+      courses: [{ course: 'create-pr', version: 2 }], stateFile: join(dir, 'runner.json'), clonesDir: join(dir, 'clones'),
+      beatEvery: 60_000, log: (line) => logs.push(line),
+    });
+    const outcome = await runner.runOnce();
+    expect(outcome, logs.join('\n')).toMatchObject({ ticket: 'docs:B-1', end_reason: 'done' });
+    const archive = g('ls-remote', 'origin', 'refs/heads/main').split(/\s/)[0];
+    expect(g('rev-parse', `${archive}^`)).toBe(second);
+    expect(g('show', '-s', '--format=%B', archive)).toBe(`tickets: B-1 done (archived)\n\nDelivered by: ${second}`);
+    expect(g('show', `${archive}:tickets/archive/nested/Delivery.MD`)).toContain('status: done');
+    expect(g('show', `${archive}:tickets/archive/nested/Delivery.MD`)).toContain('[work](../../../evidence.txt)');
+    const [claim] = await rows<{ id: number; ended_at_sha: string; confirmed_at: number | null }>(
+      `SELECT id, ended_at_sha, confirmed_at FROM claims WHERE ticket_id = ? AND end_reason = 'done'`, 'docs:B-1');
+    expect(claim).toMatchObject({ ended_at_sha: archive, confirmed_at: null });
+    await sync();
+    expect(await rows('SELECT closed_as FROM closed_tickets WHERE ticket_id = ?', 'docs:B-1')).toEqual([{ closed_as: 'done' }]);
+    expect((await claimRow(claim.id)).confirmed_at).not.toBeNull();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 30_000);
 
 
 describe('parseSyncArgs', () => {
@@ -597,7 +677,7 @@ describe('baton repo init, through the built CLI', () => {
     expect(settings.agent_command).not.toMatch(/[<>|]/);
     expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_runner_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm', 'archive'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 2, min_runner_version: 2, skill: 'baton-create-pr', step_kinds: ['implement', 'run-tests', 'review', 'fix', 'adjudicate', 'merge', 'confirm', 'archive'], branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -784,9 +864,10 @@ describe('baton repo init, through the built CLI', () => {
       mkdirSync(join(checkout, '.baton'));
       writeFileSync(join(checkout, '.baton/baton.json'), JSON.stringify({ items: 'tickets', ticket_prefix: 'B' }));
       const first = commitAll(checkout);
-      mkdirSync(join(checkout, 'tickets'));
-      const path = 'tickets/B-1.mdx';
-      writeFileSync(join(checkout, path), '---\nid: B-1\nstatus: available\n---\nSee [docs](../docs/file.md).\n');
+      mkdirSync(join(checkout, 'tickets/nested'), { recursive: true });
+      const path = 'tickets/nested/Delivery [1].MD';
+      const archived = 'tickets/archive/nested/Delivery [1].MD';
+      writeFileSync(join(checkout, path), '---\nid: B-1\nstatus: available\n---\nSee [docs](../../docs/file.md).\n');
       const second = commitAll(checkout);
       g('push', '-q', 'origin', 'HEAD:refs/heads/main');
       const stub = await load(join(root, '.baton/courses/create-pr/legs/archive.mjs'));
@@ -811,10 +892,14 @@ describe('baton repo init, through the built CLI', () => {
       expect(g('ls-remote', 'origin', 'refs/heads/main')).toContain(sha);
       expect(g('rev-parse', `${sha}^`)).toBe(second);
       expect(g('log', '-1', '--format=%B', sha)).toBe(`tickets: B-1 done (archived)\n\nDelivered by: ${first}, ${second}`);
-      expect(g('show', `${sha}:tickets/archive/B-1.mdx`)).toContain('status: done');
-      expect(g('show', `${sha}:tickets/archive/B-1.mdx`)).toContain('[docs](../../docs/file.md)');
-      expect(g('ls-tree', sha, path)).toBe('');
+      expect(g('show', `${sha}:${archived}`)).toContain('status: done');
+      expect(g('show', `${sha}:${archived}`)).toContain('[docs](../../../docs/file.md)');
+      expect(g('--literal-pathspecs', 'ls-tree', sha, '--', path)).toBe('');
       expect(g('rev-parse', 'HEAD')).toBe(second);
+      g('switch', '--detach', sha);
+      writeFileSync(join(checkout, archived), `${g('show', `${sha}:${archived}`)}\nA later edit.\n`);
+      commitAll(checkout);
+      g('push', '-q', 'origin', 'HEAD:refs/heads/main');
       expect(await stub.close(ctx, result)).toBe(sha);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -1692,7 +1777,7 @@ describe('baton repo init, through the built CLI', () => {
       baton(root, 'repo', 'init', '--pin', PIN, '--force');
       const forced = JSON.parse(readFileSync(settingsFile, 'utf8'));
       expect(forced).toMatchObject({ repos: { docs: 'o/docs' }, agent_command: 'my-agent', default_course: 'create-pr' });
-      expect(forced.courses.map((c: { id: string; version: number }) => [c.id, c.version])).toEqual([['create-pr', 1], ['bug-report', 1]]);
+      expect(forced.courses.map((c: { id: string; version: number }) => [c.id, c.version])).toEqual([['create-pr', 2], ['bug-report', 1]]);
       expect(readFileSync(stub, 'utf8')).not.toContain('// edited by hand');
     } finally {
       writeFileSync(settingsFile, settings);

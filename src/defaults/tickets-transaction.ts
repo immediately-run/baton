@@ -6,8 +6,9 @@ import { dirname, join } from 'node:path';
 import { resolveDelivered } from './pr-verify';
 import { ticketsBranch } from './ticket-state';
 import { accepts, GITHUB_PR, readTicketSettings, type TicketSettings } from './tickets-config';
-import { addPr, locate, setKey } from './tickets-file';
+import { addPr, setKey } from './tickets-file';
 import { parseFrontmatter } from './tickets-markdown';
+import { readItems } from './read-items';
 
 /** The most tries one command makes when the default branch moves under it: the stopgap's. */
 export const TICKET_TRIES = 6;
@@ -108,7 +109,7 @@ export function transact(root: string, io: TicketTransactionIo, describe: string
       }
       // The paths this command touched, and nothing else: the worktree is a fresh checkout of
       // the fetched head, so nothing else in it is this command's to commit.
-      git(dir, 'add', '-A', '--', ...new Set([...write.map((w) => w.path), ...move.map((m) => m.from)]));
+      git(dir, '--literal-pathspecs', 'add', '-A', '--', ...new Set([...write.map((w) => w.path), ...move.map((m) => m.from)]));
       // Nothing to record is a lost race too — a peer pushed this same change first — so it is
       // the next try's, not a failure.
       // Asked, not parsed from a failure: `git diff --cached --quiet` exits 0 when the index
@@ -168,6 +169,18 @@ export const fileAt = (dir: string): ((path: string) => boolean) => (path) => ex
 
 export const acceptedList = (settings: TicketSettings): string => Object.keys(settings.prefixes).sort().map((p) => `${p}…`).join(', ');
 
+/** Never descend through a git symlink, including a dangling link at the destination. */
+function regularDirs(root: string, path: string, missingOk = false): void {
+  const parts = path.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..' || part.toLowerCase() === '.git')) throw new Error(`invalid ticket directory: ${path}`);
+  for (const part of parts) {
+    root = join(root, part);
+    const stat = lstatSync(root, { throwIfNoEntry: false });
+    if (!stat && missingOk) return;
+    if (!stat?.isDirectory()) throw new Error(`not a regular ticket directory: ${path}`);
+  }
+}
+
 /** The one archive transaction, used by tickets done and create-pr's archive close. */
 export function archiveTicket(root: string, io: TicketTransactionIo, id: string, evidence: { pr?: string; delivered?: { path: string; shas: string[] } }): string {
   const { pr, delivered } = evidence;
@@ -177,31 +190,39 @@ export function archiveTicket(root: string, io: TicketTransactionIo, id: string,
   const branch = io.branch ?? ticketsBranch(root, null);
   return transact(root, io, `${id} → done`, (dir) => {
     const settings = settingsAt(dir, remote, branch);
-    if (!accepts(settings, id)) throw new Error(`${id} is not a ticket id of this repository — its ids are ${acceptedList(settings)}`);
+    if (!delivered && !accepts(settings, id)) throw new Error(`${id} is not a ticket id of this repository — its ids are ${acceptedList(settings)}`);
     const items = (settings.items ?? 'tickets').replace(/\/$/, '');
-    const from = `${items}/${id}.mdx`;
-    const to = `${items}/archive/${id}.mdx`;
-    if (delivered && delivered.path !== from) throw new Error(`${id}: archive requires the markdown source's ${from}`);
-    const found = locate(items, id, fileAt(dir));
-    if (!found) throw new Error(`${id}: no ${from} on ${remote}/${branch}`);
-    if (delivered && (!lstatSync(join(dir, found.path)).isFile() || (existsSync(join(dir, items, 'archive')) && !lstatSync(join(dir, items, 'archive')).isDirectory()))) {
-      throw new Error(`${id}: archive requires a regular ticket file and archive directory`);
+    regularDirs(dir, items, true);
+    const matches = readItems(dir, items).filter((f) => /\.mdx?$/i.test(f.path) && parseFrontmatter(f.text)?.id === id);
+    if (!matches.length) throw new Error(`${id}: no ${items}/${id}.mdx on ${remote}/${branch}`);
+    if (matches.length !== 1) throw new Error(`${id}: archive cannot identify a single ticket file`);
+    let { path, text } = matches[0];
+    const archived = path.startsWith('archive/');
+    const from = `${items}/${path}`;
+    const to = `${items}/archive/${path}`;
+    if (delivered && delivered.path !== (archived ? `${items}/${path.slice('archive/'.length)}` : from)) {
+      throw new Error(`${id}: archive requires the markdown source's current ticket path`);
     }
-    let text = readFileSync(join(dir, found.path), 'utf8');
-    const fm = delivered ? parseFrontmatter(text) : null;
-    if (found.archived) {
-      if (fm?.status === 'done' && fm.id === id) {
-        // A prior close may have pushed but lost its reply. Do not write a second commit.
-        return { existing: git(dir, 'log', '-1', '--format=%H', '--', to) };
-      }
-      throw new Error(`${id} is archived (done)`);
-    }
-    if (delivered && (fm?.id !== id || existsSync(join(dir, to)))) throw new Error(`${id}: archive cannot identify a single ticket file`);
     const shas = delivered ? resolveDelivered(delivered.shas, 'HEAD', dir, (_cmd, args, cwd) => git(cwd, ...args)) : [];
+    const subject = `tickets: ${id} done (archived)`;
+    const delivery = `Delivered by: ${shas.join(', ')}`;
+    if (archived) {
+      if (!delivered || parseFrontmatter(text)?.status !== 'done') throw new Error(`${id} is archived (done)`);
+      // Inspect the addition, not the latest edit. The exact evidence distinguishes our push
+      // from a manual archive or another delivery that happened to use the same ticket path.
+      const existing = git(dir, '--literal-pathspecs', 'log', '-1', '--first-parent', '--no-renames', '--diff-filter=A', '--format=%H', '--', from);
+      if (existing) {
+        const [first, , third] = git(dir, 'show', '-s', '--format=%B', existing).split('\n');
+        if (first === subject && third === delivery) return { existing };
+      }
+      throw new Error(`${id}: the archive does not record this delivery`);
+    }
+    regularDirs(dir, dirname(to), true);
+    if (lstatSync(join(dir, to), { throwIfNoEntry: false })) throw new Error(`${id}: archive destination already exists`);
     text = setKey(setKey(text, 'status', 'done'), 'updated', date);
     if (pr) text = addPr(text, pr);
-    const body = shas.length ? `\n\nDelivered by: ${shas.join(', ')}` : pr ? `\n\n${pr}` : '';
-    return { message: `tickets: ${id} done (archived)${body}`, write: [{ path: to, text: deepenRelativeLinks(text) }], move: [{ from, to }] };
+    const body = shas.length ? `\n\n${delivery}` : pr ? `\n\n${pr}` : '';
+    return { message: `${subject}${body}`, write: [{ path: to, text: deepenRelativeLinks(text) }], move: [{ from, to }] };
   });
 }
 

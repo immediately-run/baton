@@ -99,8 +99,8 @@ export const CREATE_PR_COURSE = {
     merge: { from: ['reviewed', 'adjudicated'], to: 'merged', label: 'Merge and close the ticket' },
     // B-257: the person's confirmation — no runner is offered it (R-BTN-116); its options are
     // its outcomes, `confirmed` and `filed`.
-    confirm: { from: ['delivered'], to: ['confirmed', 'filed'], kind: 'person', asks: 'owner', max_runs: 3, label: 'A person confirms it was already delivered' },
-    archive: { from: ['confirmed'], to: 'archived', label: 'Archive the confirmed ticket' },
+    confirm: { from: ['delivered'], to: ['confirmed', 'filed'], kind: 'person', asks: 'owner', answer_source: 'person', max_runs: 3, label: 'A person confirms it was already delivered' },
+    archive: { from: ['confirmed'], to: 'archived', requires: { capabilities: ['runner:claim-evidence'] }, label: 'Archive the confirmed ticket' },
   },
 };
 

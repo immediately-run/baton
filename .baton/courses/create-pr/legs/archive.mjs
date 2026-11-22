@@ -1,13 +1,13 @@
 // generated archive entry
 import { execFileSync as execFileSync3 } from "node:child_process";
-import { mkdtempSync as mkdtempSync2, readdirSync, rmSync as rmSync2, statSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { mkdtempSync as mkdtempSync2, readdirSync as readdirSync2, rmSync as rmSync2, statSync, writeFileSync as writeFileSync2 } from "node:fs";
 import { tmpdir as tmpdir2 } from "node:os";
 import { join as join4 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/defaults/tickets-transaction.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
-import { existsSync as existsSync3, lstatSync, mkdirSync, mkdtempSync, readFileSync as readFileSync2, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync as existsSync3, lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join as join3 } from "node:path";
 
@@ -197,15 +197,6 @@ function accepts(settings, id) {
 }
 
 // src/defaults/tickets-file.ts
-import { existsSync as existsSync2 } from "node:fs";
-import { join as join2 } from "node:path";
-function locate(items, id, has = (p) => existsSync2(p)) {
-  for (const [sub, archived] of [[items, false], [join2(items, "archive"), true]]) {
-    const path = join2(sub, `${id}.mdx`);
-    if (has(path)) return { path, archived };
-  }
-  return null;
-}
 var fenceOf = (text) => {
   const m = /^---\r?\n([\s\S]*?)\r?\n---(?=\r?\n|$)/.exec(text);
   return m ? { lines: m[1].split(/\r?\n/), rest: text.slice(m[0].length) } : null;
@@ -232,6 +223,15 @@ function addPr(text, url) {
   return `---
 ${lines.join("\n")}
 ---${fence.rest}`;
+}
+
+// src/defaults/read-items.ts
+import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2 } from "node:fs";
+import { join as join2, relative, sep } from "node:path";
+function readItems(root, items = "tickets") {
+  const dir = join2(root, items);
+  if (!existsSync2(dir)) return [];
+  return readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => relative(dir, join2(e.parentPath, e.name)).split(sep).join("/")).sort().map((path) => ({ path, text: readFileSync2(join2(dir, path), "utf8") }));
 }
 
 // src/defaults/tickets-transaction.ts
@@ -280,7 +280,7 @@ function transact(root, io, describe, change) {
         mkdirSync(dirname(join3(dir, w.path)), { recursive: true });
         writeFileSync(join3(dir, w.path), w.text);
       }
-      git(dir, "add", "-A", "--", .../* @__PURE__ */ new Set([...write.map((w) => w.path), ...move.map((m) => m.from)]));
+      git(dir, "--literal-pathspecs", "add", "-A", "--", .../* @__PURE__ */ new Set([...write.map((w) => w.path), ...move.map((m) => m.from)]));
       const staged = (() => {
         try {
           git(dir, "diff", "--cached", "--quiet");
@@ -321,8 +321,17 @@ function transact(root, io, describe, change) {
   throw new Error(`${describe}: no transaction attempt completed`);
 }
 var settingsAt = (dir, remote, branch) => readTicketSettings(dir, `${remote}/${branch}`);
-var fileAt = (dir) => (path) => existsSync3(join3(dir, path));
 var acceptedList = (settings) => Object.keys(settings.prefixes).sort().map((p) => `${p}\u2026`).join(", ");
+function regularDirs(root, path, missingOk = false) {
+  const parts = path.split("/");
+  if (parts.some((part) => !part || part === "." || part === ".." || part.toLowerCase() === ".git")) throw new Error(`invalid ticket directory: ${path}`);
+  for (const part of parts) {
+    root = join3(root, part);
+    const stat = lstatSync(root, { throwIfNoEntry: false });
+    if (!stat && missingOk) return;
+    if (!stat?.isDirectory()) throw new Error(`not a regular ticket directory: ${path}`);
+  }
+}
 function archiveTicket(root, io, id, evidence) {
   const { pr, delivered } = evidence;
   if (pr != null && !GITHUB_PR.test(pr)) throw new Error(`--pr ${pr} is not a GitHub pull request URL`);
@@ -331,34 +340,41 @@ function archiveTicket(root, io, id, evidence) {
   const branch = io.branch ?? ticketsBranch(root, null);
   return transact(root, io, `${id} \u2192 done`, (dir) => {
     const settings = settingsAt(dir, remote, branch);
-    if (!accepts(settings, id)) throw new Error(`${id} is not a ticket id of this repository \u2014 its ids are ${acceptedList(settings)}`);
+    if (!delivered && !accepts(settings, id)) throw new Error(`${id} is not a ticket id of this repository \u2014 its ids are ${acceptedList(settings)}`);
     const items = (settings.items ?? "tickets").replace(/\/$/, "");
-    const from = `${items}/${id}.mdx`;
-    const to = `${items}/archive/${id}.mdx`;
-    if (delivered && delivered.path !== from) throw new Error(`${id}: archive requires the markdown source's ${from}`);
-    const found = locate(items, id, fileAt(dir));
-    if (!found) throw new Error(`${id}: no ${from} on ${remote}/${branch}`);
-    if (delivered && (!lstatSync(join3(dir, found.path)).isFile() || existsSync3(join3(dir, items, "archive")) && !lstatSync(join3(dir, items, "archive")).isDirectory())) {
-      throw new Error(`${id}: archive requires a regular ticket file and archive directory`);
+    regularDirs(dir, items, true);
+    const matches = readItems(dir, items).filter((f) => /\.mdx?$/i.test(f.path) && parseFrontmatter(f.text)?.id === id);
+    if (!matches.length) throw new Error(`${id}: no ${items}/${id}.mdx on ${remote}/${branch}`);
+    if (matches.length !== 1) throw new Error(`${id}: archive cannot identify a single ticket file`);
+    let { path, text } = matches[0];
+    const archived = path.startsWith("archive/");
+    const from = `${items}/${path}`;
+    const to = `${items}/archive/${path}`;
+    if (delivered && delivered.path !== (archived ? `${items}/${path.slice("archive/".length)}` : from)) {
+      throw new Error(`${id}: archive requires the markdown source's current ticket path`);
     }
-    let text = readFileSync2(join3(dir, found.path), "utf8");
-    const fm = delivered ? parseFrontmatter(text) : null;
-    if (found.archived) {
-      if (fm?.status === "done" && fm.id === id) {
-        return { existing: git(dir, "log", "-1", "--format=%H", "--", to) };
-      }
-      throw new Error(`${id} is archived (done)`);
-    }
-    if (delivered && (fm?.id !== id || existsSync3(join3(dir, to)))) throw new Error(`${id}: archive cannot identify a single ticket file`);
     const shas = delivered ? resolveDelivered(delivered.shas, "HEAD", dir, (_cmd, args, cwd) => git(cwd, ...args)) : [];
+    const subject = `tickets: ${id} done (archived)`;
+    const delivery = `Delivered by: ${shas.join(", ")}`;
+    if (archived) {
+      if (!delivered || parseFrontmatter(text)?.status !== "done") throw new Error(`${id} is archived (done)`);
+      const existing = git(dir, "--literal-pathspecs", "log", "-1", "--first-parent", "--no-renames", "--diff-filter=A", "--format=%H", "--", from);
+      if (existing) {
+        const [first, , third] = git(dir, "show", "-s", "--format=%B", existing).split("\n");
+        if (first === subject && third === delivery) return { existing };
+      }
+      throw new Error(`${id}: the archive does not record this delivery`);
+    }
+    regularDirs(dir, dirname(to), true);
+    if (lstatSync(join3(dir, to), { throwIfNoEntry: false })) throw new Error(`${id}: archive destination already exists`);
     text = setKey(setKey(text, "status", "done"), "updated", date);
     if (pr) text = addPr(text, pr);
     const body = shas.length ? `
 
-Delivered by: ${shas.join(", ")}` : pr ? `
+${delivery}` : pr ? `
 
 ${pr}` : "";
-    return { message: `tickets: ${id} done (archived)${body}`, write: [{ path: to, text: deepenRelativeLinks(text) }], move: [{ from, to }] };
+    return { message: `${subject}${body}`, write: [{ path: to, text: deepenRelativeLinks(text) }], move: [{ from, to }] };
   });
 }
 function deepenRelativeLinks(text) {

@@ -64,7 +64,7 @@ const STARTS_FROM = new Set(['request']);
 const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
 const ENTRY_KEYS = new Set(['output', 'schema']);
 const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
-  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires', 'conditions', 'autonomous', 'spawns']);
+  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'answer_source', 'expires', 'conditions', 'autonomous', 'spawns']);
 /** R-BTN-116: the one kind a leg may be today — `person`, a leg a person answers by a
  *  `std:decision@1`. A `call` leg (R-BTN-165) is not built, so a file carrying one is refused
  *  rather than kept unread. */
@@ -336,6 +336,7 @@ export function validateCourse(json: unknown): CourseViolation[] {
     if ('asks' in l && (typeof l.asks !== 'string' || !ASKS_LABEL.test(l.asks))) add('shape', `${at}.asks`, `asks is a label of who answers (${ASKS_LABEL.source}, R-BTN-116)`);
     if (person && !('asks' in l)) add('shape', `${at}.asks`, 'a person leg says who answers: asks is required on kind: person (R-BTN-116)');
     if ('asks' in l && !person) add('shape', `${at}.asks`, 'asks sits only on a kind: person leg (R-BTN-116)');
+    if ('answer_source' in l && (!person || l.answer_source !== 'person')) add('shape', `${at}.answer_source`, 'only a person leg may set answer_source: person (R-BTN-116)');
     if ('expires' in l) {
       const e = l.expires;
       const at2 = `${at}.expires`;

@@ -23,7 +23,7 @@
     {
       "id": "create-pr",
       "version": 2,
-      "min_runner_version": 1,
+      "min_runner_version": 2,
       "skill": "baton-create-pr",
       "step_kinds": [
         "implement",

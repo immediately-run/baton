@@ -19,7 +19,7 @@ import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { API_KEY, signingKey } from '../../cli/sign.mjs';
-import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
+import { CREATE_PR_COURSE, DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type CodeRepoEntry, type PrFact, type StationsResult } from './course-pr';
 import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
@@ -171,7 +171,8 @@ const defaultSkill = (course: string): string => `baton-${course}`;
  * them where the spec says rather than discovering them. Never `min_worker_version`: init
  * writes the new name only; the window is on the read (above). */
 function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source' | 'min_worker_version'>> {
-  return { id: course, version: 1, min_runner_version: 1, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
+  const version = course === 'create-pr' ? 2 : 1;
+  return { id: course, version, min_runner_version: version, skill: defaultSkill(course), step_kinds: legs, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
 export interface SyncArgs {
@@ -2060,6 +2061,14 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // An entry whose source names another course than its id is the sync's to refuse, not init's to move.
     return sameRepo(src, self) && src.ref !== self.sha && src.course === c.id && builtIn(src.course) != null;
   };
+  const moveSource = (c: CourseEntry): CourseEntry => {
+    const source = sourceOf(c.id)!;
+    if (c.id !== 'create-pr') return { ...c, source };
+    const { min_worker_version, ...rest } = c;
+    const min_runner_version = Math.max(2, c.min_runner_version ?? min_worker_version ?? c.version);
+    return { ...rest, source, version: Math.max(2, c.version), min_runner_version,
+      step_kinds: [...new Set([...(c.step_kinds ?? []), ...Object.keys(CREATE_PR_COURSE.legs)])] };
+  };
   /** The sources name this CLI's repository at its commit, whose registry writes the files; a
    * workflow pinned to another repository or commit would run a CLI that refuses them
    * (checkSource). So a --pin that differs is refused — before any write — whenever the courses
@@ -2077,7 +2086,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     refusePin(courses);
     const movedHere = courses.filter(moves).map((c) => c.id);
     if (movedHere.length) {
-      writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: courses.map((c) => (moves(c) ? { ...c, source: sourceOf(c.id)! } : c)) }, null, 2)}\n`);
+      writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: courses.map((c) => (moves(c) ? moveSource(c) : c)) }, null, 2)}\n`);
       for (const id of movedHere) await scaffold(builtIn(id)!, true);
       log(`baton: ${movedHere.join(', ')} now from ${self!.sha.slice(0, 10)}`);
     }
@@ -2105,7 +2114,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
       if (moves(c)) {
         moved.push(c.id);
         if (c.id === b.id) rewriteNamed = true;
-        return { ...c, source: sourceOf(parseSource(c.source!).course)! };
+        return moveSource(c);
       }
       return c;
     });

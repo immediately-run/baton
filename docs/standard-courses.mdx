@@ -86,11 +86,14 @@ runner-main.test.ts 47 passed, typecheck clean`. The stub fetches the default br
 every named commit is on it; one that is not refuses the answer and fails the leg. Otherwise the
 leg reaches `delivered` — an outcome, not a failed attempt — with the commit as the end's
 evidence and the line as its detail, shown on the ticket's history. There the person leg
-`confirm` waits for the owner under Needs you. `baton decision answer <repository>:<ticket>
-confirmed` queues the deterministic `archive` leg; `filed` sends it back to `implement` without
-writing to git. `archive` uses the same transaction as `baton tickets done <ticket>` to mark the
+`confirm` waits for a direct answer from the owner under Needs you; an answer in git does not
+count. `baton decision answer <repository>:<ticket> confirmed` queues the deterministic `archive`
+leg; `filed` sends it back to `implement` without writing to git and another delivery opens a
+fresh question. `archive` uses the same transaction as `baton tickets done <ticket>` to mark the
 ticket `done`, move it to `archive/`, and rewrite its relative links. The one commit names the
-delivered commits, and Baton ends at `archived` without another person step. The agent's word
+latest delivery's commits, and the next sync observes the closure without another person step.
+Upgrade Baton before posting the new course, and use a runner that declares
+`runner:claim-evidence` for the archive leg. The agent's word
 alone never closes a ticket. If the commit list cannot fit in the end record, the delivered
 answer is refused rather than silently dropping commit ids.
 
