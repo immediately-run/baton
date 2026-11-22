@@ -1,5 +1,6 @@
 // sync.ts — accepting a repository's board post and reading its sync record.
 import type { BatonCore } from './baton';
+import type { Dispatch, DispatchTarget, Workflow } from './ports';
 import { DEFAULT_COURSE, resolveParents, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation, type TicketRow } from './board';
 import { BatonError } from './http';
 import { familyOf } from '../shared/baton.mjs';
@@ -30,18 +31,29 @@ export function head(core: Pick<BatonCore, 'sql'>, repo: string) {
   return { sha: headOf(core, repo), unconfirmed };
 }
 
-export async function board(core: BoardPostCore, repo: Repository, p: BoardPayload) {
+/**
+ * `POST /v1/sync/board` (R-BTN-11): accepted only when `parent_sha` is the current head (or
+ * null while there is none); a lost race is `head-moved`. `force` — a rewritten `main` — is
+ * held for the owner as a `snapshot-rejected` event and moves nothing else; accepting it
+ * is the alarm's and the dashboard's job (R3-1212). A repeat of the head is a no-op.
+ *
+ * `held_snapshots` holds one row per hold, against the current head (R3-1223): rows held
+ * against a head are deleted when the head moves, so a later force post of the same sha —
+ * a rewind to a once-accepted history included — is a fresh hold with a fresh row. The 0001
+ * schema's "written once" and "the first force post" describe that one hold.
+ */
+export async function board(core: BoardPostCore, repo: Repository, p: BoardPayload, hashRows: typeof rowsFor) {
   // Course graphs are read per post: a registry applied, or a post refused after applying one,
   // must not leave another request reading a graph that is not in force.
   core.stations.reset();
   try {
-    return await boardPost(core, repo, p);
+    return await boardPost(core, repo, p, hashRows);
   } finally {
     core.stations.reset();
   }
 }
 
-async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload) {
+async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload, hashRows: typeof rowsFor) {
   const r = repo.id;
   // R-BTN-62: the post's number is used first, whatever becomes of the post; an older reading
   // than the last accepted one, or a void or used number, is refused whole here.
@@ -150,7 +162,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload)
     // source's versions are blob ids, so no version changes without a new commit and its
     // refreshes still write no ticket row.
     const readAtHead = normative && p.read_sha === p.sha;
-    const refreshed = readAtHead ? await rowsFor(repo, p) : null;
+    const refreshed = readAtHead ? await hashRows(repo, p) : null;
     return core.store.transaction(() => {
       // The row hashes were awaited after the number was used, so another run may have posted
       // meanwhile (round 1, finding 2): this reading must still be the newest, over the head it
@@ -198,7 +210,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload)
   if (!accepted && p.parent_sha !== head) throw new BatonError('head-moved', `the head is ${head ?? 'unset'}; re-read it and retry`);
 
   // Hash every row before the transaction: the digest is async, the transaction is not.
-  const rows = await rowsFor(repo, p);
+  const rows = await hashRows(repo, p);
   const changed: { upserted: number; deleted: number; renumbered?: { from: string; to: string; key: string }[]; confirmed?: number; stale_released?: number; courses_refused?: string[]; fleet_ignored?: boolean; dropped?: string[] } = { upserted: 0, deleted: 0 };
   core.store.transaction(() => {
     // The row hashes were awaited after the number was used, so another run may have posted
@@ -360,7 +372,7 @@ function notePositionDisagreements(core: Pick<BatonCore, 'sql' | 'history'>, r: 
  *  rewrites its row (B-183). The interim post's items (docs until R3-1233) become rows the
  *  same way; only a refresh skips materialization for them (§4.3: the interim post carries no
  *  versions, and its refreshes change no ticket). */
-async function rowsFor(repo: Repository, p: BoardPayload): Promise<{ row: TicketRow; hash: string }[]> {
+export async function rowsFor(repo: Repository, p: BoardPayload): Promise<{ row: TicketRow; hash: string }[]> {
   const rankOf = new Map((p.ready ?? []).map((id, i) => [id, i]));
   const posted = p.tickets !== undefined
     ? p.tickets.map(rowForTicket)
@@ -678,3 +690,37 @@ function event(core: Pick<BatonCore, 'store'>, repo: string, kind: string, detai
   core.store.exec('INSERT INTO events (at, kind, actor, detail_json, repository_id) VALUES (?, ?, ?, ?, ?)', at, kind, 'sync', JSON.stringify(detail), repo);
 }
 
+
+/** §10.3: a repository's sync or mirror workflow, on its default branch. A repository with no
+ *  mirror has nothing to dispatch for it; a retired one has nothing at all (R-BTN-47, B-173). A
+ *  dispatch the forge refuses is logged with its reason (R-BTN-94): the want it answers stands
+ *  until a post answers it, so a refusal costs latency, never correctness. */
+export async function sendDispatch(core: Pick<BatonCore, 'registry' | 'sql' | 'store' | 'now'>, dispatch: Dispatch, wf: Workflow): Promise<unknown> {
+  const repo = core.registry.live(wf.repository);
+  if (!repo) return false;
+  let target: DispatchTarget | null = null;
+  if (wf.kind === 'unblocked') {
+    // R-BTN-77: one input, `tickets`, JSON — every id and ref in it passed its rule (§10.4). Only
+    // the GitHub App's dispatch is built here; GitLab's and Gitea's adapters are R3-1263's.
+    const trigger = core.sql<{ t: string | null }>('SELECT unblocked_trigger AS t FROM repositories WHERE id = ?', wf.repository)[0]?.t;
+    const t = trigger ? (JSON.parse(trigger) as { kind: string; workflow?: string }) : null;
+    if (t?.kind !== 'github-app' || !t.workflow) return false;
+    // R-BTN-94 (B-168): Baton reads no workflow file — one declaring no manual dispatch, or no
+    // `tickets` input, is the forge's to refuse at dispatch, and the refusal is logged below.
+    target = { github: repo.github, workflow: t.workflow.slice(t.workflow.lastIndexOf('/') + 1), ref: repo.default_branch, inputs: { tickets: JSON.stringify(wf.tickets ?? []) } };
+  } else {
+    const path = wf.kind === 'sync' ? repo.sync_workflow : repo.mirror_workflow;
+    if (!path) return false;
+    target = { github: repo.github, workflow: path.slice(path.lastIndexOf('/') + 1), ref: repo.default_branch };
+  }
+  try {
+    return await dispatch.send(target);
+  } catch (e) {
+    // R-BTN-94: the forge's refusal, with its reason — identifiers only, never a body (the
+    // refusal's message is the forge's own words, capped like a notice's).
+    core.store.transaction(() => logEvent(core.store, core.now(), 'discrepancy', 'baton',
+      { kind: 'dispatch-refused', repository: wf.repository, workflow: wf.kind, reason: (e instanceof Error ? e.message : String(e)).slice(0, 500) },
+      null, null, wf.repository));
+    return false;
+  }
+}

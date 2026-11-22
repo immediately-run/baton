@@ -4,6 +4,7 @@
 // and the owner's grants and policy log. Their bodies are unchanged (R-BTN-179: a session reads
 // the same entry, query and JSON a key gets); what changed is before them — one principal, one
 // authorization, the one refusal, and the ETag (./index.ts).
+import { repositoryRead } from '../routes/public';
 import { BatonError, json } from '../http';
 import { STATS_WINDOW_MS } from '../stats';
 import { withCredentials } from './credentials';
@@ -14,7 +15,7 @@ import type { ReadRoute } from './kit';
 const legacy = (action: string, over: Partial<ReadRoute> = {}): ReadRoute => ({
   action,
   clock: true,
-  run: async (cx, call) => (await cx.core.repositoryRead(call.req, call.url, call.repository!, call.principal))
+  run: async (cx, call) => (await repositoryRead(cx.core, call.req, call.url, call.repository!, call.principal))
     ?? (() => { throw new BatonError('not-found', `no route GET ${call.url.pathname}`); })(),
   ...over,
 });

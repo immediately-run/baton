@@ -23,6 +23,8 @@
 // for a list, the convention `{<items>: [...], next_cursor?, counts?}` with `cursorOf` and
 // `pageOf` (./kit.ts), timestamps as epoch milliseconds; filter fields only (R-BTN-33). A read
 // writes nothing.
+import { pathSegment } from '../routes/kit';
+import { readPrincipal } from '../routes/principal';
 import { BatonError, json } from '../http';
 import { matchActions } from '../actions';
 import { clockBucket, ifNoneMatch, stateEtag } from '../stateVersion';
@@ -59,15 +61,6 @@ function routeOf(action: string): ReadRoute | undefined {
   return byAction.get(action);
 }
 
-/** One path segment, decoded: a malformed escape is the caller's error, never a 500. */
-function decoded(raw: string): string {
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    throw new BatonError('invalid-params', 'a malformed path segment');
-  }
-}
-
 /** B-205: the strong ETag of this call's answer — the state version, the caller, the action,
  *  its path and its query, and the clock's coarse bucket where the read shows what the clock
  *  decides — through B-242's one helper. Decided after authorization and before the read. */
@@ -85,9 +78,9 @@ export async function dispatchRead(cx: ReadCtx, req: Request, url: URL): Promise
   const route = routeOf(hit.action.id)!;
   // One principal, then the one check (R-BTN-129): the caller against the entry, then the
   // repository the path names.
-  const who = await cx.core.readPrincipal(req);
+  const who = await readPrincipal(cx.core, req);
   const caller = authorizeAction(who.principal, hit.action);
-  const params = Object.fromEntries(Object.entries(hit.params).map(([k, v]) => [k, decoded(v)]));
+  const params = Object.fromEntries(Object.entries(hit.params).map(([k, v]) => [k, pathSegment(v)]));
   let repository: string | null = null;
   if ('repository' in params) {
     repository = checkRepositoryId(params.repository);
