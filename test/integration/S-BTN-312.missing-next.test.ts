@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { Git, cutover, keyCall, placed, rows, setAdminKeys, setClock } from '../helpers';
+import { MIGRATIONS } from '../../src/migrations';
+import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
+import { Git, course, cutover, keyCall, placed, rows, setAdminKeys, setClock, withCore } from '../helpers';
 import { grantedRunner, signed } from '../lib/fleet';
 import { makeKey } from '../lib/sshKeys';
 
@@ -68,5 +70,63 @@ describe('S-BTN-312 a board post missing a queued leg', () => {
     expect(await needsYou()).toEqual([]);
     const another = await grantedRunner(owner, 'docs', 'another', ['agent-venue']);
     expect((await another.call('/v1/runner/claim', { request_id: 'req-fixed', ticket_id: 'docs:STUCK' })).status).toBe(200);
+  });
+
+  it.each(['post', 'refresh'] as const)('settles a %s against the placement after its decision attestation', async (method) => {
+    await setClock(NOW);
+    const git = new Git().add('DECIDED', {}, placed('reviewed', [...path, ['review', 'reviewed']], [['decide', 'ready']], { next_leg: null }));
+    git.registry = [course(3, 3, { course: {
+      ...roadmapPr,
+      legs: {
+        ...roadmapPr.legs,
+        decide: { from: ['reviewed'], to: ['adjudicated'], kind: 'person', asks: 'owner' },
+      },
+    } })];
+    expect((await git.post()).status).toBe(200);
+    const conditions = () => rows('SELECT outcome FROM conditions WHERE type = ? AND ticket_id = ?', TYPE, 'docs:DECIDED');
+    expect(await conditions()).toEqual([{ outcome: 'open' }]);
+
+    // The attested person leg leaves this station even though no leg is queued (R-BTN-39).
+    const answer = { attestations: [{ type: 'std:decision@1', ticket: 'DECIDED', ref: 'a'.repeat(40),
+      value: { id: 'q-1', leg: 'decide', option: 'adjudicated', reached: 'adjudicated' } }] };
+    expect((await git[method](answer)).status).toBe(200);
+    expect(await rows('SELECT station, next_leg FROM ticket_stations WHERE ticket_id = ?', 'docs:DECIDED'))
+      .toEqual([{ station: 'adjudicated', next_leg: 'merge' }]);
+    expect(await conditions()).toEqual([{ outcome: 'closed' }]);
+    expect((await git.refresh(answer)).status).toBe(200);
+    expect((await git.refresh(answer)).status).toBe(200);
+    expect(await conditions()).toEqual([{ outcome: 'closed' }]);
+  });
+
+  it('reprocesses an unchanged refresh after upgrade and preserves the retention index', async () => {
+    await setClock(NOW);
+    const git = new Git().add('STUCK', {}, placed('pr-open', path, [['review', 'ready']], { next_leg: null }));
+    expect((await git.post()).status).toBe(200);
+    expect((await git.refresh()).status).toBe(200);
+
+    // Keep the actual refresh fingerprint and station rows, but restore the pre-0075 conditions
+    // schema, which could not hold the notice. Then run the production migrator on that state.
+    await withCore((core) => {
+      const { store } = core;
+      const previous = MIGRATIONS.find((m) => m.id === 48)!.sql.match(/CREATE TABLE conditions \([\s\S]*?CREATE INDEX conditions_by_run ON conditions\(run_id\);/)![0];
+      store.transaction(() => {
+        store.exec('DROP TABLE conditions');
+        store.script(previous);
+        store.exec('CREATE INDEX conditions_by_claim ON conditions(claim_id)');
+        store.exec('DELETE FROM _baton_migrations WHERE id = 75');
+      });
+      expect(store.exec('SELECT digest FROM sync_fingerprints WHERE repository_id = ?', 'docs').toArray()).toHaveLength(1);
+      core.migrate();
+    });
+    expect(await rows('SELECT digest FROM sync_fingerprints WHERE repository_id = ?', 'docs')).toEqual([]);
+    const plan = await rows<{ detail: string }>('EXPLAIN QUERY PLAN SELECT 1 FROM conditions WHERE claim_id = ?', 1);
+    expect(plan.map((r) => r.detail).join('\n')).toMatch(/SEARCH conditions USING COVERING INDEX conditions_by_claim/);
+
+    expect((await git.refresh()).status).toBe(200);
+    const notices = () => rows('SELECT id, outcome FROM conditions WHERE type = ? AND ticket_id = ?', TYPE, 'docs:STUCK');
+    const first = await notices();
+    expect(first).toEqual([{ id: expect.any(Number), outcome: 'open' }]);
+    expect((await git.refresh()).status).toBe(200);
+    expect(await notices()).toEqual(first);
   });
 });

@@ -27,3 +27,7 @@ ALTER TABLE conditions_0075 RENAME TO conditions;
 CREATE INDEX conditions_open ON conditions(repository_id, type, raised_at) WHERE outcome = 'open';
 CREATE INDEX conditions_by_ticket ON conditions(ticket_id, raised_at);
 CREATE INDEX conditions_by_run ON conditions(run_id);
+CREATE INDEX conditions_by_claim ON conditions(claim_id);
+
+-- The first refresh must settle missing-next conditions even if the reading is unchanged.
+DELETE FROM sync_fingerprints;
