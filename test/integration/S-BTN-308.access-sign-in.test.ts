@@ -1,5 +1,5 @@
 // S-BTN-308 sign-in through Cloudflare Access (BATON_SPEC §15; R-BTN-155, R-BTN-16, R-BTN-57).
-// Run against both hosts, using only the test JWT keys.
+// Run against both hosts, using test JWT keys and no live Access requests.
 import { importJWK, SignJWT, generateKeyPair } from 'jose';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { config } from '#host';
@@ -113,12 +113,21 @@ describe('S-BTN-308 sign-in through Cloudflare Access', () => {
   it('reports an unreadable key set as unavailable and ignores an assertion for link sign-in', async () => {
     const to = vi.fn(async () => new Response('{}'));
     const headers = { ...JSON_HEADERS, [ASSERTION]: await accessToken(EMAIL) };
-    const broken = { ...config, TEST_MIN_CLIENT: undefined, TEST_ACCESS_JWKS: '{' };
+    const remote = { ...config, BATON_TEST_BINDINGS: undefined };
+    const fetchKeys = vi.fn(async () => new Response(null, { status: 503 }));
     const request = (body: unknown) => new Request(`${ORIGIN}/v1/login`, { method: 'POST', headers, body: JSON.stringify(body) });
-    await refused(await front(request({ access: true }), broken, to), 503, 'unavailable');
-    expect(to).not.toHaveBeenCalled();
-    expect((await front(request({ token: 'b'.repeat(64) }), broken, to)).status).toBe(200);
-    expect(to.mock.calls).toHaveLength(1);
+    const keyUrl = `https://${remote.ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`;
+    vi.stubGlobal('fetch', fetchKeys);
+    try {
+      await refused(await front(request({ access: true }), remote, to), 503, 'unavailable');
+      expect(fetchKeys).toHaveBeenCalledExactlyOnceWith(keyUrl, expect.anything());
+      expect(to).not.toHaveBeenCalled();
+      expect((await front(request({ token: 'b'.repeat(64) }), remote, to)).status).toBe(200);
+      expect(to.mock.calls).toHaveLength(1);
+      expect(fetchKeys).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it.each(['duplicate', 'malformed'] as const)('rejects a %s binding file without affecting link sign-in', async (problem) => {
@@ -153,6 +162,31 @@ describe('S-BTN-308 sign-in through Cloudflare Access', () => {
     expect((await sessionCall(cookie, '/v1/ui/session')).status).toBe(401);
   });
 
+  it('applies the session list limit after excluding dead bindings', async () => {
+    const cookie = await adminSession(admin);
+    const emailHash = await sha256(EMAIL);
+    await bind(`${EMAIL} ${other.fingerprint}`);
+    // Seed newer sessions still within their lifetime, but whose binding now names another key.
+    await withCore((core) => {
+      core.store.exec(`WITH RECURSIVE series(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM series WHERE n < 500)
+        INSERT INTO dashboard_sessions (id_hash, admin_key, access_email_hash, created_at, expires_at)
+        SELECT printf('%064x', n), ?, ?, ?, ? FROM series`, admin.fingerprint, emailHash, AT + 1, AT + 43_200_000);
+    });
+    await setClock(AT + 1);
+    const res = await sessionCall(cookie, '/v1/admin/sessions');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ sessions: [{ key_fingerprint: admin.fingerprint, via: 'link', current: true }] });
+  });
+
+  it('still accepts a legacy Access assertion with a stale cookie when no admin key is configured', async () => {
+    const cookie = await adminSession(admin);
+    await setAdminKeys();
+    const headers = { [ASSERTION]: await accessToken() };
+    expect((await call('/v1/ui/session', { headers })).status).toBe(200);
+    expect((await sessionCall(cookie, '/v1/ui/session', { headers })).status).toBe(200);
+    await refused(await sessionCall(cookie, '/v1/ui/session'), 401, 'unauthenticated');
+  });
+
   it('returns unauthenticated rather than forbidden behind Access when an administrator key is configured', async () => {
     // The harness overrides keys inside the object, so exercise the Worker's configured-key
     // branch at the front boundary as well as the legacy allowlisted email at the host.
@@ -161,5 +195,18 @@ describe('S-BTN-308 sign-in through Cloudflare Access', () => {
     await refused(await front(req, { ...config, TEST_MIN_CLIENT: undefined }, vi.fn(), async () => true), 401, 'unauthenticated');
     await refused(await call('/v1/ui/session', { headers: { [ASSERTION]: await accessToken() } }), 401, 'unauthenticated');
     expect((await call('/login', { headers })).status).toBe(200);
+  });
+
+  it('forwards an existing session without verifying Access when an administrator key is configured', async () => {
+    const cookie = await cookieFor();
+    const req = new Request(`${ORIGIN}/v1/ui/session`, { headers: { Cookie: cookie, [ASSERTION]: 'not-a-jwt' } });
+    const to = vi.fn(async (r: Request) => {
+      expect(r.headers.get('X-Baton-Session')).toBe(cookie.split('=')[1]);
+      expect(r.headers.has('X-Baton-Owner')).toBe(false);
+      expect(r.headers.has(ASSERTION)).toBe(false);
+      return new Response('{}');
+    });
+    expect((await front(req, { ...config, TEST_MIN_CLIENT: undefined }, to, async () => true)).status).toBe(200);
+    expect(to).toHaveBeenCalledTimes(1);
   });
 });

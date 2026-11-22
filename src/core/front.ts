@@ -52,10 +52,18 @@ function cookie(req: Request, name: string): string | null {
  *  administrator key is configured (the core decides; round 1, 1-A-6). */
 async function dashboardPrincipal(req: Request, env: Config, hasAdmin: () => Promise<boolean>): Promise<Record<string, string>> {
   const session = cookie(req, SESSION_COOKIE);
-  if (session) return { 'X-Baton-Session': session };
   if (req.headers.has('Cf-Access-Jwt-Assertion') && !(await hasAdmin())) {
-    return { 'X-Baton-Owner': await verifyOwner(req, env) };
+    // A stale cookie must not mask legacy Access. The core checks the cookie first
+    // and rechecks its own key configuration before accepting the Access principal.
+    try {
+      const owner = await verifyOwner(req, env);
+      return session ? { 'X-Baton-Session': session, 'X-Baton-Owner': owner } : { 'X-Baton-Owner': owner };
+    } catch (e) {
+      if (!session) throw e;
+      // A verifier failure must not veto a cookie the core can still authenticate.
+    }
   }
+  if (session) return { 'X-Baton-Session': session };
   throw new BatonError('unauthenticated', 'a dashboard session is required');
 }
 
