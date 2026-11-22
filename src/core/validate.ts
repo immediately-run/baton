@@ -21,6 +21,10 @@ export const ORIGIN = /^https?:\/\/[A-Za-z0-9.-]+(?::[1-9][0-9]{0,4})?$/;
 /** R-BTN-138's id kind, as a `code_repos` entry stores it: a decimal string. */
 export const FORGE_ID = /^[1-9][0-9]{0,19}$/;
 export const SHA256_HEX = /^[0-9a-f]{64}$/;
+export const KEY_FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
+export const API_KEY_FINGERPRINT = /^bak_[0-9a-f]{16}$/;
+/** A login link's token and a session's value: 32 random bytes, hex. */
+export const SESSION_TOKEN = SHA256_HEX;
 // The id forms of R-BTN-47, each spelled once.
 const REPOSITORY_SRC = '[a-z][a-z0-9-]{0,39}';
 const LOCAL_SRC = '[A-Za-z0-9][A-Za-z0-9._-]{0,63}';
@@ -90,6 +94,36 @@ export const bad = (field: string, why: string): never => {
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v: unknown) => Number.isInteger(v);
 const isTime = (v: unknown) => Number.isInteger(v) && (v as number) >= 0;
+
+/** R-BTN-155: compare only ASCII addresses, without silently trimming or Unicode folding. */
+export function accessEmail(value: unknown): string | null {
+  const address = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$/;
+  return typeof value === 'string' && address.test(value) ? value.toLowerCase() : null;
+}
+
+/** R-BTN-155: one email/fingerprint pair per line; a bad line invalidates the whole binding. */
+export function parseAccessIdentities(text: string): Map<string, string> {
+  const identities = new Map<string, string>();
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/^[ \t]+|[ \t]+$/g, '');
+    if (!line) continue;
+    const [address, fingerprint, ...extra] = line.split(/[ \t]+/);
+    const email = accessEmail(address);
+    if (!email || !fingerprint || extra.length || !(KEY_FINGERPRINT.test(fingerprint) || API_KEY_FINGERPRINT.test(fingerprint)) || identities.has(email)) {
+      throw new BatonError('unavailable', 'ACCESS_IDENTITIES has a malformed or duplicate line');
+    }
+    identities.set(email, fingerprint);
+  }
+  return identities;
+}
+
+export function checkLogin(body: unknown): { token: string } | { access: true } {
+  if (isObj(body) && Object.keys(body).length === 1) {
+    if (body.access === true) return { access: true };
+    if (typeof body.token === 'string' && SESSION_TOKEN.test(body.token)) return { token: body.token };
+  }
+  return bad('body', 'send exactly one of the link token or access: true');
+}
 
 /** §10.4's free text: at most 500 characters, no control characters, none of `< > { }`. */
 export function freeText(v: unknown, field: string, max = FREE_TEXT_MAX): string {

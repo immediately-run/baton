@@ -302,9 +302,10 @@ read-only, on a repository's credential and governance screens (`…/grants`, `�
 `…/settings`, `…/bars`); the CLI changes them.
 
 The dashboard takes the `__Host-baton_session` cookie a login link sets (12 hours; it ends when
-its key leaves `BATON_ADMIN_KEYS`). Cloudflare Access may stand in front as extra hardening; on its
-own it opens the dashboard only while `BATON_ADMIN_KEYS` lists no key — a deployment from before
-administrators — so set that secret, then log in with `baton admin open`.
+its key leaves `BATON_ADMIN_KEYS`). Behind Cloudflare Access, a person whose verified email is
+bound to an administrator key by `ACCESS_IDENTITIES` can click **Sign in with Cloudflare Access**
+at `/login` instead. The session also ends when that binding is removed or changed. See the
+[deployment runbook](docs/runbooks/register-baton.mdx) for configuration and trust requirements.
 
 ## Repositories and their syncs
 

@@ -18,12 +18,14 @@ afterEach(() => {
 });
 
 /** A Baton with one session: signed out until `POST /v1/login`, then answering. */
-function baton(signedIn: boolean) {
+function baton(signedIn: boolean, accessBound = false) {
   const state = { signedIn };
   const gate = <T,>(body: T) => () => (state.signedIn ? { body } : refuse('unauthenticated', 'the dashboard session ended or is unknown'));
   const mock = mockFetch({
     'POST /v1/login': (call) => {
-      if ((call.body as { token?: string }).token !== TOKEN) return refuse('unauthenticated', 'the link is used, expired or unknown');
+      const login = call.body as { token?: string; access?: boolean };
+      if (login.access && !accessBound) return refuse('unauthenticated', 'no bound Access email');
+      if (!login.access && login.token !== TOKEN) return refuse('unauthenticated', 'the link is used, expired or unknown');
       state.signedIn = true;
       return { body: { ok: true } };
     },
@@ -73,7 +75,7 @@ describe('sign-in (B-206 item 4)', () => {
     renderApp('/login?as=owner');
     expect(await screen.findByText(/Signing in as an owner is not built yet/)).toBeDefined();
     expect(screen.getByText('B-76')).toBeDefined();
-    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['I have signed in — continue']);
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Sign in with Cloudflare Access', 'I have signed in — continue']);
   });
 
   it('/login with a session standing goes to /', async () => {
@@ -103,13 +105,36 @@ describe('sign-in (B-206 item 4)', () => {
   });
 
   it('a session that ends mid-way draws the sign-in in place', async () => {
-    const { state } = baton(true);
+    const { calls, state } = baton(true, true);
     const { store } = renderApp('/repositories/docs/board');
     await screen.findByRole('navigation', { name: 'Repository overview' });
     state.signedIn = false;
     await act(() => store.refresh());
     expect(await screen.findByRole('heading', { name: 'Sign in to Baton' })).toBeDefined();
     expect(window.location.pathname).toBe('/repositories/docs/board');
+    expect(calls.some((c) => c.path === '/v1/login')).toBe(false);
+  });
+
+  it('S-BTN-308: posts access only on a click, then opens the dashboard', async () => {
+    const { calls } = baton(false, true);
+    renderApp('/login');
+    const button = await screen.findByRole('button', { name: 'Sign in with Cloudflare Access' });
+    await act(() => window.dispatchEvent(new Event('focus')));
+    expect(calls.some((c) => c.path === '/v1/login')).toBe(false);
+    fireEvent.click(button);
+    expect(await screen.findByRole('heading', { name: 'Repositories' })).toBeDefined();
+    const logins = calls.filter((c) => c.path === '/v1/login');
+    expect(logins).toHaveLength(1);
+    expect(logins[0]).toMatchObject({ method: 'POST', body: { access: true }, headers: { 'content-type': 'application/json' } });
+    expect(window.location.pathname).toBe('/');
+  });
+
+  it('S-BTN-308: explains an unbound email without naming it and keeps the link fallback', async () => {
+    baton(false);
+    renderApp('/login');
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with Cloudflare Access' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('No verified Cloudflare Access email is bound');
+    expect(screen.getByText('baton admin open')).toBeDefined();
   });
 });
 
@@ -137,7 +162,7 @@ describe('the frame (B-206 item 1)', () => {
   });
 
   it('logout posts ui.logout, forgets the session and returns to the sign-in', async () => {
-    const { calls, state } = baton(true);
+    const { calls, state } = baton(true, true);
     renderApp('/repositories/docs/board');
     fireEvent.click(await screen.findByRole('button', { name: 'Log out' }));
     expect(await screen.findByRole('heading', { name: 'Sign in to Baton' })).toBeDefined();
@@ -145,6 +170,7 @@ describe('the frame (B-206 item 1)', () => {
     expect([out.method, out.body, out.headers['content-type']]).toEqual(['POST', {}, 'application/json']);
     expect(state.signedIn).toBe(false);
     expect(window.location.pathname).toBe('/login');
+    expect(calls.some((c) => c.path === '/v1/login')).toBe(false);
   });
 });
 

@@ -7,9 +7,9 @@
 // sync key. Each act is an `admin` event; a bar change also dispatches the repository's sync.
 import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
-import { API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, verifyNamespacedSignature, type SshKey } from './auth';
+import { adminFingerprints, API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, sshPublicLine, verifyNamespacedSignature } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkLogin, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
@@ -38,8 +38,6 @@ const CHECKS_MAX = 200;
 const LINK_FIELDS = ['remote', 'web_base', 'ci_identity', 'sync_workflow', 'mirror_workflow'] as const;
 /** A capability or role name, as a heartbeat declares one. */
 const CAPABILITY = /^[a-z0-9][a-z0-9-]{0,63}$/;
-/** A login link's token and a session's value: 32 random bytes, hex. */
-const TOKEN = /^[0-9a-f]{64}$/;
 const LABEL = /^[A-Za-z0-9][A-Za-z0-9 ._:@/-]{0,99}$/;
 
 export interface RequiredBar {
@@ -94,7 +92,6 @@ const only = (b: Record<string, unknown>, keys: string[], at: string) => {
   for (const k of Object.keys(b)) if (!keys.includes(k)) bad(`${at}.${k}`, 'unknown field');
 };
 /** A key's stored line: its type and base64 only — a comment is for people, never stored. */
-const lineOf = (key: SshKey, text: string) => `${key.type} ${text.trim().split(/\s+/)[1]}`;
 
 /** A setting's value as the settings event carries it: the JSON settings parse back to their
  *  value; `scope_policy`'s bare word (B-134) is its own value, not JSON. */
@@ -134,6 +131,7 @@ export class Admin {
     registry: Registry;
     /** BATON_ADMIN_KEYS' lines, read on every call (a key that leaves ends its sessions). */
     adminKeys: () => string[];
+    accessIdentities: () => string;
     origin: string;
     /** R-BTN-67: a bar change dispatches the repository's sync, after commit. */
     dispatchSync: (repository: string) => void;
@@ -170,23 +168,8 @@ export class Admin {
   // ── principals ──────────────────────────────────────────────────────────────────────────
 
   /** The administrators' keys by fingerprint (R-BTN-57). An unparsable line is no key. */
-  async adminFingerprints(): Promise<Map<string, string>> {
-    const out = new Map<string, string>();
-    for (const line of this.c.adminKeys()) {
-      // An API key's public line (R-BTN-159) or an OpenSSH public key.
-      const api = parseApiKeyLine(line);
-      if (api) {
-        out.set(api.fingerprint, api.line);
-        continue;
-      }
-      try {
-        const k = await parseSshKey(line);
-        out.set(k.fingerprint, lineOf(k, line));
-      } catch {
-        // A line that is no key admits nobody.
-      }
-    }
-    return out;
+  adminFingerprints(): Promise<Map<string, string>> {
+    return adminFingerprints(this.c.adminKeys());
   }
 
   /** An owner key's line by fingerprint, if it owns any live repository (R-BTN-58, R-BTN-47: a
@@ -641,40 +624,73 @@ export class Admin {
     return { url: `${this.c.origin}/login#${token}` };
   }
 
-  /** `POST /v1/login {token}`: marks the link used and opens a session, returning the cookie's
-   *  value — only while the key that minted the link is still an administrator. */
-  async login(body: unknown): Promise<string> {
-    const token = isObj(body) && typeof body.token === 'string' && TOKEN.test(body.token) ? body.token : bad('token', 'must be the link’s token');
-    const hash = await sha256Hex(token);
-    const admins = await this.adminFingerprints();
+  /** `POST /v1/login`: exchange a one-time link or a verified, bound Access email for its
+   *  administrator key's session. Only the front supplies the email. */
+  async login(body: unknown, email: string | null): Promise<string> {
+    const login = checkLogin(body);
+    const identities = 'access' in login ? parseAccessIdentities(this.c.accessIdentities()) : null;
+    const fingerprint = email == null ? undefined : identities?.get(email);
+    if (identities && !fingerprint) throw new BatonError('unauthenticated', 'no verified Access email bound to an administrator key');
+    const hash = 'token' in login ? await sha256Hex(login.token) : null;
+    const emailHash = fingerprint && email != null ? await sha256Hex(email) : null;
     const value = randomHex(32);
     const id = await sha256Hex(value);
+    const admins = await this.adminFingerprints();
     return this.c.store.transaction(() => {
       const now = this.c.now();
-      const link = this.rows<{ admin_key: string; expires_at: number; used_at: number | null }>('SELECT admin_key, expires_at, used_at FROM login_links WHERE token_hash = ?', hash)[0];
-      if (!link || link.used_at != null || link.expires_at <= now || !admins.has(link.admin_key)) throw new BatonError('unauthenticated', 'the link is used, expired or unknown');
-      this.exec('UPDATE login_links SET used_at = ? WHERE token_hash = ?', now, hash);
+      let key: string;
+      if (hash !== null) {
+        const link = this.rows<{ admin_key: string; expires_at: number; used_at: number | null }>('SELECT admin_key, expires_at, used_at FROM login_links WHERE token_hash = ?', hash)[0];
+        if (!link || link.used_at != null || link.expires_at <= now || !admins.has(link.admin_key)) throw new BatonError('unauthenticated', 'the link is used, expired or unknown');
+        this.exec('UPDATE login_links SET used_at = ? WHERE token_hash = ?', now, hash);
+        key = link.admin_key;
+      } else {
+        if (!fingerprint || !admins.has(fingerprint)) throw new BatonError('unauthenticated', 'no verified Access email bound to an administrator key');
+        key = fingerprint;
+        this.event(`admin:${key}`, { act: 'login', via: 'access', email_sha256: emailHash }, null);
+      }
       this.exec('DELETE FROM dashboard_sessions WHERE expires_at < ?', now - SESSION_MS);
-      this.exec('INSERT INTO dashboard_sessions (id_hash, admin_key, created_at, expires_at) VALUES (?, ?, ?, ?)', id, link.admin_key, now, now + SESSION_MS);
+      this.exec('INSERT INTO dashboard_sessions (id_hash, admin_key, access_email_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)', id, key, emailHash, now, now + SESSION_MS);
       return value;
     });
   }
 
-  /** The administrator a dashboard session cookie stands for, or null: a live, unrevoked session
-   *  whose key is still in BATON_ADMIN_KEYS — checked on every request. */
+  /** Current Access bindings indexed by hash, never by a stored email. Invalid or unreadable
+   *  bindings bind nobody; link sessions need not consult them at all. */
+  async accessFingerprints(): Promise<Map<string, string>> {
+    let identities: Map<string, string>;
+    try {
+      identities = parseAccessIdentities(this.c.accessIdentities());
+    } catch (e) {
+      if (!(e instanceof BatonError) || e.code !== 'unavailable') throw e;
+      return new Map();
+    }
+    return new Map(await Promise.all([...identities].map(async ([email, key]) => [await sha256Hex(email), key] as const)));
+  }
+
+  /** The administrator a dashboard session cookie stands for, or null. A bound session
+   *  checks its key and its Access line on every request, not the original JWT. */
   async session(value: string | null): Promise<string | null> {
-    if (!value || !TOKEN.test(value)) return null;
+    if (!value || !SESSION_TOKEN.test(value)) return null;
     const id = await sha256Hex(value);
-    const s = this.rows<{ admin_key: string; expires_at: number; revoked_at: number | null }>('SELECT admin_key, expires_at, revoked_at FROM dashboard_sessions WHERE id_hash = ?', id)[0];
+    const s = this.rows<{ admin_key: string; access_email_hash: string | null; expires_at: number; revoked_at: number | null }>('SELECT admin_key, access_email_hash, expires_at, revoked_at FROM dashboard_sessions WHERE id_hash = ?', id)[0];
     if (!s || s.revoked_at != null || s.expires_at <= this.c.now()) return null;
-    return (await this.adminFingerprints()).has(s.admin_key) ? s.admin_key : null;
+    const admin = (await this.adminFingerprints()).has(s.admin_key);
+    if (s.access_email_hash === null) return admin ? s.admin_key : null;
+    if (admin && (await this.accessFingerprints()).get(s.access_email_hash) === s.admin_key) {
+      // Hashing the bindings can yield to logout; recheck the row before authorizing.
+      return this.rows('SELECT 1 FROM dashboard_sessions WHERE id_hash = ? AND revoked_at IS NULL AND expires_at > ?', id, this.c.now()).length
+        ? s.admin_key : null;
+    }
+    this.exec('UPDATE dashboard_sessions SET revoked_at = ? WHERE id_hash = ? AND revoked_at IS NULL', this.c.now(), id);
+    return null;
   }
 
   /** `POST /v1/ui/logout` (`ui.logout`, R-BTN-155; B-206): ends the caller's own session — its
    *  row is marked revoked, so the cookie's value authorizes nothing from this request on. A
    *  value that names no live row ends nothing; the caller was authorized before this. */
   async endSession(value: string | null): Promise<void> {
-    if (!value || !TOKEN.test(value)) return;
+    if (!value || !SESSION_TOKEN.test(value)) return;
     const id = await sha256Hex(value);
     this.c.store.transaction(() => {
       const s = this.rows<{ admin_key: string }>('SELECT admin_key FROM dashboard_sessions WHERE id_hash = ? AND revoked_at IS NULL', id)[0];
@@ -1352,7 +1368,7 @@ export class Admin {
   private async parseKey(v: unknown, field: string): Promise<{ fingerprint: string; line: string }> {
     if (typeof v !== 'string') bad(field, 'must be an OpenSSH public key line');
     const key = await parseSshKey(v as string);
-    return { fingerprint: key.fingerprint, line: lineOf(key, v as string) };
+    return { fingerprint: key.fingerprint, line: sshPublicLine(key, v as string) };
   }
 
   /** An owner's or a runner's key: an OpenSSH public key, or an API key's public line (R-BTN-159).
