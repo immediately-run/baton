@@ -7,13 +7,14 @@
 // Node only: init writes a real tree and runs git.
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { courseSchemas, githubFacts, initMain, parseSyncArgs, plainGitRemote, remoteSlug, syncMain, syncWorkflow } from '../../src/defaults/cli';
 import type { Transport } from '../../src/runner/api';
-import { HARNESS_AGENTS } from '../../src/runner/harness';
+import { HARNESS_AGENTS, readOnlyHarness } from '../../src/runner/harness';
+import { validateCourse } from '../../src/core/course';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { githubFake } from '../githubFake';
@@ -62,6 +63,101 @@ const load = async (file: string) => import(`${pathToFileURL(file).href}?t=${Mat
 /** A scaffolded leg stub's text: which close it routes to is what the stub's source says. */
 const stubSourceOf = (root: string, course: string, leg: string): string =>
   readFileSync(join(root, '.baton', 'courses', course, 'legs', `${leg}.mjs`), 'utf8');
+
+describe('S-BTN-310: reads_only agent runs', () => {
+  it('runs a snapshot-selected standalone OpenCode on diff data, without the branch plugin or writable tools', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'baton-b141-'));
+    const root = join(tmp, 'home');
+    const bin = join(tmp, 'bin');
+    const facts = join(tmp, 'facts.json');
+    const marker = join(tmp, 'plugin-loaded');
+    try {
+      gitInit(root);
+      const g = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { stdio: 'ignore' });
+      g('remote', 'add', 'origin', 'https://github.com/immediately-run/baton.git');
+      expect(await initMain(['--agent', 'opencode'], { root, log: () => {} })).toBe(0);
+      const settings = join(root, '.baton', 'baton.json');
+      const course = join(root, '.baton', 'courses', 'create-pr');
+      const graph = JSON.parse(readFileSync(join(course, 'course.json'), 'utf8'));
+      graph.legs.review.reads_only = true;
+      expect(validateCourse(graph)).toEqual([]);
+      expect(graphOf(graph).legs.get('review')?.readsOnly).toBe(true);
+      expect(validateCourse({ ...graph, legs: { ...graph.legs, review: { ...graph.legs.review, reads_only: 'yes' } } }))
+        .toEqual(expect.arrayContaining([expect.objectContaining({ path: 'legs.review.reads_only' })]));
+      writeFileSync(join(course, 'course.json'), JSON.stringify(graph));
+      const initial = JSON.parse(readFileSync(settings, 'utf8'));
+      writeFileSync(settings, JSON.stringify({ ...initial, agent_command: 'opencode run --auto --model snapshot/model "old prompt"', agent_wrapper: '/not-used' }));
+      writeFileSync(join(course, 'legs', 'review.md'), 'trusted snapshot instructions');
+      mkdirSync(join(root, 'tickets'), { recursive: true });
+      writeFileSync(join(root, 'tickets', 'A-1.md'), 'trusted ticket');
+      const sha = commitAll(root);
+      g('switch', '-qc', 'review-head');
+      for (const path of ['.opencode/plugins/probe.mjs', '.claude/settings.json', 'opencode.json', 'opencode.jsonc', 'AGENTS.md', 'CLAUDE.md', '.mcp.json', 'nested/AGENTS.md']) {
+        mkdirSync(dirname(join(root, path)), { recursive: true });
+        writeFileSync(join(root, path), 'branch configuration');
+      }
+      writeFileSync(join(root, 'changed.js'), 'changed blob');
+      chmodSync(join(root, 'changed.js'), 0o755);
+      symlinkSync('../outside', join(root, 'branch-link'));
+      writeFileSync(settings, JSON.stringify({ ...initial, agent_command: 'opencode run --model branch/model' }));
+      writeFileSync(join(course, 'legs', 'review.md'), 'branch instructions');
+      writeFileSync(join(root, 'tickets', 'A-1.md'), 'branch ticket');
+      const head = commitAll(root);
+      g('switch', '-q', 'main'); // The reviewed commit is never the agent's working checkout.
+      mkdirSync(bin);
+      writeFileSync(join(bin, 'opencode'), `#!${process.execPath}
+const { readFileSync, readdirSync, statSync, writeFileSync } = require('node:fs');
+if (process.argv[2] === '--version') { console.log('vv2.2.5-test'); process.exit(); }
+const files = readdirSync('.', { recursive: true });
+if (files.some((file) => file.endsWith('.opencode/plugins/probe.mjs'))) writeFileSync(${JSON.stringify(marker)}, 'discovered');
+writeFileSync(${JSON.stringify(facts)}, JSON.stringify({
+  argv: process.argv.slice(2), cwd: process.cwd(), files,
+  policy: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT).policies,
+  diff: readFileSync('review.diff', 'utf8'), change: readFileSync('changes/changed.js', 'utf8'),
+  executable: Boolean(statSync('changes/changed.js').mode & 0o111),
+  instructions: readFileSync(process.env.BATON_INSTRUCTIONS, 'utf8'), ticket: readFileSync(process.env.BATON_TICKET_FILE, 'utf8'),
+}));
+console.log('approve');
+`, { mode: 0o700 });
+      const context = { ticket: { id: 'A-1', path: 'tickets/A-1.md' }, checkout: root, snapshot: { sha }, reads_only: true };
+      const stub = join(course, 'legs', 'review.mjs');
+      const wrapper = join(ROOT, 'src', 'runner', 'legProcess.mjs');
+      const run = (input: object, script = stub) => {
+        const call = spawnSync(process.execPath, [wrapper, 'run', script], {
+          cwd: root, input: JSON.stringify([input]) + '\n', encoding: 'utf8', timeout: 10_000,
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, BATON_AGENT_WRAPPER: '/not-used' },
+        });
+        if (call.error) throw call.error;
+        return JSON.parse(call.stdout.trim());
+      };
+      expect(run(context)).toMatchObject({ ok: false, error: expect.stringContaining('exact review commit') });
+      const oldStub = join(tmp, 'old.mjs');
+      writeFileSync(oldStub, 'export const run = () => { throw new Error("old stub ran"); };');
+      expect(run({ ...context, review_head: head }, oldStub)).toMatchObject({ ok: false, error: expect.stringContaining('stub that supports reads_only') });
+      expect(run({ ...context, review_head: head })).toMatchObject({ ok: true, result: { reached: 'reviewed', verdict: 'approve' } });
+      const seen = JSON.parse(readFileSync(facts, 'utf8'));
+      expect(seen.argv.slice(0, -1)).toEqual(['run', '--standalone', '--model', 'snapshot/model', '--']);
+      expect(seen.cwd).not.toBe(root);
+      expect(seen.files).toEqual(expect.arrayContaining(['review.diff', 'instructions.md', 'ticket.md', 'changes/changed.js']));
+      expect(seen.files.join('\n')).not.toMatch(/(?:\.opencode|\.claude|\.git|opencode\.json|AGENTS\.md|CLAUDE\.md|\.mcp\.json|branch-link)/);
+      expect(seen.policy.filter((p: { action: string }) => p.action === 'tool.use').map((p: { effect: string; resource: string }) => `${p.effect}:${p.resource}`))
+        .toEqual(['deny:*', 'allow:read:*', 'allow:glob:*', 'allow:grep:*']);
+      expect(seen).toMatchObject({ change: 'changed blob', executable: false, instructions: 'trusted snapshot instructions', ticket: 'trusted ticket' });
+      expect(seen.diff).toContain('+changed blob');
+      expect(existsSync(marker)).toBe(false);
+      expect(existsSync(seen.cwd)).toBe(false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('builds a Claude read-tool allowlist and rejects unknown commands', () => {
+    const { argv } = readOnlyHarness(['claude', '-p', '--permission-mode', 'bypassPermissions', '--model', 'sonnet'], 'review');
+    expect(argv).toEqual(['claude', '--print', '--bare', '--setting-sources', '', '--strict-mcp-config', '--mcp-config', '{}',
+      '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep', '--permission-mode', 'dontAsk', '--model', 'sonnet', '--', 'review']);
+    expect(() => readOnlyHarness(['node', 'agent.mjs'], 'review')).toThrow('reads_only supports only');
+  });
+});
 
 
 describe('parseSyncArgs', () => {

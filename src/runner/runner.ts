@@ -1127,7 +1127,7 @@ export class Runner {
   }
 
   /** Start a session of `kind` on the executor the host chose. */
-  private async startSession(kind: SessionKind, o: { session_id: string; run_id?: string; ticket?: string; leg?: string; snapshot_sha?: string; paths: string[]; env: Record<string, string>; channel?: string | null; autonomous?: boolean }): Promise<Handle> {
+  private async startSession(kind: SessionKind, o: { session_id: string; run_id?: string; ticket?: string; leg?: string; snapshot_sha?: string; paths: string[]; env: Record<string, string>; channel?: string | null; autonomous?: boolean; reads_only?: boolean }): Promise<Handle> {
     return await this.executor.start({
       brief: { kind, ...o, checkout: this.checkout, wrapper: LEG_PROCESS, ...(o.autonomous ? { autonomous: true } : {}) },
       executor: null, inputs: [], channel: o.channel ?? null,
@@ -2553,6 +2553,7 @@ export class Runner {
   private async runLeg(course: CourseLoad, leg: string, ctx: Record<string, unknown>, scratch: string): Promise<{ kind: 'ok'; result: unknown } | { kind: 'crashed'; error: string } | { kind: 'missing' } | { kind: 'lease-lost' }> {
     const script = course.scripts.get(leg);
     if (script == null) return { kind: 'missing' };
+    if (course.graph?.legs.get(leg)?.readsOnly) ctx.reads_only = true;
     // R-BTN-202 (B-248): a leg run under a local order while Baton is unreachable has no lease.
     const offlineLeg = this.cur.offline;
     const tag = randomBytes(4).toString('hex');
@@ -2633,6 +2634,7 @@ export class Runner {
         // R-BTN-107: the brief carries the leg's autonomy as a hint — the raise check below is
         // what enforces it, whatever the executor does with the hint.
         autonomous: course.graph?.legs.get(leg)?.autonomous === true,
+        ...(ctx.reads_only === true ? { reads_only: true } : {}),
       });
     } catch (e) {
       // The leg's own failure text leaves masked, whatever of it the executor quoted.

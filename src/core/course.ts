@@ -64,7 +64,7 @@ const STARTS_FROM = new Set(['request']);
 const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
 const ENTRY_KEYS = new Set(['output', 'schema']);
 const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
-  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires', 'conditions', 'autonomous', 'spawns']);
+  'no_chain_from', 'isolation', 'requires', 'kind', 'asks', 'expires', 'conditions', 'autonomous', 'spawns', 'reads_only']);
 /** R-BTN-116: the one kind a leg may be today — `person`, a leg a person answers by a
  *  `std:decision@1`. A `call` leg (R-BTN-165) is not built, so a file carrying one is refused
  *  rather than kept unread. */
@@ -379,6 +379,9 @@ export function validateCourse(json: unknown): CourseViolation[] {
     // itself to. R-BTN-69's clause reads on the field's presence, `false` included: a leg that
     // is not autonomous says nothing, so `autonomous: false` beside a barred type or on a
     // person leg is the same broken promise, refused as such.
+    if ('reads_only' in l && (typeof l.reads_only !== 'boolean' || l.kind === 'person' || 'arrives' in l)) {
+      add('shape', `${at}.reads_only`, 'reads_only is a boolean on a runner leg (R-BTN-183)');
+    }
     if ('autonomous' in l && typeof l.autonomous !== 'boolean') add('bound', `${at}.autonomous`, 'autonomous is true or false (R-BTN-195)');
     if ('autonomous' in l) {
       if (person) {

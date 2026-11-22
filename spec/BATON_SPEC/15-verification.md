@@ -119,6 +119,7 @@ script: setups, values and refusal codes are there and in the rules, not here. A
 | S-BTN-79 schemas refused | A schema with a changed digest, outside the subset, cyclic or under the `std:` prefix is refused and raised, the previous kept; the same id in another repository is a separate schema. | R-BTN-108 |
 | S-BTN-80 signatures and spawns | `course test` prints a course's signature beside the signature of each course a call leg `spawns`, and names an end that does not produce an output the caller requires. | R-BTN-111 |
 | S-BTN-104 the standard courses | `bug-report`, `decision` and `draft-ticket` run on their stubs: an off-graph or malformed arrival is refused, a decision's answer is the next leg's input, and a stub reads an outcome line wrapped in prose and fails, naming what it read, when there is none. | R-BTN-131 |
+| S-BTN-310 a read-only agent reviews commit data | The stub runs the harness selected at the default snapshot with only read tools and no permission bypass or wrapper. It supplies the reviewed diff and blobs without `.git`, symlinks, or branch configuration; a branch plugin is not discovered and leaves no marker. No exact review head, an unsupported stub, or an unknown harness refuses the launch. | R-BTN-183 |
 | S-BTN-105 one leg overridden | A `<leg>.run.mjs` in the home replaces that leg's run on a sourced course, at the snapshot; the standard `close` still writes the result. | R-BTN-134 |
 | S-BTN-107 the build-app course | `build-app` files its stage documents as children that wait on one another, plans from the merged plan, never verifies while a child is open, routes a stuck verification to a person, is abandoned when a stage is withdrawn, and under proposed tickets waits for each approval. | R-BTN-131 |
 | S-BTN-175 the request | `baton ticket request` files a one-sentence ticket alone on the default branch, the caller's checkout untouched, and its first leg is offered after the sync; against a protected branch it opens a PR from its own request branch, or prints the branch and exits non-zero where it has no forge credential. | R-BTN-131, R-BTN-74 |
@@ -308,6 +309,7 @@ Each gate is an invariant, the rule that owns it, and the scenarios or tests tha
 | G-BTN-100 | Renderers escape or text-set every value and link only to allowed hosts (R-BTN-112); the dashboard's is `src/dashboard/`, drawn as text nodes and held there by the source gate (`test/ui/source-gate.test.ts`) | S-BTN-76 |
 | G-BTN-102 | Schemas are per repository, and refused outside R-BTN-108's subset | S-BTN-79 |
 | G-BTN-123 | A standard course needs no course code (R-BTN-131) | S-BTN-104 |
+| G-BTN-173 | A review stub's read-only agent gets branch data, never branch tools or configuration (R-BTN-183) | S-BTN-310 |
 | G-BTN-124 | A leg's run override replaces only its run, never its `close` (R-BTN-134) | S-BTN-105 |
 | G-BTN-126 | A `build-app` leg never starts on an unapproved document, and `verify` never while a child is open | S-BTN-107 |
 | G-BTN-129 | The CLI holds no course; a course is read from one directory at one default-branch commit (R-BTN-134) | S-BTN-110 |

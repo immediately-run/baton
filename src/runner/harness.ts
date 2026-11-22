@@ -43,3 +43,48 @@ export const HARNESS_AGENTS: Record<Harness, string> = {
   opencode: `opencode run --auto --model zai-coding-plan/glm-5.3 ${quotedBriefing}`,
   'claude-code': `claude -p --permission-mode bypassPermissions --model sonnet ${quotedBriefing}`,
 };
+
+/** B-141: reconstruct argv rather than forwarding flags that might change the workspace,
+ * connect to another session, load plugins, or bypass the tool policy. */
+export function readOnlyHarness(words: string[], prompt: string): { argv: string[]; env: NodeJS.ProcessEnv } {
+  const [bin, mode, ...options] = words;
+  const opencode = bin === 'opencode' && mode === 'run';
+  if (!opencode && !(bin === 'claude' && (mode === '-p' || mode === '--print'))) {
+    throw new Error('reads_only supports only opencode run and claude --print agent commands (R-BTN-183)');
+  }
+  let model: string | undefined;
+  for (let i = 0; i < options.length; i++) {
+    if (options[i] === '--model' || options[i] === '-m') {
+      model = options[++i];
+      if (!model || !/^[\w./:#-]+$/.test(model) || model.startsWith('-')) throw new Error('invalid reads_only harness model');
+    }
+  }
+  const selection = model ? ['--model', model] : [];
+  const env = { ...process.env };
+  // The agent should not discover or operate on the object's original Git directory.
+  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
+  if (opencode) {
+    // Explicit config locations in the host environment are not part of the snapshot. The
+    // standalone server must receive this policy, not reuse a service started without it.
+    for (const key of Object.keys(env)) if (key.startsWith('OPENCODE_CONFIG') || key === 'OPENCODE_PERMISSION') delete env[key];
+    const readTools = ['read', 'glob', 'grep'];
+    env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+      snapshots: false, formatter: false, lsp: false,
+      permissions: [
+        { action: '*', resource: '*', effect: 'deny' },
+        ...readTools.map((action) => ({ action, resource: '*', effect: 'allow' })),
+      ],
+      policies: [
+        { action: 'tool.use', resource: '*', effect: 'deny' },
+        ...readTools.map((tool) => ({ action: 'tool.use', resource: `${tool}:*`, effect: 'allow' })),
+        ...['plugin.use', 'mcp.use', 'skill.use'].map((action) => ({ action, resource: '*', effect: 'deny' })),
+      ],
+    });
+    return { argv: [bin, mode, '--standalone', ...selection, '--', prompt], env };
+  }
+  return {
+    argv: [bin, '--print', '--bare', '--setting-sources', '', '--strict-mcp-config', '--mcp-config', '{}',
+      '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep', '--permission-mode', 'dontAsk',
+      ...selection, '--', prompt], env,
+  };
+}

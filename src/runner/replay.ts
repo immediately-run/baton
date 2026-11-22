@@ -334,6 +334,10 @@ export async function replayMain(argv: string[], io: ReplayIo = {}): Promise<num
     dropCourse(course.scratch);
     return refuse(`the snapshot's course has no legs/${a.leg}.mjs`);
   }
+  if (course.graph.legs.get(a.leg)?.readsOnly) {
+    dropCourse(course.scratch);
+    return refuse(`${a.leg} is reads_only: replay does not record a pinned review input (R-BTN-183)`);
+  }
   if (course.graph.legs.get(a.leg)?.replaySafe === false) {
     dropCourse(course.scratch);
     return refuse(`${a.leg} is marked "replay_safe": false — it has side effects outside git and its forge, and is never replayed (R-BTN-84)`);
