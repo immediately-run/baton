@@ -442,7 +442,7 @@ export class Runner {
     } catch (e) {
       // B-106 (R-BTN-178): a refused claim releases the locks it would have used — the machine's
       // singleton is not held by an idle runner (B-188: nor taken from a claim's running leg).
-      if (this.locks && e instanceof BatonRefusal) this.locks.releaseAll((c) => this.lockHeldByLive(c, null));
+      if (this.locks && e instanceof BatonRefusal) this.locks.releaseAll((c) => this.lockReservedByOther(c, null));
       // R-BTN-202 (B-248): Baton refused the order's ticket (or the offline result's) — a gate,
       // another holder, a ticket no longer on the board. The order goes; an offline result is
       // not reported, and what its leg pushed stays in git. An unreachable Baton keeps both.
@@ -611,17 +611,21 @@ export class Runner {
     } finally {
       slot.ended = true;
       this.slots.delete(slot);
-      for (const [c, owner] of [...this.lockOwners]) if (owner === slot) this.lockOwners.delete(c);
+      for (const [c, owner] of this.lockOwners) {
+        if (owner !== slot) continue;
+        this.locks?.release(c);
+        this.lockOwners.delete(c);
+      }
       if (slot.cloneIndex != null) this.clonesBusy.delete(slot.cloneIndex);
       this.writeClaims();
       this.roomMade = true;
     }
   }
 
-  /** B-106, B-188: whether a machine lock is held for another claim's leg than `except`'s. */
-  private lockHeldByLive(capability: string, except: ClaimRun | null): boolean {
+  /** Ownership survives `ended`: an acknowledgement can still be in flight (S-BTN-21). */
+  private lockReservedByOther(capability: string, except: ClaimRun | null): boolean {
     const owner = this.lockOwners.get(capability);
-    return owner != null && owner !== except && this.slots.has(owner) && !owner.ended;
+    return owner != null && owner !== except;
   }
 
   /** R-BTN-72 (B-188): the claims this process found in its state file, settled once before its
@@ -710,13 +714,20 @@ export class Runner {
     for (const capability of needed) {
       // B-188: one machine's singleton is one leg's, whichever claim runs it — another claim's
       // leg holding it is a lock this claim cannot take.
-      if (this.lockHeldByLive(capability, slot)) ok = false;
-      else if (!(await locks.take(capability))) ok = false;
-      else this.lockOwners.set(capability, slot);
+      if (this.lockReservedByOther(capability, slot)) {
+        ok = false;
+        continue;
+      }
+      // Even an already-held flock yields in take(); reserve before that yield.
+      this.lockOwners.set(capability, slot);
+      if (!(await locks.take(capability))) {
+        this.lockOwners.delete(capability);
+        ok = false;
+      }
     }
     // Released: what this claim's earlier leg needed and this one does not — never a lock
     // another claim's leg holds.
-    locks.releaseAll((c) => needed.includes(c) || this.lockHeldByLive(c, slot));
+    locks.releaseAll((c) => needed.includes(c) || this.lockReservedByOther(c, slot));
     for (const [c, owner] of [...this.lockOwners]) if (owner === slot && !needed.includes(c)) this.lockOwners.delete(c);
     if (!ok) {
       this.log(`baton: ${leg} requires a lock another process on this machine holds — the claim suspends rather than run it (R-BTN-178)`);
@@ -751,7 +762,7 @@ export class Runner {
   }
 
   private releaseLegLocks(run: ClaimRun): void {
-    this.locks?.releaseAll((c) => this.lockHeldByLive(c, run));
+    this.locks?.releaseAll((c) => this.lockReservedByOther(c, run));
     for (const [c, owner] of this.lockOwners) if (owner === run) this.lockOwners.delete(c);
   }
 }

@@ -2,7 +2,7 @@
 // the course declarations a heartbeat needs (rule 9), the credential the environment names and
 // the runner secret's shape. Node only: it writes temp checkouts and runs ssh-keygen.
 import { describe, it, expect, vi } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -19,6 +19,7 @@ import { Sidecar } from '../../src/runner/sidecar';
 import { StateFile } from '../../src/runner/state';
 import { declarationFrom } from '../../src/runner/runner';
 import { validateCourse } from '../../src/core/course';
+import { graphOf } from '../../src/core/graph';
 
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
@@ -1339,7 +1340,45 @@ describe('baton run --home: a name resolves to its checkout (B-121)', () => {
   });
 });
 
-it('S-BTN-229: a heartbeat fences only the omitted claim and confirms the other run\'s session link', async () => {
+it.each([false, true])('S-BTN-21: a retiring claim reserves its machine lock (release ack: %s)', async (ack) => {
+  const dir = mkdtempSync(join(tmpdir(), 'baton-lock-retire-'));
+  const capability = 'lock:test';
+  const path = join(dir, 'singleton.lock');
+  let allowAck!: () => void;
+  const acked = new Promise<void>((resolveAck) => { allowAck = resolveAck; });
+  const api = { setSecret: vi.fn(), end: vi.fn(async () => {}), ack: vi.fn(() => acked) } as unknown as BatonApi;
+  const runner = new Runner({ api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
+    session: 'lock-retire', courses: [], stateFile: join(dir, 'runner.json'), concurrency: 2,
+    locks: { [capability]: path }, log: () => {} });
+  const a = runner['makeRun'](dir);
+  const b = runner['makeRun'](dir);
+  runner['slots'].add(a);
+  runner['slots'].add(b);
+  const course = { graph: { legs: new Map([['locked', { requires: [capability] }]]) } } as Parameters<Runner['ensureLegLocks']>[2];
+  let ending: Promise<unknown> | undefined;
+  try {
+    expect(await runner['ensureLegLocks'](a, 'locked', course)).toBe(true);
+    expect(spawnSync('flock', ['-n', path, 'true']).status).toBe(1);
+    if (ack) a.receiveRelease(1, 'released:requested');
+    ending = a['finish'](1, { end_reason: 'done' }, null);
+    await Promise.resolve(); // `end` answered; retirement hasn't resumed after `ackEnd`.
+    expect(a.ended).toBe(true);
+    const taking = runner['ensureLegLocks'](b, 'locked', course);
+    allowAck();
+    expect(await taking).toBe(false);
+    await ending;
+    // Once retirement releases A's lock, B can take it again, and an independent flock can't.
+    await vi.waitFor(async () => expect(await runner['ensureLegLocks'](b, 'locked', course)).toBe(true));
+    expect(spawnSync('flock', ['-n', path, 'true']).status).toBe(1);
+  } finally {
+    allowAck();
+    await ending;
+    runner.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it('S-BTN-229: a finishing heartbeat fences only the omitted claim and skips its settlement hooks', async () => {
   const home = mkdtempSync(join(tmpdir(), 'baton-claim-run-'));
   try {
     const stateFile = join(home, 'runner.json');
@@ -1347,7 +1386,8 @@ it('S-BTN-229: a heartbeat fences only the omitted claim and confirms the other 
     const heartbeat = vi.fn(async (_body: Record<string, unknown>) => ({
       runner_id: 1, incarnation: 1, lease_timeout_s: 900, claims: [{ id: 2 }],
     }));
-    const api = { heartbeat } as unknown as BatonApi;
+    const end = vi.fn(async (_id: number, _body: unknown) => {});
+    const api = { heartbeat, end } as unknown as BatonApi;
     const options = {
       api, home, repository: 'docs', courses: [], stateFile, beatEvery: 50,
       verbose: false, now: () => 1_000, log: () => {},
@@ -1356,7 +1396,8 @@ it('S-BTN-229: a heartbeat fences only the omitted claim and confirms the other 
     const sidecar = new Sidecar({ ...options, hostname: 'vm-a', session: 'test', harness: 'opencode', concurrency: 2 },
       state, null, () => ({ live, persisted: [], epoch: 2, pendingRequests: 0 }), () => {});
     const stop = vi.fn(async () => {});
-    const executor = { source: 'test', stop, start: vi.fn(), end: vi.fn(), exec: vi.fn() };
+    const executor = { source: 'test', stop, start: vi.fn(async () => ({ session_id: 'replacement' })), end: vi.fn(),
+      exec: vi.fn(() => ({ kill: vi.fn(), write: vi.fn(), result: Promise.resolve({ status: 0, stdout: '{"ok":true,"result":null}\n', stderr: '' }) })) };
     const host = { ensureLegLocks: async () => true, savePlace: vi.fn(), retire: vi.fn(), isStopping: () => false, isDraining: () => false };
     const make = (id: number) => {
       const run = new ClaimRun(join(home, String(id)), options, state, executor, sidecar, host);
@@ -1376,11 +1417,13 @@ it('S-BTN-229: a heartbeat fences only the omitted claim and confirms the other 
     const a = make(1);
     const b = make(2);
 
-    await sidecar.tick();
+    a.run.legSeq = 1;
+    await a.run['reportLegFinished']();
 
-    expect(heartbeat).toHaveBeenCalledWith(expect.objectContaining({ session_urls: [
-      { claim_id: 1, url: a.run.legSessionUrl }, { claim_id: 2, url: b.run.legSessionUrl },
-    ] }));
+    expect(heartbeat).toHaveBeenCalledWith(expect.objectContaining({
+      legs_finished: [{ claim_id: 1, seq: 1 }],
+      session_urls: [{ claim_id: 1, url: a.run.legSessionUrl }, { claim_id: 2, url: b.run.legSessionUrl }],
+    }));
     expect(a.kill).toHaveBeenCalledOnce();
     expect(a.run.lost).toBe(true);
     expect(stop.mock.calls).toEqual([[a.handle, 'lease-lost']]);
@@ -1388,6 +1431,15 @@ it('S-BTN-229: a heartbeat fences only the omitted claim and confirms the other 
     expect(b.run.session?.handle).toBe(b.handle);
     expect(b.run.sessionLinkLanded).toBe(true);
     expect(state.get().lease_lost).toBe(false);
+
+    const graph = graphOf({ start: 'filed', end: ['done'], stations: { filed: {}, done: {} }, legs: { work: { from: ['filed'], to: 'done' } } });
+    const outcome = await a.run['settleLeg'](1, 'docs:T-1', { course: { graph } } as Parameters<ClaimRun['settleLeg']>[2],
+      { at: 'filed', legName: 'work' } as Parameters<ClaimRun['settleLeg']>[3],
+      { outcome: { kind: 'ok', result: { release: 'cannot-finish:transient', reached: 'filed' } }, pre: null, ctx: {}, script: 'work.mjs', run: 1 });
+    expect(executor.start.mock.calls.length).toBe(0);
+    expect(executor.exec.mock.calls.length).toBe(0);
+    expect(outcome).toMatchObject({ end_reason: 'released:lease-lost', handoff: null });
+    expect(end).toHaveBeenCalledWith(1, expect.objectContaining({ end_reason: 'released:lease-lost' }));
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

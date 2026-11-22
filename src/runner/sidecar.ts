@@ -3,7 +3,6 @@ import { appendFileSync, readdirSync, readFileSync, renameSync, rmSync } from 'n
 import { basename, dirname, join, resolve } from 'node:path';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { BatonRefusal } from './api';
-import type { ClaimRun, NextLegs } from './claimRun';
 import type { MachineLocks } from './machineLocks';
 import type { RunnerOptions } from './runner';
 import { ageWords, legActivity, msg, sleep } from './log';
@@ -38,8 +37,25 @@ type SidecarOptions = Pick<RunnerOptions, 'api' | 'apiFor' | 'stateFile' | 'host
   log: (line: string) => void;
 };
 
+interface HeartbeatClaim {
+  readonly claimId: number | null;
+  readonly ticket: string;
+  readonly checkout: string;
+  readonly ended: boolean;
+  readonly lost: boolean;
+  readonly legSessionUrl: string | null;
+  readonly sessionLinkSeq: number;
+  readonly legFinishedSeq: number | null;
+  readonly legLineAt: number | null;
+  readonly heartbeatLeg: { claimId: number; ticket: string; leg: string | null; legAt: number; running: boolean } | null;
+  acceptHeartbeatReports(linkSeq: number | undefined, finishedSeq: number | undefined): void;
+  applyGitView(view: unknown): void;
+  receiveRelease(id: number, reason: string): void;
+  fence(): void;
+}
+
 interface ClaimRegistry {
-  live: readonly ClaimRun[];
+  live: readonly HeartbeatClaim[];
   pendingRequests: number;
   epoch: number;
   persisted: readonly PersistedClaim[];
@@ -205,7 +221,7 @@ export class Sidecar {
     // machine holds is not declared, so no leg requiring it is offered here. Mid-claim the set
     // is the claims' own — `ensureLegLocks` holds the legs' locks and releases the rest — so the
     // idle maintenance stays out until every claim ends.
-    if (this.locks && !live.some((x) => x.inflight)) await this.locks.takeAll();
+    if (this.locks && !live.some((x) => x.heartbeatLeg)) await this.locks.takeAll();
     const declaring = this.declaringList();
     // R-BTN-113, R-BTN-90 (B-188): each claim's running leg's link and finished run, by claim;
     // read at build time, so the answer below clears only what this beat carried.
@@ -246,10 +262,8 @@ export class Sidecar {
     // and was stored nowhere). This is what each claim's raise check reads (R-BTN-195).
     for (const x of live) {
       const carried = links.find((l) => l.slot === x);
-      x.sessionLinkLanded = carried != null && carried.seq === x.sessionLinkSeq && answer.session_url_dropped == null;
+      x.acceptHeartbeatReports(answer.session_url_dropped == null ? carried?.seq : undefined, finished.find((f) => f.slot === x)?.seq);
     }
-    // §7.5 R-BTN-90 (B-234): each finish landed — nothing further owes Baton that run's return.
-    for (const f of finished) if (f.slot.legFinishedSeq === f.seq) f.slot.legFinishedSeq = null;
     await this.recordDeclaration(declaring, answer);
     if (this.rekeySecret) {
       // The re-key landed: the new secret serves from here (R-BTN-14), and the new incarnation
@@ -366,7 +380,7 @@ export class Sidecar {
     }
   }
 
-  private async applyClaimViews(answer: Record<string, any>, live: readonly ClaimRun[], epoch: number, claimingAtStart: boolean): Promise<void> {
+  private async applyClaimViews(answer: Record<string, any>, live: readonly HeartbeatClaim[], epoch: number, claimingAtStart: boolean): Promise<void> {
     // R-BTN-4 (B-188): every claim the runner holds, oldest first; a Baton before B-188 answers
     // the one `claim`.
     const answered = (Array.isArray(answer.claims) ? answer.claims : answer.claim && typeof answer.claim === 'object' ? [answer.claim] : []) as Record<string, any>[];
@@ -382,29 +396,23 @@ export class Sidecar {
       this.loseLease('lease-timeout');
     } else if (!this.lostLease) {
       for (const x of live) {
-        const id = x.inflight?.claimId;
+        const id = x.heartbeatLeg?.claimId;
         if (id != null && !x.lost && !x.ended && !byId.has(id)) this.loseClaim(x);
       }
     }
     for (const x of live) {
-      if (!x.inflight) continue;
-      const view = byId.get(x.inflight.claimId)?.git ?? null;
-      if (view === 'unknown') x.signalLeg('course-changed', 'released:course-changed');
-      else if (view && typeof view === 'object') {
-        if (view.closed === 'done') x.closedDone = true;
-        else if (view.regressed) x.signalLeg('regressed');
-        const next = (view.next ?? null) as NextLegs | null;
-        for (const w of x.inflight.waiters.splice(0)) w(next ?? []);
-      }
+      const running = x.heartbeatLeg;
+      if (!running) continue;
+      x.applyGitView(byId.get(running.claimId)?.git ?? null);
       // B-108: the liveness line — while a leg call is in flight, each beat says how long it has
       // run and how old its newest activity signal is, so an operator watches a wedge form (and
       // the leg's ceiling approach) instead of silence. Advice for the operator's eye, never a
       // detector: the stub concludes its agent; this line only makes the wait visible.
-      if (x.inflight.child != null && x.inflight.leg != null) {
-        const leg = x.inflight.leg;
-        const signals = [...legActivity(x.checkout, x.inflight.ticket, leg), ...(x.legLineAt != null ? [{ name: 'drained-line', at: x.legLineAt }] : [])];
+      if (running.running && running.leg != null) {
+        const leg = running.leg;
+        const signals = [...legActivity(x.checkout, running.ticket, leg), ...(x.legLineAt != null ? [{ name: 'drained-line', at: x.legLineAt }] : [])];
         const newest = signals.reduce((a, b) => (b.at > a.at ? b : a));
-        this.o.log(`baton: ${x.inflight.ticket}'s ${leg} has run ${ageWords(this.o.now() - x.inflight.legAt)}; newest activity ${newest.at > 0 ? `${ageWords(this.o.now() - newest.at)} ago (${newest.name})` : 'not seen'}`);
+        this.o.log(`baton: ${running.ticket}'s ${leg} has run ${ageWords(this.o.now() - running.legAt)}; newest activity ${newest.at > 0 ? `${ageWords(this.o.now() - newest.at)} ago (${newest.name})` : 'not seen'}`);
       }
     }
     this.deliverMessages(answer.messages ?? [], live);
@@ -425,11 +433,11 @@ export class Sidecar {
     if (!live.length) for (const id of this.toAck.splice(0)) await this.o.api.ack(id).catch(() => {});
   }
 
-  private deliverMessages(messages: { id: number; kind: string; payload?: { reason?: string; ticket_id?: string } }[], live: readonly ClaimRun[]): void {
+  private deliverMessages(messages: { id: number; kind: string; payload?: { reason?: string; ticket_id?: string } }[], live: readonly HeartbeatClaim[]): void {
     for (const m of messages) {
       // R-BTN-119 (B-188): a release names its ticket — it stops that claim alone.
       const target = m.kind === 'release' ? this.slotFor(live, m.payload?.ticket_id) : null;
-      const about = target?.ticket || m.payload?.ticket_id || (live.length === 1 ? live[0].ticket || live[0].inflight?.ticket : '') || this.state.get().claim?.ticket_id || '';
+      const about = target?.ticket || m.payload?.ticket_id || (live.length === 1 ? live[0].ticket || live[0].heartbeatLeg?.ticket : '') || this.state.get().claim?.ticket_id || '';
       // 2026-10-24: every message is logged on receipt — a release or cue the runner acts on
       // silently was the hardest class to debug from the log alone.
       if (!this.seenMessages.has(m.id)) {
@@ -443,8 +451,7 @@ export class Sidecar {
         // the same way, as a release message — §11's heartbeat bars carry no release flag.)
         // One for a ticket no claim here holds is acknowledged with the idle beat.
         if (target) {
-          if (!target.toAck.includes(m.id)) target.toAck.push(m.id);
-          target.signalLeg('release', `released:${m.payload?.reason ?? 'requested'}`);
+          target.receiveRelease(m.id, `released:${m.payload?.reason ?? 'requested'}`);
         } else if (!this.toAck.includes(m.id)) {
           this.toAck.push(m.id);
         }
@@ -466,8 +473,8 @@ export class Sidecar {
 
   /** R-BTN-119 (B-188): the claim a release names, by its ticket — the one held claim when the
    *  message names none (a Baton before B-188 always named one). */
-  private slotFor(live: readonly ClaimRun[], ticket: string | undefined): ClaimRun | null {
-    if (ticket) return live.find((x) => x.ticket === ticket || x.inflight?.ticket === ticket) ?? null;
+  private slotFor(live: readonly HeartbeatClaim[], ticket: string | undefined): HeartbeatClaim | null {
+    if (ticket) return live.find((x) => x.ticket === ticket || x.heartbeatLeg?.ticket === ticket) ?? null;
     return live.length === 1 ? live[0] : null;
   }
 
@@ -576,8 +583,8 @@ export class Sidecar {
     // R-BTN-19: the claims were taken away from this runner; the next heartbeat reports the
     // fences it cleared, so each ticket is re-issued instead of waiting for the runner to go
     // silent. B-188: the runner's lease is every claim's — each leg stops at once.
-    const live = this.claims().live.filter((x) => x.claimId != null || x.inflight);
-    const ids = live.map((x) => x.inflight?.claimId ?? x.claimId).filter((id): id is number => id != null);
+    const live = this.claims().live.filter((x) => x.claimId != null || x.heartbeatLeg);
+    const ids = live.map((x) => x.heartbeatLeg?.claimId ?? x.claimId).filter((id): id is number => id != null);
     if (!ids.length && this.state.get().claim) ids.push(this.state.get().claim!.id);
     for (const id of ids) if (!this.fences.includes(id)) this.fences.push(id);
     for (const x of live) x.fence();
@@ -586,9 +593,9 @@ export class Sidecar {
   /** R-BTN-6 (B-188): Baton's answer no longer lists this claim — a force-reap, a deadline's
    *  release already taken — so this claim alone is fenced: its leg stops at once, no hand-off,
    *  and the next beat reports its fence. The runner's lease and its other claims run on. */
-  private loseClaim(x: ClaimRun): void {
-    const id = x.inflight?.claimId ?? x.claimId;
-    this.o.log(`baton: Baton no longer lists claim ${id ?? '?'} on ${x.inflight?.ticket ?? x.ticket} — its leg stops at once, no hand-off; this runner's other claims run on (R-BTN-6)`);
+  private loseClaim(x: HeartbeatClaim): void {
+    const id = x.heartbeatLeg?.claimId ?? x.claimId;
+    this.o.log(`baton: Baton no longer lists claim ${id ?? '?'} on ${x.heartbeatLeg?.ticket ?? x.ticket} — its leg stops at once, no hand-off; this runner's other claims run on (R-BTN-6)`);
     if (id != null && !this.fences.includes(id)) this.fences.push(id);
     x.fence();
   }
