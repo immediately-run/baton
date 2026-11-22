@@ -56,6 +56,8 @@ export interface LegStub {
   /** B-110: the deterministic test gate — no agent runs; the stub itself executes the course's
    *  `test_script` on the PR's head and the close pushes the branch's `Baton-Tests` marker. */
   tests?: true;
+  /** Archive in close, from Baton's recorded answer and delivery evidence, without an agent. */
+  archive?: true;
   /** B-231: a leg that answers the gate's red — run from `pr-open` or `fixed` — must push. The
    *  stub reads the ticket's PR branch heads before and after the agent; unchanged, it fails the
    *  leg rather than report a fix of a tree the gate already tested red. */
@@ -256,6 +258,7 @@ const CREATE_PR: BuiltIn = {
     // offered the leg: the position below is what a holder would report if one ever ran it by hand.
     adjudicate: { ask: { name: 'adjudication', values: ['merge', 'owner'] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
     merge: { position: "{ reached: 'merged', next: null }" },
+    archive: { position: "{ reached: 'archived', next: null }", archive: true },
   },
   skill: 'baton-create-pr',
 };

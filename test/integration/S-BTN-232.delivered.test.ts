@@ -5,8 +5,8 @@
 // hold: the end is no failed attempt and holds nothing; Baton's record hands the sync the run's
 // `reached`, from which the station function places the ticket at `delivered` with the person leg
 // `confirm` queued, confirming the end; the evidence is on the ticket's history where the person
-// decides; the person's `confirmed` closes it at the end station, and only the person's word
-// does; `filed` sends it back to implement, and a second delivered pass is placed after the loop.
+// decides; the owner's `confirmed` queues archive, which closes at the end station;
+// `filed` sends it back to implement, and a second delivered pass is placed after the loop.
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { CREATE_PR_COURSE, stationsPr, type PrGraph } from '../../src/defaults/course-pr';
@@ -61,7 +61,7 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-232 a ticket already delivered', () => {
-  it('delivered: no attempt spent, placed at delivered with confirm queued from Baton’s record, the evidence on the history; the person’s confirmed closes it', async () => {
+  it('delivered waits for the owner; confirmed queues archive with the end evidence and archive closes it', async () => {
     const claim = await delivered('D-1');
     // An outcome, not a failure (R-BTN-122): no failed attempt, no backoff, no hold.
     expect(await rows('SELECT status, failed_attempt, ended_at_sha, end_detail FROM claims WHERE id = ?', claim))
@@ -82,14 +82,24 @@ describe('S-BTN-232 a ticket already delivered', () => {
     // No runner may take the person's leg (rule person): the leg's word never closes the ticket.
     const w = await register('vm-b');
     expect((await claimItem('vm-b', w.secret, { ticket_id: 'docs:D-1' })).json).toMatchObject({ code: 'not-eligible', rule: 'person' });
-    // The person confirms: the ticket is at the end station.
+    // The person confirms: archive, not another person leg, is now queued.
     const res = await answer('D-1', 'confirmed');
     expect(res.status).toBe(200);
     expect(res.json).toMatchObject({ ok: true, reached: 'confirmed' });
-    expect(await station('D-1')).toEqual([{ station: 'confirmed', next_leg: null }]);
+    expect(await station('D-1')).toEqual([{ station: 'confirmed', next_leg: 'archive' }]);
     // The sync's next post, still reading the delivered run, does not undo the person's answer.
     expect((await synced('D-1')).posted.status).toBe(200);
-    expect(await station('D-1')).toEqual([{ station: 'confirmed', next_leg: null }]);
+    expect(await station('D-1')).toEqual([{ station: 'confirmed', next_leg: 'archive' }]);
+    const { json: archive } = await claimItem('vm-b', w.secret, { ticket_id: 'docs:D-1' });
+    expect(archive).toMatchObject({ station: 'confirmed', legs: ['archive'],
+      person_answer: { leg: 'confirm', option: 'confirmed', answered_by: expect.stringMatching(/^owner:/) },
+      previous_attempts: [{ ended_at_sha: SHA, detail: DETAIL }] });
+    expect((await advance('vm-b', w.secret, archive.claim_id, { leg: 'archive' })).status).toBe(200);
+    // The actual git write and the archive stub's evidence are exercised in defaults-cli.test.ts.
+    expect((await endClaim('vm-b', w.secret, archive.claim_id, { end_reason: 'done', reached: 'archived', ended_at_sha: 'a'.repeat(40) })).status).toBe(200);
+    expect(await rows('SELECT station FROM claims WHERE id = ?', archive.claim_id)).toEqual([{ station: 'archived' }]);
+    expect(await git.close('D-1', 'done').post()).toMatchObject({ status: 200, confirmed: 1 });
+    expect(await rows('SELECT closed_as FROM closed_tickets WHERE ticket_id = ?', 'docs:D-1')).toEqual([{ closed_as: 'done' }]);
   });
 
   it('the person sends it back: implement is queued again, and a second delivered answer is placed after the loop', async () => {
@@ -97,6 +107,7 @@ describe('S-BTN-232 a ticket already delivered', () => {
     expect((await synced('D-1')).posted.status).toBe(200);
     expect((await answer('D-1', 'filed')).status).toBe(200);
     expect(await station('D-1')).toEqual([{ station: 'filed', next_leg: 'implement' }]);
+    expect(await rows('SELECT closed_as FROM closed_tickets WHERE ticket_id = ?', 'docs:D-1')).toEqual([]);
     // The sync still reads the delivered run as the newest; Baton's position stands.
     expect((await synced('D-1')).posted.status).toBe(200);
     expect(await station('D-1')).toEqual([{ station: 'filed', next_leg: 'implement' }]);

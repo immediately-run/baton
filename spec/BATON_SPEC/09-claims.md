@@ -253,9 +253,10 @@ A claim ends with `POST /v1/runner/claims/{id}/end`. Its body, stated here once:
   outcome, the legs run, the end reason and detail, and the transcript pointers. Core reads no
   particular activity kind.
   - The claim response for a ticket with earlier ended claims carries `previous_attempts`,
-    newest first, each `{claim_id, status, end_reason, detail, ended_at, resume, legs}`, `legs`
-    naming each run's `run_id` (R-BTN-63). A leg receives them only as data (`BATON_RESUME`,
-    R-BTN-144).
+    newest first, each `{claim_id, status, end_reason, detail, ended_at, ended_at_sha?, resume, legs}`,
+    `legs` naming each run's `run_id` (R-BTN-63). A leg receives earlier attempts only as data
+    (`BATON_RESUME`, R-BTN-144). The claim response and leg context also carry `person_answer`
+    when the current question has an applied answer: its leg, option, answer time and writer.
   - The ticket history read (R-BTN-81) serves the records pruned to its *reader*, so a claim
     through git continues the change (R-BTN-74).
 - **R-BTN-25 (idempotent side effects).** Every side effect is keyed by the ticket so a later

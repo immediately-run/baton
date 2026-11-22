@@ -1293,11 +1293,11 @@ const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
  * not the leg's outcome. The bundled `close` writes the closing marker where the course's
  * convention puts it. */
 export function stubSource(b: BuiltIn, course: string, leg: string): string {
-  const { ask, position, verify, pushes, delivered } = b.legs[leg];
+  const { ask, position, verify, pushes, delivered, archive } = b.legs[leg];
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
-  const closeFrom = b.reads === 'prs' ? ['prClose', 'pr-close.ts'] : ['closeTicket', 'ticket-state.ts'];
+  const closeFrom = archive ? ['archiveClose', 'pr-archive.ts'] : b.reads === 'prs' ? ['prClose', 'pr-close.ts'] : ['closeTicket', 'ticket-state.ts'];
   // `prClose`'s marker legs (create-spec's interactive converse and address) write the ticket's
   // own frontmatter through ticket-state.ts's git plumbing (`closeTicket`), so a PR course's
   // close names that module too — one implementation, for a state the sync must find on the
@@ -1396,7 +1396,8 @@ export async function run(ctx) {
   }
 }
 /** The course's own run of this leg: what \`run\` does with no override, and what an override may call. */
-async function standard(ctx) {
+async function standard(ctx) {${archive ? `
+  return ${position};` : `
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
   // B-127: where the repository requires owner-signed control, \`agent_command\` and
@@ -1637,7 +1638,7 @@ ${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.tic
   }` : ''}
 ${verify ? `  try { await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun); } catch (e) { throw failed(e); }
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
-` : ''}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}
+` : ''}  return { ...(${position}), ...(conclusion ? { conclusion } : {}) };`}`}
 }
 // The close's ctx, one line (B-96's review round 2): everything the stub hands back, plus the
 // repository's default branch — the claim answer's \`default_branch\`, which the runner puts in

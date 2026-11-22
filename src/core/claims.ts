@@ -1349,8 +1349,10 @@ export class Claims {
     // committed on, whatever branch the runner's checkout was left on (B-96's review round 3).
     const defaultBranch = this.rows<{ default_branch: string }>('SELECT default_branch FROM repositories WHERE id = ?', repositoryOf(c.ticket_id))[0]?.default_branch ?? null;
     const handoff = this.rows<{ handoff_url: string | null }>('SELECT handoff_url FROM ticket_stations WHERE ticket_id = ?', c.ticket_id)[0]?.handoff_url ?? null;
-    const previous = this.rows<{ id: number; status: string; end_reason: string | null; end_detail: string | null; ended_at: number | null; resume_json: string | null }>(
-      `SELECT id, status, end_reason, end_detail, ended_at, resume_json FROM claims WHERE ticket_id = ? AND id < ? AND status != 'active' ORDER BY id DESC`, c.ticket_id, id);
+    const previous = this.rows<{ id: number; status: string; end_reason: string | null; end_detail: string | null; ended_at_sha: string | null; ended_at: number | null; resume_json: string | null }>(
+      `SELECT id, status, end_reason, end_detail, ended_at_sha, ended_at, resume_json FROM claims WHERE ticket_id = ? AND id < ? AND status != 'active' ORDER BY id DESC`, c.ticket_id, id);
+    const answer = this.rows<{ leg: string; option: string; answered_at: number; answered_by: string }>(
+      `SELECT leg, option, answered_at, answered_by FROM ticket_questions WHERE ticket_id = ? AND option IS NOT NULL AND answered_at IS NOT NULL`, c.ticket_id)[0];
     // §12.8 (B-145): where state one leg hands the next lives (R-BTN-188's `leg_state` —
     // B-148 reads it). B-182 (R-BTN-190): a
     // `git` home's claimed ticket on a course that reads PR facts keeps its rounds in its PR's
@@ -1383,8 +1385,10 @@ export class Claims {
       // the first thing a privileged session should know of it, before it reads the body.
       ...((w) => (w ? { last_written_by: w } : {}))(writtenBy(ticketRow?.last_written_by)),
       ...(defaultBranch ? { default_branch: defaultBranch } : {}),
+      ...(answer ? { person_answer: answer } : {}),
       previous_attempts: previous.map((p) => ({
         claim_id: p.id, status: p.status, end_reason: p.end_reason, detail: p.end_detail, ended_at: p.ended_at,
+        ...(p.ended_at_sha ? { ended_at_sha: p.ended_at_sha } : {}),
         resume: p.resume_json ? JSON.parse(p.resume_json) : null, legs: this.legsOf(p.id),
       })),
     };

@@ -2316,6 +2316,8 @@ export class Runner {
           // to the branch the sync reads whatever branch this checkout is on.
           ...(typeof claim.default_branch === 'string' && claim.default_branch !== '' ? { default_branch: claim.default_branch } : {}),
           handoff: handoffUrl, resume, advice,
+          ...(claim.previous_attempts?.length ? { previous_attempts: claim.previous_attempts } : {}),
+          ...(claim.person_answer ? { person_answer: claim.person_answer } : {}),
           checkout: this.checkout, session,
           state: this.o.stateFile, runner: this.state.get().runner_id,
         };

@@ -70,14 +70,14 @@ export const DEFAULT_BRANCH_PATTERN = 'claude/{ticket}-*';
  *
  * B-257: an implement leg that finds the ticket already on the default branch answers
  * `delivered <sha> <evidence>`; the stub checks the commit is on the default branch and the leg
- * reaches `delivered`, where the person leg `confirm` waits on a person — `confirmed` closes the
- * ticket, `filed` sends it back to `implement`. The leg's word alone never closes it, and the
+ * reaches `delivered`, where `confirm` waits on the owner. `confirmed` queues `archive`, while
+ * `filed` sends it back to `implement`. The leg's word alone never closes it, and the
  * answer is an outcome, never a failed attempt (R-BTN-122). `confirm`'s `max_runs` is the bound
  * R-BTN-69 asks of the cycle `filed → delivered → filed`; every pass of it is a person's. */
 export const CREATE_PR_COURSE = {
   start: 'filed',
   start_leg: 'implement',
-  end: ['merged', 'confirmed'],
+  end: ['merged', 'archived'],
   short_waits: ['ci'],
   // B-110: the deterministic gate's script — `npm run <test_script>` in the checkout.
   test_script: 'test',
@@ -85,6 +85,7 @@ export const CREATE_PR_COURSE = {
     filed: { label: 'Filed, no PR yet' }, 'pr-open': { label: 'PR open' }, reviewed: { label: 'Reviewed' },
     fixed: { label: 'Findings addressed' }, adjudicated: { label: 'Open findings adjudicated' }, merged: { label: 'Merged' },
     delivered: { label: 'Found already delivered' }, confirmed: { label: 'Already delivered, confirmed by a person' },
+    archived: { label: 'Confirmed ticket archived' },
   },
   legs: {
     implement: { from: ['filed'], to: ['pr-open', 'delivered'], label: 'Implement it and open the PR, or find it delivered' },
@@ -99,6 +100,7 @@ export const CREATE_PR_COURSE = {
     // B-257: the person's confirmation — no runner is offered it (R-BTN-116); its options are
     // its outcomes, `confirmed` and `filed`.
     confirm: { from: ['delivered'], to: ['confirmed', 'filed'], kind: 'person', asks: 'owner', max_runs: 3, label: 'A person confirms it was already delivered' },
+    archive: { from: ['confirmed'], to: 'archived', label: 'Archive the confirmed ticket' },
   },
 };
 

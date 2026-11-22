@@ -32,7 +32,8 @@
         "fix",
         "adjudicate",
         "merge",
-        "confirm"
+        "confirm",
+        "archive"
       ],
       "branch_pattern": "claude/{ticket}-*",
       "protocol_files": []

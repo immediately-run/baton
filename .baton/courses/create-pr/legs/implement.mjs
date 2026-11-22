@@ -499,15 +499,20 @@ function verifyDelivered(ask, run2) {
   } catch (e) {
     throw new Error(`cannot verify the delivered answer \u2014 fetching ${branch} from origin failed: ${msg(e)}`);
   }
-  return ask.shas.map((sha) => {
+  return resolveDelivered(ask.shas, tracking, ask.checkout, run2);
+}
+function resolveDelivered(shas, ref, checkout, run2) {
+  return shas.map((sha) => {
+    if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error("invalid delivered commit id");
     let full;
     try {
-      full = run2("git", ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`], ask.checkout).trim();
+      full = run2("git", ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`], checkout).trim();
     } catch {
       throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
     }
-    if (!/^[0-9a-f]{40}$/.test(full)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
-    if (!ancestor(full, tracking, run2, ask.checkout)) {
+    if (!/^[0-9a-f]{40}$/.test(full) || !full.startsWith(sha)) throw new Error(`the implement agent answered delivered at ${sha}, which names no commit this checkout knows \u2014 refused`);
+    if (!ancestor(full, ref, run2, checkout)) {
+      const branch = ref.replace(/^refs\/remotes\/origin\//, "");
       throw new Error(`the implement agent answered delivered at ${sha}, which is not on ${branch} \u2014 refused: the commit a delivered answer names is on the default branch`);
     }
     return full;
@@ -515,6 +520,7 @@ function verifyDelivered(ask, run2) {
 }
 function deliveredDetail(shas, evidence) {
   const head = `delivered at ${shas.map((s) => s.slice(0, 10)).join(", ")}`;
+  if (head.length > 198) throw new Error("too many delivered commits to record in the end detail");
   const said = evidence.replace(/[\u0000-\u001f\u007f-\u009f<>{}]/g, " ").replace(/\s+/g, " ").trim();
   const text = said === "" ? head : `${head}: ${said}`;
   return text.length <= 200 ? text : `${text.slice(0, 199)}\u2026`;
