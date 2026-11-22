@@ -25,6 +25,8 @@ export interface CourseViolation {
 import { isFreeText } from './text';
 import { parseSchemaId } from '../shared/schema.mjs';
 import { ROLES } from '../shared/vocabulary.mjs';
+import { RESOURCE_NAME } from './validate';
+import { checkWriters, type WriterClass } from './policy';
 import { CONDITION_TYPE, CONDITION_TYPE_MAX, RESTART_ID, barredFromAutonomous, dispositionOf, type ConditionDeclaration, type Disposition } from './conditionTypes';
 
 /** R-BTN-121, R-BTN-157: the names a vocabulary expansion already means — a vocabulary role, the
@@ -79,9 +81,19 @@ const EXPIRES_KEYS = new Set(['after_s', 'reached']);
 const EXPIRES_AFTER_MAX = 30 * 86_400;
 /** R-BTN-120: what a leg's `requires` holds — its capabilities, which rule 4 reads as its own
  *  input beside the ticket's clause (`gates.ts`; `claims.ts` passes the leg's list through).
- *  The spec's `tickets`, `resources` and the other prerequisite kinds are not implemented, so a
- *  file carrying one is refused rather than silently accepted unread (B-86). */
-const REQUIRES_KEYS = new Set(['capabilities']);
+ *  Other prerequisite kinds are refused rather than silently accepted unread. */
+const REQUIRES_KEYS = new Set(['capabilities', 'resources']);
+const RESOURCE_KEYS = new Set(['resource', 'binds', 'missing', 'writers']);
+
+export interface ResourceRequirement {
+  resource: string;
+  binds?: 'gate' | 'advice';
+  missing?: 'block' | 'allow';
+  writers?: WriterClass[];
+}
+
+export const resourceBinding = (r: ResourceRequirement) => r.binds ?? 'advice';
+export const resourceMissing = (r: ResourceRequirement) => r.missing ?? (resourceBinding(r) === 'gate' ? 'block' : 'allow');
 /** A capability name: a vocabulary name (`create-pr`) or a namespaced one (`vpn:corp`). */
 const CAPABILITY = /^[A-Za-z][A-Za-z0-9._:-]{0,63}$/;
 const INPUT_KEYS = new Set(['from', 'accepts', 'required']);
@@ -300,6 +312,30 @@ export function validateCourse(json: unknown): CourseViolation[] {
       else {
         for (const k of Object.keys(r)) if (!REQUIRES_KEYS.has(k)) add('unknown-key', `${at}.requires.${k}`, `unknown key "${k}"`);
         if ('capabilities' in r) capabilityList(r.capabilities, `${at}.requires.capabilities`, 'a leg');
+        if ('resources' in r) {
+          const path = `${at}.requires.resources`;
+          if (!Array.isArray(r.resources) || r.resources.length > COURSE_LIST_MAX) add('shape', path, `a list of at most ${COURSE_LIST_MAX} resource requirements`);
+          else {
+            const seen = new Set<string>();
+            for (const [i, entry] of r.resources.entries()) {
+              const p = `${path}.${i}`;
+              if (!isObject(entry) || typeof entry.resource !== 'string' || !RESOURCE_NAME.test(entry.resource)) {
+                add('shape', p, 'a resource requirement names a registered resource by name in `resource`');
+                continue;
+              }
+              if (seen.has(entry.resource)) add('shape', p, 'resource is required twice on this leg');
+              seen.add(entry.resource);
+              for (const k of Object.keys(entry)) if (!RESOURCE_KEYS.has(k)) add('unknown-key', `${p}.${k}`, `unknown key "${k}"`);
+              if ('binds' in entry && entry.binds !== 'gate' && entry.binds !== 'advice') add('shape', `${p}.binds`, 'must be gate or advice');
+              if ('missing' in entry && entry.missing !== 'block' && entry.missing !== 'allow') add('shape', `${p}.missing`, 'must be block or allow');
+              if ('writers' in entry) {
+                try { checkWriters(entry.writers, `${p}.writers`); }
+                catch (e) { add('shape', `${p}.writers`, (e as Error).message); }
+              }
+              if (l.trusted === true && (entry.binds !== 'gate' || entry.missing === 'allow')) add('policy', p, 'a trusted leg requires binds: gate and missing: block');
+            }
+          }
+        }
       }
     }
     // R-BTN-111 (B-52): a leg that files children declares their courses — one id, a list, or

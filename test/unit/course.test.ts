@@ -74,7 +74,7 @@ describe('validateCourse (R-BTN-69)', () => {
       'shape capability_roles.empty',
       'shape capability_roles.notList',
       'shape capability_roles.tooMany',
-      'unknown-key legs.deploy.requires.resources',
+      'shape legs.deploy.requires.resources.0',
       'unknown-key legs.review.requires.tickets',
     ]);
     // A requires that is not an object, a capability list that is empty or holds a non-name.
