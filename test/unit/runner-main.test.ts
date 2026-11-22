@@ -1092,6 +1092,86 @@ describe('a leg\'s output leaves the runner masked (B-170, R-BTN-144 class 7)', 
     }
   }, 60_000);
 
+  it('S-BTN-119: a host value that starts with the last bytes of the leg\'s secrets does not cut them — each still leaves whole as ***', async () => {
+    // The flaky failures of 2026-11-22 (B-249, B-244, B-239): `npm test` ran inside a leg, so
+    // the tests' runner spread an environment holding the host's own secrets; one that began with
+    // the vendor value's last byte (`1`) or the key's (`n`) made the sink's hold cut inside the
+    // printed literal, and its head reached the log in clear. Pinned here, not left to the host.
+    const names = [...ENV_NAMES, 'BATON170_TEST_ONE_TOKEN', 'BATON170_TEST_N_TOKEN'];
+    const saved = names.map((n) => [n, process.env[n]] as const);
+    process.env.BATON170_TEST_API_KEY = KEY;
+    process.env.BATON170_TEST_VENDOR = VENDOR;
+    process.env.BATON170_TEST_ONE_TOKEN = `${VENDOR.slice(-1)}abcdef0123456`;
+    process.env.BATON170_TEST_N_TOKEN = `${KEY.slice(-1)}ZZZZZZZZ0123`;
+    const lines: string[] = [];
+    const { r, home } = maskRunner(lines, { runner_id: 1, claim: null });
+    try {
+      const script = join(home, 'leak.mjs');
+      writeFileSync(script, `export async function run() {
+  process.stderr.write('whole key: ' + process.env.BATON170_TEST_API_KEY + '\\n');
+  process.stderr.write('vendor: ' + process.env.BATON170_TEST_VENDOR + '\\n');
+  process.stderr.write('token: brt_abc123XYZ\\n');
+  return { done: true };
+}
+`);
+      const out = await legOf(r).runLeg({ scripts: new Map([['implement', script]]) }, 'implement', { leg: 'implement' }, join(home, 'scratch'));
+      expect(out).toEqual({ kind: 'ok', result: { done: true } });
+      const said = lines.join('\n');
+      for (const secret of [KEY.slice(0, 14), KEY.slice(14, -1), VENDOR.slice(0, -1)]) expect(said, said).not.toContain(secret);
+      expect(said).toContain('whole key: ***');
+      expect(said).toContain('vendor: ***');
+      expect(said).toContain('token: ***');
+    } finally {
+      for (const [n, v] of saved) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('S-BTN-119: a drained call masks with the set bound as the call starts, whatever the slot holds when its lines arrive', async () => {
+    const saved = ENV_NAMES.map((n) => [n, process.env[n]] as const);
+    process.env.BATON170_TEST_API_KEY = KEY;
+    process.env.BATON170_TEST_VENDOR = VENDOR;
+    const lines: string[] = [];
+    const { r, home } = maskRunner(lines, { runner_id: 1, claim: null });
+    try {
+      const quiet = join(home, 'quiet.mjs');
+      writeFileSync(quiet, 'export async function run() { return { done: true }; }\n');
+      expect(await legOf(r).runLeg({ scripts: new Map([['implement', quiet]]) }, 'implement', { leg: 'implement' }, join(home, 'scratch'))).toEqual({ kind: 'ok', result: { done: true } });
+      // The handoff starts, then waits; its slot's set is replaced before its line arrives (the
+      // next leg's assignment, or another slot's read through `cur`) — the line must not care.
+      const started = join(home, 'started');
+      const go = join(home, 'go');
+      const noisy = join(home, 'noisy.mjs');
+      writeFileSync(noisy, `import { existsSync, writeFileSync } from 'node:fs';
+export async function handoff() {
+  writeFileSync(${JSON.stringify(started)}, 'here');
+  while (!existsSync(${JSON.stringify(go)})) await new Promise((res) => setTimeout(res, 10));
+  process.stderr.write('handoff drain: ' + process.env.BATON170_TEST_VENDOR + '\\n');
+  return 'https://example.test/noisy';
+}
+`);
+      const handoff = (r as unknown as { callHandoff(script: string, ctx: Record<string, unknown>): Promise<string | null> }).callHandoff(noisy, { leg: 'implement' });
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline && !existsSync(started)) await new Promise((res) => setTimeout(res, 10));
+      expect(existsSync(started)).toBe(true);
+      (r as unknown as { legSecrets: readonly string[] }).legSecrets = [];
+      writeFileSync(go, 'go');
+      expect(await handoff).toBe('https://example.test/noisy');
+      const said = lines.join('\n');
+      expect(said).not.toContain(VENDOR);
+      expect(said).toContain('handoff drain: ***');
+    } finally {
+      for (const [n, v] of saved) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it('a crashed leg\'s own error text, the close\'s and the handoff\'s failures, and every other call\'s drain leave masked', async () => {
     const saved = ENV_NAMES.map((n) => [n, process.env[n]] as const);
     process.env.BATON170_TEST_API_KEY = KEY;
