@@ -22,7 +22,7 @@
   "courses": [
     {
       "id": "create-pr",
-      "version": 1,
+      "version": 2,
       "min_runner_version": 1,
       "skill": "baton-create-pr",
       "step_kinds": [
@@ -35,8 +35,7 @@
         "confirm"
       ],
       "branch_pattern": "claude/{ticket}-*",
-      "protocol_files": [],
-      "source": "github/immediately-run/baton/17ae8cce1411b71c413a123e54e4030b967a6e13/create-pr"
+      "protocol_files": []
     }
   ]
 }

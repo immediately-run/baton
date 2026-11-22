@@ -620,3 +620,29 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
   default (fieldhouse #47); a supervisor's watch must last until the runners are back (lessons);
   an idle runner fleet with ready work should raise a condition (intervention-sessions proposal,
   "runner-starved"). *No ticket yet* for the last.
+
+## 2026-11-22 06:42 — 15 tickets parked at `reviewed` after three review rounds; the course is owned in `main`, with eight
+
+- **Host:** bering (both runners kept claiming new tickets while the parked ones waited)
+- **Tickets:** B-8, B-10, B-23, B-131, B-135, B-136, B-137, B-139, B-141, B-146, B-147, B-293,
+  B-294, B-299, B-312 (PRs #321, #323, #325, #326, #329–#339)
+- **Why it was needed:** `create-pr` allowed three review rounds (`review.max_runs: 3`). Overnight
+  every PR the runners opened spent its three rounds with blocking findings still open (most are
+  security tickets the reviewer kept finding real holes in), so each waited on the owner's
+  `adjudicate` answer (`review-rounds-3`) while the runners started new tickets. The owner asked
+  the supervisor to merge the PRs without blockers: none qualified. The supervisor had also read
+  `suspended:reviewed` as "approved, waiting to merge" the evening before; it is only the station
+  a round reaches, whatever its verdict.
+- **Resolution:** at the owner's word ("increase the maximum review rounds to 8 … set the course
+  to use whatever is currently in main. During development, I think we lose more from pinning a
+  specific hash than we gain from preventing attacks that push new courses to the Git
+  repository"): `.baton/baton.json`'s `create-pr` entry drops its pinned `source` (the repository
+  now owns the course; the sync reads `.baton/courses/create-pr/` from `main`), its version moves
+  to 2, `review.max_runs` is 8 and the adjudicate instructions follow. The parked tickets have
+  spent 3 of 8 rounds, so the station function queues their `fix` again; the runners were drained
+  and restarted to declare course version 2.
+- **Autonomous handling:** the owner's call, recorded here: during development a sourced course's
+  pin costs more than the attack it prevents (a push changing the course is reviewed in its PR).
+  The board should show a review round's verdict, not only the station, so "reviewed" is never
+  read as "approved"; and the queue could prefer finishing parked tickets over starting new ones.
+  *No ticket yet* for either.
