@@ -17,9 +17,10 @@
 //
 //   node scripts/check-traces.mjs [trace files or directories]   (default: test/.traces)
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'test', '.traces', '.qnt');
@@ -467,8 +468,19 @@ function expectations(Q, env, T, W) {
 
 // ── Quint ────────────────────────────────────────────────────────────────────────────────
 
+/** Group translated traces by every constant in the model import, not by scenario or test name. */
+export function groupTraces(traces) {
+  const groups = new Map();
+  for (const t of traces) {
+    const key = JSON.stringify(Object.entries(t.consts).sort());
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+  return [...groups.values()];
+}
+
 const header = (consts) => `module replay {
-  import baton(${Object.entries(consts).map(([k, v]) => `${k} = ${v}`).join(', ')}).* from "../../../model/baton"
+  import baton(${Object.entries(consts).map(([k, v]) => `${k} = ${v}`).join(', ')}).* from "../../../../model/baton"
   action start: bool = initWith(RUNNERS.mapBy(w => 0))
 `;
 const chain = (steps, upto, withExpect = true) => {
@@ -480,9 +492,10 @@ const chain = (steps, upto, withExpect = true) => {
   return s;
 };
 
-/** The Quint module that replays `t` (translate's result) whole. */
-export function quintModule(t) {
-  return `${header(t.consts)}  run traceTest =\n${chain(t.steps, t.steps.length)}\n}\n`;
+const testName = (i) => `trace${i}Test`;
+
+function batchModule(group) {
+  return header(group[0].consts) + group.map((t, i) => `  run ${testName(i)} =\n${chain(t.steps, t.steps.length)}\n`).join('') + '}\n';
 }
 
 /** On a rejection: the run of the first `k` steps — the checker searches for the smallest `k`
@@ -500,46 +513,64 @@ function stepModule(t, i, only) {
 
 function quintTest(file) {
   return new Promise((done) => {
-    const p = spawn('npx', ['quint', 'test', file, '--main=replay', '--backend=typescript', '--max-samples=1'], { cwd: ROOT });
-    let out = '';
-    p.stdout.on('data', (d) => (out += d));
-    p.stderr.on('data', (d) => (out += d));
-    p.on('close', (code) => done({ ok: code === 0, out }));
+    const p = spawn('npx', ['quint', 'test', relative(ROOT, file), '--main=replay', '--backend=typescript', '--max-samples=1', '--verbosity=2'], { cwd: ROOT });
+    let stdout = '';
+    let stderr = '';
+    p.stdout.on('data', (d) => (stdout += d));
+    p.stderr.on('data', (d) => (stderr += d));
+    p.on('error', (e) => (stderr += e.message));
+    p.on('close', (code) => done({ code, stdout: stripVTControlCharacters(stdout), stderr: stripVTControlCharacters(stderr) }));
   });
 }
 
-/** Check one trace file: `{ok, checked, total, end, failure}`. */
-export async function checkTrace(file, tag = basename(file).replace(/\W+/g, '_').slice(0, 60)) {
-  const trace = readTrace(file);
-  const t = translate(trace);
-  // a step no model action explains rejects the trace whatever the run before it (round 1, 1-A-2)
-  if (t.reject) {
-    return { file, scenario: trace.scenario, test: trace.test, checked: t.steps.length, total: t.total, end: null, ok: false,
-      failure: { step: t.reject.index, label: t.reject.label, actions: [], actionRefused: true, fields: [], reason: t.reject.reason } };
-  }
+async function checkGroup(group, report) {
   mkdirSync(OUT, { recursive: true });
-  const qnt = join(OUT, `${tag}.qnt`);
-  writeFileSync(qnt, quintModule(t));
-  const r = await quintTest(relative(ROOT, qnt));
-  const res = { file, scenario: trace.scenario, test: trace.test, checked: t.steps.length, total: t.total, end: t.end, ok: r.ok };
-  if (r.ok) return res;
-  if (!/failed/.test(r.out)) return { ...res, failure: { error: r.out.slice(-1500) } };
-  // name the step (the shortest failing prefix), the action and the field
-  const dq = join(OUT, `${tag}.prefix.qnt`);
+  const dir = mkdtempSync(join(OUT, 'batch-'));
+  try {
+    const file = join(dir, 'batch.qnt');
+    writeFileSync(file, batchModule(group));
+    const { code, stdout, stderr } = await quintTest(file);
+    // Quint 0.33 reports a line per executed test. Missing, ignored or duplicate results
+    // (e.g. a batch that did not compile) must not pass or be bisected as model rejections.
+    const runs = [...stdout.matchAll(/^    (?:ok (trace\d+Test) passed|\d+\) (trace\d+Test) failed after) \d+ test\(s\)$/gm)];
+    const passed = new Map(runs.map(([, ok, failed]) => [ok ?? failed, !!ok]));
+    if (runs.length !== group.length || !group.every((_, i) => passed.has(testName(i))) ||
+        code !== ([...passed.values()].every(Boolean) ? 0 : 1)) {
+      const error = `Quint returned incomplete or inconsistent batch results (exit ${code})\n${(stdout + stderr).slice(-1500)}`;
+      for (const t of group) {
+        t.result.failure = { error };
+        report(t.result);
+      }
+      return;
+    }
+    for (const [i, t] of group.entries()) {
+      if (passed.get(testName(i))) t.result.ok = true;
+      else t.result.failure = await diagnose(t, join(dir, `trace${i}`));
+      report(t.result);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Name the step (the shortest failing prefix), the action and the field. */
+async function diagnose(t, path) {
+  if (!t.steps.length) return { error: 'Quint rejected the initial state (no trace steps)' };
+  const dq = `${path}.prefix.qnt`;
   let lo = 0;
   let hi = t.steps.length;
   while (hi - lo > 1) {
     const mid = (lo + hi) >> 1;
     writeFileSync(dq, prefixModule(t, mid));
-    if ((await quintTest(relative(ROOT, dq))).ok) lo = mid;
+    if ((await quintTest(dq)).code === 0) lo = mid;
     else hi = mid;
   }
   const first = hi - 1;
   const st = t.steps[first];
-  const fq = join(OUT, `${tag}.step.qnt`);
+  const fq = `${path}.step.qnt`;
   const holds = async (only) => {
     writeFileSync(fq, stepModule(t, first, only));
-    return (await quintTest(relative(ROOT, fq))).ok;
+    return (await quintTest(fq)).code === 0;
   };
   const actionRefused = !(await holds([]));
   // the failing expectations, by halving
@@ -550,16 +581,39 @@ export async function checkTrace(file, tag = basename(file).replace(/\W+/g, '_')
     return [...(await failing(js.slice(0, mid))), ...(await failing(js.slice(mid)))];
   };
   const fields = actionRefused ? [] : (await failing(st.expect.map((_, j) => j))).map((j) => st.expect[j][0]);
-  return { ...res, failure: { step: st.index, label: st.label, actions: st.actions, actionRefused, fields } };
+  return { step: st.index, label: st.label, actions: st.actions, actionRefused, fields };
+}
+
+/** Check trace files in instance batches; return one report per file, in input order. */
+export async function checkTraces(files, report = () => {}) {
+  const traces = files.map((file) => {
+    const trace = readTrace(file);
+    const t = translate(trace);
+    const result = { file, scenario: trace.scenario, test: trace.test, checked: t.steps.length, total: t.total, end: t.end, ok: false };
+    // A translation rejection stands on its own (round 1, 1-A-2); no Quint run is needed.
+    if (t.reject) {
+      result.failure = { step: t.reject.index, label: t.reject.label, actions: [], actionRefused: true, fields: [], reason: t.reject.reason };
+      report(result);
+    }
+    return { ...t, result };
+  });
+  await pool(groupTraces(traces.filter((t) => !t.reject)), Number(process.env.TRACE_JOBS ?? 4), (group) => checkGroup(group, report));
+  return traces.map((t) => t.result);
+}
+
+export async function checkTrace(file) {
+  const [result] = await checkTraces([file]);
+  return result;
 }
 
 async function pool(items, n, fn) {
-  const out = [];
+  if (!Number.isInteger(n) || n < 1) throw new Error('TRACE_JOBS must be a positive integer');
   let i = 0;
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
-    while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); }
+  const workers = await Promise.allSettled(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length) await fn(items[i++]);
   }));
-  return out;
+  const failed = workers.find((r) => r.status === 'rejected');
+  if (failed) throw failed.reason;
 }
 
 function traceFiles(args) {
@@ -604,16 +658,12 @@ async function main(args) {
   args = args.filter((a) => a !== '--write-scope');
   const files = traceFiles(args);
   if (!files.length) {
-    console.error('check-traces: no traces — run the scenarios first (npm test writes test/.traces/)');
+    console.error('check-traces: no traces — run the scenarios with trace recording enabled (see model/full.mjs)');
     return 1;
   }
   let bad = 0;
   let full = 0;
-  const results = await pool(files, Number(process.env.TRACE_JOBS ?? 4), async (f, k) => {
-    const r = await checkTrace(f, `${process.pid}-t${k}`);
-    report(r);
-    return r;
-  });
+  const results = await checkTraces(files, report);
   function report(r) {
     const where = `${r.scenario} › ${r.test}`;
     if (!r.ok) {
@@ -627,7 +677,6 @@ async function main(args) {
     if (!r.end) full++;
     console.log(`✓ ${where} — ${r.checked}/${r.total} steps${r.end ? `; step ${r.end.index} on is outside the model: ${r.end.reason}` : ''}`);
   }
-  for (const f of readdirSync(OUT)) if (f.startsWith(`${process.pid}-`)) rmSync(join(OUT, f), { force: true });
   console.log(`\n${results.length} traces: ${results.length - bad} accepted (${full} whole), ${bad} rejected`);
   if (writeScope) {
     const scope = Object.fromEntries(results.filter((r) => r.ok && r.end).map((r) => [keyOf(r), { at: r.end.index, reason: r.end.reason }]).sort(([a], [b]) => (a < b ? -1 : 1)));
