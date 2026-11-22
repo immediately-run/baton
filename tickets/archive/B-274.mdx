@@ -2,8 +2,8 @@
 title: "B-274 — Per-claim behaviour lives on a per-claim object: ClaimRun and Sidecar out of the 2,440-line Runner"
 id: B-274
 project: baton
-status: available
-updated: 2026-11-19
+status: done
+updated: 2026-11-22
 tags:
   - roadmap-item
 description: "runClaim, runLeg, close, handoff and verify move to a ClaimRun that owns its slot; the heartbeat and spool become Sidecar; the runner uses no AsyncLocalStorage"
@@ -38,9 +38,9 @@ keep each of those checks on the path it guards.
 
 ### Invariants
 
-- [BATON_SPEC §9.1](../spec/BATON_SPEC/09-claims.md#sec-9-1) ([R-BTN-4](../spec/BATON_SPEC/09-claims.md#sec-9-1)): a runner may hold several claims, each in its own session and
+- [BATON_SPEC §9.1](../../spec/BATON_SPEC/09-claims.md#sec-9-1) ([R-BTN-4](../../spec/BATON_SPEC/09-claims.md#sec-9-1)): a runner may hold several claims, each in its own session and
   checkout. Two `ClaimRun`s share no mutable state.
-- [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3)): how a leg runs is the executor's; `ClaimRun` hands the leg to the
+- [BATON_SPEC §8.3](../../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-107](../../spec/BATON_SPEC/08-runners.md#sec-8-3)): how a leg runs is the executor's; `ClaimRun` hands the leg to the
   `Executor` contract and knows no executor by name.
 - Fencing (R-BTN-6): a heartbeat's refusal stops that claim's legs and no other's.
 
